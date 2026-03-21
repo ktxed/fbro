@@ -182,6 +182,7 @@ async fn handle_connection(stream: TcpStream, addr: SocketAddr, state: SharedSta
                     Some(Ok(Message::Text(text))) => {
                         match serde_json::from_str::<ClientMessage>(&text) {
                             Ok(ClientMessage::Intent { name, scope, args, .. }) => {
+                                eprintln!("[fbro] intent: {name} scope={scope} args={args}");
                                 handle_intent(
                                     &name,
                                     &scope,
@@ -239,6 +240,35 @@ async fn handle_intent(
                         "up" => panel.cursor.saturating_sub(1),
                         _ => (panel.cursor + 1).min(len - 1),
                     };
+                    panel.cursor = cursor;
+                    panel.version += 1;
+                    (cursor, panel.version)
+                } else {
+                    return;
+                }
+            };
+            let _ = tx
+                .send(ServerMessage::StatePatch {
+                    timestamp: now(),
+                    domain: "panels".to_string(),
+                    entity_id: Some(panel_id),
+                    version,
+                    patch: serde_json::json!({ "cursor": new_cursor }),
+                })
+                .await;
+        }
+
+        "MoveCursorToEdge" => {
+            let panel_id = resolve_panel_id(scope, state).await;
+            let edge = args.get("edge").and_then(|v| v.as_str()).unwrap_or("first");
+            let (new_cursor, version) = {
+                let mut s = state.lock().await;
+                if let Some(panel) = s.panels.get_mut(&panel_id) {
+                    let len = panel.entries.len();
+                    if len == 0 {
+                        return;
+                    }
+                    let cursor = if edge == "last" { len - 1 } else { 0 };
                     panel.cursor = cursor;
                     panel.version += 1;
                     (cursor, panel.version)

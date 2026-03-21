@@ -51,17 +51,35 @@ export function Panel({ panelId, panel, isFocused, client }: PanelProps) {
     switch (e.key) {
       case "ArrowUp":
         e.preventDefault();
-        client.sendIntent("MoveCursor", "focused-panel", { direction: "up" });
+        if (e.metaKey) {
+          client.sendIntent("MoveCursorToEdge", "focused-panel", { edge: "first" });
+        } else {
+          client.sendIntent("MoveCursor", "focused-panel", { direction: "up" });
+        }
         break;
       case "ArrowDown":
         e.preventDefault();
-        client.sendIntent("MoveCursor", "focused-panel", { direction: "down" });
+        if (e.metaKey) {
+          client.sendIntent("MoveCursorToEdge", "focused-panel", { edge: "last" });
+        } else {
+          client.sendIntent("MoveCursor", "focused-panel", { direction: "down" });
+        }
+        break;
+      case "Home":
+        e.preventDefault();
+        client.sendIntent("MoveCursorToEdge", "focused-panel", { edge: "first" });
+        break;
+      case "End":
+        e.preventDefault();
+        client.sendIntent("MoveCursorToEdge", "focused-panel", { edge: "last" });
         break;
       case "Enter":
+      case "ArrowRight":
         e.preventDefault();
         client.sendIntent("OpenEntry", "focused-panel");
         break;
       case "Backspace":
+      case "ArrowLeft":
         e.preventDefault();
         client.sendIntent("NavigateUp", "focused-panel");
         break;
