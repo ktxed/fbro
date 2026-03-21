@@ -31,7 +31,7 @@ function formatSize(entry: VFSEntry): string {
 export function Panel({ panelId, panel, isFocused, client }: PanelProps) {
   const listRef = useRef<HTMLDivElement>(null);
   const focusDivRef = useRef<HTMLDivElement>(null);
-  const rightDrag = useRef({ active: false, moved: false, startRow: -1, mode: "select" as "select" | "deselect", visited: new Set<number>() });
+  const rightDrag = useRef({ active: false, everMoved: false, startRow: -1, mode: "select" as "select" | "deselect", preSelection: [] as number[] });
 
   // Keep focused panel's div focused so it receives keyboard events
   useEffect(() => {
@@ -40,10 +40,12 @@ export function Panel({ panelId, panel, isFocused, client }: PanelProps) {
     }
   }, [isFocused]);
 
-  // End right-drag on mouse up anywhere
+  // End right-drag on mouse up anywhere; if a drag occurred, send final SetSelection
   useEffect(() => {
     const onMouseUp = (e: MouseEvent) => {
-      if (e.button === 2) rightDrag.current.active = false;
+      if (e.button === 2) {
+        rightDrag.current.active = false;
+      }
     };
     window.addEventListener("mouseup", onMouseUp);
     return () => window.removeEventListener("mouseup", onMouseUp);
@@ -143,7 +145,7 @@ export function Panel({ panelId, panel, isFocused, client }: PanelProps) {
             onMouseDown={(e) => {
               if (e.button === 2) {
                 const mode = panel.selection.includes(i) ? "deselect" : "select";
-                rightDrag.current = { active: true, moved: false, startRow: i, mode, visited: new Set([i]) };
+                rightDrag.current = { active: true, everMoved: false, startRow: i, mode, preSelection: [...panel.selection] };
                 return;
               }
               if (!isFocused) client.sendIntent("SwitchFocus", undefined, { to: panelId });
@@ -151,18 +153,26 @@ export function Panel({ panelId, panel, isFocused, client }: PanelProps) {
             }}
             onMouseEnter={() => {
               const drag = rightDrag.current;
-              if (!drag.active || drag.visited.has(i)) return;
-              drag.visited.add(i);
-              const intent = drag.mode === "deselect" ? "DeselectAtIndex" : "SelectAtIndex";
-              if (!drag.moved) {
-                drag.moved = true;
-                client.sendIntent(intent, "focused-panel", { index: drag.startRow });
+              if (!drag.active) return;
+              drag.everMoved = true;
+              // Compute the full range [startRow..currentRow] and apply mode to preSelection
+              const lo = Math.min(drag.startRow, i);
+              const hi = Math.max(drag.startRow, i);
+              const rangeSet = new Set<number>();
+              for (let r = lo; r <= hi; r++) rangeSet.add(r);
+              let indices: number[];
+              if (drag.mode === "deselect") {
+                indices = drag.preSelection.filter(idx => !rangeSet.has(idx));
+              } else {
+                const merged = new Set(drag.preSelection);
+                rangeSet.forEach(r => merged.add(r));
+                indices = [...merged];
               }
-              client.sendIntent(intent, "focused-panel", { index: i });
+              client.sendIntent("SetSelection", "focused-panel", { indices });
             }}
             onContextMenu={(e) => {
               e.preventDefault();
-              if (!rightDrag.current.moved) {
+              if (!rightDrag.current.everMoved) {
                 // Pure right-click (no drag) → toggle
                 client.sendIntent("ToggleSelectionAtIndex", "focused-panel", { index: i });
               }
