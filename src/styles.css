@@ -1,0 +1,195 @@
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  --bg:           #0d0d0d;
+  --bg-panel:     #111111;
+  --bg-header:    #1a1a2e;
+  --bg-footer:    #0f0f1a;
+  --bg-cursor:    #1a3a5c;
+  --bg-focused:   #16213e;
+  --border:       #2a2a4a;
+  --border-focus: #4a7cbf;
+  --text:         #c8c8d0;
+  --text-dim:     #666680;
+  --text-dir:     #6699ff;
+  --text-link:    #ff9944;
+  --text-path:    #88aadd;
+  --text-size:    #888899;
+  --accent:       #4a7cbf;
+  --font:         "JetBrains Mono", "Fira Code", "Cascadia Code", "Consolas", monospace;
+  --font-size:    13px;
+  --row-height:   20px;
+}
+
+html, body, #root {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: var(--font-size);
+  line-height: var(--row-height);
+}
+
+/* ── Banner ──────────────────────────────────────────────────────────────── */
+
+.banner {
+  text-align: center;
+  padding: 4px 0;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+}
+
+.banner--disconnected {
+  background: #3a1a00;
+  color: #ffaa44;
+  border-bottom: 1px solid #663300;
+}
+
+/* ── Layout ──────────────────────────────────────────────────────────────── */
+
+.layout {
+  display: flex;
+  flex-direction: row;
+  height: 100%;
+  width: 100%;
+  gap: 2px;
+  background: var(--bg);
+  padding: 2px;
+}
+
+.layout__empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-dim);
+}
+
+/* ── Panel ───────────────────────────────────────────────────────────────── */
+
+.panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  outline: none;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.panel--focused {
+  border-color: var(--border-focus);
+  background: var(--bg-focused);
+}
+
+.panel__header {
+  background: var(--bg-header);
+  border-bottom: 1px solid var(--border);
+  padding: 3px 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-shrink: 0;
+}
+
+.panel--focused .panel__header {
+  border-bottom-color: var(--border-focus);
+}
+
+.panel__path {
+  color: var(--text-path);
+  font-size: 12px;
+}
+
+.panel__list {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+.panel__list::-webkit-scrollbar { width: 6px; }
+.panel__list::-webkit-scrollbar-track { background: transparent; }
+.panel__list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+.panel__row {
+  display: flex;
+  align-items: center;
+  padding: 0 6px;
+  height: var(--row-height);
+  cursor: default;
+  white-space: nowrap;
+  overflow: hidden;
+  user-select: none;
+}
+
+.panel__row:hover {
+  background: rgba(74, 124, 191, 0.12);
+}
+
+.panel__row--cursor {
+  background: var(--bg-cursor) !important;
+}
+
+.panel--focused .panel__row--cursor {
+  background: var(--accent) !important;
+  color: #fff;
+}
+
+.panel__icon {
+  width: 14px;
+  flex-shrink: 0;
+  color: var(--text-dim);
+  font-size: 10px;
+}
+
+.panel__name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+/* Directories get a distinct color */
+.panel__row [class="panel__icon"] + .panel__name {
+  color: var(--text);
+}
+
+.panel__size {
+  flex-shrink: 0;
+  width: 70px;
+  text-align: right;
+  color: var(--text-size);
+  font-size: 11px;
+  padding-left: 8px;
+}
+
+.panel__loading {
+  padding: 8px;
+  color: var(--text-dim);
+  font-style: italic;
+}
+
+.panel__footer {
+  background: var(--bg-footer);
+  border-top: 1px solid var(--border);
+  padding: 2px 8px;
+  font-size: 11px;
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+
+.panel--focused .panel__footer {
+  color: var(--text);
+}
