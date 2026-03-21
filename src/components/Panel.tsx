@@ -131,6 +131,12 @@ export function Panel({ panelId, panel, isFocused, client }: PanelProps) {
     >
       <div className="panel__header">
         <span className="panel__path">{panel.path}</span>
+        <button
+          className="panel__home-btn"
+          tabIndex={-1}
+          title="Navigate to home folder"
+          onClick={() => client.sendIntent("NavigateHome", panelId)}
+        >~</button>
       </div>
 
       <div className="panel__list" ref={listRef}>

@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+use crate::platform::Platform;
 use crate::ws::protocol::{EntrySchema, FilterSpec, SortSpec};
 
 // ─── Source ───────────────────────────────────────────────────────────────────
@@ -53,11 +54,12 @@ pub struct AppState {
     pub panels: HashMap<String, Panel>,
     pub sources: HashMap<String, Source>,
     pub focus: String,
+    pub platform: Arc<dyn Platform>,
 }
 
 impl AppState {
-    pub fn new_default() -> Self {
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/".to_string());
+    pub fn new_default(platform: Arc<dyn Platform>) -> Self {
+        let home = platform.home_dir();
         let source_id = "local-home".to_string();
 
         let source = Source {
@@ -116,6 +118,7 @@ impl AppState {
             panels,
             sources,
             focus: "left".to_string(),
+            platform,
         }
     }
 }

@@ -520,6 +520,12 @@ async fn handle_intent(
             }
         }
 
+        "NavigateHome" => {
+            let panel_id = resolve_panel_id(scope, state).await;
+            let home = state.lock().await.platform.home_dir();
+            navigate_to(&panel_id, &home, state, tx, scan_handles).await;
+        }
+
         "NavigateUp" => {
             let panel_id = resolve_panel_id(scope, state).await;
             let current_path = {
