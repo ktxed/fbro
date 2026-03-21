@@ -175,6 +175,27 @@ body {
   padding-left: 8px;
 }
 
+.panel__row--selected {
+  background: rgba(180, 140, 30, 0.25);
+  color: #e8c84a;
+}
+
+.panel--focused .panel__row--selected {
+  background: rgba(220, 170, 20, 0.30);
+  color: #f0d060;
+}
+
+/* cursor wins over selection highlight, but keeps selection color */
+.panel__row--cursor.panel__row--selected {
+  background: var(--bg-cursor) !important;
+  color: #f0d060;
+}
+
+.panel--focused .panel__row--cursor.panel__row--selected {
+  background: var(--accent) !important;
+  color: #f0d060;
+}
+
 .panel__loading {
   padding: 8px;
   color: var(--text-dim);

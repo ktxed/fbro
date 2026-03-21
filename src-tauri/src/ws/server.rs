@@ -101,6 +101,7 @@ async fn handle_connection(stream: TcpStream, addr: SocketAddr, state: SharedSta
                         sort: p.sort.clone(),
                         filter: p.filter.clone(),
                         cursor: p.cursor,
+                        selection: p.selection.clone(),
                         entries: p.entries.clone(),
                         version: p.version,
                     },
@@ -258,6 +259,77 @@ async fn handle_intent(
                 .await;
         }
 
+        "ToggleSelection" => {
+            let panel_id = resolve_panel_id(scope, state).await;
+            let (new_selection, version) = {
+                let mut s = state.lock().await;
+                if let Some(panel) = s.panels.get_mut(&panel_id) {
+                    let cursor = panel.cursor;
+                    if let Some(pos) = panel.selection.iter().position(|&i| i == cursor) {
+                        panel.selection.remove(pos);
+                    } else {
+                        panel.selection.push(cursor);
+                    }
+                    panel.version += 1;
+                    (panel.selection.clone(), panel.version)
+                } else {
+                    return;
+                }
+            };
+            let _ = tx
+                .send(ServerMessage::StatePatch {
+                    timestamp: now(),
+                    domain: "panels".to_string(),
+                    entity_id: Some(panel_id),
+                    version,
+                    patch: serde_json::json!({ "selection": new_selection }),
+                })
+                .await;
+        }
+
+        "MoveCursorWithSelect" => {
+            let panel_id = resolve_panel_id(scope, state).await;
+            let direction = args.get("direction").and_then(|v| v.as_str()).unwrap_or("down");
+            let (new_cursor, new_selection, version) = {
+                let mut s = state.lock().await;
+                if let Some(panel) = s.panels.get_mut(&panel_id) {
+                    let len = panel.entries.len();
+                    if len == 0 {
+                        return;
+                    }
+                    let cursor = match direction {
+                        "up" => panel.cursor.saturating_sub(1),
+                        _ => (panel.cursor + 1).min(len - 1),
+                    };
+                    let prev = panel.cursor;
+                    panel.cursor = cursor;
+                    if panel.selection.contains(&cursor) {
+                        // Shrinking: remove both destination and the entry we left
+                        panel.selection.retain(|&i| i != cursor && i != prev);
+                    } else {
+                        // Extending: add destination + starting point if needed
+                        if !panel.selection.contains(&prev) {
+                            panel.selection.push(prev);
+                        }
+                        panel.selection.push(cursor);
+                    }
+                    panel.version += 1;
+                    (cursor, panel.selection.clone(), panel.version)
+                } else {
+                    return;
+                }
+            };
+            let _ = tx
+                .send(ServerMessage::StatePatch {
+                    timestamp: now(),
+                    domain: "panels".to_string(),
+                    entity_id: Some(panel_id),
+                    version,
+                    patch: serde_json::json!({ "cursor": new_cursor, "selection": new_selection }),
+                })
+                .await;
+        }
+
         "MoveCursorToEdge" => {
             let panel_id = resolve_panel_id(scope, state).await;
             let edge = args.get("edge").and_then(|v| v.as_str()).unwrap_or("first");
@@ -385,6 +457,7 @@ async fn handle_intent(
                             sort: p.sort.clone(),
                             filter: p.filter.clone(),
                             cursor: p.cursor,
+                            selection: p.selection.clone(),
                             entries: p.entries.clone(),
                             version: p.version,
                         },
@@ -451,6 +524,7 @@ async fn navigate_to(
             panel.path = new_path.to_string();
             panel.entries.clear();
             panel.cursor = 0;
+            panel.selection.clear();
             panel.status = PanelStatus::Loading;
             panel.version += 1;
             (panel.sort.clone(), panel.filter.clone(), panel.version)
@@ -470,6 +544,7 @@ async fn navigate_to(
                 "path": new_path,
                 "entries": [],
                 "cursor": 0,
+                "selection": [],
                 "status": "loading"
             }),
         })
@@ -528,6 +603,11 @@ async fn update_panel_from_patch(
         }
         if let Some(cursor) = patch.get("cursor").and_then(|v| v.as_u64()) {
             panel.cursor = cursor as usize;
+        }
+        if let Some(sel) = patch.get("selection").and_then(|v| v.as_array()) {
+            panel.selection = sel.iter()
+                .filter_map(|v| v.as_u64().map(|n| n as usize))
+                .collect();
         }
         panel.version = version;
     }

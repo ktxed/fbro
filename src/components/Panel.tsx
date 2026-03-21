@@ -53,6 +53,8 @@ export function Panel({ panelId, panel, isFocused, client }: PanelProps) {
         e.preventDefault();
         if (e.metaKey) {
           client.sendIntent("MoveCursorToEdge", "focused-panel", { edge: "first" });
+        } else if (e.shiftKey) {
+          client.sendIntent("MoveCursorWithSelect", "focused-panel", { direction: "up" });
         } else {
           client.sendIntent("MoveCursor", "focused-panel", { direction: "up" });
         }
@@ -61,9 +63,15 @@ export function Panel({ panelId, panel, isFocused, client }: PanelProps) {
         e.preventDefault();
         if (e.metaKey) {
           client.sendIntent("MoveCursorToEdge", "focused-panel", { edge: "last" });
+        } else if (e.shiftKey) {
+          client.sendIntent("MoveCursorWithSelect", "focused-panel", { direction: "down" });
         } else {
           client.sendIntent("MoveCursor", "focused-panel", { direction: "down" });
         }
+        break;
+      case " ":
+        e.preventDefault();
+        client.sendIntent("ToggleSelection", "focused-panel");
         break;
       case "Home":
         e.preventDefault();
@@ -117,7 +125,11 @@ export function Panel({ panelId, panel, isFocused, client }: PanelProps) {
         {panel.entries.map((entry, i) => (
           <div
             key={entry.name}
-            className={`panel__row ${i === panel.cursor ? "panel__row--cursor" : ""}`}
+            className={[
+              "panel__row",
+              i === panel.cursor ? "panel__row--cursor" : "",
+              panel.selection.includes(i) ? "panel__row--selected" : "",
+            ].filter(Boolean).join(" ")}
             onMouseDown={() => {
               if (!isFocused) client.sendIntent("SwitchFocus", undefined, { to: panelId });
               client.sendIntent("SetCursor", "focused-panel", { index: i });

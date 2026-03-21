@@ -27,6 +27,7 @@ export interface PanelState {
   sort: { by: string; order: "asc" | "desc" };
   filter: null | { mode: string; value: string };
   cursor: number;
+  selection: number[];
   entries: VFSEntry[];
   version: number;
 }
@@ -105,6 +106,7 @@ export interface StatePatchMessage {
     cursor?: number;
     path?: string;
     entries?: VFSEntry[];
+    selection?: number[];
     [key: string]: unknown;
   };
 }

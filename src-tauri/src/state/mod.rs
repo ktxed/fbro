@@ -25,6 +25,7 @@ pub struct Panel {
     pub sort: SortSpec,
     pub filter: Option<FilterSpec>,
     pub cursor: usize,
+    pub selection: Vec<usize>,
     pub entries: Vec<EntrySchema>,
     pub version: u64,
 }
@@ -86,6 +87,7 @@ impl AppState {
             sort: default_sort.clone(),
             filter: None,
             cursor: 0,
+            selection: vec![],
             entries: vec![],
             version: 0,
         };
@@ -98,6 +100,7 @@ impl AppState {
             sort: default_sort,
             filter: None,
             cursor: 0,
+            selection: vec![],
             entries: vec![],
             version: 0,
         };

@@ -68,6 +68,7 @@ pub struct PanelSnapshot {
     pub sort: SortSpec,
     pub filter: Option<FilterSpec>,
     pub cursor: usize,
+    pub selection: Vec<usize>,
     pub entries: Vec<EntrySchema>,
     pub version: u64,
 }
