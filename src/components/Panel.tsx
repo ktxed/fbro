@@ -31,7 +31,7 @@ function formatSize(entry: VFSEntry): string {
 export function Panel({ panelId, panel, isFocused, client }: PanelProps) {
   const listRef = useRef<HTMLDivElement>(null);
   const focusDivRef = useRef<HTMLDivElement>(null);
-  const rightDrag = useRef({ active: false, moved: false, startRow: -1, visited: new Set<number>() });
+  const rightDrag = useRef({ active: false, moved: false, startRow: -1, mode: "select" as "select" | "deselect", visited: new Set<number>() });
 
   // Keep focused panel's div focused so it receives keyboard events
   useEffect(() => {
@@ -142,7 +142,8 @@ export function Panel({ panelId, panel, isFocused, client }: PanelProps) {
             ].filter(Boolean).join(" ")}
             onMouseDown={(e) => {
               if (e.button === 2) {
-                rightDrag.current = { active: true, moved: false, startRow: i, visited: new Set([i]) };
+                const mode = panel.selection.includes(i) ? "deselect" : "select";
+                rightDrag.current = { active: true, moved: false, startRow: i, mode, visited: new Set([i]) };
                 return;
               }
               if (!isFocused) client.sendIntent("SwitchFocus", undefined, { to: panelId });
@@ -152,12 +153,12 @@ export function Panel({ panelId, panel, isFocused, client }: PanelProps) {
               const drag = rightDrag.current;
               if (!drag.active || drag.visited.has(i)) return;
               drag.visited.add(i);
+              const intent = drag.mode === "deselect" ? "DeselectAtIndex" : "SelectAtIndex";
               if (!drag.moved) {
-                // First new row entered — also select the starting row
                 drag.moved = true;
-                client.sendIntent("SelectAtIndex", "focused-panel", { index: drag.startRow });
+                client.sendIntent(intent, "focused-panel", { index: drag.startRow });
               }
-              client.sendIntent("SelectAtIndex", "focused-panel", { index: i });
+              client.sendIntent(intent, "focused-panel", { index: i });
             }}
             onContextMenu={(e) => {
               e.preventDefault();
