@@ -1,4 +1,4 @@
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{self, BufRead, BufReader, Read, Write};
 use std::os::unix::net::UnixStream;
 use std::sync::Arc;
 use std::time::Duration;
@@ -20,21 +20,18 @@ impl SpyFsDriver {
         Self { inner, sock_path }
     }
 
-    /// Send an intercept request to lfs-spy and wait for approval.
-    /// Returns Ok(()) if approved or lfs-spy is not running (pass-through).
-    /// Returns Err(PermissionDenied) if denied.
-    fn intercept(&self, op: &str, args: serde_json::Value) -> Result<(), VfsError> {
+    /// Send an intercept request to lfs-spy and wait for a response.
+    /// Returns `Ok(chunk_delay_ms)` if approved (0 = no delay).
+    /// Returns `Err(PermissionDenied)` if denied.
+    /// Returns `Ok(0)` (pass-through) if lfs-spy is not running.
+    fn intercept(&self, op: &str, args: serde_json::Value) -> Result<u64, VfsError> {
         let stream = match UnixStream::connect(&self.sock_path) {
             Ok(s) => s,
-            Err(_) => return Ok(()), // lfs-spy not running — pass through
+            Err(_) => return Ok(0), // lfs-spy not running — pass through
         };
 
-        stream
-            .set_read_timeout(Some(Duration::from_secs(60)))
-            .ok();
-        stream
-            .set_write_timeout(Some(Duration::from_secs(5)))
-            .ok();
+        stream.set_read_timeout(Some(Duration::from_secs(60))).ok();
+        stream.set_write_timeout(Some(Duration::from_secs(5))).ok();
 
         let id = uuid::Uuid::new_v4().to_string();
         let ts = std::time::SystemTime::now()
@@ -42,56 +39,61 @@ impl SpyFsDriver {
             .map(|d| d.as_secs())
             .unwrap_or(0);
 
-        let request = json!({
-            "id": id,
-            "op": op,
-            "args": args,
-            "ts": ts,
-        });
-
+        let request = json!({ "id": id, "op": op, "args": args, "ts": ts });
         let mut msg = serde_json::to_string(&request)
             .map_err(|e| VfsError::IOError(format!("spy serialize: {e}")))?;
         msg.push('\n');
 
         let mut writer = stream.try_clone()
             .map_err(|e| VfsError::IOError(format!("spy clone: {e}")))?;
-        writer
-            .write_all(msg.as_bytes())
+        writer.write_all(msg.as_bytes())
             .map_err(|e| VfsError::IOError(format!("spy write: {e}")))?;
-        writer
-            .flush()
+        writer.flush()
             .map_err(|e| VfsError::IOError(format!("spy flush: {e}")))?;
 
         let mut reader = BufReader::new(stream);
         let mut line = String::new();
-        reader
-            .read_line(&mut line)
+        reader.read_line(&mut line)
             .map_err(|e| VfsError::IOError(format!("spy read: {e}")))?;
 
         let resp: serde_json::Value = serde_json::from_str(line.trim())
             .map_err(|e| VfsError::IOError(format!("spy parse: {e}")))?;
 
         match resp.get("action").and_then(|v| v.as_str()) {
-            Some("approve") => Ok(()),
-            Some("deny") => Err(VfsError::PermissionDenied(
-                format!("lfs-spy denied: {op}"),
-            )),
-            other => Err(VfsError::IOError(
-                format!("spy unexpected action: {other:?}"),
-            )),
+            Some("approve") => {
+                let delay = resp.get("chunk_delay_ms")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                Ok(delay)
+            }
+            Some("deny") => Err(VfsError::PermissionDenied(format!("lfs-spy denied: {op}"))),
+            other => Err(VfsError::IOError(format!("spy unexpected action: {other:?}"))),
         }
     }
 }
 
+// ─── Delayed reader ───────────────────────────────────────────────────────────
+
+/// Wraps a `Read` impl and sleeps `delay` before each `read()` call.
+/// Used to simulate slow transfers for testing.
+struct DelayedReader<R: Read + Send> {
+    inner: R,
+    delay: Duration,
+}
+
+impl<R: Read + Send> Read for DelayedReader<R> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        std::thread::sleep(self.delay);
+        self.inner.read(buf)
+    }
+}
+
+// ─── VfsDriver impl ───────────────────────────────────────────────────────────
+
 impl VfsDriver for SpyFsDriver {
     // ── Pass-through (non-mutating) ──────────────────────────────────────────
 
-    fn list(
-        &self,
-        path: &str,
-        sort: &SortSpec,
-        filter: Option<&FilterSpec>,
-    ) -> Result<Vec<VfsEntry>, VfsError> {
+    fn list(&self, path: &str, sort: &SortSpec, filter: Option<&FilterSpec>) -> Result<Vec<VfsEntry>, VfsError> {
         self.inner.list(path, sort, filter)
     }
 
@@ -118,8 +120,16 @@ impl VfsDriver for SpyFsDriver {
     // ── Intercepted (mutating) ───────────────────────────────────────────────
 
     fn open_read(&self, path: &str) -> Result<Box<dyn Read + Send>, VfsError> {
-        self.intercept("open_read", json!({ "path": path }))?;
-        self.inner.open_read(path)
+        let chunk_delay_ms = self.intercept("open_read", json!({ "path": path }))?;
+        let reader = self.inner.open_read(path)?;
+        if chunk_delay_ms > 0 {
+            Ok(Box::new(DelayedReader {
+                inner: reader,
+                delay: Duration::from_millis(chunk_delay_ms),
+            }))
+        } else {
+            Ok(reader)
+        }
     }
 
     fn open_write(&self, path: &str) -> Result<Box<dyn Write + Send>, VfsError> {
