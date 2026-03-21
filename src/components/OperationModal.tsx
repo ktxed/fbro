@@ -29,8 +29,9 @@ function formatBytes(n: number): string {
 export function OperationModal({ pending, activeJob, activeJobId, client }: OperationModalProps) {
   const dispatch = useAppDispatch();
   const [conflictPolicy, setConflictPolicy] = useState<ConflictPolicy>("ask");
+  const [submitted, setSubmitted] = useState(false);
 
-  const close = () => dispatch({ type: "CLOSE_OPERATION" });
+  const close = () => { setSubmitted(false); dispatch({ type: "CLOSE_OPERATION" }); };
 
   // Nothing to show
   if (!pending && !activeJob) return null;
@@ -42,6 +43,8 @@ export function OperationModal({ pending, activeJob, activeJobId, client }: Oper
     const label = opLabel(pending.opType);
 
     const startOp = (background: boolean) => {
+      if (submitted) return;
+      setSubmitted(true);
       client.sendIntent("StartFileOp", undefined, {
         opType: pending.opType,
         sourcePanel: pending.sourcePanel,
@@ -95,10 +98,10 @@ export function OperationModal({ pending, activeJob, activeJobId, client }: Oper
             )}
           </div>
           <div className="modal__actions">
-            <button className="modal__btn modal__btn--primary" onClick={() => startOp(false)}>
-              {label}
+            <button className="modal__btn modal__btn--primary" disabled={submitted} onClick={() => startOp(false)}>
+              {submitted ? "Starting…" : label}
             </button>
-            <button className="modal__btn" onClick={() => startOp(true)}>
+            <button className="modal__btn" disabled={submitted} onClick={() => startOp(true)}>
               Background
             </button>
             <button className="modal__btn" onClick={close}>

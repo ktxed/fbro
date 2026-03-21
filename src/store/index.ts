@@ -136,6 +136,7 @@ function applyJobStarted(state: AppState, msg: JobStartedMessage): AppState {
     ...state,
     jobs: { ...state.jobs, [job.jobId]: newJob },
     activeJobId: state.activeJobId ?? job.jobId,
+    pendingOp: null,
   };
 }
 
