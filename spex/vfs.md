@@ -1,0 +1,350 @@
+# fbro VFS Specification (FMP) — v0
+
+1. **What a VFS driver is (and is not)**
+2. **Core VFS interface (v0)**
+3. **Read vs write capabilities**
+4. **Cross-VFS copy model (important)**
+5. **How jobs use the VFS**
+6. **Error & capability contracts**
+7. **Why this interface will age well**
+
+---
+
+## 1. What a VFS driver is (conceptually)
+
+A VFS driver is:
+
+> A **pure filesystem-like adapter** that exposes a tree of entries and operations on them, independent of UI, jobs, or protocol.
+
+It is **not**:
+
+* A job runner
+* A protocol component
+* A panel
+* A state store
+
+It **does not**:
+
+* Know about selections
+* Know about panels
+* Emit UI events
+
+It only:
+
+* Lists
+* Reads
+* Writes
+* Mutates
+* Reports errors
+
+---
+
+## 2. VFS Driver Interface (v0)
+
+Below is a **minimal but sufficient** interface.
+
+### 2.1 Driver identity & capabilities
+
+```ts
+interface VFSDriver {
+  id: string
+  name: string
+  capabilities: VFSCapabilities
+}
+```
+
+```ts
+interface VFSCapabilities {
+  read: boolean
+  write: boolean
+  delete: boolean
+  move: boolean
+  streamListing: boolean
+  randomRead: boolean
+}
+```
+
+This maps directly to `source.supports`.
+
+---
+
+## 3. Paths & entries
+
+### 3.1 Path type
+
+Paths are **opaque to the BE**, but stable per driver.
+
+```ts
+type VFSPath = string
+```
+
+Interpretation:
+
+* POSIX for local FS
+* Virtual for others
+* Never parsed outside the driver
+
+---
+
+### 3.2 Entry metadata
+
+```ts
+interface VFSEntry {
+  path: VFSPath
+  name: string
+  kind: "file" | "directory" | "symlink" | "other"
+  size?: number
+  mtime?: ISO8601
+}
+```
+
+Rules:
+
+* `size` optional (directories may not know it)
+* `mtime` optional
+* Never assume filesystem semantics
+
+---
+
+## 4. Core operations (v0)
+
+### 4.1 List directory (streamable)
+
+```ts
+list(
+  path: VFSPath,
+  options: {
+    sort?: SortSpec
+    filter?: FilterSpec
+    signal?: AbortSignal
+  }
+): AsyncIterable<VFSEntry>
+```
+
+Notes:
+
+* Streaming is natural via `AsyncIterable`
+* Cancelled via `AbortSignal`
+* Sorting/filtering happens **inside the driver**
+
+---
+
+### 4.2 Stat (single entry)
+
+```ts
+stat(path: VFSPath): Promise<VFSEntry>
+```
+
+Used for:
+
+* Cursor inspection
+* Folder size calculation
+* AI queries
+
+---
+
+### 4.3 Read file (streamed)
+
+```ts
+openRead(
+  path: VFSPath
+): AsyncIterable<Uint8Array>
+```
+
+Only required for copy & inspect.
+
+---
+
+### 4.4 Write file (streamed)
+
+```ts
+openWrite(
+  path: VFSPath,
+  options: {
+    overwrite: boolean
+  }
+): WritableStream<Uint8Array>
+```
+
+Driver decides:
+
+* Whether overwrite is allowed
+* Whether rename is required
+
+---
+
+### 4.5 Delete
+
+```ts
+delete(path: VFSPath): Promise<void>
+```
+
+Recursive behavior is driver-defined (but must be documented).
+
+---
+
+### 4.6 Move / rename (same VFS only)
+
+```ts
+move(
+  source: VFSPath,
+  destination: VFSPath
+): Promise<void>
+```
+
+Rule:
+
+* Only valid **within the same driver**
+* Cross-driver moves are copy+delete jobs
+
+---
+
+## 5. Cross-VFS copy (key point)
+
+> Copying should work between *any* write-enabled VFSes.
+
+### 5.1 Copy is NOT a VFS primitive
+
+There is **no**:
+
+```ts
+copy(source, destination)
+```
+
+at the driver level.
+
+Why?
+
+* Cross-VFS copies are orchestration, not IO
+* OS-level optimizations are optional, not required
+
+---
+
+### 5.2 Copy job orchestration
+
+The BE performs:
+
+```text id="epb6b5"
+Source VFS
+  openRead(path)
+    ↓ stream
+Destination VFS
+  openWrite(path)
+```
+
+This means:
+
+* Any readable → any writable VFS works
+* Streaming avoids buffering entire files
+* Progress tracking is trivial
+
+---
+
+### 5.3 Optional fast-path optimization (later)
+
+You *may* add later:
+
+```ts
+copyTo?(
+  source: VFSPath,
+  targetDriver: VFSDriver,
+  targetPath: VFSPath
+): Promise<void>
+```
+
+But **v0 should not rely on it**.
+
+---
+
+## 6. Jobs & VFS interaction
+
+Jobs are **VFS consumers**, never owners.
+
+Example: Copy job loop:
+
+```text id="pt0vib"
+for each selected entry:
+  if file:
+    stream read → write
+  if directory:
+    mkdir
+    recurse
+```
+
+When a conflict occurs:
+
+* Job suspends
+* Emits `DecisionRequired`
+* Waits for FE response
+* Resumes with new policy
+
+The VFS driver:
+
+* Never blocks on UI
+* Never asks questions
+* Just throws errors
+
+---
+
+## 7. Error contract (critical)
+
+VFS drivers must throw **typed errors**.
+
+```ts
+class VFSError extends Error {
+  code:
+    | "NotFound"
+    | "PermissionDenied"
+    | "AlreadyExists"
+    | "NotSupported"
+    | "IOError"
+}
+```
+
+The BE:
+
+* Maps these to JobDecision or Error messages
+* Decides whether retry, skip, or abort
+
+---
+
+## 8. Why this interface is correct
+
+This design:
+
+✔ Keeps VFS simple
+✔ Keeps BE in control
+✔ Enables AI safely
+✔ Enables remote FS
+✔ Enables streaming
+✔ Avoids premature optimization
+
+Most importantly:
+
+> **It forces all complexity into one place: the BE job engine.**
+
+That’s exactly where it belongs.
+
+---
+
+## 9. Mental checkpoint
+
+At this point you have:
+
+* A BE that feels like a *micro-kernel*
+* VFS drivers as *device drivers*
+* Jobs as *processes*
+* FE as a *display server*
+
+That’s not accidental — it’s a sign the abstraction boundaries are right.
+
+---
+
+## Suggested next step
+
+Two very natural next steps:
+
+1. **Formal job types** (`ScanDirectoryJob`, `CopyJob`, `DeleteJob`)
+2. **Conflict resolution policy model** (per-job vs global)
+
+If you want, we can spec one of those next.
