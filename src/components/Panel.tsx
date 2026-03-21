@@ -6,6 +6,7 @@ interface PanelProps {
   panelId: string;
   panel: PanelState;
   isFocused: boolean;
+  modalActive: boolean;
   client: WsClient;
 }
 
@@ -28,7 +29,7 @@ function formatSize(entry: VFSEntry): string {
   return `${(s / (1024 * 1024 * 1024)).toFixed(1)}G`;
 }
 
-export function Panel({ panelId, panel, isFocused, client }: PanelProps) {
+export function Panel({ panelId, panel, isFocused, modalActive, client }: PanelProps) {
   const listRef = useRef<HTMLDivElement>(null);
   const focusDivRef = useRef<HTMLDivElement>(null);
   const rightDrag = useRef({ active: false, everMoved: false, startRow: -1, mode: "select" as "select" | "deselect", preSelection: [] as number[] });
@@ -71,6 +72,10 @@ export function Panel({ panelId, panel, isFocused, client }: PanelProps) {
   }, [panel.cursor]);
 
   function handleKeyDown(e: React.KeyboardEvent) {
+    if (modalActive) {
+      e.preventDefault();
+      return;
+    }
     switch (e.key) {
       case "ArrowUp":
         e.preventDefault();
@@ -147,7 +152,7 @@ export function Panel({ panelId, panel, isFocused, client }: PanelProps) {
       tabIndex={0}
       onKeyDown={handleKeyDown}
       onFocus={() => {
-        if (!isFocused) {
+        if (!isFocused && !modalActive) {
           client.sendIntent("SwitchFocus", undefined, { to: panelId });
         }
       }}

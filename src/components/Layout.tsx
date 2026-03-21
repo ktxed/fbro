@@ -17,6 +17,7 @@ export function Layout({ client }: LayoutProps) {
   }
 
   const activeJob = state.activeJobId ? state.jobs[state.activeJobId] ?? null : null;
+  const modalActive = state.pendingOp !== null || state.activeJobId !== null;
 
   return (
     <>
@@ -30,6 +31,7 @@ export function Layout({ client }: LayoutProps) {
               panelId={id}
               panel={panel}
               isFocused={state.focus === id}
+              modalActive={modalActive}
               client={client}
             />
           );

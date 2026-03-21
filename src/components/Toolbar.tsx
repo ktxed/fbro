@@ -61,6 +61,9 @@ export function Toolbar() {
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      // Don't handle keys while a modal is active
+      if (state.pendingOp || state.activeJobId) return;
+
       const opType = FILE_OP_KEYS[e.key];
       if (opType) {
         e.preventDefault();

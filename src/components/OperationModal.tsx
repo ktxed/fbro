@@ -74,10 +74,17 @@ export function OperationModal({ pending, activeJob, activeJobId, client }: Oper
   const dispatch = useAppDispatch();
   const [conflictPolicy, setConflictPolicy] = useState<ConflictPolicy>("ask");
   const [submitted, setSubmitted] = useState(false);
+  const modalRef = useRef<HTMLDivElement>(null);
   const p = activeJob?.progress;
   const speed = useTransferSpeed(p?.currentFile, p?.currentFileBytesCopied ?? 0);
 
   const close = () => { setSubmitted(false); dispatch({ type: "CLOSE_OPERATION" }); };
+
+  // Auto-focus the modal when it appears
+  const isVisible = !!(pending || activeJob);
+  useEffect(() => {
+    if (isVisible) modalRef.current?.focus();
+  }, [isVisible]);
 
   // Nothing to show
   if (!pending && !activeJob) return null;
@@ -105,7 +112,7 @@ export function OperationModal({ pending, activeJob, activeJobId, client }: Oper
     };
 
     return (
-      <div className="modal-overlay" onClick={close}>
+      <div className="modal-overlay" ref={modalRef} tabIndex={-1} onClick={close} onKeyDown={(e) => { if (e.key === "Tab") e.preventDefault(); }}>
         <div className="modal" onClick={(e) => e.stopPropagation()}>
           <div className="modal__header">{label}</div>
           <div className="modal__body">
@@ -173,7 +180,7 @@ export function OperationModal({ pending, activeJob, activeJobId, client }: Oper
       : 0;
 
     return (
-      <div className="modal-overlay" onClick={isTerminal ? close : undefined}>
+      <div className="modal-overlay" ref={modalRef} tabIndex={-1} onClick={isTerminal ? close : undefined} onKeyDown={(e) => { if (e.key === "Tab") e.preventDefault(); }}>
         <div className="modal" onClick={(e) => e.stopPropagation()}>
           <div className="modal__header">{label} — {activeJob.state}</div>
           <div className="modal__body">
