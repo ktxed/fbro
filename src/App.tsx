@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { AppContext, useAppReducer } from "./store";
 import { WsClient } from "./ws/client";
 import { Layout } from "./components/Layout";
+import { Toolbar } from "./components/Toolbar";
 
 export function App() {
   const [state, dispatch] = useAppReducer();
@@ -28,7 +29,10 @@ export function App() {
           Connecting to backend…
         </div>
       )}
-      {client && <Layout client={client} />}
+      <div className="app">
+        {client && <Layout client={client} />}
+        <Toolbar />
+      </div>
     </AppContext.Provider>
   );
 }

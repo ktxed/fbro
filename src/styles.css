@@ -54,12 +54,22 @@ body {
   border-bottom: 1px solid #663300;
 }
 
+/* ── App shell ───────────────────────────────────────────────────────────── */
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+}
+
 /* ── Layout ──────────────────────────────────────────────────────────────── */
 
 .layout {
   display: flex;
   flex-direction: row;
-  height: 100%;
+  flex: 1;
+  min-height: 0;
   width: 100%;
   gap: 2px;
   background: var(--bg);
@@ -236,4 +246,58 @@ body {
 
 .panel--focused .panel__footer {
   color: var(--text);
+}
+
+/* ── Toolbar ─────────────────────────────────────────────────────────────── */
+
+.toolbar {
+  display: flex;
+  flex-direction: row;
+  flex-shrink: 0;
+  background: var(--bg-header);
+  border-top: 1px solid var(--border);
+  padding: 2px 4px;
+  gap: 2px;
+}
+
+.toolbar__btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  background: var(--bg-footer);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text-dim);
+  font-family: var(--font);
+  font-size: 11px;
+  padding: 3px 4px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.toolbar__btn:hover {
+  background: var(--bg-focused);
+  color: var(--text);
+  border-color: var(--border-focus);
+}
+
+.toolbar__key {
+  color: var(--accent);
+  font-weight: bold;
+  font-size: 10px;
+  flex-shrink: 0;
+}
+
+.toolbar__icon {
+  font-size: 13px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.toolbar__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
