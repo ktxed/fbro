@@ -259,6 +259,37 @@ async fn handle_intent(
                 .await;
         }
 
+        "ToggleSelectionAtIndex" => {
+            let panel_id = resolve_panel_id(scope, state).await;
+            let index = args.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            let (new_selection, version) = {
+                let mut s = state.lock().await;
+                if let Some(panel) = s.panels.get_mut(&panel_id) {
+                    if index >= panel.entries.len() {
+                        return;
+                    }
+                    if let Some(pos) = panel.selection.iter().position(|&i| i == index) {
+                        panel.selection.remove(pos);
+                    } else {
+                        panel.selection.push(index);
+                    }
+                    panel.version += 1;
+                    (panel.selection.clone(), panel.version)
+                } else {
+                    return;
+                }
+            };
+            let _ = tx
+                .send(ServerMessage::StatePatch {
+                    timestamp: now(),
+                    domain: "panels".to_string(),
+                    entity_id: Some(panel_id),
+                    version,
+                    patch: serde_json::json!({ "selection": new_selection }),
+                })
+                .await;
+        }
+
         "ToggleSelection" => {
             let panel_id = resolve_panel_id(scope, state).await;
             let (new_selection, version) = {

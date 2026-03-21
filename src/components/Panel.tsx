@@ -134,6 +134,10 @@ export function Panel({ panelId, panel, isFocused, client }: PanelProps) {
               if (!isFocused) client.sendIntent("SwitchFocus", undefined, { to: panelId });
               client.sendIntent("SetCursor", "focused-panel", { index: i });
             }}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              client.sendIntent("ToggleSelectionAtIndex", "focused-panel", { index: i });
+            }}
             onDoubleClick={() => {
               if (entry.kind === "directory") client.sendIntent("OpenEntry", "focused-panel");
             }}
