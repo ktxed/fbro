@@ -11,7 +11,7 @@ use crate::jobs::file_ops::run_file_op;
 use crate::jobs::scan::run_scan;
 use crate::jobs::{ConflictPolicy, FileOpEntry, FileOpJob, FileOpType, JobState, ScanHandle};
 use crate::state::{PanelStatus, SharedState};
-use crate::vfs::local::LocalFsDriver;
+use crate::vfs::VfsDriver;
 use crate::ws::protocol::{
     now, ClientMessage, FileOpFileSchema, JobStartSchema, LayoutDomain, PanelSnapshot,
     ServerMessage, SourceCapabilities, SourceSchema, StateDomains,
@@ -151,13 +151,14 @@ async fn handle_connection(stream: TcpStream, addr: SocketAddr, state: SharedSta
     let mut decision_senders: HashMap<String, mpsc::Sender<String>> = HashMap::new();
 
     for panel_id in &panel_ids {
-        let (path, sort, filter, version_base) = {
+        let (path, sort, filter, version_base, driver) = {
             let s = state.lock().await;
             let p = s.panels.get(panel_id).unwrap();
-            (p.path.clone(), p.sort.clone(), p.filter.clone(), p.version)
+            let driver = s.drivers.get(&p.source_id).cloned().unwrap();
+            (p.path.clone(), p.sort.clone(), p.filter.clone(), p.version, driver)
         };
 
-        let h = spawn_scan(panel_id.clone(), path, sort, filter, version_base, tx.clone());
+        let h = spawn_scan(panel_id.clone(), path, sort, filter, version_base, tx.clone(), driver);
         scan_handles.insert(panel_id.clone(), h);
     }
 
@@ -559,7 +560,8 @@ async fn handle_intent(
                 if let Some(panel) = s.panels.get(&panel_id) {
                     if let Some(entry) = panel.entries.get(panel.cursor) {
                         let kind = entry.kind.clone();
-                        let full = LocalFsDriver::resolve_child(&panel.path, &entry.name);
+                        let driver = s.drivers.get(&panel.source_id).unwrap();
+                        let full = driver.resolve_child(&panel.path, &entry.name);
                         (kind, full)
                     } else {
                         return;
@@ -582,12 +584,17 @@ async fn handle_intent(
 
         "NavigateUp" => {
             let panel_id = resolve_panel_id(scope, state).await;
-            let current_path = {
+            let (current_path, parent_path) = {
                 let s = state.lock().await;
-                s.panels.get(&panel_id).map(|p| p.path.clone())
+                if let Some(panel) = s.panels.get(&panel_id) {
+                    let driver = s.drivers.get(&panel.source_id).unwrap();
+                    (Some(panel.path.clone()), driver.parent_path(&panel.path))
+                } else {
+                    (None, None)
+                }
             };
             if let Some(path) = current_path {
-                if let Some(parent) = LocalFsDriver::parent_path(&path) {
+                if let Some(parent) = parent_path {
                     if parent != path {
                         navigate_to(&panel_id, &parent, state, tx, scan_handles).await;
                     }
@@ -691,9 +698,10 @@ async fn handle_intent(
             };
 
             // Gather files from the source panel's selection (or cursor)
-            let (files, dest_path) = {
+            let (files, dest_path, src_driver, dst_driver) = {
                 let s = state.lock().await;
                 let Some(src_panel) = s.panels.get(&source_panel_id) else { return };
+                let src_driver = s.drivers.get(&src_panel.source_id).cloned().unwrap();
 
                 let indices: Vec<usize> = if src_panel.selection.is_empty() {
                     vec![src_panel.cursor]
@@ -704,19 +712,24 @@ async fn handle_intent(
                 let files: Vec<FileOpEntry> = indices.iter().filter_map(|&idx| {
                     src_panel.entries.get(idx).map(|e| FileOpEntry {
                         name: e.name.clone(),
-                        source_path: LocalFsDriver::resolve_child(&src_panel.path, &e.name),
+                        source_path: src_driver.resolve_child(&src_panel.path, &e.name),
                         size: e.size,
                         kind: e.kind.clone(),
                     })
                 }).collect();
 
-                let dest_path = if op_type != FileOpType::Delete {
-                    dest_panel_id.as_ref().and_then(|id| s.panels.get(id)).map(|p| p.path.clone())
+                let (dest_path, dst_driver) = if op_type != FileOpType::Delete {
+                    if let Some(dp) = dest_panel_id.as_ref().and_then(|id| s.panels.get(id)) {
+                        let drv = s.drivers.get(&dp.source_id).cloned().unwrap();
+                        (Some(dp.path.clone()), Some(drv))
+                    } else {
+                        (None, None)
+                    }
                 } else {
-                    None
+                    (None, None)
                 };
 
-                (files, dest_path)
+                (files, dest_path, src_driver, dst_driver)
             };
 
             if files.is_empty() { return; }
@@ -763,6 +776,8 @@ async fn handle_intent(
                 tx.clone(),
                 cancel_rx,
                 dec_rx,
+                src_driver,
+                dst_driver,
             ));
 
             // Store job in state
@@ -828,19 +843,22 @@ async fn navigate_to(
         h.abort();
     }
 
-    let (sort, filter, version) = {
+    let (sort, filter, version, driver) = {
         let mut s = state.lock().await;
-        if let Some(panel) = s.panels.get_mut(panel_id) {
+        let (source_id, sort, filter, version) = if let Some(panel) = s.panels.get_mut(panel_id) {
+            let sid = panel.source_id.clone();
             panel.path = new_path.to_string();
             panel.entries.clear();
             panel.cursor = 0;
             panel.selection.clear();
             panel.status = PanelStatus::Loading;
             panel.version += 1;
-            (panel.sort.clone(), panel.filter.clone(), panel.version)
+            (sid, panel.sort.clone(), panel.filter.clone(), panel.version)
         } else {
             return;
-        }
+        };
+        let driver = s.drivers.get(&source_id).cloned().unwrap();
+        (sort, filter, version, driver)
     };
 
     // Inform FE of the path change + cleared entries
@@ -860,7 +878,7 @@ async fn navigate_to(
         })
         .await;
 
-    let h = spawn_scan(panel_id.to_string(), new_path.to_string(), sort, filter, version, tx.clone());
+    let h = spawn_scan(panel_id.to_string(), new_path.to_string(), sort, filter, version, tx.clone(), driver);
     scan_handles.insert(panel_id.to_string(), h);
 }
 
@@ -873,16 +891,19 @@ async fn rescan_panel(
     if let Some(h) = scan_handles.remove(panel_id) {
         h.abort();
     }
-    let (path, sort, filter, version) = {
+    let (path, sort, filter, version, driver) = {
         let mut s = state.lock().await;
-        if let Some(panel) = s.panels.get_mut(panel_id) {
+        let (source_id, path, sort, filter, version) = if let Some(panel) = s.panels.get_mut(panel_id) {
+            let sid = panel.source_id.clone();
             panel.entries.clear();
             panel.status = PanelStatus::Loading;
             panel.version += 1;
-            (panel.path.clone(), panel.sort.clone(), panel.filter.clone(), panel.version)
+            (sid, panel.path.clone(), panel.sort.clone(), panel.filter.clone(), panel.version)
         } else {
             return;
-        }
+        };
+        let driver = s.drivers.get(&source_id).cloned().unwrap();
+        (path, sort, filter, version, driver)
     };
     let _ = tx
         .send(ServerMessage::StatePatch {
@@ -896,7 +917,7 @@ async fn rescan_panel(
             }),
         })
         .await;
-    let h = spawn_scan(panel_id.to_string(), path, sort, filter, version, tx.clone());
+    let h = spawn_scan(panel_id.to_string(), path, sort, filter, version, tx.clone(), driver);
     scan_handles.insert(panel_id.to_string(), h);
 }
 
@@ -917,8 +938,9 @@ fn spawn_scan(
     filter: Option<crate::ws::protocol::FilterSpec>,
     version_base: u64,
     tx: mpsc::Sender<ServerMessage>,
+    driver: Arc<dyn VfsDriver>,
 ) -> ScanHandle {
-    let handle = tokio::spawn(run_scan(panel_id, path, sort, filter, version_base, tx));
+    let handle = tokio::spawn(run_scan(panel_id, path, sort, filter, version_base, tx, driver));
     ScanHandle { handle }
 }
 

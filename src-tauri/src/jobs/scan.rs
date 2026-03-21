@@ -1,6 +1,7 @@
+use std::sync::Arc;
 use tokio::sync::mpsc;
 
-use crate::vfs::local::LocalFsDriver;
+use crate::vfs::VfsDriver;
 use crate::ws::protocol::{EntrySchema, FilterSpec, ServerMessage, SortSpec};
 
 const BATCH_SIZE: usize = 50;
@@ -12,10 +13,10 @@ pub async fn run_scan(
     filter: Option<FilterSpec>,
     version_base: u64,
     tx: mpsc::Sender<ServerMessage>,
+    driver: Arc<dyn VfsDriver>,
 ) {
-    // Run blocking FS read in a spawn_blocking task so we don't stall the async runtime
     let result = tokio::task::spawn_blocking(move || {
-        LocalFsDriver::list(&path, &sort, filter.as_ref())
+        driver.list(&path, &sort, filter.as_ref())
     })
     .await;
 
@@ -49,7 +50,6 @@ pub async fn run_scan(
     let total = schema_entries.len();
     let mut version = version_base;
 
-    // Send in batches
     for (batch_idx, chunk) in schema_entries.chunks(BATCH_SIZE).enumerate() {
         version += 1;
         let patch = serde_json::json!({ "appendEntries": chunk });
@@ -64,16 +64,14 @@ pub async fn run_scan(
             .await
             .is_err()
         {
-            return; // receiver dropped (client disconnected)
+            return;
         }
 
-        // Yield occasionally to avoid starving other tasks
         if batch_idx % 4 == 3 {
             tokio::task::yield_now().await;
         }
     }
 
-    // Mark ready
     version += 1;
     let _ = tx
         .send(ServerMessage::StatePatch {

@@ -4,6 +4,7 @@ use tokio::sync::Mutex;
 
 use crate::jobs::JobStore;
 use crate::platform::Platform;
+use crate::vfs::VfsDriver;
 use crate::ws::protocol::{EntrySchema, FilterSpec, SortSpec};
 
 // ─── Source ───────────────────────────────────────────────────────────────────
@@ -54,6 +55,7 @@ impl PanelStatus {
 pub struct AppState {
     pub panels: HashMap<String, Panel>,
     pub sources: HashMap<String, Source>,
+    pub drivers: HashMap<String, Arc<dyn VfsDriver>>,
     pub focus: String,
     pub platform: Arc<dyn Platform>,
     pub job_store: JobStore,
@@ -114,11 +116,16 @@ impl AppState {
         panels.insert("right".to_string(), right);
 
         let mut sources = HashMap::new();
-        sources.insert(source_id, source);
+        sources.insert(source_id.clone(), source);
+
+        let driver: Arc<dyn VfsDriver> = Arc::new(crate::vfs::local::LocalFsDriver);
+        let mut drivers = HashMap::new();
+        drivers.insert(source_id, driver);
 
         AppState {
             panels,
             sources,
+            drivers,
             focus: "left".to_string(),
             platform,
             job_store: JobStore::new(),

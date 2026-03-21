@@ -1,9 +1,10 @@
-use std::fs;
 use std::io::{Read, Write};
 use std::path::Path;
+use std::sync::Arc;
 use tokio::sync::{mpsc, watch};
 
-use crate::jobs::{ConflictPolicy, DecisionRx, FileOpEntry, FileOpProgress, FileOpType};
+use crate::jobs::{ConflictPolicy, DecisionRx, FileOpEntry, FileOpType};
+use crate::vfs::VfsDriver;
 use crate::ws::protocol::{
     now, ConflictDecisionSchema, FileOpProgressSchema, ServerMessage,
 };
@@ -12,6 +13,12 @@ const COPY_BUF_SIZE: usize = 64 * 1024; // 64 KiB
 
 /// Run a file operation (copy/move/delete) in a blocking context.
 /// Sends JobEvent messages for progress, decisions, completion, and errors.
+///
+/// `src_driver` is the VFS driver for the source panel.
+/// `dst_driver` is the VFS driver for the destination panel (None for delete).
+///
+/// When both drivers point to the same OS-managed VFS (same Arc),
+/// the move operation attempts `try_rename` for an O(1) fast path.
 pub async fn run_file_op(
     job_id: String,
     op_type: FileOpType,
@@ -21,6 +28,8 @@ pub async fn run_file_op(
     tx: mpsc::Sender<ServerMessage>,
     cancel_rx: watch::Receiver<bool>,
     mut decision_rx: DecisionRx,
+    src_driver: Arc<dyn VfsDriver>,
+    dst_driver: Option<Arc<dyn VfsDriver>>,
 ) {
     let job_id_clone = job_id.clone();
     let tx_clone = tx.clone();
@@ -34,6 +43,8 @@ pub async fn run_file_op(
             &tx_clone,
             &cancel_rx,
             &mut decision_rx,
+            &*src_driver,
+            dst_driver.as_deref(),
         )
     })
     .await;
@@ -60,12 +71,17 @@ fn run_file_op_blocking(
     tx: &mpsc::Sender<ServerMessage>,
     cancel_rx: &watch::Receiver<bool>,
     decision_rx: &mut DecisionRx,
+    src_driver: &dyn VfsDriver,
+    dst_driver: Option<&dyn VfsDriver>,
 ) -> Result<(), String> {
     let total_files = files.len();
     let mut completed_files = 0usize;
 
+    // For move: check if source and dest share the same driver (ptr equality).
+    // If they do, try_rename may succeed as an O(1) operation.
+    let same_driver = dst_driver.map_or(false, |d| std::ptr::eq(src_driver, d));
+
     for entry in files {
-        // Check cancellation
         if *cancel_rx.borrow() {
             send_event_sync(tx, job_id, "Cancelled", None, None, None);
             return Ok(());
@@ -73,10 +89,30 @@ fn run_file_op_blocking(
 
         match op_type {
             FileOpType::Copy | FileOpType::Move => {
+                let dst_drv = dst_driver.ok_or("No destination driver for copy/move")?;
                 let dest_dir = dest_path.ok_or("No destination path for copy/move")?;
                 let src = &entry.source_path;
-                let dst = Path::new(dest_dir).join(&entry.name);
-                let dst_str = dst.to_string_lossy().to_string();
+                let dst_str = dst_drv.resolve_child(dest_dir, &entry.name);
+
+                // For move with same driver: try O(1) rename first
+                if *op_type == FileOpType::Move && same_driver {
+                    match src_driver.try_rename(src, &dst_str) {
+                        Ok(true) => {
+                            // Rename succeeded — skip copy+delete
+                            completed_files += 1;
+                            send_progress_sync(
+                                tx, job_id, total_files, completed_files, None, 0, 0,
+                            );
+                            continue;
+                        }
+                        Ok(false) => {
+                            // Cross-device — fall through to copy+delete
+                        }
+                        Err(e) => {
+                            return Err(format!("Rename failed for {src}: {e}"));
+                        }
+                    }
+                }
 
                 if entry.kind == "directory" {
                     copy_dir_recursive(
@@ -88,65 +124,26 @@ fn run_file_op_blocking(
                         cancel_rx,
                         total_files,
                         completed_files,
+                        src_driver,
+                        dst_drv,
                     )?;
                 } else {
                     // Check conflict
-                    if dst.exists() {
-                        match conflict_policy {
-                            ConflictPolicy::Skip => {
+                    if dst_drv.exists(&dst_str) {
+                        match resolve_conflict(
+                            conflict_policy, src, &dst_str, tx, job_id, decision_rx,
+                        )? {
+                            ConflictOutcome::Overwrite => { /* proceed */ }
+                            ConflictOutcome::Skip => {
                                 completed_files += 1;
                                 send_progress_sync(
                                     tx, job_id, total_files, completed_files, None, 0, 0,
                                 );
                                 continue;
                             }
-                            ConflictPolicy::Overwrite => {
-                                // Proceed — will overwrite
-                            }
-                            ConflictPolicy::Ask => {
-                                // Send decision request, then block waiting for answer
-                                send_event_sync(
-                                    tx,
-                                    job_id,
-                                    "DecisionRequired",
-                                    None,
-                                    Some(ConflictDecisionSchema {
-                                        source: src.clone(),
-                                        destination: dst_str.clone(),
-                                        options: vec![
-                                            "overwrite".to_string(),
-                                            "skip".to_string(),
-                                            "cancel".to_string(),
-                                        ],
-                                        supports_apply_to_all: true,
-                                    }),
-                                    None,
-                                );
-
-                                // Block until decision arrives
-                                let decision = decision_rx.blocking_recv();
-                                match decision.as_deref() {
-                                    Some("overwrite") => { /* proceed */ }
-                                    Some("skip") => {
-                                        completed_files += 1;
-                                        send_progress_sync(
-                                            tx, job_id, total_files, completed_files,
-                                            None, 0, 0,
-                                        );
-                                        continue;
-                                    }
-                                    Some("cancel") | None => {
-                                        send_event_sync(
-                                            tx, job_id, "Cancelled", None, None, None,
-                                        );
-                                        return Ok(());
-                                    }
-                                    _ => {
-                                        // Unknown decision, skip
-                                        completed_files += 1;
-                                        continue;
-                                    }
-                                }
+                            ConflictOutcome::Cancel => {
+                                send_event_sync(tx, job_id, "Cancelled", None, None, None);
+                                return Ok(());
                             }
                         }
                     }
@@ -160,15 +157,17 @@ fn run_file_op_blocking(
                         cancel_rx,
                         total_files,
                         completed_files,
+                        src_driver,
+                        dst_drv,
                     )?;
                 }
 
                 // For move: remove source after successful copy
                 if *op_type == FileOpType::Move {
                     if entry.kind == "directory" {
-                        let _ = fs::remove_dir_all(src);
+                        let _ = src_driver.remove_dir_all(src);
                     } else {
-                        let _ = fs::remove_file(src);
+                        let _ = src_driver.remove_file(src);
                     }
                 }
 
@@ -182,21 +181,16 @@ fn run_file_op_blocking(
                 let src = &entry.source_path;
 
                 send_progress_sync(
-                    tx,
-                    job_id,
-                    total_files,
-                    completed_files,
-                    Some(entry.name.clone()),
-                    0,
-                    0,
+                    tx, job_id, total_files, completed_files,
+                    Some(entry.name.clone()), 0, 0,
                 );
 
                 if entry.kind == "directory" {
-                    fs::remove_dir_all(src)
-                        .map_err(|e| format!("Failed to delete {}: {e}", src))?;
+                    src_driver.remove_dir_all(src)
+                        .map_err(|e| format!("Failed to delete {src}: {e}"))?;
                 } else {
-                    fs::remove_file(src)
-                        .map_err(|e| format!("Failed to delete {}: {e}", src))?;
+                    src_driver.remove_file(src)
+                        .map_err(|e| format!("Failed to delete {src}: {e}"))?;
                 }
 
                 completed_files += 1;
@@ -210,6 +204,56 @@ fn run_file_op_blocking(
     Ok(())
 }
 
+// ─── Conflict resolution ────────────────────────────────────────────────────
+
+enum ConflictOutcome {
+    Overwrite,
+    Skip,
+    Cancel,
+}
+
+fn resolve_conflict(
+    policy: &ConflictPolicy,
+    src: &str,
+    dst: &str,
+    tx: &mpsc::Sender<ServerMessage>,
+    job_id: &str,
+    decision_rx: &mut DecisionRx,
+) -> Result<ConflictOutcome, String> {
+    match policy {
+        ConflictPolicy::Skip => Ok(ConflictOutcome::Skip),
+        ConflictPolicy::Overwrite => Ok(ConflictOutcome::Overwrite),
+        ConflictPolicy::Ask => {
+            send_event_sync(
+                tx,
+                job_id,
+                "DecisionRequired",
+                None,
+                Some(ConflictDecisionSchema {
+                    source: src.to_string(),
+                    destination: dst.to_string(),
+                    options: vec![
+                        "overwrite".to_string(),
+                        "skip".to_string(),
+                        "cancel".to_string(),
+                    ],
+                    supports_apply_to_all: true,
+                }),
+                None,
+            );
+            let decision = decision_rx.blocking_recv();
+            match decision.as_deref() {
+                Some("overwrite") => Ok(ConflictOutcome::Overwrite),
+                Some("skip") => Ok(ConflictOutcome::Skip),
+                Some("cancel") | None => Ok(ConflictOutcome::Cancel),
+                _ => Ok(ConflictOutcome::Skip),
+            }
+        }
+    }
+}
+
+// ─── File copy via VFS ──────────────────────────────────────────────────────
+
 fn copy_file_with_progress(
     job_id: &str,
     src: &str,
@@ -219,19 +263,22 @@ fn copy_file_with_progress(
     cancel_rx: &watch::Receiver<bool>,
     total_files: usize,
     completed_files: usize,
+    src_driver: &dyn VfsDriver,
+    dst_driver: &dyn VfsDriver,
 ) -> Result<(), String> {
-    let mut reader =
-        fs::File::open(src).map_err(|e| format!("Cannot open {src}: {e}"))?;
+    let mut reader = src_driver
+        .open_read(src)
+        .map_err(|e| format!("Cannot open {src}: {e}"))?;
 
-    // Get actual size from metadata if total_bytes is 0
     let file_size = if total_bytes > 0 {
         total_bytes
     } else {
-        reader.metadata().map(|m| m.len()).unwrap_or(0)
+        src_driver.file_size(src).unwrap_or(0)
     };
 
-    let mut writer =
-        fs::File::create(dst).map_err(|e| format!("Cannot create {dst}: {e}"))?;
+    let mut writer = dst_driver
+        .open_write(dst)
+        .map_err(|e| format!("Cannot create {dst}: {e}"))?;
 
     let mut buf = vec![0u8; COPY_BUF_SIZE];
     let mut copied: u64 = 0;
@@ -242,9 +289,8 @@ fn copy_file_with_progress(
 
     loop {
         if *cancel_rx.borrow() {
-            // Clean up partial file
             drop(writer);
-            let _ = fs::remove_file(dst);
+            let _ = dst_driver.remove_file(dst);
             return Err("Cancelled".to_string());
         }
 
@@ -261,16 +307,10 @@ fn copy_file_with_progress(
 
         copied += n as u64;
 
-        // Send progress every 256 KiB to avoid flooding
         if copied % (256 * 1024) < COPY_BUF_SIZE as u64 || copied == file_size {
             send_progress_sync(
-                tx,
-                job_id,
-                total_files,
-                completed_files,
-                Some(src_name.clone()),
-                file_size,
-                copied,
+                tx, job_id, total_files, completed_files,
+                Some(src_name.clone()), file_size, copied,
             );
         }
     }
@@ -287,64 +327,45 @@ fn copy_dir_recursive(
     cancel_rx: &watch::Receiver<bool>,
     total_files: usize,
     completed_files: usize,
+    src_driver: &dyn VfsDriver,
+    dst_driver: &dyn VfsDriver,
 ) -> Result<(), String> {
-    fs::create_dir_all(dst).map_err(|e| format!("Cannot create dir {dst}: {e}"))?;
+    dst_driver
+        .create_dir_all(dst)
+        .map_err(|e| format!("Cannot create dir {dst}: {e}"))?;
 
-    let entries =
-        fs::read_dir(src).map_err(|e| format!("Cannot read dir {src}: {e}"))?;
+    let children = src_driver
+        .read_dir_entries(src)
+        .map_err(|e| format!("Cannot read dir {src}: {e}"))?;
 
-    for entry_result in entries {
+    for child in children {
         if *cancel_rx.borrow() {
             return Err("Cancelled".to_string());
         }
 
-        let entry = match entry_result {
-            Ok(e) => e,
-            Err(_) => continue,
-        };
+        let child_src = src_driver.resolve_child(src, &child.name);
+        let child_dst = dst_driver.resolve_child(dst, &child.name);
 
-        let name = entry.file_name().to_string_lossy().to_string();
-        let child_src = Path::new(src).join(&name).to_string_lossy().to_string();
-        let child_dst = Path::new(dst).join(&name).to_string_lossy().to_string();
-
-        let meta = entry.metadata().ok();
-        let is_dir = meta.as_ref().map(|m| m.is_dir()).unwrap_or(false);
-
-        if is_dir {
+        if child.is_dir {
             copy_dir_recursive(
-                job_id,
-                &child_src,
-                &child_dst,
-                conflict_policy,
-                tx,
-                cancel_rx,
-                total_files,
-                completed_files,
+                job_id, &child_src, &child_dst, conflict_policy,
+                tx, cancel_rx, total_files, completed_files,
+                src_driver, dst_driver,
             )?;
         } else {
-            let size = meta.as_ref().map(|m| m.len()).unwrap_or(0);
-
-            // Check conflict for files inside directory
-            if Path::new(&child_dst).exists() {
+            if dst_driver.exists(&child_dst) {
                 match conflict_policy {
                     ConflictPolicy::Skip => continue,
-                    ConflictPolicy::Overwrite => {}
-                    ConflictPolicy::Ask => {
-                        // Inside recursive copy, default to overwrite for subdirectories
-                        // (the top-level decision covers the directory)
+                    ConflictPolicy::Overwrite | ConflictPolicy::Ask => {
+                        // Inside recursive dir copy, honour the top-level policy
                     }
                 }
             }
 
             copy_file_with_progress(
-                job_id,
-                &child_src,
-                &child_dst,
-                size,
-                tx,
-                cancel_rx,
-                total_files,
-                completed_files,
+                job_id, &child_src, &child_dst, child.size,
+                tx, cancel_rx, total_files, completed_files,
+                src_driver, dst_driver,
             )?;
         }
     }
@@ -378,7 +399,6 @@ fn send_progress_sync(
         decision: None,
         error: None,
     };
-    // Use try_send to avoid blocking — if channel is full, drop the progress update
     let _ = tx.try_send(msg);
 }
 
