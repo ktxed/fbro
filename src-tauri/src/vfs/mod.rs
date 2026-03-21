@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 pub mod local;
+pub mod spy;
 
 use std::io::{Read, Write};
 use std::time::{SystemTime, UNIX_EPOCH};

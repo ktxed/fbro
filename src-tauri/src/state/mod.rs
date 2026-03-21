@@ -118,7 +118,14 @@ impl AppState {
         let mut sources = HashMap::new();
         sources.insert(source_id.clone(), source);
 
-        let driver: Arc<dyn VfsDriver> = Arc::new(crate::vfs::local::LocalFsDriver);
+        let driver: Arc<dyn VfsDriver> = if std::env::var("FBRO_SPY").is_ok() {
+            let inner = Arc::new(crate::vfs::local::LocalFsDriver);
+            let sock_path = std::env::var("FBRO_SPY_SOCK")
+                .unwrap_or_else(|_| "/tmp/fbro-spy.sock".to_string());
+            Arc::new(crate::vfs::spy::SpyFsDriver::new(inner, sock_path))
+        } else {
+            Arc::new(crate::vfs::local::LocalFsDriver)
+        };
         let mut drivers = HashMap::new();
         drivers.insert(source_id, driver);
 
