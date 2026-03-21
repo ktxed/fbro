@@ -96,6 +96,18 @@ export function Panel({ panelId, panel, isFocused, client }: PanelProps) {
         e.preventDefault();
         client.sendIntent("ToggleSelection", "focused-panel");
         break;
+      case "PageUp":
+      case "PageDown": {
+        e.preventDefault();
+        const list = listRef.current;
+        if (!list) break;
+        const firstRow = list.children[0] as HTMLElement | undefined;
+        const rowHeight = firstRow ? firstRow.getBoundingClientRect().height : 1;
+        const pageSize = Math.max(1, Math.floor(list.clientHeight / rowHeight));
+        const delta = e.key === "PageDown" ? pageSize : -pageSize;
+        client.sendIntent("MoveCursorBy", "focused-panel", { delta });
+        break;
+      }
       case "Home":
         e.preventDefault();
         client.sendIntent("MoveCursorToEdge", "focused-panel", { edge: "first" });

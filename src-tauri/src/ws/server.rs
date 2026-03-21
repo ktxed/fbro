@@ -444,6 +444,34 @@ async fn handle_intent(
                 .await;
         }
 
+        "MoveCursorBy" => {
+            let panel_id = resolve_panel_id(scope, state).await;
+            let delta = args.get("delta").and_then(|v| v.as_i64()).unwrap_or(0);
+            let (new_cursor, version) = {
+                let mut s = state.lock().await;
+                if let Some(panel) = s.panels.get_mut(&panel_id) {
+                    let len = panel.entries.len();
+                    if len == 0 { return; }
+                    let cursor = (panel.cursor as i64 + delta).clamp(0, (len - 1) as i64) as usize;
+                    if cursor == panel.cursor { return; }
+                    panel.cursor = cursor;
+                    panel.version += 1;
+                    (cursor, panel.version)
+                } else {
+                    return;
+                }
+            };
+            let _ = tx
+                .send(ServerMessage::StatePatch {
+                    timestamp: now(),
+                    domain: "panels".to_string(),
+                    entity_id: Some(panel_id),
+                    version,
+                    patch: serde_json::json!({ "cursor": new_cursor }),
+                })
+                .await;
+        }
+
         "MoveCursorToEdge" => {
             let panel_id = resolve_panel_id(scope, state).await;
             let edge = args.get("edge").and_then(|v| v.as_str()).unwrap_or("first");
