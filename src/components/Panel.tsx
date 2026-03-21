@@ -51,12 +51,23 @@ export function Panel({ panelId, panel, isFocused, client }: PanelProps) {
     return () => window.removeEventListener("mouseup", onMouseUp);
   }, []);
 
-  // Scroll cursor into view
+  // Scroll cursor into view within panel__list.
+  // Uses getBoundingClientRect so the row position is always relative to the
+  // list viewport, regardless of which element is the CSS offsetParent.
   useEffect(() => {
     const list = listRef.current;
     if (!list) return;
     const row = list.children[panel.cursor] as HTMLElement | undefined;
-    row?.scrollIntoView({ block: "nearest" });
+    if (!row) return;
+    const listRect = list.getBoundingClientRect();
+    const rowRect = row.getBoundingClientRect();
+    const rowTop = rowRect.top - listRect.top + list.scrollTop;
+    const rowBottom = rowTop + row.offsetHeight;
+    if (rowTop < list.scrollTop) {
+      list.scrollTop = rowTop;
+    } else if (rowBottom > list.scrollTop + list.clientHeight) {
+      list.scrollTop = rowBottom - list.clientHeight;
+    }
   }, [panel.cursor]);
 
   function handleKeyDown(e: React.KeyboardEvent) {
