@@ -31,6 +31,7 @@ function formatSize(entry: VFSEntry): string {
 export function Panel({ panelId, panel, isFocused, client }: PanelProps) {
   const listRef = useRef<HTMLDivElement>(null);
   const focusDivRef = useRef<HTMLDivElement>(null);
+  const rightDrag = useRef({ active: false, moved: false, startRow: -1, visited: new Set<number>() });
 
   // Keep focused panel's div focused so it receives keyboard events
   useEffect(() => {
@@ -38,6 +39,15 @@ export function Panel({ panelId, panel, isFocused, client }: PanelProps) {
       focusDivRef.current?.focus();
     }
   }, [isFocused]);
+
+  // End right-drag on mouse up anywhere
+  useEffect(() => {
+    const onMouseUp = (e: MouseEvent) => {
+      if (e.button === 2) rightDrag.current.active = false;
+    };
+    window.addEventListener("mouseup", onMouseUp);
+    return () => window.removeEventListener("mouseup", onMouseUp);
+  }, []);
 
   // Scroll cursor into view
   useEffect(() => {
@@ -130,13 +140,31 @@ export function Panel({ panelId, panel, isFocused, client }: PanelProps) {
               i === panel.cursor ? "panel__row--cursor" : "",
               panel.selection.includes(i) ? "panel__row--selected" : "",
             ].filter(Boolean).join(" ")}
-            onMouseDown={() => {
+            onMouseDown={(e) => {
+              if (e.button === 2) {
+                rightDrag.current = { active: true, moved: false, startRow: i, visited: new Set([i]) };
+                return;
+              }
               if (!isFocused) client.sendIntent("SwitchFocus", undefined, { to: panelId });
               client.sendIntent("SetCursor", "focused-panel", { index: i });
             }}
+            onMouseEnter={() => {
+              const drag = rightDrag.current;
+              if (!drag.active || drag.visited.has(i)) return;
+              drag.visited.add(i);
+              if (!drag.moved) {
+                // First new row entered — also select the starting row
+                drag.moved = true;
+                client.sendIntent("SelectAtIndex", "focused-panel", { index: drag.startRow });
+              }
+              client.sendIntent("SelectAtIndex", "focused-panel", { index: i });
+            }}
             onContextMenu={(e) => {
               e.preventDefault();
-              client.sendIntent("ToggleSelectionAtIndex", "focused-panel", { index: i });
+              if (!rightDrag.current.moved) {
+                // Pure right-click (no drag) → toggle
+                client.sendIntent("ToggleSelectionAtIndex", "focused-panel", { index: i });
+              }
             }}
             onDoubleClick={() => {
               if (entry.kind === "directory") client.sendIntent("OpenEntry", "focused-panel");
