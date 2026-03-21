@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+use crate::jobs::JobStore;
 use crate::platform::Platform;
 use crate::ws::protocol::{EntrySchema, FilterSpec, SortSpec};
 
@@ -55,6 +56,7 @@ pub struct AppState {
     pub sources: HashMap<String, Source>,
     pub focus: String,
     pub platform: Arc<dyn Platform>,
+    pub job_store: JobStore,
 }
 
 impl AppState {
@@ -119,6 +121,7 @@ impl AppState {
             sources,
             focus: "left".to_string(),
             platform,
+            job_store: JobStore::new(),
         }
     }
 }

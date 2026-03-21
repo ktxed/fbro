@@ -7,13 +7,14 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message;
 
+use crate::jobs::file_ops::run_file_op;
 use crate::jobs::scan::run_scan;
-use crate::jobs::ScanHandle;
+use crate::jobs::{ConflictPolicy, FileOpEntry, FileOpJob, FileOpType, JobState, ScanHandle};
 use crate::state::{PanelStatus, SharedState};
 use crate::vfs::local::LocalFsDriver;
 use crate::ws::protocol::{
-    now, ClientMessage, LayoutDomain, PanelSnapshot, ServerMessage, SourceCapabilities,
-    SourceSchema, StateDomains,
+    now, ClientMessage, FileOpFileSchema, JobStartSchema, LayoutDomain, PanelSnapshot,
+    ServerMessage, SourceCapabilities, SourceSchema, StateDomains,
 };
 
 const WS_ADDR: &str = "127.0.0.1:7878";
@@ -147,6 +148,7 @@ async fn handle_connection(stream: TcpStream, addr: SocketAddr, state: SharedSta
 
     // ── Spawn initial scan jobs ────────────────────────────────────────────────
     let mut scan_handles: HashMap<String, ScanHandle> = HashMap::new();
+    let mut decision_senders: HashMap<String, mpsc::Sender<String>> = HashMap::new();
 
     for panel_id in &panel_ids {
         let (path, sort, filter, version_base) = {
@@ -172,6 +174,28 @@ async fn handle_connection(stream: TcpStream, addr: SocketAddr, state: SharedSta
                         }
                     }
                 }
+
+                // When a job completes, rescan affected panels
+                if let ServerMessage::JobEvent { ref job_id, ref event, .. } = msg {
+                    if event == "Completed" || event == "Cancelled" {
+                        let panels_to_rescan = {
+                            let s = state.lock().await;
+                            if let Some(job) = s.job_store.jobs.get(job_id) {
+                                let mut panels = vec![job.source_panel.clone()];
+                                if let Some(ref dp) = job.dest_panel {
+                                    panels.push(dp.clone());
+                                }
+                                panels
+                            } else {
+                                vec![]
+                            }
+                        };
+                        for pid in panels_to_rescan {
+                            rescan_panel(&pid, &state, &tx, &mut scan_handles).await;
+                        }
+                    }
+                }
+
                 if send_msg(&mut ws_tx, &msg).await.is_err() {
                     break;
                 }
@@ -191,6 +215,7 @@ async fn handle_connection(stream: TcpStream, addr: SocketAddr, state: SharedSta
                                     &state,
                                     &tx,
                                     &mut scan_handles,
+                                    &mut decision_senders,
                                 )
                                 .await;
                             }
@@ -225,6 +250,7 @@ async fn handle_intent(
     state: &SharedState,
     tx: &mpsc::Sender<ServerMessage>,
     scan_handles: &mut HashMap<String, ScanHandle>,
+    decision_senders: &mut HashMap<String, mpsc::Sender<String>>,
 ) {
     match name {
         "MoveCursor" => {
@@ -646,6 +672,142 @@ async fn handle_intent(
                 .await;
         }
 
+        "StartFileOp" => {
+            let source_panel_id = args.get("sourcePanel").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let dest_panel_id = args.get("destPanel").and_then(|v| v.as_str()).map(String::from);
+            let op_type_str = args.get("opType").and_then(|v| v.as_str()).unwrap_or("copy");
+            let conflict_str = args.get("conflictPolicy").and_then(|v| v.as_str()).unwrap_or("ask");
+            let background = args.get("background").and_then(|v| v.as_bool()).unwrap_or(false);
+
+            let op_type = match op_type_str {
+                "move" => FileOpType::Move,
+                "delete" => FileOpType::Delete,
+                _ => FileOpType::Copy,
+            };
+            let conflict_policy = match conflict_str {
+                "skip" => ConflictPolicy::Skip,
+                "overwrite" => ConflictPolicy::Overwrite,
+                _ => ConflictPolicy::Ask,
+            };
+
+            // Gather files from the source panel's selection (or cursor)
+            let (files, dest_path) = {
+                let s = state.lock().await;
+                let Some(src_panel) = s.panels.get(&source_panel_id) else { return };
+
+                let indices: Vec<usize> = if src_panel.selection.is_empty() {
+                    vec![src_panel.cursor]
+                } else {
+                    src_panel.selection.clone()
+                };
+
+                let files: Vec<FileOpEntry> = indices.iter().filter_map(|&idx| {
+                    src_panel.entries.get(idx).map(|e| FileOpEntry {
+                        name: e.name.clone(),
+                        source_path: LocalFsDriver::resolve_child(&src_panel.path, &e.name),
+                        size: e.size,
+                        kind: e.kind.clone(),
+                    })
+                }).collect();
+
+                let dest_path = if op_type != FileOpType::Delete {
+                    dest_panel_id.as_ref().and_then(|id| s.panels.get(id)).map(|p| p.path.clone())
+                } else {
+                    None
+                };
+
+                (files, dest_path)
+            };
+
+            if files.is_empty() { return; }
+
+            // Create the job
+            let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
+            let (dec_tx, dec_rx) = mpsc::channel::<String>(4);
+
+            let job_id = {
+                let mut s = state.lock().await;
+                s.job_store.next_job_id()
+            };
+
+            // Send JobStarted to FE
+            let file_schemas: Vec<FileOpFileSchema> = files.iter().map(|f| FileOpFileSchema {
+                name: f.name.clone(),
+                size: f.size,
+                kind: f.kind.clone(),
+            }).collect();
+
+            let _ = tx.send(ServerMessage::JobStarted {
+                timestamp: now(),
+                job: JobStartSchema {
+                    job_id: job_id.clone(),
+                    op_type: op_type_str.to_string(),
+                    files: file_schemas,
+                    source_panel: source_panel_id.clone(),
+                    dest_panel: dest_panel_id.clone(),
+                    dest_path: dest_path.clone(),
+                    total_files: files.len(),
+                },
+            }).await;
+
+            // Store decision sender
+            decision_senders.insert(job_id.clone(), dec_tx);
+
+            // Spawn the job
+            let handle = tokio::spawn(run_file_op(
+                job_id.clone(),
+                op_type.clone(),
+                files.clone(),
+                dest_path.clone(),
+                conflict_policy.clone(),
+                tx.clone(),
+                cancel_rx,
+                dec_rx,
+            ));
+
+            // Store job in state
+            {
+                let mut s = state.lock().await;
+                s.job_store.jobs.insert(job_id.clone(), FileOpJob {
+                    job_id: job_id.clone(),
+                    op_type,
+                    source_panel: source_panel_id,
+                    dest_panel: dest_panel_id,
+                    dest_path,
+                    files,
+                    conflict_policy,
+                    state: JobState::Running,
+                    progress: Default::default(),
+                    decision: None,
+                    error: None,
+                    background,
+                    handle,
+                    cancel_tx,
+                });
+            }
+        }
+
+        "ProvideJobDecision" => {
+            let job_id = args.get("jobId").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let decision = args.get("decision").and_then(|v| v.as_str()).unwrap_or("skip").to_string();
+
+            if let Some(sender) = decision_senders.get(&job_id) {
+                let _ = sender.send(decision).await;
+            }
+        }
+
+        "CancelJob" => {
+            let job_id = args.get("jobId").and_then(|v| v.as_str()).unwrap_or("").to_string();
+
+            let mut s = state.lock().await;
+            if let Some(job) = s.job_store.jobs.get_mut(&job_id) {
+                let _ = job.cancel_tx.send(true);
+                job.state = JobState::Cancelled;
+            }
+            drop(s);
+            decision_senders.remove(&job_id);
+        }
+
         unknown => {
             eprintln!("[fbro] Unknown intent: {unknown}");
         }
@@ -699,6 +861,42 @@ async fn navigate_to(
         .await;
 
     let h = spawn_scan(panel_id.to_string(), new_path.to_string(), sort, filter, version, tx.clone());
+    scan_handles.insert(panel_id.to_string(), h);
+}
+
+async fn rescan_panel(
+    panel_id: &str,
+    state: &SharedState,
+    tx: &mpsc::Sender<ServerMessage>,
+    scan_handles: &mut HashMap<String, ScanHandle>,
+) {
+    if let Some(h) = scan_handles.remove(panel_id) {
+        h.abort();
+    }
+    let (path, sort, filter, version) = {
+        let mut s = state.lock().await;
+        if let Some(panel) = s.panels.get_mut(panel_id) {
+            panel.entries.clear();
+            panel.status = PanelStatus::Loading;
+            panel.version += 1;
+            (panel.path.clone(), panel.sort.clone(), panel.filter.clone(), panel.version)
+        } else {
+            return;
+        }
+    };
+    let _ = tx
+        .send(ServerMessage::StatePatch {
+            timestamp: now(),
+            domain: "panels".to_string(),
+            entity_id: Some(panel_id.to_string()),
+            version,
+            patch: serde_json::json!({
+                "entries": [],
+                "status": "loading"
+            }),
+        })
+        .await;
+    let h = spawn_scan(panel_id.to_string(), path, sort, filter, version, tx.clone());
     scan_handles.insert(panel_id.to_string(), h);
 }
 

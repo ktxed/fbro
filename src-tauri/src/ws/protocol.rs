@@ -33,7 +33,15 @@ pub enum ServerMessage {
         job_id: String,
         event: String,
         #[serde(skip_serializing_if = "Option::is_none")]
-        progress: Option<JobProgress>,
+        progress: Option<FileOpProgressSchema>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        decision: Option<ConflictDecisionSchema>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
+    JobStarted {
+        timestamp: String,
+        job: JobStartSchema,
     },
     Error {
         timestamp: String,
@@ -118,6 +126,45 @@ pub struct SourceCapabilities {
 pub struct JobProgress {
     pub current: u64,
     pub total: u64,
+}
+
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct FileOpProgressSchema {
+    pub total_files: usize,
+    pub completed_files: usize,
+    pub current_file: Option<String>,
+    pub current_file_bytes_total: u64,
+    pub current_file_bytes_copied: u64,
+}
+
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct ConflictDecisionSchema {
+    pub source: String,
+    pub destination: String,
+    pub options: Vec<String>,
+    pub supports_apply_to_all: bool,
+}
+
+/// Summary sent when a job starts, so FE knows about the job.
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct JobStartSchema {
+    pub job_id: String,
+    pub op_type: String,
+    pub files: Vec<FileOpFileSchema>,
+    pub source_panel: String,
+    pub dest_panel: Option<String>,
+    pub dest_path: Option<String>,
+    pub total_files: usize,
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct FileOpFileSchema {
+    pub name: String,
+    pub size: Option<u64>,
+    pub kind: String,
 }
 
 // ─── Incoming (FE → BE) ───────────────────────────────────────────────────────

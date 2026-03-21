@@ -6,6 +6,9 @@ import type {
   BEMessage,
   StateSnapshotMessage,
   StatePatchMessage,
+  JobStartedMessage,
+  JobEventMessage,
+  PendingOp,
 } from "../ws/types";
 
 // ─── State ───────────────────────────────────────────────────────────────────
@@ -17,7 +20,9 @@ export interface AppState {
   panels: Record<string, PanelState>;
   sources: Record<string, Source>;
   focus: string;
-  jobs: Job[];
+  jobs: Record<string, Job>;
+  pendingOp: PendingOp | null;
+  activeJobId: string | null;
 }
 
 const initialState: AppState = {
@@ -27,7 +32,9 @@ const initialState: AppState = {
   panels: {},
   sources: {},
   focus: "",
-  jobs: [],
+  jobs: {},
+  pendingOp: null,
+  activeJobId: null,
 };
 
 // ─── Actions ─────────────────────────────────────────────────────────────────
@@ -35,7 +42,10 @@ const initialState: AppState = {
 export type AppAction =
   | { type: "CONNECTED" }
   | { type: "DISCONNECTED" }
-  | { type: "BE_MESSAGE"; msg: BEMessage };
+  | { type: "BE_MESSAGE"; msg: BEMessage }
+  | { type: "OPEN_OPERATION"; op: PendingOp }
+  | { type: "CLOSE_OPERATION" }
+  | { type: "SET_ACTIVE_JOB"; jobId: string };
 
 // ─── Reducer ─────────────────────────────────────────────────────────────────
 
@@ -62,7 +72,9 @@ function applySnapshot(state: AppState, msg: StateSnapshotMessage): AppState {
     next.panels = panels;
   }
   if (domains.jobs) {
-    next.jobs = domains.jobs;
+    const jobs: Record<string, Job> = {};
+    for (const j of domains.jobs) jobs[j.jobId] = j;
+    next.jobs = jobs;
   }
   return next;
 }
@@ -107,6 +119,55 @@ function applyPatch(state: AppState, msg: StatePatchMessage): AppState {
   return state;
 }
 
+function applyJobStarted(state: AppState, msg: JobStartedMessage): AppState {
+  const { job } = msg;
+  const newJob: Job = {
+    jobId: job.jobId,
+    type: job.opType,
+    state: "Running",
+    progress: {
+      totalFiles: job.totalFiles,
+      completedFiles: 0,
+      currentFileBytesTotal: 0,
+      currentFileBytesCopied: 0,
+    },
+  };
+  return {
+    ...state,
+    jobs: { ...state.jobs, [job.jobId]: newJob },
+    activeJobId: state.activeJobId ?? job.jobId,
+  };
+}
+
+function applyJobEvent(state: AppState, msg: JobEventMessage): AppState {
+  const job = state.jobs[msg.jobId];
+  if (!job) return state;
+
+  let updated: Job;
+
+  switch (msg.event) {
+    case "Progress":
+      updated = { ...job, state: "Running", progress: msg.progress ?? job.progress, decision: undefined };
+      break;
+    case "DecisionRequired":
+      updated = { ...job, state: "AwaitingDecision", decision: msg.decision };
+      break;
+    case "Completed":
+      updated = { ...job, state: "Completed", decision: undefined };
+      break;
+    case "Failed":
+      updated = { ...job, state: "Failed", error: msg.error, decision: undefined };
+      break;
+    case "Cancelled":
+      updated = { ...job, state: "Cancelled", decision: undefined };
+      break;
+    default:
+      return state;
+  }
+
+  return { ...state, jobs: { ...state.jobs, [msg.jobId]: updated } };
+}
+
 function reducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
     case "CONNECTED":
@@ -122,9 +183,10 @@ function reducer(state: AppState, action: AppAction): AppState {
           return applySnapshot(state, msg);
         case "StatePatch":
           return applyPatch(state, msg);
+        case "JobStarted":
+          return applyJobStarted(state, msg);
         case "JobEvent":
-          // minimal handling — update job state in list
-          return state;
+          return applyJobEvent(state, msg);
         case "Error":
           console.error("BE error:", msg.code, msg.message);
           return state;
@@ -132,6 +194,12 @@ function reducer(state: AppState, action: AppAction): AppState {
           return state;
       }
     }
+    case "OPEN_OPERATION":
+      return { ...state, pendingOp: action.op };
+    case "CLOSE_OPERATION":
+      return { ...state, pendingOp: null, activeJobId: null };
+    case "SET_ACTIVE_JOB":
+      return { ...state, activeJobId: action.jobId, pendingOp: null };
   }
 }
 

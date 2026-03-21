@@ -39,16 +39,53 @@ export interface LayoutDomain {
 export interface Job {
   jobId: string;
   type: string;
-  state: "Created" | "Running" | "AwaitingDecision" | "Completed" | "Cancelled" | "Failed";
-  progress?: { current: number; total: number };
+  state: "Running" | "AwaitingDecision" | "Completed" | "Cancelled" | "Failed";
+  progress?: FileOpProgress;
+  decision?: DecisionRequest;
+  error?: string;
+}
+
+export interface FileOpProgress {
+  totalFiles: number;
+  completedFiles: number;
+  currentFile?: string;
+  currentFileBytesTotal: number;
+  currentFileBytesCopied: number;
 }
 
 export interface DecisionRequest {
-  kind: string;
-  source?: string;
-  destination?: string;
+  source: string;
+  destination: string;
   options: string[];
   supportsApplyToAll: boolean;
+}
+
+export interface FileOpFile {
+  name: string;
+  size?: number;
+  kind: string;
+}
+
+export interface JobStart {
+  jobId: string;
+  opType: string;
+  files: FileOpFile[];
+  sourcePanel: string;
+  destPanel?: string;
+  destPath?: string;
+  totalFiles: number;
+}
+
+export type FileOpType = "copy" | "move" | "delete";
+export type ConflictPolicy = "ask" | "skip" | "overwrite";
+
+export interface PendingOp {
+  opType: FileOpType;
+  files: FileOpFile[];
+  sourcePanel: string;
+  destPanel?: string;
+  destPath?: string;
+  conflictPolicy: ConflictPolicy;
 }
 
 // ─── Client → BE messages ────────────────────────────────────────────────────
@@ -111,13 +148,20 @@ export interface StatePatchMessage {
   };
 }
 
+export interface JobStartedMessage {
+  type: "JobStarted";
+  timestamp: string;
+  job: JobStart;
+}
+
 export interface JobEventMessage {
   type: "JobEvent";
   timestamp: string;
   jobId: string;
   event: "Progress" | "DecisionRequired" | "Completed" | "Failed" | "Cancelled";
-  progress?: { current: number; total: number };
+  progress?: FileOpProgress;
   decision?: DecisionRequest;
+  error?: string;
 }
 
 export interface ErrorMessage {
@@ -134,6 +178,7 @@ export type BEMessage =
   | WelcomeMessage
   | StateSnapshotMessage
   | StatePatchMessage
+  | JobStartedMessage
   | JobEventMessage
   | ErrorMessage;
 
