@@ -51,6 +51,8 @@ export interface FileOpProgress {
   currentFile?: string;
   currentFileBytesTotal: number;
   currentFileBytesCopied: number;
+  totalBytesTotal: number;
+  totalBytesCopied: number;
 }
 
 export interface DecisionRequest {
@@ -74,6 +76,7 @@ export interface JobStart {
   destPanel?: string;
   destPath?: string;
   totalFiles: number;
+  totalBytesTotal: number;
 }
 
 export type FileOpType = "copy" | "move" | "delete";

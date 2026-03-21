@@ -130,6 +130,8 @@ function applyJobStarted(state: AppState, msg: JobStartedMessage): AppState {
       completedFiles: 0,
       currentFileBytesTotal: 0,
       currentFileBytesCopied: 0,
+      totalBytesTotal: job.totalBytesTotal,
+      totalBytesCopied: 0,
     },
   };
   return {

@@ -456,6 +456,10 @@ body {
   color: var(--text-dim);
 }
 
+.modal__progress-speed {
+  color: var(--accent);
+}
+
 /* Decision */
 
 .modal__decision p {

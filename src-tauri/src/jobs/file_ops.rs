@@ -74,8 +74,19 @@ fn run_file_op_blocking(
     src_driver: &dyn VfsDriver,
     dst_driver: Option<&dyn VfsDriver>,
 ) -> Result<(), String> {
-    let total_files = files.len();
+    // Totals grow as directories are discovered (no pre-scan — VFS may be remote)
+    let mut total_files = 0usize;
+    let mut total_bytes_total: u64 = 0;
+    // Count top-level non-directory entries upfront
+    for entry in files {
+        if entry.kind != "directory" {
+            total_files += 1;
+            total_bytes_total += entry.size.unwrap_or(0);
+        }
+    }
+
     let mut completed_files = 0usize;
+    let mut total_bytes_completed: u64 = 0;
 
     // For move: check if source and dest share the same driver (ptr equality).
     // If they do, try_rename may succeed as an O(1) operation.
@@ -98,10 +109,15 @@ fn run_file_op_blocking(
                 if *op_type == FileOpType::Move && same_driver {
                     match src_driver.try_rename(src, &dst_str) {
                         Ok(true) => {
-                            // Rename succeeded — skip copy+delete
-                            completed_files += 1;
+                            // Rename succeeded — we can't know inner file count without
+                            // scanning, so just count as 1 item for rename
+                            if entry.kind != "directory" {
+                                completed_files += 1;
+                                total_bytes_completed += entry.size.unwrap_or(0);
+                            }
                             send_progress_sync(
                                 tx, job_id, total_files, completed_files, None, 0, 0,
+                                total_bytes_total, total_bytes_completed,
                             );
                             continue;
                         }
@@ -122,8 +138,10 @@ fn run_file_op_blocking(
                         conflict_policy,
                         tx,
                         cancel_rx,
-                        total_files,
-                        completed_files,
+                        &mut total_files,
+                        &mut completed_files,
+                        &mut total_bytes_total,
+                        &mut total_bytes_completed,
                         src_driver,
                         dst_drv,
                     )?;
@@ -135,9 +153,11 @@ fn run_file_op_blocking(
                         )? {
                             ConflictOutcome::Overwrite => { /* proceed */ }
                             ConflictOutcome::Skip => {
+                                total_bytes_completed += entry.size.unwrap_or(0);
                                 completed_files += 1;
                                 send_progress_sync(
                                     tx, job_id, total_files, completed_files, None, 0, 0,
+                                    total_bytes_total, total_bytes_completed,
                                 );
                                 continue;
                             }
@@ -157,9 +177,18 @@ fn run_file_op_blocking(
                         cancel_rx,
                         total_files,
                         completed_files,
+                        total_bytes_total,
+                        total_bytes_completed,
                         src_driver,
                         dst_drv,
                     )?;
+
+                    total_bytes_completed += entry.size.unwrap_or(0);
+                    completed_files += 1;
+                    send_progress_sync(
+                        tx, job_id, total_files, completed_files, None, 0, 0,
+                        total_bytes_total, total_bytes_completed,
+                    );
                 }
 
                 // For move: remove source after successful copy
@@ -170,11 +199,6 @@ fn run_file_op_blocking(
                         let _ = src_driver.remove_file(src);
                     }
                 }
-
-                completed_files += 1;
-                send_progress_sync(
-                    tx, job_id, total_files, completed_files, None, 0, 0,
-                );
             }
 
             FileOpType::Delete => {
@@ -183,6 +207,7 @@ fn run_file_op_blocking(
                 send_progress_sync(
                     tx, job_id, total_files, completed_files,
                     Some(entry.name.clone()), 0, 0,
+                    total_bytes_total, total_bytes_completed,
                 );
 
                 if entry.kind == "directory" {
@@ -196,6 +221,7 @@ fn run_file_op_blocking(
                 completed_files += 1;
                 send_progress_sync(
                     tx, job_id, total_files, completed_files, None, 0, 0,
+                    total_bytes_total, total_bytes_completed,
                 );
             }
         }
@@ -263,6 +289,8 @@ fn copy_file_with_progress(
     cancel_rx: &watch::Receiver<bool>,
     total_files: usize,
     completed_files: usize,
+    total_bytes_total: u64,
+    total_bytes_completed: u64,
     src_driver: &dyn VfsDriver,
     dst_driver: &dyn VfsDriver,
 ) -> Result<(), String> {
@@ -311,6 +339,7 @@ fn copy_file_with_progress(
             send_progress_sync(
                 tx, job_id, total_files, completed_files,
                 Some(src_name.clone()), file_size, copied,
+                total_bytes_total, total_bytes_completed + copied,
             );
         }
     }
@@ -325,8 +354,10 @@ fn copy_dir_recursive(
     conflict_policy: &ConflictPolicy,
     tx: &mpsc::Sender<ServerMessage>,
     cancel_rx: &watch::Receiver<bool>,
-    total_files: usize,
-    completed_files: usize,
+    total_files: &mut usize,
+    completed_files: &mut usize,
+    total_bytes_total: &mut u64,
+    total_bytes_completed: &mut u64,
     src_driver: &dyn VfsDriver,
     dst_driver: &dyn VfsDriver,
 ) -> Result<(), String> {
@@ -337,6 +368,14 @@ fn copy_dir_recursive(
     let children = src_driver
         .read_dir_entries(src)
         .map_err(|e| format!("Cannot read dir {src}: {e}"))?;
+
+    // Discover files in this directory — grow totals
+    for child in &children {
+        if !child.is_dir {
+            *total_files += 1;
+            *total_bytes_total += child.size;
+        }
+    }
 
     for child in children {
         if *cancel_rx.borrow() {
@@ -350,12 +389,21 @@ fn copy_dir_recursive(
             copy_dir_recursive(
                 job_id, &child_src, &child_dst, conflict_policy,
                 tx, cancel_rx, total_files, completed_files,
+                total_bytes_total, total_bytes_completed,
                 src_driver, dst_driver,
             )?;
         } else {
             if dst_driver.exists(&child_dst) {
                 match conflict_policy {
-                    ConflictPolicy::Skip => continue,
+                    ConflictPolicy::Skip => {
+                        *completed_files += 1;
+                        *total_bytes_completed += child.size;
+                        send_progress_sync(
+                            tx, job_id, *total_files, *completed_files, None, 0, 0,
+                            *total_bytes_total, *total_bytes_completed,
+                        );
+                        continue;
+                    }
                     ConflictPolicy::Overwrite | ConflictPolicy::Ask => {
                         // Inside recursive dir copy, honour the top-level policy
                     }
@@ -364,9 +412,17 @@ fn copy_dir_recursive(
 
             copy_file_with_progress(
                 job_id, &child_src, &child_dst, child.size,
-                tx, cancel_rx, total_files, completed_files,
+                tx, cancel_rx, *total_files, *completed_files,
+                *total_bytes_total, *total_bytes_completed,
                 src_driver, dst_driver,
             )?;
+
+            *completed_files += 1;
+            *total_bytes_completed += child.size;
+            send_progress_sync(
+                tx, job_id, *total_files, *completed_files, None, 0, 0,
+                *total_bytes_total, *total_bytes_completed,
+            );
         }
     }
 
@@ -383,6 +439,8 @@ fn send_progress_sync(
     current_file: Option<String>,
     current_file_bytes_total: u64,
     current_file_bytes_copied: u64,
+    total_bytes_total: u64,
+    total_bytes_copied: u64,
 ) {
     let progress = FileOpProgressSchema {
         total_files,
@@ -390,6 +448,8 @@ fn send_progress_sync(
         current_file,
         current_file_bytes_total,
         current_file_bytes_copied,
+        total_bytes_total,
+        total_bytes_copied,
     };
     let msg = ServerMessage::JobEvent {
         timestamp: now(),

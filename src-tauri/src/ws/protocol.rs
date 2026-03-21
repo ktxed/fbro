@@ -136,6 +136,8 @@ pub struct FileOpProgressSchema {
     pub current_file: Option<String>,
     pub current_file_bytes_total: u64,
     pub current_file_bytes_copied: u64,
+    pub total_bytes_total: u64,
+    pub total_bytes_copied: u64,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -158,6 +160,7 @@ pub struct JobStartSchema {
     pub dest_panel: Option<String>,
     pub dest_path: Option<String>,
     pub total_files: usize,
+    pub total_bytes_total: u64,
 }
 
 #[derive(Serialize, Clone, Debug)]

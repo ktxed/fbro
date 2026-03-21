@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import type { WsClient } from "../ws/client";
 import type { PendingOp, Job, ConflictPolicy } from "../ws/types";
 import { useAppDispatch } from "../store";
@@ -26,10 +26,56 @@ function formatBytes(n: number): string {
   return `${(n / (1024 * 1024 * 1024)).toFixed(1)} GiB`;
 }
 
+function formatSpeed(bytesPerSec: number): string {
+  if (bytesPerSec < 1024) return `${bytesPerSec.toFixed(0)} B/s`;
+  if (bytesPerSec < 1024 * 1024) return `${(bytesPerSec / 1024).toFixed(1)} KiB/s`;
+  if (bytesPerSec < 1024 * 1024 * 1024) return `${(bytesPerSec / (1024 * 1024)).toFixed(1)} MiB/s`;
+  return `${(bytesPerSec / (1024 * 1024 * 1024)).toFixed(1)} GiB/s`;
+}
+
+function formatEta(remainingBytes: number, bytesPerSec: number): string {
+  const secs = Math.round(remainingBytes / bytesPerSec);
+  if (secs < 60) return `${secs}s`;
+  if (secs < 3600) return `${Math.floor(secs / 60)}m ${secs % 60}s`;
+  return `${Math.floor(secs / 3600)}h ${Math.floor((secs % 3600) / 60)}m`;
+}
+
+const LARGE_FILE_THRESHOLD = 1024 * 1024; // 1 MiB — show speed only above this
+
+function useTransferSpeed(currentFile: string | undefined, bytesCopied: number) {
+  const sampleRef = useRef<{ file: string; bytes: number; time: number } | null>(null);
+  const [speed, setSpeed] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!currentFile) { setSpeed(null); return; }
+
+    const now = Date.now();
+    const prev = sampleRef.current;
+
+    if (!prev || prev.file !== currentFile) {
+      sampleRef.current = { file: currentFile, bytes: bytesCopied, time: now };
+      setSpeed(null);
+      return;
+    }
+
+    const deltaBytes = bytesCopied - prev.bytes;
+    const deltaSec = (now - prev.time) / 1000;
+
+    if (deltaSec >= 0.5 && deltaBytes > 0) {
+      setSpeed(deltaBytes / deltaSec);
+      sampleRef.current = { file: currentFile, bytes: bytesCopied, time: now };
+    }
+  }, [bytesCopied, currentFile]);
+
+  return speed;
+}
+
 export function OperationModal({ pending, activeJob, activeJobId, client }: OperationModalProps) {
   const dispatch = useAppDispatch();
   const [conflictPolicy, setConflictPolicy] = useState<ConflictPolicy>("ask");
   const [submitted, setSubmitted] = useState(false);
+  const p = activeJob?.progress;
+  const speed = useTransferSpeed(p?.currentFile, p?.currentFileBytesCopied ?? 0);
 
   const close = () => { setSubmitted(false); dispatch({ type: "CLOSE_OPERATION" }); };
 
@@ -117,7 +163,6 @@ export function OperationModal({ pending, activeJob, activeJobId, client }: Oper
   if (activeJob) {
     const isTerminal = activeJob.state === "Completed" || activeJob.state === "Cancelled" || activeJob.state === "Failed";
     const isDecision = activeJob.state === "AwaitingDecision";
-    const p = activeJob.progress;
     const label = opLabel(activeJob.type);
 
     const filePercent = p && p.currentFileBytesTotal > 0
@@ -171,25 +216,34 @@ export function OperationModal({ pending, activeJob, activeJobId, client }: Oper
                     </div>
                     <span className="modal__progress-text">
                       {filePercent}% ({formatBytes(p.currentFileBytesCopied)} / {formatBytes(p.currentFileBytesTotal)})
+                      {speed !== null && p.currentFileBytesTotal >= LARGE_FILE_THRESHOLD && (
+                        <span className="modal__progress-speed">
+                          {" — "}{formatSpeed(speed)}
+                          {p.currentFileBytesTotal > p.currentFileBytesCopied && (
+                            <> · ETA {formatEta(p.currentFileBytesTotal - p.currentFileBytesCopied, speed)}</>
+                          )}
+                        </span>
+                      )}
                     </span>
                   </div>
                 )}
 
-                {/* Job-wide progress (only if > 1 file) */}
-                {p.totalFiles > 1 && (
-                  <div className="modal__progress-section">
-                    <span className="modal__progress-label">Overall</span>
-                    <div className="modal__progress-bar">
-                      <div
-                        className="modal__progress-fill"
-                        style={{ width: `${jobPercent}%` }}
-                      />
-                    </div>
-                    <span className="modal__progress-text">
-                      {jobPercent}% ({p.completedFiles} / {p.totalFiles} files)
-                    </span>
+                {/* Job-wide progress */}
+                <div className="modal__progress-section">
+                  <span className="modal__progress-label">Overall</span>
+                  <div className="modal__progress-bar">
+                    <div
+                      className="modal__progress-fill"
+                      style={{ width: `${jobPercent}%` }}
+                    />
                   </div>
-                )}
+                  <span className="modal__progress-text">
+                    {p.completedFiles + (p.currentFile ? 1 : 0)} / {p.totalFiles} files
+                    {p.totalBytesTotal > 0 && (
+                      <> · {formatBytes(p.totalBytesCopied)} / {formatBytes(p.totalBytesTotal)}</>
+                    )}
+                  </span>
+                </div>
               </div>
             )}
 

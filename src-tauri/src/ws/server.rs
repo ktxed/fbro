@@ -750,6 +750,7 @@ async fn handle_intent(
                 kind: f.kind.clone(),
             }).collect();
 
+            let total_bytes_total: u64 = files.iter().map(|f| f.size.unwrap_or(0)).sum();
             let _ = tx.send(ServerMessage::JobStarted {
                 timestamp: now(),
                 job: JobStartSchema {
@@ -760,6 +761,7 @@ async fn handle_intent(
                     dest_panel: dest_panel_id.clone(),
                     dest_path: dest_path.clone(),
                     total_files: files.len(),
+                    total_bytes_total,
                 },
             }).await;
 
