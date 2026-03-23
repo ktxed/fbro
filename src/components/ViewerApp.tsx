@@ -1,10 +1,11 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { WsClient } from "../ws/client";
 import type { BEMessage, FileChunkMessage } from "../ws/types";
 
 const SMALL_LIMIT = 32768;  // 32 KiB — files at or below this are loaded fully
 const CHUNK_SIZE  = 65536;  // 64 KiB — buffer window for large files
 const LINE_H      = 18;     // px — 12px font × 1.5 line-height
+const MAX_COL     = 512;    // chars — wrap long lines into multiple display rows
 
 interface ViewerAppProps {
   path: string;
@@ -92,19 +93,50 @@ export function ViewerApp({ path, sourceId, filename, windowLabel }: ViewerAppPr
 
   const clientRef    = useRef<WsClient | null>(null);
   const bodyRef      = useRef<HTMLDivElement>(null);
-  const contentRef   = useRef<HTMLPreElement>(null);
+  const contentRef   = useRef<HTMLElement>(null);
   // After a large-mode buffer load, what to do with topLine
   const afterLoadRef = useRef<"top" | "bottom">("top");
+
+  // 1-based file line number of the first raw line in the current buffer.
+  // null = unknown (after a scrollbar jump to an arbitrary byte offset).
+  const [bufferBaseLine, setBufferBaseLine] = useState<number | null>(1);
+  // Tracks state needed to compute baseLine when the next chunk arrives.
+  const chunkInfoRef = useRef<{ end: number; newlineCount: number; baseLine: number | null }>({
+    end: 0, newlineCount: 0, baseLine: 1,
+  });
 
   const effectiveMode: ViewMode = mode ?? "text";
 
   // ── Derived: lines from buffer ────────────────────────────────────────────
 
-  const lines = useMemo(() => {
-    if (!buffer) return [];
-    if (effectiveMode === "hex") return renderHexLines(buffer, bufferOffset);
-    return renderText(buffer).split("\n");
-  }, [buffer, bufferOffset, effectiveMode]);
+  // lines: display rows (long file lines are wrapped into multiple rows)
+  // lineNums: 1-based file line number for each display row (text mode only);
+  //           null entry means position unknown (chunk loaded at arbitrary offset)
+  const { lines, lineNums } = useMemo(() => {
+    if (!buffer) return { lines: [] as string[], lineNums: [] as (number | null)[] };
+    if (effectiveMode === "hex") {
+      return { lines: renderHexLines(buffer, bufferOffset), lineNums: [] as (number | null)[] };
+    }
+    const raw = renderText(buffer).split("\n");
+    const lines: string[] = [];
+    const lineNums: (number | null)[] = [];
+    // bufferBaseLine = null means we jumped to an unknown position
+    const base = bufferBaseLine;
+    for (let i = 0; i < raw.length; i++) {
+      const line = raw[i];
+      const fileLineNum = base !== null ? base + i : null;
+      if (line.length <= MAX_COL) {
+        lines.push(line);
+        lineNums.push(fileLineNum);
+      } else {
+        for (let j = 0; j < line.length; j += MAX_COL) {
+          lines.push(line.slice(j, j + MAX_COL));
+          lineNums.push(fileLineNum);
+        }
+      }
+    }
+    return { lines, lineNums };
+  }, [buffer, bufferOffset, effectiveMode, bufferBaseLine]);
 
   const maxTopLine = Math.max(0, lines.length - vpLines);
 
@@ -143,6 +175,25 @@ export function ViewerApp({ path, sourceId, filename, windowLabel }: ViewerAppPr
       if (msg.type === "FileChunk") {
         const m = msg as FileChunkMessage;
         const bytes = hexDecode(m.data);
+
+        // Compute the 1-based file line number of the first raw line in this chunk.
+        // Use chunkInfoRef (a ref, so always fresh) to compare with previous chunk.
+        const info = chunkInfoRef.current;
+        let newBaseLine: number | null;
+        if (m.offset === 0) {
+          newBaseLine = 1;
+        } else if (m.offset === info.end) {
+          // Sequential load: base advances by the newline count of the previous buffer.
+          newBaseLine = info.baseLine !== null ? info.baseLine + info.newlineCount : null;
+        } else {
+          // Jump to arbitrary byte position — absolute line number is unknown.
+          newBaseLine = null;
+        }
+        let newlineCount = 0;
+        for (const b of bytes) if (b === 10) newlineCount++;
+        chunkInfoRef.current = { end: m.offset + bytes.length, newlineCount, baseLine: newBaseLine };
+        setBufferBaseLine(newBaseLine);
+
         if (m.fileSize !== undefined) setFileSize(m.fileSize);
         setBuffer(bytes);
         setBufferOffset(m.offset);
@@ -357,16 +408,39 @@ export function ViewerApp({ path, sourceId, filename, windowLabel }: ViewerAppPr
   // ── Render content ────────────────────────────────────────────────────────
 
   const content = useMemo(() => {
-    if (!buffer) return "";
-    if (isSmall === true) {
-      if (effectiveMode === "hex") return renderHexLines(buffer, 0).join("\n");
-      return renderText(buffer);
-    }
+    if (!buffer || effectiveMode !== "hex") return "";
+    if (isSmall === true) return renderHexLines(buffer, 0).join("\n");
     // Large mode: visible slice
     const start = clamp(topLine, 0, lines.length);
     const end = Math.min(lines.length, topLine + vpLines + 1);
     return lines.slice(start, end).join("\n");
   }, [buffer, isSmall, effectiveMode, topLine, vpLines, lines]);
+
+  // Text mode: line-numbered view
+  const textView = useMemo(() => {
+    if (effectiveMode !== "text" || !buffer) return { gutterText: "", textContent: "" };
+    let visLines: string[];
+    let visNums: (number | null)[];
+    if (isSmall === true) {
+      visLines = lines;
+      visNums = lineNums;
+    } else {
+      const start = clamp(topLine, 0, lines.length);
+      const end = Math.min(lines.length, start + vpLines + 1);
+      visLines = lines.slice(start, end);
+      visNums = lineNums.slice(start, end);
+    }
+    const lastKnown = [...visNums].reverse().find(n => n !== null) ?? 1;
+    const w = Math.max(4, (lastKnown as number).toString().length);
+    // Show file line number only on the first display row of each file line
+    const gutterEntries = visNums.map((num, i) => {
+      const isFirst = i === 0 || visNums[i - 1] !== num;
+      if (!isFirst) return " ".repeat(w);
+      if (num === null) return "~".repeat(w); // unknown position after a jump
+      return num.toString().padStart(w);
+    });
+    return { gutterText: gutterEntries.join("\n"), textContent: visLines.join("\n") };
+  }, [effectiveMode, buffer, isSmall, lines, lineNums, topLine, vpLines]);
 
   // ── Status bar info ───────────────────────────────────────────────────────
 
@@ -408,12 +482,26 @@ export function ViewerApp({ path, sourceId, filename, windowLabel }: ViewerAppPr
         {error && <div className="viewer__error">{error}</div>}
         {!error && buffer && (
           <>
-            <pre
-              className={`viewer__pre${isSmall === false ? " viewer__pre--virtual" : ""}`}
-              ref={contentRef}
-            >
-              {content}
-            </pre>
+            {effectiveMode === "hex" ? (
+              <pre
+                className={`viewer__pre${isSmall === false ? " viewer__pre--virtual" : ""}`}
+                ref={contentRef as React.RefObject<HTMLPreElement>}
+              >
+                {content}
+              </pre>
+            ) : (
+              <div
+                className={`viewer__text${isSmall === false ? " viewer__text--virtual" : ""}`}
+                ref={contentRef as React.RefObject<HTMLDivElement>}
+              >
+                <pre className="viewer__gutter" aria-hidden="true">
+                  {textView.gutterText}
+                </pre>
+                <pre className="viewer__content">
+                  {textView.textContent}
+                </pre>
+              </div>
+            )}
             {isSmall === false && fileSize !== null && fileSize > 0 && (
               <div className="viewer__scrollbar" onMouseDown={handleScrollbarMouse}>
                 <div

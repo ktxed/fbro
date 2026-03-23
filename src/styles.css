@@ -738,6 +738,53 @@ body {
   padding-right: 22px;
 }
 
+/* Text mode: gutter + content side by side */
+.viewer__text {
+  display: flex;
+  height: 100%;
+  overflow: auto;
+  font-size: 12px;
+  line-height: 1.5;
+  tab-size: 4;
+  box-sizing: border-box;
+}
+
+.viewer__text--virtual {
+  /* vertical scroll handled by JS; allow horizontal native scroll */
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.viewer__gutter {
+  margin: 0;
+  padding: 8px 8px 8px 12px;
+  flex-shrink: 0;
+  align-self: flex-start;
+  text-align: right;
+  color: var(--text-dim, #666);
+  border-right: 1px solid var(--border, #333);
+  user-select: none;
+  white-space: pre;
+  /* Stay visible when scrolling right */
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--bg);
+}
+
+.viewer__content {
+  margin: 0;
+  padding: 8px 12px;
+  /* grow to fill short lines, but don't shrink below natural width for long lines */
+  flex: 1 0 auto;
+  white-space: pre;
+}
+
+/* Leave room for custom scrollbar in virtual text mode */
+.viewer__text--virtual .viewer__content {
+  padding-right: 22px;
+}
+
 .viewer__scrollbar {
   position: absolute;
   top: 0;
