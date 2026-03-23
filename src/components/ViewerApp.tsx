@@ -10,6 +10,7 @@ interface ViewerAppProps {
   path: string;
   sourceId: string;
   filename: string;
+  windowLabel: string;
 }
 
 type ViewMode = "text" | "hex";
@@ -68,7 +69,7 @@ function clamp(v: number, lo: number, hi: number) {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export function ViewerApp({ path, sourceId, filename }: ViewerAppProps) {
+export function ViewerApp({ path, sourceId, filename, windowLabel }: ViewerAppProps) {
   const [mode, setMode]           = useState<ViewMode | null>(null);
   const [fileSize, setFileSize]   = useState<number | null>(null);
   const [loading, setLoading]     = useState(true);
@@ -206,6 +207,10 @@ export function ViewerApp({ path, sourceId, filename }: ViewerAppProps) {
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        clientRef.current?.sendIntent("CloseViewerWindow", undefined, { label: windowLabel });
+        return;
+      }
       if (e.key === "1") { setMode("text"); return; }
       if (e.key === "3") { setMode("hex"); return; }
 
@@ -258,7 +263,7 @@ export function ViewerApp({ path, sourceId, filename }: ViewerAppProps) {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [isSmall, eof, loading, fileSize, bufferOffset, maxTopLine, vpLines, scrollByLines, requestChunk]);
+  }, [isSmall, eof, loading, fileSize, bufferOffset, maxTopLine, vpLines, scrollByLines, requestChunk, windowLabel]);
 
   // ── Mouse wheel for large mode ────────────────────────────────────────────
 

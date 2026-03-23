@@ -849,10 +849,11 @@ async fn handle_intent(
             let full_path = format!("{}/{}", dir_path.trim_end_matches('/'), filename);
             let label = format!("viewer-{}", uuid::Uuid::new_v4());
             let qs = format!(
-                "?viewer=1&path={}&source={}&name={}",
+                "?viewer=1&path={}&source={}&name={}&label={}",
                 url_encode(&full_path),
                 url_encode(&source_id),
                 url_encode(&filename),
+                url_encode(&label),
             );
 
             use tauri::Manager;
@@ -865,6 +866,14 @@ async fn handle_intent(
             .inner_size(900.0, 700.0)
             .resizable(true)
             .build();
+        }
+
+        "CloseViewerWindow" => {
+            let label = args.get("label").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            use tauri::Manager;
+            if let Some(win) = app_handle.get_webview_window(&label) {
+                let _ = win.close();
+            }
         }
 
         "ReadFileChunk" => {
