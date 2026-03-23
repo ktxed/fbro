@@ -64,6 +64,11 @@ pub enum ServerMessage {
         #[serde(rename = "fileSize", skip_serializing_if = "Option::is_none")]
         file_size: Option<u64>,
     },
+    RenameOk {
+        timestamp: String,
+        #[serde(rename = "panelId")]
+        panel_id: String,
+    },
 }
 
 #[derive(Serialize, Clone, Debug)]

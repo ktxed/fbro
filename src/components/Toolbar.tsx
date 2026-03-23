@@ -4,8 +4,9 @@ import type { WsClient } from "../ws/client";
 import type { FileOpType, PendingOp, FileOpFile } from "../ws/types";
 
 const ACTIONS = [
+  { key: "F2",  label: "Rename", icon: "✏️"  },
   { key: "F3",  label: "View",   icon: "👁️"  },
-  { key: "F4",  label: "Edit",   icon: "✏️"  },
+  { key: "F4",  label: "Edit",   icon: "🖊️"  },
   { key: "F5",  label: "Copy",   icon: "📋"  },
   { key: "F6",  label: "Move",   icon: "✂️"  },
   { key: "F7",  label: "MkDir",  icon: "📁"  },
@@ -19,6 +20,23 @@ const FILE_OP_KEYS: Record<string, FileOpType> = {
   F6: "move",
   F8: "delete",
 };
+
+function openRename(state: ReturnType<typeof useAppState>, dispatch: ReturnType<typeof useAppDispatch>) {
+  const panel = state.panels[state.focus];
+  if (!panel) return;
+  const entry = panel.entries[panel.cursor];
+  if (!entry || entry.name === "..") return;
+  const dirPath = panel.path.replace(/\/+$/, "");
+  dispatch({
+    type: "OPEN_RENAME",
+    rename: {
+      sourcePanel: state.focus,
+      sourcePath: `${dirPath}/${entry.name}`,
+      dirPath,
+      filename: entry.name,
+    },
+  });
+}
 
 export function Toolbar({ client }: { client: WsClient }) {
   const state = useAppState();
@@ -63,8 +81,13 @@ export function Toolbar({ client }: { client: WsClient }) {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       // Don't handle keys while a modal is active
-      if (state.pendingOp || state.activeJobId || state.pendingQuit) return;
+      if (state.pendingOp || state.activeJobId || state.pendingQuit || state.pendingRename) return;
 
+      if (e.key === "F2") {
+        e.preventDefault();
+        openRename(state, dispatch);
+        return;
+      }
       if (e.key === "F3") {
         e.preventDefault();
         const panel = state.panels[state.focus];
@@ -108,6 +131,7 @@ export function Toolbar({ client }: { client: WsClient }) {
           tabIndex={-1}
           title={`${key} — ${label}`}
           onClick={() => {
+            if (key === "F2") { openRename(state, dispatch); return; }
             if (key === "F3") {
               const panel = state.panels[state.focus];
               if (panel) {

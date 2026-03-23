@@ -14,6 +14,14 @@ import type {
 
 // ─── State ───────────────────────────────────────────────────────────────────
 
+export interface PendingRename {
+  sourcePanel: string;
+  sourcePath: string; // full path of the file being renamed
+  dirPath: string;    // directory containing the file
+  filename: string;   // current filename
+  error?: string;     // set when BE reports RENAME_FAILED
+}
+
 export interface AppState {
   connected: boolean;
   sessionId: string | null;
@@ -25,6 +33,7 @@ export interface AppState {
   pendingOp: PendingOp | null;
   activeJobId: string | null;
   pendingQuit: { activeJobs: number } | null;
+  pendingRename: PendingRename | null;
 }
 
 const initialState: AppState = {
@@ -38,6 +47,7 @@ const initialState: AppState = {
   pendingOp: null,
   activeJobId: null,
   pendingQuit: null,
+  pendingRename: null,
 };
 
 // ─── Actions ─────────────────────────────────────────────────────────────────
@@ -49,7 +59,9 @@ export type AppAction =
   | { type: "OPEN_OPERATION"; op: PendingOp }
   | { type: "CLOSE_OPERATION" }
   | { type: "SET_ACTIVE_JOB"; jobId: string }
-  | { type: "CANCEL_QUIT" };
+  | { type: "CANCEL_QUIT" }
+  | { type: "OPEN_RENAME"; rename: PendingRename }
+  | { type: "CLOSE_RENAME" };
 
 // ─── Reducer ─────────────────────────────────────────────────────────────────
 
@@ -201,8 +213,13 @@ function reducer(state: AppState, action: AppAction): AppState {
         case "JobEvent":
           return applyJobEvent(state, msg);
         case "Error":
+          if (msg.code === "RENAME_FAILED" && state.pendingRename) {
+            return { ...state, pendingRename: { ...state.pendingRename, error: msg.message } };
+          }
           console.error("BE error:", msg.code, msg.message);
           return state;
+        case "RenameOk":
+          return { ...state, pendingRename: null };
         case "QuitConfirmRequired":
           return applyQuitConfirmRequired(state, msg);
         default:
@@ -217,6 +234,10 @@ function reducer(state: AppState, action: AppAction): AppState {
       return { ...state, activeJobId: action.jobId, pendingOp: null };
     case "CANCEL_QUIT":
       return { ...state, pendingQuit: null };
+    case "OPEN_RENAME":
+      return { ...state, pendingRename: action.rename };
+    case "CLOSE_RENAME":
+      return { ...state, pendingRename: null };
   }
 }
 

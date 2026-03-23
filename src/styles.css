@@ -611,6 +611,51 @@ body {
   color: var(--text-dim);
 }
 
+/* Rename modal */
+
+.modal__rename-from {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin: 0 0 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.modal__rename-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.modal__rename-label {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.modal__rename-input {
+  flex: 1;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border-focus);
+  border-radius: 3px;
+  padding: 4px 8px;
+  font-family: var(--font);
+  font-size: 12px;
+  outline: none;
+}
+
+.modal__rename-input:focus {
+  border-color: var(--accent);
+}
+
+.modal__rename-error {
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: #ff6060;
+}
+
 /* ── Viewer window ───────────────────────────────────────────────────────── */
 
 .viewer {

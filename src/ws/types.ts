@@ -196,6 +196,12 @@ export interface FileChunkMessage {
   fileSize?: number;
 }
 
+export interface RenameOkMessage {
+  type: "RenameOk";
+  timestamp: string;
+  panelId: string;
+}
+
 // ─── Union types ─────────────────────────────────────────────────────────────
 
 export type BEMessage =
@@ -206,6 +212,7 @@ export type BEMessage =
   | JobEventMessage
   | ErrorMessage
   | QuitConfirmRequiredMessage
-  | FileChunkMessage;
+  | FileChunkMessage
+  | RenameOkMessage;
 
 export type FEMessage = HelloMessage | IntentMessage;

@@ -868,6 +868,61 @@ async fn handle_intent(
             .build();
         }
 
+        "RenameFile" => {
+            let source_panel = args.get("sourcePanel").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let source_path  = args.get("sourcePath").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let dest_name    = args.get("destName").and_then(|v| v.as_str()).unwrap_or("").to_string();
+
+            // Resolve dest path: absolute if starts with '/', else relative to source directory.
+            let dest_path = if dest_name.starts_with('/') {
+                dest_name.clone()
+            } else {
+                let source_dir = std::path::Path::new(&source_path)
+                    .parent()
+                    .map(|p| p.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                format!("{}/{}", source_dir.trim_end_matches('/'), dest_name.trim_start_matches('/'))
+            };
+
+            let driver = {
+                let s = state.lock().await;
+                s.panels.get(&source_panel)
+                    .and_then(|p| s.drivers.get(&p.source_id).cloned())
+            };
+
+            if let Some(driver) = driver {
+                let src = source_path.clone();
+                let dst = dest_path.clone();
+                let result = tokio::task::spawn_blocking(move || driver.try_rename(&src, &dst)).await;
+                match result {
+                    Ok(Ok(true)) => {
+                        let _ = tx.send(ServerMessage::RenameOk {
+                            timestamp: now(),
+                            panel_id: source_panel.clone(),
+                        }).await;
+                        rescan_panel(&source_panel, state, &tx, scan_handles).await;
+                    }
+                    Ok(Ok(false)) => {
+                        let _ = tx.send(ServerMessage::Error {
+                            timestamp: now(),
+                            code: "RENAME_FAILED".to_string(),
+                            message: "Cannot rename across filesystems — use Move (F6) instead.".to_string(),
+                            recoverable: true,
+                        }).await;
+                    }
+                    Ok(Err(e)) => {
+                        let _ = tx.send(ServerMessage::Error {
+                            timestamp: now(),
+                            code: "RENAME_FAILED".to_string(),
+                            message: e.to_string(),
+                            recoverable: true,
+                        }).await;
+                    }
+                    Err(_) => {}
+                }
+            }
+        }
+
         "CloseViewerWindow" => {
             let label = args.get("label").and_then(|v| v.as_str()).unwrap_or("").to_string();
             use tauri::Manager;
