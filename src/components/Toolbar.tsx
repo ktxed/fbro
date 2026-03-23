@@ -120,6 +120,7 @@ export function Toolbar({ client }: { client: WsClient }) {
           const entry = panel.entries[panel.cursor];
           if (entry && entry.kind !== "directory") {
             client.sendIntent("ViewFile", undefined, {
+              panelId: state.focus,
               path: panel.path,
               sourceId: panel.sourceId,
               filename: entry.name,
@@ -163,6 +164,7 @@ export function Toolbar({ client }: { client: WsClient }) {
                 const entry = panel.entries[panel.cursor];
                 if (entry && entry.kind !== "directory") {
                   client.sendIntent("ViewFile", undefined, {
+                    panelId: state.focus,
                     path: panel.path,
                     sourceId: panel.sourceId,
                     filename: entry.name,

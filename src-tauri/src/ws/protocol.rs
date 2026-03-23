@@ -69,6 +69,15 @@ pub enum ServerMessage {
         #[serde(rename = "panelId")]
         panel_id: String,
     },
+    ViewerFileChanged {
+        timestamp: String,
+        path: String,
+        filename: String,
+        #[serde(rename = "sourceId")]
+        source_id: String,
+        #[serde(rename = "panelId")]
+        panel_id: String,
+    },
 }
 
 #[derive(Serialize, Clone, Debug)]

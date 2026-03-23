@@ -204,6 +204,15 @@ export interface RenameOkMessage {
   panelId: string;
 }
 
+export interface ViewerFileChangedMessage {
+  type: "ViewerFileChanged";
+  timestamp: string;
+  path: string;
+  filename: string;
+  sourceId: string;
+  panelId: string;
+}
+
 // ─── Union types ─────────────────────────────────────────────────────────────
 
 export type BEMessage =
@@ -215,6 +224,7 @@ export type BEMessage =
   | ErrorMessage
   | QuitConfirmRequiredMessage
   | FileChunkMessage
-  | RenameOkMessage;
+  | RenameOkMessage
+  | ViewerFileChangedMessage;
 
 export type FEMessage = HelloMessage | IntentMessage;

@@ -16,6 +16,7 @@ if (params.get("viewer") === "1") {
         sourceId={params.get("source") ?? ""}
         filename={params.get("name") ?? params.get("path")?.split("/").pop() ?? ""}
         windowLabel={params.get("label") ?? ""}
+        panelId={params.get("panel") ?? ""}
       />
     </React.StrictMode>,
   );

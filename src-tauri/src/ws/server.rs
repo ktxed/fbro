@@ -178,6 +178,12 @@ async fn handle_connection(stream: TcpStream, addr: SocketAddr, state: SharedSta
         scan_handles.insert(panel_id.clone(), h);
     }
 
+    // Register GUI client's sender for cross-connection broadcasts
+    if is_gui {
+        let mut s = state.lock().await;
+        s.gui_senders.push(tx.clone());
+    }
+
     // ── Main loop: fanout outgoing messages / dispatch incoming intents ────────
     loop {
         tokio::select! {
@@ -256,6 +262,12 @@ async fn handle_connection(stream: TcpStream, addr: SocketAddr, state: SharedSta
     eprintln!("[fbro] Client disconnected: {addr}");
     for h in scan_handles.values() {
         h.abort();
+    }
+
+    // Unregister GUI sender
+    if is_gui {
+        let mut s = state.lock().await;
+        s.gui_senders.retain(|s| !s.is_closed());
     }
 }
 
@@ -858,6 +870,7 @@ async fn handle_intent(
         }
 
         "ViewFile" => {
+            let panel_id  = args.get("panelId").and_then(|v| v.as_str()).unwrap_or("").to_string();
             let dir_path  = args.get("path").and_then(|v| v.as_str()).unwrap_or("").to_string();
             let source_id = args.get("sourceId").and_then(|v| v.as_str()).unwrap_or("").to_string();
             let filename  = args.get("filename").and_then(|v| v.as_str()).unwrap_or("").to_string();
@@ -865,11 +878,12 @@ async fn handle_intent(
             let full_path = format!("{}/{}", dir_path.trim_end_matches('/'), filename);
             let label = format!("viewer-{}", uuid::Uuid::new_v4());
             let qs = format!(
-                "?viewer=1&path={}&source={}&name={}&label={}",
+                "?viewer=1&path={}&source={}&name={}&label={}&panel={}",
                 url_encode(&full_path),
                 url_encode(&source_id),
                 url_encode(&filename),
                 url_encode(&label),
+                url_encode(&panel_id),
             );
 
             use tauri::Manager;
@@ -949,6 +963,65 @@ async fn handle_intent(
             use tauri::Manager;
             if let Some(win) = app_handle.get_webview_window(&label) {
                 let _ = win.close();
+            }
+        }
+
+        "ViewerNavigate" => {
+            let panel_id  = args.get("panelId").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let direction = args.get("direction").and_then(|v| v.as_str()).unwrap_or("next").to_string();
+
+            let nav_result = {
+                let mut s = state.lock().await;
+                if let Some(panel) = s.panels.get_mut(&panel_id) {
+                    let new_cursor = if direction == "prev" {
+                        if panel.cursor == 0 { 0 } else { panel.cursor - 1 }
+                    } else {
+                        (panel.cursor + 1).min(panel.entries.len().saturating_sub(1))
+                    };
+                    panel.cursor = new_cursor;
+                    let source_id = panel.source_id.clone();
+                    let dir_path = panel.path.clone();
+                    let entry_info = panel.entries.get(new_cursor).map(|e| {
+                        (e.name.clone(), e.kind.clone())
+                    });
+                    Some((new_cursor, source_id, dir_path, entry_info))
+                } else {
+                    None
+                }
+            };
+
+            if let Some((new_cursor, source_id, dir_path, entry_info)) = nav_result {
+                if let Some((name, kind)) = entry_info {
+                    if kind == "file" {
+                        let full_path = format!("{}/{}", dir_path.trim_end_matches('/'), name);
+                        let _ = tx.send(ServerMessage::ViewerFileChanged {
+                            timestamp: now(),
+                            path: full_path,
+                            filename: name,
+                            source_id,
+                            panel_id: panel_id.clone(),
+                        }).await;
+                    } else {
+                        let _ = tx.send(ServerMessage::Error {
+                            timestamp: now(),
+                            code: "NOT_A_FILE".to_string(),
+                            message: format!("{name} is a {kind}, not a file"),
+                            recoverable: true,
+                        }).await;
+                    }
+                }
+                // Broadcast cursor update to all GUI clients
+                let cursor_patch = ServerMessage::StatePatch {
+                    timestamp: now(),
+                    domain: "panels".to_string(),
+                    entity_id: Some(panel_id),
+                    version: 0,
+                    patch: serde_json::json!({ "cursor": new_cursor }),
+                };
+                let s = state.lock().await;
+                for gui_tx in &s.gui_senders {
+                    let _ = gui_tx.send(cursor_patch.clone()).await;
+                }
             }
         }
 

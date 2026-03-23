@@ -904,6 +904,27 @@ body {
   font-size: var(--font-size);
 }
 
+.viewer__nav-error {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--font-size);
+  color: var(--text);
+  background: rgba(0, 0, 0, 0.7);
+  z-index: 10;
+}
+
+.viewer__nav-error p {
+  margin: 0 0 4px;
+}
+
+.viewer__nav-error-hint {
+  color: var(--text-dim);
+}
+
 .viewer__loading,
 .viewer__error {
   position: absolute;

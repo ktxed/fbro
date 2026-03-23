@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::sync::{mpsc, Mutex};
 
 use crate::jobs::JobStore;
 use crate::platform::Platform;
 use crate::vfs::VfsDriver;
-use crate::ws::protocol::{EntrySchema, FilterSpec, SortSpec};
+use crate::ws::protocol::{EntrySchema, FilterSpec, ServerMessage, SortSpec};
 
 // ─── Source ───────────────────────────────────────────────────────────────────
 
@@ -60,6 +60,9 @@ pub struct AppState {
     pub focus: String,
     pub platform: Arc<dyn Platform>,
     pub job_store: JobStore,
+    /// Senders for all connected GUI clients — used to broadcast state updates
+    /// from non-GUI connections (e.g. viewer windows).
+    pub gui_senders: Vec<mpsc::Sender<ServerMessage>>,
 }
 
 impl AppState {
@@ -146,6 +149,7 @@ impl AppState {
             focus: "left".to_string(),
             platform,
             job_store: JobStore::new(),
+            gui_senders: Vec::new(),
         }
     }
 }

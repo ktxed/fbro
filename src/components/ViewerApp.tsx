@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { WsClient } from "../ws/client";
-import type { BEMessage, FileChunkMessage } from "../ws/types";
+import type { BEMessage, FileChunkMessage, ViewerFileChangedMessage } from "../ws/types";
 import { ImageViewer, IMAGE_LIMIT } from "../viewers/ImageViewer";
 import { detectRenderer, isImageExt } from "../viewers/media";
 
@@ -14,6 +14,7 @@ interface ViewerAppProps {
   sourceId: string;
   filename: string;
   windowLabel: string;
+  panelId: string;
 }
 
 type ViewMode = "text" | "image" | "hex";
@@ -72,11 +73,17 @@ function clamp(v: number, lo: number, hi: number) {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export function ViewerApp({ path, sourceId, filename, windowLabel }: ViewerAppProps) {
+export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: initFilename, windowLabel, panelId }: ViewerAppProps) {
+  // Current file being viewed (updated on navigation)
+  const [curPath, setCurPath]         = useState(initPath);
+  const [curSourceId, setCurSourceId] = useState(initSourceId);
+  const [curFilename, setCurFilename] = useState(initFilename);
+
   const [mode, setMode]           = useState<ViewMode | null>(null);
   const [fileSize, setFileSize]   = useState<number | null>(null);
   const [loading, setLoading]     = useState(true);
   const [error, setError]         = useState<string | null>(null);
+  const [navError, setNavError]   = useState<string | null>(null);
 
   // Buffer
   const [buffer, setBuffer]             = useState<Uint8Array | null>(null);
@@ -93,11 +100,12 @@ export function ViewerApp({ path, sourceId, filename, windowLabel }: ViewerAppPr
   // Incremented each time a new buffer arrives — drives post-load effects
   const [bufSeq, setBufSeq]   = useState(0);
 
-  const clientRef    = useRef<WsClient | null>(null);
-  const bodyRef      = useRef<HTMLDivElement>(null);
-  const contentRef   = useRef<HTMLElement>(null);
+  const clientRef     = useRef<WsClient | null>(null);
+  const bodyRef       = useRef<HTMLDivElement>(null);
+  const contentRef    = useRef<HTMLElement>(null);
   // After a large-mode buffer load, what to do with topLine
-  const afterLoadRef = useRef<"top" | "bottom">("top");
+  const afterLoadRef  = useRef<"top" | "bottom">("top");
+  const filenameRef   = useRef(initFilename);
 
   // 1-based file line number of the first raw line in the current buffer.
   // null = unknown (after a scrollbar jump to an arbitrary byte offset).
@@ -107,6 +115,7 @@ export function ViewerApp({ path, sourceId, filename, windowLabel }: ViewerAppPr
     end: 0, newlineCount: 0, baseLine: 1,
   });
 
+  filenameRef.current = curFilename;
   const effectiveMode: ViewMode = mode ?? "text";
   const isImageMode = effectiveMode === "image";
 
@@ -149,9 +158,9 @@ export function ViewerApp({ path, sourceId, filename, windowLabel }: ViewerAppPr
     afterLoadRef.current = after;
     setLoading(true);
     clientRef.current?.sendIntent("ReadFileChunk", undefined, {
-      path, sourceId, offset: off, size,
+      path: curPath, sourceId: curSourceId, offset: off, size,
     });
-  }, [path, sourceId]);
+  }, [curPath, curSourceId]);
 
   // ── Measure viewport on resize ────────────────────────────────────────────
 
@@ -174,7 +183,7 @@ export function ViewerApp({ path, sourceId, filename, windowLabel }: ViewerAppPr
 
     client.onConnected = () => {
       // For known image types, request up to IMAGE_LIMIT in one shot
-      const initSize = isImageExt(filename) ? IMAGE_LIMIT : SMALL_LIMIT;
+      const initSize = isImageExt(curFilename) ? IMAGE_LIMIT : SMALL_LIMIT;
       requestChunk(0, initSize);
     };
 
@@ -208,16 +217,47 @@ export function ViewerApp({ path, sourceId, filename, windowLabel }: ViewerAppPr
         setLoading(false);
         setMode(prev => {
           if (prev !== null) return prev;
-          const detected = detectRenderer(filename, detectBinary(bytes));
+          const detected = detectRenderer(filenameRef.current, detectBinary(bytes));
           if (detected === "image" && m.fileSize !== undefined && m.fileSize > IMAGE_LIMIT) return "hex";
           return detected;
         });
+        setNavError(null);
         setIsSmall(prev => prev !== null ? prev : (m.eof && bytes.length <= SMALL_LIMIT));
         setBufSeq(s => s + 1);
       }
+      if (msg.type === "ViewerFileChanged") {
+        const m = msg as ViewerFileChangedMessage;
+        // Reset viewer state for new file
+        setCurPath(m.path);
+        setCurSourceId(m.sourceId);
+        setCurFilename(m.filename);
+        setMode(null);
+        setBuffer(null);
+        setBufferOffset(0);
+        setEof(false);
+        setIsSmall(null);
+        setTopLine(0);
+        setFileSize(null);
+        setError(null);
+        setNavError(null);
+        setLoading(true);
+        setBufferBaseLine(1);
+        chunkInfoRef.current = { end: 0, newlineCount: 0, baseLine: 1 };
+        setBufSeq(0);
+        // Request first chunk of new file
+        const initSize = isImageExt(m.filename) ? IMAGE_LIMIT : SMALL_LIMIT;
+        clientRef.current?.sendIntent("ReadFileChunk", undefined, {
+          path: m.path, sourceId: m.sourceId, offset: 0, size: initSize,
+        });
+      }
       if (msg.type === "Error") {
-        setError((msg as any).message ?? "Unknown error");
-        setLoading(false);
+        const err = msg as { code: string; message: string };
+        if (err.code === "NOT_A_FILE") {
+          setNavError(err.message);
+        } else {
+          setError(err.message ?? "Unknown error");
+          setLoading(false);
+        }
       }
     };
 
@@ -277,6 +317,18 @@ export function ViewerApp({ path, sourceId, filename, windowLabel }: ViewerAppPr
       if (e.key === "1") { setMode("text"); return; }
       if (e.key === "2") { setMode("image"); return; }
       if (e.key === "3") { setMode("hex"); return; }
+      if (e.key === "k") {
+        e.preventDefault();
+        setNavError(null);
+        clientRef.current?.sendIntent("ViewerNavigate", undefined, { panelId, direction: "next" });
+        return;
+      }
+      if (e.key === "j") {
+        e.preventDefault();
+        setNavError(null);
+        clientRef.current?.sendIntent("ViewerNavigate", undefined, { panelId, direction: "prev" });
+        return;
+      }
 
       const goStart = e.key === "Home" || (e.key === "ArrowUp" && e.metaKey);
       const goEnd   = e.key === "End"  || (e.key === "ArrowDown" && e.metaKey);
@@ -471,7 +523,7 @@ export function ViewerApp({ path, sourceId, filename, windowLabel }: ViewerAppPr
   return (
     <div className="viewer">
       <div className="viewer__header">
-        <span className="viewer__filename">{filename}</span>
+        <span className="viewer__filename">{curFilename}</span>
         <div className="viewer__mode-btns">
           <button
             className={`viewer__mode-btn${effectiveMode === "text" ? " viewer__mode-btn--active" : ""}`}
@@ -500,8 +552,16 @@ export function ViewerApp({ path, sourceId, filename, windowLabel }: ViewerAppPr
       <div className="viewer__body" ref={bodyRef}>
         {loading && !buffer && <div className="viewer__loading">Loading…</div>}
         {error && <div className="viewer__error">{error}</div>}
+        {navError && (
+          <div className="viewer__nav-error">
+            <p>{navError}</p>
+            <p className="viewer__nav-error-hint">
+              j/k — try again · Esc — close viewer
+            </p>
+          </div>
+        )}
         {!error && buffer && isImageMode && (
-          <ImageViewer buffer={buffer} fileSize={fileSize} filename={filename} />
+          <ImageViewer buffer={buffer} fileSize={fileSize} filename={curFilename} />
         )}
         {!error && buffer && !isImageMode && (
           <>
@@ -547,8 +607,8 @@ export function ViewerApp({ path, sourceId, filename, windowLabel }: ViewerAppPr
         {loading && <span style={{ color: "var(--accent)" }}>loading…</span>}
         <span className="viewer__status-nav">
           {isImageMode
-            ? "z — toggle zoom · 1 text · 2 image · 3 hex"
-            : "↑↓ PgDn/PgUp — navigate · 1 text · 2 image · 3 hex"}
+            ? "z zoom · j/k prev/next file · 1 text · 2 image · 3 hex"
+            : "↑↓ PgDn/PgUp scroll · j/k prev/next file · 1 text · 2 image · 3 hex"}
         </span>
       </div>
     </div>
