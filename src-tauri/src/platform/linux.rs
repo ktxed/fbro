@@ -3,6 +3,28 @@ use super::Platform;
 pub struct LinuxPlatform;
 
 impl Platform for LinuxPlatform {
+    fn find_icon(&self, icon_name: &str) -> Option<(Vec<u8>, &'static str)> {
+        const THEMES: &[&str] = &["Pop", "Adwaita", "hicolor"];
+        const SIZES: &[&str] = &["48x48", "scalable", "32x32", "24x24"];
+        const CATS: &[&str] = &["mimetypes", "places", "emblems"];
+
+        for theme in THEMES {
+            for size in SIZES {
+                for cat in CATS {
+                    let svg = format!("/usr/share/icons/{theme}/{size}/{cat}/{icon_name}.svg");
+                    if let Ok(data) = std::fs::read(&svg) {
+                        return Some((data, "image/svg+xml"));
+                    }
+                    let png = format!("/usr/share/icons/{theme}/{size}/{cat}/{icon_name}.png");
+                    if let Ok(data) = std::fs::read(&png) {
+                        return Some((data, "image/png"));
+                    }
+                }
+            }
+        }
+        None
+    }
+
     fn home_dir(&self) -> String {
         // Prefer $HOME; fall back to /etc/passwd entry for current uid
         if let Ok(h) = std::env::var("HOME") {
