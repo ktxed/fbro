@@ -678,6 +678,49 @@ body {
   color: #ff6060;
 }
 
+/* Info modal */
+
+.modal__info-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.modal__info-table td {
+  padding: 3px 0;
+  vertical-align: top;
+  font-size: var(--font-size);
+}
+
+.modal__info-label {
+  color: var(--text-dim);
+  white-space: nowrap;
+  padding-right: 12px;
+  width: 1%;
+}
+
+.modal__info-value {
+  color: var(--text);
+  word-break: break-all;
+}
+
+.modal__info-copy {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  cursor: pointer;
+  font-family: var(--font);
+  font-size: var(--font-size);
+  padding: 1px 8px;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+
+.modal__info-copy:hover {
+  color: var(--text);
+  border-color: var(--border-focus);
+  background: var(--bg-focused);
+}
+
 /* ── Viewer window ───────────────────────────────────────────────────────── */
 
 .viewer {

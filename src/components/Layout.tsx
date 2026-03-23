@@ -2,6 +2,7 @@ import { Panel } from "./Panel";
 import { OperationModal } from "./OperationModal";
 import { QuitModal } from "./QuitModal";
 import { RenameModal } from "./RenameModal";
+import { InfoModal } from "./InfoModal";
 import { useAppState } from "../store";
 import type { WsClient } from "../ws/client";
 
@@ -19,7 +20,7 @@ export function Layout({ client }: LayoutProps) {
   }
 
   const activeJob = state.activeJobId ? state.jobs[state.activeJobId] ?? null : null;
-  const modalActive = state.pendingOp !== null || state.activeJobId !== null || state.pendingQuit !== null || state.pendingRename !== null;
+  const modalActive = state.pendingOp !== null || state.activeJobId !== null || state.pendingQuit !== null || state.pendingRename !== null || state.pendingInfo !== null;
 
   return (
     <>
@@ -50,6 +51,9 @@ export function Layout({ client }: LayoutProps) {
       )}
       {state.pendingRename && (
         <RenameModal rename={state.pendingRename} client={client} />
+      )}
+      {state.pendingInfo && (
+        <InfoModal info={state.pendingInfo} />
       )}
     </>
   );

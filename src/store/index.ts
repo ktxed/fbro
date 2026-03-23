@@ -22,6 +22,16 @@ export interface PendingRename {
   error?: string;     // set when BE reports RENAME_FAILED
 }
 
+export interface PendingInfo {
+  name: string;
+  kind: string;
+  fullPath: string;
+  dirPath: string;
+  size?: number;
+  mtime?: string;
+  permissions?: string;
+}
+
 export interface AppState {
   connected: boolean;
   sessionId: string | null;
@@ -34,6 +44,7 @@ export interface AppState {
   activeJobId: string | null;
   pendingQuit: { activeJobs: number } | null;
   pendingRename: PendingRename | null;
+  pendingInfo: PendingInfo | null;
 }
 
 const initialState: AppState = {
@@ -48,6 +59,7 @@ const initialState: AppState = {
   activeJobId: null,
   pendingQuit: null,
   pendingRename: null,
+  pendingInfo: null,
 };
 
 // ─── Actions ─────────────────────────────────────────────────────────────────
@@ -61,7 +73,9 @@ export type AppAction =
   | { type: "SET_ACTIVE_JOB"; jobId: string }
   | { type: "CANCEL_QUIT" }
   | { type: "OPEN_RENAME"; rename: PendingRename }
-  | { type: "CLOSE_RENAME" };
+  | { type: "CLOSE_RENAME" }
+  | { type: "OPEN_INFO"; info: PendingInfo }
+  | { type: "CLOSE_INFO" };
 
 // ─── Reducer ─────────────────────────────────────────────────────────────────
 
@@ -238,6 +252,10 @@ function reducer(state: AppState, action: AppAction): AppState {
       return { ...state, pendingRename: action.rename };
     case "CLOSE_RENAME":
       return { ...state, pendingRename: null };
+    case "OPEN_INFO":
+      return { ...state, pendingInfo: action.info };
+    case "CLOSE_INFO":
+      return { ...state, pendingInfo: null };
   }
 }
 

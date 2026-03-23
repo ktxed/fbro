@@ -21,6 +21,26 @@ const FILE_OP_KEYS: Record<string, FileOpType> = {
   F8: "delete",
 };
 
+function openInfo(state: ReturnType<typeof useAppState>, dispatch: ReturnType<typeof useAppDispatch>) {
+  const panel = state.panels[state.focus];
+  if (!panel) return;
+  const entry = panel.entries[panel.cursor];
+  if (!entry) return;
+  const dirPath = panel.path.replace(/\/+$/, "");
+  dispatch({
+    type: "OPEN_INFO",
+    info: {
+      name: entry.name,
+      kind: entry.kind,
+      fullPath: entry.name === ".." ? dirPath : `${dirPath}/${entry.name}`,
+      dirPath,
+      size: entry.size,
+      mtime: entry.mtime,
+      permissions: entry.permissions,
+    },
+  });
+}
+
 function openRename(state: ReturnType<typeof useAppState>, dispatch: ReturnType<typeof useAppDispatch>) {
   const panel = state.panels[state.focus];
   if (!panel) return;
@@ -81,8 +101,13 @@ export function Toolbar({ client }: { client: WsClient }) {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       // Don't handle keys while a modal is active
-      if (state.pendingOp || state.activeJobId || state.pendingQuit || state.pendingRename) return;
+      if (state.pendingOp || state.activeJobId || state.pendingQuit || state.pendingRename || state.pendingInfo) return;
 
+      if (e.key === "i" || e.key === "I") {
+        e.preventDefault();
+        openInfo(state, dispatch);
+        return;
+      }
       if (e.key === "F2") {
         e.preventDefault();
         openRename(state, dispatch);
