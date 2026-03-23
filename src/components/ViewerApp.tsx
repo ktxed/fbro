@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { WsClient } from "../ws/client";
 import type { BEMessage, FileChunkMessage } from "../ws/types";
+import { ImageViewer, IMAGE_LIMIT } from "../viewers/ImageViewer";
+import { detectRenderer, isImageExt } from "../viewers/media";
 
 const SMALL_LIMIT = 32768;  // 32 KiB — files at or below this are loaded fully
 const CHUNK_SIZE  = 65536;  // 64 KiB — buffer window for large files
@@ -14,7 +16,7 @@ interface ViewerAppProps {
   windowLabel: string;
 }
 
-type ViewMode = "text" | "hex";
+type ViewMode = "text" | "image" | "hex";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -106,6 +108,7 @@ export function ViewerApp({ path, sourceId, filename, windowLabel }: ViewerAppPr
   });
 
   const effectiveMode: ViewMode = mode ?? "text";
+  const isImageMode = effectiveMode === "image";
 
   // ── Derived: lines from buffer ────────────────────────────────────────────
 
@@ -169,7 +172,11 @@ export function ViewerApp({ path, sourceId, filename, windowLabel }: ViewerAppPr
     const client = new WsClient("viewer");
     clientRef.current = client;
 
-    client.onConnected = () => requestChunk(0, SMALL_LIMIT);
+    client.onConnected = () => {
+      // For known image types, request up to IMAGE_LIMIT in one shot
+      const initSize = isImageExt(filename) ? IMAGE_LIMIT : SMALL_LIMIT;
+      requestChunk(0, initSize);
+    };
 
     client.onMessage = (msg: BEMessage) => {
       if (msg.type === "FileChunk") {
@@ -199,7 +206,12 @@ export function ViewerApp({ path, sourceId, filename, windowLabel }: ViewerAppPr
         setBufferOffset(m.offset);
         setEof(m.eof);
         setLoading(false);
-        setMode(prev => prev ?? (detectBinary(bytes) ? "hex" : "text"));
+        setMode(prev => {
+          if (prev !== null) return prev;
+          const detected = detectRenderer(filename, detectBinary(bytes));
+          if (detected === "image" && m.fileSize !== undefined && m.fileSize > IMAGE_LIMIT) return "hex";
+          return detected;
+        });
         setIsSmall(prev => prev !== null ? prev : (m.eof && bytes.length <= SMALL_LIMIT));
         setBufSeq(s => s + 1);
       }
@@ -263,6 +275,7 @@ export function ViewerApp({ path, sourceId, filename, windowLabel }: ViewerAppPr
         return;
       }
       if (e.key === "1") { setMode("text"); return; }
+      if (e.key === "2") { setMode("image"); return; }
       if (e.key === "3") { setMode("hex"); return; }
 
       const goStart = e.key === "Home" || (e.key === "ArrowUp" && e.metaKey);
@@ -468,6 +481,13 @@ export function ViewerApp({ path, sourceId, filename, windowLabel }: ViewerAppPr
             1 Text
           </button>
           <button
+            className={`viewer__mode-btn${effectiveMode === "image" ? " viewer__mode-btn--active" : ""}`}
+            onClick={() => setMode("image")}
+            title="Image mode (2)"
+          >
+            2 Image
+          </button>
+          <button
             className={`viewer__mode-btn${effectiveMode === "hex" ? " viewer__mode-btn--active" : ""}`}
             onClick={() => setMode("hex")}
             title="Hex mode (3)"
@@ -480,7 +500,10 @@ export function ViewerApp({ path, sourceId, filename, windowLabel }: ViewerAppPr
       <div className="viewer__body" ref={bodyRef}>
         {loading && !buffer && <div className="viewer__loading">Loading…</div>}
         {error && <div className="viewer__error">{error}</div>}
-        {!error && buffer && (
+        {!error && buffer && isImageMode && (
+          <ImageViewer buffer={buffer} fileSize={fileSize} filename={filename} />
+        )}
+        {!error && buffer && !isImageMode && (
           <>
             {effectiveMode === "hex" ? (
               <pre
@@ -522,7 +545,11 @@ export function ViewerApp({ path, sourceId, filename, windowLabel }: ViewerAppPr
         {fileSize !== null && <span>Size: {formatSize(fileSize)}</span>}
         <span>{pct}%</span>
         {loading && <span style={{ color: "var(--accent)" }}>loading…</span>}
-        <span className="viewer__status-nav">↑↓ PgDn/PgUp — navigate · 1 text · 3 hex</span>
+        <span className="viewer__status-nav">
+          {isImageMode
+            ? "z — toggle zoom · 1 text · 2 image · 3 hex"
+            : "↑↓ PgDn/PgUp — navigate · 1 text · 2 image · 3 hex"}
+        </span>
       </div>
     </div>
   );
