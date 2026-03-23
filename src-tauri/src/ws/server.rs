@@ -10,6 +10,7 @@ use tokio_tungstenite::tungstenite::Message;
 use crate::jobs::file_ops::run_file_op;
 use crate::jobs::scan::run_scan;
 use crate::jobs::{ConflictPolicy, FileOpEntry, FileOpJob, FileOpType, JobState, ScanHandle};
+use crate::persistence::{PanelSession, SessionState};
 use crate::state::{PanelStatus, SharedState};
 use crate::vfs::VfsDriver;
 use crate::ws::protocol::{
@@ -837,6 +838,7 @@ async fn handle_intent(
                 }).count()
             };
             if active_jobs == 0 {
+                save_session(state).await;
                 std::process::exit(0);
             } else {
                 let _ = tx.send(ServerMessage::QuitConfirmRequired {
@@ -847,6 +849,7 @@ async fn handle_intent(
         }
 
         "ConfirmQuit" => {
+            save_session(state).await;
             std::process::exit(0);
         }
 
@@ -947,6 +950,14 @@ async fn rescan_panel(
         .await;
     let h = spawn_scan(panel_id.to_string(), path, sort, filter, version, tx.clone(), driver, None);
     scan_handles.insert(panel_id.to_string(), h);
+}
+
+async fn save_session(state: &SharedState) {
+    let s = state.lock().await;
+    let panels = s.panels.iter()
+        .map(|(id, panel)| (id.clone(), PanelSession { path: panel.path.clone() }))
+        .collect();
+    crate::persistence::save(&SessionState { panels });
 }
 
 async fn resolve_panel_id(scope: &serde_json::Value, state: &SharedState) -> String {

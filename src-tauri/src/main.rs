@@ -2,6 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod jobs;
+mod persistence;
 mod platform;
 mod state;
 mod vfs;
@@ -17,7 +18,11 @@ fn main() {
     tauri::Builder::default()
         .setup(|_app| {
             let platform = Arc::new(LinuxPlatform);
-            let shared_state = Arc::new(Mutex::new(AppState::new_default(platform)));
+            let session = persistence::load();
+            let initial_paths = session.panels.into_iter()
+                .map(|(id, p)| (id, p.path))
+                .collect();
+            let shared_state = Arc::new(Mutex::new(AppState::new_default(platform, initial_paths)));
             tauri::async_runtime::spawn(ws::server::start(shared_state));
             Ok(())
         })

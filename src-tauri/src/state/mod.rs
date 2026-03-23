@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -62,8 +63,17 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn new_default(platform: Arc<dyn Platform>) -> Self {
+    pub fn new_default(platform: Arc<dyn Platform>, initial_paths: HashMap<String, String>) -> Self {
         let home = platform.home_dir();
+
+        // Validate a saved path; fall back to home if it is no longer a directory.
+        let resolve = |id: &str| -> String {
+            initial_paths
+                .get(id)
+                .filter(|p| Path::new(p.as_str()).is_dir())
+                .cloned()
+                .unwrap_or_else(|| home.clone())
+        };
         let source_id = "local-home".to_string();
 
         let source = Source {
@@ -88,7 +98,7 @@ impl AppState {
         let left = Panel {
             panel_id: "left".to_string(),
             source_id: source_id.clone(),
-            path: home.clone(),
+            path: resolve("left"),
             status: PanelStatus::Loading,
             sort: default_sort.clone(),
             filter: None,
@@ -101,7 +111,7 @@ impl AppState {
         let right = Panel {
             panel_id: "right".to_string(),
             source_id: source_id.clone(),
-            path: home.clone(),
+            path: resolve("right"),
             status: PanelStatus::Loading,
             sort: default_sort,
             filter: None,
