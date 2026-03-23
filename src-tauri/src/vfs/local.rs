@@ -1,5 +1,5 @@
 use std::fs;
-use std::io::{Read, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
 
 use super::{format_mtime, DirChild, VfsDriver, VfsEntry, VfsError, VfsKind};
@@ -126,6 +126,15 @@ impl VfsDriver for LocalFsDriver {
 
     fn file_size(&self, path: &str) -> Option<u64> {
         fs::metadata(path).ok().map(|m| m.len())
+    }
+
+    fn read_chunk(&self, path: &str, offset: u64, size: usize) -> Result<Vec<u8>, VfsError> {
+        let mut file = fs::File::open(path).map_err(|e| map_io_err(path, e))?;
+        file.seek(SeekFrom::Start(offset)).map_err(|e| map_io_err(path, e))?;
+        let mut buf = vec![0u8; size];
+        let n = file.read(&mut buf).map_err(|e| map_io_err(path, e))?;
+        buf.truncate(n);
+        Ok(buf)
     }
 
     fn read_dir_entries(&self, path: &str) -> Result<Vec<DirChild>, VfsError> {

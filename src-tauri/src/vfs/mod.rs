@@ -41,6 +41,10 @@ pub trait VfsDriver: Send + Sync {
 
     // ── Same-driver fast path ───────────────────────────────────────────────
 
+    /// Read up to `size` bytes from `path` starting at `offset`.
+    /// Returns fewer bytes than requested only at EOF.
+    fn read_chunk(&self, path: &str, offset: u64, size: usize) -> Result<Vec<u8>, VfsError>;
+
     /// Try an O(1) filesystem-level rename/move.
     /// Returns `Ok(true)` if the rename succeeded (e.g. same-filesystem move).
     /// Returns `Ok(false)` if this driver cannot do it (caller falls back to

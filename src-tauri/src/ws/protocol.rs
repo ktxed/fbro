@@ -54,6 +54,16 @@ pub enum ServerMessage {
         #[serde(rename = "activeJobs")]
         active_jobs: usize,
     },
+    FileChunk {
+        timestamp: String,
+        path: String,
+        offset: u64,
+        /// Hex-encoded bytes.
+        data: String,
+        eof: bool,
+        #[serde(rename = "fileSize", skip_serializing_if = "Option::is_none")]
+        file_size: Option<u64>,
+    },
 }
 
 #[derive(Serialize, Clone, Debug)]

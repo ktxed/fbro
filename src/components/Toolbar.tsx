@@ -65,6 +65,21 @@ export function Toolbar({ client }: { client: WsClient }) {
       // Don't handle keys while a modal is active
       if (state.pendingOp || state.activeJobId || state.pendingQuit) return;
 
+      if (e.key === "F3") {
+        e.preventDefault();
+        const panel = state.panels[state.focus];
+        if (panel) {
+          const entry = panel.entries[panel.cursor];
+          if (entry && entry.kind !== "directory") {
+            client.sendIntent("ViewFile", undefined, {
+              path: panel.path,
+              sourceId: panel.sourceId,
+              filename: entry.name,
+            });
+          }
+        }
+        return;
+      }
       if (e.key === "F10") {
         e.preventDefault();
         client.sendIntent("Quit");
@@ -93,6 +108,20 @@ export function Toolbar({ client }: { client: WsClient }) {
           tabIndex={-1}
           title={`${key} — ${label}`}
           onClick={() => {
+            if (key === "F3") {
+              const panel = state.panels[state.focus];
+              if (panel) {
+                const entry = panel.entries[panel.cursor];
+                if (entry && entry.kind !== "directory") {
+                  client.sendIntent("ViewFile", undefined, {
+                    path: panel.path,
+                    sourceId: panel.sourceId,
+                    filename: entry.name,
+                  });
+                }
+              }
+              return;
+            }
             if (key === "F10") { client.sendIntent("Quit"); return; }
             const opType = FILE_OP_KEYS[key];
             if (opType) openFileOp(opType);

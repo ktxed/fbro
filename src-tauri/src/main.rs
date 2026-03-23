@@ -16,14 +16,15 @@ use state::AppState;
 
 fn main() {
     tauri::Builder::default()
-        .setup(|_app| {
+        .setup(|app| {
+            let app_handle = app.handle().clone();
             let platform = Arc::new(LinuxPlatform);
             let session = persistence::load();
             let initial_paths = session.panels.into_iter()
                 .map(|(id, p)| (id, p.path))
                 .collect();
             let shared_state = Arc::new(Mutex::new(AppState::new_default(platform, initial_paths)));
-            tauri::async_runtime::spawn(ws::server::start(shared_state));
+            tauri::async_runtime::spawn(ws::server::start(shared_state, app_handle));
             Ok(())
         })
         .run(tauri::generate_context!())

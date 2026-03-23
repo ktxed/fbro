@@ -113,6 +113,10 @@ impl VfsDriver for SpyFsDriver {
         self.inner.file_size(path)
     }
 
+    fn read_chunk(&self, path: &str, offset: u64, size: usize) -> Result<Vec<u8>, VfsError> {
+        self.inner.read_chunk(path, offset, size)
+    }
+
     fn read_dir_entries(&self, path: &str) -> Result<Vec<DirChild>, VfsError> {
         self.inner.read_dir_entries(path)
     }

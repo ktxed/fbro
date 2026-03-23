@@ -610,3 +610,144 @@ body {
   padding: 4px 0;
   color: var(--text-dim);
 }
+
+/* ── Viewer window ───────────────────────────────────────────────────────── */
+
+.viewer {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: monospace;
+}
+
+.viewer__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--bg-header);
+  border-bottom: 1px solid var(--border);
+  padding: 4px 10px;
+  flex-shrink: 0;
+}
+
+.viewer__filename {
+  color: var(--text-path);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.viewer__mode-btns {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.viewer__mode-btn {
+  background: var(--bg-footer);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  cursor: pointer;
+  font-family: monospace;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 2px;
+}
+
+.viewer__mode-btn:hover {
+  background: var(--bg-focused);
+  color: var(--text);
+  border-color: var(--border-focus);
+}
+
+.viewer__mode-btn--active {
+  border-color: var(--accent);
+  color: var(--text);
+  background: var(--bg-focused);
+}
+
+.viewer__body {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+}
+
+.viewer__pre {
+  margin: 0;
+  padding: 8px 12px;
+  height: 100%;
+  overflow: auto;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre;
+  tab-size: 4;
+  box-sizing: border-box;
+}
+
+/* Large-file mode: no native scroll, leave room for custom scrollbar */
+.viewer__pre--virtual {
+  overflow: hidden;
+  padding-right: 22px;
+}
+
+.viewer__scrollbar {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 10px;
+  background: var(--bg);
+  border-left: 1px solid var(--border);
+  cursor: pointer;
+}
+
+.viewer__scrollbar-thumb {
+  position: absolute;
+  left: 1px;
+  right: 1px;
+  min-height: 12px;
+  background: var(--border);
+  border-radius: 3px;
+  transition: background 0.1s;
+}
+
+.viewer__scrollbar-thumb:hover,
+.viewer__scrollbar:active .viewer__scrollbar-thumb {
+  background: var(--accent);
+}
+
+.viewer__loading,
+.viewer__error {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.viewer__error {
+  color: #ff6060;
+}
+
+.viewer__status {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  background: var(--bg-footer);
+  border-top: 1px solid var(--border);
+  padding: 3px 10px;
+  font-size: 11px;
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+
+.viewer__status-nav {
+  margin-left: auto;
+  color: var(--text-dim);
+  opacity: 0.6;
+}

@@ -185,6 +185,17 @@ export interface QuitConfirmRequiredMessage {
   activeJobs: number;
 }
 
+export interface FileChunkMessage {
+  type: "FileChunk";
+  timestamp: string;
+  path: string;
+  offset: number;
+  /** Hex-encoded bytes. */
+  data: string;
+  eof: boolean;
+  fileSize?: number;
+}
+
 // ─── Union types ─────────────────────────────────────────────────────────────
 
 export type BEMessage =
@@ -194,6 +205,7 @@ export type BEMessage =
   | JobStartedMessage
   | JobEventMessage
   | ErrorMessage
-  | QuitConfirmRequiredMessage;
+  | QuitConfirmRequiredMessage
+  | FileChunkMessage;
 
 export type FEMessage = HelloMessage | IntentMessage;

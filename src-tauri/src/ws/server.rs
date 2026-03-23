@@ -21,7 +21,7 @@ use crate::ws::protocol::{
 const WS_ADDR: &str = "127.0.0.1:7878";
 const CHANNEL_CAP: usize = 512;
 
-pub async fn start(state: SharedState) {
+pub async fn start(state: SharedState, app_handle: tauri::AppHandle) {
     let listener = match TcpListener::bind(WS_ADDR).await {
         Ok(l) => l,
         Err(e) => {
@@ -35,14 +35,15 @@ pub async fn start(state: SharedState) {
         match listener.accept().await {
             Ok((stream, addr)) => {
                 let state = Arc::clone(&state);
-                tokio::spawn(handle_connection(stream, addr, state));
+                let app_handle = app_handle.clone();
+                tokio::spawn(handle_connection(stream, addr, state, app_handle));
             }
             Err(e) => eprintln!("[fbro] Accept error: {e}"),
         }
     }
 }
 
-async fn handle_connection(stream: TcpStream, addr: SocketAddr, state: SharedState) {
+async fn handle_connection(stream: TcpStream, addr: SocketAddr, state: SharedState, app_handle: tauri::AppHandle) {
     eprintln!("[fbro] Client connected: {addr}");
 
     let ws_stream = match tokio_tungstenite::accept_async(stream).await {
@@ -218,6 +219,7 @@ async fn handle_connection(stream: TcpStream, addr: SocketAddr, state: SharedSta
                                     &tx,
                                     &mut scan_handles,
                                     &mut decision_senders,
+                                    &app_handle,
                                 )
                                 .await;
                             }
@@ -253,6 +255,7 @@ async fn handle_intent(
     tx: &mpsc::Sender<ServerMessage>,
     scan_handles: &mut HashMap<String, ScanHandle>,
     decision_senders: &mut HashMap<String, mpsc::Sender<String>>,
+    app_handle: &tauri::AppHandle,
 ) {
     match name {
         "MoveCursor" => {
@@ -830,6 +833,78 @@ async fn handle_intent(
             decision_senders.remove(&job_id);
         }
 
+        "ViewFile" => {
+            let dir_path  = args.get("path").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let source_id = args.get("sourceId").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let filename  = args.get("filename").and_then(|v| v.as_str()).unwrap_or("").to_string();
+
+            let full_path = format!("{}/{}", dir_path.trim_end_matches('/'), filename);
+            let label = format!("viewer-{}", uuid::Uuid::new_v4());
+            let qs = format!(
+                "?viewer=1&path={}&source={}&name={}",
+                url_encode(&full_path),
+                url_encode(&source_id),
+                url_encode(&filename),
+            );
+
+            use tauri::Manager;
+            let _ = tauri::WebviewWindowBuilder::new(
+                app_handle,
+                label,
+                tauri::WebviewUrl::App(qs.into()),
+            )
+            .title(format!("{filename} — fbro viewer"))
+            .inner_size(900.0, 700.0)
+            .resizable(true)
+            .build();
+        }
+
+        "ReadFileChunk" => {
+            let path      = args.get("path").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let source_id = args.get("sourceId").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let offset    = args.get("offset").and_then(|v| v.as_u64()).unwrap_or(0);
+            let size      = args.get("size").and_then(|v| v.as_u64()).unwrap_or(4096) as usize;
+
+            let (driver, file_size) = {
+                let s = state.lock().await;
+                let drv = s.drivers.get(&source_id).cloned();
+                let sz  = drv.as_ref().and_then(|d| d.file_size(&path));
+                (drv, sz)
+            };
+
+            if let Some(driver) = driver {
+                let path_clone = path.clone();
+                let result = tokio::task::spawn_blocking(move || {
+                    driver.read_chunk(&path_clone, offset, size)
+                }).await;
+
+                match result {
+                    Ok(Ok(bytes)) => {
+                        let eof = bytes.len() < size
+                            || file_size.map_or(false, |fs| offset + bytes.len() as u64 >= fs);
+                        let data: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+                        let _ = tx.send(ServerMessage::FileChunk {
+                            timestamp: now(),
+                            path,
+                            offset,
+                            data,
+                            eof,
+                            file_size,
+                        }).await;
+                    }
+                    Ok(Err(e)) => {
+                        let _ = tx.send(ServerMessage::Error {
+                            timestamp: now(),
+                            code: "READ_CHUNK_FAILED".to_string(),
+                            message: e.to_string(),
+                            recoverable: true,
+                        }).await;
+                    }
+                    Err(_) => {}
+                }
+            }
+        }
+
         "Quit" => {
             let active_jobs = {
                 let s = state.lock().await;
@@ -950,6 +1025,19 @@ async fn rescan_panel(
         .await;
     let h = spawn_scan(panel_id.to_string(), path, sort, filter, version, tx.clone(), driver, None);
     scan_handles.insert(panel_id.to_string(), h);
+}
+
+fn url_encode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() * 2);
+    for byte in s.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9'
+            | b'-' | b'_' | b'.' | b'/' | b'~' | b':' => out.push(byte as char),
+            b' ' => out.push_str("%20"),
+            b => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
 }
 
 async fn save_session(state: &SharedState) {

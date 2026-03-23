@@ -22,13 +22,13 @@ export class WsClient {
     }
 
     this.ws.onopen = () => {
-      this.onConnected();
       this.send({
         type: "Hello",
         timestamp: new Date().toISOString(),
         protocolVersion: "0",
         client: { kind: "gui", name: "fbro-ui", supports: ["jobs", "decisions"] },
       });
+      this.onConnected();
     };
 
     this.ws.onmessage = (event) => {
