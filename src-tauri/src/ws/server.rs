@@ -958,6 +958,43 @@ async fn handle_intent(
             }
         }
 
+        "MakeDir" => {
+            let source_panel = args.get("sourcePanel").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let dir_path     = args.get("dirPath").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let name         = args.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+
+            let full_path = format!("{}/{}", dir_path.trim_end_matches('/'), name);
+
+            let driver = {
+                let s = state.lock().await;
+                s.panels.get(&source_panel)
+                    .and_then(|p| s.drivers.get(&p.source_id).cloned())
+            };
+
+            if let Some(driver) = driver {
+                let p = full_path.clone();
+                let result = tokio::task::spawn_blocking(move || driver.create_dir_all(&p)).await;
+                match result {
+                    Ok(Ok(())) => {
+                        let _ = tx.send(ServerMessage::MkdirOk {
+                            timestamp: now(),
+                            panel_id: source_panel.clone(),
+                        }).await;
+                        rescan_panel(&source_panel, state, &tx, scan_handles, Some(name)).await;
+                    }
+                    Ok(Err(e)) => {
+                        let _ = tx.send(ServerMessage::Error {
+                            timestamp: now(),
+                            code: "MKDIR_FAILED".to_string(),
+                            message: e.to_string(),
+                            recoverable: true,
+                        }).await;
+                    }
+                    Err(_) => {}
+                }
+            }
+        }
+
         "CloseViewerWindow" => {
             let label = args.get("label").and_then(|v| v.as_str()).unwrap_or("").to_string();
             use tauri::Manager;

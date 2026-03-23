@@ -204,6 +204,12 @@ export interface RenameOkMessage {
   panelId: string;
 }
 
+export interface MkdirOkMessage {
+  type: "MkdirOk";
+  timestamp: string;
+  panelId: string;
+}
+
 export interface ViewerFileChangedMessage {
   type: "ViewerFileChanged";
   timestamp: string;
@@ -225,6 +231,7 @@ export type BEMessage =
   | QuitConfirmRequiredMessage
   | FileChunkMessage
   | RenameOkMessage
+  | MkdirOkMessage
   | ViewerFileChangedMessage;
 
 export type FEMessage = HelloMessage | IntentMessage;

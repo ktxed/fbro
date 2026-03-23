@@ -69,6 +69,11 @@ pub enum ServerMessage {
         #[serde(rename = "panelId")]
         panel_id: String,
     },
+    MkdirOk {
+        timestamp: String,
+        #[serde(rename = "panelId")]
+        panel_id: String,
+    },
     ViewerFileChanged {
         timestamp: String,
         path: String,

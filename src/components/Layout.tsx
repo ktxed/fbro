@@ -3,6 +3,7 @@ import { OperationModal } from "./OperationModal";
 import { QuitModal } from "./QuitModal";
 import { RenameModal } from "./RenameModal";
 import { InfoModal } from "./InfoModal";
+import { MkDirModal } from "./MkDirModal";
 import { useAppState } from "../store";
 import type { WsClient } from "../ws/client";
 
@@ -20,7 +21,7 @@ export function Layout({ client }: LayoutProps) {
   }
 
   const activeJob = state.activeJobId ? state.jobs[state.activeJobId] ?? null : null;
-  const modalActive = state.pendingOp !== null || state.activeJobId !== null || state.pendingQuit !== null || state.pendingRename !== null || state.pendingInfo !== null;
+  const modalActive = state.pendingOp !== null || state.activeJobId !== null || state.pendingQuit !== null || state.pendingRename !== null || state.pendingInfo !== null || state.pendingMkdir !== null;
 
   return (
     <>
@@ -54,6 +55,9 @@ export function Layout({ client }: LayoutProps) {
       )}
       {state.pendingInfo && (
         <InfoModal info={state.pendingInfo} />
+      )}
+      {state.pendingMkdir && (
+        <MkDirModal mkdir={state.pendingMkdir} client={client} />
       )}
     </>
   );

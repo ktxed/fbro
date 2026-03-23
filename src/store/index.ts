@@ -32,6 +32,12 @@ export interface PendingInfo {
   permissions?: string;
 }
 
+export interface PendingMkdir {
+  sourcePanel: string;
+  dirPath: string;
+  error?: string;
+}
+
 export interface AppState {
   connected: boolean;
   sessionId: string | null;
@@ -45,6 +51,7 @@ export interface AppState {
   pendingQuit: { activeJobs: number } | null;
   pendingRename: PendingRename | null;
   pendingInfo: PendingInfo | null;
+  pendingMkdir: PendingMkdir | null;
 }
 
 const initialState: AppState = {
@@ -60,6 +67,7 @@ const initialState: AppState = {
   pendingQuit: null,
   pendingRename: null,
   pendingInfo: null,
+  pendingMkdir: null,
 };
 
 // ─── Actions ─────────────────────────────────────────────────────────────────
@@ -75,7 +83,9 @@ export type AppAction =
   | { type: "OPEN_RENAME"; rename: PendingRename }
   | { type: "CLOSE_RENAME" }
   | { type: "OPEN_INFO"; info: PendingInfo }
-  | { type: "CLOSE_INFO" };
+  | { type: "CLOSE_INFO" }
+  | { type: "OPEN_MKDIR"; mkdir: PendingMkdir }
+  | { type: "CLOSE_MKDIR" };
 
 // ─── Reducer ─────────────────────────────────────────────────────────────────
 
@@ -230,10 +240,15 @@ function reducer(state: AppState, action: AppAction): AppState {
           if (msg.code === "RENAME_FAILED" && state.pendingRename) {
             return { ...state, pendingRename: { ...state.pendingRename, error: msg.message } };
           }
+          if (msg.code === "MKDIR_FAILED" && state.pendingMkdir) {
+            return { ...state, pendingMkdir: { ...state.pendingMkdir, error: msg.message } };
+          }
           console.error("BE error:", msg.code, msg.message);
           return state;
         case "RenameOk":
           return { ...state, pendingRename: null };
+        case "MkdirOk":
+          return { ...state, pendingMkdir: null };
         case "QuitConfirmRequired":
           return applyQuitConfirmRequired(state, msg);
         default:
@@ -256,6 +271,10 @@ function reducer(state: AppState, action: AppAction): AppState {
       return { ...state, pendingInfo: action.info };
     case "CLOSE_INFO":
       return { ...state, pendingInfo: null };
+    case "OPEN_MKDIR":
+      return { ...state, pendingMkdir: action.mkdir };
+    case "CLOSE_MKDIR":
+      return { ...state, pendingMkdir: null };
   }
 }
 

@@ -101,7 +101,7 @@ export function Toolbar({ client }: { client: WsClient }) {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       // Don't handle keys while a modal is active
-      if (state.pendingOp || state.activeJobId || state.pendingQuit || state.pendingRename || state.pendingInfo) return;
+      if (state.pendingOp || state.activeJobId || state.pendingQuit || state.pendingRename || state.pendingInfo || state.pendingMkdir) return;
 
       if (e.key === "i" || e.key === "I") {
         e.preventDefault();
@@ -126,6 +126,17 @@ export function Toolbar({ client }: { client: WsClient }) {
               filename: entry.name,
             });
           }
+        }
+        return;
+      }
+      if (e.key === "F7") {
+        e.preventDefault();
+        const panel = state.panels[state.focus];
+        if (panel) {
+          dispatch({
+            type: "OPEN_MKDIR",
+            mkdir: { sourcePanel: state.focus, dirPath: panel.path },
+          });
         }
         return;
       }
@@ -170,6 +181,16 @@ export function Toolbar({ client }: { client: WsClient }) {
                     filename: entry.name,
                   });
                 }
+              }
+              return;
+            }
+            if (key === "F7") {
+              const panel = state.panels[state.focus];
+              if (panel) {
+                dispatch({
+                  type: "OPEN_MKDIR",
+                  mkdir: { sourcePanel: state.focus, dirPath: panel.path },
+                });
               }
               return;
             }
