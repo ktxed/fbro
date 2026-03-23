@@ -34,12 +34,13 @@ export function Panel({ panelId, panel, isFocused, modalActive, client }: PanelP
   const focusDivRef = useRef<HTMLDivElement>(null);
   const rightDrag = useRef({ active: false, everMoved: false, startRow: -1, mode: "select" as "select" | "deselect", preSelection: [] as number[] });
 
-  // Keep focused panel's div focused so it receives keyboard events
+  // Keep focused panel's div focused so it receives keyboard events.
+  // Also re-focus when a modal closes (modalActive transitions to false).
   useEffect(() => {
-    if (isFocused) {
+    if (isFocused && !modalActive) {
       focusDivRef.current?.focus();
     }
-  }, [isFocused]);
+  }, [isFocused, modalActive]);
 
   // End right-drag on mouse up anywhere; if a drag occurred, send final SetSelection
   useEffect(() => {

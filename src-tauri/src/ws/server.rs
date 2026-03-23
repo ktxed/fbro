@@ -202,7 +202,7 @@ async fn handle_connection(stream: TcpStream, addr: SocketAddr, state: SharedSta
                             }
                         };
                         for pid in panels_to_rescan {
-                            rescan_panel(&pid, &state, &tx, &mut scan_handles).await;
+                            rescan_panel(&pid, &state, &tx, &mut scan_handles, None).await;
                         }
                     }
                 }
@@ -272,7 +272,7 @@ async fn handle_intent(
                 s.panels.keys().cloned().collect()
             };
             for panel_id in panel_ids {
-                rescan_panel(&panel_id, state, &tx, scan_handles).await;
+                rescan_panel(&panel_id, state, &tx, scan_handles, None).await;
             }
         }
 
@@ -915,7 +915,7 @@ async fn handle_intent(
                             timestamp: now(),
                             panel_id: source_panel.clone(),
                         }).await;
-                        rescan_panel(&source_panel, state, &tx, scan_handles).await;
+                        rescan_panel(&source_panel, state, &tx, scan_handles, Some(dest_name.clone())).await;
                     }
                     Ok(Ok(false)) => {
                         let _ = tx.send(ServerMessage::Error {
@@ -1080,6 +1080,7 @@ async fn rescan_panel(
     state: &SharedState,
     tx: &mpsc::Sender<ServerMessage>,
     scan_handles: &mut HashMap<String, ScanHandle>,
+    cursor_hint: Option<String>,
 ) {
     if let Some(h) = scan_handles.remove(panel_id) {
         h.abort();
@@ -1110,7 +1111,7 @@ async fn rescan_panel(
             }),
         })
         .await;
-    let h = spawn_scan(panel_id.to_string(), path, sort, filter, version, tx.clone(), driver, None);
+    let h = spawn_scan(panel_id.to_string(), path, sort, filter, version, tx.clone(), driver, cursor_hint);
     scan_handles.insert(panel_id.to_string(), h);
 }
 
