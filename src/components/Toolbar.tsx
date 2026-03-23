@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { useAppState, useAppDispatch } from "../store";
+import type { WsClient } from "../ws/client";
 import type { FileOpType, PendingOp, FileOpFile } from "../ws/types";
 
 const ACTIONS = [
@@ -19,7 +20,7 @@ const FILE_OP_KEYS: Record<string, FileOpType> = {
   F8: "delete",
 };
 
-export function Toolbar() {
+export function Toolbar({ client }: { client: WsClient }) {
   const state = useAppState();
   const dispatch = useAppDispatch();
 
@@ -62,8 +63,13 @@ export function Toolbar() {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       // Don't handle keys while a modal is active
-      if (state.pendingOp || state.activeJobId) return;
+      if (state.pendingOp || state.activeJobId || state.pendingQuit) return;
 
+      if (e.key === "F10") {
+        e.preventDefault();
+        client.sendIntent("Quit");
+        return;
+      }
       const opType = FILE_OP_KEYS[e.key];
       if (opType) {
         e.preventDefault();
@@ -87,6 +93,7 @@ export function Toolbar() {
           tabIndex={-1}
           title={`${key} — ${label}`}
           onClick={() => {
+            if (key === "F10") { client.sendIntent("Quit"); return; }
             const opType = FILE_OP_KEYS[key];
             if (opType) openFileOp(opType);
           }}

@@ -826,6 +826,27 @@ async fn handle_intent(
             decision_senders.remove(&job_id);
         }
 
+        "Quit" => {
+            let active_jobs = {
+                let s = state.lock().await;
+                s.job_store.jobs.values().filter(|j| {
+                    j.state == JobState::Running || j.state == JobState::AwaitingDecision
+                }).count()
+            };
+            if active_jobs == 0 {
+                std::process::exit(0);
+            } else {
+                let _ = tx.send(ServerMessage::QuitConfirmRequired {
+                    timestamp: now(),
+                    active_jobs,
+                }).await;
+            }
+        }
+
+        "ConfirmQuit" => {
+            std::process::exit(0);
+        }
+
         unknown => {
             eprintln!("[fbro] Unknown intent: {unknown}");
         }

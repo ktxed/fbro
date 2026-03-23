@@ -1,5 +1,6 @@
 import { Panel } from "./Panel";
 import { OperationModal } from "./OperationModal";
+import { QuitModal } from "./QuitModal";
 import { useAppState } from "../store";
 import type { WsClient } from "../ws/client";
 
@@ -17,7 +18,7 @@ export function Layout({ client }: LayoutProps) {
   }
 
   const activeJob = state.activeJobId ? state.jobs[state.activeJobId] ?? null : null;
-  const modalActive = state.pendingOp !== null || state.activeJobId !== null;
+  const modalActive = state.pendingOp !== null || state.activeJobId !== null || state.pendingQuit !== null;
 
   return (
     <>
@@ -43,6 +44,9 @@ export function Layout({ client }: LayoutProps) {
         activeJobId={state.activeJobId}
         client={client}
       />
+      {state.pendingQuit && (
+        <QuitModal activeJobs={state.pendingQuit.activeJobs} client={client} />
+      )}
     </>
   );
 }

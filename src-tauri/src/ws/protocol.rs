@@ -49,6 +49,11 @@ pub enum ServerMessage {
         message: String,
         recoverable: bool,
     },
+    QuitConfirmRequired {
+        timestamp: String,
+        #[serde(rename = "activeJobs")]
+        active_jobs: usize,
+    },
 }
 
 #[derive(Serialize, Clone, Debug)]

@@ -9,6 +9,7 @@ import type {
   JobStartedMessage,
   JobEventMessage,
   PendingOp,
+  QuitConfirmRequiredMessage,
 } from "../ws/types";
 
 // ─── State ───────────────────────────────────────────────────────────────────
@@ -23,6 +24,7 @@ export interface AppState {
   jobs: Record<string, Job>;
   pendingOp: PendingOp | null;
   activeJobId: string | null;
+  pendingQuit: { activeJobs: number } | null;
 }
 
 const initialState: AppState = {
@@ -35,6 +37,7 @@ const initialState: AppState = {
   jobs: {},
   pendingOp: null,
   activeJobId: null,
+  pendingQuit: null,
 };
 
 // ─── Actions ─────────────────────────────────────────────────────────────────
@@ -45,7 +48,8 @@ export type AppAction =
   | { type: "BE_MESSAGE"; msg: BEMessage }
   | { type: "OPEN_OPERATION"; op: PendingOp }
   | { type: "CLOSE_OPERATION" }
-  | { type: "SET_ACTIVE_JOB"; jobId: string };
+  | { type: "SET_ACTIVE_JOB"; jobId: string }
+  | { type: "CANCEL_QUIT" };
 
 // ─── Reducer ─────────────────────────────────────────────────────────────────
 
@@ -142,6 +146,10 @@ function applyJobStarted(state: AppState, msg: JobStartedMessage): AppState {
   };
 }
 
+function applyQuitConfirmRequired(state: AppState, msg: QuitConfirmRequiredMessage): AppState {
+  return { ...state, pendingQuit: { activeJobs: msg.activeJobs } };
+}
+
 function applyJobEvent(state: AppState, msg: JobEventMessage): AppState {
   const job = state.jobs[msg.jobId];
   if (!job) return state;
@@ -193,6 +201,8 @@ function reducer(state: AppState, action: AppAction): AppState {
         case "Error":
           console.error("BE error:", msg.code, msg.message);
           return state;
+        case "QuitConfirmRequired":
+          return applyQuitConfirmRequired(state, msg);
         default:
           return state;
       }
@@ -203,6 +213,8 @@ function reducer(state: AppState, action: AppAction): AppState {
       return { ...state, pendingOp: null, activeJobId: null };
     case "SET_ACTIVE_JOB":
       return { ...state, activeJobId: action.jobId, pendingOp: null };
+    case "CANCEL_QUIT":
+      return { ...state, pendingQuit: null };
   }
 }
 

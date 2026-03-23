@@ -175,6 +175,12 @@ export interface ErrorMessage {
   recoverable: boolean;
 }
 
+export interface QuitConfirmRequiredMessage {
+  type: "QuitConfirmRequired";
+  timestamp: string;
+  activeJobs: number;
+}
+
 // ─── Union types ─────────────────────────────────────────────────────────────
 
 export type BEMessage =
@@ -183,6 +189,7 @@ export type BEMessage =
   | StatePatchMessage
   | JobStartedMessage
   | JobEventMessage
-  | ErrorMessage;
+  | ErrorMessage
+  | QuitConfirmRequiredMessage;
 
 export type FEMessage = HelloMessage | IntentMessage;
