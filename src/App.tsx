@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { AppContext, useAppReducer } from "./store";
 import { WsClient } from "./ws/client";
 import { Layout } from "./components/Layout";
+import { JobsBar } from "./components/JobsBar";
 import { Toolbar } from "./components/Toolbar";
 
 export function App() {
@@ -31,7 +32,8 @@ export function App() {
       )}
       <div className="app">
         {client && <Layout client={client} />}
-        <Toolbar />
+        {client && <JobsBar client={client} />}
+        {client && <Toolbar client={client} />}
       </div>
     </AppContext.Provider>
   );

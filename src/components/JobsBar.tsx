@@ -1,0 +1,73 @@
+import { useState } from "react";
+import { useAppState, useAppDispatch } from "../store";
+import type { WsClient } from "../ws/client";
+
+const VISIBLE = 5;
+
+export function JobsBar({ client }: { client: WsClient }) {
+  const state = useAppState();
+  const dispatch = useAppDispatch();
+  const [scrollIndex, setScrollIndex] = useState(0);
+
+  const activeJobs = Object.values(state.jobs).filter(
+    (j) => j.state === "Running" || j.state === "AwaitingDecision"
+  );
+
+  if (activeJobs.length === 0) return null;
+
+  const clamped = Math.min(scrollIndex, Math.max(0, activeJobs.length - VISIBLE));
+  const visible = activeJobs.slice(clamped, clamped + VISIBLE);
+  const canLeft = clamped > 0;
+  const canRight = clamped + VISIBLE < activeJobs.length;
+
+  return (
+    <div className="jobs-bar">
+      <button
+        className="jobs-bar__arrow"
+        disabled={!canLeft}
+        onClick={() => setScrollIndex(clamped - 1)}
+      >
+        ‹
+      </button>
+
+      {visible.map((job) => {
+        const isActive = job.jobId === state.activeJobId;
+        const p = job.progress;
+        const pct = p && p.totalFiles > 0
+          ? Math.round((p.completedFiles / p.totalFiles) * 100)
+          : null;
+        const typeLabel = job.type.charAt(0).toUpperCase() + job.type.slice(1);
+
+        return (
+          <button
+            key={job.jobId}
+            className={`jobs-bar__job${isActive ? " jobs-bar__job--active" : ""}`}
+            onClick={() => dispatch({ type: "SET_ACTIVE_JOB", jobId: job.jobId })}
+          >
+            <span className="jobs-bar__job-label">{typeLabel}</span>
+            {pct !== null && <span className="jobs-bar__job-pct">{pct}%</span>}
+            <span
+              className="jobs-bar__job-close"
+              role="button"
+              title="Cancel job"
+              onClick={(e) => {
+                e.stopPropagation();
+                client.sendIntent("CancelJob", undefined, { jobId: job.jobId });
+              }}
+            >
+              ×
+            </span>
+          </button>
+        );
+      })}
+
+      <button
+        className="jobs-bar__arrow"
+        disabled={!canRight}
+        onClick={() => setScrollIndex(clamped + 1)}
+      >
+        ›
+      </button>
+    </div>
+  );
+}
