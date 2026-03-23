@@ -265,11 +265,16 @@ export function OperationModal({ pending, activeJob, activeJobId, client }: Oper
           </div>
           <div className="modal__actions">
             {!isTerminal && !isDecision && (
-              <button className="modal__btn" onClick={() =>
-                client.sendIntent("CancelJob", undefined, { jobId: activeJobId })
-              }>
-                Cancel
-              </button>
+              <>
+                <button className="modal__btn" onClick={close}>
+                  Background
+                </button>
+                <button className="modal__btn" onClick={() =>
+                  client.sendIntent("CancelJob", undefined, { jobId: activeJobId })
+                }>
+                  Cancel
+                </button>
+              </>
             )}
             {isTerminal && (
               <button className="modal__btn modal__btn--primary" onClick={close}>
