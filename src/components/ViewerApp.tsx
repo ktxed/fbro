@@ -133,7 +133,7 @@ export function ViewerApp({ path, sourceId, filename }: ViewerAppProps) {
   // ── WS connection ─────────────────────────────────────────────────────────
 
   useEffect(() => {
-    const client = new WsClient();
+    const client = new WsClient("viewer");
     clientRef.current = client;
 
     client.onConnected = () => requestChunk(0, SMALL_LIMIT);

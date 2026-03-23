@@ -102,7 +102,7 @@ export interface HelloMessage {
   timestamp: string;
   protocolVersion: string;
   client: {
-    kind: "gui";
+    kind: "gui" | "viewer";
     name: string;
     supports: string[];
   };

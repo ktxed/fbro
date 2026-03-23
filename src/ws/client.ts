@@ -7,6 +7,11 @@ export class WsClient {
   private ws: WebSocket | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private destroyed = false;
+  private clientKind: "gui" | "viewer";
+
+  constructor(clientKind: "gui" | "viewer" = "gui") {
+    this.clientKind = clientKind;
+  }
 
   onMessage: (msg: BEMessage) => void = () => {};
   onConnected: () => void = () => {};
@@ -26,7 +31,7 @@ export class WsClient {
         type: "Hello",
         timestamp: new Date().toISOString(),
         protocolVersion: "0",
-        client: { kind: "gui", name: "fbro-ui", supports: ["jobs", "decisions"] },
+        client: { kind: this.clientKind, name: "fbro-ui", supports: ["jobs", "decisions"] },
       });
       this.onConnected();
     };

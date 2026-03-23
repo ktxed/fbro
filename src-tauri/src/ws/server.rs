@@ -58,12 +58,12 @@ async fn handle_connection(stream: TcpStream, addr: SocketAddr, state: SharedSta
     let (tx, mut rx) = mpsc::channel::<ServerMessage>(CHANNEL_CAP);
 
     // ── Wait for Hello ────────────────────────────────────────────────────────
-    let _hello = loop {
+    let hello_client = loop {
         match ws_rx.next().await {
             Some(Ok(Message::Text(text))) => {
                 match serde_json::from_str::<ClientMessage>(&text) {
                     Ok(ClientMessage::Hello { protocol_version, client }) => {
-                        eprintln!("[fbro] Hello from {:?} (protocol v{})", client.name, protocol_version);
+                        eprintln!("[fbro] Hello from {:?} kind={:?} (protocol v{})", client.name, client.kind, protocol_version);
                         break client;
                     }
                     Ok(_) => eprintln!("[fbro] Expected Hello, got other intent"),
@@ -75,6 +75,10 @@ async fn handle_connection(stream: TcpStream, addr: SocketAddr, state: SharedSta
         }
     };
 
+    // Viewer connections only need file chunk reads — skip state snapshot and
+    // panel scans, which would corrupt the shared cursor/entry state.
+    let is_gui = hello_client.kind == "gui";
+
     let session_id = uuid::Uuid::new_v4().to_string();
 
     // ── Send Welcome ──────────────────────────────────────────────────────────
@@ -85,8 +89,8 @@ async fn handle_connection(stream: TcpStream, addr: SocketAddr, state: SharedSta
     })
     .await;
 
-    // ── Send initial StateSnapshot ─────────────────────────────────────────────
-    let (snapshot, panel_ids) = {
+    // ── Send initial StateSnapshot (gui clients only) ──────────────────────────
+    let (snapshot, panel_ids) = if is_gui { {
         let s = state.lock().await;
         let panel_ids: Vec<String> = s.panels.keys().cloned().collect::<Vec<_>>();
 
@@ -143,12 +147,16 @@ async fn handle_connection(stream: TcpStream, addr: SocketAddr, state: SharedSta
             },
         };
 
-        (snapshot, panel_ids)
+        (Some(snapshot), panel_ids)
+    } } else {
+        (None, vec![])
     };
 
-    let _ = send_msg(&mut ws_tx, &snapshot).await;
+    if let Some(snapshot) = snapshot {
+        let _ = send_msg(&mut ws_tx, &snapshot).await;
+    }
 
-    // ── Spawn initial scan jobs ────────────────────────────────────────────────
+    // ── Spawn initial scan jobs (gui clients only) ─────────────────────────────
     let mut scan_handles: HashMap<String, ScanHandle> = HashMap::new();
     let mut decision_senders: HashMap<String, mpsc::Sender<String>> = HashMap::new();
 
