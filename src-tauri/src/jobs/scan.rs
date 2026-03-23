@@ -46,6 +46,7 @@ pub async fn run_scan(
             size: e.size,
             mtime: e.mtime,
             permissions: e.permissions,
+            icon_name: e.icon_name,
         })
         .collect();
 

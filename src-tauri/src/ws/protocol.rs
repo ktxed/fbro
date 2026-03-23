@@ -123,6 +123,9 @@ pub struct EntrySchema {
     pub mtime: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub permissions: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "iconName")]
+    pub icon_name: Option<String>,
 }
 
 #[derive(Serialize, Clone, Debug)]

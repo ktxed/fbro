@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import type { PanelState, VFSEntry } from "../ws/types";
 import type { WsClient } from "../ws/client";
 
@@ -10,13 +10,32 @@ interface PanelProps {
   client: WsClient;
 }
 
-function entryIcon(entry: VFSEntry): string {
+function fallbackIcon(entry: VFSEntry): string {
   switch (entry.kind) {
     case "directory": return "▶";
     case "symlink":   return "↗";
     case "file":      return " ";
     default:          return "?";
   }
+}
+
+function EntryIcon({ entry }: { entry: VFSEntry }) {
+  const [failed, setFailed] = useState(false);
+  const iconName = entry.iconName;
+  return (
+    <span className="panel__col-icon">
+      {iconName && !failed ? (
+        <img
+          src={`icon://localhost/${iconName}`}
+          alt=""
+          draggable={false}
+          onError={() => setFailed(true)}
+        />
+      ) : (
+        <span>{fallbackIcon(entry)}</span>
+      )}
+    </span>
+  );
 }
 
 function formatSize(entry: VFSEntry): string {
@@ -225,7 +244,7 @@ export function Panel({ panelId, panel, isFocused, modalActive, client }: PanelP
               if (entry.kind === "directory") client.sendIntent("OpenEntry", "focused-panel");
             }}
           >
-            <span className="panel__icon">{entryIcon(entry)}</span>
+            <EntryIcon entry={entry} />
             <span className="panel__name">{entry.name}</span>
             <span className="panel__size">{formatSize(entry)}</span>
             <span className="panel__mtime">{formatMtime(entry.mtime)}</span>

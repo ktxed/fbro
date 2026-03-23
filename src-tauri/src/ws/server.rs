@@ -91,7 +91,13 @@ async fn handle_connection(stream: TcpStream, addr: SocketAddr, state: SharedSta
 
     // ── Send initial StateSnapshot (gui clients only) ──────────────────────────
     let (snapshot, panel_ids) = if is_gui { {
-        let s = state.lock().await;
+        let mut s = state.lock().await;
+        // Clear stale entries so the snapshot + scan don't double on reconnect
+        for panel in s.panels.values_mut() {
+            panel.entries.clear();
+            panel.status = PanelStatus::Loading;
+            panel.version += 1;
+        }
         let panel_ids: Vec<String> = s.panels.keys().cloned().collect::<Vec<_>>();
 
         let panels: std::collections::HashMap<String, PanelSnapshot> = s
@@ -1176,6 +1182,7 @@ async fn update_panel_from_patch(
                     size: e["size"].as_u64(),
                     mtime: e["mtime"].as_str().map(String::from),
                     permissions: e["permissions"].as_str().map(String::from),
+                    icon_name: e["iconName"].as_str().map(String::from),
                 });
             }
         }

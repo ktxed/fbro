@@ -21,8 +21,9 @@
   --text-size:    #888899;
   --accent:       #4a7cbf;
   --font:         "JetBrains Mono", "Fira Code", "Cascadia Code", "Consolas", monospace;
-  --font-size:    13px;
-  --row-height:   20px;
+  --font-size:    14px;
+  --font-size-sm: 12px;
+  --row-height:   22px;
 }
 
 html, body, #root {
@@ -44,7 +45,7 @@ body {
 .banner {
   text-align: center;
   padding: 4px 0;
-  font-size: 11px;
+  font-size: var(--font-size-sm);
   letter-spacing: 0.05em;
 }
 
@@ -119,7 +120,7 @@ body {
 
 .panel__path {
   color: var(--text-path);
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -132,7 +133,7 @@ body {
   border: 1px solid transparent;
   color: var(--text-dim);
   font-family: var(--font);
-  font-size: 13px;
+  font-size: var(--font-size);
   line-height: 1;
   padding: 0 4px;
   cursor: pointer;
@@ -180,11 +181,22 @@ body {
   color: #fff;
 }
 
-.panel__icon {
-  width: 14px;
+.panel__col-icon {
   flex-shrink: 0;
+  width: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.panel__col-icon img {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+}
+
+.panel__col-icon span {
   color: var(--text-dim);
-  font-size: 10px;
 }
 
 .panel__name {
@@ -194,35 +206,27 @@ body {
   min-width: 0;
 }
 
-/* Directories get a distinct color */
-.panel__row [class="panel__icon"] + .panel__name {
-  color: var(--text);
-}
-
 .panel__size {
   flex-shrink: 0;
   width: 70px;
   text-align: right;
   color: var(--text-size);
-  font-size: 11px;
   padding-left: 8px;
 }
 
 .panel__mtime {
   flex-shrink: 0;
-  width: 120px;
+  width: 130px;
   text-align: right;
   color: var(--text-dim);
-  font-size: 11px;
   padding-left: 8px;
 }
 
 .panel__perms {
   flex-shrink: 0;
-  width: 68px;
+  width: 76px;
   text-align: right;
   color: var(--text-dim);
-  font-size: 11px;
   font-family: monospace;
   padding-left: 8px;
 }
@@ -258,7 +262,7 @@ body {
   background: var(--bg-footer);
   border-top: 1px solid var(--border);
   padding: 2px 8px;
-  font-size: 11px;
+  font-size: var(--font-size-sm);
   color: var(--text-dim);
   flex-shrink: 0;
 }
@@ -290,7 +294,7 @@ body {
   border-radius: 3px;
   color: var(--text-dim);
   font-family: var(--font);
-  font-size: 11px;
+  font-size: var(--font-size-sm);
   padding: 3px 4px;
   cursor: pointer;
   white-space: nowrap;
@@ -306,12 +310,12 @@ body {
 .toolbar__key {
   color: var(--accent);
   font-weight: bold;
-  font-size: 10px;
+  font-size: var(--font-size-sm);
   flex-shrink: 0;
 }
 
 .toolbar__icon {
-  font-size: 13px;
+  font-size: var(--font-size);
   line-height: 1;
   flex-shrink: 0;
 }

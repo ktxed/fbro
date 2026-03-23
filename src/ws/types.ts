@@ -6,6 +6,7 @@ export interface VFSEntry {
   size?: number;
   mtime?: string;
   permissions?: string;
+  iconName?: string;
 }
 
 export interface Source {

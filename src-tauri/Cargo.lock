@@ -741,6 +741,7 @@ name = "fbro"
 version = "0.1.0"
 dependencies = [
  "futures-util",
+ "http",
  "serde",
  "serde_json",
  "tauri",
