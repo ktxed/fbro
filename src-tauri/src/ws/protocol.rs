@@ -167,6 +167,7 @@ pub struct JobStartSchema {
     pub dest_path: Option<String>,
     pub total_files: usize,
     pub total_bytes_total: u64,
+    pub background: bool,
 }
 
 #[derive(Serialize, Clone, Debug)]

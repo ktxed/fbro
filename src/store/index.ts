@@ -143,7 +143,7 @@ function applyJobStarted(state: AppState, msg: JobStartedMessage): AppState {
   return {
     ...state,
     jobs: { ...state.jobs, [job.jobId]: newJob },
-    activeJobId: state.activeJobId ?? job.jobId,
+    activeJobId: job.background ? state.activeJobId : (state.activeJobId ?? job.jobId),
     pendingOp: null,
   };
 }

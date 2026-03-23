@@ -765,6 +765,7 @@ async fn handle_intent(
                     dest_path: dest_path.clone(),
                     total_files: files.len(),
                     total_bytes_total,
+                    background,
                 },
             }).await;
 

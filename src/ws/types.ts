@@ -80,6 +80,7 @@ export interface JobStart {
   destPath?: string;
   totalFiles: number;
   totalBytesTotal: number;
+  background: boolean;
 }
 
 export type FileOpType = "copy" | "move" | "delete";
