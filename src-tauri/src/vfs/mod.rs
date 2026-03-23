@@ -71,6 +71,7 @@ pub struct VfsEntry {
     pub kind: VfsKind,
     pub size: Option<u64>,
     pub mtime: Option<String>,
+    pub permissions: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]

@@ -7,6 +7,29 @@ use crate::ws::protocol::{FilterSpec, SortSpec};
 
 pub struct LocalFsDriver;
 
+#[cfg(unix)]
+fn format_permissions(meta: &fs::Metadata) -> Option<String> {
+    use std::os::unix::fs::PermissionsExt;
+    let mode = meta.permissions().mode();
+    let bits = |shift: u32| -> [char; 3] {
+        let b = (mode >> shift) & 7;
+        [
+            if b & 4 != 0 { 'r' } else { '-' },
+            if b & 2 != 0 { 'w' } else { '-' },
+            if b & 1 != 0 { 'x' } else { '-' },
+        ]
+    };
+    let [ur, uw, ux] = bits(6);
+    let [gr, gw, gx] = bits(3);
+    let [or, ow, ox] = bits(0);
+    Some(format!("{ur}{uw}{ux}{gr}{gw}{gx}{or}{ow}{ox}"))
+}
+
+#[cfg(not(unix))]
+fn format_permissions(meta: &fs::Metadata) -> Option<String> {
+    Some(if meta.permissions().readonly() { "r-" } else { "rw" }.to_string())
+}
+
 fn map_io_err(path: &str, e: std::io::Error) -> VfsError {
     match e.kind() {
         std::io::ErrorKind::PermissionDenied => VfsError::PermissionDenied(e.to_string()),
@@ -49,7 +72,7 @@ impl VfsDriver for LocalFsDriver {
             }
 
             let meta = entry.metadata().ok();
-            let (kind, size, mtime) = if let Some(m) = meta {
+            let (kind, size, mtime, permissions) = if let Some(m) = meta {
                 let kind = if m.is_symlink() {
                     VfsKind::Symlink
                 } else if m.is_dir() {
@@ -61,12 +84,13 @@ impl VfsDriver for LocalFsDriver {
                 };
                 let size = if m.is_file() { Some(m.len()) } else { None };
                 let mtime = m.modified().ok().and_then(format_mtime);
-                (kind, size, mtime)
+                let permissions = format_permissions(&m);
+                (kind, size, mtime, permissions)
             } else {
-                (VfsKind::Other, None, None)
+                (VfsKind::Other, None, None, None)
             };
 
-            entries.push(VfsEntry { name, kind, size, mtime });
+            entries.push(VfsEntry { name, kind, size, mtime, permissions });
         }
 
         entries.sort_by(|a, b| {

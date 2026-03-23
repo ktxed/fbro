@@ -29,6 +29,15 @@ function formatSize(entry: VFSEntry): string {
   return `${(s / (1024 * 1024 * 1024)).toFixed(1)}G`;
 }
 
+function formatMtime(mtime: string | undefined): string {
+  if (!mtime) return "";
+  const secs = parseInt(mtime, 10);
+  if (isNaN(secs)) return "";
+  const d = new Date(secs * 1000);
+  const p = (n: number) => n.toString().padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
 export function Panel({ panelId, panel, isFocused, modalActive, client }: PanelProps) {
   const listRef = useRef<HTMLDivElement>(null);
   const focusDivRef = useRef<HTMLDivElement>(null);
@@ -219,6 +228,8 @@ export function Panel({ panelId, panel, isFocused, modalActive, client }: PanelP
             <span className="panel__icon">{entryIcon(entry)}</span>
             <span className="panel__name">{entry.name}</span>
             <span className="panel__size">{formatSize(entry)}</span>
+            <span className="panel__mtime">{formatMtime(entry.mtime)}</span>
+            <span className="panel__perms">{entry.permissions ?? ""}</span>
           </div>
         ))}
         {panel.status === "loading" && panel.entries.length === 0 && (

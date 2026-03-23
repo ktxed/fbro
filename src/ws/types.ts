@@ -5,6 +5,7 @@ export interface VFSEntry {
   kind: "file" | "directory" | "symlink" | "other";
   size?: number;
   mtime?: string;
+  permissions?: string;
 }
 
 export interface Source {

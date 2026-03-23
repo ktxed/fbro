@@ -208,6 +208,25 @@ body {
   padding-left: 8px;
 }
 
+.panel__mtime {
+  flex-shrink: 0;
+  width: 120px;
+  text-align: right;
+  color: var(--text-dim);
+  font-size: 11px;
+  padding-left: 8px;
+}
+
+.panel__perms {
+  flex-shrink: 0;
+  width: 68px;
+  text-align: right;
+  color: var(--text-dim);
+  font-size: 11px;
+  font-family: monospace;
+  padding-left: 8px;
+}
+
 .panel__row--selected {
   background: rgba(180, 140, 30, 0.25);
   color: #e8c84a;
