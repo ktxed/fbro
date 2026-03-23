@@ -11,6 +11,7 @@ interface RenameModalProps {
 export function RenameModal({ rename, client }: RenameModalProps) {
   const dispatch = useAppDispatch();
   const [value, setValue] = useState(rename.filename);
+  const [localError, setLocalError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -29,6 +30,11 @@ export function RenameModal({ rename, client }: RenameModalProps) {
   const submit = () => {
     const dest = value.trim();
     if (submitting || !dest || dest === rename.filename) { close(); return; }
+    if (dest.includes("/") || dest.includes("\\")) {
+      setLocalError("Rename cannot change directories — use Move (F6) for that.");
+      return;
+    }
+    setLocalError(null);
     setSubmitting(true);
     client.sendIntent("RenameFile", undefined, {
       sourcePanel: rename.sourcePanel,
@@ -59,14 +65,14 @@ export function RenameModal({ rename, client }: RenameModalProps) {
               ref={inputRef}
               className="modal__rename-input"
               value={value}
-              onChange={(e) => setValue(e.target.value)}
+              onChange={(e) => { setValue(e.target.value); setLocalError(null); }}
               onKeyDown={handleKeyDown}
               spellCheck={false}
               autoComplete="off"
             />
           </div>
-          {rename.error && (
-            <p className="modal__rename-error">{rename.error}</p>
+          {(localError ?? rename.error) && (
+            <p className="modal__rename-error">{localError ?? rename.error}</p>
           )}
         </div>
         <div className="modal__actions">

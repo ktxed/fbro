@@ -873,16 +873,21 @@ async fn handle_intent(
             let source_path  = args.get("sourcePath").and_then(|v| v.as_str()).unwrap_or("").to_string();
             let dest_name    = args.get("destName").and_then(|v| v.as_str()).unwrap_or("").to_string();
 
-            // Resolve dest path: absolute if starts with '/', else relative to source directory.
-            let dest_path = if dest_name.starts_with('/') {
-                dest_name.clone()
-            } else {
-                let source_dir = std::path::Path::new(&source_path)
-                    .parent()
-                    .map(|p| p.to_string_lossy().to_string())
-                    .unwrap_or_default();
-                format!("{}/{}", source_dir.trim_end_matches('/'), dest_name.trim_start_matches('/'))
-            };
+            // Rename only — no path separators allowed.
+            if dest_name.contains('/') || dest_name.contains('\\') {
+                let _ = tx.send(ServerMessage::Error {
+                    timestamp: now(),
+                    code: "RENAME_FAILED".to_string(),
+                    message: "Rename cannot change directories — use Move (F6) for that.".to_string(),
+                    recoverable: true,
+                }).await;
+                return;
+            }
+            let source_dir = std::path::Path::new(&source_path)
+                .parent()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_default();
+            let dest_path = format!("{}/{}", source_dir.trim_end_matches('/'), dest_name);
 
             let driver = {
                 let s = state.lock().await;
