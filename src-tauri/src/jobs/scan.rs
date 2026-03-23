@@ -14,6 +14,7 @@ pub async fn run_scan(
     version_base: u64,
     tx: mpsc::Sender<ServerMessage>,
     driver: Arc<dyn VfsDriver>,
+    cursor_hint: Option<String>,
 ) {
     let result = tokio::task::spawn_blocking(move || {
         driver.list(&path, &sort, filter.as_ref())
@@ -72,6 +73,11 @@ pub async fn run_scan(
         }
     }
 
+    let cursor = cursor_hint
+        .as_deref()
+        .and_then(|hint| schema_entries.iter().position(|e| e.name == hint))
+        .unwrap_or(0);
+
     version += 1;
     let _ = tx
         .send(ServerMessage::StatePatch {
@@ -79,7 +85,7 @@ pub async fn run_scan(
             domain: "panels".to_string(),
             entity_id: Some(panel_id),
             version,
-            patch: serde_json::json!({ "status": "ready", "total": total }),
+            patch: serde_json::json!({ "status": "ready", "total": total, "cursor": cursor }),
         })
         .await;
 }

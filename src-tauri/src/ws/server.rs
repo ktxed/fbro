@@ -158,7 +158,7 @@ async fn handle_connection(stream: TcpStream, addr: SocketAddr, state: SharedSta
             (p.path.clone(), p.sort.clone(), p.filter.clone(), p.version, driver)
         };
 
-        let h = spawn_scan(panel_id.clone(), path, sort, filter, version_base, tx.clone(), driver);
+        let h = spawn_scan(panel_id.clone(), path, sort, filter, version_base, tx.clone(), driver, None);
         scan_handles.insert(panel_id.clone(), h);
     }
 
@@ -572,14 +572,14 @@ async fn handle_intent(
             };
 
             if entry_kind == "directory" {
-                navigate_to(&panel_id, &new_path, state, tx, scan_handles).await;
+                navigate_to(&panel_id, &new_path, None, state, tx, scan_handles).await;
             }
         }
 
         "NavigateHome" => {
             let panel_id = resolve_panel_id(scope, state).await;
             let home = state.lock().await.platform.home_dir();
-            navigate_to(&panel_id, &home, state, tx, scan_handles).await;
+            navigate_to(&panel_id, &home, None, state, tx, scan_handles).await;
         }
 
         "NavigateUp" => {
@@ -596,7 +596,8 @@ async fn handle_intent(
             if let Some(path) = current_path {
                 if let Some(parent) = parent_path {
                     if parent != path {
-                        navigate_to(&panel_id, &parent, state, tx, scan_handles).await;
+                        let dir_name = path.trim_end_matches('/').rsplit('/').next().map(str::to_string);
+                        navigate_to(&panel_id, &parent, dir_name, state, tx, scan_handles).await;
                     }
                 }
             }
@@ -836,6 +837,7 @@ async fn handle_intent(
 async fn navigate_to(
     panel_id: &str,
     new_path: &str,
+    cursor_hint: Option<String>,
     state: &SharedState,
     tx: &mpsc::Sender<ServerMessage>,
     scan_handles: &mut HashMap<String, ScanHandle>,
@@ -880,7 +882,7 @@ async fn navigate_to(
         })
         .await;
 
-    let h = spawn_scan(panel_id.to_string(), new_path.to_string(), sort, filter, version, tx.clone(), driver);
+    let h = spawn_scan(panel_id.to_string(), new_path.to_string(), sort, filter, version, tx.clone(), driver, cursor_hint);
     scan_handles.insert(panel_id.to_string(), h);
 }
 
@@ -919,7 +921,7 @@ async fn rescan_panel(
             }),
         })
         .await;
-    let h = spawn_scan(panel_id.to_string(), path, sort, filter, version, tx.clone(), driver);
+    let h = spawn_scan(panel_id.to_string(), path, sort, filter, version, tx.clone(), driver, None);
     scan_handles.insert(panel_id.to_string(), h);
 }
 
@@ -941,8 +943,9 @@ fn spawn_scan(
     version_base: u64,
     tx: mpsc::Sender<ServerMessage>,
     driver: Arc<dyn VfsDriver>,
+    cursor_hint: Option<String>,
 ) -> ScanHandle {
-    let handle = tokio::spawn(run_scan(panel_id, path, sort, filter, version_base, tx, driver));
+    let handle = tokio::spawn(run_scan(panel_id, path, sort, filter, version_base, tx, driver, cursor_hint));
     ScanHandle { handle }
 }
 
