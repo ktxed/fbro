@@ -209,10 +209,15 @@ export function ViewerApp({ path, sourceId, filename }: ViewerAppProps) {
       if (e.key === "1") { setMode("text"); return; }
       if (e.key === "3") { setMode("hex"); return; }
 
+      const goStart = e.key === "Home" || (e.key === "ArrowUp" && e.metaKey);
+      const goEnd   = e.key === "End"  || (e.key === "ArrowDown" && e.metaKey);
+
       // ── Small file mode: native DOM scroll ────────────────────────────
       if (isSmall === true) {
         const el = contentRef.current;
         if (!el) return;
+        if (goStart) { e.preventDefault(); el.scrollTop = 0; return; }
+        if (goEnd)   { e.preventDefault(); el.scrollTop = el.scrollHeight; return; }
         if (e.key === "ArrowDown")  { e.preventDefault(); el.scrollBy({ top: LINE_H }); return; }
         if (e.key === "ArrowUp")    { e.preventDefault(); el.scrollBy({ top: -LINE_H }); return; }
         if (e.key === "PageDown" || (e.key === " " && !e.shiftKey)) {
@@ -221,28 +226,18 @@ export function ViewerApp({ path, sourceId, filename }: ViewerAppProps) {
         if (e.key === "PageUp" || (e.key === " " && e.shiftKey)) {
           e.preventDefault(); el.scrollBy({ top: -el.clientHeight }); return;
         }
-        if (e.key === "Home" && e.ctrlKey) { e.preventDefault(); el.scrollTop = 0; return; }
-        if (e.key === "End" && e.ctrlKey)  { e.preventDefault(); el.scrollTop = el.scrollHeight; return; }
         return;
       }
 
       // ── Large file mode: virtual scroll ───────────────────────────────
       if (isSmall === false) {
-        if (e.key === "ArrowDown")  { e.preventDefault(); scrollByLines(1); return; }
-        if (e.key === "ArrowUp")    { e.preventDefault(); scrollByLines(-1); return; }
-        if (e.key === "PageDown" || (e.key === " " && !e.shiftKey)) {
-          e.preventDefault(); scrollByLines(vpLines); return;
-        }
-        if (e.key === "PageUp" || (e.key === " " && e.shiftKey)) {
-          e.preventDefault(); scrollByLines(-vpLines); return;
-        }
-        if (e.key === "Home" && e.ctrlKey) {
+        if (goStart) {
           e.preventDefault();
           if (bufferOffset === 0) { setTopLine(0); }
           else if (!loading) { requestChunk(0, CHUNK_SIZE, "top"); }
           return;
         }
-        if (e.key === "End" && e.ctrlKey) {
+        if (goEnd) {
           e.preventDefault();
           if (eof) { setTopLine(maxTopLine); }
           else if (!loading && fileSize !== null) {
@@ -250,6 +245,14 @@ export function ViewerApp({ path, sourceId, filename }: ViewerAppProps) {
             requestChunk(lastOff, CHUNK_SIZE, "bottom");
           }
           return;
+        }
+        if (e.key === "ArrowDown")  { e.preventDefault(); scrollByLines(1); return; }
+        if (e.key === "ArrowUp")    { e.preventDefault(); scrollByLines(-1); return; }
+        if (e.key === "PageDown" || (e.key === " " && !e.shiftKey)) {
+          e.preventDefault(); scrollByLines(vpLines); return;
+        }
+        if (e.key === "PageUp" || (e.key === " " && e.shiftKey)) {
+          e.preventDefault(); scrollByLines(-vpLines); return;
         }
       }
     };
