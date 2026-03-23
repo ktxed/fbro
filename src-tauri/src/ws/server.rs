@@ -188,7 +188,7 @@ async fn handle_connection(stream: TcpStream, addr: SocketAddr, state: SharedSta
 
                 // When a job completes, rescan affected panels
                 if let ServerMessage::JobEvent { ref job_id, ref event, .. } = msg {
-                    if event == "Completed" || event == "Cancelled" {
+                    if event == "Completed" || event == "Cancelled" || event == "Failed" {
                         let panels_to_rescan = {
                             let s = state.lock().await;
                             if let Some(job) = s.job_store.jobs.get(job_id) {
@@ -266,6 +266,16 @@ async fn handle_intent(
     app_handle: &tauri::AppHandle,
 ) {
     match name {
+        "RefreshPanels" => {
+            let panel_ids: Vec<String> = {
+                let s = state.lock().await;
+                s.panels.keys().cloned().collect()
+            };
+            for panel_id in panel_ids {
+                rescan_panel(&panel_id, state, &tx, scan_handles).await;
+            }
+        }
+
         "MoveCursor" => {
             let panel_id = resolve_panel_id(scope, state).await;
             let direction = args.get("direction").and_then(|v| v.as_str()).unwrap_or("down");

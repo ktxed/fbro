@@ -287,7 +287,10 @@ export function OperationModal({ pending, activeJob, activeJobId, client }: Oper
               </>
             )}
             {isTerminal && (
-              <button className="modal__btn modal__btn--primary" onClick={close}>
+              <button className="modal__btn modal__btn--primary" onClick={() => {
+                client.sendIntent("RefreshPanels");
+                close();
+              }}>
                 Close
               </button>
             )}
