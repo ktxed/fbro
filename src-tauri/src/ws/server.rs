@@ -699,7 +699,7 @@ async fn handle_intent(
             };
 
             // Gather files from the source panel's selection (or cursor)
-            let (files, dest_path, src_driver, dst_driver) = {
+            let (files, source_path, dest_path, src_driver, dst_driver) = {
                 let s = state.lock().await;
                 let Some(src_panel) = s.panels.get(&source_panel_id) else { return };
                 let src_driver = s.drivers.get(&src_panel.source_id).cloned().unwrap();
@@ -730,7 +730,8 @@ async fn handle_intent(
                     (None, None)
                 };
 
-                (files, dest_path, src_driver, dst_driver)
+                let source_path = src_panel.path.clone();
+                (files, source_path, dest_path, src_driver, dst_driver)
             };
 
             if files.is_empty() { return; }
@@ -759,6 +760,7 @@ async fn handle_intent(
                     op_type: op_type_str.to_string(),
                     files: file_schemas,
                     source_panel: source_panel_id.clone(),
+                    source_path,
                     dest_panel: dest_panel_id.clone(),
                     dest_path: dest_path.clone(),
                     total_files: files.len(),

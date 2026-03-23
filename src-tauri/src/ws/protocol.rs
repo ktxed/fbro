@@ -162,6 +162,7 @@ pub struct JobStartSchema {
     pub op_type: String,
     pub files: Vec<FileOpFileSchema>,
     pub source_panel: String,
+    pub source_path: String,
     pub dest_panel: Option<String>,
     pub dest_path: Option<String>,
     pub total_files: usize,

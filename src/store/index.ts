@@ -129,6 +129,8 @@ function applyJobStarted(state: AppState, msg: JobStartedMessage): AppState {
     jobId: job.jobId,
     type: job.opType,
     state: "Running",
+    sourcePath: job.sourcePath,
+    destPath: job.destPath,
     progress: {
       totalFiles: job.totalFiles,
       completedFiles: 0,

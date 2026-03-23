@@ -184,6 +184,16 @@ export function OperationModal({ pending, activeJob, activeJobId, client }: Oper
         <div className="modal" onClick={(e) => e.stopPropagation()}>
           <div className="modal__header">{label} — {activeJob.state}</div>
           <div className="modal__body">
+            <div className="modal__job-params">
+              <span className="modal__job-param-label">From:</span>
+              <span className="modal__job-param-value" title={activeJob.sourcePath}>{activeJob.sourcePath}</span>
+              <button className="modal__job-param-copy" onClick={() => navigator.clipboard.writeText(activeJob.sourcePath)} title="Copy path">⧉</button>
+              {activeJob.destPath && (<>
+                <span className="modal__job-param-label">To:</span>
+                <span className="modal__job-param-value" title={activeJob.destPath}>{activeJob.destPath}</span>
+                <button className="modal__job-param-copy" onClick={() => navigator.clipboard.writeText(activeJob.destPath!)} title="Copy path">⧉</button>
+              </>)}
+            </div>
             {/* Decision required */}
             {isDecision && activeJob.decision && (
               <div className="modal__decision">

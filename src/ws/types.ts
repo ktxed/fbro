@@ -40,6 +40,8 @@ export interface Job {
   jobId: string;
   type: string;
   state: "Running" | "AwaitingDecision" | "Completed" | "Cancelled" | "Failed";
+  sourcePath: string;
+  destPath?: string;
   progress?: FileOpProgress;
   decision?: DecisionRequest;
   error?: string;
@@ -73,6 +75,7 @@ export interface JobStart {
   opType: string;
   files: FileOpFile[];
   sourcePanel: string;
+  sourcePath: string;
   destPanel?: string;
   destPath?: string;
   totalFiles: number;

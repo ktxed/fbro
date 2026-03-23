@@ -436,6 +436,45 @@ body {
   color: var(--text);
 }
 
+.modal__job-params {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 2px 6px;
+  margin: 0 0 10px;
+  font-size: 11px;
+}
+
+.modal__job-param-label {
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.modal__job-param-value {
+  min-width: 0;
+  color: var(--text-path);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.modal__job-param-copy {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0 2px;
+  line-height: 1;
+  font-family: inherit;
+  border-radius: 2px;
+}
+
+.modal__job-param-copy:hover {
+  color: var(--text);
+  background: var(--bg-focused);
+}
+
 .modal__summary {
   margin: 0 0 8px;
 }
