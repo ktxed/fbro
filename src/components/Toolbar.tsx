@@ -101,7 +101,7 @@ export function Toolbar({ client }: { client: WsClient }) {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       // Don't handle keys while a modal is active
-      if (state.pendingOp || state.activeJobId || state.pendingQuit || state.pendingRename || state.pendingInfo || state.pendingMkdir) return;
+      if (state.pendingOp || state.activeJobId || state.pendingQuit || state.pendingRename || state.pendingInfo || state.pendingMkdir || state.pendingNoEditor) return;
 
       if (e.key === "i" || e.key === "I") {
         e.preventDefault();
@@ -113,7 +113,7 @@ export function Toolbar({ client }: { client: WsClient }) {
         openRename(state, dispatch);
         return;
       }
-      if (e.key === "F3") {
+        if (e.key === "F3") {
         e.preventDefault();
         const panel = state.panels[state.focus];
         if (panel) {
@@ -123,6 +123,20 @@ export function Toolbar({ client }: { client: WsClient }) {
               panelId: state.focus,
               path: panel.path,
               sourceId: panel.sourceId,
+              filename: entry.name,
+            });
+          }
+        }
+        return;
+      }
+      if (e.key === "F4") {
+        e.preventDefault();
+        const panel = state.panels[state.focus];
+        if (panel) {
+          const entry = panel.entries[panel.cursor];
+          if (entry && entry.kind !== "directory") {
+            client.sendIntent("EditFile", undefined, {
+              path: panel.path,
               filename: entry.name,
             });
           }
@@ -178,6 +192,19 @@ export function Toolbar({ client }: { client: WsClient }) {
                     panelId: state.focus,
                     path: panel.path,
                     sourceId: panel.sourceId,
+                    filename: entry.name,
+                  });
+                }
+              }
+              return;
+            }
+            if (key === "F4") {
+              const panel = state.panels[state.focus];
+              if (panel) {
+                const entry = panel.entries[panel.cursor];
+                if (entry && entry.kind !== "directory") {
+                  client.sendIntent("EditFile", undefined, {
+                    path: panel.path,
                     filename: entry.name,
                   });
                 }

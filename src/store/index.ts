@@ -38,6 +38,11 @@ export interface PendingMkdir {
   error?: string;
 }
 
+export interface PendingNoEditor {
+  filename: string;
+  fullPath: string;
+}
+
 export interface AppState {
   connected: boolean;
   sessionId: string | null;
@@ -52,6 +57,7 @@ export interface AppState {
   pendingRename: PendingRename | null;
   pendingInfo: PendingInfo | null;
   pendingMkdir: PendingMkdir | null;
+  pendingNoEditor: PendingNoEditor | null;
 }
 
 const initialState: AppState = {
@@ -68,6 +74,7 @@ const initialState: AppState = {
   pendingRename: null,
   pendingInfo: null,
   pendingMkdir: null,
+  pendingNoEditor: null,
 };
 
 // ─── Actions ─────────────────────────────────────────────────────────────────
@@ -85,7 +92,9 @@ export type AppAction =
   | { type: "OPEN_INFO"; info: PendingInfo }
   | { type: "CLOSE_INFO" }
   | { type: "OPEN_MKDIR"; mkdir: PendingMkdir }
-  | { type: "CLOSE_MKDIR" };
+  | { type: "CLOSE_MKDIR" }
+  | { type: "OPEN_NO_EDITOR"; noEditor: PendingNoEditor }
+  | { type: "CLOSE_NO_EDITOR" };
 
 // ─── Reducer ─────────────────────────────────────────────────────────────────
 
@@ -243,6 +252,11 @@ function reducer(state: AppState, action: AppAction): AppState {
           if (msg.code === "MKDIR_FAILED" && state.pendingMkdir) {
             return { ...state, pendingMkdir: { ...state.pendingMkdir, error: msg.message } };
           }
+          if (msg.code === "NO_EDITOR" && msg.extra?.path) {
+            const path = msg.extra.path as string;
+            const filename = path.split("/").pop() || path;
+            return { ...state, pendingNoEditor: { filename, fullPath: path } };
+          }
           console.error("BE error:", msg.code, msg.message);
           return state;
         case "RenameOk":
@@ -275,6 +289,10 @@ function reducer(state: AppState, action: AppAction): AppState {
       return { ...state, pendingMkdir: action.mkdir };
     case "CLOSE_MKDIR":
       return { ...state, pendingMkdir: null };
+    case "OPEN_NO_EDITOR":
+      return { ...state, pendingNoEditor: action.noEditor };
+    case "CLOSE_NO_EDITOR":
+      return { ...state, pendingNoEditor: null };
   }
 }
 

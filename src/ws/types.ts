@@ -179,6 +179,7 @@ export interface ErrorMessage {
   code: string;
   message: string;
   recoverable: boolean;
+  extra?: Record<string, unknown>;
 }
 
 export interface QuitConfirmRequiredMessage {

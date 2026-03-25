@@ -1,8 +1,23 @@
 use super::Platform;
+use std::process::Command;
 
 pub struct LinuxPlatform;
 
 impl Platform for LinuxPlatform {
+    fn open_in_editor(&self, path: &str) -> Result<String, String> {
+        let output = Command::new("xdg-open")
+            .arg(path)
+            .output()
+            .map_err(|e| e.to_string())?;
+
+        if output.status.success() {
+            Ok(path.to_string())
+        } else {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            Err(stderr.trim().to_string())
+        }
+    }
+
     fn find_icon(&self, icon_name: &str) -> Option<(Vec<u8>, &'static str)> {
         const THEMES: &[&str] = &["Pop", "Adwaita", "hicolor"];
         const SIZES: &[&str] = &["48x48", "scalable", "32x32", "24x24"];

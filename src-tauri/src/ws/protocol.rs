@@ -48,6 +48,8 @@ pub enum ServerMessage {
         code: String,
         message: String,
         recoverable: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        extra: Option<serde_json::Value>,
     },
     QuitConfirmRequired {
         timestamp: String,

@@ -13,6 +13,10 @@ pub trait Platform: Send + Sync {
     fn find_icon(&self, _icon_name: &str) -> Option<(Vec<u8>, &'static str)> {
         None
     }
+
+    /// Opens a file in the system's default editor.
+    /// Returns the full path on success, or an error message if no editor is available.
+    fn open_in_editor(&self, path: &str) -> Result<String, String>;
 }
 
 // ── Embedded fallback icons ─────────────────────────────────────────────────
@@ -37,9 +41,13 @@ pub fn resolve_icon(platform: &dyn Platform, icon_name: &str) -> (Vec<u8>, &'sta
 /// Create the platform implementation for the current OS.
 pub fn create_platform() -> std::sync::Arc<dyn Platform> {
     #[cfg(target_os = "linux")]
-    { std::sync::Arc::new(linux::LinuxPlatform) }
+    {
+        std::sync::Arc::new(linux::LinuxPlatform)
+    }
     #[cfg(target_os = "macos")]
-    { std::sync::Arc::new(macos::MacOSPlatform) }
+    {
+        std::sync::Arc::new(macos::MacOSPlatform)
+    }
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     compile_error!("unsupported platform")
 }

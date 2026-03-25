@@ -898,6 +898,30 @@ async fn handle_intent(
             .build();
         }
 
+        "EditFile" => {
+            let dir_path  = args.get("path").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let filename  = args.get("filename").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let full_path = format!("{}/{}", dir_path.trim_end_matches('/'), filename);
+
+            let result = {
+                let s = state.lock().await;
+                s.platform.open_in_editor(&full_path)
+            };
+
+            match result {
+                Ok(_) => {}
+                Err(e) => {
+                    let _ = tx.send(ServerMessage::Error {
+                        timestamp: now(),
+                        code: "NO_EDITOR".to_string(),
+                        message: e,
+                        recoverable: true,
+                        extra: Some(serde_json::json!({ "path": full_path })),
+                    }).await;
+                }
+            }
+        }
+
         "RenameFile" => {
             let source_panel = args.get("sourcePanel").and_then(|v| v.as_str()).unwrap_or("").to_string();
             let source_path  = args.get("sourcePath").and_then(|v| v.as_str()).unwrap_or("").to_string();
@@ -910,6 +934,7 @@ async fn handle_intent(
                     code: "RENAME_FAILED".to_string(),
                     message: "Rename cannot change directories — use Move (F6) for that.".to_string(),
                     recoverable: true,
+                    extra: None,
                 }).await;
                 return;
             }
@@ -943,6 +968,7 @@ async fn handle_intent(
                             code: "RENAME_FAILED".to_string(),
                             message: "Cannot rename across filesystems — use Move (F6) instead.".to_string(),
                             recoverable: true,
+                            extra: None,
                         }).await;
                     }
                     Ok(Err(e)) => {
@@ -951,6 +977,7 @@ async fn handle_intent(
                             code: "RENAME_FAILED".to_string(),
                             message: e.to_string(),
                             recoverable: true,
+                            extra: None,
                         }).await;
                     }
                     Err(_) => {}
@@ -988,6 +1015,7 @@ async fn handle_intent(
                             code: "MKDIR_FAILED".to_string(),
                             message: e.to_string(),
                             recoverable: true,
+                            extra: None,
                         }).await;
                     }
                     Err(_) => {}
@@ -1044,6 +1072,7 @@ async fn handle_intent(
                             code: "NOT_A_FILE".to_string(),
                             message: format!("{name} is a {kind}, not a file"),
                             recoverable: true,
+                            extra: None,
                         }).await;
                     }
                 }
@@ -1101,6 +1130,7 @@ async fn handle_intent(
                             code: "READ_CHUNK_FAILED".to_string(),
                             message: e.to_string(),
                             recoverable: true,
+                            extra: None,
                         }).await;
                     }
                     Err(_) => {}

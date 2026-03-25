@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useRef, useEffect } from "react";
 import { useAppDispatch } from "../store";
 import type { PendingInfo } from "../store";
 
@@ -33,23 +33,12 @@ function kindLabel(kind: string): string {
 }
 
 function CopyButton({ text }: { text: string }) {
-  const [copied, setCopied] = useState(false);
-
-  const copy = () => {
-    navigator.clipboard.writeText(text).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    });
-  };
-
   return (
     <button
-      className="modal__info-copy"
-      onClick={copy}
+      className="modal__job-param-copy"
+      onClick={() => navigator.clipboard.writeText(text)}
       title="Copy to clipboard"
-    >
-      {copied ? "Copied!" : "Copy"}
-    </button>
+    >⧉</button>
   );
 }
 

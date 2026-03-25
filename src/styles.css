@@ -721,6 +721,32 @@ body {
   background: var(--bg-focused);
 }
 
+.modal__no-editor-path {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.modal__no-editor-code {
+  flex: 1;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 6px 10px;
+  font-family: monospace;
+  font-size: var(--font-size);
+  color: var(--text);
+  word-break: break-all;
+}
+
+.modal__no-editor-msg {
+  color: var(--text-dim);
+  font-size: var(--font-size);
+  text-align: center;
+  margin: 0;
+}
+
 /* ── Viewer window ───────────────────────────────────────────────────────── */
 
 .viewer {
