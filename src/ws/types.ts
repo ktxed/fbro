@@ -149,6 +149,7 @@ export interface StatePatchMessage {
   patch: {
     appendEntries?: VFSEntry[];
     status?: PanelState["status"];
+    sort?: PanelState["sort"];
     cursor?: number;
     path?: string;
     entries?: VFSEntry[];

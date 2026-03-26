@@ -294,6 +294,19 @@ async fn handle_intent(
             }
         }
 
+        "SetSort" => {
+            let panel_id = resolve_panel_id(scope, state).await;
+            let by    = args.get("by").and_then(|v| v.as_str()).unwrap_or("name").to_string();
+            let order = args.get("order").and_then(|v| v.as_str()).unwrap_or("asc").to_string();
+            {
+                let mut s = state.lock().await;
+                if let Some(panel) = s.panels.get_mut(&panel_id) {
+                    panel.sort = crate::ws::protocol::SortSpec { by, order };
+                }
+            }
+            rescan_panel(&panel_id, state, &tx, scan_handles, None).await;
+        }
+
         "MoveCursor" => {
             let panel_id = resolve_panel_id(scope, state).await;
             let direction = args.get("direction").and_then(|v| v.as_str()).unwrap_or("down");
@@ -1253,7 +1266,9 @@ async fn rescan_panel(
             version,
             patch: serde_json::json!({
                 "entries": [],
-                "status": "loading"
+                "cursor": 0,
+                "status": "loading",
+                "sort": { "by": sort.by, "order": sort.order }
             }),
         })
         .await;

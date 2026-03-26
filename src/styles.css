@@ -144,6 +144,43 @@ body {
   border-color: var(--border);
 }
 
+.panel__sort-header {
+  display: flex;
+  align-items: center;
+  padding: 0 6px;
+  height: var(--row-height);
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-header);
+  user-select: none;
+}
+
+/* mirror the column widths from panel__row exactly */
+.panel__sort-kind  { flex-shrink: 0; width: 24px; display: flex; align-items: center; justify-content: center; }
+.panel__sort-name  { flex: 1; min-width: 0; display: flex; align-items: center; gap: 4px; color: var(--text-dim); font-size: calc(var(--font-size) - 1px); cursor: pointer; }
+.panel__sort-size  { flex-shrink: 0; width: 70px;  text-align: right; display: flex; align-items: center; justify-content: flex-end; gap: 4px; color: var(--text-dim); font-size: calc(var(--font-size) - 1px); padding-left: 8px; cursor: pointer; }
+.panel__sort-date  { flex-shrink: 0; width: 130px; text-align: left; display: flex; align-items: center; justify-content: flex-start; gap: 4px; color: var(--text-dim); font-size: calc(var(--font-size) - 1px); padding-left: 8px; cursor: pointer; }
+.panel__sort-perms { flex-shrink: 0; width: 76px; padding-left: 8px; }
+
+.panel__sort-tri {
+  cursor: pointer;
+  color: var(--text-dim);
+  font-size: 9px;
+  line-height: 1;
+  opacity: 0.45;
+  transition: opacity 0.1s, color 0.1s;
+}
+
+.panel__sort-tri:hover {
+  opacity: 0.8;
+  color: var(--text);
+}
+
+.panel__sort-tri--active {
+  color: var(--accent);
+  opacity: 1;
+}
+
 .panel__list {
   flex: 1;
   overflow-y: auto;

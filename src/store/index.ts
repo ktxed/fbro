@@ -154,6 +154,9 @@ function applyPatch(state: AppState, msg: StatePatchMessage): AppState {
     if (msg.patch.entries !== undefined) {
       updated = { ...updated, entries: msg.patch.entries };
     }
+    if (msg.patch.sort !== undefined) {
+      updated = { ...updated, sort: msg.patch.sort };
+    }
     if (msg.patch.selection !== undefined) {
       updated = { ...updated, selection: msg.patch.selection };
     }

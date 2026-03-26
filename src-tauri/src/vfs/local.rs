@@ -102,7 +102,13 @@ impl VfsDriver for LocalFsDriver {
             }
             let ord = match sort.by.as_str() {
                 "size" => a.size.unwrap_or(0).cmp(&b.size.unwrap_or(0)),
-                "mtime" => a.mtime.cmp(&b.mtime),
+                "date" => a.mtime.cmp(&b.mtime),
+                "kind" => {
+                    let ext = |e: &VfsEntry| -> String {
+                        e.name.rfind('.').map(|i| e.name[i+1..].to_lowercase()).unwrap_or_default()
+                    };
+                    ext(a).cmp(&ext(b))
+                }
                 _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
             };
             if sort.order == "desc" { ord.reverse() } else { ord }

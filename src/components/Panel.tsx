@@ -2,6 +2,33 @@ import { useState, useEffect, useRef } from "react";
 import type { PanelState, VFSEntry } from "../ws/types";
 import type { WsClient } from "../ws/client";
 
+function SortHeader({ sort, panelId, client }: {
+  sort: PanelState["sort"];
+  panelId: string;
+  client: WsClient;
+}) {
+  function handleSort(by: string) {
+    const order = sort.by === by && sort.order === "asc" ? "desc" : "asc";
+    client.sendIntent("SetSort", panelId, { by, order });
+  }
+
+  function tri(col: string) {
+    const active = sort.by === col;
+    const icon = active && sort.order === "desc" ? "▼" : "▲";
+    return <span className={`panel__sort-tri${active ? " panel__sort-tri--active" : ""}`}>{icon}</span>;
+  }
+
+  return (
+    <div className="panel__sort-header">
+      <span className="panel__sort-kind" onClick={() => handleSort("kind")}>{tri("kind")}</span>
+      <span className="panel__sort-name" onClick={() => handleSort("name")}>Name {tri("name")}</span>
+      <span className="panel__sort-size" onClick={() => handleSort("size")}>Size {tri("size")}</span>
+      <span className="panel__sort-date" onClick={() => handleSort("date")}>Date {tri("date")}</span>
+      <span className="panel__sort-perms" />
+    </div>
+  );
+}
+
 interface PanelProps {
   panelId: string;
   panel: PanelState;
@@ -196,6 +223,8 @@ export function Panel({ panelId, panel, isFocused, modalActive, client }: PanelP
         >~</button>
       </div>
 
+      <SortHeader sort={panel.sort} panelId={panelId} client={client} />
+
       <div className="panel__list" ref={listRef}>
         {panel.entries.map((entry, i) => (
           <div
@@ -218,7 +247,6 @@ export function Panel({ panelId, panel, isFocused, modalActive, client }: PanelP
               const drag = rightDrag.current;
               if (!drag.active) return;
               drag.everMoved = true;
-              // Compute the full range [startRow..currentRow] and apply mode to preSelection
               const lo = Math.min(drag.startRow, i);
               const hi = Math.max(drag.startRow, i);
               const rangeSet = new Set<number>();
@@ -236,7 +264,6 @@ export function Panel({ panelId, panel, isFocused, modalActive, client }: PanelP
             onContextMenu={(e) => {
               e.preventDefault();
               if (!rightDrag.current.everMoved) {
-                // Pure right-click (no drag) → toggle
                 client.sendIntent("ToggleSelectionAtIndex", "focused-panel", { index: i });
               }
             }}
