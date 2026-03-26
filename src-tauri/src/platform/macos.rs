@@ -8,6 +8,10 @@ impl Platform for MacOSPlatform {
         std::env::var("HOME").unwrap_or_else(|_| "/".to_string())
     }
 
+    fn open_file(&self, path: &str) {
+        let _ = Command::new("open").arg(path).spawn();
+    }
+
     fn open_in_editor(&self, path: &str) -> Result<String, String> {
         let output = Command::new("open")
             .arg(path)

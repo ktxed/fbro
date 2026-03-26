@@ -4,6 +4,10 @@ use std::process::Command;
 pub struct LinuxPlatform;
 
 impl Platform for LinuxPlatform {
+    fn open_file(&self, path: &str) {
+        let _ = Command::new("xdg-open").arg(path).spawn();
+    }
+
     fn open_in_editor(&self, path: &str) -> Result<String, String> {
         let output = Command::new("xdg-open")
             .arg(path)

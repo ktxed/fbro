@@ -636,6 +636,25 @@ async fn handle_intent(
             navigate_to(&panel_id, &home, None, state, tx, scan_handles).await;
         }
 
+        "OpenFile" => {
+            let panel_id = resolve_panel_id(scope, state).await;
+            let (path, entry, platform) = {
+                let s = state.lock().await;
+                let panel = match s.panels.get(&panel_id) {
+                    Some(p) => p,
+                    None => return,
+                };
+                let entry = panel.entries.get(panel.cursor).cloned();
+                (panel.path.clone(), entry, Arc::clone(&s.platform))
+            };
+            if let Some(entry) = entry {
+                if entry.kind != "directory" {
+                    let full_path = format!("{}/{}", path.trim_end_matches('/'), entry.name);
+                    platform.open_file(&full_path);
+                }
+            }
+        }
+
         "NavigateToSource" => {
             let panel_id = resolve_panel_id(scope, state).await;
             let source_id = args.get("sourceId").and_then(|v| v.as_str()).unwrap_or("").to_string();

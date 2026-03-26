@@ -25,6 +25,9 @@ pub trait Platform: Send + Sync {
     /// Returns the full path on success, or an error message if no editor is available.
     fn open_in_editor(&self, path: &str) -> Result<String, String>;
 
+    /// Opens a file with the OS default application for its type. Fire-and-forget.
+    fn open_file(&self, _path: &str) {}
+
     /// Returns all available volumes / mount points on this platform.
     fn list_volumes(&self) -> Vec<VolumeInfo> {
         vec![]

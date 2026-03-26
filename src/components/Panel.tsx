@@ -199,7 +199,16 @@ export function Panel({ panelId, panel, isFocused, modalActive, client, sources 
         e.preventDefault();
         client.sendIntent("MoveCursorToEdge", "focused-panel", { edge: "last" });
         break;
-      case "Enter":
+      case "Enter": {
+        e.preventDefault();
+        const entry = panel.entries[panel.cursor];
+        if (entry && entry.kind !== "directory") {
+          client.sendIntent("OpenFile", "focused-panel");
+        } else {
+          client.sendIntent("OpenEntry", "focused-panel");
+        }
+        break;
+      }
       case "ArrowRight":
         e.preventDefault();
         client.sendIntent("OpenEntry", "focused-panel");
