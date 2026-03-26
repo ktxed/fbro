@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use futures_util::{SinkExt, StreamExt};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Notify};
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::jobs::file_ops::run_file_op;
@@ -21,7 +21,7 @@ use crate::ws::protocol::{
 const WS_ADDR: &str = "127.0.0.1:7878";
 const CHANNEL_CAP: usize = 512;
 
-pub async fn start(state: SharedState, app_handle: tauri::AppHandle) {
+pub async fn start(state: SharedState, app_handle: tauri::AppHandle, quit_notify: Arc<Notify>) {
     let listener = match TcpListener::bind(WS_ADDR).await {
         Ok(l) => l,
         Err(e) => {
@@ -36,14 +36,15 @@ pub async fn start(state: SharedState, app_handle: tauri::AppHandle) {
             Ok((stream, addr)) => {
                 let state = Arc::clone(&state);
                 let app_handle = app_handle.clone();
-                tokio::spawn(handle_connection(stream, addr, state, app_handle));
+                let quit_notify = Arc::clone(&quit_notify);
+                tokio::spawn(handle_connection(stream, addr, state, app_handle, quit_notify));
             }
             Err(e) => eprintln!("[fbro] Accept error: {e}"),
         }
     }
 }
 
-async fn handle_connection(stream: TcpStream, addr: SocketAddr, state: SharedState, app_handle: tauri::AppHandle) {
+async fn handle_connection(stream: TcpStream, addr: SocketAddr, state: SharedState, app_handle: tauri::AppHandle, quit_notify: Arc<Notify>) {
     eprintln!("[fbro] Client connected: {addr}");
 
     let ws_stream = match tokio_tungstenite::accept_async(stream).await {
@@ -222,6 +223,25 @@ async fn handle_connection(stream: TcpStream, addr: SocketAddr, state: SharedSta
 
                 if send_msg(&mut ws_tx, &msg).await.is_err() {
                     break;
+                }
+            }
+
+            // OS window close button: treat like "Quit" intent
+            _ = quit_notify.notified(), if is_gui => {
+                let active_jobs = {
+                    let s = state.lock().await;
+                    s.job_store.jobs.values().filter(|j| {
+                        j.state == JobState::Running || j.state == JobState::AwaitingDecision
+                    }).count()
+                };
+                if active_jobs == 0 {
+                    save_session(&state).await;
+                    std::process::exit(0);
+                } else {
+                    let _ = tx.send(ServerMessage::QuitConfirmRequired {
+                        timestamp: now(),
+                        active_jobs,
+                    }).await;
                 }
             }
 
@@ -943,7 +963,6 @@ async fn handle_intent(
                 url_encode(&panel_id),
             );
 
-            use tauri::Manager;
             let _ = tauri::WebviewWindowBuilder::new(
                 app_handle,
                 label,

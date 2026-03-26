@@ -47,8 +47,21 @@ fn main() {
                     .map(|(id, p)| (id, p.path))
                     .collect();
                 let shared_state = Arc::new(Mutex::new(AppState::new_default(platform, initial_paths)));
-                tauri::async_runtime::spawn(ws::server::start(shared_state, app_handle));
+                let quit_notify = Arc::new(tokio::sync::Notify::new());
+                use tauri::Manager;
+                app.manage(Arc::clone(&quit_notify));
+                tauri::async_runtime::spawn(ws::server::start(shared_state, app_handle, quit_notify));
                 Ok(())
+            }
+        })
+        .on_window_event(|window, event| {
+            if window.label() == "main" {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                    use tauri::Manager;
+                    let notify = window.app_handle().state::<Arc<tokio::sync::Notify>>();
+                    notify.notify_one();
+                }
             }
         })
         .run(tauri::generate_context!())
