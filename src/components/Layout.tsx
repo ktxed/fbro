@@ -38,6 +38,7 @@ export function Layout({ client }: LayoutProps) {
               isFocused={state.focus === id}
               modalActive={modalActive}
               client={client}
+              sources={state.sources}
             />
           );
         })}

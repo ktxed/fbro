@@ -151,6 +151,8 @@ pub struct SourceSchema {
     pub kind: String,
     pub supports: Vec<String>,
     pub capabilities: SourceCapabilities,
+    #[serde(rename = "rootPath")]
+    pub root_path: String,
 }
 
 #[derive(Serialize, Clone, Debug)]

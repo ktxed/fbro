@@ -117,6 +117,44 @@ body {
   border-bottom-color: var(--border-focus);
 }
 
+.panel__volumes {
+  display: flex;
+  flex-direction: row;
+  flex-shrink: 0;
+  gap: 2px;
+  padding: 2px 6px;
+  background: var(--bg-header);
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.panel__volumes::-webkit-scrollbar { display: none; }
+
+.panel__volume-btn {
+  flex-shrink: 0;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  color: var(--text-dim);
+  font-family: var(--font);
+  font-size: calc(var(--font-size) - 1px);
+  padding: 1px 6px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.panel__volume-btn:hover {
+  color: var(--text);
+  border-color: var(--border);
+}
+
+.panel__volume-btn--active {
+  color: var(--text-path);
+  border-color: var(--border-focus);
+  background: rgba(74, 124, 191, 0.15);
+}
+
 .panel__path {
   color: var(--text-path);
   font-size: var(--font-size);

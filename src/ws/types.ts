@@ -19,6 +19,7 @@ export interface Source {
     supportsStreaming: boolean;
     supportsJobs: boolean;
   };
+  rootPath: string;
 }
 
 export interface PanelState {
@@ -152,6 +153,7 @@ export interface StatePatchMessage {
     sort?: PanelState["sort"];
     cursor?: number;
     path?: string;
+    sourceId?: string;
     entries?: VFSEntry[];
     selection?: number[];
     [key: string]: unknown;

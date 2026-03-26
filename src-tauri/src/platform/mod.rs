@@ -3,6 +3,13 @@ pub mod linux;
 #[cfg(target_os = "macos")]
 pub mod macos;
 
+/// Information about a mounted volume / filesystem root.
+pub struct VolumeInfo {
+    pub id: String,        // stable ID, e.g. "vol-root", "vol-home"
+    pub name: String,      // display name, e.g. "/", "/home", "USB"
+    pub root_path: String, // mount point path
+}
+
 /// Abstraction over platform-specific environment queries and services.
 pub trait Platform: Send + Sync {
     /// Returns the current user's home directory.
@@ -17,6 +24,11 @@ pub trait Platform: Send + Sync {
     /// Opens a file in the system's default editor.
     /// Returns the full path on success, or an error message if no editor is available.
     fn open_in_editor(&self, path: &str) -> Result<String, String>;
+
+    /// Returns all available volumes / mount points on this platform.
+    fn list_volumes(&self) -> Vec<VolumeInfo> {
+        vec![]
+    }
 }
 
 // ── Embedded fallback icons ─────────────────────────────────────────────────

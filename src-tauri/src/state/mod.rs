@@ -16,6 +16,7 @@ pub struct Source {
     pub name: String,
     pub kind: String,
     pub supports: Vec<String>,
+    pub root_path: String,
 }
 
 // ─── Panel ────────────────────────────────────────────────────────────────────
@@ -77,21 +78,34 @@ impl AppState {
                 .cloned()
                 .unwrap_or_else(|| home.clone())
         };
-        let source_id = "local-home".to_string();
 
-        let source = Source {
-            id: source_id.clone(),
-            name: "Home".to_string(),
-            kind: "filesystem".to_string(),
-            supports: vec![
-                "ListEntries".to_string(),
-                "OpenFolder".to_string(),
-                "CopySelection".to_string(),
-                "MoveSelection".to_string(),
-                "DeleteSelection".to_string(),
-                "InspectItem".to_string(),
-            ],
-        };
+        let supports = vec![
+            "ListEntries".to_string(),
+            "OpenFolder".to_string(),
+            "CopySelection".to_string(),
+            "MoveSelection".to_string(),
+            "DeleteSelection".to_string(),
+            "InspectItem".to_string(),
+        ];
+
+        // Detect volumes from platform; fall back to a single root volume if empty.
+        let mut vols = platform.list_volumes();
+        if vols.is_empty() {
+            vols.push(crate::platform::VolumeInfo {
+                id: "vol-root".to_string(),
+                name: "/".to_string(),
+                root_path: "/".to_string(),
+            });
+        }
+
+        // Determine which source to use for the initial panels: pick the volume
+        // whose root_path is the longest prefix of home_dir.
+        let initial_source_id = vols
+            .iter()
+            .filter(|v| home.starts_with(&v.root_path))
+            .max_by_key(|v| v.root_path.len())
+            .map(|v| v.id.clone())
+            .unwrap_or_else(|| vols[0].id.clone());
 
         let default_sort = SortSpec {
             by: "name".to_string(),
@@ -100,7 +114,7 @@ impl AppState {
 
         let left = Panel {
             panel_id: "left".to_string(),
-            source_id: source_id.clone(),
+            source_id: initial_source_id.clone(),
             path: resolve("left"),
             status: PanelStatus::Loading,
             sort: default_sort.clone(),
@@ -113,7 +127,7 @@ impl AppState {
 
         let right = Panel {
             panel_id: "right".to_string(),
-            source_id: source_id.clone(),
+            source_id: initial_source_id.clone(),
             path: resolve("right"),
             status: PanelStatus::Loading,
             sort: default_sort,
@@ -128,19 +142,31 @@ impl AppState {
         panels.insert("left".to_string(), left);
         panels.insert("right".to_string(), right);
 
-        let mut sources = HashMap::new();
-        sources.insert(source_id.clone(), source);
+        // Build sources and drivers from volumes.
+        let is_spy = std::env::var("FBRO_SPY").is_ok();
+        let sock_path = std::env::var("FBRO_SPY_SOCK")
+            .unwrap_or_else(|_| "/tmp/fbro-spy.sock".to_string());
 
-        let driver: Arc<dyn VfsDriver> = if std::env::var("FBRO_SPY").is_ok() {
-            let inner = Arc::new(crate::vfs::local::LocalFsDriver);
-            let sock_path = std::env::var("FBRO_SPY_SOCK")
-                .unwrap_or_else(|_| "/tmp/fbro-spy.sock".to_string());
-            Arc::new(crate::vfs::spy::SpyFsDriver::new(inner, sock_path))
-        } else {
-            Arc::new(crate::vfs::local::LocalFsDriver)
-        };
-        let mut drivers = HashMap::new();
-        drivers.insert(source_id, driver);
+        let mut sources = HashMap::new();
+        let mut drivers: HashMap<String, Arc<dyn VfsDriver>> = HashMap::new();
+
+        for vol in vols {
+            let source = Source {
+                id: vol.id.clone(),
+                name: vol.name,
+                kind: "filesystem".to_string(),
+                supports: supports.clone(),
+                root_path: vol.root_path,
+            };
+            let driver: Arc<dyn VfsDriver> = if is_spy {
+                let inner = Arc::new(crate::vfs::local::LocalFsDriver);
+                Arc::new(crate::vfs::spy::SpyFsDriver::new(inner, sock_path.clone()))
+            } else {
+                Arc::new(crate::vfs::local::LocalFsDriver)
+            };
+            sources.insert(vol.id.clone(), source);
+            drivers.insert(vol.id, driver);
+        }
 
         AppState {
             panels,

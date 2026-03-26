@@ -135,6 +135,7 @@ async fn handle_connection(stream: TcpStream, addr: SocketAddr, state: SharedSta
                     supports_streaming: true,
                     supports_jobs: true,
                 },
+                root_path: src.root_path.clone(),
             })
             .collect();
 
@@ -635,6 +636,29 @@ async fn handle_intent(
             navigate_to(&panel_id, &home, None, state, tx, scan_handles).await;
         }
 
+        "NavigateToSource" => {
+            let panel_id = resolve_panel_id(scope, state).await;
+            let source_id = args.get("sourceId").and_then(|v| v.as_str()).unwrap_or("").to_string();
+
+            let root_path = {
+                let s = state.lock().await;
+                s.sources.get(&source_id).map(|src| src.root_path.clone())
+            };
+
+            if let Some(root_path) = root_path {
+                {
+                    let mut s = state.lock().await;
+                    if let Some(panel) = s.panels.get_mut(&panel_id) {
+                        panel.source_id = source_id;
+                        panel.path = root_path;
+                        panel.cursor = 0;
+                        panel.selection.clear();
+                    }
+                }
+                rescan_panel(&panel_id, state, tx, scan_handles, None).await;
+            }
+        }
+
         "NavigateUp" => {
             let panel_id = resolve_panel_id(scope, state).await;
             let (current_path, parent_path) = {
@@ -713,6 +737,7 @@ async fn handle_intent(
                         supports_streaming: true,
                         supports_jobs: true,
                     },
+                    root_path: src.root_path.clone(),
                 })
                 .collect();
 
@@ -1244,7 +1269,7 @@ async fn rescan_panel(
     if let Some(h) = scan_handles.remove(panel_id) {
         h.abort();
     }
-    let (path, sort, filter, version, driver) = {
+    let (path, sort, filter, version, driver, source_id) = {
         let mut s = state.lock().await;
         let (source_id, path, sort, filter, version) = if let Some(panel) = s.panels.get_mut(panel_id) {
             let sid = panel.source_id.clone();
@@ -1256,7 +1281,7 @@ async fn rescan_panel(
             return;
         };
         let driver = s.drivers.get(&source_id).cloned().unwrap();
-        (path, sort, filter, version, driver)
+        (path, sort, filter, version, driver, source_id)
     };
     let _ = tx
         .send(ServerMessage::StatePatch {
@@ -1265,6 +1290,8 @@ async fn rescan_panel(
             entity_id: Some(panel_id.to_string()),
             version,
             patch: serde_json::json!({
+                "path": path,
+                "sourceId": source_id,
                 "entries": [],
                 "cursor": 0,
                 "status": "loading",

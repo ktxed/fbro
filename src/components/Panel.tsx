@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import type { PanelState, VFSEntry } from "../ws/types";
+import type { PanelState, VFSEntry, Source } from "../ws/types";
 import type { WsClient } from "../ws/client";
 
 function SortHeader({ sort, panelId, client }: {
@@ -35,6 +35,28 @@ interface PanelProps {
   isFocused: boolean;
   modalActive: boolean;
   client: WsClient;
+  sources: Record<string, Source>;
+}
+
+function VolumeHeader({ sources, panel, panelId, client }: {
+  sources: Record<string, Source>;
+  panel: PanelState;
+  panelId: string;
+  client: WsClient;
+}) {
+  return (
+    <div className="panel__volumes">
+      {Object.values(sources).map(src => (
+        <button
+          key={src.id}
+          className={`panel__volume-btn${src.id === panel.sourceId ? " panel__volume-btn--active" : ""}`}
+          tabIndex={-1}
+          onClick={() => client.sendIntent("NavigateToSource", panelId, { sourceId: src.id })}
+          title={src.rootPath}
+        >{src.name}</button>
+      ))}
+    </div>
+  );
 }
 
 function fallbackIcon(entry: VFSEntry): string {
@@ -84,7 +106,7 @@ function formatMtime(mtime: string | undefined): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
-export function Panel({ panelId, panel, isFocused, modalActive, client }: PanelProps) {
+export function Panel({ panelId, panel, isFocused, modalActive, client, sources }: PanelProps) {
   const listRef = useRef<HTMLDivElement>(null);
   const focusDivRef = useRef<HTMLDivElement>(null);
   const rightDrag = useRef({ active: false, everMoved: false, startRow: -1, mode: "select" as "select" | "deselect", preSelection: [] as number[] });
@@ -222,6 +244,8 @@ export function Panel({ panelId, panel, isFocused, modalActive, client }: PanelP
           onClick={() => client.sendIntent("NavigateHome", panelId)}
         >~</button>
       </div>
+
+      <VolumeHeader sources={sources} panel={panel} panelId={panelId} client={client} />
 
       <SortHeader sort={panel.sort} panelId={panelId} client={client} />
 

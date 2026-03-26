@@ -1,4 +1,4 @@
-use super::Platform;
+use super::{Platform, VolumeInfo};
 use std::process::Command;
 
 pub struct LinuxPlatform;
@@ -38,6 +38,84 @@ impl Platform for LinuxPlatform {
             }
         }
         None
+    }
+
+    fn list_volumes(&self) -> Vec<VolumeInfo> {
+        const FALLBACK: &str = "/";
+        const WHITELIST: &[&str] = &[
+            "ext2", "ext3", "ext4", "btrfs", "xfs", "zfs", "vfat", "exfat",
+            "ntfs", "ntfs3", "f2fs", "jfs", "hfsplus", "fuseblk", "nfs", "nfs4", "cifs",
+        ];
+
+        let contents = match std::fs::read_to_string("/proc/mounts") {
+            Ok(c) => c,
+            Err(_) => {
+                return vec![VolumeInfo {
+                    id: "vol-root".to_string(),
+                    name: "/".to_string(),
+                    root_path: FALLBACK.to_string(),
+                }];
+            }
+        };
+
+        let mut seen = std::collections::HashSet::new();
+        let mut volumes: Vec<VolumeInfo> = Vec::new();
+
+        for line in contents.lines() {
+            let fields: Vec<&str> = line.split_whitespace().collect();
+            if fields.len() < 3 {
+                continue;
+            }
+            let mountpoint = fields[1];
+            let fstype = fields[2];
+
+            if !WHITELIST.contains(&fstype) {
+                continue;
+            }
+            if seen.contains(mountpoint) {
+                continue;
+            }
+            seen.insert(mountpoint.to_string());
+
+            let (id, name) = if mountpoint == "/" {
+                ("vol-root".to_string(), "/".to_string())
+            } else {
+                let id = format!("vol{}", mountpoint.replace('/', "-"));
+                let name = mountpoint.trim_end_matches('/')
+                    .rsplit('/')
+                    .next()
+                    .unwrap_or(mountpoint)
+                    .to_string();
+                (id, name)
+            };
+
+            volumes.push(VolumeInfo {
+                id,
+                name,
+                root_path: mountpoint.to_string(),
+            });
+        }
+
+        if volumes.is_empty() {
+            return vec![VolumeInfo {
+                id: "vol-root".to_string(),
+                name: "/".to_string(),
+                root_path: FALLBACK.to_string(),
+            }];
+        }
+
+        // Sort: "/" first, then alphabetically by root_path
+        volumes.sort_by(|a, b| {
+            if a.root_path == "/" {
+                std::cmp::Ordering::Less
+            } else if b.root_path == "/" {
+                std::cmp::Ordering::Greater
+            } else {
+                a.root_path.cmp(&b.root_path)
+            }
+        });
+
+        volumes
     }
 
     fn home_dir(&self) -> String {
