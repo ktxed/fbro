@@ -44,17 +44,41 @@ function VolumeHeader({ sources, panel, panelId, client }: {
   panelId: string;
   client: WsClient;
 }) {
+  const listRef = useRef<HTMLDivElement>(null);
+  const [canLeft, setCanLeft] = useState(false);
+  const [canRight, setCanRight] = useState(false);
+
+  const updateArrows = () => {
+    const el = listRef.current;
+    if (!el) return;
+    setCanLeft(el.scrollLeft > 0);
+    setCanRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 1);
+  };
+
+  useEffect(() => {
+    const id = setTimeout(updateArrows, 0);
+    return () => clearTimeout(id);
+  }, [sources]);
+
+  const scroll = (dir: number) => {
+    listRef.current?.scrollBy({ left: dir * 80, behavior: "smooth" });
+  };
+
   return (
     <div className="panel__volumes">
-      {Object.values(sources).map(src => (
-        <button
-          key={src.id}
-          className={`panel__volume-btn${src.id === panel.sourceId ? " panel__volume-btn--active" : ""}`}
-          tabIndex={-1}
-          onClick={() => client.sendIntent("NavigateToSource", panelId, { sourceId: src.id })}
-          title={src.rootPath}
-        >{src.name}</button>
-      ))}
+      <button className="panel__volumes-arrow" disabled={!canLeft} tabIndex={-1} onClick={() => scroll(-1)}>‹</button>
+      <div className="panel__volumes-list" ref={listRef} onScroll={updateArrows}>
+        {Object.values(sources).map(src => (
+          <button
+            key={src.id}
+            className={`panel__volume-btn${src.id === panel.sourceId ? " panel__volume-btn--active" : ""}`}
+            tabIndex={-1}
+            onClick={() => client.sendIntent("NavigateToSource", panelId, { sourceId: src.id })}
+            title={src.rootPath}
+          >{src.name}</button>
+        ))}
+      </div>
+      <button className="panel__volumes-arrow" disabled={!canRight} tabIndex={-1} onClick={() => scroll(1)}>›</button>
     </div>
   );
 }
