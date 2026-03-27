@@ -124,6 +124,8 @@ async fn handle_connection(stream: TcpStream, addr: SocketAddr, state: SharedSta
                         entries: p.entries.clone(),
                         version: p.version,
                         calculating_size: vec![],
+                        total_count: None,
+                        window_start: None,
                     },
                 )
             })
@@ -187,7 +189,7 @@ async fn handle_connection(stream: TcpStream, addr: SocketAddr, state: SharedSta
             (p.path.clone(), p.sort.clone(), p.filter.clone(), p.version, driver)
         };
 
-        let h = spawn_scan(panel_id.clone(), path, sort, filter, version_base, tx.clone(), driver, None, None);
+        let h = spawn_scan(panel_id.clone(), path, sort, filter, version_base, tx.clone(), driver, None, None, Arc::clone(&state));
         scan_handles.insert(panel_id.clone(), h);
     }
 
@@ -348,7 +350,7 @@ async fn handle_intent(
         "MoveCursor" => {
             let panel_id = resolve_panel_id(scope, state).await;
             let direction = args.get("direction").and_then(|v| v.as_str()).unwrap_or("down");
-            let (new_cursor, version) = {
+            let (new_cursor, version, needs_window) = {
                 let mut s = state.lock().await;
                 if let Some(panel) = s.panels.get_mut(&panel_id) {
                     let len = panel.entries.len();
@@ -361,7 +363,8 @@ async fn handle_intent(
                     };
                     panel.cursor = cursor;
                     panel.version += 1;
-                    (cursor, panel.version)
+                    let needs_window = panel.windowed && (cursor < panel.window_start || cursor >= panel.window_start + panel.window_count);
+                    (cursor, panel.version, needs_window)
                 } else {
                     return;
                 }
@@ -370,11 +373,16 @@ async fn handle_intent(
                 .send(ServerMessage::StatePatch {
                     timestamp: now(),
                     domain: "panels".to_string(),
-                    entity_id: Some(panel_id),
+                    entity_id: Some(panel_id.clone()),
                     version,
                     patch: serde_json::json!({ "cursor": new_cursor }),
                 })
                 .await;
+            if needs_window {
+                let count = { state.lock().await.panels.get(&panel_id).map(|p| p.window_count).unwrap_or(200) };
+                let start = new_cursor.saturating_sub(count / 2);
+                send_window(&panel_id, start, count, state, tx).await;
+            }
         }
 
         "SetSelection" => {
@@ -546,7 +554,7 @@ async fn handle_intent(
         "MoveCursorWithSelect" => {
             let panel_id = resolve_panel_id(scope, state).await;
             let direction = args.get("direction").and_then(|v| v.as_str()).unwrap_or("down");
-            let (new_cursor, new_selection, version) = {
+            let (new_cursor, new_selection, version, needs_window) = {
                 let mut s = state.lock().await;
                 if let Some(panel) = s.panels.get_mut(&panel_id) {
                     let len = panel.entries.len();
@@ -560,17 +568,16 @@ async fn handle_intent(
                     let prev = panel.cursor;
                     panel.cursor = cursor;
                     if panel.selection.contains(&cursor) {
-                        // Shrinking: remove both destination and the entry we left
                         panel.selection.retain(|&i| i != cursor && i != prev);
                     } else {
-                        // Extending: add destination + starting point if needed
                         if !panel.selection.contains(&prev) {
                             panel.selection.push(prev);
                         }
                         panel.selection.push(cursor);
                     }
                     panel.version += 1;
-                    (cursor, panel.selection.clone(), panel.version)
+                    let needs_window = panel.windowed && (cursor < panel.window_start || cursor >= panel.window_start + panel.window_count);
+                    (cursor, panel.selection.clone(), panel.version, needs_window)
                 } else {
                     return;
                 }
@@ -579,17 +586,22 @@ async fn handle_intent(
                 .send(ServerMessage::StatePatch {
                     timestamp: now(),
                     domain: "panels".to_string(),
-                    entity_id: Some(panel_id),
+                    entity_id: Some(panel_id.clone()),
                     version,
                     patch: serde_json::json!({ "cursor": new_cursor, "selection": new_selection }),
                 })
                 .await;
+            if needs_window {
+                let count = { state.lock().await.panels.get(&panel_id).map(|p| p.window_count).unwrap_or(200) };
+                let start = new_cursor.saturating_sub(count / 2);
+                send_window(&panel_id, start, count, state, tx).await;
+            }
         }
 
         "MoveCursorBy" => {
             let panel_id = resolve_panel_id(scope, state).await;
             let delta = args.get("delta").and_then(|v| v.as_i64()).unwrap_or(0);
-            let (new_cursor, version) = {
+            let (new_cursor, version, needs_window) = {
                 let mut s = state.lock().await;
                 if let Some(panel) = s.panels.get_mut(&panel_id) {
                     let len = panel.entries.len();
@@ -598,7 +610,8 @@ async fn handle_intent(
                     if cursor == panel.cursor { return; }
                     panel.cursor = cursor;
                     panel.version += 1;
-                    (cursor, panel.version)
+                    let needs_window = panel.windowed && (cursor < panel.window_start || cursor >= panel.window_start + panel.window_count);
+                    (cursor, panel.version, needs_window)
                 } else {
                     return;
                 }
@@ -607,17 +620,22 @@ async fn handle_intent(
                 .send(ServerMessage::StatePatch {
                     timestamp: now(),
                     domain: "panels".to_string(),
-                    entity_id: Some(panel_id),
+                    entity_id: Some(panel_id.clone()),
                     version,
                     patch: serde_json::json!({ "cursor": new_cursor }),
                 })
                 .await;
+            if needs_window {
+                let count = { state.lock().await.panels.get(&panel_id).map(|p| p.window_count).unwrap_or(200) };
+                let start = new_cursor.saturating_sub(count / 2);
+                send_window(&panel_id, start, count, state, tx).await;
+            }
         }
 
         "MoveCursorToEdge" => {
             let panel_id = resolve_panel_id(scope, state).await;
             let edge = args.get("edge").and_then(|v| v.as_str()).unwrap_or("first");
-            let (new_cursor, version) = {
+            let (new_cursor, version, needs_window) = {
                 let mut s = state.lock().await;
                 if let Some(panel) = s.panels.get_mut(&panel_id) {
                     let len = panel.entries.len();
@@ -627,7 +645,8 @@ async fn handle_intent(
                     let cursor = if edge == "last" { len - 1 } else { 0 };
                     panel.cursor = cursor;
                     panel.version += 1;
-                    (cursor, panel.version)
+                    let needs_window = panel.windowed && (cursor < panel.window_start || cursor >= panel.window_start + panel.window_count);
+                    (cursor, panel.version, needs_window)
                 } else {
                     return;
                 }
@@ -636,11 +655,16 @@ async fn handle_intent(
                 .send(ServerMessage::StatePatch {
                     timestamp: now(),
                     domain: "panels".to_string(),
-                    entity_id: Some(panel_id),
+                    entity_id: Some(panel_id.clone()),
                     version,
                     patch: serde_json::json!({ "cursor": new_cursor }),
                 })
                 .await;
+            if needs_window {
+                let count = { state.lock().await.panels.get(&panel_id).map(|p| p.window_count).unwrap_or(200) };
+                let start = new_cursor.saturating_sub(count / 2);
+                send_window(&panel_id, start, count, state, tx).await;
+            }
         }
 
         "SetCursor" => {
@@ -762,6 +786,13 @@ async fn handle_intent(
             }).await;
         }
 
+        "RequestWindow" => {
+            let panel_id = resolve_panel_id(scope, state).await;
+            let start = args.get("start").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            let count = args.get("count").and_then(|v| v.as_u64()).unwrap_or(200) as usize;
+            send_window(&panel_id, start, count, state, tx).await;
+        }
+
         "OpenTerminal" => {
             let panel_id = resolve_panel_id(scope, state).await;
             let (path, platform) = {
@@ -859,6 +890,8 @@ async fn handle_intent(
                             entries: p.entries.clone(),
                             version: p.version,
                             calculating_size: vec![],
+                            total_count: None,
+                            window_start: None,
                         },
                     )
                 })
@@ -1377,6 +1410,9 @@ async fn navigate_to(
             panel.cursor = 0;
             panel.selection.clear();
             panel.status = PanelStatus::Loading;
+            panel.windowed = false;
+            panel.window_start = 0;
+            panel.window_count = 0;
             panel.version += 1;
             (sid, panel.sort.clone(), panel.filter.clone(), panel.version)
         } else {
@@ -1398,12 +1434,14 @@ async fn navigate_to(
                 "entries": [],
                 "cursor": 0,
                 "selection": [],
-                "status": "loading"
+                "status": "loading",
+                "totalCount": null,
+                "windowStart": null
             }),
         })
         .await;
 
-    let h = spawn_scan(panel_id.to_string(), new_path.to_string(), sort, filter, version, tx.clone(), driver, cursor_hint, None);
+    let h = spawn_scan(panel_id.to_string(), new_path.to_string(), sort, filter, version, tx.clone(), driver, cursor_hint, None, Arc::clone(state));
     scan_handles.insert(panel_id.to_string(), h);
 }
 
@@ -1433,6 +1471,9 @@ async fn rescan_panel(
             panel.entries.clear();
             panel.selection.clear();
             panel.status = PanelStatus::Loading;
+            panel.windowed = false;
+            panel.window_start = 0;
+            panel.window_count = 0;
             panel.version += 1;
             (sid, panel.path.clone(), panel.sort.clone(), panel.filter.clone(), panel.version)
         } else {
@@ -1454,12 +1495,52 @@ async fn rescan_panel(
                 "cursor": 0,
                 "selection": [],
                 "status": "loading",
-                "sort": { "by": sort.by, "order": sort.order }
+                "sort": { "by": sort.by, "order": sort.order },
+                "totalCount": null,
+                "windowStart": null
             }),
         })
         .await;
-    let h = spawn_scan(panel_id.to_string(), path, sort, filter, version, tx.clone(), driver, cursor_hint, selection_names);
+    let h = spawn_scan(panel_id.to_string(), path, sort, filter, version, tx.clone(), driver, cursor_hint, selection_names, Arc::clone(state));
     scan_handles.insert(panel_id.to_string(), h);
+}
+
+async fn send_window(
+    panel_id: &str,
+    requested_start: usize,
+    count: usize,
+    state: &SharedState,
+    tx: &mpsc::Sender<ServerMessage>,
+) {
+    let (window_entries, window_start, total, version) = {
+        let mut s = state.lock().await;
+        let panel = match s.panels.get_mut(panel_id) {
+            Some(p) if p.windowed => p,
+            _ => return,
+        };
+        let total = panel.entries.len();
+        let start = requested_start.min(total.saturating_sub(1));
+        let end = (start + count).min(total);
+        let entries: Vec<&crate::ws::protocol::EntrySchema> = panel.entries[start..end].iter().collect();
+        let json_entries = serde_json::json!(entries);
+        panel.window_start = start;
+        panel.window_count = end - start;
+        panel.version += 1;
+        (json_entries, start, total, panel.version)
+    };
+    let _ = tx
+        .send(ServerMessage::StatePatch {
+            timestamp: now(),
+            domain: "panels".to_string(),
+            entity_id: Some(panel_id.to_string()),
+            version,
+            patch: serde_json::json!({
+                "totalCount": total,
+                "windowStart": window_start,
+                "windowEntries": window_entries,
+            }),
+        })
+        .await;
 }
 
 fn url_encode(s: &str) -> String {
@@ -1503,8 +1584,9 @@ fn spawn_scan(
     driver: Arc<dyn VfsDriver>,
     cursor_hint: Option<String>,
     selection_names: Option<Vec<String>>,
+    state: SharedState,
 ) -> ScanHandle {
-    let handle = tokio::spawn(run_scan(panel_id, path, sort, filter, version_base, tx, driver, cursor_hint, selection_names));
+    let handle = tokio::spawn(run_scan(panel_id, path, sort, filter, version_base, tx, driver, cursor_hint, selection_names, state));
     ScanHandle { handle }
 }
 
@@ -1516,16 +1598,23 @@ async fn update_panel_from_patch(
 ) {
     let mut s = state.lock().await;
     if let Some(panel) = s.panels.get_mut(panel_id) {
-        if let Some(entries) = patch.get("appendEntries").and_then(|v| v.as_array()) {
-            for e in entries {
-                panel.entries.push(crate::ws::protocol::EntrySchema {
-                    name: e["name"].as_str().unwrap_or("").to_string(),
-                    kind: e["kind"].as_str().unwrap_or("file").to_string(),
-                    size: e["size"].as_u64(),
-                    mtime: e["mtime"].as_str().map(String::from),
-                    permissions: e["permissions"].as_str().map(String::from),
-                    icon_name: e["iconName"].as_str().map(String::from),
-                });
+        // In windowed mode (Mode B), scan.rs already stored entries directly
+        // in state.  Skip appendEntries / entry overwrites for windowed patches
+        // (identified by the presence of "totalCount" or "windowEntries").
+        let is_window_patch = patch.get("totalCount").is_some() || patch.get("windowEntries").is_some();
+
+        if !is_window_patch {
+            if let Some(entries) = patch.get("appendEntries").and_then(|v| v.as_array()) {
+                for e in entries {
+                    panel.entries.push(crate::ws::protocol::EntrySchema {
+                        name: e["name"].as_str().unwrap_or("").to_string(),
+                        kind: e["kind"].as_str().unwrap_or("file").to_string(),
+                        size: e["size"].as_u64(),
+                        mtime: e["mtime"].as_str().map(String::from),
+                        permissions: e["permissions"].as_str().map(String::from),
+                        icon_name: e["iconName"].as_str().map(String::from),
+                    });
+                }
             }
         }
         if let Some(status) = patch.get("status").and_then(|v| v.as_str()) {
@@ -1542,6 +1631,10 @@ async fn update_panel_from_patch(
             panel.selection = sel.iter()
                 .filter_map(|v| v.as_u64().map(|n| n as usize))
                 .collect();
+        }
+        // Track window position from send_window patches
+        if let Some(ws) = patch.get("windowStart").and_then(|v| v.as_u64()) {
+            panel.window_start = ws as usize;
         }
         panel.version = version;
     }

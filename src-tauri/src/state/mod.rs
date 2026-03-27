@@ -34,6 +34,11 @@ pub struct Panel {
     pub entries: Vec<EntrySchema>,
     pub version: u64,
     pub calculating_size: HashSet<String>,
+    /// When true, this panel is in windowed mode (Mode B) — FE receives only a
+    /// slice of entries rather than the full list.
+    pub windowed: bool,
+    pub window_start: usize,
+    pub window_count: usize,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -125,6 +130,9 @@ impl AppState {
             entries: vec![],
             version: 0,
             calculating_size: HashSet::new(),
+            windowed: false,
+            window_start: 0,
+            window_count: 0,
         };
 
         let right = Panel {
@@ -139,6 +147,9 @@ impl AppState {
             entries: vec![],
             version: 0,
             calculating_size: HashSet::new(),
+            windowed: false,
+            window_start: 0,
+            window_count: 0,
         };
 
         let mut panels = HashMap::new();

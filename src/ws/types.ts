@@ -36,6 +36,8 @@ export interface PanelState {
   entries: VFSEntry[];
   version: number;
   calculatingSize: string[];
+  totalCount?: number;
+  windowStart?: number;
 }
 
 export interface LayoutDomain {

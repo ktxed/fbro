@@ -21,10 +21,16 @@ const FILE_OP_KEYS: Record<string, FileOpType> = {
   F8: "delete",
 };
 
+/** Resolve an absolute index into the panel's local entries array (handles windowed mode). */
+function entryAt(panel: { entries: { name: string; kind: string; size?: number; mtime?: string; permissions?: string }[]; cursor: number; windowStart?: number }, absIndex: number) {
+  const localIdx = absIndex - (panel.windowStart ?? 0);
+  return panel.entries[localIdx];
+}
+
 function openInfo(state: ReturnType<typeof useAppState>, dispatch: ReturnType<typeof useAppDispatch>) {
   const panel = state.panels[state.focus];
   if (!panel) return;
-  const entry = panel.entries[panel.cursor];
+  const entry = entryAt(panel, panel.cursor);
   if (!entry) return;
   const dirPath = panel.path.replace(/\/+$/, "");
   dispatch({
@@ -44,7 +50,7 @@ function openInfo(state: ReturnType<typeof useAppState>, dispatch: ReturnType<ty
 function openRename(state: ReturnType<typeof useAppState>, dispatch: ReturnType<typeof useAppDispatch>) {
   const panel = state.panels[state.focus];
   if (!panel) return;
-  const entry = panel.entries[panel.cursor];
+  const entry = entryAt(panel, panel.cursor);
   if (!entry || entry.name === "..") return;
   const dirPath = panel.path.replace(/\/+$/, "");
   dispatch({
@@ -73,7 +79,7 @@ export function Toolbar({ client }: { client: WsClient }) {
       : [panel.cursor];
 
     const files: FileOpFile[] = indices
-      .map((idx) => panel.entries[idx])
+      .map((idx) => entryAt(panel, idx))
       .filter(Boolean)
       .map((e) => ({ name: e.name, size: e.size, kind: e.kind }));
 
@@ -117,7 +123,7 @@ export function Toolbar({ client }: { client: WsClient }) {
         e.preventDefault();
         const panel = state.panels[state.focus];
         if (panel) {
-          const entry = panel.entries[panel.cursor];
+          const entry = entryAt(panel, panel.cursor);
           if (entry && entry.kind !== "directory") {
             client.sendIntent("ViewFile", undefined, {
               panelId: state.focus,
@@ -133,7 +139,7 @@ export function Toolbar({ client }: { client: WsClient }) {
         e.preventDefault();
         const panel = state.panels[state.focus];
         if (panel) {
-          const entry = panel.entries[panel.cursor];
+          const entry = entryAt(panel, panel.cursor);
           if (entry && entry.kind !== "directory") {
             client.sendIntent("EditFile", undefined, {
               path: panel.path,
@@ -186,7 +192,7 @@ export function Toolbar({ client }: { client: WsClient }) {
             if (key === "F3") {
               const panel = state.panels[state.focus];
               if (panel) {
-                const entry = panel.entries[panel.cursor];
+                const entry = entryAt(panel, panel.cursor);
                 if (entry && entry.kind !== "directory") {
                   client.sendIntent("ViewFile", undefined, {
                     panelId: state.focus,
@@ -201,7 +207,7 @@ export function Toolbar({ client }: { client: WsClient }) {
             if (key === "F4") {
               const panel = state.panels[state.focus];
               if (panel) {
-                const entry = panel.entries[panel.cursor];
+                const entry = entryAt(panel, panel.cursor);
                 if (entry && entry.kind !== "directory") {
                   client.sendIntent("EditFile", undefined, {
                     path: panel.path,

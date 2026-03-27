@@ -1,6 +1,8 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import type { PanelState, VFSEntry, Source } from "../ws/types";
 import type { WsClient } from "../ws/client";
+
+const ROW_HEIGHT = 22;
 
 function SortHeader({ sort, panelId, client }: {
   sort: PanelState["sort"];
@@ -142,6 +144,12 @@ export function Panel({ panelId, panel, isFocused, modalActive, client, sources 
   const focusDivRef = useRef<HTMLDivElement>(null);
   const rightDrag = useRef({ active: false, everMoved: false, startRow: -1, mode: "select" as "select" | "deselect", preSelection: [] as number[] });
   const calcSet = new Set(panel.calculatingSize ?? []);
+  const windowTimerRef = useRef<number>(0);
+
+  const isWindowed = panel.totalCount !== undefined && panel.totalCount > panel.entries.length;
+  const totalCount = panel.totalCount ?? panel.entries.length;
+  const windowStart = panel.windowStart ?? 0;
+  const selectionSet = useMemo(() => new Set(panel.selection), [panel.selection]);
 
   // Keep focused panel's div focused so it receives keyboard events.
   // Also re-focus when a modal closes (modalActive transitions to false).
@@ -163,23 +171,51 @@ export function Panel({ panelId, panel, isFocused, modalActive, client, sources 
   }, []);
 
   // Scroll cursor into view within panel__list.
-  // Uses getBoundingClientRect so the row position is always relative to the
-  // list viewport, regardless of which element is the CSS offsetParent.
   useEffect(() => {
     const list = listRef.current;
     if (!list) return;
-    const row = list.children[panel.cursor] as HTMLElement | undefined;
-    if (!row) return;
-    const listRect = list.getBoundingClientRect();
-    const rowRect = row.getBoundingClientRect();
-    const rowTop = rowRect.top - listRect.top + list.scrollTop;
-    const rowBottom = rowTop + row.offsetHeight;
-    if (rowTop < list.scrollTop) {
-      list.scrollTop = rowTop;
-    } else if (rowBottom > list.scrollTop + list.clientHeight) {
-      list.scrollTop = rowBottom - list.clientHeight;
+
+    if (isWindowed) {
+      // In windowed mode, use absolute cursor position to scroll
+      const cursorTop = panel.cursor * ROW_HEIGHT;
+      const cursorBottom = cursorTop + ROW_HEIGHT;
+      if (cursorTop < list.scrollTop) {
+        list.scrollTop = cursorTop;
+      } else if (cursorBottom > list.scrollTop + list.clientHeight) {
+        list.scrollTop = cursorBottom - list.clientHeight;
+      }
+    } else {
+      const row = list.children[panel.cursor] as HTMLElement | undefined;
+      if (!row) return;
+      const listRect = list.getBoundingClientRect();
+      const rowRect = row.getBoundingClientRect();
+      const rowTop = rowRect.top - listRect.top + list.scrollTop;
+      const rowBottom = rowTop + row.offsetHeight;
+      if (rowTop < list.scrollTop) {
+        list.scrollTop = rowTop;
+      } else if (rowBottom > list.scrollTop + list.clientHeight) {
+        list.scrollTop = rowBottom - list.clientHeight;
+      }
     }
-  }, [panel.cursor]);
+  }, [panel.cursor, isWindowed]);
+
+  // Debounced window request on scroll (Mode B only)
+  const handleScroll = useCallback(() => {
+    if (!isWindowed) return;
+    clearTimeout(windowTimerRef.current);
+    windowTimerRef.current = window.setTimeout(() => {
+      const list = listRef.current;
+      if (!list) return;
+      const scrollTop = list.scrollTop;
+      const viewportHeight = list.clientHeight;
+      const firstVisible = Math.floor(scrollTop / ROW_HEIGHT);
+      const visibleCount = Math.ceil(viewportHeight / ROW_HEIGHT);
+      const buffer = visibleCount; // 1 screen buffer on each side
+      const start = Math.max(0, firstVisible - buffer);
+      const count = visibleCount + 2 * buffer;
+      client.sendIntent("RequestWindow", panelId, { start, count });
+    }, 50);
+  }, [isWindowed, panelId, client]);
 
   function handleKeyDown(e: React.KeyboardEvent) {
     if (modalActive) {
@@ -212,7 +248,10 @@ export function Panel({ panelId, panel, isFocused, modalActive, client, sources 
         if (e.shiftKey) {
           const targets = new Set([panel.cursor, ...panel.selection]);
           for (const i of targets) {
-            const entry = panel.entries[i];
+            // In windowed mode, entry at cursor might not be in local entries
+            const entry = isWindowed
+              ? (i >= windowStart && i < windowStart + panel.entries.length ? panel.entries[i - windowStart] : undefined)
+              : panel.entries[i];
             if (!entry || entry.kind !== "directory") continue;
             if (calcSet.has(entry.name)) {
               client.sendIntent("CancelSizeCalculation", "focused-panel", { name: entry.name });
@@ -235,9 +274,7 @@ export function Panel({ panelId, panel, isFocused, modalActive, client, sources 
         e.preventDefault();
         const list = listRef.current;
         if (!list) break;
-        const firstRow = list.children[0] as HTMLElement | undefined;
-        const rowHeight = firstRow ? firstRow.getBoundingClientRect().height : 1;
-        const pageSize = Math.max(1, Math.floor(list.clientHeight / rowHeight));
+        const pageSize = Math.max(1, Math.floor(list.clientHeight / ROW_HEIGHT));
         const delta = e.key === "PageDown" ? pageSize : -pageSize;
         client.sendIntent("MoveCursorBy", "focused-panel", { delta });
         break;
@@ -252,11 +289,22 @@ export function Panel({ panelId, panel, isFocused, modalActive, client, sources 
         break;
       case "Enter": {
         e.preventDefault();
-        const entry = panel.entries[panel.cursor];
-        if (entry && entry.kind !== "directory") {
-          client.sendIntent("OpenFile", "focused-panel");
+        // In windowed mode, the BE knows the cursor entry — just send OpenEntry/OpenFile
+        if (isWindowed) {
+          const localIdx = panel.cursor - windowStart;
+          const entry = panel.entries[localIdx];
+          if (entry && entry.kind !== "directory") {
+            client.sendIntent("OpenFile", "focused-panel");
+          } else {
+            client.sendIntent("OpenEntry", "focused-panel");
+          }
         } else {
-          client.sendIntent("OpenEntry", "focused-panel");
+          const entry = panel.entries[panel.cursor];
+          if (entry && entry.kind !== "directory") {
+            client.sendIntent("OpenFile", "focused-panel");
+          } else {
+            client.sendIntent("OpenEntry", "focused-panel");
+          }
         }
         break;
       }
@@ -282,15 +330,77 @@ export function Panel({ panelId, panel, isFocused, modalActive, client, sources 
     }
   }
 
+  const itemCount = isWindowed ? totalCount : panel.entries.length;
   const statusText =
     panel.status === "loading"
       ? "Loading…"
-      : `${panel.entries.length} item${panel.entries.length !== 1 ? "s" : ""}`;
+      : `${itemCount} item${itemCount !== 1 ? "s" : ""}`;
 
   const source = sources[panel.sourceId];
   const diskText = (source?.freeBytes !== undefined && source?.totalBytes !== undefined)
     ? `${formatBytes(source.freeBytes)} / ${formatBytes(source.totalBytes)} free`
     : "";
+
+  function renderRow(entry: VFSEntry, absIndex: number) {
+    return (
+      <div
+        key={entry.name}
+        className={[
+          "panel__row",
+          absIndex === panel.cursor ? "panel__row--cursor" : "",
+          selectionSet.has(absIndex) ? "panel__row--selected" : "",
+        ].filter(Boolean).join(" ")}
+        style={isWindowed ? { position: "absolute", top: absIndex * ROW_HEIGHT, height: ROW_HEIGHT, left: 0, right: 0 } : undefined}
+        onMouseDown={(e) => {
+          if (e.button === 2) {
+            const mode = selectionSet.has(absIndex) ? "deselect" : "select";
+            rightDrag.current = { active: true, everMoved: false, startRow: absIndex, mode, preSelection: [...panel.selection] };
+            return;
+          }
+          if (!isFocused) client.sendIntent("SwitchFocus", undefined, { to: panelId });
+          client.sendIntent("SetCursor", "focused-panel", { index: absIndex });
+        }}
+        onMouseEnter={() => {
+          const drag = rightDrag.current;
+          if (!drag.active) return;
+          drag.everMoved = true;
+          const lo = Math.min(drag.startRow, absIndex);
+          const hi = Math.max(drag.startRow, absIndex);
+          const rangeSet = new Set<number>();
+          for (let r = lo; r <= hi; r++) rangeSet.add(r);
+          let indices: number[];
+          if (drag.mode === "deselect") {
+            indices = drag.preSelection.filter(idx => !rangeSet.has(idx));
+          } else {
+            const merged = new Set(drag.preSelection);
+            rangeSet.forEach(r => merged.add(r));
+            indices = [...merged];
+          }
+          client.sendIntent("SetSelection", "focused-panel", { indices });
+        }}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          if (!rightDrag.current.everMoved) {
+            client.sendIntent("ToggleSelectionAtIndex", "focused-panel", { index: absIndex });
+          }
+        }}
+        onDoubleClick={() => {
+          client.sendIntent("SetCursor", "focused-panel", { index: absIndex });
+          if (entry.kind !== "directory") {
+            client.sendIntent("OpenFile", "focused-panel");
+          } else {
+            client.sendIntent("OpenEntry", "focused-panel");
+          }
+        }}
+      >
+        <EntryIcon entry={entry} />
+        <span className="panel__name">{entry.name}</span>
+        <span className="panel__size">{formatSize(entry, calcSet)}</span>
+        <span className="panel__mtime">{formatMtime(entry.mtime)}</span>
+        <span className="panel__perms">{entry.permissions ?? ""}</span>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -318,66 +428,18 @@ export function Panel({ panelId, panel, isFocused, modalActive, client, sources 
 
       <SortHeader sort={panel.sort} panelId={panelId} client={client} />
 
-      <div className="panel__list" ref={listRef}>
-        {panel.entries.map((entry, i) => (
-          <div
-            key={entry.name}
-            className={[
-              "panel__row",
-              i === panel.cursor ? "panel__row--cursor" : "",
-              panel.selection.includes(i) ? "panel__row--selected" : "",
-            ].filter(Boolean).join(" ")}
-            onMouseDown={(e) => {
-              if (e.button === 2) {
-                const mode = panel.selection.includes(i) ? "deselect" : "select";
-                rightDrag.current = { active: true, everMoved: false, startRow: i, mode, preSelection: [...panel.selection] };
-                return;
-              }
-              if (!isFocused) client.sendIntent("SwitchFocus", undefined, { to: panelId });
-              client.sendIntent("SetCursor", "focused-panel", { index: i });
-            }}
-            onMouseEnter={() => {
-              const drag = rightDrag.current;
-              if (!drag.active) return;
-              drag.everMoved = true;
-              const lo = Math.min(drag.startRow, i);
-              const hi = Math.max(drag.startRow, i);
-              const rangeSet = new Set<number>();
-              for (let r = lo; r <= hi; r++) rangeSet.add(r);
-              let indices: number[];
-              if (drag.mode === "deselect") {
-                indices = drag.preSelection.filter(idx => !rangeSet.has(idx));
-              } else {
-                const merged = new Set(drag.preSelection);
-                rangeSet.forEach(r => merged.add(r));
-                indices = [...merged];
-              }
-              client.sendIntent("SetSelection", "focused-panel", { indices });
-            }}
-            onContextMenu={(e) => {
-              e.preventDefault();
-              if (!rightDrag.current.everMoved) {
-                client.sendIntent("ToggleSelectionAtIndex", "focused-panel", { index: i });
-              }
-            }}
-            onDoubleClick={() => {
-              client.sendIntent("SetCursor", "focused-panel", { index: i });
-              if (entry.kind !== "directory") {
-                client.sendIntent("OpenFile", "focused-panel");
-              } else {
-                client.sendIntent("OpenEntry", "focused-panel");
-              }
-            }}
-          >
-            <EntryIcon entry={entry} />
-            <span className="panel__name">{entry.name}</span>
-            <span className="panel__size">{formatSize(entry, calcSet)}</span>
-            <span className="panel__mtime">{formatMtime(entry.mtime)}</span>
-            <span className="panel__perms">{entry.permissions ?? ""}</span>
+      <div className="panel__list" ref={listRef} onScroll={isWindowed ? handleScroll : undefined}>
+        {isWindowed ? (
+          <div className="panel__virtual-sizer" style={{ height: totalCount * ROW_HEIGHT, position: "relative" }}>
+            {panel.entries.map((entry, i) => renderRow(entry, windowStart + i))}
           </div>
-        ))}
-        {panel.status === "loading" && panel.entries.length === 0 && (
-          <div className="panel__loading">Loading…</div>
+        ) : (
+          <>
+            {panel.entries.map((entry, i) => renderRow(entry, i))}
+            {panel.status === "loading" && panel.entries.length === 0 && (
+              <div className="panel__loading">Loading…</div>
+            )}
+          </>
         )}
       </div>
 

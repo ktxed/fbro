@@ -117,6 +117,10 @@ pub struct PanelSnapshot {
     pub version: u64,
     #[serde(rename = "calculatingSize")]
     pub calculating_size: Vec<String>,
+    #[serde(rename = "totalCount", skip_serializing_if = "Option::is_none")]
+    pub total_count: Option<usize>,
+    #[serde(rename = "windowStart", skip_serializing_if = "Option::is_none")]
+    pub window_start: Option<usize>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

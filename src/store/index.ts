@@ -10,6 +10,7 @@ import type {
   JobEventMessage,
   PendingOp,
   QuitConfirmRequiredMessage,
+  VFSEntry,
 } from "../ws/types";
 
 // ─── State ───────────────────────────────────────────────────────────────────
@@ -116,7 +117,7 @@ function applySnapshot(state: AppState, msg: StateSnapshotMessage): AppState {
   if (domains.panels) {
     const panels: Record<string, PanelState> = {};
     for (const [id, p] of Object.entries(domains.panels)) {
-      panels[id] = { ...p, panelId: id, entries: p.entries ?? [], selection: p.selection ?? [], version: p.version ?? 0, calculatingSize: p.calculatingSize ?? [] };
+      panels[id] = { ...p, panelId: id, entries: p.entries ?? [], selection: p.selection ?? [], version: p.version ?? 0, calculatingSize: p.calculatingSize ?? [], totalCount: p.totalCount, windowStart: p.windowStart };
     }
     next.panels = panels;
   }
@@ -169,6 +170,15 @@ function applyPatch(state: AppState, msg: StatePatchMessage): AppState {
     if (msg.patch.updateEntrySize !== undefined) {
       const { name, size } = msg.patch.updateEntrySize as { name: string; size: number };
       updated = { ...updated, entries: updated.entries.map(e => e.name === name ? { ...e, size } : e) };
+    }
+    if (msg.patch.totalCount !== undefined) {
+      updated = { ...updated, totalCount: msg.patch.totalCount === null ? undefined : msg.patch.totalCount as number };
+    }
+    if (msg.patch.windowStart !== undefined) {
+      updated = { ...updated, windowStart: msg.patch.windowStart === null ? undefined : msg.patch.windowStart as number };
+    }
+    if (msg.patch.windowEntries !== undefined) {
+      updated = { ...updated, entries: msg.patch.windowEntries as VFSEntry[] };
     }
 
     return { ...state, panels: { ...state.panels, [panelId]: updated } };
