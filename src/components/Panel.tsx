@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import type { PanelState, VFSEntry, Source } from "../ws/types";
 import type { WsClient } from "../ws/client";
+import { modKey } from "../utils/platform";
 
 const ROW_HEIGHT = 22;
 
@@ -265,7 +266,7 @@ export function Panel({ panelId, panel, isFocused, modalActive, client, sources 
         break;
       case "a":
       case "A":
-        if (e.ctrlKey) {
+        if (modKey(e)) {
           e.preventDefault();
           if (e.shiftKey) {
             client.sendIntent("ClearSelection", "focused-panel");
@@ -275,7 +276,7 @@ export function Panel({ panelId, panel, isFocused, modalActive, client, sources 
         }
         break;
       case "i":
-        if (e.ctrlKey) {
+        if (modKey(e)) {
           e.preventDefault();
           client.sendIntent("InvertSelection", "focused-panel");
         }

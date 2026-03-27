@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { useAppState, useAppDispatch } from "../store";
 import type { WsClient } from "../ws/client";
 import type { FileOpType, PendingOp, FileOpFile } from "../ws/types";
+import { modKey } from "../utils/platform";
 
 const ACTIONS = [
   { key: "F2",  label: "Rename", icon: "✏️"  },
@@ -109,7 +110,7 @@ export function Toolbar({ client }: { client: WsClient }) {
       // Don't handle keys while a modal is active
       if (state.pendingOp || state.activeJobId || state.pendingQuit || state.pendingRename || state.pendingInfo || state.pendingMkdir || state.pendingNoEditor) return;
 
-      if ((e.key === "i" || e.key === "I") && !e.ctrlKey) {
+      if ((e.key === "i" || e.key === "I") && !modKey(e)) {
         e.preventDefault();
         openInfo(state, dispatch);
         return;
