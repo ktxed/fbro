@@ -116,7 +116,7 @@ function applySnapshot(state: AppState, msg: StateSnapshotMessage): AppState {
   if (domains.panels) {
     const panels: Record<string, PanelState> = {};
     for (const [id, p] of Object.entries(domains.panels)) {
-      panels[id] = { ...p, panelId: id, entries: p.entries ?? [], selection: p.selection ?? [], version: p.version ?? 0 };
+      panels[id] = { ...p, panelId: id, entries: p.entries ?? [], selection: p.selection ?? [], version: p.version ?? 0, calculatingSize: p.calculatingSize ?? [] };
     }
     next.panels = panels;
   }
@@ -162,6 +162,13 @@ function applyPatch(state: AppState, msg: StatePatchMessage): AppState {
     }
     if (msg.patch.sourceId !== undefined) {
       updated = { ...updated, sourceId: msg.patch.sourceId as string };
+    }
+    if (msg.patch.calculatingSize !== undefined) {
+      updated = { ...updated, calculatingSize: msg.patch.calculatingSize as string[] };
+    }
+    if (msg.patch.updateEntrySize !== undefined) {
+      const { name, size } = msg.patch.updateEntrySize as { name: string; size: number };
+      updated = { ...updated, entries: updated.entries.map(e => e.name === name ? { ...e, size } : e) };
     }
 
     return { ...state, panels: { ...state.panels, [panelId]: updated } };

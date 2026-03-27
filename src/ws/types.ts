@@ -33,6 +33,7 @@ export interface PanelState {
   selection: number[];
   entries: VFSEntry[];
   version: number;
+  calculatingSize: string[];
 }
 
 export interface LayoutDomain {

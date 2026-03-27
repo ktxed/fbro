@@ -115,6 +115,8 @@ pub struct PanelSnapshot {
     pub selection: Vec<usize>,
     pub entries: Vec<EntrySchema>,
     pub version: u64,
+    #[serde(rename = "calculatingSize")]
+    pub calculating_size: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

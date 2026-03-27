@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
@@ -33,6 +33,7 @@ pub struct Panel {
     pub selection: Vec<usize>,
     pub entries: Vec<EntrySchema>,
     pub version: u64,
+    pub calculating_size: HashSet<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -123,6 +124,7 @@ impl AppState {
             selection: vec![],
             entries: vec![],
             version: 0,
+            calculating_size: HashSet::new(),
         };
 
         let right = Panel {
@@ -136,6 +138,7 @@ impl AppState {
             selection: vec![],
             entries: vec![],
             version: 0,
+            calculating_size: HashSet::new(),
         };
 
         let mut panels = HashMap::new();

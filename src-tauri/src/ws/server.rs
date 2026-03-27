@@ -7,6 +7,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, Notify};
 use tokio_tungstenite::tungstenite::Message;
 
+use crate::jobs::dirsize::DirSizeQueue;
 use crate::jobs::file_ops::run_file_op;
 use crate::jobs::scan::run_scan;
 use crate::jobs::{ConflictPolicy, FileOpEntry, FileOpJob, FileOpType, JobState, ScanHandle};
@@ -31,20 +32,23 @@ pub async fn start(state: SharedState, app_handle: tauri::AppHandle, quit_notify
     };
     eprintln!("[fbro] WebSocket server listening on ws://{WS_ADDR}");
 
+    let dir_size_queue = Arc::new(DirSizeQueue::new());
+
     loop {
         match listener.accept().await {
             Ok((stream, addr)) => {
                 let state = Arc::clone(&state);
                 let app_handle = app_handle.clone();
                 let quit_notify = Arc::clone(&quit_notify);
-                tokio::spawn(handle_connection(stream, addr, state, app_handle, quit_notify));
+                let dir_size_queue = Arc::clone(&dir_size_queue);
+                tokio::spawn(handle_connection(stream, addr, state, app_handle, quit_notify, dir_size_queue));
             }
             Err(e) => eprintln!("[fbro] Accept error: {e}"),
         }
     }
 }
 
-async fn handle_connection(stream: TcpStream, addr: SocketAddr, state: SharedState, app_handle: tauri::AppHandle, quit_notify: Arc<Notify>) {
+async fn handle_connection(stream: TcpStream, addr: SocketAddr, state: SharedState, app_handle: tauri::AppHandle, quit_notify: Arc<Notify>, dir_size_queue: Arc<DirSizeQueue>) {
     eprintln!("[fbro] Client connected: {addr}");
 
     let ws_stream = match tokio_tungstenite::accept_async(stream).await {
@@ -97,6 +101,7 @@ async fn handle_connection(stream: TcpStream, addr: SocketAddr, state: SharedSta
         for panel in s.panels.values_mut() {
             panel.entries.clear();
             panel.status = PanelStatus::Loading;
+            panel.calculating_size.clear();
             panel.version += 1;
         }
         let panel_ids: Vec<String> = s.panels.keys().cloned().collect::<Vec<_>>();
@@ -118,6 +123,7 @@ async fn handle_connection(stream: TcpStream, addr: SocketAddr, state: SharedSta
                         selection: p.selection.clone(),
                         entries: p.entries.clone(),
                         version: p.version,
+                        calculating_size: vec![],
                     },
                 )
             })
@@ -261,6 +267,7 @@ async fn handle_connection(stream: TcpStream, addr: SocketAddr, state: SharedSta
                                     &mut scan_handles,
                                     &mut decision_senders,
                                     &app_handle,
+                                    &dir_size_queue,
                                 )
                                 .await;
                             }
@@ -303,6 +310,7 @@ async fn handle_intent(
     scan_handles: &mut HashMap<String, ScanHandle>,
     decision_senders: &mut HashMap<String, mpsc::Sender<String>>,
     app_handle: &tauri::AppHandle,
+    dir_size_queue: &Arc<DirSizeQueue>,
 ) {
     match name {
         "RefreshPanels" => {
@@ -699,6 +707,52 @@ async fn handle_intent(
             }
         }
 
+        "CalculateSize" => {
+            let panel_id = resolve_panel_id(scope, state).await;
+            let name = args.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let full_path = {
+                let s = state.lock().await;
+                s.panels.get(&panel_id).and_then(|panel| {
+                    panel.entries.iter()
+                        .find(|e| e.name == name && e.kind == "directory")
+                        .map(|_| format!("{}/{}", panel.path.trim_end_matches('/'), name))
+                })
+            };
+            if let Some(path) = full_path {
+                dir_size_queue.enqueue(panel_id, name, path, Arc::clone(&state), tx.clone()).await;
+            }
+        }
+
+        "CancelSizeCalculation" => {
+            let panel_id = resolve_panel_id(scope, state).await;
+            let name = args.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            // Signal the background task to stop
+            dir_size_queue.cancel(&panel_id, &name).await;
+            // Immediately remove from calculating_size for instant FE feedback
+            let (calc, version) = {
+                let mut s = state.lock().await;
+                if let Some(panel) = s.panels.get_mut(&panel_id) {
+                    panel.calculating_size.remove(&name);
+                    panel.version += 1;
+                    let calc: Vec<String> = {
+                        let mut v: Vec<String> = panel.calculating_size.iter().cloned().collect();
+                        v.sort();
+                        v
+                    };
+                    (calc, panel.version)
+                } else {
+                    return;
+                }
+            };
+            let _ = tx.send(ServerMessage::StatePatch {
+                timestamp: now(),
+                domain: "panels".to_string(),
+                entity_id: Some(panel_id),
+                version,
+                patch: serde_json::json!({ "calculatingSize": calc }),
+            }).await;
+        }
+
         "OpenTerminal" => {
             let panel_id = resolve_panel_id(scope, state).await;
             let (path, platform) = {
@@ -795,6 +849,7 @@ async fn handle_intent(
                             selection: p.selection.clone(),
                             entries: p.entries.clone(),
                             version: p.version,
+                            calculating_size: vec![],
                         },
                     )
                 })

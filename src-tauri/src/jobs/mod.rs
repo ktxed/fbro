@@ -1,3 +1,4 @@
+pub mod dirsize;
 pub mod file_ops;
 pub mod scan;
 

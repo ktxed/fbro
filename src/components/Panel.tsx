@@ -111,14 +111,21 @@ function EntryIcon({ entry }: { entry: VFSEntry }) {
   );
 }
 
-function formatSize(entry: VFSEntry): string {
-  if (entry.kind === "directory") return "<DIR>";
-  if (entry.size === undefined) return "";
-  const s = entry.size;
+function formatBytes(s: number): string {
   if (s < 1024) return `${s}`;
   if (s < 1024 * 1024) return `${(s / 1024).toFixed(1)}K`;
   if (s < 1024 * 1024 * 1024) return `${(s / (1024 * 1024)).toFixed(1)}M`;
   return `${(s / (1024 * 1024 * 1024)).toFixed(1)}G`;
+}
+
+function formatSize(entry: VFSEntry, calcSet: ReadonlySet<string>): string {
+  if (entry.kind === "directory") {
+    if (calcSet.has(entry.name)) return "⏳";
+    if (entry.size !== undefined) return formatBytes(entry.size);
+    return "<DIR>";
+  }
+  if (entry.size === undefined) return "";
+  return formatBytes(entry.size);
 }
 
 function formatMtime(mtime: string | undefined): string {
@@ -134,6 +141,7 @@ export function Panel({ panelId, panel, isFocused, modalActive, client, sources 
   const listRef = useRef<HTMLDivElement>(null);
   const focusDivRef = useRef<HTMLDivElement>(null);
   const rightDrag = useRef({ active: false, everMoved: false, startRow: -1, mode: "select" as "select" | "deselect", preSelection: [] as number[] });
+  const calcSet = new Set(panel.calculatingSize ?? []);
 
   // Keep focused panel's div focused so it receives keyboard events.
   // Also re-focus when a modal closes (modalActive transitions to false).
@@ -201,7 +209,20 @@ export function Panel({ panelId, panel, isFocused, modalActive, client, sources 
         break;
       case " ":
         e.preventDefault();
-        client.sendIntent("ToggleSelection", "focused-panel");
+        if (e.shiftKey) {
+          const targets = new Set([panel.cursor, ...panel.selection]);
+          for (const i of targets) {
+            const entry = panel.entries[i];
+            if (!entry || entry.kind !== "directory") continue;
+            if (calcSet.has(entry.name)) {
+              client.sendIntent("CancelSizeCalculation", "focused-panel", { name: entry.name });
+            } else {
+              client.sendIntent("CalculateSize", "focused-panel", { name: entry.name });
+            }
+          }
+        } else {
+          client.sendIntent("ToggleSelection", "focused-panel");
+        }
         break;
       case "a":
         if (e.ctrlKey) {
@@ -345,7 +366,7 @@ export function Panel({ panelId, panel, isFocused, modalActive, client, sources 
           >
             <EntryIcon entry={entry} />
             <span className="panel__name">{entry.name}</span>
-            <span className="panel__size">{formatSize(entry)}</span>
+            <span className="panel__size">{formatSize(entry, calcSet)}</span>
             <span className="panel__mtime">{formatMtime(entry.mtime)}</span>
             <span className="panel__perms">{entry.permissions ?? ""}</span>
           </div>
