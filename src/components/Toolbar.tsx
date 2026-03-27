@@ -109,7 +109,7 @@ export function Toolbar({ client }: { client: WsClient }) {
       // Don't handle keys while a modal is active
       if (state.pendingOp || state.activeJobId || state.pendingQuit || state.pendingRename || state.pendingInfo || state.pendingMkdir || state.pendingNoEditor) return;
 
-      if (e.key === "i" || e.key === "I") {
+      if ((e.key === "i" || e.key === "I") && !e.ctrlKey) {
         e.preventDefault();
         openInfo(state, dispatch);
         return;

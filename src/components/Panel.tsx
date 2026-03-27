@@ -264,9 +264,20 @@ export function Panel({ panelId, panel, isFocused, modalActive, client, sources 
         }
         break;
       case "a":
+      case "A":
         if (e.ctrlKey) {
           e.preventDefault();
-          client.sendIntent("SelectAll", "focused-panel");
+          if (e.shiftKey) {
+            client.sendIntent("ClearSelection", "focused-panel");
+          } else {
+            client.sendIntent("SelectAll", "focused-panel");
+          }
+        }
+        break;
+      case "i":
+        if (e.ctrlKey) {
+          e.preventDefault();
+          client.sendIntent("InvertSelection", "focused-panel");
         }
         break;
       case "PageUp":

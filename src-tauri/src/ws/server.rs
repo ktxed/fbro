@@ -551,6 +551,56 @@ async fn handle_intent(
                 .await;
         }
 
+        "ClearSelection" => {
+            let panel_id = resolve_panel_id(scope, state).await;
+            let version = {
+                let mut s = state.lock().await;
+                if let Some(panel) = s.panels.get_mut(&panel_id) {
+                    panel.selection.clear();
+                    panel.version += 1;
+                    panel.version
+                } else {
+                    return;
+                }
+            };
+            let _ = tx
+                .send(ServerMessage::StatePatch {
+                    timestamp: now(),
+                    domain: "panels".to_string(),
+                    entity_id: Some(panel_id),
+                    version,
+                    patch: serde_json::json!({ "selection": [] }),
+                })
+                .await;
+        }
+
+        "InvertSelection" => {
+            let panel_id = resolve_panel_id(scope, state).await;
+            let (indices, version) = {
+                let mut s = state.lock().await;
+                if let Some(panel) = s.panels.get_mut(&panel_id) {
+                    let selected: std::collections::HashSet<usize> = panel.selection.iter().copied().collect();
+                    let indices: Vec<usize> = (0..panel.entries.len())
+                        .filter(|i| !selected.contains(i))
+                        .collect();
+                    panel.selection = indices.clone();
+                    panel.version += 1;
+                    (indices, panel.version)
+                } else {
+                    return;
+                }
+            };
+            let _ = tx
+                .send(ServerMessage::StatePatch {
+                    timestamp: now(),
+                    domain: "panels".to_string(),
+                    entity_id: Some(panel_id),
+                    version,
+                    patch: serde_json::json!({ "selection": indices }),
+                })
+                .await;
+        }
+
         "MoveCursorWithSelect" => {
             let panel_id = resolve_panel_id(scope, state).await;
             let direction = args.get("direction").and_then(|v| v.as_str()).unwrap_or("down");
