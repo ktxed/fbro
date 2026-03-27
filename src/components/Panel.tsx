@@ -203,6 +203,12 @@ export function Panel({ panelId, panel, isFocused, modalActive, client, sources 
         e.preventDefault();
         client.sendIntent("ToggleSelection", "focused-panel");
         break;
+      case "a":
+        if (e.ctrlKey) {
+          e.preventDefault();
+          client.sendIntent("SelectAll", "focused-panel");
+        }
+        break;
       case "PageUp":
       case "PageDown": {
         e.preventDefault();
@@ -325,7 +331,12 @@ export function Panel({ panelId, panel, isFocused, modalActive, client, sources 
               }
             }}
             onDoubleClick={() => {
-              if (entry.kind === "directory") client.sendIntent("OpenEntry", "focused-panel");
+              client.sendIntent("SetCursor", "focused-panel", { index: i });
+              if (entry.kind !== "directory") {
+                client.sendIntent("OpenFile", "focused-panel");
+              } else {
+                client.sendIntent("OpenEntry", "focused-panel");
+              }
             }}
           >
             <EntryIcon entry={entry} />
