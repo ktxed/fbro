@@ -7,7 +7,7 @@ use crate::vfs::VfsDriver;
 use crate::ws::protocol::{EntrySchema, FilterSpec, ServerMessage, SortSpec};
 
 const BATCH_SIZE: usize = 50;
-pub const WINDOWED_THRESHOLD: usize = 3000;
+pub const WINDOWED_THRESHOLD: usize = 1500;
 pub const INITIAL_WINDOW_SIZE: usize = 200;
 
 pub async fn run_scan(
