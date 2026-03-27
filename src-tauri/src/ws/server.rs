@@ -699,6 +699,19 @@ async fn handle_intent(
             }
         }
 
+        "OpenTerminal" => {
+            let panel_id = resolve_panel_id(scope, state).await;
+            let (path, platform) = {
+                let s = state.lock().await;
+                let panel = match s.panels.get(&panel_id) {
+                    Some(p) => p,
+                    None => return,
+                };
+                (panel.path.clone(), Arc::clone(&s.platform))
+            };
+            platform.open_terminal(&path);
+        }
+
         "NavigateToSource" => {
             let panel_id = resolve_panel_id(scope, state).await;
             let source_id = args.get("sourceId").and_then(|v| v.as_str()).unwrap_or("").to_string();

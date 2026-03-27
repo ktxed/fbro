@@ -248,6 +248,10 @@ export function Panel({ panelId, panel, isFocused, modalActive, client, sources 
         e.preventDefault();
         client.sendIntent("NavigateUp", "focused-panel");
         break;
+      case "F9":
+        e.preventDefault();
+        client.sendIntent("OpenTerminal", "focused-panel");
+        break;
       case "Tab":
         e.preventDefault();
         client.sendIntent("SwitchFocus", undefined, {

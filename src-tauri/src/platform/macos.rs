@@ -12,6 +12,10 @@ impl Platform for MacOSPlatform {
         let _ = Command::new("open").arg(path).spawn();
     }
 
+    fn open_terminal(&self, path: &str) {
+        let _ = Command::new("open").arg("-a").arg("Terminal").arg(path).spawn();
+    }
+
     fn open_in_editor(&self, path: &str) -> Result<String, String> {
         let output = Command::new("open")
             .arg(path)

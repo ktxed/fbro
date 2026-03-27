@@ -8,6 +8,35 @@ impl Platform for LinuxPlatform {
         let _ = Command::new("xdg-open").arg(path).spawn();
     }
 
+    fn open_terminal(&self, path: &str) {
+        if let Ok(term) = std::env::var("TERMINAL") {
+            let _ = Command::new(&term).current_dir(path).spawn();
+            return;
+        }
+        // (terminal, working-directory flag)
+        let candidates: &[(&str, Option<&str>)] = &[
+            ("cosmic-term",     Some("--working-directory")),
+            ("gnome-terminal",  Some("--working-directory")),
+            ("xfce4-terminal",  Some("--working-directory")),
+            ("mate-terminal",   Some("--working-directory")),
+            ("tilix",           Some("--working-directory")),
+            ("kitty",           Some("--directory")),
+            ("alacritty",       Some("--working-directory")),
+            ("xterm",           None),
+            ("rxvt",            None),
+        ];
+        for (term, flag) in candidates {
+            let mut cmd = Command::new(term);
+            if let Some(f) = flag {
+                cmd.arg(f).arg(path);
+            }
+            cmd.current_dir(path);
+            if cmd.spawn().is_ok() {
+                return;
+            }
+        }
+    }
+
     fn open_in_editor(&self, path: &str) -> Result<String, String> {
         let output = Command::new("xdg-open")
             .arg(path)
