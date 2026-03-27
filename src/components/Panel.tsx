@@ -287,6 +287,11 @@ export function Panel({ panelId, panel, isFocused, modalActive, client, sources 
       ? "Loading…"
       : `${panel.entries.length} item${panel.entries.length !== 1 ? "s" : ""}`;
 
+  const source = sources[panel.sourceId];
+  const diskText = (source?.freeBytes !== undefined && source?.totalBytes !== undefined)
+    ? `${formatBytes(source.freeBytes)} / ${formatBytes(source.totalBytes)} free`
+    : "";
+
   return (
     <div
       className={`panel ${isFocused ? "panel--focused" : ""}`}
@@ -376,7 +381,10 @@ export function Panel({ panelId, panel, isFocused, modalActive, client, sources 
         )}
       </div>
 
-      <div className="panel__footer">{statusText}</div>
+      <div className="panel__footer">
+        <span>{statusText}</span>
+        {diskText && <span>{diskText}</span>}
+      </div>
     </div>
   );
 }

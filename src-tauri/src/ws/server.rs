@@ -132,17 +132,22 @@ async fn handle_connection(stream: TcpStream, addr: SocketAddr, state: SharedSta
         let sources: Vec<SourceSchema> = s
             .sources
             .values()
-            .map(|src| SourceSchema {
-                id: src.id.clone(),
-                name: src.name.clone(),
-                kind: src.kind.clone(),
-                supports: src.supports.clone(),
-                capabilities: SourceCapabilities {
-                    read_only: false,
-                    supports_streaming: true,
-                    supports_jobs: true,
-                },
-                root_path: src.root_path.clone(),
+            .map(|src| {
+                let space = s.platform.disk_space(&src.root_path);
+                SourceSchema {
+                    id: src.id.clone(),
+                    name: src.name.clone(),
+                    kind: src.kind.clone(),
+                    supports: src.supports.clone(),
+                    capabilities: SourceCapabilities {
+                        read_only: false,
+                        supports_streaming: true,
+                        supports_jobs: true,
+                    },
+                    root_path: src.root_path.clone(),
+                    free_bytes: space.map(|(f, _)| f),
+                    total_bytes: space.map(|(_, t)| t),
+                }
             })
             .collect();
 
@@ -862,17 +867,22 @@ async fn handle_intent(
             let sources: Vec<SourceSchema> = s
                 .sources
                 .values()
-                .map(|src| SourceSchema {
-                    id: src.id.clone(),
-                    name: src.name.clone(),
-                    kind: src.kind.clone(),
-                    supports: src.supports.clone(),
-                    capabilities: SourceCapabilities {
-                        read_only: false,
-                        supports_streaming: true,
-                        supports_jobs: true,
-                    },
-                    root_path: src.root_path.clone(),
+                .map(|src| {
+                    let space = s.platform.disk_space(&src.root_path);
+                    SourceSchema {
+                        id: src.id.clone(),
+                        name: src.name.clone(),
+                        kind: src.kind.clone(),
+                        supports: src.supports.clone(),
+                        capabilities: SourceCapabilities {
+                            read_only: false,
+                            supports_streaming: true,
+                            supports_jobs: true,
+                        },
+                        root_path: src.root_path.clone(),
+                        free_bytes: space.map(|(f, _)| f),
+                        total_bytes: space.map(|(_, t)| t),
+                    }
                 })
                 .collect();
 

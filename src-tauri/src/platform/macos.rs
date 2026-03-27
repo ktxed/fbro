@@ -1,5 +1,6 @@
 use super::{Platform, VolumeInfo};
 use std::process::Command;
+use libc;
 
 pub struct MacOSPlatform;
 
@@ -10,6 +11,18 @@ impl Platform for MacOSPlatform {
 
     fn open_file(&self, path: &str) {
         let _ = Command::new("open").arg(path).spawn();
+    }
+
+    fn disk_space(&self, path: &str) -> Option<(u64, u64)> {
+        use std::ffi::CString;
+        let cpath = CString::new(path).ok()?;
+        let mut stat: libc::statvfs = unsafe { std::mem::zeroed() };
+        let ret = unsafe { libc::statvfs(cpath.as_ptr(), &mut stat) };
+        if ret != 0 { return None; }
+        let block_size = stat.f_frsize as u64;
+        let total = stat.f_blocks as u64 * block_size;
+        let free  = stat.f_bavail as u64 * block_size;
+        Some((free, total))
     }
 
     fn open_terminal(&self, path: &str) {

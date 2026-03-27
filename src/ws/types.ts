@@ -20,6 +20,8 @@ export interface Source {
     supportsJobs: boolean;
   };
   rootPath: string;
+  freeBytes?: number;
+  totalBytes?: number;
 }
 
 export interface PanelState {

@@ -31,6 +31,11 @@ pub trait Platform: Send + Sync {
     /// Opens a terminal emulator at the given directory. Fire-and-forget.
     fn open_terminal(&self, _path: &str) {}
 
+    /// Returns (free_bytes, total_bytes) for the filesystem containing `path`.
+    fn disk_space(&self, _path: &str) -> Option<(u64, u64)> {
+        None
+    }
+
     /// Returns all available volumes / mount points on this platform.
     fn list_volumes(&self) -> Vec<VolumeInfo> {
         vec![]

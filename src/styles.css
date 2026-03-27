@@ -370,6 +370,9 @@ body {
   font-size: var(--font-size);
   color: var(--text-dim);
   flex-shrink: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
 
 .panel--focused .panel__footer {
