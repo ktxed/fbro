@@ -182,7 +182,7 @@ async fn handle_connection(stream: TcpStream, addr: SocketAddr, state: SharedSta
             (p.path.clone(), p.sort.clone(), p.filter.clone(), p.version, driver)
         };
 
-        let h = spawn_scan(panel_id.clone(), path, sort, filter, version_base, tx.clone(), driver, None);
+        let h = spawn_scan(panel_id.clone(), path, sort, filter, version_base, tx.clone(), driver, None, None);
         scan_handles.insert(panel_id.clone(), h);
     }
 
@@ -222,7 +222,7 @@ async fn handle_connection(stream: TcpStream, addr: SocketAddr, state: SharedSta
                             }
                         };
                         for pid in panels_to_rescan {
-                            rescan_panel(&pid, &state, &tx, &mut scan_handles, None).await;
+                            rescan_panel(&pid, &state, &tx, &mut scan_handles, None, None).await;
                         }
                     }
                 }
@@ -314,12 +314,14 @@ async fn handle_intent(
 ) {
     match name {
         "RefreshPanels" => {
-            let panel_ids: Vec<String> = {
+            let panel_ids_and_names: Vec<(String, Option<Vec<String>>)> = {
                 let s = state.lock().await;
-                s.panels.keys().cloned().collect()
+                s.panels.keys()
+                    .map(|id| (id.clone(), selected_names_for(&s, id)))
+                    .collect()
             };
-            for panel_id in panel_ids {
-                rescan_panel(&panel_id, state, &tx, scan_handles, None).await;
+            for (panel_id, names) in panel_ids_and_names {
+                rescan_panel(&panel_id, state, &tx, scan_handles, None, names).await;
             }
         }
 
@@ -327,13 +329,15 @@ async fn handle_intent(
             let panel_id = resolve_panel_id(scope, state).await;
             let by    = args.get("by").and_then(|v| v.as_str()).unwrap_or("name").to_string();
             let order = args.get("order").and_then(|v| v.as_str()).unwrap_or("asc").to_string();
-            {
+            let names = {
                 let mut s = state.lock().await;
+                let names = selected_names_for(&s, &panel_id);
                 if let Some(panel) = s.panels.get_mut(&panel_id) {
                     panel.sort = crate::ws::protocol::SortSpec { by, order };
                 }
-            }
-            rescan_panel(&panel_id, state, &tx, scan_handles, None).await;
+                names
+            };
+            rescan_panel(&panel_id, state, &tx, scan_handles, None, names).await;
         }
 
         "MoveCursor" => {
@@ -785,7 +789,7 @@ async fn handle_intent(
                         panel.selection.clear();
                     }
                 }
-                rescan_panel(&panel_id, state, tx, scan_handles, None).await;
+                rescan_panel(&panel_id, state, tx, scan_handles, None, None).await;
             }
         }
 
@@ -1112,10 +1116,12 @@ async fn handle_intent(
                 .unwrap_or_default();
             let dest_path = format!("{}/{}", source_dir.trim_end_matches('/'), dest_name);
 
-            let driver = {
+            let (driver, rename_selection_names) = {
                 let s = state.lock().await;
-                s.panels.get(&source_panel)
-                    .and_then(|p| s.drivers.get(&p.source_id).cloned())
+                let driver = s.panels.get(&source_panel)
+                    .and_then(|p| s.drivers.get(&p.source_id).cloned());
+                let names = selected_names_for(&s, &source_panel);
+                (driver, names)
             };
 
             if let Some(driver) = driver {
@@ -1128,7 +1134,7 @@ async fn handle_intent(
                             timestamp: now(),
                             panel_id: source_panel.clone(),
                         }).await;
-                        rescan_panel(&source_panel, state, &tx, scan_handles, Some(dest_name.clone())).await;
+                        rescan_panel(&source_panel, state, &tx, scan_handles, Some(dest_name.clone()), rename_selection_names).await;
                     }
                     Ok(Ok(false)) => {
                         let _ = tx.send(ServerMessage::Error {
@@ -1160,10 +1166,12 @@ async fn handle_intent(
 
             let full_path = format!("{}/{}", dir_path.trim_end_matches('/'), name);
 
-            let driver = {
+            let (driver, mkdir_selection_names) = {
                 let s = state.lock().await;
-                s.panels.get(&source_panel)
-                    .and_then(|p| s.drivers.get(&p.source_id).cloned())
+                let driver = s.panels.get(&source_panel)
+                    .and_then(|p| s.drivers.get(&p.source_id).cloned());
+                let names = selected_names_for(&s, &source_panel);
+                (driver, names)
             };
 
             if let Some(driver) = driver {
@@ -1175,7 +1183,7 @@ async fn handle_intent(
                             timestamp: now(),
                             panel_id: source_panel.clone(),
                         }).await;
-                        rescan_panel(&source_panel, state, &tx, scan_handles, Some(name)).await;
+                        rescan_panel(&source_panel, state, &tx, scan_handles, Some(name), mkdir_selection_names).await;
                     }
                     Ok(Err(e)) => {
                         let _ = tx.send(ServerMessage::Error {
@@ -1385,8 +1393,16 @@ async fn navigate_to(
         })
         .await;
 
-    let h = spawn_scan(panel_id.to_string(), new_path.to_string(), sort, filter, version, tx.clone(), driver, cursor_hint);
+    let h = spawn_scan(panel_id.to_string(), new_path.to_string(), sort, filter, version, tx.clone(), driver, cursor_hint, None);
     scan_handles.insert(panel_id.to_string(), h);
+}
+
+fn selected_names_for(state_guard: &crate::state::AppState, panel_id: &str) -> Option<Vec<String>> {
+    state_guard.panels.get(panel_id).map(|panel| {
+        panel.selection.iter()
+            .filter_map(|&i| panel.entries.get(i).map(|e| e.name.clone()))
+            .collect()
+    })
 }
 
 async fn rescan_panel(
@@ -1395,6 +1411,7 @@ async fn rescan_panel(
     tx: &mpsc::Sender<ServerMessage>,
     scan_handles: &mut HashMap<String, ScanHandle>,
     cursor_hint: Option<String>,
+    selection_names: Option<Vec<String>>,
 ) {
     if let Some(h) = scan_handles.remove(panel_id) {
         h.abort();
@@ -1404,6 +1421,7 @@ async fn rescan_panel(
         let (source_id, path, sort, filter, version) = if let Some(panel) = s.panels.get_mut(panel_id) {
             let sid = panel.source_id.clone();
             panel.entries.clear();
+            panel.selection.clear();
             panel.status = PanelStatus::Loading;
             panel.version += 1;
             (sid, panel.path.clone(), panel.sort.clone(), panel.filter.clone(), panel.version)
@@ -1424,12 +1442,13 @@ async fn rescan_panel(
                 "sourceId": source_id,
                 "entries": [],
                 "cursor": 0,
+                "selection": [],
                 "status": "loading",
                 "sort": { "by": sort.by, "order": sort.order }
             }),
         })
         .await;
-    let h = spawn_scan(panel_id.to_string(), path, sort, filter, version, tx.clone(), driver, cursor_hint);
+    let h = spawn_scan(panel_id.to_string(), path, sort, filter, version, tx.clone(), driver, cursor_hint, selection_names);
     scan_handles.insert(panel_id.to_string(), h);
 }
 
@@ -1473,8 +1492,9 @@ fn spawn_scan(
     tx: mpsc::Sender<ServerMessage>,
     driver: Arc<dyn VfsDriver>,
     cursor_hint: Option<String>,
+    selection_names: Option<Vec<String>>,
 ) -> ScanHandle {
-    let handle = tokio::spawn(run_scan(panel_id, path, sort, filter, version_base, tx, driver, cursor_hint));
+    let handle = tokio::spawn(run_scan(panel_id, path, sort, filter, version_base, tx, driver, cursor_hint, selection_names));
     ScanHandle { handle }
 }
 

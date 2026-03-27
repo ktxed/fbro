@@ -15,6 +15,7 @@ pub async fn run_scan(
     tx: mpsc::Sender<ServerMessage>,
     driver: Arc<dyn VfsDriver>,
     cursor_hint: Option<String>,
+    selection_names: Option<Vec<String>>,
 ) {
     let result = tokio::task::spawn_blocking(move || {
         driver.list(&path, &sort, filter.as_ref())
@@ -80,6 +81,17 @@ pub async fn run_scan(
         .and_then(|hint| schema_entries.iter().position(|e| e.name == hint))
         .unwrap_or(0);
 
+    let selection: Vec<usize> = match selection_names {
+        Some(names) => {
+            let name_set: std::collections::HashSet<_> = names.into_iter().collect();
+            schema_entries.iter().enumerate()
+                .filter(|(_, e)| name_set.contains(&e.name))
+                .map(|(i, _)| i)
+                .collect()
+        }
+        None => vec![],
+    };
+
     version += 1;
     let _ = tx
         .send(ServerMessage::StatePatch {
@@ -87,7 +99,7 @@ pub async fn run_scan(
             domain: "panels".to_string(),
             entity_id: Some(panel_id),
             version,
-            patch: serde_json::json!({ "status": "ready", "total": total, "cursor": cursor }),
+            patch: serde_json::json!({ "status": "ready", "total": total, "cursor": cursor, "selection": selection }),
         })
         .await;
 }
