@@ -227,6 +227,7 @@ export function Toolbar({ client }: { client: WsClient }) {
               }
               return;
             }
+            if (key === "F9") { client.sendIntent("OpenTerminal", state.focus); return; }
             if (key === "F10") { client.sendIntent("Quit"); return; }
             const opType = FILE_OP_KEYS[key];
             if (opType) openFileOp(opType);
