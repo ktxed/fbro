@@ -189,7 +189,7 @@ async fn handle_connection(stream: TcpStream, addr: SocketAddr, state: SharedSta
             (p.path.clone(), p.sort.clone(), p.filter.clone(), p.version, driver)
         };
 
-        let h = spawn_scan(panel_id.clone(), path, sort, filter, version_base, tx.clone(), driver, None, None, Arc::clone(&state));
+        let h = spawn_scan(panel_id.clone(), path, sort, filter, version_base, tx.clone(), driver, None, None, Arc::clone(&state), Arc::clone(&dir_size_queue));
         scan_handles.insert(panel_id.clone(), h);
     }
 
@@ -229,7 +229,7 @@ async fn handle_connection(stream: TcpStream, addr: SocketAddr, state: SharedSta
                             }
                         };
                         for pid in panels_to_rescan {
-                            rescan_panel(&pid, &state, &tx, &mut scan_handles, None, None).await;
+                            rescan_panel(&pid, &state, &tx, &mut scan_handles, None, None, &dir_size_queue).await;
                         }
                     }
                 }
@@ -328,7 +328,7 @@ async fn handle_intent(
                     .collect()
             };
             for (panel_id, names) in panel_ids_and_names {
-                rescan_panel(&panel_id, state, &tx, scan_handles, None, names).await;
+                rescan_panel(&panel_id, state, &tx, scan_handles, None, names, dir_size_queue).await;
             }
         }
 
@@ -344,7 +344,7 @@ async fn handle_intent(
                 }
                 names
             };
-            rescan_panel(&panel_id, state, &tx, scan_handles, None, names).await;
+            rescan_panel(&panel_id, state, &tx, scan_handles, None, names, dir_size_queue).await;
         }
 
         "MoveCursor" => {
@@ -761,14 +761,14 @@ async fn handle_intent(
             };
 
             if entry_kind == "directory" {
-                navigate_to(&panel_id, &new_path, None, state, tx, scan_handles).await;
+                navigate_to(&panel_id, &new_path, None, state, tx, scan_handles, dir_size_queue).await;
             }
         }
 
         "NavigateHome" => {
             let panel_id = resolve_panel_id(scope, state).await;
             let home = state.lock().await.platform.home_dir();
-            navigate_to(&panel_id, &home, None, state, tx, scan_handles).await;
+            navigate_to(&panel_id, &home, None, state, tx, scan_handles, dir_size_queue).await;
         }
 
         "OpenFile" => {
@@ -802,6 +802,7 @@ async fn handle_intent(
                 })
             };
             if let Some(path) = full_path {
+                dir_size_queue.invalidate_cache(&path).await;
                 dir_size_queue.enqueue(panel_id, name, path, Arc::clone(&state), tx.clone()).await;
             }
         }
@@ -875,7 +876,7 @@ async fn handle_intent(
                         panel.selection.clear();
                     }
                 }
-                rescan_panel(&panel_id, state, tx, scan_handles, None, None).await;
+                rescan_panel(&panel_id, state, tx, scan_handles, None, None, dir_size_queue).await;
             }
         }
 
@@ -894,7 +895,7 @@ async fn handle_intent(
                 if let Some(parent) = parent_path {
                     if parent != path {
                         let dir_name = path.trim_end_matches('/').rsplit('/').next().map(str::to_string);
-                        navigate_to(&panel_id, &parent, dir_name, state, tx, scan_handles).await;
+                        navigate_to(&panel_id, &parent, dir_name, state, tx, scan_handles, dir_size_queue).await;
                     }
                 }
             }
@@ -1227,7 +1228,7 @@ async fn handle_intent(
                             timestamp: now(),
                             panel_id: source_panel.clone(),
                         }).await;
-                        rescan_panel(&source_panel, state, &tx, scan_handles, Some(dest_name.clone()), rename_selection_names).await;
+                        rescan_panel(&source_panel, state, &tx, scan_handles, Some(dest_name.clone()), rename_selection_names, dir_size_queue).await;
                     }
                     Ok(Ok(false)) => {
                         let _ = tx.send(ServerMessage::Error {
@@ -1276,7 +1277,7 @@ async fn handle_intent(
                             timestamp: now(),
                             panel_id: source_panel.clone(),
                         }).await;
-                        rescan_panel(&source_panel, state, &tx, scan_handles, Some(name), mkdir_selection_names).await;
+                        rescan_panel(&source_panel, state, &tx, scan_handles, Some(name), mkdir_selection_names, dir_size_queue).await;
                     }
                     Ok(Err(e)) => {
                         let _ = tx.send(ServerMessage::Error {
@@ -1445,6 +1446,7 @@ async fn navigate_to(
     state: &SharedState,
     tx: &mpsc::Sender<ServerMessage>,
     scan_handles: &mut HashMap<String, ScanHandle>,
+    dir_size_queue: &Arc<DirSizeQueue>,
 ) {
     // Abort any running scan for this panel
     if let Some(h) = scan_handles.remove(panel_id) {
@@ -1491,7 +1493,7 @@ async fn navigate_to(
         })
         .await;
 
-    let h = spawn_scan(panel_id.to_string(), new_path.to_string(), sort, filter, version, tx.clone(), driver, cursor_hint, None, Arc::clone(state));
+    let h = spawn_scan(panel_id.to_string(), new_path.to_string(), sort, filter, version, tx.clone(), driver, cursor_hint, None, Arc::clone(state), Arc::clone(dir_size_queue));
     scan_handles.insert(panel_id.to_string(), h);
 }
 
@@ -1510,6 +1512,7 @@ async fn rescan_panel(
     scan_handles: &mut HashMap<String, ScanHandle>,
     cursor_hint: Option<String>,
     selection_names: Option<Vec<String>>,
+    dir_size_queue: &Arc<DirSizeQueue>,
 ) {
     if let Some(h) = scan_handles.remove(panel_id) {
         h.abort();
@@ -1551,7 +1554,7 @@ async fn rescan_panel(
             }),
         })
         .await;
-    let h = spawn_scan(panel_id.to_string(), path, sort, filter, version, tx.clone(), driver, cursor_hint, selection_names, Arc::clone(state));
+    let h = spawn_scan(panel_id.to_string(), path, sort, filter, version, tx.clone(), driver, cursor_hint, selection_names, Arc::clone(state), Arc::clone(dir_size_queue));
     scan_handles.insert(panel_id.to_string(), h);
 }
 
@@ -1635,8 +1638,9 @@ fn spawn_scan(
     cursor_hint: Option<String>,
     selection_names: Option<Vec<String>>,
     state: SharedState,
+    dir_size_queue: Arc<DirSizeQueue>,
 ) -> ScanHandle {
-    let handle = tokio::spawn(run_scan(panel_id, path, sort, filter, version_base, tx, driver, cursor_hint, selection_names, state));
+    let handle = tokio::spawn(run_scan(panel_id, path, sort, filter, version_base, tx, driver, cursor_hint, selection_names, state, dir_size_queue));
     ScanHandle { handle }
 }
 

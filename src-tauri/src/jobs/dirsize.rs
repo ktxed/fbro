@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use tokio::sync::{mpsc, watch, Mutex, Semaphore};
 
@@ -8,10 +9,49 @@ use crate::state::SharedState;
 use crate::ws::protocol::{now, ServerMessage};
 
 const MAX_CONCURRENT: usize = 4;
+const CACHE_TTL: Duration = Duration::from_secs(60);
+
+// ── DirSizeCache ─────────────────────────────────────────────────────────────
+
+struct CacheEntry {
+    size: u64,
+    computed_at: Instant,
+}
+
+/// Scoped cache for computed directory sizes.  Keyed by full filesystem path.
+/// Entries expire after CACHE_TTL (1 minute).
+pub struct DirSizeCache {
+    entries: HashMap<String, CacheEntry>,
+}
+
+impl DirSizeCache {
+    fn new() -> Self {
+        Self { entries: HashMap::new() }
+    }
+
+    /// Returns the cached size if the entry exists and has not expired.
+    pub fn get(&self, path: &str) -> Option<u64> {
+        self.entries.get(path)
+            .filter(|e| e.computed_at.elapsed() < CACHE_TTL)
+            .map(|e| e.size)
+    }
+
+    fn insert(&mut self, path: String, size: u64) {
+        self.entries.insert(path, CacheEntry { size, computed_at: Instant::now() });
+    }
+
+    /// Remove an entry so the next calculation starts fresh.
+    pub fn invalidate(&mut self, path: &str) {
+        self.entries.remove(path);
+    }
+}
+
+// ── DirSizeQueue ─────────────────────────────────────────────────────────────
 
 pub struct DirSizeQueue {
     semaphore: Arc<Semaphore>,
     active: Arc<Mutex<HashMap<(String, String), watch::Sender<bool>>>>,
+    cache: Arc<Mutex<DirSizeCache>>,
 }
 
 impl DirSizeQueue {
@@ -19,7 +59,18 @@ impl DirSizeQueue {
         Self {
             semaphore: Arc::new(Semaphore::new(MAX_CONCURRENT)),
             active: Arc::new(Mutex::new(HashMap::new())),
+            cache: Arc::new(Mutex::new(DirSizeCache::new())),
         }
+    }
+
+    /// Return a cached size for `path` if one exists and has not expired.
+    pub async fn get_cached_size(&self, path: &str) -> Option<u64> {
+        self.cache.lock().await.get(path)
+    }
+
+    /// Invalidate the cache entry for `path` (called before explicit recalculation).
+    pub async fn invalidate_cache(&self, path: &str) {
+        self.cache.lock().await.invalidate(path);
     }
 
     /// Enqueue a recursive size calculation for a directory entry.
@@ -67,6 +118,7 @@ impl DirSizeQueue {
 
         let semaphore = Arc::clone(&self.semaphore);
         let active = Arc::clone(&self.active);
+        let cache = Arc::clone(&self.cache);
 
         tokio::spawn(async move {
             // Wait for an available computation slot
@@ -110,6 +162,9 @@ impl DirSizeQueue {
                             }),
                         });
                     }
+                    // Store in cache after releasing the state lock
+                    drop(s);
+                    cache.lock().await.insert(full_path, size);
                 }
                 Ok(None) => {
                     eprintln!("[dirsize] cancelled: panel={panel_id} entry={entry_name}");
@@ -134,7 +189,7 @@ impl DirSizeQueue {
     }
 }
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 fn calculating_vec(set: &std::collections::HashSet<String>) -> Vec<String> {
     let mut v: Vec<String> = set.iter().cloned().collect();

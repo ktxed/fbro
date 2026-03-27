@@ -135,17 +135,32 @@ function applyPatch(state: AppState, msg: StatePatchMessage): AppState {
     const panel = state.panels[panelId];
     if (!panel) return state;
 
-    // updateEntrySize is applied unconditionally before the version guard because
-    // dirsize patches can arrive out-of-order relative to cursor/selection patches
-    // (the BE version is incremented under a lock but try_send is outside it).
+    // Some fields are applied before the version guard because a dirsize try_send
+    // can fire between the BE's state-lock release and its tx.send, putting a
+    // higher-versioned dirsize patch in the channel ahead of the cursor/selection
+    // patch.  These fields are safe to apply out-of-order: they carry no stale
+    // structural data and WebSocket ordering still prevents truly stale values
+    // from a previous navigation session.
+    let preGuardPanel = panel;
     if (msg.patch.updateEntrySize !== undefined) {
       const { name, size } = msg.patch.updateEntrySize as { name: string; size: number };
-      const updated = { ...panel, entries: panel.entries.map(e => e.name === name ? { ...e, size } : e) };
-      state = { ...state, panels: { ...state.panels, [panelId]: updated } };
-      // Continue to let the rest of the patch (e.g. calculatingSize) be applied below.
+      preGuardPanel = { ...preGuardPanel, entries: preGuardPanel.entries.map(e => e.name === name ? { ...e, size } : e) };
+    }
+    if (msg.patch.cursor !== undefined) {
+      preGuardPanel = { ...preGuardPanel, cursor: msg.patch.cursor as number };
+    }
+    if (msg.patch.selection !== undefined) {
+      preGuardPanel = { ...preGuardPanel, selection: msg.patch.selection as number[] };
+    }
+    if (msg.patch.calculatingSize !== undefined) {
+      preGuardPanel = { ...preGuardPanel, calculatingSize: msg.patch.calculatingSize as string[] };
+    }
+    if (preGuardPanel !== panel) {
+      state = { ...state, panels: { ...state.panels, [panelId]: preGuardPanel } };
     }
 
-    // Version guard — if version goes backwards skip (shouldn't happen in v0)
+    // Version guard — drop structurally stale patches (old scan data arriving
+    // after a newer scan has already produced results).
     if (msg.version <= panel.version && msg.version !== 0) return state;
 
     let updated = { ...panel, version: msg.version };

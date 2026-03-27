@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
+use crate::jobs::dirsize::DirSizeQueue;
 use crate::state::SharedState;
 use crate::vfs::VfsDriver;
 use crate::ws::protocol::{EntrySchema, FilterSpec, ServerMessage, SortSpec};
@@ -20,9 +21,11 @@ pub async fn run_scan(
     cursor_hint: Option<String>,
     selection_names: Option<Vec<String>>,
     state: SharedState,
+    dir_size_queue: Arc<DirSizeQueue>,
 ) {
+    let path_clone = path.clone();
     let result = tokio::task::spawn_blocking(move || {
-        driver.list(&path, &sort, filter.as_ref())
+        driver.list(&path_clone, &sort, filter.as_ref())
     })
     .await;
 
@@ -43,7 +46,7 @@ pub async fn run_scan(
         Err(_) => return,
     };
 
-    let schema_entries: Vec<EntrySchema> = entries
+    let mut schema_entries: Vec<EntrySchema> = entries
         .into_iter()
         .map(|e| EntrySchema {
             name: e.name,
@@ -56,6 +59,18 @@ pub async fn run_scan(
         .collect();
 
     let total = schema_entries.len();
+
+    // Apply cached directory sizes so returning to a folder restores previously
+    // computed sizes without requiring another Shift+Space.
+    let panel_path = path.trim_end_matches('/');
+    for entry in &mut schema_entries {
+        if entry.kind == "directory" {
+            let full = format!("{}/{}", panel_path, entry.name);
+            if let Some(sz) = dir_size_queue.get_cached_size(&full).await {
+                entry.size = Some(sz);
+            }
+        }
+    }
 
     let cursor = cursor_hint
         .as_deref()
