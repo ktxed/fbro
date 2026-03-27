@@ -135,6 +135,16 @@ function applyPatch(state: AppState, msg: StatePatchMessage): AppState {
     const panel = state.panels[panelId];
     if (!panel) return state;
 
+    // updateEntrySize is applied unconditionally before the version guard because
+    // dirsize patches can arrive out-of-order relative to cursor/selection patches
+    // (the BE version is incremented under a lock but try_send is outside it).
+    if (msg.patch.updateEntrySize !== undefined) {
+      const { name, size } = msg.patch.updateEntrySize as { name: string; size: number };
+      const updated = { ...panel, entries: panel.entries.map(e => e.name === name ? { ...e, size } : e) };
+      state = { ...state, panels: { ...state.panels, [panelId]: updated } };
+      // Continue to let the rest of the patch (e.g. calculatingSize) be applied below.
+    }
+
     // Version guard — if version goes backwards skip (shouldn't happen in v0)
     if (msg.version <= panel.version && msg.version !== 0) return state;
 
