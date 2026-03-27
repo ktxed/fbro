@@ -15,6 +15,11 @@ use state::AppState;
 use tokio::sync::Mutex;
 
 fn main() {
+    #[cfg(target_os = "linux")]
+    if std::env::var("WAYLAND_DISPLAY").is_ok() {
+        std::env::set_var("GDK_BACKEND", "wayland");
+    }
+
     let platform = platform::create_platform();
     let icon_cache: Arc<StdMutex<HashMap<String, (Vec<u8>, &'static str)>>> =
         Arc::new(StdMutex::new(HashMap::new()));
@@ -42,6 +47,9 @@ fn main() {
             let platform = platform.clone();
             move |app| {
                 let app_handle = app.handle().clone();
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.set_icon(tauri::include_image!("icons/128x128.png"));
+                }
                 let session = persistence::load();
                 let initial_paths = session.panels.into_iter()
                     .map(|(id, p)| (id, p.path))
