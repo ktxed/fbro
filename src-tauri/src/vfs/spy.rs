@@ -91,6 +91,8 @@ impl<R: Read + Send> Read for DelayedReader<R> {
 // ─── VfsDriver impl ───────────────────────────────────────────────────────────
 
 impl VfsDriver for SpyFsDriver {
+    fn is_local(&self) -> bool { self.inner.is_local() }
+
     // ── Pass-through (non-mutating) ──────────────────────────────────────────
 
     fn list(&self, path: &str, sort: &SortSpec, filter: Option<&FilterSpec>) -> Result<Vec<VfsEntry>, VfsError> {

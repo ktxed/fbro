@@ -1,6 +1,7 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod fileserver;
 mod jobs;
 mod persistence;
 mod platform;
@@ -14,6 +15,71 @@ use std::sync::{Arc, Mutex as StdMutex};
 use state::AppState;
 use tokio::sync::Mutex;
 
+fn percent_decode(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let Ok(b) = u8::from_str_radix(
+                std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap_or(""),
+                16,
+            ) {
+                out.push(b);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+fn parse_range(header: &str, total: u64) -> Option<(u64, u64)> {
+    let s = header.strip_prefix("bytes=")?;
+    let (start_str, end_str) = s.split_once('-')?;
+    let start: u64 = start_str.parse().ok()?;
+    let end: u64 = if end_str.is_empty() {
+        total.saturating_sub(1)
+    } else {
+        end_str.parse::<u64>().ok()?.min(total.saturating_sub(1))
+    };
+    if start > end { return None; }
+    Some((start, end))
+}
+
+fn read_file_range(path: &str, start: u64, length: usize) -> std::io::Result<Vec<u8>> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut file = std::fs::File::open(path)?;
+    file.seek(SeekFrom::Start(start))?;
+    let mut buf = vec![0u8; length];
+    let n = file.read(&mut buf)?;
+    buf.truncate(n);
+    Ok(buf)
+}
+
+fn mime_for_path(path: &str) -> &'static str {
+    let ext = path.rsplit('.').next().unwrap_or("").to_lowercase();
+    match ext.as_str() {
+        "png"  => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif"  => "image/gif",
+        "webp" => "image/webp",
+        "svg"  => "image/svg+xml",
+        "bmp"  => "image/bmp",
+        "ico"  => "image/x-icon",
+        "avif" => "image/avif",
+        "mp4"  => "video/mp4",
+        "webm" => "video/webm",
+        "ogv"  => "video/ogg",
+        "mkv"  => "video/x-matroska",
+        "mov"  => "video/quicktime",
+        "pdf"  => "application/pdf",
+        _      => "application/octet-stream",
+    }
+}
+
 fn main() {
     #[cfg(target_os = "linux")]
     if std::env::var("WAYLAND_DISPLAY").is_ok() {
@@ -21,10 +87,57 @@ fn main() {
     }
 
     let platform = platform::create_platform();
+    let file_server_port = fileserver::start();
     let icon_cache: Arc<StdMutex<HashMap<String, (Vec<u8>, &'static str)>>> =
         Arc::new(StdMutex::new(HashMap::new()));
 
     tauri::Builder::default()
+        .register_uri_scheme_protocol("localfile", |_ctx, request| {
+            // Serve local filesystem files for the viewer.
+            // WebKit blocks file:// from a non-file:// origin, so we proxy via
+            // this custom scheme: localfile://localhost/abs/path/to/file
+            //
+            // Range request support is required for video playback: browsers send
+            // "Range: bytes=N-M" to buffer/seek; we respond with 206 Partial Content.
+            let raw_path = request.uri().path().to_string();
+            let path = percent_decode(&raw_path);
+            let mime = mime_for_path(&path);
+
+            let total = match std::fs::metadata(&path).map(|m| m.len()) {
+                Ok(n) => n,
+                Err(_) => return http::Response::builder().status(404).body(vec![]).unwrap(),
+            };
+
+            // Check for Range header
+            let range = request.headers()
+                .get("Range")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|s| parse_range(s, total));
+
+            if let Some((start, end)) = range {
+                let length = (end - start + 1) as usize;
+                let data = read_file_range(&path, start, length).unwrap_or_default();
+                http::Response::builder()
+                    .status(206)
+                    .header("Content-Type", mime)
+                    .header("Content-Range", format!("bytes {start}-{end}/{total}"))
+                    .header("Content-Length", data.len().to_string())
+                    .header("Accept-Ranges", "bytes")
+                    .body(data)
+                    .unwrap()
+            } else {
+                match std::fs::read(&path) {
+                    Ok(data) => http::Response::builder()
+                        .status(200)
+                        .header("Content-Type", mime)
+                        .header("Accept-Ranges", "bytes")
+                        .header("Content-Length", total.to_string())
+                        .body(data)
+                        .unwrap(),
+                    Err(_) => http::Response::builder().status(404).body(vec![]).unwrap(),
+                }
+            }
+        })
         .register_uri_scheme_protocol("icon", {
             let cache = icon_cache;
             let platform = platform.clone();
@@ -54,7 +167,7 @@ fn main() {
                 let initial_paths = session.panels.into_iter()
                     .map(|(id, p)| (id, p.path))
                     .collect();
-                let shared_state = Arc::new(Mutex::new(AppState::new_default(platform, initial_paths)));
+                let shared_state = Arc::new(Mutex::new(AppState::new_default(platform, initial_paths, file_server_port)));
                 let quit_notify = Arc::new(tokio::sync::Notify::new());
                 use tauri::Manager;
                 app.manage(Arc::clone(&quit_notify));

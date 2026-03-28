@@ -40,6 +40,8 @@ fn map_io_err(path: &str, e: std::io::Error) -> VfsError {
 }
 
 impl VfsDriver for LocalFsDriver {
+    fn is_local(&self) -> bool { true }
+
     // ── Listing & navigation ────────────────────────────────────────────────
 
     fn list(

@@ -70,10 +70,12 @@ pub struct AppState {
     /// Senders for all connected GUI clients — used to broadcast state updates
     /// from non-GUI connections (e.g. viewer windows).
     pub gui_senders: Vec<mpsc::Sender<ServerMessage>>,
+    /// Port of the local HTTP file server used by viewer windows for media streaming.
+    pub file_server_port: u16,
 }
 
 impl AppState {
-    pub fn new_default(platform: Arc<dyn Platform>, initial_paths: HashMap<String, String>) -> Self {
+    pub fn new_default(platform: Arc<dyn Platform>, initial_paths: HashMap<String, String>, file_server_port: u16) -> Self {
         let home = platform.home_dir();
 
         // Validate a saved path; fall back to home if it is no longer a directory.
@@ -190,6 +192,7 @@ impl AppState {
             platform,
             job_store: JobStore::new(),
             gui_senders: Vec::new(),
+            file_server_port,
         }
     }
 }

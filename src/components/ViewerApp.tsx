@@ -3,6 +3,7 @@ import { WsClient } from "../ws/client";
 import type { BEMessage, FileChunkMessage, ViewerFileChangedMessage } from "../ws/types";
 import { ImageViewer, IMAGE_LIMIT } from "../viewers/ImageViewer";
 import { detectRenderer, isImageExt } from "../viewers/media";
+import { DirectFileViewer, canUseDirect } from "../viewers/DirectFileViewer";
 
 const SMALL_LIMIT = 32768;  // 32 KiB — files at or below this are loaded fully
 const CHUNK_SIZE  = 65536;  // 64 KiB — buffer window for large files
@@ -15,6 +16,8 @@ interface ViewerAppProps {
   filename: string;
   windowLabel: string;
   panelId: string;
+  isLocal: boolean;
+  nativeFileSize: number | null;
 }
 
 type ViewMode = "text" | "image" | "hex";
@@ -73,7 +76,7 @@ function clamp(v: number, lo: number, hi: number) {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: initFilename, windowLabel, panelId }: ViewerAppProps) {
+export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: initFilename, windowLabel, panelId, isLocal, nativeFileSize }: ViewerAppProps) {
   // Current file being viewed (updated on navigation)
   const [curPath, setCurPath]         = useState(initPath);
   const [curSourceId, setCurSourceId] = useState(initSourceId);
@@ -93,6 +96,9 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
   // null = undetermined, true = small file, false = large file
   const [isSmall, setIsSmall] = useState<boolean | null>(null);
 
+  // true = use file:// direct rendering (local images < 10 MiB, video, PDF)
+  const [useDirect, setUseDirect] = useState(() => canUseDirect(isLocal, initFilename, nativeFileSize));
+
   // Large-file virtual scroll: line index at the top of viewport
   const [topLine, setTopLine] = useState(0);
   // Viewport height in lines
@@ -105,6 +111,10 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
   const contentRef    = useRef<HTMLElement>(null);
   // After a large-mode buffer load, what to do with topLine
   const afterLoadRef  = useRef<"top" | "bottom">("top");
+  // Refs so requestChunk can always use the current path/sourceId without
+  // being recreated on navigation (which would tear down and recreate the WS).
+  const curPathRef      = useRef(initPath);
+  const curSourceIdRef  = useRef(initSourceId);
   const filenameRef   = useRef(initFilename);
 
   // 1-based file line number of the first raw line in the current buffer.
@@ -115,7 +125,9 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
     end: 0, newlineCount: 0, baseLine: 1,
   });
 
-  filenameRef.current = curFilename;
+  filenameRef.current  = curFilename;
+  curPathRef.current     = curPath;
+  curSourceIdRef.current = curSourceId;
   const effectiveMode: ViewMode = mode ?? "text";
   const isImageMode = effectiveMode === "image";
 
@@ -158,9 +170,9 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
     afterLoadRef.current = after;
     setLoading(true);
     clientRef.current?.sendIntent("ReadFileChunk", undefined, {
-      path: curPath, sourceId: curSourceId, offset: off, size,
+      path: curPathRef.current, sourceId: curSourceIdRef.current, offset: off, size,
     });
-  }, [curPath, curSourceId]);
+  }, []); // stable: reads current path/sourceId via refs, never recreated
 
   // ── Measure viewport on resize ────────────────────────────────────────────
 
@@ -182,9 +194,13 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
     clientRef.current = client;
 
     client.onConnected = () => {
-      // For known image types, request up to IMAGE_LIMIT in one shot
-      const initSize = isImageExt(curFilename) ? IMAGE_LIMIT : SMALL_LIMIT;
-      requestChunk(0, initSize);
+      if (canUseDirect(isLocal, initFilename, nativeFileSize)) {
+        setLoading(false);
+      } else {
+        // For known image types, request up to IMAGE_LIMIT in one shot
+        const initSize = isImageExt(initFilename) ? IMAGE_LIMIT : SMALL_LIMIT;
+        requestChunk(0, initSize);
+      }
     };
 
     client.onMessage = (msg: BEMessage) => {
@@ -227,10 +243,12 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
       }
       if (msg.type === "ViewerFileChanged") {
         const m = msg as ViewerFileChangedMessage;
+        const direct = canUseDirect(m.isLocal ?? false, m.filename, m.fileSize ?? null);
         // Reset viewer state for new file
         setCurPath(m.path);
         setCurSourceId(m.sourceId);
         setCurFilename(m.filename);
+        setUseDirect(direct);
         setMode(null);
         setBuffer(null);
         setBufferOffset(0);
@@ -240,15 +258,17 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
         setFileSize(null);
         setError(null);
         setNavError(null);
-        setLoading(true);
+        setLoading(!direct);
         setBufferBaseLine(1);
         chunkInfoRef.current = { end: 0, newlineCount: 0, baseLine: 1 };
         setBufSeq(0);
-        // Request first chunk of new file
-        const initSize = isImageExt(m.filename) ? IMAGE_LIMIT : SMALL_LIMIT;
-        clientRef.current?.sendIntent("ReadFileChunk", undefined, {
-          path: m.path, sourceId: m.sourceId, offset: 0, size: initSize,
-        });
+        if (!direct) {
+          // Request first chunk of new file
+          const initSize = isImageExt(m.filename) ? IMAGE_LIMIT : SMALL_LIMIT;
+          clientRef.current?.sendIntent("ReadFileChunk", undefined, {
+            path: m.path, sourceId: m.sourceId, offset: 0, size: initSize,
+          });
+        }
       }
       if (msg.type === "Error") {
         const err = msg as { code: string; message: string };
@@ -519,6 +539,31 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
   const pct = fileSize && fileSize > 0
     ? Math.min(100, Math.round((offsetDisplay / fileSize) * 100))
     : isSmall ? 100 : 0;
+
+  if (useDirect) {
+    return (
+      <div className="viewer">
+        <div className="viewer__header">
+          <span className="viewer__filename">{curFilename}</span>
+        </div>
+        <div className="viewer__body" ref={bodyRef}>
+          {navError ? (
+            <div className="viewer__nav-error">
+              <p>{navError}</p>
+              <p className="viewer__nav-error-hint">
+                j/k — try again · Esc — close viewer
+              </p>
+            </div>
+          ) : (
+            <DirectFileViewer path={curPath} filename={curFilename} />
+          )}
+        </div>
+        <div className="viewer__status">
+          <span className="viewer__status-nav">j/k prev/next file · Esc close</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="viewer">

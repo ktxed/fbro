@@ -14,6 +14,13 @@ use crate::ws::protocol::{FilterSpec, SortSpec};
 /// All file I/O in fbro goes through this trait so that the same job logic
 /// works across local, remote, archive, and virtual sources.
 pub trait VfsDriver: Send + Sync {
+    // ── Driver identity ─────────────────────────────────────────────────────
+
+    /// Returns true if this driver accesses the local native filesystem,
+    /// meaning paths it exposes are valid `file://` URLs in the webview.
+    /// Remote drivers (SFTP, S3, etc.) must return false.
+    fn is_local(&self) -> bool { false }
+
     // ── Listing & navigation ────────────────────────────────────────────────
 
     fn list(

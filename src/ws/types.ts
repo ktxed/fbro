@@ -226,6 +226,8 @@ export interface ViewerFileChangedMessage {
   filename: string;
   sourceId: string;
   panelId: string;
+  fileSize?: number;
+  isLocal?: boolean;
 }
 
 // ─── Union types ─────────────────────────────────────────────────────────────

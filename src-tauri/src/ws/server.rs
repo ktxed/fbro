@@ -1143,8 +1143,17 @@ async fn handle_intent(
             let filename  = args.get("filename").and_then(|v| v.as_str()).unwrap_or("").to_string();
 
             let full_path = format!("{}/{}", dir_path.trim_end_matches('/'), filename);
+            let (is_local, file_size, file_server_port) = {
+                let s = state.lock().await;
+                let drv = s.drivers.get(&source_id);
+                (
+                    drv.map(|d| d.is_local()).unwrap_or(false),
+                    drv.and_then(|d| d.file_size(&full_path)),
+                    s.file_server_port,
+                )
+            };
             let label = format!("viewer-{}", uuid::Uuid::new_v4());
-            let qs = format!(
+            let mut qs = format!(
                 "?viewer=1&path={}&source={}&name={}&label={}&panel={}",
                 url_encode(&full_path),
                 url_encode(&source_id),
@@ -1152,6 +1161,9 @@ async fn handle_intent(
                 url_encode(&label),
                 url_encode(&panel_id),
             );
+            if is_local { qs.push_str("&local=1"); }
+            if let Some(sz) = file_size { qs.push_str(&format!("&size={sz}")); }
+            if file_server_port > 0 { qs.push_str(&format!("&fsport={file_server_port}")); }
 
             let _ = tauri::WebviewWindowBuilder::new(
                 app_handle,
@@ -1161,6 +1173,7 @@ async fn handle_intent(
             .title(format!("{filename} — fbro viewer"))
             .inner_size(900.0, 700.0)
             .resizable(true)
+            .devtools(true)
             .build();
         }
 
@@ -1329,12 +1342,18 @@ async fn handle_intent(
                 if let Some((name, kind)) = entry_info {
                     if kind == "file" {
                         let full_path = format!("{}/{}", dir_path.trim_end_matches('/'), name);
+                        let drv = state.lock().await.drivers.get(&source_id).cloned();
+                        let (file_size, is_local) = drv.as_ref()
+                            .map(|d| (d.file_size(&full_path), d.is_local()))
+                            .unwrap_or((None, false));
                         let _ = tx.send(ServerMessage::ViewerFileChanged {
                             timestamp: now(),
                             path: full_path,
                             filename: name,
                             source_id,
                             panel_id: panel_id.clone(),
+                            file_size,
+                            is_local,
                         }).await;
                     } else {
                         let _ = tx.send(ServerMessage::Error {

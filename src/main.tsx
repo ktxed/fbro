@@ -9,6 +9,7 @@ const params = new URLSearchParams(window.location.search);
 const root = ReactDOM.createRoot(document.getElementById("root")!);
 
 if (params.get("viewer") === "1") {
+  const sizeParam = params.get("size");
   root.render(
     <React.StrictMode>
       <ViewerApp
@@ -17,6 +18,8 @@ if (params.get("viewer") === "1") {
         filename={params.get("name") ?? params.get("path")?.split("/").pop() ?? ""}
         windowLabel={params.get("label") ?? ""}
         panelId={params.get("panel") ?? ""}
+        isLocal={params.get("local") === "1"}
+        nativeFileSize={sizeParam !== null ? Number(sizeParam) : null}
       />
     </React.StrictMode>,
   );

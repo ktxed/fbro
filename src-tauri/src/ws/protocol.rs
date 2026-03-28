@@ -84,6 +84,10 @@ pub enum ServerMessage {
         source_id: String,
         #[serde(rename = "panelId")]
         panel_id: String,
+        #[serde(rename = "fileSize", skip_serializing_if = "Option::is_none")]
+        file_size: Option<u64>,
+        #[serde(rename = "isLocal")]
+        is_local: bool,
     },
 }
 
