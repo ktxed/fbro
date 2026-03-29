@@ -872,8 +872,17 @@ async fn handle_intent(
                 {
                     let mut s = state.lock().await;
                     if let Some(panel) = s.panels.get_mut(&panel_id) {
+                        // Save current location for the source we're leaving
+                        panel.source_paths.insert(panel.source_id.clone(), panel.path.clone());
+
+                        // Determine target path: saved path > root_path
+                        let target_path = panel.source_paths.get(&source_id)
+                            .filter(|p| std::path::Path::new(p.as_str()).is_dir())
+                            .cloned()
+                            .unwrap_or(root_path);
+
                         panel.source_id = source_id;
-                        panel.path = root_path;
+                        panel.path = target_path;
                         panel.cursor = 0;
                         panel.selection.clear();
                     }

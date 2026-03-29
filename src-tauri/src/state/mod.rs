@@ -39,6 +39,8 @@ pub struct Panel {
     pub windowed: bool,
     pub window_start: usize,
     pub window_count: usize,
+    /// Last visited path per source — used to restore position when switching back.
+    pub source_paths: HashMap<String, String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -135,6 +137,7 @@ impl AppState {
             windowed: false,
             window_start: 0,
             window_count: 0,
+            source_paths: HashMap::new(),
         };
 
         let right = Panel {
@@ -152,6 +155,7 @@ impl AppState {
             windowed: false,
             window_start: 0,
             window_count: 0,
+            source_paths: HashMap::new(),
         };
 
         let mut panels = HashMap::new();
