@@ -116,6 +116,11 @@ export function Toolbar({ client, onOpenJobsView }: { client: WsClient; onOpenJo
         onOpenJobsView();
         return;
       }
+      if (e.key === "/" && !modKey(e)) {
+        e.preventDefault();
+        client.sendIntent("NavigateSourceRoot", state.focus);
+        return;
+      }
       if ((e.key === "i" || e.key === "I") && !modKey(e)) {
         e.preventDefault();
         openInfo(state, dispatch);

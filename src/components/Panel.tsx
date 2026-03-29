@@ -521,6 +521,12 @@ export function Panel({ panelId, panel, isFocused, modalActive, client, sources,
         <button
           className="panel__home-btn"
           tabIndex={-1}
+          title="Navigate to source root"
+          onClick={() => client.sendIntent("NavigateSourceRoot", panelId)}
+        >/</button>
+        <button
+          className="panel__home-btn"
+          tabIndex={-1}
           title="Navigate to home folder"
           onClick={() => client.sendIntent("NavigateHome", panelId)}
         >~</button>

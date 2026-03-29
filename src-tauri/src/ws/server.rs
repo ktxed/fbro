@@ -859,6 +859,32 @@ async fn handle_intent(
             navigate_to(&panel_id, &home, None, state, tx, scan_handles, dir_size_queue, watcher_cmd_tx).await;
         }
 
+        "NavigateSourceRoot" => {
+            let panel_id = resolve_panel_id(scope, state).await;
+            let target = {
+                let s = state.lock().await;
+                let panel = match s.panels.get(&panel_id) {
+                    Some(p) => p,
+                    None => return,
+                };
+                let cur = panel.path.as_str();
+                // Find the source whose root_path is the longest prefix of
+                // the current path — this is the volume we're actually on.
+                let root = s.sources.values()
+                    .filter(|src| cur.starts_with(&src.root_path))
+                    .max_by_key(|src| src.root_path.len())
+                    .map(|src| src.root_path.clone())
+                    .unwrap_or_else(|| "/".to_string());
+                let home = s.platform.home_dir();
+                if home.starts_with(&root) && cur.starts_with(&home) {
+                    home
+                } else {
+                    root
+                }
+            };
+            navigate_to(&panel_id, &target, None, state, tx, scan_handles, dir_size_queue, watcher_cmd_tx).await;
+        }
+
         "NavigatePanelTo" => {
             let panel_id = args.get("panelId").and_then(|v| v.as_str()).unwrap_or("").to_string();
             let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("").to_string();
