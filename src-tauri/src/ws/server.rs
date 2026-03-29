@@ -36,18 +36,8 @@ pub async fn start(state: SharedState, app_handle: tauri::AppHandle, quit_notify
 
     let dir_size_queue = Arc::new(DirSizeQueue::new());
 
-    // Initialize udisks2 on Linux for unmounted volume detection and mounting
-    #[cfg(target_os = "linux")]
-    let udisks2: Option<Arc<crate::platform::linux::udisks2::UDisks2>> = match crate::platform::linux::udisks2::UDisks2::new().await {
-        Ok(u) => {
-            eprintln!("[fbro] udisks2 available — unmounted volumes will be shown");
-            Some(Arc::new(u))
-        }
-        Err(e) => {
-            eprintln!("[fbro] udisks2 not available: {e} — falling back to /proc/mounts");
-            None
-        }
-    };
+    let platform = state.lock().await.platform.clone();
+    let volume_watcher = crate::platform::create_volume_watcher(platform).await;
 
     loop {
         match listener.accept().await {
@@ -56,12 +46,9 @@ pub async fn start(state: SharedState, app_handle: tauri::AppHandle, quit_notify
                 let app_handle = app_handle.clone();
                 let quit_notify = Arc::clone(&quit_notify);
                 let dir_size_queue = Arc::clone(&dir_size_queue);
-                #[cfg(target_os = "linux")]
-                let udisks2 = udisks2.clone();
+                let volume_watcher = Arc::clone(&volume_watcher);
                 tokio::spawn(handle_connection(
-                    stream, addr, state, app_handle, quit_notify, dir_size_queue,
-                    #[cfg(target_os = "linux")]
-                    udisks2,
+                    stream, addr, state, app_handle, quit_notify, dir_size_queue, volume_watcher,
                 ));
             }
             Err(e) => eprintln!("[fbro] Accept error: {e}"),
@@ -76,7 +63,7 @@ async fn handle_connection(
     app_handle: tauri::AppHandle,
     quit_notify: Arc<Notify>,
     dir_size_queue: Arc<DirSizeQueue>,
-    #[cfg(target_os = "linux")] udisks2: Option<Arc<crate::platform::linux::udisks2::UDisks2>>,
+    volume_watcher: Arc<dyn crate::platform::VolumeWatcher>,
 ) {
     eprintln!("[fbro] Client connected: {addr}");
 
@@ -230,7 +217,6 @@ async fn handle_connection(
     let (watcher_action_tx, mut watcher_action_rx) = mpsc::channel::<WatcherAction>(64);
 
     let _watcher_handle = if is_gui {
-        let platform = state.lock().await.platform.clone();
         // Send initial Watch for each panel's current path
         for panel_id in &panel_ids {
             let path = state.lock().await.panels.get(panel_id).map(|p| p.path.clone());
@@ -242,9 +228,7 @@ async fn handle_connection(
             }
         }
         Some(crate::watcher::spawn_watcher(
-            platform,
-            #[cfg(target_os = "linux")]
-            udisks2.clone(),
+            Arc::clone(&volume_watcher),
             watcher_cmd_rx,
             watcher_action_tx,
         ))
@@ -354,8 +338,7 @@ async fn handle_connection(
                                     &app_handle,
                                     &dir_size_queue,
                                     &watcher_cmd_tx,
-                                    #[cfg(target_os = "linux")]
-                                    &udisks2,
+                                    &volume_watcher,
                                 )
                                 .await;
                             }
@@ -404,7 +387,7 @@ async fn handle_intent(
     app_handle: &tauri::AppHandle,
     dir_size_queue: &Arc<DirSizeQueue>,
     watcher_cmd_tx: &mpsc::Sender<WatcherCommand>,
-    #[cfg(target_os = "linux")] udisks2: &Option<Arc<crate::platform::linux::udisks2::UDisks2>>,
+    volume_watcher: &Arc<dyn crate::platform::VolumeWatcher>,
 ) {
     match name {
         "RefreshPanels" => {
@@ -1009,130 +992,104 @@ async fn handle_intent(
         }
 
         "MountSource" => {
-            #[cfg(target_os = "linux")]
-            {
-                let panel_id = resolve_panel_id(scope, state).await;
-                let source_id = args.get("sourceId").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let panel_id = resolve_panel_id(scope, state).await;
+            let source_id = args.get("sourceId").and_then(|v| v.as_str()).unwrap_or("").to_string();
 
-                let device_path = {
-                    let s = state.lock().await;
-                    s.sources.get(&source_id).and_then(|src| src.device_path.clone())
-                };
+            let device_path = {
+                let s = state.lock().await;
+                s.sources.get(&source_id).and_then(|src| src.device_path.clone())
+            };
 
-                if let Some(device_path) = device_path {
-                    if let Some(ref ud) = udisks2 {
-                        match ud.mount(&device_path).await {
-                            Ok(mount_point) => {
-                                eprintln!("[fbro] Mounted {source_id} at {mount_point}");
-                                // Update source state
-                                {
-                                    let mut s = state.lock().await;
-                                    if let Some(src) = s.sources.get_mut(&source_id) {
-                                        src.mounted = true;
-                                        src.root_path = mount_point.clone();
-                                        src.supports = vec![
-                                            "ListEntries".to_string(),
-                                            "OpenFolder".to_string(),
-                                            "CopySelection".to_string(),
-                                            "MoveSelection".to_string(),
-                                            "DeleteSelection".to_string(),
-                                            "InspectItem".to_string(),
-                                        ];
-                                    }
-                                    // Create VFS driver for the newly mounted source
-                                    if !s.drivers.contains_key(&source_id) {
-                                        let driver: Arc<dyn VfsDriver> = Arc::new(crate::vfs::local::LocalFsDriver);
-                                        s.drivers.insert(source_id.clone(), driver);
-                                    }
-                                }
-
-                                // Broadcast updated sources
-                                let sources_json = {
-                                    let s = state.lock().await;
-                                    let sources: Vec<serde_json::Value> = s.sources.values().map(|src| {
-                                        let space = if src.mounted { s.platform.disk_space(&src.root_path) } else { None };
-                                        serde_json::json!({
-                                            "id": src.id,
-                                            "name": src.name,
-                                            "kind": src.kind,
-                                            "supports": src.supports,
-                                            "capabilities": {
-                                                "readOnly": false,
-                                                "supportsStreaming": true,
-                                                "supportsJobs": true
-                                            },
-                                            "rootPath": src.root_path,
-                                            "mounted": src.mounted,
-                                            "freeBytes": space.map(|(f, _)| f),
-                                            "totalBytes": space.map(|(_, t)| t)
-                                        })
-                                    }).collect();
-                                    sources
-                                };
-
-                                let _ = tx.send(ServerMessage::StatePatch {
-                                    timestamp: now(),
-                                    domain: "sources".to_string(),
-                                    entity_id: None,
-                                    version: 0,
-                                    patch: serde_json::json!({ "sources": sources_json }),
-                                }).await;
-
-                                // Navigate the panel to the newly mounted source
-                                {
-                                    let mut s = state.lock().await;
-                                    if let Some(panel) = s.panels.get_mut(&panel_id) {
-                                        panel.source_paths.insert(panel.source_id.clone(), panel.path.clone());
-                                        panel.source_id = source_id.clone();
-                                        panel.path = mount_point.clone();
-                                        panel.cursor = 0;
-                                        panel.selection.clear();
-                                        panel.filter = None;
-                                        let _ = watcher_cmd_tx.send(WatcherCommand::Watch {
-                                            panel_id: panel_id.clone(),
-                                            path: PathBuf::from(&mount_point),
-                                        }).await;
-                                    }
-                                }
-                                rescan_panel(&panel_id, state, tx, scan_handles, None, None, dir_size_queue).await;
+            if let Some(device_path) = device_path {
+                match volume_watcher.mount(&device_path).await {
+                    Ok(mount_point) => {
+                        eprintln!("[fbro] Mounted {source_id} at {mount_point}");
+                        {
+                            let mut s = state.lock().await;
+                            if let Some(src) = s.sources.get_mut(&source_id) {
+                                src.mounted = true;
+                                src.root_path = mount_point.clone();
+                                src.supports = vec![
+                                    "ListEntries".to_string(),
+                                    "OpenFolder".to_string(),
+                                    "CopySelection".to_string(),
+                                    "MoveSelection".to_string(),
+                                    "DeleteSelection".to_string(),
+                                    "InspectItem".to_string(),
+                                ];
                             }
-                            Err(e) => {
-                                eprintln!("[fbro] Mount failed for {source_id}: {e}");
-                                let _ = tx.send(ServerMessage::Error {
-                                    timestamp: now(),
-                                    code: "MOUNT_FAILED".to_string(),
-                                    message: e,
-                                    recoverable: true,
-                                    extra: None,
+                            if !s.drivers.contains_key(&source_id) {
+                                let driver: Arc<dyn VfsDriver> = Arc::new(crate::vfs::local::LocalFsDriver);
+                                s.drivers.insert(source_id.clone(), driver);
+                            }
+                        }
+
+                        // Broadcast updated sources
+                        let sources_json = {
+                            let s = state.lock().await;
+                            let sources: Vec<serde_json::Value> = s.sources.values().map(|src| {
+                                let space = if src.mounted { s.platform.disk_space(&src.root_path) } else { None };
+                                serde_json::json!({
+                                    "id": src.id,
+                                    "name": src.name,
+                                    "kind": src.kind,
+                                    "supports": src.supports,
+                                    "capabilities": {
+                                        "readOnly": false,
+                                        "supportsStreaming": true,
+                                        "supportsJobs": true
+                                    },
+                                    "rootPath": src.root_path,
+                                    "mounted": src.mounted,
+                                    "freeBytes": space.map(|(f, _)| f),
+                                    "totalBytes": space.map(|(_, t)| t)
+                                })
+                            }).collect();
+                            sources
+                        };
+
+                        let _ = tx.send(ServerMessage::StatePatch {
+                            timestamp: now(),
+                            domain: "sources".to_string(),
+                            entity_id: None,
+                            version: 0,
+                            patch: serde_json::json!({ "sources": sources_json }),
+                        }).await;
+
+                        // Navigate the panel to the newly mounted source
+                        {
+                            let mut s = state.lock().await;
+                            if let Some(panel) = s.panels.get_mut(&panel_id) {
+                                panel.source_paths.insert(panel.source_id.clone(), panel.path.clone());
+                                panel.source_id = source_id.clone();
+                                panel.path = mount_point.clone();
+                                panel.cursor = 0;
+                                panel.selection.clear();
+                                panel.filter = None;
+                                let _ = watcher_cmd_tx.send(WatcherCommand::Watch {
+                                    panel_id: panel_id.clone(),
+                                    path: PathBuf::from(&mount_point),
                                 }).await;
                             }
                         }
-                    } else {
+                        rescan_panel(&panel_id, state, tx, scan_handles, None, None, dir_size_queue).await;
+                    }
+                    Err(e) => {
+                        eprintln!("[fbro] Mount failed for {source_id}: {e}");
                         let _ = tx.send(ServerMessage::Error {
                             timestamp: now(),
-                            code: "MOUNT_UNAVAILABLE".to_string(),
-                            message: "udisks2 is not available on this system".to_string(),
+                            code: "MOUNT_FAILED".to_string(),
+                            message: e,
                             recoverable: true,
                             extra: None,
                         }).await;
                     }
-                } else {
-                    let _ = tx.send(ServerMessage::Error {
-                        timestamp: now(),
-                        code: "MOUNT_FAILED".to_string(),
-                        message: "Source has no device path for mounting".to_string(),
-                        recoverable: true,
-                        extra: None,
-                    }).await;
                 }
-            }
-
-            #[cfg(not(target_os = "linux"))]
-            {
+            } else {
                 let _ = tx.send(ServerMessage::Error {
                     timestamp: now(),
-                    code: "MOUNT_UNAVAILABLE".to_string(),
-                    message: "Mounting is only supported on Linux".to_string(),
+                    code: "MOUNT_FAILED".to_string(),
+                    message: "Source has no device path for mounting".to_string(),
                     recoverable: true,
                     extra: None,
                 }).await;

@@ -1,4 +1,5 @@
 pub mod udisks2;
+pub mod volume_watcher;
 
 use super::{Platform, VolumeInfo};
 use std::process::Command;

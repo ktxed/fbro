@@ -5,6 +5,9 @@ pub mod macos;
 #[cfg(target_os = "windows")]
 pub mod windows;
 
+use std::sync::Arc;
+use tokio::sync::mpsc;
+
 /// Information about a volume / filesystem root (mounted or unmounted).
 pub struct VolumeInfo {
     pub id: String,                    // stable ID, e.g. "vol-root", "vol-home"
@@ -81,4 +84,69 @@ pub fn create_platform() -> std::sync::Arc<dyn Platform> {
     }
     #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
     compile_error!("unsupported platform")
+}
+
+// ── Volume watcher abstraction ──────────────────────────────────────────────
+
+/// Async interface for volume enumeration, mounting, and change notification.
+/// Hides platform-specific details (udisks2, /proc/mounts, etc.) behind a
+/// uniform API so that `watcher.rs` and `server.rs` contain no `#[cfg]`.
+#[async_trait::async_trait]
+pub trait VolumeWatcher: Send + Sync {
+    /// List all volumes (mounted + unmounted).
+    async fn list_volumes(&self) -> Vec<VolumeInfo>;
+    /// Mount an unmounted volume by its device path. Returns the mount point.
+    async fn mount(&self, device_path: &str) -> Result<String, String>;
+    /// Subscribe to volume change signals. Returns a channel that fires `()`
+    /// whenever any volume state changes (plug/unplug, mount/unmount).
+    async fn subscribe(&self) -> mpsc::Receiver<()>;
+}
+
+/// Fallback volume watcher: uses Platform::list_volumes() (sync) and does not
+/// support mounting. Used on non-Linux platforms or when udisks2 is unavailable.
+pub struct FallbackVolumeWatcher {
+    platform: Arc<dyn Platform>,
+}
+
+impl FallbackVolumeWatcher {
+    pub fn new(platform: Arc<dyn Platform>) -> Self {
+        Self { platform }
+    }
+}
+
+#[async_trait::async_trait]
+impl VolumeWatcher for FallbackVolumeWatcher {
+    async fn list_volumes(&self) -> Vec<VolumeInfo> {
+        self.platform.list_volumes()
+    }
+
+    async fn mount(&self, _device_path: &str) -> Result<String, String> {
+        Err("Mounting is not supported on this platform".to_string())
+    }
+
+    async fn subscribe(&self) -> mpsc::Receiver<()> {
+        // No signal source — return a channel that never fires.
+        // The watcher falls back to periodic polling.
+        let (_tx, rx) = mpsc::channel(1);
+        rx
+    }
+}
+
+/// Create the appropriate VolumeWatcher for the current platform.
+pub async fn create_volume_watcher(platform: Arc<dyn Platform>) -> Arc<dyn VolumeWatcher> {
+    #[cfg(target_os = "linux")]
+    {
+        match linux::volume_watcher::try_udisks2(platform.clone()).await {
+            Some(watcher) => {
+                eprintln!("[fbro] udisks2 available — unmounted volumes will be shown");
+                return Arc::new(watcher);
+            }
+            None => {
+                eprintln!("[fbro] udisks2 not available — falling back to /proc/mounts");
+                return Arc::new(linux::volume_watcher::ProcMountsWatcher::new(platform));
+            }
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    Arc::new(FallbackVolumeWatcher::new(platform))
 }

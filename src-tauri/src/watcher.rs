@@ -6,9 +6,7 @@ use notify::{RecursiveMode, Watcher};
 use tokio::sync::mpsc;
 use tokio::time::{Duration, Instant};
 
-use crate::platform::{Platform, VolumeInfo};
-#[cfg(target_os = "linux")]
-use crate::platform::linux::udisks2::UDisks2;
+use crate::platform::{VolumeInfo, VolumeWatcher};
 
 /// Commands sent from the main loop to the watcher task.
 pub enum WatcherCommand {
@@ -34,65 +32,17 @@ const DEBOUNCE_MS: u64 = 200;
 const VOLUME_POLL_SECS: u64 = 2;
 
 pub fn spawn_watcher(
-    platform: Arc<dyn Platform>,
-    #[cfg(target_os = "linux")] udisks2: Option<Arc<UDisks2>>,
+    volume_watcher: Arc<dyn VolumeWatcher>,
     cmd_rx: mpsc::Receiver<WatcherCommand>,
     action_tx: mpsc::Sender<WatcherAction>,
 ) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(watcher_task(
-        platform,
-        #[cfg(target_os = "linux")]
-        udisks2,
-        cmd_rx,
-        action_tx,
-    ))
-}
-
-// ── Linux: instant mount-change notification via /proc/mounts poll() ────────
-
-#[cfg(target_os = "linux")]
-fn spawn_mount_watcher(mount_tx: mpsc::Sender<()>) -> tokio::task::JoinHandle<()> {
-    tokio::task::spawn_blocking(move || {
-        use std::os::unix::io::AsRawFd;
-        let file = match std::fs::File::open("/proc/mounts") {
-            Ok(f) => f,
-            Err(e) => {
-                eprintln!("[fbro] Cannot open /proc/mounts: {e}");
-                return;
-            }
-        };
-        let fd = file.as_raw_fd();
-        loop {
-            let mut pfd = libc::pollfd {
-                fd,
-                events: libc::POLLPRI | libc::POLLERR,
-                revents: 0,
-            };
-            // Block until mount table changes (timeout -1 = infinite)
-            let ret = unsafe { libc::poll(&mut pfd as *mut _, 1, -1) };
-            if ret < 0 {
-                break; // error — stop watching
-            }
-            if pfd.revents & (libc::POLLPRI | libc::POLLERR) != 0 {
-                if mount_tx.blocking_send(()).is_err() {
-                    break; // receiver dropped
-                }
-            }
-        }
-    })
-}
-
-#[cfg(not(target_os = "linux"))]
-fn spawn_mount_watcher(_mount_tx: mpsc::Sender<()>) -> tokio::task::JoinHandle<()> {
-    // No-op on non-Linux — volume detection falls back to polling.
-    tokio::spawn(std::future::pending())
+    tokio::spawn(watcher_task(volume_watcher, cmd_rx, action_tx))
 }
 
 // ── Main watcher task ───────────────────────────────────────────────────────
 
 async fn watcher_task(
-    platform: Arc<dyn Platform>,
-    #[cfg(target_os = "linux")] udisks2: Option<Arc<UDisks2>>,
+    volume_watcher: Arc<dyn VolumeWatcher>,
     mut cmd_rx: mpsc::Receiver<WatcherCommand>,
     action_tx: mpsc::Sender<WatcherAction>,
 ) {
@@ -130,28 +80,15 @@ async fn watcher_task(
     // Debounce: path → latest event time
     let mut pending: HashMap<PathBuf, Instant> = HashMap::new();
 
-    // Mount change detection: udisks2 signals (Linux) > /proc/mounts poll > periodic fallback
-    let (mount_tx, mut mount_rx) = mpsc::channel::<()>(4);
-    let mut udisks2_rx: Option<mpsc::Receiver<()>> = None;
+    // Volume change signals from the platform-specific VolumeWatcher
+    let mut volume_signal_rx = volume_watcher.subscribe().await;
 
-    #[cfg(target_os = "linux")]
-    if let Some(ref ud) = udisks2 {
-        udisks2_rx = Some(ud.subscribe_signals().await);
-    }
-
-    let udisks2_available = udisks2_rx.is_some();
-
-    let mount_handle = if !udisks2_available {
-        Some(spawn_mount_watcher(mount_tx))
-    } else {
-        None
-    };
-
-    // Poll fallback for non-Linux (also serves as a secondary check on Linux without udisks2)
+    // Poll fallback: covers platforms with no signal source
     let mut volume_interval = tokio::time::interval(Duration::from_secs(VOLUME_POLL_SECS));
     volume_interval.tick().await; // consume the immediate first tick
-    let mut prev_volumes: Vec<(String, bool, String)> = platform
+    let mut prev_volumes: Vec<(String, bool, String)> = volume_watcher
         .list_volumes()
+        .await
         .iter()
         .map(|v| (v.id.clone(), v.mounted, v.root_path.clone()))
         .collect();
@@ -244,77 +181,27 @@ async fn watcher_task(
                 }
             }
 
-            // ── udisks2 D-Bus signal (Linux with udisks2) ────────────────
-            Some(()) = async {
-                match udisks2_rx.as_mut() {
-                    Some(rx) => rx.recv().await,
-                    None => std::future::pending().await,
-                }
-            } => {
-                #[cfg(target_os = "linux")]
-                check_volumes_udisks2(&udisks2, &platform, &mut prev_volumes, &action_tx).await;
-                #[cfg(not(target_os = "linux"))]
-                { let _ = (&platform, &mut prev_volumes, &action_tx); }
+            // ── Volume change signal from VolumeWatcher ─────────────────
+            Some(()) = volume_signal_rx.recv() => {
+                check_volumes(&volume_watcher, &mut prev_volumes, &action_tx).await;
             }
 
-            // ── Instant mount change (Linux /proc/mounts, non-udisks2) ──
-            Some(()) = mount_rx.recv() => {
-                check_volumes(&platform, &mut prev_volumes, &action_tx).await;
-            }
-
-            // ── Volume poll fallback (all platforms) ────────────────────
-            _ = volume_interval.tick(), if !udisks2_available => {
-                check_volumes(&platform, &mut prev_volumes, &action_tx).await;
+            // ── Volume poll fallback ────────────────────────────────────
+            _ = volume_interval.tick() => {
+                check_volumes(&volume_watcher, &mut prev_volumes, &action_tx).await;
             }
         }
     }
 
-    if let Some(h) = mount_handle {
-        h.abort();
-    }
     bridge_handle.abort();
 }
 
 async fn check_volumes(
-    platform: &Arc<dyn Platform>,
+    volume_watcher: &Arc<dyn VolumeWatcher>,
     prev_volumes: &mut Vec<(String, bool, String)>,
     action_tx: &mpsc::Sender<WatcherAction>,
 ) {
-    let vols = platform.list_volumes();
-    let mut current: Vec<(String, bool, String)> = vols
-        .iter()
-        .map(|v| (v.id.clone(), v.mounted, v.root_path.clone()))
-        .collect();
-    current.sort();
-    if current != *prev_volumes {
-        *prev_volumes = current;
-        let _ = action_tx.send(WatcherAction::VolumesChanged { volumes: vols }).await;
-    }
-}
-
-#[cfg(target_os = "linux")]
-async fn check_volumes_udisks2(
-    udisks2: &Option<Arc<UDisks2>>,
-    platform: &Arc<dyn Platform>,
-    prev_volumes: &mut Vec<(String, bool, String)>,
-    action_tx: &mpsc::Sender<WatcherAction>,
-) {
-    let vols = if let Some(ref ud) = udisks2 {
-        let mut udisks_vols = ud.list_block_devices().await;
-        // Merge with /proc/mounts-based volumes: udisks2 may miss some (e.g. network mounts)
-        let udisks_ids: std::collections::HashSet<String> = udisks_vols.iter().map(|v| v.id.clone()).collect();
-        let proc_vols = platform.list_volumes();
-        for pv in proc_vols {
-            // Add /proc/mounts volumes not covered by udisks2 (like root "/")
-            if !udisks_ids.contains(&pv.id) {
-                udisks_vols.push(pv);
-            }
-        }
-        udisks_vols
-    } else {
-        platform.list_volumes()
-    };
-
+    let vols = volume_watcher.list_volumes().await;
     let mut current: Vec<(String, bool, String)> = vols
         .iter()
         .map(|v| (v.id.clone(), v.mounted, v.root_path.clone()))
