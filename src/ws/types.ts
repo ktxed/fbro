@@ -38,6 +38,7 @@ export interface PanelState {
   version: number;
   calculatingSize: string[];
   totalCount?: number;
+  totalSize?: number;
   windowStart?: number;
 }
 

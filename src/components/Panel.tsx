@@ -411,10 +411,11 @@ export function Panel({ panelId, panel, isFocused, modalActive, client, sources,
   };
 
   const itemCount = isWindowed ? totalCount : panel.entries.length;
+  const totalSize = panel.totalSize;
   const statusText =
     panel.status === "loading"
       ? "Loading…"
-      : `${itemCount} item${itemCount !== 1 ? "s" : ""}`;
+      : `${itemCount} item${itemCount !== 1 ? "s" : ""}${totalSize !== undefined && totalSize > 0 ? ` (${formatBytes(totalSize)})` : ""}`;
 
   const source = sources[panel.sourceId];
   const diskText = (source?.freeBytes !== undefined && source?.totalBytes !== undefined)

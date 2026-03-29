@@ -1599,6 +1599,7 @@ async fn navigate_to(
                 "status": "loading",
                 "filter": null,
                 "totalCount": null,
+                "totalSize": null,
                 "windowStart": null
             }),
         })

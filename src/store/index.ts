@@ -131,7 +131,7 @@ function applySnapshot(state: AppState, msg: StateSnapshotMessage): AppState {
   if (domains.panels) {
     const panels: Record<string, PanelState> = {};
     for (const [id, p] of Object.entries(domains.panels)) {
-      panels[id] = { ...p, panelId: id, entries: p.entries ?? [], selection: p.selection ?? [], version: p.version ?? 0, calculatingSize: p.calculatingSize ?? [], totalCount: p.totalCount, windowStart: p.windowStart };
+      panels[id] = { ...p, panelId: id, entries: p.entries ?? [], selection: p.selection ?? [], version: p.version ?? 0, calculatingSize: p.calculatingSize ?? [], totalCount: p.totalCount, totalSize: p.totalSize, windowStart: p.windowStart };
     }
     next.panels = panels;
   }
@@ -215,6 +215,9 @@ function applyPatch(state: AppState, msg: StatePatchMessage): AppState {
     }
     if (msg.patch.totalCount !== undefined) {
       updated = { ...updated, totalCount: msg.patch.totalCount === null ? undefined : msg.patch.totalCount as number };
+    }
+    if (msg.patch.totalSize !== undefined) {
+      updated = { ...updated, totalSize: msg.patch.totalSize === null ? undefined : msg.patch.totalSize as number };
     }
     if (msg.patch.windowStart !== undefined) {
       updated = { ...updated, windowStart: msg.patch.windowStart === null ? undefined : msg.patch.windowStart as number };

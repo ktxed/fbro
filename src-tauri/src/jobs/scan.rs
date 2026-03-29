@@ -73,6 +73,12 @@ pub async fn run_scan(
         }
     }
 
+    // Sum sizes of all file entries (directories excluded — their size is optional/computed separately).
+    let total_file_size: u64 = schema_entries.iter()
+        .filter(|e| e.kind == "file")
+        .filter_map(|e| e.size)
+        .sum();
+
     let cursor = cursor_hint
         .as_deref()
         .and_then(|hint| schema_entries.iter().position(|e| e.name == hint))
@@ -119,6 +125,7 @@ pub async fn run_scan(
                 patch: serde_json::json!({
                     "status": "ready",
                     "totalCount": total,
+                    "totalSize": total_file_size,
                     "windowStart": window_start,
                     "windowEntries": window_json,
                     "cursor": cursor,
@@ -159,7 +166,7 @@ pub async fn run_scan(
                 domain: "panels".to_string(),
                 entity_id: Some(panel_id),
                 version,
-                patch: serde_json::json!({ "status": "ready", "total": total, "cursor": cursor, "selection": selection }),
+                patch: serde_json::json!({ "status": "ready", "total": total, "totalSize": total_file_size, "cursor": cursor, "selection": selection }),
             })
             .await;
     }
