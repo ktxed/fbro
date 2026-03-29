@@ -7,7 +7,7 @@ import { DirectFileViewer, canUseDirect } from "../viewers/DirectFileViewer";
 
 const SMALL_LIMIT = 32768;  // 32 KiB — files at or below this are loaded fully
 const CHUNK_SIZE  = 65536;  // 64 KiB — buffer window for large files
-const LINE_H      = 18;     // px — 12px font × 1.5 line-height
+const LINE_H      = 20;     // px — 13px font × 1.5 line-height (19.5, rounded up)
 const MAX_COL     = 512;    // chars — wrap long lines into multiple display rows
 
 interface ViewerAppProps {
@@ -196,7 +196,9 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
   useEffect(() => {
     const measure = () => {
       const el = bodyRef.current;
-      if (el) setVpLines(Math.max(1, Math.floor(el.clientHeight / LINE_H)));
+      // Reserve one LINE_H at the bottom: accounts for the 8px top padding
+      // and leaves a visible gap so the last line isn't flush with the edge.
+      if (el) setVpLines(Math.max(1, Math.floor((el.clientHeight - LINE_H) / LINE_H)));
     };
     measure();
     const obs = new ResizeObserver(measure);
