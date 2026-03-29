@@ -1026,6 +1026,14 @@ body {
   padding-right: 22px;
 }
 
+/* DOS/CP437 mode: use a monospace font that renders box-drawing chars correctly */
+.viewer--dos .viewer__content,
+.viewer--dos .viewer__gutter {
+  font-family: "Perfect DOS VGA 437", "Px437 IBM VGA8", "Fixedsys Excelsior", "Courier New", monospace;
+  font-size: 16px;
+  line-height: 1.25;
+}
+
 .viewer__scrollbar {
   position: absolute;
   top: 0;

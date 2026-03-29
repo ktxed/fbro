@@ -46,6 +46,31 @@ function renderText(bytes: Uint8Array): string {
   return new TextDecoder("utf-8", { fatal: false }).decode(bytes);
 }
 
+// ─── CP437 (DOS) rendering ────────────────────────────────────────────────────
+
+// Mapping for bytes 0x80-0xFF in IBM Code Page 437 → Unicode
+const CP437_HIGH =
+  "ÇüéâäàåçêëèïîìÄÅÉæÆôöòûùÿÖÜ¢£¥₧ƒáíóúñÑªº¿⌐¬½¼¡«»" +
+  "░▒▓│┤╡╢╖╕╣║╗╝╜╛┐└┴┬├─┼╞╟╚╔╩╦╠═╬╧╨╤╥╙╘╒╓╫╪┘┌█▄▌▐▀" +
+  "αßΓπΣσµτΦΘΩδ∞φε∩≡±≥≤⌠⌡÷≈°∙·√ⁿ²■\u00A0";
+
+function renderCp437(bytes: Uint8Array): string {
+  const chars: string[] = [];
+  for (const b of bytes) {
+    if (b >= 0x80) {
+      chars.push(CP437_HIGH[b - 0x80]);
+    } else if (b === 0x0D) {
+      // skip CR (pairs with LF)
+    } else if (b < 0x20 || b === 0x7F) {
+      if (b === 0x0A) chars.push("\n");
+      else chars.push(" "); // collapse other control chars
+    } else {
+      chars.push(String.fromCharCode(b));
+    }
+  }
+  return chars.join("");
+}
+
 function renderHexLines(bytes: Uint8Array, baseOffset: number): string[] {
   const result: string[] = [];
   for (let i = 0; i < bytes.length; i += 16) {
@@ -121,6 +146,8 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
 
   // 1-based file line number of the first raw line in the current buffer.
   // null = unknown (after a scrollbar jump to an arbitrary byte offset).
+  const [dosMode, setDosMode] = useState(false);
+
   const [bufferBaseLine, setBufferBaseLine] = useState<number | null>(1);
   // Tracks state needed to compute baseLine when the next chunk arrives.
   const chunkInfoRef = useRef<{ end: number; newlineCount: number; baseLine: number | null }>({
@@ -158,7 +185,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
     if (effectiveMode === "hex") {
       return { lines: renderHexLines(buffer, bufferOffset), lineNums: [] as (number | null)[] };
     }
-    const raw = renderText(buffer).split("\n");
+    const raw = (dosMode ? renderCp437(buffer) : renderText(buffer)).split("\n");
     const lines: string[] = [];
     const lineNums: (number | null)[] = [];
     // bufferBaseLine = null means we jumped to an unknown position
@@ -177,7 +204,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
       }
     }
     return { lines, lineNums };
-  }, [buffer, bufferOffset, effectiveMode, bufferBaseLine]);
+  }, [buffer, bufferOffset, effectiveMode, bufferBaseLine, dosMode]);
 
   const maxTopLine = Math.max(0, lines.length - vpLines);
 
@@ -264,6 +291,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
         const m = msg as ViewerFileChangedMessage;
         const direct = canUseDirect(m.isLocal ?? false, m.filename, m.fileSize ?? null);
         // Reset viewer state for new file
+        setDosMode(false);
         setCurPath(m.path);
         setCurSourceId(m.sourceId);
         setCurFilename(m.filename);
@@ -370,6 +398,8 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
         return;
       }
 
+      if (e.key === "s" && effectiveMode === "text") { setDosMode(prev => !prev); return; }
+
       const goStart = e.key === "Home" || (e.key === "ArrowUp" && e.metaKey);
       const goEnd   = e.key === "End"  || (e.key === "ArrowDown" && e.metaKey);
 
@@ -419,7 +449,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [isSmall, eof, loading, fileSize, bufferOffset, maxTopLine, vpLines, scrollByLines, requestChunk, windowLabel]);
+  }, [isSmall, eof, loading, fileSize, bufferOffset, maxTopLine, vpLines, scrollByLines, requestChunk, windowLabel, effectiveMode, dosMode]);
 
   // ── Mouse wheel for large mode ────────────────────────────────────────────
 
@@ -609,7 +639,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
   }
 
   return (
-    <div className="viewer">
+    <div className={`viewer${dosMode && effectiveMode === "text" ? " viewer--dos" : ""}`}>
       <div className="viewer__header">
         <span className="viewer__filename">{curFilename}</span>
         <div className="viewer__mode-btns">
@@ -634,6 +664,15 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
           >
             3 Hex
           </button>
+          {effectiveMode === "text" && (
+            <button
+              className={`viewer__mode-btn${dosMode ? " viewer__mode-btn--active" : ""}`}
+              onClick={() => setDosMode(prev => !prev)}
+              title="DOS/CP437 mode (s)"
+            >
+              S DOS
+            </button>
+          )}
         </div>
       </div>
 
@@ -696,7 +735,9 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
         <span className="viewer__status-nav">
           {isImageMode
             ? "z zoom · j/k prev/next file · 1 text · 2 image · 3 hex"
-            : "↑↓ PgDn/PgUp scroll · j/k prev/next file · 1 text · 2 image · 3 hex"}
+            : effectiveMode === "text"
+              ? "↑↓ PgDn/PgUp scroll · j/k prev/next · 1 text · 2 image · 3 hex · s dos"
+              : "↑↓ PgDn/PgUp scroll · j/k prev/next file · 1 text · 2 image · 3 hex"}
         </span>
       </div>
     </div>
