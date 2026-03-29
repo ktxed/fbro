@@ -57,7 +57,7 @@ export function Layout({ client, jobsViewOpen, onCloseJobsView }: LayoutProps) {
         client={client}
       />
       {state.pendingQuit && (
-        <QuitModal activeJobs={state.pendingQuit.activeJobs} client={client} />
+        <QuitModal client={client} />
       )}
       {state.pendingRename && (
         <RenameModal rename={state.pendingRename} client={client} />
