@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(while read:*)",
+      "Bash(do basename:*)",
+      "Bash(done)",
+      "Bash(cargo build:*)"
+    ]
+  }
+}

@@ -15,7 +15,7 @@ if (params.get("viewer") === "1") {
       <ViewerApp
         path={params.get("path") ?? ""}
         sourceId={params.get("source") ?? ""}
-        filename={params.get("name") ?? params.get("path")?.split("/").pop() ?? ""}
+        filename={params.get("name") ?? params.get("path")?.replace(/\\/g, "/").split("/").filter(Boolean).pop() ?? ""}
         windowLabel={params.get("label") ?? ""}
         panelId={params.get("panel") ?? ""}
         isLocal={params.get("local") === "1"}

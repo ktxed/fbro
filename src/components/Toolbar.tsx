@@ -33,7 +33,7 @@ function openInfo(state: ReturnType<typeof useAppState>, dispatch: ReturnType<ty
   if (!panel) return;
   const entry = entryAt(panel, panel.cursor);
   if (!entry) return;
-  const dirPath = panel.path.replace(/\/+$/, "");
+  const dirPath = panel.path.replace(/[/\\]+$/, "");
   dispatch({
     type: "OPEN_INFO",
     info: {
@@ -53,7 +53,7 @@ function openRename(state: ReturnType<typeof useAppState>, dispatch: ReturnType<
   if (!panel) return;
   const entry = entryAt(panel, panel.cursor);
   if (!entry || entry.name === "..") return;
-  const dirPath = panel.path.replace(/\/+$/, "");
+  const dirPath = panel.path.replace(/[/\\]+$/, "");
   dispatch({
     type: "OPEN_RENAME",
     rename: {

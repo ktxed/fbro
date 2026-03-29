@@ -35,7 +35,12 @@ fn handle(mut stream: TcpStream) -> std::io::Result<()> {
             return Ok(());
         }
     };
-    let path = percent_decode(&url_path);
+    let decoded = percent_decode(&url_path);
+    // On Windows the URL path has a leading / before the drive letter: /C:/... → C:/...
+    #[cfg(windows)]
+    let path = decoded.trim_start_matches('/').to_string();
+    #[cfg(not(windows))]
+    let path = decoded;
 
     // Parse optional Range header (case-insensitive)
     let range_str = req

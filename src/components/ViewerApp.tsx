@@ -98,6 +98,8 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
 
   // true = use file:// direct rendering (local images < 10 MiB, video, PDF)
   const [useDirect, setUseDirect] = useState(() => canUseDirect(isLocal, initFilename, nativeFileSize));
+  // true = current file supports direct rendering (even if user switched to text/hex)
+  const [canDirect, setCanDirect] = useState(() => canUseDirect(isLocal, initFilename, nativeFileSize));
 
   // Large-file virtual scroll: line index at the top of viewport
   const [topLine, setTopLine] = useState(0);
@@ -128,8 +130,23 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
   filenameRef.current  = curFilename;
   curPathRef.current     = curPath;
   curSourceIdRef.current = curSourceId;
-  const effectiveMode: ViewMode = mode ?? "text";
+  const effectiveMode: ViewMode = useDirect ? "image" : (mode ?? "text");
   const isImageMode = effectiveMode === "image";
+
+  function switchMode(newMode: ViewMode) {
+    if (newMode === "image" && canDirect) {
+      setUseDirect(true);
+      setMode("image");
+      return;
+    }
+    if (useDirect) {
+      setUseDirect(false);
+    }
+    setMode(newMode);
+    if (!buffer) {
+      requestChunk(0, SMALL_LIMIT);
+    }
+  }
 
   // ── Derived: lines from buffer ────────────────────────────────────────────
 
@@ -249,6 +266,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
         setCurSourceId(m.sourceId);
         setCurFilename(m.filename);
         setUseDirect(direct);
+        setCanDirect(direct);
         setMode(null);
         setBuffer(null);
         setBufferOffset(0);
@@ -334,9 +352,9 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
         clientRef.current?.sendIntent("CloseViewerWindow", undefined, { label: windowLabel });
         return;
       }
-      if (e.key === "1") { setMode("text"); return; }
-      if (e.key === "2") { setMode("image"); return; }
-      if (e.key === "3") { setMode("hex"); return; }
+      if (e.key === "1") { switchMode("text"); return; }
+      if (e.key === "2") { switchMode("image"); return; }
+      if (e.key === "3") { switchMode("hex"); return; }
       if (e.key === "k") {
         e.preventDefault();
         setNavError(null);
@@ -545,6 +563,29 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
       <div className="viewer">
         <div className="viewer__header">
           <span className="viewer__filename">{curFilename}</span>
+          <div className="viewer__mode-btns">
+            <button
+              className={`viewer__mode-btn${effectiveMode === "text" ? " viewer__mode-btn--active" : ""}`}
+              onClick={() => switchMode("text")}
+              title="Text mode (1)"
+            >
+              1 Text
+            </button>
+            <button
+              className={`viewer__mode-btn${effectiveMode === "image" ? " viewer__mode-btn--active" : ""}`}
+              onClick={() => switchMode("image")}
+              title="Image mode (2)"
+            >
+              2 Image
+            </button>
+            <button
+              className={`viewer__mode-btn${effectiveMode === "hex" ? " viewer__mode-btn--active" : ""}`}
+              onClick={() => switchMode("hex")}
+              title="Hex mode (3)"
+            >
+              3 Hex
+            </button>
+          </div>
         </div>
         <div className="viewer__body" ref={bodyRef}>
           {navError ? (
@@ -572,21 +613,21 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
         <div className="viewer__mode-btns">
           <button
             className={`viewer__mode-btn${effectiveMode === "text" ? " viewer__mode-btn--active" : ""}`}
-            onClick={() => setMode("text")}
+            onClick={() => switchMode("text")}
             title="Text mode (1)"
           >
             1 Text
           </button>
           <button
             className={`viewer__mode-btn${effectiveMode === "image" ? " viewer__mode-btn--active" : ""}`}
-            onClick={() => setMode("image")}
+            onClick={() => switchMode("image")}
             title="Image mode (2)"
           >
             2 Image
           </button>
           <button
             className={`viewer__mode-btn${effectiveMode === "hex" ? " viewer__mode-btn--active" : ""}`}
-            onClick={() => setMode("hex")}
+            onClick={() => switchMode("hex")}
             title="Hex mode (3)"
           >
             3 Hex

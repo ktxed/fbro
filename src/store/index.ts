@@ -302,7 +302,7 @@ function reducer(state: AppState, action: AppAction): AppState {
           }
           if (msg.code === "NO_EDITOR" && msg.extra?.path) {
             const path = msg.extra.path as string;
-            const filename = path.split("/").pop() || path;
+            const filename = path.replace(/\\/g, "/").split("/").filter(Boolean).pop() || path;
             return { ...state, pendingNoEditor: { filename, fullPath: path } };
           }
           console.error("BE error:", msg.code, msg.message);

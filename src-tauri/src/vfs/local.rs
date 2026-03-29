@@ -7,6 +7,13 @@ use crate::ws::protocol::{FilterSpec, SortSpec};
 
 pub struct LocalFsDriver;
 
+fn normalize_path(path: std::path::PathBuf) -> String {
+    #[cfg(windows)]
+    return path.to_string_lossy().replace('\\', "/");
+    #[cfg(not(windows))]
+    path.to_string_lossy().to_string()
+}
+
 #[cfg(unix)]
 fn format_permissions(meta: &fs::Metadata) -> Option<String> {
     use std::os::unix::fs::PermissionsExt;
@@ -120,13 +127,11 @@ impl VfsDriver for LocalFsDriver {
     }
 
     fn resolve_child(&self, base: &str, name: &str) -> String {
-        Path::new(base).join(name).to_string_lossy().to_string()
+        normalize_path(Path::new(base).join(name))
     }
 
     fn parent_path(&self, path: &str) -> Option<String> {
-        Path::new(path)
-            .parent()
-            .map(|p| p.to_string_lossy().to_string())
+        Path::new(path).parent().map(|p| normalize_path(p.to_path_buf()))
     }
 
     // ── File I/O ────────────────────────────────────────────────────────────
@@ -195,10 +200,14 @@ impl VfsDriver for LocalFsDriver {
         match fs::rename(src, dst) {
             Ok(()) => Ok(true),
             Err(e) => {
-                // EXDEV / cross-device link — not an error, just means
-                // the caller should fall back to copy + delete
-                if e.raw_os_error() == Some(18) {
-                    // 18 = EXDEV on Linux
+                // Cross-device move — not an error, caller falls back to copy + delete
+                let is_cross_device = {
+                    #[cfg(windows)]
+                    { e.raw_os_error() == Some(17) } // ERROR_NOT_SAME_DEVICE
+                    #[cfg(not(windows))]
+                    { e.raw_os_error() == Some(18) } // EXDEV
+                };
+                if is_cross_device {
                     Ok(false)
                 } else {
                     Err(map_io_err(src, e))

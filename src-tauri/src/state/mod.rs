@@ -159,7 +159,9 @@ impl AppState {
         panels.insert("right".to_string(), right);
 
         // Build sources and drivers from volumes.
+        #[cfg(unix)]
         let is_spy = std::env::var("FBRO_SPY").is_ok();
+        #[cfg(unix)]
         let sock_path = std::env::var("FBRO_SPY_SOCK")
             .unwrap_or_else(|_| "/tmp/fbro-spy.sock".to_string());
 
@@ -174,10 +176,15 @@ impl AppState {
                 supports: supports.clone(),
                 root_path: vol.root_path,
             };
-            let driver: Arc<dyn VfsDriver> = if is_spy {
-                let inner = Arc::new(crate::vfs::local::LocalFsDriver);
-                Arc::new(crate::vfs::spy::SpyFsDriver::new(inner, sock_path.clone()))
-            } else {
+            let driver: Arc<dyn VfsDriver> = {
+                #[cfg(unix)]
+                if is_spy {
+                    let inner = Arc::new(crate::vfs::local::LocalFsDriver);
+                    Arc::new(crate::vfs::spy::SpyFsDriver::new(inner, sock_path.clone()))
+                } else {
+                    Arc::new(crate::vfs::local::LocalFsDriver)
+                }
+                #[cfg(not(unix))]
                 Arc::new(crate::vfs::local::LocalFsDriver)
             };
             sources.insert(vol.id.clone(), source);

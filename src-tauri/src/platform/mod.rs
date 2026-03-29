@@ -2,6 +2,8 @@
 pub mod linux;
 #[cfg(target_os = "macos")]
 pub mod macos;
+#[cfg(target_os = "windows")]
+pub mod windows;
 
 /// Information about a mounted volume / filesystem root.
 pub struct VolumeInfo {
@@ -71,6 +73,10 @@ pub fn create_platform() -> std::sync::Arc<dyn Platform> {
     {
         std::sync::Arc::new(macos::MacOSPlatform)
     }
-    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    #[cfg(target_os = "windows")]
+    {
+        std::sync::Arc::new(windows::WindowsPlatform)
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
     compile_error!("unsupported platform")
 }

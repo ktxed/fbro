@@ -100,7 +100,12 @@ fn main() {
             // Range request support is required for video playback: browsers send
             // "Range: bytes=N-M" to buffer/seek; we respond with 206 Partial Content.
             let raw_path = request.uri().path().to_string();
-            let path = percent_decode(&raw_path);
+            let decoded = percent_decode(&raw_path);
+            // On Windows the URI path has a leading / before the drive letter: /C:/... → C:/...
+            #[cfg(windows)]
+            let path = decoded.trim_start_matches('/').to_string();
+            #[cfg(not(windows))]
+            let path = decoded;
             let mime = mime_for_path(&path);
 
             let total = match std::fs::metadata(&path).map(|m| m.len()) {

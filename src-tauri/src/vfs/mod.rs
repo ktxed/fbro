@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 pub mod local;
+#[cfg(unix)]
 pub mod spy;
 
 use std::io::{Read, Write};

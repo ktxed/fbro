@@ -15,12 +15,14 @@ interface DirectFileViewerProps {
 }
 
 export function DirectFileViewer({ path, filename }: DirectFileViewerProps) {
-  // For video/PDF: use the local HTTP file server so GStreamer can stream via http://.
-  // For images: use the localfile:// custom scheme (GStreamer is not involved).
+  // Serve all local files through the HTTP file server.
+  // On Windows, paths don't start with / (e.g. C:/...) so we add one for valid URLs.
+  // (localfile:// was used for images on Linux/macOS to avoid GStreamer intercepting
+  // <video> elements, but GStreamer does not affect <img>, and localfile:// is not
+  // supported by WebView2 on Windows without additional setup.)
   const fsPort = new URLSearchParams(window.location.search).get("fsport") ?? "0";
-  const url = (isVideoExt(filename) || isPdfExt(filename))
-    ? `http://127.0.0.1:${fsPort}${path}`
-    : `localfile://localhost${path}`;
+  const urlPath = path.startsWith("/") ? path : `/${path}`;
+  const url = `http://127.0.0.1:${fsPort}${urlPath}`;
 
   if (isPdfExt(filename)) {
     return <embed className="viewer__embed" src={url} type="application/pdf" />;
