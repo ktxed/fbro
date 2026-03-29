@@ -1,4 +1,4 @@
-/// Minimal HTTP file server for the viewer.
+/// Minimal HTTP file server for the viewer and icon serving.
 ///
 /// On Linux, WebKitGTK hands <video> URLs to GStreamer for playback.
 /// GStreamer does not know about custom URI scheme handlers registered via
@@ -6,23 +6,29 @@
 /// like http://.  This server runs on localhost and serves files with proper
 /// HTTP range-request support so that GStreamer can buffer and seek in media
 /// files.
+///
+/// Also serves panel icons at /__icon__/{name} so that custom URI schemes
+/// (which are unreliable on WebView2/Windows) are not needed for icons.
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::net::{TcpListener, TcpStream};
+use std::sync::Arc;
+use crate::platform::{self, Platform};
 
-pub fn start() -> u16 {
+pub fn start(plat: Arc<dyn Platform>) -> u16 {
     let listener = TcpListener::bind("127.0.0.1:0").expect("file server bind");
     let port = listener.local_addr().expect("file server addr").port();
     std::thread::spawn(move || {
         for stream in listener.incoming().flatten() {
+            let plat = plat.clone();
             std::thread::spawn(move || {
-                let _ = handle(stream);
+                let _ = handle(stream, &*plat);
             });
         }
     });
     port
 }
 
-fn handle(mut stream: TcpStream) -> std::io::Result<()> {
+fn handle(mut stream: TcpStream, plat: &dyn Platform) -> std::io::Result<()> {
     let mut buf = [0u8; 8192];
     let n = stream.read(&mut buf)?;
     let req = std::str::from_utf8(&buf[..n]).unwrap_or("");
@@ -35,6 +41,20 @@ fn handle(mut stream: TcpStream) -> std::io::Result<()> {
             return Ok(());
         }
     };
+
+    // Icon requests: /__icon__/{name}
+    if let Some(icon_name) = url_path.strip_prefix("/__icon__/") {
+        let icon_name = percent_decode(icon_name);
+        let (data, ct) = platform::resolve_icon(plat, &icon_name);
+        write!(
+            stream,
+            "HTTP/1.1 200 OK\r\nContent-Type: {ct}\r\nContent-Length: {}\r\nCache-Control: public, max-age=31536000, immutable\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n",
+            data.len()
+        )?;
+        stream.write_all(&data)?;
+        return Ok(());
+    }
+
     let decoded = percent_decode(&url_path);
     // On Windows the URL path has a leading / before the drive letter: /C:/... → C:/...
     #[cfg(windows)]

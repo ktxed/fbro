@@ -132,6 +132,7 @@ export interface WelcomeMessage {
   timestamp: string;
   protocolVersion: string;
   sessionId: string;
+  fileServerPort: number;
 }
 
 export interface StateSnapshotMessage {

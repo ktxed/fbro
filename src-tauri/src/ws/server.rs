@@ -87,10 +87,12 @@ async fn handle_connection(stream: TcpStream, addr: SocketAddr, state: SharedSta
     let session_id = uuid::Uuid::new_v4().to_string();
 
     // ── Send Welcome ──────────────────────────────────────────────────────────
+    let file_server_port = state.lock().await.file_server_port;
     let _ = send_msg(&mut ws_tx, &ServerMessage::Welcome {
         timestamp: now(),
         protocol_version: "0".to_string(),
         session_id: session_id.clone(),
+        file_server_port,
     })
     .await;
 

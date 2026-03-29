@@ -87,7 +87,7 @@ fn main() {
     }
 
     let platform = platform::create_platform();
-    let file_server_port = fileserver::start();
+    let file_server_port = fileserver::start(platform.clone());
     let icon_cache: Arc<StdMutex<HashMap<String, (Vec<u8>, &'static str)>>> =
         Arc::new(StdMutex::new(HashMap::new()));
 

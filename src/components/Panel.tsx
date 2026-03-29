@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import type { PanelState, VFSEntry, Source } from "../ws/types";
 import type { WsClient } from "../ws/client";
 import { modKey } from "../utils/platform";
+import { useAppState } from "../store";
 
 const ROW_HEIGHT = 22;
 
@@ -97,12 +98,13 @@ function fallbackIcon(entry: VFSEntry): string {
 
 function EntryIcon({ entry }: { entry: VFSEntry }) {
   const [failed, setFailed] = useState(false);
+  const { fileServerPort } = useAppState();
   const iconName = entry.iconName;
   return (
     <span className="panel__col-icon">
-      {iconName && !failed ? (
+      {iconName && !failed && fileServerPort > 0 ? (
         <img
-          src={`icon://localhost/${iconName}`}
+          src={`http://127.0.0.1:${fileServerPort}/__icon__/${iconName}`}
           alt=""
           draggable={false}
           onError={() => setFailed(true)}

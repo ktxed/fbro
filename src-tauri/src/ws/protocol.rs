@@ -14,6 +14,8 @@ pub enum ServerMessage {
         protocol_version: String,
         #[serde(rename = "sessionId")]
         session_id: String,
+        #[serde(rename = "fileServerPort")]
+        file_server_port: u16,
     },
     StateSnapshot {
         timestamp: String,

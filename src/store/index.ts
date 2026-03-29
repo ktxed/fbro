@@ -47,6 +47,7 @@ export interface PendingNoEditor {
 export interface AppState {
   connected: boolean;
   sessionId: string | null;
+  fileServerPort: number;
   layout: { panels: string[] };
   panels: Record<string, PanelState>;
   sources: Record<string, Source>;
@@ -64,6 +65,7 @@ export interface AppState {
 const initialState: AppState = {
   connected: false,
   sessionId: null,
+  fileServerPort: 0,
   layout: { panels: [] },
   panels: {},
   sources: {},
@@ -284,7 +286,7 @@ function reducer(state: AppState, action: AppAction): AppState {
       const msg = action.msg;
       switch (msg.type) {
         case "Welcome":
-          return { ...state, sessionId: msg.sessionId };
+          return { ...state, sessionId: msg.sessionId, fileServerPort: msg.fileServerPort };
         case "StateSnapshot":
           return applySnapshot(state, msg);
         case "StatePatch":
