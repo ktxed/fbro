@@ -294,28 +294,30 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
             {!isDecision && p && (
               <div className="modal__progress">
                 {/* Current file progress */}
-                {p.currentFile && (
-                  <div className="modal__progress-section">
-                    <span className="modal__progress-label">{p.currentFile}</span>
-                    <div className="modal__progress-bar">
-                      <div
-                        className="modal__progress-fill"
-                        style={{ width: `${filePercent}%` }}
-                      />
-                    </div>
-                    <span className="modal__progress-text">
-                      {filePercent}% ({formatBytes(p.currentFileBytesCopied)} / {formatBytes(p.currentFileBytesTotal)})
-                      {speed !== null && p.currentFileBytesTotal >= LARGE_FILE_THRESHOLD && (
-                        <span className="modal__progress-speed">
-                          {" — "}{formatSpeed(speed)}
-                          {p.currentFileBytesTotal > p.currentFileBytesCopied && (
-                            <> · ETA {formatEta(p.currentFileBytesTotal - p.currentFileBytesCopied, speed)}</>
-                          )}
-                        </span>
-                      )}
-                    </span>
+                <div className="modal__progress-section">
+                  <span className="modal__progress-label">{p.currentFile ?? "⏳"}</span>
+                  <div className="modal__progress-bar">
+                    <div
+                      className="modal__progress-fill"
+                      style={{ width: `${filePercent}%` }}
+                    />
                   </div>
-                )}
+                  <span className="modal__progress-text">
+                    {p.currentFile ? (
+                      <>
+                        {filePercent}% ({formatBytes(p.currentFileBytesCopied)} / {formatBytes(p.currentFileBytesTotal)})
+                        {speed !== null && p.currentFileBytesTotal >= LARGE_FILE_THRESHOLD && (
+                          <span className="modal__progress-speed">
+                            {" — "}{formatSpeed(speed)}
+                            {p.currentFileBytesTotal > p.currentFileBytesCopied && (
+                              <> · ETA {formatEta(p.currentFileBytesTotal - p.currentFileBytesCopied, speed)}</>
+                            )}
+                          </span>
+                        )}
+                      </>
+                    ) : "⏳"}
+                  </span>
+                </div>
 
                 {/* Job-wide progress */}
                 <div className="modal__progress-section">
