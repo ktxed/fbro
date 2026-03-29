@@ -631,6 +631,22 @@ body {
   background: var(--bg-focused);
 }
 
+.modal__dry-run-name {
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: var(--font-size);
+  font-family: var(--font-mono, monospace);
+  padding: 0 2px;
+  text-decoration: underline;
+  border-radius: 2px;
+}
+
+.modal__dry-run-name:hover {
+  color: var(--text);
+}
+
 .modal__summary {
   margin: 0 0 8px;
 }

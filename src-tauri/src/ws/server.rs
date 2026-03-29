@@ -8,7 +8,7 @@ use tokio::sync::{mpsc, Notify};
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::jobs::dirsize::DirSizeQueue;
-use crate::jobs::file_ops::run_file_op;
+use crate::jobs::file_ops::{generate_dry_delete_script, run_file_op};
 use crate::jobs::scan::run_scan;
 use crate::jobs::{ConflictPolicy, FileOpEntry, FileOpJob, FileOpType, JobState, ScanHandle};
 use crate::persistence::{PanelSession, SessionState};
@@ -791,6 +791,15 @@ async fn handle_intent(
             navigate_to(&panel_id, &home, None, state, tx, scan_handles, dir_size_queue).await;
         }
 
+        "NavigatePanelTo" => {
+            let panel_id = args.get("panelId").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let cursor_hint = args.get("cursorHint").and_then(|v| v.as_str()).map(String::from);
+            if !panel_id.is_empty() && !path.is_empty() {
+                navigate_to(&panel_id, &path, cursor_hint, state, tx, scan_handles, dir_size_queue).await;
+            }
+        }
+
         "OpenFile" => {
             let panel_id = resolve_panel_id(scope, state).await;
             let (path, entry, platform) = {
@@ -1023,6 +1032,7 @@ async fn handle_intent(
             let op_type_str = args.get("opType").and_then(|v| v.as_str()).unwrap_or("copy");
             let conflict_str = args.get("conflictPolicy").and_then(|v| v.as_str()).unwrap_or("ask");
             let background = args.get("background").and_then(|v| v.as_bool()).unwrap_or(false);
+            let dry_mode = args.get("dryMode").and_then(|v| v.as_bool()).unwrap_or(false);
 
             let op_type = match op_type_str {
                 "move" => FileOpType::Move,
@@ -1072,6 +1082,56 @@ async fn handle_intent(
             };
 
             if files.is_empty() { return; }
+
+            // Dry mode: generate a bash script instead of deleting
+            if dry_mode && op_type == FileOpType::Delete {
+                let home = {
+                    #[cfg(unix)]
+                    { std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string()) }
+                    #[cfg(windows)]
+                    { std::env::var("USERPROFILE").unwrap_or_else(|_| std::env::temp_dir().to_string_lossy().to_string()) }
+                };
+                let ts = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+                let script_name = format!("{ts}_dry_delete.sh");
+                let script_path = format!("{}/{}", home, script_name);
+                let script_path_clone = script_path.clone();
+                let files_clone = files.clone();
+                let driver_clone = Arc::clone(&src_driver);
+                let result = tokio::task::spawn_blocking(move || {
+                    generate_dry_delete_script(&files_clone, &script_path_clone, &*driver_clone)
+                }).await;
+                match result {
+                    Ok(Ok(())) => {
+                        let _ = tx.send(ServerMessage::DryRunReady {
+                            timestamp: now(),
+                            script_path,
+                            script_dir: home,
+                        }).await;
+                    }
+                    Ok(Err(e)) => {
+                        let _ = tx.send(ServerMessage::Error {
+                            timestamp: now(),
+                            code: "DRY_RUN_FAILED".to_string(),
+                            message: e,
+                            recoverable: true,
+                            extra: None,
+                        }).await;
+                    }
+                    Err(e) => {
+                        let _ = tx.send(ServerMessage::Error {
+                            timestamp: now(),
+                            code: "DRY_RUN_FAILED".to_string(),
+                            message: e.to_string(),
+                            recoverable: true,
+                            extra: None,
+                        }).await;
+                    }
+                }
+                return;
+            }
 
             // Create the job
             let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);

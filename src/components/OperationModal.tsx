@@ -2,11 +2,14 @@ import { useState, useRef, useEffect } from "react";
 import type { WsClient } from "../ws/client";
 import type { PendingOp, Job, ConflictPolicy } from "../ws/types";
 import { useAppDispatch } from "../store";
+import type { PendingDryRun } from "../store";
 
 interface OperationModalProps {
   pending: PendingOp | null;
   activeJob: Job | null;
   activeJobId: string | null;
+  pendingDryRun: PendingDryRun | null;
+  panelIds: string[];
   client: WsClient;
 }
 
@@ -70,24 +73,66 @@ function useTransferSpeed(currentFile: string | undefined, bytesCopied: number) 
   return speed;
 }
 
-export function OperationModal({ pending, activeJob, activeJobId, client }: OperationModalProps) {
+export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun, panelIds, client }: OperationModalProps) {
   const dispatch = useAppDispatch();
   const [conflictPolicy, setConflictPolicy] = useState<ConflictPolicy>("ask");
   const [submitted, setSubmitted] = useState(false);
+  const [dryMode, setDryMode] = useState(false);
   const modalRef = useRef<HTMLDivElement>(null);
   const p = activeJob?.progress;
   const speed = useTransferSpeed(p?.currentFile, p?.currentFileBytesCopied ?? 0);
 
-  const close = () => { setSubmitted(false); dispatch({ type: "CLOSE_OPERATION" }); };
+  const close = () => { setSubmitted(false); setDryMode(false); dispatch({ type: "CLOSE_OPERATION" }); };
+  const closeDryRun = () => { setSubmitted(false); setDryMode(false); dispatch({ type: "CLOSE_DRY_RUN" }); };
 
   // Auto-focus the modal when it appears
-  const isVisible = !!(pending || activeJob);
+  const isVisible = !!(pending || activeJob || pendingDryRun);
   useEffect(() => {
     if (isVisible) modalRef.current?.focus();
   }, [isVisible]);
 
   // Nothing to show
-  if (!pending && !activeJob) return null;
+  if (!pendingDryRun && !pending && !activeJob) return null;
+
+  // ── Dry run result ──────────────────────────────────────────────────────
+  if (pendingDryRun) {
+    const otherPanel = panelIds.find(id => id !== pendingDryRun.sourcePanel) ?? panelIds[0] ?? "";
+    return (
+      <div className="modal-overlay" ref={modalRef} tabIndex={-1} onKeyDown={(e) => { if (e.key === "Escape") closeDryRun(); if (e.key === "Tab") e.preventDefault(); }}>
+        <div className="modal" onClick={(e) => e.stopPropagation()}>
+          <div className="modal__header">Dry Run Script Generated</div>
+          <div className="modal__body">
+            <p className="modal__summary">Script saved to your home folder:</p>
+            <div className="modal__job-params">
+              <span className="modal__job-param-label">Script:</span>
+              <button
+                className="modal__dry-run-name"
+                title={pendingDryRun.scriptPath}
+                onClick={() => {
+                  if (otherPanel) {
+                    client.sendIntent("NavigatePanelTo", undefined, {
+                      panelId: otherPanel,
+                      path: pendingDryRun.scriptDir,
+                      cursorHint: pendingDryRun.scriptName,
+                    });
+                  }
+                  closeDryRun();
+                }}
+              >{pendingDryRun.scriptName}</button>
+              <button
+                className="modal__job-param-copy"
+                onClick={() => navigator.clipboard.writeText(pendingDryRun.scriptPath)}
+                title="Copy path"
+              >⧉</button>
+            </div>
+          </div>
+          <div className="modal__actions">
+            <button className="modal__btn modal__btn--primary" onClick={closeDryRun}>Close</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // ── Phase 1: Confirmation ───────────────────────────────────────────────
   if (pending) {
@@ -104,6 +149,7 @@ export function OperationModal({ pending, activeJob, activeJobId, client }: Oper
         destPanel: pending.destPanel,
         conflictPolicy,
         background,
+        ...(isDelete && dryMode ? { dryMode: true } : {}),
       });
       if (background) {
         close();
@@ -149,14 +195,28 @@ export function OperationModal({ pending, activeJob, activeJobId, client }: Oper
                 </select>
               </div>
             )}
+            {isDelete && (
+              <div className="modal__option">
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={dryMode}
+                    onChange={(e) => setDryMode(e.target.checked)}
+                  />
+                  {" "}Dry mode (generate bash script instead)
+                </label>
+              </div>
+            )}
           </div>
           <div className="modal__actions">
             <button className="modal__btn modal__btn--primary" disabled={submitted} onClick={() => startOp(false)}>
               {submitted ? "Starting…" : label}
             </button>
-            <button className="modal__btn" disabled={submitted} onClick={() => startOp(true)}>
-              Background
-            </button>
+            {!(isDelete && dryMode) && (
+              <button className="modal__btn" disabled={submitted} onClick={() => startOp(true)}>
+                Background
+              </button>
+            )}
             <button className="modal__btn" onClick={close}>
               Cancel
             </button>

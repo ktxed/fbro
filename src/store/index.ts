@@ -11,6 +11,7 @@ import type {
   PendingOp,
   QuitConfirmRequiredMessage,
   VFSEntry,
+  DryRunReadyMessage,
 } from "../ws/types";
 
 // ─── State ───────────────────────────────────────────────────────────────────
@@ -45,6 +46,13 @@ export interface PendingNoEditor {
   fullPath: string;
 }
 
+export interface PendingDryRun {
+  scriptPath: string;
+  scriptDir: string;
+  scriptName: string;
+  sourcePanel: string;
+}
+
 export interface AppState {
   connected: boolean;
   sessionId: string | null;
@@ -61,6 +69,7 @@ export interface AppState {
   pendingInfo: PendingInfo | null;
   pendingMkdir: PendingMkdir | null;
   pendingNoEditor: PendingNoEditor | null;
+  pendingDryRun: PendingDryRun | null;
 }
 
 const initialState: AppState = {
@@ -79,6 +88,7 @@ const initialState: AppState = {
   pendingInfo: null,
   pendingMkdir: null,
   pendingNoEditor: null,
+  pendingDryRun: null,
 };
 
 // ─── Actions ─────────────────────────────────────────────────────────────────
@@ -98,7 +108,8 @@ export type AppAction =
   | { type: "OPEN_MKDIR"; mkdir: PendingMkdir }
   | { type: "CLOSE_MKDIR" }
   | { type: "OPEN_NO_EDITOR"; noEditor: PendingNoEditor }
-  | { type: "CLOSE_NO_EDITOR" };
+  | { type: "CLOSE_NO_EDITOR" }
+  | { type: "CLOSE_DRY_RUN" };
 
 // ─── Reducer ─────────────────────────────────────────────────────────────────
 
@@ -317,6 +328,20 @@ function reducer(state: AppState, action: AppAction): AppState {
           return { ...state, pendingRename: null };
         case "MkdirOk":
           return { ...state, pendingMkdir: null };
+        case "DryRunReady": {
+          const m = msg as DryRunReadyMessage;
+          const scriptName = m.scriptPath.replace(/\\/g, "/").split("/").filter(Boolean).pop() ?? m.scriptPath;
+          return {
+            ...state,
+            pendingOp: null,
+            pendingDryRun: {
+              scriptPath: m.scriptPath,
+              scriptDir: m.scriptDir,
+              scriptName,
+              sourcePanel: state.pendingOp?.sourcePanel ?? "",
+            },
+          };
+        }
         case "QuitConfirmRequired":
           return applyQuitConfirmRequired(state, msg);
         default:
@@ -347,6 +372,8 @@ function reducer(state: AppState, action: AppAction): AppState {
       return { ...state, pendingNoEditor: action.noEditor };
     case "CLOSE_NO_EDITOR":
       return { ...state, pendingNoEditor: null };
+    case "CLOSE_DRY_RUN":
+      return { ...state, pendingDryRun: null };
   }
 }
 

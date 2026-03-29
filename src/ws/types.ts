@@ -232,6 +232,13 @@ export interface ViewerFileChangedMessage {
   isLocal?: boolean;
 }
 
+export interface DryRunReadyMessage {
+  type: "DryRunReady";
+  timestamp: string;
+  scriptPath: string;
+  scriptDir: string;
+}
+
 // ─── Union types ─────────────────────────────────────────────────────────────
 
 export type BEMessage =
@@ -245,6 +252,7 @@ export type BEMessage =
   | FileChunkMessage
   | RenameOkMessage
   | MkdirOkMessage
-  | ViewerFileChangedMessage;
+  | ViewerFileChangedMessage
+  | DryRunReadyMessage;
 
 export type FEMessage = HelloMessage | IntentMessage;

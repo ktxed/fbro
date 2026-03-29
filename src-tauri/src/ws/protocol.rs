@@ -91,6 +91,13 @@ pub enum ServerMessage {
         #[serde(rename = "isLocal")]
         is_local: bool,
     },
+    DryRunReady {
+        timestamp: String,
+        #[serde(rename = "scriptPath")]
+        script_path: String,
+        #[serde(rename = "scriptDir")]
+        script_dir: String,
+    },
 }
 
 #[derive(Serialize, Clone, Debug)]

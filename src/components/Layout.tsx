@@ -22,7 +22,7 @@ export function Layout({ client }: LayoutProps) {
   }
 
   const activeJob = state.activeJobId ? state.jobs[state.activeJobId] ?? null : null;
-  const modalActive = state.pendingOp !== null || state.activeJobId !== null || state.pendingQuit !== null || state.pendingRename !== null || state.pendingInfo !== null || state.pendingMkdir !== null || state.pendingNoEditor !== null;
+  const modalActive = state.pendingOp !== null || state.activeJobId !== null || state.pendingQuit !== null || state.pendingRename !== null || state.pendingInfo !== null || state.pendingMkdir !== null || state.pendingNoEditor !== null || state.pendingDryRun !== null;
 
   return (
     <>
@@ -47,6 +47,8 @@ export function Layout({ client }: LayoutProps) {
         pending={state.pendingOp}
         activeJob={activeJob}
         activeJobId={state.activeJobId}
+        pendingDryRun={state.pendingDryRun}
+        panelIds={panelIds}
         client={client}
       />
       {state.pendingQuit && (
