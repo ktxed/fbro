@@ -42,11 +42,10 @@ interface PanelProps {
   sources: Record<string, Source>;
 }
 
-function VolumeHeader({ sources, panel, panelId, client }: {
+function VolumeHeader({ sources, panel, onNavigateToSource }: {
   sources: Record<string, Source>;
   panel: PanelState;
-  panelId: string;
-  client: WsClient;
+  onNavigateToSource: (sourceId: string) => void;
 }) {
   const listRef = useRef<HTMLDivElement>(null);
   const [canLeft, setCanLeft] = useState(false);
@@ -77,7 +76,7 @@ function VolumeHeader({ sources, panel, panelId, client }: {
             key={src.id}
             className={`panel__volume-btn${src.id === panel.sourceId ? " panel__volume-btn--active" : ""}`}
             tabIndex={-1}
-            onClick={() => client.sendIntent("NavigateToSource", panelId, { sourceId: src.id })}
+            onClick={() => onNavigateToSource(src.id)}
             title={src.rootPath}
           >{src.name}</button>
         ))}
@@ -367,6 +366,7 @@ export function Panel({ panelId, panel, isFocused, modalActive, client, sources 
               ? (cur - 1 + sourceList.length) % sourceList.length
               : (cur + 1) % sourceList.length;
             client.sendIntent("NavigateToSource", panelId, { sourceId: sourceList[next].id });
+            setFilterOpen(false);
           }
         } else {
           client.sendIntent("SwitchFocus", undefined, {
@@ -494,7 +494,7 @@ export function Panel({ panelId, panel, isFocused, modalActive, client, sources 
         >~</button>
       </div>
 
-      <VolumeHeader sources={sources} panel={panel} panelId={panelId} client={client} />
+      <VolumeHeader sources={sources} panel={panel} onNavigateToSource={(sourceId) => { client.sendIntent("NavigateToSource", panelId, { sourceId }); setFilterOpen(false); }} />
 
       <SortHeader sort={panel.sort} panelId={panelId} client={client} />
 
