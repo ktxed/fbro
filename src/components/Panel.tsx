@@ -40,6 +40,7 @@ interface PanelProps {
   modalActive: boolean;
   client: WsClient;
   sources: Record<string, Source>;
+  otherPanelId: string;
 }
 
 function VolumeHeader({ sources, panel, onNavigateToSource }: {
@@ -141,7 +142,7 @@ function formatMtime(mtime: string | undefined): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
-export function Panel({ panelId, panel, isFocused, modalActive, client, sources }: PanelProps) {
+export function Panel({ panelId, panel, isFocused, modalActive, client, sources, otherPanelId }: PanelProps) {
   const listRef = useRef<HTMLDivElement>(null);
   const focusDivRef = useRef<HTMLDivElement>(null);
   const rightDrag = useRef({ active: false, everMoved: false, startRow: -1, mode: "select" as "select" | "deselect", preSelection: [] as number[] });
@@ -380,6 +381,15 @@ export function Panel({ panelId, panel, isFocused, modalActive, client, sources 
           setFilterInput(panel.filter?.value ?? "");
           setFilterOpen(true);
           setTimeout(() => filterInputRef.current?.focus(), 0);
+        }
+        break;
+      case "s":
+        if (!modKey(e) && otherPanelId) {
+          e.preventDefault();
+          client.sendIntent("NavigatePanelTo", undefined, {
+            panelId: otherPanelId,
+            path: panel.path,
+          });
         }
         break;
     }

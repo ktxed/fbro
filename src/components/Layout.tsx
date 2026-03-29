@@ -30,6 +30,7 @@ export function Layout({ client }: LayoutProps) {
         {panelIds.map((id) => {
           const panel = state.panels[id];
           if (!panel) return null;
+          const otherPanelId = panelIds.find(p => p !== id) ?? "";
           return (
             <Panel
               key={id}
@@ -39,6 +40,7 @@ export function Layout({ client }: LayoutProps) {
               modalActive={modalActive}
               client={client}
               sources={state.sources}
+              otherPanelId={otherPanelId}
             />
           );
         })}
