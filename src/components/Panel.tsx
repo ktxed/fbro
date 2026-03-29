@@ -246,15 +246,17 @@ export function Panel({ panelId, panel, isFocused, modalActive, client, sources 
           client.sendIntent("MoveCursor", "focused-panel", { direction: "down" });
         }
         break;
-      case " ":
+      case " ": {
         e.preventDefault();
         if (e.shiftKey) {
-          const targets = new Set([panel.cursor, ...panel.selection]);
-          for (const i of targets) {
-            // In windowed mode, entry at cursor might not be in local entries
-            const entry = isWindowed
-              ? (i >= windowStart && i < windowStart + panel.entries.length ? panel.entries[i - windowStart] : undefined)
-              : panel.entries[i];
+          // Shift+Space: calculate sizes for all folders in the panel, or only
+          // selected folders if the selection contains any.
+          const entriesToCalc = panel.selection.length > 0
+            ? panel.selection.map(i => isWindowed
+                ? (i >= windowStart && i < windowStart + panel.entries.length ? panel.entries[i - windowStart] : undefined)
+                : panel.entries[i])
+            : panel.entries;
+          for (const entry of entriesToCalc) {
             if (!entry || entry.kind !== "directory") continue;
             if (calcSet.has(entry.name)) {
               client.sendIntent("CancelSizeCalculation", "focused-panel", { name: entry.name });
@@ -263,9 +265,24 @@ export function Panel({ panelId, panel, isFocused, modalActive, client, sources 
             }
           }
         } else {
-          client.sendIntent("ToggleSelection", "focused-panel");
+          // Space: if cursor is on a folder with no selection, toggle its size
+          // calculation; otherwise toggle selection.
+          const cursorEntry = isWindowed
+            ? (panel.cursor >= windowStart && panel.cursor < windowStart + panel.entries.length
+                ? panel.entries[panel.cursor - windowStart] : undefined)
+            : panel.entries[panel.cursor];
+          if (cursorEntry?.kind === "directory" && panel.selection.length === 0) {
+            if (calcSet.has(cursorEntry.name)) {
+              client.sendIntent("CancelSizeCalculation", "focused-panel", { name: cursorEntry.name });
+            } else {
+              client.sendIntent("CalculateSize", "focused-panel", { name: cursorEntry.name });
+            }
+          } else {
+            client.sendIntent("ToggleSelection", "focused-panel");
+          }
         }
         break;
+      }
       case "a":
       case "A":
         if (modKey(e)) {
