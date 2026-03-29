@@ -129,6 +129,8 @@ impl Platform for WindowsPlatform {
                 id: format!("vol-{}", letter.to_lowercase()),
                 name,
                 root_path: root,
+                mounted: true,
+                device_path: None,
             });
         }
 

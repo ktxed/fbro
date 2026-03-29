@@ -22,6 +22,7 @@ pub async fn run_scan(
     selection_names: Option<Vec<String>>,
     state: SharedState,
     dir_size_queue: Arc<DirSizeQueue>,
+    atomic: bool,
 ) {
     let path_clone = path.clone();
     let result = tokio::task::spawn_blocking(move || {
@@ -133,8 +134,41 @@ pub async fn run_scan(
                 }),
             })
             .await;
+    } else if atomic {
+        // ── Mode A-atomic: single replacement (no flash for watcher rescans) ─
+        let version = version_base + 1;
+
+        // Update BE state atomically
+        {
+            let mut s = state.lock().await;
+            if let Some(panel) = s.panels.get_mut(&panel_id) {
+                panel.entries = schema_entries.clone();
+                panel.cursor = cursor;
+                panel.selection = selection.clone();
+                panel.windowed = false;
+                panel.status = crate::state::PanelStatus::Ready;
+                panel.version = version;
+            }
+        }
+
+        let _ = tx
+            .send(ServerMessage::StatePatch {
+                timestamp: crate::ws::protocol::now(),
+                domain: "panels".to_string(),
+                entity_id: Some(panel_id),
+                version,
+                patch: serde_json::json!({
+                    "entries": schema_entries,
+                    "status": "ready",
+                    "total": total,
+                    "totalSize": total_file_size,
+                    "cursor": cursor,
+                    "selection": selection,
+                }),
+            })
+            .await;
     } else {
-        // ── Mode A: full list (current behavior) ─────────────────────────
+        // ── Mode A: full list (streamed) ─────────────────────────────────
         let mut version = version_base;
 
         for (batch_idx, chunk) in schema_entries.chunks(BATCH_SIZE).enumerate() {

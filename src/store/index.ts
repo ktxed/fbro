@@ -233,6 +233,12 @@ function applyPatch(state: AppState, msg: StatePatchMessage): AppState {
     return { ...state, focus: msg.patch.focus as string };
   }
 
+  if (msg.domain === "sources") {
+    const sources: Record<string, Source> = {};
+    for (const s of msg.patch.sources as Source[]) sources[s.id] = s;
+    return { ...state, sources };
+  }
+
   return state;
 }
 

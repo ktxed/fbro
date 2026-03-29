@@ -7,6 +7,7 @@ mod persistence;
 mod platform;
 mod state;
 mod vfs;
+mod watcher;
 mod ws;
 
 use std::collections::HashMap;

@@ -43,10 +43,11 @@ interface PanelProps {
   otherPanelId: string;
 }
 
-function VolumeHeader({ sources, panel, onNavigateToSource }: {
+function VolumeHeader({ sources, panel, onNavigateToSource, onMountSource }: {
   sources: Record<string, Source>;
   panel: PanelState;
   onNavigateToSource: (sourceId: string) => void;
+  onMountSource: (sourceId: string) => void;
 }) {
   const listRef = useRef<HTMLDivElement>(null);
   const [canLeft, setCanLeft] = useState(false);
@@ -75,10 +76,10 @@ function VolumeHeader({ sources, panel, onNavigateToSource }: {
         {Object.values(sources).map(src => (
           <button
             key={src.id}
-            className={`panel__volume-btn${src.id === panel.sourceId ? " panel__volume-btn--active" : ""}`}
+            className={`panel__volume-btn${src.id === panel.sourceId ? " panel__volume-btn--active" : ""}${!src.mounted ? " panel__volume-btn--unmounted" : ""}`}
             tabIndex={-1}
-            onClick={() => onNavigateToSource(src.id)}
-            title={src.rootPath}
+            onClick={() => src.mounted ? onNavigateToSource(src.id) : onMountSource(src.id)}
+            title={src.mounted ? src.rootPath : `${src.name} (unmounted — click to mount)`}
           >{src.name}</button>
         ))}
       </div>
@@ -518,7 +519,7 @@ export function Panel({ panelId, panel, isFocused, modalActive, client, sources,
         >~</button>
       </div>
 
-      <VolumeHeader sources={sources} panel={panel} onNavigateToSource={(sourceId) => { client.sendIntent("NavigateToSource", panelId, { sourceId }); setFilterOpen(false); }} />
+      <VolumeHeader sources={sources} panel={panel} onNavigateToSource={(sourceId) => { client.sendIntent("NavigateToSource", panelId, { sourceId }); setFilterOpen(false); }} onMountSource={(sourceId) => { client.sendIntent("MountSource", panelId, { sourceId }); }} />
 
       <SortHeader sort={panel.sort} panelId={panelId} client={client} />
 

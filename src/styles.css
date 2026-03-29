@@ -186,6 +186,14 @@ body {
   background: rgba(74, 124, 191, 0.15);
 }
 
+.panel__volume-btn--unmounted {
+  opacity: 0.5;
+  border-style: dashed;
+}
+.panel__volume-btn--unmounted:hover {
+  opacity: 0.8;
+}
+
 .panel__path {
   color: var(--text-path);
   font-size: var(--font-size);

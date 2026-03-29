@@ -5,11 +5,13 @@ pub mod macos;
 #[cfg(target_os = "windows")]
 pub mod windows;
 
-/// Information about a mounted volume / filesystem root.
+/// Information about a volume / filesystem root (mounted or unmounted).
 pub struct VolumeInfo {
-    pub id: String,        // stable ID, e.g. "vol-root", "vol-home"
-    pub name: String,      // display name, e.g. "/", "/home", "USB"
-    pub root_path: String, // mount point path
+    pub id: String,                    // stable ID, e.g. "vol-root", "vol-home"
+    pub name: String,                  // display name, e.g. "/", "/home", "USB"
+    pub root_path: String,            // mount point path (empty if unmounted)
+    pub mounted: bool,                 // whether the volume is currently mounted
+    pub device_path: Option<String>,   // udisks2 object path for mount operations
 }
 
 /// Abstraction over platform-specific environment queries and services.

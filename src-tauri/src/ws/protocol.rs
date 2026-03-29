@@ -174,6 +174,7 @@ pub struct SourceSchema {
     pub capabilities: SourceCapabilities,
     #[serde(rename = "rootPath")]
     pub root_path: String,
+    pub mounted: bool,
     #[serde(rename = "freeBytes", skip_serializing_if = "Option::is_none")]
     pub free_bytes: Option<u64>,
     #[serde(rename = "totalBytes", skip_serializing_if = "Option::is_none")]

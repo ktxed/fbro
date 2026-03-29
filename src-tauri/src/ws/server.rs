@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use futures_util::{SinkExt, StreamExt};
@@ -14,6 +15,7 @@ use crate::jobs::{ConflictPolicy, FileOpEntry, FileOpJob, FileOpType, JobState, 
 use crate::persistence::{PanelSession, SessionState};
 use crate::state::{PanelStatus, SharedState};
 use crate::vfs::VfsDriver;
+use crate::watcher::{WatcherAction, WatcherCommand};
 use crate::ws::protocol::{
     now, ClientMessage, FileOpFileSchema, JobStartSchema, LayoutDomain, PanelSnapshot,
     ServerMessage, SourceCapabilities, SourceSchema, StateDomains,
@@ -34,6 +36,19 @@ pub async fn start(state: SharedState, app_handle: tauri::AppHandle, quit_notify
 
     let dir_size_queue = Arc::new(DirSizeQueue::new());
 
+    // Initialize udisks2 on Linux for unmounted volume detection and mounting
+    #[cfg(target_os = "linux")]
+    let udisks2: Option<Arc<crate::platform::linux::udisks2::UDisks2>> = match crate::platform::linux::udisks2::UDisks2::new().await {
+        Ok(u) => {
+            eprintln!("[fbro] udisks2 available — unmounted volumes will be shown");
+            Some(Arc::new(u))
+        }
+        Err(e) => {
+            eprintln!("[fbro] udisks2 not available: {e} — falling back to /proc/mounts");
+            None
+        }
+    };
+
     loop {
         match listener.accept().await {
             Ok((stream, addr)) => {
@@ -41,14 +56,28 @@ pub async fn start(state: SharedState, app_handle: tauri::AppHandle, quit_notify
                 let app_handle = app_handle.clone();
                 let quit_notify = Arc::clone(&quit_notify);
                 let dir_size_queue = Arc::clone(&dir_size_queue);
-                tokio::spawn(handle_connection(stream, addr, state, app_handle, quit_notify, dir_size_queue));
+                #[cfg(target_os = "linux")]
+                let udisks2 = udisks2.clone();
+                tokio::spawn(handle_connection(
+                    stream, addr, state, app_handle, quit_notify, dir_size_queue,
+                    #[cfg(target_os = "linux")]
+                    udisks2,
+                ));
             }
             Err(e) => eprintln!("[fbro] Accept error: {e}"),
         }
     }
 }
 
-async fn handle_connection(stream: TcpStream, addr: SocketAddr, state: SharedState, app_handle: tauri::AppHandle, quit_notify: Arc<Notify>, dir_size_queue: Arc<DirSizeQueue>) {
+async fn handle_connection(
+    stream: TcpStream,
+    addr: SocketAddr,
+    state: SharedState,
+    app_handle: tauri::AppHandle,
+    quit_notify: Arc<Notify>,
+    dir_size_queue: Arc<DirSizeQueue>,
+    #[cfg(target_os = "linux")] udisks2: Option<Arc<crate::platform::linux::udisks2::UDisks2>>,
+) {
     eprintln!("[fbro] Client connected: {addr}");
 
     let ws_stream = match tokio_tungstenite::accept_async(stream).await {
@@ -137,7 +166,7 @@ async fn handle_connection(stream: TcpStream, addr: SocketAddr, state: SharedSta
             .sources
             .values()
             .map(|src| {
-                let space = s.platform.disk_space(&src.root_path);
+                let space = if src.mounted { s.platform.disk_space(&src.root_path) } else { None };
                 SourceSchema {
                     id: src.id.clone(),
                     name: src.name.clone(),
@@ -149,6 +178,7 @@ async fn handle_connection(stream: TcpStream, addr: SocketAddr, state: SharedSta
                         supports_jobs: true,
                     },
                     root_path: src.root_path.clone(),
+                    mounted: src.mounted,
                     free_bytes: space.map(|(f, _)| f),
                     total_bytes: space.map(|(_, t)| t),
                 }
@@ -194,6 +224,33 @@ async fn handle_connection(stream: TcpStream, addr: SocketAddr, state: SharedSta
         let h = spawn_scan(panel_id.clone(), path, sort, filter, version_base, tx.clone(), driver, None, None, Arc::clone(&state), Arc::clone(&dir_size_queue));
         scan_handles.insert(panel_id.clone(), h);
     }
+
+    // ── Spawn filesystem watcher (gui clients only) ─────────────────────────────
+    let (watcher_cmd_tx, watcher_cmd_rx) = mpsc::channel::<WatcherCommand>(64);
+    let (watcher_action_tx, mut watcher_action_rx) = mpsc::channel::<WatcherAction>(64);
+
+    let _watcher_handle = if is_gui {
+        let platform = state.lock().await.platform.clone();
+        // Send initial Watch for each panel's current path
+        for panel_id in &panel_ids {
+            let path = state.lock().await.panels.get(panel_id).map(|p| p.path.clone());
+            if let Some(path) = path {
+                let _ = watcher_cmd_tx.send(WatcherCommand::Watch {
+                    panel_id: panel_id.clone(),
+                    path: PathBuf::from(&path),
+                }).await;
+            }
+        }
+        Some(crate::watcher::spawn_watcher(
+            platform,
+            #[cfg(target_os = "linux")]
+            udisks2.clone(),
+            watcher_cmd_rx,
+            watcher_action_tx,
+        ))
+    } else {
+        None
+    };
 
     // Register GUI client's sender for cross-connection broadcasts
     if is_gui {
@@ -241,6 +298,25 @@ async fn handle_connection(stream: TcpStream, addr: SocketAddr, state: SharedSta
                 }
             }
 
+            // Filesystem watcher actions
+            Some(action) = watcher_action_rx.recv() => {
+                match action {
+                    WatcherAction::DirChanged { panel_id } => {
+                        let names = {
+                            let s = state.lock().await;
+                            selected_names_for(&s, &panel_id)
+                        };
+                        quiet_rescan_panel(&panel_id, &state, &tx, &mut scan_handles, names, &dir_size_queue).await;
+                    }
+                    WatcherAction::DirDeleted { panel_id } => {
+                        navigate_up_safe(&panel_id, &state, &tx, &mut scan_handles, &watcher_cmd_tx, &dir_size_queue).await;
+                    }
+                    WatcherAction::VolumesChanged { volumes } => {
+                        handle_volumes_changed(volumes, &state, &tx, &mut scan_handles, &watcher_cmd_tx, &dir_size_queue).await;
+                    }
+                }
+            }
+
             // OS window close button: treat like "Quit" intent
             _ = quit_notify.notified(), if is_gui => {
                 let active_jobs = {
@@ -277,6 +353,9 @@ async fn handle_connection(stream: TcpStream, addr: SocketAddr, state: SharedSta
                                     &mut decision_senders,
                                     &app_handle,
                                     &dir_size_queue,
+                                    &watcher_cmd_tx,
+                                    #[cfg(target_os = "linux")]
+                                    &udisks2,
                                 )
                                 .await;
                             }
@@ -297,6 +376,10 @@ async fn handle_connection(stream: TcpStream, addr: SocketAddr, state: SharedSta
     }
 
     eprintln!("[fbro] Client disconnected: {addr}");
+    let _ = watcher_cmd_tx.send(WatcherCommand::Shutdown).await;
+    if let Some(h) = _watcher_handle {
+        h.abort();
+    }
     for h in scan_handles.values() {
         h.abort();
     }
@@ -320,6 +403,8 @@ async fn handle_intent(
     decision_senders: &mut HashMap<String, mpsc::Sender<String>>,
     app_handle: &tauri::AppHandle,
     dir_size_queue: &Arc<DirSizeQueue>,
+    watcher_cmd_tx: &mpsc::Sender<WatcherCommand>,
+    #[cfg(target_os = "linux")] udisks2: &Option<Arc<crate::platform::linux::udisks2::UDisks2>>,
 ) {
     match name {
         "RefreshPanels" => {
@@ -781,14 +866,14 @@ async fn handle_intent(
             };
 
             if entry_kind == "directory" {
-                navigate_to(&panel_id, &new_path, None, state, tx, scan_handles, dir_size_queue).await;
+                navigate_to(&panel_id, &new_path, None, state, tx, scan_handles, dir_size_queue, watcher_cmd_tx).await;
             }
         }
 
         "NavigateHome" => {
             let panel_id = resolve_panel_id(scope, state).await;
             let home = state.lock().await.platform.home_dir();
-            navigate_to(&panel_id, &home, None, state, tx, scan_handles, dir_size_queue).await;
+            navigate_to(&panel_id, &home, None, state, tx, scan_handles, dir_size_queue, watcher_cmd_tx).await;
         }
 
         "NavigatePanelTo" => {
@@ -796,7 +881,7 @@ async fn handle_intent(
             let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("").to_string();
             let cursor_hint = args.get("cursorHint").and_then(|v| v.as_str()).map(String::from);
             if !panel_id.is_empty() && !path.is_empty() {
-                navigate_to(&panel_id, &path, cursor_hint, state, tx, scan_handles, dir_size_queue).await;
+                navigate_to(&panel_id, &path, cursor_hint, state, tx, scan_handles, dir_size_queue, watcher_cmd_tx).await;
             }
         }
 
@@ -909,13 +994,148 @@ async fn handle_intent(
                             .unwrap_or(root_path);
 
                         panel.source_id = source_id;
-                        panel.path = target_path;
+                        panel.path = target_path.clone();
                         panel.cursor = 0;
                         panel.selection.clear();
                         panel.filter = None;
+                        let _ = watcher_cmd_tx.send(WatcherCommand::Watch {
+                            panel_id: panel_id.clone(),
+                            path: PathBuf::from(&target_path),
+                        }).await;
                     }
                 }
                 rescan_panel(&panel_id, state, tx, scan_handles, None, None, dir_size_queue).await;
+            }
+        }
+
+        "MountSource" => {
+            #[cfg(target_os = "linux")]
+            {
+                let panel_id = resolve_panel_id(scope, state).await;
+                let source_id = args.get("sourceId").and_then(|v| v.as_str()).unwrap_or("").to_string();
+
+                let device_path = {
+                    let s = state.lock().await;
+                    s.sources.get(&source_id).and_then(|src| src.device_path.clone())
+                };
+
+                if let Some(device_path) = device_path {
+                    if let Some(ref ud) = udisks2 {
+                        match ud.mount(&device_path).await {
+                            Ok(mount_point) => {
+                                eprintln!("[fbro] Mounted {source_id} at {mount_point}");
+                                // Update source state
+                                {
+                                    let mut s = state.lock().await;
+                                    if let Some(src) = s.sources.get_mut(&source_id) {
+                                        src.mounted = true;
+                                        src.root_path = mount_point.clone();
+                                        src.supports = vec![
+                                            "ListEntries".to_string(),
+                                            "OpenFolder".to_string(),
+                                            "CopySelection".to_string(),
+                                            "MoveSelection".to_string(),
+                                            "DeleteSelection".to_string(),
+                                            "InspectItem".to_string(),
+                                        ];
+                                    }
+                                    // Create VFS driver for the newly mounted source
+                                    if !s.drivers.contains_key(&source_id) {
+                                        let driver: Arc<dyn VfsDriver> = Arc::new(crate::vfs::local::LocalFsDriver);
+                                        s.drivers.insert(source_id.clone(), driver);
+                                    }
+                                }
+
+                                // Broadcast updated sources
+                                let sources_json = {
+                                    let s = state.lock().await;
+                                    let sources: Vec<serde_json::Value> = s.sources.values().map(|src| {
+                                        let space = if src.mounted { s.platform.disk_space(&src.root_path) } else { None };
+                                        serde_json::json!({
+                                            "id": src.id,
+                                            "name": src.name,
+                                            "kind": src.kind,
+                                            "supports": src.supports,
+                                            "capabilities": {
+                                                "readOnly": false,
+                                                "supportsStreaming": true,
+                                                "supportsJobs": true
+                                            },
+                                            "rootPath": src.root_path,
+                                            "mounted": src.mounted,
+                                            "freeBytes": space.map(|(f, _)| f),
+                                            "totalBytes": space.map(|(_, t)| t)
+                                        })
+                                    }).collect();
+                                    sources
+                                };
+
+                                let _ = tx.send(ServerMessage::StatePatch {
+                                    timestamp: now(),
+                                    domain: "sources".to_string(),
+                                    entity_id: None,
+                                    version: 0,
+                                    patch: serde_json::json!({ "sources": sources_json }),
+                                }).await;
+
+                                // Navigate the panel to the newly mounted source
+                                {
+                                    let mut s = state.lock().await;
+                                    if let Some(panel) = s.panels.get_mut(&panel_id) {
+                                        panel.source_paths.insert(panel.source_id.clone(), panel.path.clone());
+                                        panel.source_id = source_id.clone();
+                                        panel.path = mount_point.clone();
+                                        panel.cursor = 0;
+                                        panel.selection.clear();
+                                        panel.filter = None;
+                                        let _ = watcher_cmd_tx.send(WatcherCommand::Watch {
+                                            panel_id: panel_id.clone(),
+                                            path: PathBuf::from(&mount_point),
+                                        }).await;
+                                    }
+                                }
+                                rescan_panel(&panel_id, state, tx, scan_handles, None, None, dir_size_queue).await;
+                            }
+                            Err(e) => {
+                                eprintln!("[fbro] Mount failed for {source_id}: {e}");
+                                let _ = tx.send(ServerMessage::Error {
+                                    timestamp: now(),
+                                    code: "MOUNT_FAILED".to_string(),
+                                    message: e,
+                                    recoverable: true,
+                                    extra: None,
+                                }).await;
+                            }
+                        }
+                    } else {
+                        let _ = tx.send(ServerMessage::Error {
+                            timestamp: now(),
+                            code: "MOUNT_UNAVAILABLE".to_string(),
+                            message: "udisks2 is not available on this system".to_string(),
+                            recoverable: true,
+                            extra: None,
+                        }).await;
+                    }
+                } else {
+                    let _ = tx.send(ServerMessage::Error {
+                        timestamp: now(),
+                        code: "MOUNT_FAILED".to_string(),
+                        message: "Source has no device path for mounting".to_string(),
+                        recoverable: true,
+                        extra: None,
+                    }).await;
+                }
+            }
+
+            #[cfg(not(target_os = "linux"))]
+            {
+                let _ = tx.send(ServerMessage::Error {
+                    timestamp: now(),
+                    code: "MOUNT_UNAVAILABLE".to_string(),
+                    message: "Mounting is only supported on Linux".to_string(),
+                    recoverable: true,
+                    extra: None,
+                }).await;
             }
         }
 
@@ -934,7 +1154,7 @@ async fn handle_intent(
                 if let Some(parent) = parent_path {
                     if parent != path {
                         let dir_name = path.trim_end_matches('/').rsplit('/').next().map(str::to_string);
-                        navigate_to(&panel_id, &parent, dir_name, state, tx, scan_handles, dir_size_queue).await;
+                        navigate_to(&panel_id, &parent, dir_name, state, tx, scan_handles, dir_size_queue, watcher_cmd_tx).await;
                     }
                 }
             }
@@ -991,7 +1211,7 @@ async fn handle_intent(
                 .sources
                 .values()
                 .map(|src| {
-                    let space = s.platform.disk_space(&src.root_path);
+                    let space = if src.mounted { s.platform.disk_space(&src.root_path) } else { None };
                     SourceSchema {
                         id: src.id.clone(),
                         name: src.name.clone(),
@@ -1003,6 +1223,7 @@ async fn handle_intent(
                             supports_jobs: true,
                         },
                         root_path: src.root_path.clone(),
+                        mounted: src.mounted,
                         free_bytes: space.map(|(f, _)| f),
                         total_bytes: space.map(|(_, t)| t),
                     }
@@ -1572,6 +1793,7 @@ async fn navigate_to(
     tx: &mpsc::Sender<ServerMessage>,
     scan_handles: &mut HashMap<String, ScanHandle>,
     dir_size_queue: &Arc<DirSizeQueue>,
+    watcher_cmd_tx: &mpsc::Sender<WatcherCommand>,
 ) {
     // Abort any running scan for this panel
     if let Some(h) = scan_handles.remove(panel_id) {
@@ -1620,6 +1842,11 @@ async fn navigate_to(
             }),
         })
         .await;
+
+    let _ = watcher_cmd_tx.send(WatcherCommand::Watch {
+        panel_id: panel_id.to_string(),
+        path: PathBuf::from(new_path),
+    }).await;
 
     let h = spawn_scan(panel_id.to_string(), new_path.to_string(), sort, filter, version, tx.clone(), driver, cursor_hint, None, Arc::clone(state), Arc::clone(dir_size_queue));
     scan_handles.insert(panel_id.to_string(), h);
@@ -1684,6 +1911,149 @@ async fn rescan_panel(
         .await;
     let h = spawn_scan(panel_id.to_string(), path, sort, filter, version, tx.clone(), driver, cursor_hint, selection_names, Arc::clone(state), Arc::clone(dir_size_queue));
     scan_handles.insert(panel_id.to_string(), h);
+}
+
+/// Like rescan_panel, but doesn't clear FE entries or show "loading" state.
+/// Uses atomic scan to swap entries in one shot — no flash.
+async fn quiet_rescan_panel(
+    panel_id: &str,
+    state: &SharedState,
+    tx: &mpsc::Sender<ServerMessage>,
+    scan_handles: &mut HashMap<String, ScanHandle>,
+    selection_names: Option<Vec<String>>,
+    dir_size_queue: &Arc<DirSizeQueue>,
+) {
+    if let Some(h) = scan_handles.remove(panel_id) {
+        h.abort();
+    }
+    let (path, sort, filter, version, driver) = {
+        let mut s = state.lock().await;
+        let (sid, path, sort, filter, version) = if let Some(panel) = s.panels.get_mut(panel_id) {
+            let sid = panel.source_id.clone();
+            panel.version += 1;
+            (sid, panel.path.clone(), panel.sort.clone(), panel.filter.clone(), panel.version)
+        } else {
+            return;
+        };
+        let driver = s.drivers.get(&sid).cloned().unwrap();
+        (path, sort, filter, version, driver)
+    };
+    // No StatePatch sent here — FE keeps showing current entries
+    let cursor_hint = {
+        let s = state.lock().await;
+        s.panels.get(panel_id).and_then(|p| p.entries.get(p.cursor).map(|e| e.name.clone()))
+    };
+    let h = spawn_scan_atomic(panel_id.to_string(), path, sort, filter, version, tx.clone(), driver, cursor_hint, selection_names, Arc::clone(state), Arc::clone(dir_size_queue));
+    scan_handles.insert(panel_id.to_string(), h);
+}
+
+async fn navigate_up_safe(
+    panel_id: &str,
+    state: &SharedState,
+    tx: &mpsc::Sender<ServerMessage>,
+    scan_handles: &mut HashMap<String, ScanHandle>,
+    watcher_cmd_tx: &mpsc::Sender<WatcherCommand>,
+    dir_size_queue: &Arc<DirSizeQueue>,
+) {
+    let (current_path, home) = {
+        let s = state.lock().await;
+        let path = s.panels.get(panel_id).map(|p| p.path.clone()).unwrap_or_default();
+        (path, s.platform.home_dir())
+    };
+    let mut target = PathBuf::from(&current_path);
+    loop {
+        match target.parent() {
+            Some(parent) if parent != target => {
+                if parent.is_dir() {
+                    let dir_name = target.file_name().and_then(|n| n.to_str()).map(String::from);
+                    navigate_to(panel_id, &parent.to_string_lossy(), dir_name, state, tx, scan_handles, dir_size_queue, watcher_cmd_tx).await;
+                    return;
+                }
+                target = parent.to_path_buf();
+            }
+            _ => break,
+        }
+    }
+    navigate_to(panel_id, &home, None, state, tx, scan_handles, dir_size_queue, watcher_cmd_tx).await;
+}
+
+async fn handle_volumes_changed(
+    volumes: Vec<crate::platform::VolumeInfo>,
+    state: &SharedState,
+    tx: &mpsc::Sender<ServerMessage>,
+    scan_handles: &mut HashMap<String, ScanHandle>,
+    watcher_cmd_tx: &mpsc::Sender<WatcherCommand>,
+    dir_size_queue: &Arc<DirSizeQueue>,
+) {
+    let (removed, sources_json, panels_to_migrate) = {
+        let mut s = state.lock().await;
+        let removed = s.rebuild_sources(volumes);
+
+        // Check if any panel references a removed source
+        let panels_to_migrate: Vec<String> = s.panels.iter()
+            .filter(|(_, p)| removed.contains(&p.source_id))
+            .map(|(id, _)| id.clone())
+            .collect();
+
+        // Migrate affected panels to the first available source
+        if !panels_to_migrate.is_empty() {
+            let fallback_source = s.sources.keys().next().cloned().unwrap_or_default();
+            let home = s.platform.home_dir();
+            for pid in &panels_to_migrate {
+                if let Some(panel) = s.panels.get_mut(pid) {
+                    panel.source_id = fallback_source.clone();
+                    panel.path = home.clone();
+                }
+            }
+        }
+
+        // Build sources JSON for the patch
+        let sources_json: Vec<serde_json::Value> = s.sources.values().map(|src| {
+            let space = if src.mounted { s.platform.disk_space(&src.root_path) } else { None };
+            serde_json::json!({
+                "id": src.id,
+                "name": src.name,
+                "kind": src.kind,
+                "supports": src.supports,
+                "capabilities": {
+                    "readOnly": false,
+                    "supportsStreaming": true,
+                    "supportsJobs": true
+                },
+                "rootPath": src.root_path,
+                "mounted": src.mounted,
+                "freeBytes": space.map(|(f, _)| f),
+                "totalBytes": space.map(|(_, t)| t)
+            })
+        }).collect();
+
+        (removed, sources_json, panels_to_migrate)
+    };
+
+    // Broadcast updated sources
+    let _ = tx.send(ServerMessage::StatePatch {
+        timestamp: now(),
+        domain: "sources".to_string(),
+        entity_id: None,
+        version: 0,
+        patch: serde_json::json!({ "sources": sources_json }),
+    }).await;
+
+    // Rescan migrated panels
+    for pid in panels_to_migrate {
+        rescan_panel(&pid, state, tx, scan_handles, None, None, dir_size_queue).await;
+        let path = state.lock().await.panels.get(&pid).map(|p| p.path.clone());
+        if let Some(path) = path {
+            let _ = watcher_cmd_tx.send(WatcherCommand::Watch {
+                panel_id: pid,
+                path: PathBuf::from(&path),
+            }).await;
+        }
+    }
+
+    if !removed.is_empty() {
+        eprintln!("[fbro] Volumes changed: removed {:?}", removed);
+    }
 }
 
 async fn send_window(
@@ -1768,7 +2138,24 @@ fn spawn_scan(
     state: SharedState,
     dir_size_queue: Arc<DirSizeQueue>,
 ) -> ScanHandle {
-    let handle = tokio::spawn(run_scan(panel_id, path, sort, filter, version_base, tx, driver, cursor_hint, selection_names, state, dir_size_queue));
+    let handle = tokio::spawn(run_scan(panel_id, path, sort, filter, version_base, tx, driver, cursor_hint, selection_names, state, dir_size_queue, false));
+    ScanHandle { handle }
+}
+
+fn spawn_scan_atomic(
+    panel_id: String,
+    path: String,
+    sort: crate::ws::protocol::SortSpec,
+    filter: Option<crate::ws::protocol::FilterSpec>,
+    version_base: u64,
+    tx: mpsc::Sender<ServerMessage>,
+    driver: Arc<dyn VfsDriver>,
+    cursor_hint: Option<String>,
+    selection_names: Option<Vec<String>>,
+    state: SharedState,
+    dir_size_queue: Arc<DirSizeQueue>,
+) -> ScanHandle {
+    let handle = tokio::spawn(run_scan(panel_id, path, sort, filter, version_base, tx, driver, cursor_hint, selection_names, state, dir_size_queue, true));
     ScanHandle { handle }
 }
 

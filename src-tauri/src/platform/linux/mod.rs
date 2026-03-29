@@ -1,3 +1,5 @@
+pub mod udisks2;
+
 use super::{Platform, VolumeInfo};
 use std::process::Command;
 use libc;
@@ -100,6 +102,8 @@ impl Platform for LinuxPlatform {
                     id: "vol-root".to_string(),
                     name: "/".to_string(),
                     root_path: FALLBACK.to_string(),
+                    mounted: true,
+                    device_path: None,
                 }];
             }
         };
@@ -139,6 +143,8 @@ impl Platform for LinuxPlatform {
                 id,
                 name,
                 root_path: mountpoint.to_string(),
+                mounted: true,
+                device_path: None,
             });
         }
 
@@ -147,6 +153,8 @@ impl Platform for LinuxPlatform {
                 id: "vol-root".to_string(),
                 name: "/".to_string(),
                 root_path: FALLBACK.to_string(),
+                mounted: true,
+                device_path: None,
             }];
         }
 

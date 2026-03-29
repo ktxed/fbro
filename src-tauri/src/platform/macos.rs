@@ -54,6 +54,8 @@ impl Platform for MacOSPlatform {
                     id: "vol-root".to_string(),
                     name: "/".to_string(),
                     root_path: "/".to_string(),
+                    mounted: true,
+                    device_path: None,
                 }];
             }
         };
@@ -65,7 +67,7 @@ impl Platform for MacOSPlatform {
                 let name = entry.file_name().to_string_lossy().to_string();
                 let root_path = format!("/Volumes/{}", name);
                 let id = format!("vol-{}", name);
-                Some(VolumeInfo { id, name, root_path })
+                Some(VolumeInfo { id, name, root_path, mounted: true, device_path: None })
             })
             .collect();
 

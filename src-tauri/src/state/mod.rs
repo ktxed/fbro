@@ -17,6 +17,8 @@ pub struct Source {
     pub kind: String,
     pub supports: Vec<String>,
     pub root_path: String,
+    pub mounted: bool,
+    pub device_path: Option<String>,
 }
 
 // ─── Panel ────────────────────────────────────────────────────────────────────
@@ -105,6 +107,8 @@ impl AppState {
                 id: "vol-root".to_string(),
                 name: "/".to_string(),
                 root_path: "/".to_string(),
+                mounted: true,
+                device_path: None,
             });
         }
 
@@ -177,22 +181,26 @@ impl AppState {
                 id: vol.id.clone(),
                 name: vol.name,
                 kind: "filesystem".to_string(),
-                supports: supports.clone(),
+                supports: if vol.mounted { supports.clone() } else { vec![] },
                 root_path: vol.root_path,
+                mounted: vol.mounted,
+                device_path: vol.device_path,
             };
-            let driver: Arc<dyn VfsDriver> = {
-                #[cfg(unix)]
-                if is_spy {
-                    let inner = Arc::new(crate::vfs::local::LocalFsDriver);
-                    Arc::new(crate::vfs::spy::SpyFsDriver::new(inner, sock_path.clone()))
-                } else {
+            if vol.mounted {
+                let driver: Arc<dyn VfsDriver> = {
+                    #[cfg(unix)]
+                    if is_spy {
+                        let inner = Arc::new(crate::vfs::local::LocalFsDriver);
+                        Arc::new(crate::vfs::spy::SpyFsDriver::new(inner, sock_path.clone()))
+                    } else {
+                        Arc::new(crate::vfs::local::LocalFsDriver)
+                    }
+                    #[cfg(not(unix))]
                     Arc::new(crate::vfs::local::LocalFsDriver)
-                }
-                #[cfg(not(unix))]
-                Arc::new(crate::vfs::local::LocalFsDriver)
-            };
+                };
+                drivers.insert(vol.id.clone(), driver);
+            }
             sources.insert(vol.id.clone(), source);
-            drivers.insert(vol.id, driver);
         }
 
         AppState {
@@ -205,6 +213,83 @@ impl AppState {
             gui_senders: Vec::new(),
             file_server_port,
         }
+    }
+
+    /// Rebuild sources and drivers from a new volume list.
+    /// Returns IDs of sources that were removed.
+    pub fn rebuild_sources(&mut self, volumes: Vec<crate::platform::VolumeInfo>) -> Vec<String> {
+        let supports = vec![
+            "ListEntries".to_string(),
+            "OpenFolder".to_string(),
+            "CopySelection".to_string(),
+            "MoveSelection".to_string(),
+            "DeleteSelection".to_string(),
+            "InspectItem".to_string(),
+        ];
+
+        #[cfg(unix)]
+        let is_spy = std::env::var("FBRO_SPY").is_ok();
+        #[cfg(unix)]
+        let sock_path = std::env::var("FBRO_SPY_SOCK")
+            .unwrap_or_else(|_| "/tmp/fbro-spy.sock".to_string());
+
+        let new_ids: HashSet<String> = volumes.iter().map(|v| v.id.clone()).collect();
+        let old_ids: HashSet<String> = self.sources.keys().cloned().collect();
+
+        // Remove stale sources/drivers
+        let removed: Vec<String> = old_ids.difference(&new_ids).cloned().collect();
+        for id in &removed {
+            self.sources.remove(id);
+            self.drivers.remove(id);
+        }
+
+        // Add or update sources/drivers
+        for vol in volumes {
+            let make_driver = || -> Arc<dyn VfsDriver> {
+                #[cfg(unix)]
+                if is_spy {
+                    let inner = Arc::new(crate::vfs::local::LocalFsDriver);
+                    return Arc::new(crate::vfs::spy::SpyFsDriver::new(inner, sock_path.clone()));
+                }
+                Arc::new(crate::vfs::local::LocalFsDriver)
+            };
+
+            if let Some(existing) = self.sources.get_mut(&vol.id) {
+                // Update existing source if mount status or path changed
+                if existing.mounted != vol.mounted || existing.root_path != vol.root_path {
+                    existing.mounted = vol.mounted;
+                    existing.root_path = vol.root_path;
+                    existing.device_path = vol.device_path;
+                    existing.name = vol.name;
+                    if vol.mounted {
+                        existing.supports = supports.clone();
+                        if !self.drivers.contains_key(&existing.id) {
+                            self.drivers.insert(existing.id.clone(), make_driver());
+                        }
+                    } else {
+                        existing.supports.clear();
+                        self.drivers.remove(&existing.id);
+                    }
+                }
+            } else {
+                // New source
+                let source = Source {
+                    id: vol.id.clone(),
+                    name: vol.name,
+                    kind: "filesystem".to_string(),
+                    supports: if vol.mounted { supports.clone() } else { vec![] },
+                    root_path: vol.root_path,
+                    mounted: vol.mounted,
+                    device_path: vol.device_path,
+                };
+                if vol.mounted {
+                    self.drivers.insert(vol.id.clone(), make_driver());
+                }
+                self.sources.insert(vol.id.clone(), source);
+            }
+        }
+
+        removed
     }
 }
 

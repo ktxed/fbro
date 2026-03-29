@@ -21,6 +21,7 @@ export interface Source {
     supportsJobs: boolean;
   };
   rootPath: string;
+  mounted: boolean;
   freeBytes?: number;
   totalBytes?: number;
 }
@@ -152,7 +153,7 @@ export interface StateSnapshotMessage {
 export interface StatePatchMessage {
   type: "StatePatch";
   timestamp: string;
-  domain: "panels" | "layout" | "focus" | "selections" | "jobs";
+  domain: "panels" | "layout" | "focus" | "selections" | "jobs" | "sources";
   entityId?: string;
   version: number;
   patch: {
