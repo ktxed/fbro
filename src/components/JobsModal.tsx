@@ -52,7 +52,7 @@ function JobRow({ job, client }: { job: Job; client: WsClient }) {
     <div className={`jobs-modal__row${isActive ? " jobs-modal__row--active" : ""}`}>
       <div className="jobs-modal__row-header">
         <span className="jobs-modal__type">{typeLabel}</span>
-        <span className="jobs-modal__timestamp">{new Date(parseFloat(job.startedAt) * 1000).toLocaleTimeString()}</span>
+        <span className="jobs-modal__timestamp">{new Date(job.startedAt).toLocaleTimeString()}</span>
         <span className={`jobs-modal__state jobs-modal__state--${job.state.toLowerCase()}${job.paused ? " jobs-modal__state--paused" : ""}`}>
           {job.paused ? "Paused" : (stateLabel[job.state] ?? job.state)}
         </span>
@@ -110,7 +110,8 @@ export function JobsModal({ onClose, client }: { onClose: () => void; client: Ws
   const state = useAppState();
   const overlayRef = useRef<HTMLDivElement>(null);
 
-  const jobs = Object.values(state.jobs);
+  const byNewest = (a: Job, b: Job) => b.startedAt - a.startedAt;
+  const jobs = Object.values(state.jobs).sort(byNewest);
   const active = jobs.filter(j => j.state === "Running" || j.state === "AwaitingDecision");
   const finished = jobs.filter(j => j.state !== "Running" && j.state !== "AwaitingDecision");
 

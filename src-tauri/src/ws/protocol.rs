@@ -9,7 +9,7 @@ use std::collections::HashMap;
 #[serde(tag = "type")]
 pub enum ServerMessage {
     Welcome {
-        timestamp: String,
+        timestamp: u64,
         #[serde(rename = "protocolVersion")]
         protocol_version: String,
         #[serde(rename = "sessionId")]
@@ -18,11 +18,11 @@ pub enum ServerMessage {
         file_server_port: u16,
     },
     StateSnapshot {
-        timestamp: String,
+        timestamp: u64,
         domains: StateDomains,
     },
     StatePatch {
-        timestamp: String,
+        timestamp: u64,
         domain: String,
         #[serde(rename = "entityId", skip_serializing_if = "Option::is_none")]
         entity_id: Option<String>,
@@ -30,7 +30,7 @@ pub enum ServerMessage {
         patch: serde_json::Value,
     },
     JobEvent {
-        timestamp: String,
+        timestamp: u64,
         #[serde(rename = "jobId")]
         job_id: String,
         event: String,
@@ -42,11 +42,11 @@ pub enum ServerMessage {
         error: Option<String>,
     },
     JobStarted {
-        timestamp: String,
+        timestamp: u64,
         job: JobStartSchema,
     },
     Error {
-        timestamp: String,
+        timestamp: u64,
         code: String,
         message: String,
         recoverable: bool,
@@ -54,12 +54,12 @@ pub enum ServerMessage {
         extra: Option<serde_json::Value>,
     },
     QuitConfirmRequired {
-        timestamp: String,
+        timestamp: u64,
         #[serde(rename = "activeJobs")]
         active_jobs: usize,
     },
     FileChunk {
-        timestamp: String,
+        timestamp: u64,
         path: String,
         offset: u64,
         /// Hex-encoded bytes.
@@ -69,17 +69,17 @@ pub enum ServerMessage {
         file_size: Option<u64>,
     },
     RenameOk {
-        timestamp: String,
+        timestamp: u64,
         #[serde(rename = "panelId")]
         panel_id: String,
     },
     MkdirOk {
-        timestamp: String,
+        timestamp: u64,
         #[serde(rename = "panelId")]
         panel_id: String,
     },
     ViewerFileChanged {
-        timestamp: String,
+        timestamp: u64,
         path: String,
         filename: String,
         #[serde(rename = "sourceId")]
@@ -92,7 +92,7 @@ pub enum ServerMessage {
         is_local: bool,
     },
     DryRunReady {
-        timestamp: String,
+        timestamp: u64,
         #[serde(rename = "scriptPath")]
         script_path: String,
         #[serde(rename = "scriptDir")]
@@ -272,10 +272,9 @@ pub struct ClientInfo {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-pub fn now() -> String {
-    // Simple RFC 3339 timestamp without pulling in chrono
+pub fn now() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| format!("{}.{:03}Z", d.as_secs(), d.subsec_millis()))
-        .unwrap_or_else(|_| "0".to_string())
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
 }

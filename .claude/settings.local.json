@@ -4,7 +4,11 @@
       "Bash(while read:*)",
       "Bash(do basename:*)",
       "Bash(done)",
-      "Bash(cargo build:*)"
+      "Bash(cargo build:*)",
+      "Bash(cargo check:*)",
+      "Bash(npx tsc:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
     ]
   }
 }

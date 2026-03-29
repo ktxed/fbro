@@ -52,7 +52,7 @@ export interface Job {
   type: string;
   state: "Running" | "AwaitingDecision" | "Completed" | "Cancelled" | "Failed";
   paused: boolean;
-  startedAt: string;
+  startedAt: number;
   sourcePath: string;
   destPath?: string;
   progress?: FileOpProgress;
@@ -112,7 +112,7 @@ export interface PendingOp {
 
 export interface HelloMessage {
   type: "Hello";
-  timestamp: string;
+  timestamp: number;
   protocolVersion: string;
   client: {
     kind: "gui" | "viewer";
@@ -123,7 +123,7 @@ export interface HelloMessage {
 
 export interface IntentMessage {
   type: "Intent";
-  timestamp: string;
+  timestamp: number;
   name: string;
   scope?: string | { from?: string; to?: string };
   args?: Record<string, unknown>;
@@ -134,7 +134,7 @@ export interface IntentMessage {
 
 export interface WelcomeMessage {
   type: "Welcome";
-  timestamp: string;
+  timestamp: number;
   protocolVersion: string;
   sessionId: string;
   fileServerPort: number;
@@ -142,7 +142,7 @@ export interface WelcomeMessage {
 
 export interface StateSnapshotMessage {
   type: "StateSnapshot";
-  timestamp: string;
+  timestamp: number;
   domains: {
     layout?: LayoutDomain;
     panels?: Record<string, PanelState>;
@@ -154,7 +154,7 @@ export interface StateSnapshotMessage {
 
 export interface StatePatchMessage {
   type: "StatePatch";
-  timestamp: string;
+  timestamp: number;
   domain: "panels" | "layout" | "focus" | "selections" | "jobs" | "sources";
   entityId?: string;
   version: number;
@@ -173,13 +173,13 @@ export interface StatePatchMessage {
 
 export interface JobStartedMessage {
   type: "JobStarted";
-  timestamp: string;
+  timestamp: number;
   job: JobStart;
 }
 
 export interface JobEventMessage {
   type: "JobEvent";
-  timestamp: string;
+  timestamp: number;
   jobId: string;
   event: "Progress" | "DecisionRequired" | "Completed" | "Failed" | "Cancelled" | "Paused" | "Resumed";
   progress?: FileOpProgress;
@@ -189,7 +189,7 @@ export interface JobEventMessage {
 
 export interface ErrorMessage {
   type: "Error";
-  timestamp: string;
+  timestamp: number;
   code: string;
   message: string;
   recoverable: boolean;
@@ -198,13 +198,13 @@ export interface ErrorMessage {
 
 export interface QuitConfirmRequiredMessage {
   type: "QuitConfirmRequired";
-  timestamp: string;
+  timestamp: number;
   activeJobs: number;
 }
 
 export interface FileChunkMessage {
   type: "FileChunk";
-  timestamp: string;
+  timestamp: number;
   path: string;
   offset: number;
   /** Hex-encoded bytes. */
@@ -215,19 +215,19 @@ export interface FileChunkMessage {
 
 export interface RenameOkMessage {
   type: "RenameOk";
-  timestamp: string;
+  timestamp: number;
   panelId: string;
 }
 
 export interface MkdirOkMessage {
   type: "MkdirOk";
-  timestamp: string;
+  timestamp: number;
   panelId: string;
 }
 
 export interface ViewerFileChangedMessage {
   type: "ViewerFileChanged";
-  timestamp: string;
+  timestamp: number;
   path: string;
   filename: string;
   sourceId: string;
@@ -238,7 +238,7 @@ export interface ViewerFileChangedMessage {
 
 export interface DryRunReadyMessage {
   type: "DryRunReady";
-  timestamp: string;
+  timestamp: number;
   scriptPath: string;
   scriptDir: string;
 }

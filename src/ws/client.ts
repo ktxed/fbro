@@ -29,7 +29,7 @@ export class WsClient {
     this.ws.onopen = () => {
       this.send({
         type: "Hello",
-        timestamp: new Date().toISOString(),
+        timestamp: Date.now(),
         protocolVersion: "0",
         client: { kind: this.clientKind, name: "fbro-ui", supports: ["jobs", "decisions"] },
       });
@@ -63,7 +63,7 @@ export class WsClient {
   ) {
     const msg: IntentMessage = {
       type: "Intent",
-      timestamp: new Date().toISOString(),
+      timestamp: Date.now(),
       name,
       scope,
       args,
