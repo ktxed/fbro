@@ -8,7 +8,7 @@ use tokio::sync::{mpsc, Notify};
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::jobs::dirsize::DirSizeQueue;
-use crate::jobs::file_ops::{generate_dry_delete_script, run_file_op};
+use crate::jobs::file_ops::{generate_dry_run_script, run_file_op};
 use crate::jobs::scan::run_scan;
 use crate::jobs::{ConflictPolicy, FileOpEntry, FileOpJob, FileOpType, JobState, ScanHandle};
 use crate::persistence::{PanelSession, SessionState};
@@ -1083,8 +1083,8 @@ async fn handle_intent(
 
             if files.is_empty() { return; }
 
-            // Dry mode: generate a bash script instead of deleting
-            if dry_mode && op_type == FileOpType::Delete {
+            // Dry mode: generate a bash script instead of performing the operation
+            if dry_mode {
                 let home = {
                     #[cfg(unix)]
                     { std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string()) }
@@ -1095,13 +1095,28 @@ async fn handle_intent(
                     .duration_since(std::time::UNIX_EPOCH)
                     .map(|d| d.as_secs())
                     .unwrap_or(0);
-                let script_name = format!("{ts}_dry_delete.sh");
+                let op_label = match op_type {
+                    FileOpType::Copy => "copy",
+                    FileOpType::Move => "move",
+                    FileOpType::Delete => "delete",
+                };
+                let script_name = format!("{ts}_dry_{op_label}.sh");
                 let script_path = format!("{}/{}", home, script_name);
                 let script_path_clone = script_path.clone();
                 let files_clone = files.clone();
+                let op_type_clone = op_type.clone();
                 let driver_clone = Arc::clone(&src_driver);
+                let dest_path_clone = dest_path.clone();
+                let dst_driver_clone = dst_driver.as_ref().map(Arc::clone);
                 let result = tokio::task::spawn_blocking(move || {
-                    generate_dry_delete_script(&files_clone, &script_path_clone, &*driver_clone)
+                    generate_dry_run_script(
+                        &op_type_clone,
+                        &files_clone,
+                        &script_path_clone,
+                        &*driver_clone,
+                        dest_path_clone.as_deref(),
+                        dst_driver_clone.as_deref(),
+                    )
                 }).await;
                 match result {
                     Ok(Ok(())) => {

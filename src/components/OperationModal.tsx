@@ -149,7 +149,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
         destPanel: pending.destPanel,
         conflictPolicy,
         background,
-        ...(isDelete && dryMode ? { dryMode: true } : {}),
+        ...(dryMode ? { dryMode: true } : {}),
       });
       if (background) {
         close();
@@ -195,24 +195,22 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
                 </select>
               </div>
             )}
-            {isDelete && (
-              <div className="modal__option">
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={dryMode}
-                    onChange={(e) => setDryMode(e.target.checked)}
-                  />
-                  {" "}Dry mode (generate bash script instead)
-                </label>
-              </div>
-            )}
+            <div className="modal__option">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={dryMode}
+                  onChange={(e) => setDryMode(e.target.checked)}
+                />
+                {" "}Dry mode (generate bash script instead)
+              </label>
+            </div>
           </div>
           <div className="modal__actions">
             <button className="modal__btn modal__btn--primary" disabled={submitted} onClick={() => startOp(false)}>
               {submitted ? "Starting…" : label}
             </button>
-            {!(isDelete && dryMode) && (
+            {!dryMode && (
               <button className="modal__btn" disabled={submitted} onClick={() => startOp(true)}>
                 Background
               </button>
