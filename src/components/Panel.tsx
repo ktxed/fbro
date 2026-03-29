@@ -69,10 +69,17 @@ function VolumeHeader({ sources, panel, onNavigateToSource, onMountSource }: {
     listRef.current?.scrollBy({ left: dir * 80, behavior: "smooth" });
   };
 
+  const onWheel = (e: React.WheelEvent) => {
+    const el = listRef.current;
+    if (!el || el.scrollWidth <= el.clientWidth) return;
+    e.preventDefault();
+    el.scrollBy({ left: e.deltaY !== 0 ? e.deltaY : e.deltaX, behavior: "smooth" });
+  };
+
   return (
     <div className="panel__volumes">
       <button className="panel__volumes-arrow" disabled={!canLeft} tabIndex={-1} onClick={() => scroll(-1)}>‹</button>
-      <div className="panel__volumes-list" ref={listRef} onScroll={updateArrows}>
+      <div className="panel__volumes-list" ref={listRef} onScroll={updateArrows} onWheel={onWheel}>
         {Object.values(sources).map(src => (
           <button
             key={src.id}

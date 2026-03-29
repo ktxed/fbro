@@ -20,8 +20,15 @@ export function JobsBar({ client }: { client: WsClient }) {
   const canLeft = clamped > 0;
   const canRight = clamped + VISIBLE < activeJobs.length;
 
+  const onWheel = (e: React.WheelEvent) => {
+    if (activeJobs.length <= VISIBLE) return;
+    e.preventDefault();
+    const delta = e.deltaY !== 0 ? e.deltaY : e.deltaX;
+    setScrollIndex(Math.max(0, Math.min(activeJobs.length - VISIBLE, clamped + (delta > 0 ? 1 : -1))));
+  };
+
   return (
-    <div className="jobs-bar">
+    <div className="jobs-bar" onWheel={onWheel}>
       <button
         className="jobs-bar__arrow"
         disabled={!canLeft}

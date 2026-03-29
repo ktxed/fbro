@@ -578,6 +578,8 @@ body {
   border-radius: 6px;
   min-width: 360px;
   max-width: 520px;
+  display: flex;
+  flex-direction: column;
   width: 90%;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
   display: flex;
@@ -590,6 +592,7 @@ body {
   font-size: var(--font-size);
   color: var(--text);
   border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
   background: var(--bg-header);
   border-radius: 6px 6px 0 0;
 }
@@ -598,6 +601,9 @@ body {
   padding: 12px;
   font-size: var(--font-size);
   color: var(--text);
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
 }
 
 .modal__job-params {
@@ -704,6 +710,11 @@ body {
   padding: 8px 12px;
   border-top: 1px solid var(--border);
   justify-content: flex-end;
+  flex-shrink: 0;
+}
+
+.modal--fixed {
+  height: 340px;
 }
 
 .modal__btn {
@@ -903,6 +914,172 @@ body {
   font-size: var(--font-size);
   text-align: center;
   margin: 0;
+}
+
+/* ── Jobs modal ──────────────────────────────────────────────────────────── */
+
+.jobs-modal {
+  width: min(640px, 92vw);
+  height: 60vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.jobs-modal .modal__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.jobs-modal__close {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 1.1em;
+  padding: 0 2px;
+  line-height: 1;
+}
+
+.jobs-modal__close:hover {
+  color: var(--text);
+}
+
+.jobs-modal__body {
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px 16px;
+}
+
+.jobs-modal__empty {
+  color: var(--text-dim);
+  text-align: center;
+  padding: 24px 0;
+}
+
+.jobs-modal__section-title {
+  font-size: 0.75em;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+}
+
+.jobs-modal__row {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.jobs-modal__row--active {
+  border-color: var(--border-focus);
+}
+
+.jobs-modal__row-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.jobs-modal__type {
+  font-weight: bold;
+  color: var(--text);
+}
+.jobs-modal__timestamp {
+  font-size: 0.8em;
+  color: var(--text-dim);
+  margin-left: auto;
+}
+
+.jobs-modal__state {
+  font-size: 0.8em;
+  padding: 1px 6px;
+  border-radius: 3px;
+  border: 1px solid currentColor;
+}
+
+.jobs-modal__state--running    { color: #4a9eff; }
+.jobs-modal__state--awaitingdecision { color: #f0a040; }
+.jobs-modal__state--completed  { color: #5ac45a; }
+.jobs-modal__state--cancelled  { color: var(--text-dim); }
+.jobs-modal__state--failed     { color: #e05050; }
+.jobs-modal__state--paused     { color: #b87cff; }
+
+.jobs-modal__cancel {
+  margin-left: auto;
+  background: none;
+  border: 1px solid #e05050;
+  color: #e05050;
+  border-radius: 3px;
+  padding: 2px 8px;
+  cursor: pointer;
+  font-size: var(--font-size);
+}
+
+.jobs-modal__cancel:hover {
+  background: rgba(224, 80, 80, 0.15);
+}
+
+.jobs-modal__paths {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.jobs-modal__path {
+  font-size: 0.8em;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.jobs-modal__progress {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.jobs-modal__progress-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.8em;
+  color: var(--text-dim);
+}
+
+.jobs-modal__bar {
+  height: 6px;
+  background: rgba(255,255,255,0.1);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.jobs-modal__bar-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.jobs-modal__current-file {
+  font-size: 0.78em;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.jobs-modal__error {
+  font-size: 0.8em;
+  color: #e05050;
+  margin-top: 2px;
 }
 
 /* ── Viewer window ───────────────────────────────────────────────────────── */

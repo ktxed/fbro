@@ -248,6 +248,8 @@ function applyJobStarted(state: AppState, msg: JobStartedMessage): AppState {
     jobId: job.jobId,
     type: job.opType,
     state: "Running",
+    paused: false,
+    startedAt: msg.timestamp,
     sourcePath: job.sourcePath,
     destPath: job.destPath,
     progress: {
@@ -279,19 +281,25 @@ function applyJobEvent(state: AppState, msg: JobEventMessage): AppState {
 
   switch (msg.event) {
     case "Progress":
-      updated = { ...job, state: "Running", progress: msg.progress ?? job.progress, decision: undefined };
+      updated = { ...job, state: "Running", paused: false, progress: msg.progress ?? job.progress, decision: undefined };
       break;
     case "DecisionRequired":
       updated = { ...job, state: "AwaitingDecision", decision: msg.decision };
       break;
+    case "Paused":
+      updated = { ...job, paused: true };
+      break;
+    case "Resumed":
+      updated = { ...job, paused: false };
+      break;
     case "Completed":
-      updated = { ...job, state: "Completed", decision: undefined };
+      updated = { ...job, state: "Completed", paused: false, decision: undefined };
       break;
     case "Failed":
-      updated = { ...job, state: "Failed", error: msg.error, decision: undefined };
+      updated = { ...job, state: "Failed", paused: false, error: msg.error, decision: undefined };
       break;
     case "Cancelled":
-      updated = { ...job, state: "Cancelled", decision: undefined };
+      updated = { ...job, state: "Cancelled", paused: false, decision: undefined };
       break;
     default:
       return state;

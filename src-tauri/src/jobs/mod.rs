@@ -90,8 +90,10 @@ pub struct FileOpJob {
     pub decision: Option<ConflictDecision>,
     pub error: Option<String>,
     pub background: bool,
+    pub paused: bool,
     pub handle: JoinHandle<()>,
     pub cancel_tx: watch::Sender<bool>,
+    pub pause_tx: watch::Sender<bool>,
 }
 
 /// Container for all active jobs in AppState.

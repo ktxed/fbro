@@ -27,6 +27,7 @@ pub async fn run_file_op(
     conflict_policy: ConflictPolicy,
     tx: mpsc::Sender<ServerMessage>,
     cancel_rx: watch::Receiver<bool>,
+    pause_rx: watch::Receiver<bool>,
     mut decision_rx: DecisionRx,
     src_driver: Arc<dyn VfsDriver>,
     dst_driver: Option<Arc<dyn VfsDriver>>,
@@ -42,6 +43,7 @@ pub async fn run_file_op(
             &conflict_policy,
             &tx_clone,
             &cancel_rx,
+            &pause_rx,
             &mut decision_rx,
             &*src_driver,
             dst_driver.as_deref(),
@@ -62,6 +64,15 @@ pub async fn run_file_op(
     }
 }
 
+/// Block while paused. Returns `true` if the job was cancelled during the wait.
+fn wait_if_paused(pause_rx: &watch::Receiver<bool>, cancel_rx: &watch::Receiver<bool>) -> bool {
+    loop {
+        if *cancel_rx.borrow() { return true; }
+        if !*pause_rx.borrow() { return false; }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+}
+
 fn run_file_op_blocking(
     job_id: &str,
     op_type: &FileOpType,
@@ -70,6 +81,7 @@ fn run_file_op_blocking(
     conflict_policy: &ConflictPolicy,
     tx: &mpsc::Sender<ServerMessage>,
     cancel_rx: &watch::Receiver<bool>,
+    pause_rx: &watch::Receiver<bool>,
     decision_rx: &mut DecisionRx,
     src_driver: &dyn VfsDriver,
     dst_driver: Option<&dyn VfsDriver>,
@@ -93,7 +105,7 @@ fn run_file_op_blocking(
     let same_driver = dst_driver.map_or(false, |d| std::ptr::eq(src_driver, d));
 
     for entry in files {
-        if *cancel_rx.borrow() {
+        if wait_if_paused(pause_rx, cancel_rx) {
             send_event_sync(tx, job_id, "Cancelled", None, None, None);
             return Ok(());
         }
@@ -138,6 +150,7 @@ fn run_file_op_blocking(
                         conflict_policy,
                         tx,
                         cancel_rx,
+                        pause_rx,
                         &mut total_files,
                         &mut completed_files,
                         &mut total_bytes_total,
@@ -175,6 +188,7 @@ fn run_file_op_blocking(
                         entry.size.unwrap_or(0),
                         tx,
                         cancel_rx,
+                        pause_rx,
                         total_files,
                         completed_files,
                         total_bytes_total,
@@ -287,6 +301,7 @@ fn copy_file_with_progress(
     total_bytes: u64,
     tx: &mpsc::Sender<ServerMessage>,
     cancel_rx: &watch::Receiver<bool>,
+    pause_rx: &watch::Receiver<bool>,
     total_files: usize,
     completed_files: usize,
     total_bytes_total: u64,
@@ -316,7 +331,7 @@ fn copy_file_with_progress(
         .unwrap_or_default();
 
     loop {
-        if *cancel_rx.borrow() {
+        if wait_if_paused(pause_rx, cancel_rx) {
             drop(writer);
             let _ = dst_driver.remove_file(dst);
             return Err("Cancelled".to_string());
@@ -354,6 +369,7 @@ fn copy_dir_recursive(
     conflict_policy: &ConflictPolicy,
     tx: &mpsc::Sender<ServerMessage>,
     cancel_rx: &watch::Receiver<bool>,
+    pause_rx: &watch::Receiver<bool>,
     total_files: &mut usize,
     completed_files: &mut usize,
     total_bytes_total: &mut u64,
@@ -378,7 +394,7 @@ fn copy_dir_recursive(
     }
 
     for child in children {
-        if *cancel_rx.borrow() {
+        if wait_if_paused(pause_rx, cancel_rx) {
             return Err("Cancelled".to_string());
         }
 
@@ -388,7 +404,7 @@ fn copy_dir_recursive(
         if child.is_dir {
             copy_dir_recursive(
                 job_id, &child_src, &child_dst, conflict_policy,
-                tx, cancel_rx, total_files, completed_files,
+                tx, cancel_rx, pause_rx, total_files, completed_files,
                 total_bytes_total, total_bytes_completed,
                 src_driver, dst_driver,
             )?;
@@ -412,7 +428,7 @@ fn copy_dir_recursive(
 
             copy_file_with_progress(
                 job_id, &child_src, &child_dst, child.size,
-                tx, cancel_rx, *total_files, *completed_files,
+                tx, cancel_rx, pause_rx, *total_files, *completed_files,
                 *total_bytes_total, *total_bytes_completed,
                 src_driver, dst_driver,
             )?;

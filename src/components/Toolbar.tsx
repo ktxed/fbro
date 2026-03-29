@@ -66,7 +66,7 @@ function openRename(state: ReturnType<typeof useAppState>, dispatch: ReturnType<
   });
 }
 
-export function Toolbar({ client }: { client: WsClient }) {
+export function Toolbar({ client, onOpenJobsView }: { client: WsClient; onOpenJobsView: () => void; }) {
   const state = useAppState();
   const dispatch = useAppDispatch();
 
@@ -111,6 +111,11 @@ export function Toolbar({ client }: { client: WsClient }) {
       // Don't handle keys while a modal is active
       if (state.pendingOp || state.activeJobId || state.pendingQuit || state.pendingRename || state.pendingInfo || state.pendingMkdir || state.pendingNoEditor) return;
 
+      if (e.key === "j" && !modKey(e)) {
+        e.preventDefault();
+        onOpenJobsView();
+        return;
+      }
       if ((e.key === "i" || e.key === "I") && !modKey(e)) {
         e.preventDefault();
         openInfo(state, dispatch);

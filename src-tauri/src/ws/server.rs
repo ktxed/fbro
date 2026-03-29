@@ -1210,6 +1210,7 @@ async fn handle_intent(
             let op_type_str = args.get("opType").and_then(|v| v.as_str()).unwrap_or("copy");
             let conflict_str = args.get("conflictPolicy").and_then(|v| v.as_str()).unwrap_or("ask");
             let background = args.get("background").and_then(|v| v.as_bool()).unwrap_or(false);
+            let start_paused = args.get("startPaused").and_then(|v| v.as_bool()).unwrap_or(false);
             let dry_mode = args.get("dryMode").and_then(|v| v.as_bool()).unwrap_or(false);
 
             let op_type = match op_type_str {
@@ -1328,6 +1329,7 @@ async fn handle_intent(
 
             // Create the job
             let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
+            let (pause_tx, pause_rx) = tokio::sync::watch::channel(start_paused);
             let (dec_tx, dec_rx) = mpsc::channel::<String>(4);
 
             let job_id = {
@@ -1371,6 +1373,7 @@ async fn handle_intent(
                 conflict_policy.clone(),
                 tx.clone(),
                 cancel_rx,
+                pause_rx,
                 dec_rx,
                 src_driver,
                 dst_driver,
@@ -1392,9 +1395,23 @@ async fn handle_intent(
                     decision: None,
                     error: None,
                     background,
+                    paused: start_paused,
                     handle,
                     cancel_tx,
+                    pause_tx,
                 });
+            }
+
+            // Notify FE if the job started paused
+            if start_paused {
+                let _ = tx.send(ServerMessage::JobEvent {
+                    timestamp: now(),
+                    job_id: job_id.clone(),
+                    event: "Paused".to_string(),
+                    progress: None,
+                    decision: None,
+                    error: None,
+                }).await;
             }
         }
 
@@ -1417,6 +1434,48 @@ async fn handle_intent(
             }
             drop(s);
             decision_senders.remove(&job_id);
+        }
+
+        "PauseJob" => {
+            let job_id = args.get("jobId").and_then(|v| v.as_str()).unwrap_or("").to_string();
+
+            let mut s = state.lock().await;
+            if let Some(job) = s.job_store.jobs.get_mut(&job_id) {
+                if job.state == JobState::Running {
+                    let _ = job.pause_tx.send(true);
+                    job.paused = true;
+                }
+            }
+            drop(s);
+            let _ = tx.send(ServerMessage::JobEvent {
+                timestamp: now(),
+                job_id: job_id.clone(),
+                event: "Paused".to_string(),
+                progress: None,
+                decision: None,
+                error: None,
+            }).await;
+        }
+
+        "ResumeJob" => {
+            let job_id = args.get("jobId").and_then(|v| v.as_str()).unwrap_or("").to_string();
+
+            let mut s = state.lock().await;
+            if let Some(job) = s.job_store.jobs.get_mut(&job_id) {
+                if job.paused {
+                    let _ = job.pause_tx.send(false);
+                    job.paused = false;
+                }
+            }
+            drop(s);
+            let _ = tx.send(ServerMessage::JobEvent {
+                timestamp: now(),
+                job_id: job_id.clone(),
+                event: "Resumed".to_string(),
+                progress: None,
+                decision: None,
+                error: None,
+            }).await;
         }
 
         "ViewFile" => {

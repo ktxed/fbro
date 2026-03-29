@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AppContext, useAppReducer } from "./store";
 import { WsClient } from "./ws/client";
 import { Layout } from "./components/Layout";
@@ -8,6 +8,7 @@ import { Toolbar } from "./components/Toolbar";
 export function App() {
   const [state, dispatch] = useAppReducer();
   const clientRef = useRef<WsClient | null>(null);
+  const [jobsViewOpen, setJobsViewOpen] = useState(false);
 
   useEffect(() => {
     const client = new WsClient();
@@ -31,9 +32,9 @@ export function App() {
         </div>
       )}
       <div className="app">
-        {client && <Layout client={client} />}
+        {client && <Layout client={client} jobsViewOpen={jobsViewOpen} onCloseJobsView={() => setJobsViewOpen(false)} />}
         {client && <JobsBar client={client} />}
-        {client && <Toolbar client={client} />}
+        {client && <Toolbar client={client} onOpenJobsView={() => setJobsViewOpen(true)} />}
       </div>
     </AppContext.Provider>
   );

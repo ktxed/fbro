@@ -51,6 +51,8 @@ export interface Job {
   jobId: string;
   type: string;
   state: "Running" | "AwaitingDecision" | "Completed" | "Cancelled" | "Failed";
+  paused: boolean;
+  startedAt: string;
   sourcePath: string;
   destPath?: string;
   progress?: FileOpProgress;
@@ -179,7 +181,7 @@ export interface JobEventMessage {
   type: "JobEvent";
   timestamp: string;
   jobId: string;
-  event: "Progress" | "DecisionRequired" | "Completed" | "Failed" | "Cancelled";
+  event: "Progress" | "DecisionRequired" | "Completed" | "Failed" | "Cancelled" | "Paused" | "Resumed";
   progress?: FileOpProgress;
   decision?: DecisionRequest;
   error?: string;

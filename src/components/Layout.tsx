@@ -5,14 +5,17 @@ import { RenameModal } from "./RenameModal";
 import { InfoModal } from "./InfoModal";
 import { MkDirModal } from "./MkDirModal";
 import { NoEditorModal } from "./NoEditorModal";
+import { JobsModal } from "./JobsModal";
 import { useAppState } from "../store";
 import type { WsClient } from "../ws/client";
 
 interface LayoutProps {
   client: WsClient;
+  jobsViewOpen: boolean;
+  onCloseJobsView: () => void;
 }
 
-export function Layout({ client }: LayoutProps) {
+export function Layout({ client, jobsViewOpen, onCloseJobsView }: LayoutProps) {
   const state = useAppState();
 
   const panelIds = state.layout.panels.length > 0 ? state.layout.panels : Object.keys(state.panels);
@@ -22,7 +25,7 @@ export function Layout({ client }: LayoutProps) {
   }
 
   const activeJob = state.activeJobId ? state.jobs[state.activeJobId] ?? null : null;
-  const modalActive = state.pendingOp !== null || state.activeJobId !== null || state.pendingQuit !== null || state.pendingRename !== null || state.pendingInfo !== null || state.pendingMkdir !== null || state.pendingNoEditor !== null || state.pendingDryRun !== null;
+  const modalActive = state.pendingOp !== null || state.activeJobId !== null || state.pendingQuit !== null || state.pendingRename !== null || state.pendingInfo !== null || state.pendingMkdir !== null || state.pendingNoEditor !== null || state.pendingDryRun !== null || jobsViewOpen;
 
   return (
     <>
@@ -67,6 +70,9 @@ export function Layout({ client }: LayoutProps) {
       )}
       {state.pendingNoEditor && (
         <NoEditorModal noEditor={state.pendingNoEditor} />
+      )}
+      {jobsViewOpen && (
+        <JobsModal onClose={onCloseJobsView} client={client} />
       )}
     </>
   );

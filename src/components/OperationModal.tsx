@@ -78,6 +78,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
   const [conflictPolicy, setConflictPolicy] = useState<ConflictPolicy>("ask");
   const [submitted, setSubmitted] = useState(false);
   const [dryMode, setDryMode] = useState(false);
+  const [startPaused, setStartPaused] = useState(true);
   const modalRef = useRef<HTMLDivElement>(null);
   const p = activeJob?.progress;
   const speed = useTransferSpeed(p?.currentFile, p?.currentFileBytesCopied ?? 0);
@@ -99,7 +100,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
     const otherPanel = panelIds.find(id => id !== pendingDryRun.sourcePanel) ?? panelIds[0] ?? "";
     return (
       <div className="modal-overlay" ref={modalRef} tabIndex={-1} onKeyDown={(e) => { if (e.key === "Escape") closeDryRun(); if (e.key === "Tab") e.preventDefault(); }}>
-        <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal modal--fixed" onClick={(e) => e.stopPropagation()}>
           <div className="modal__header">Dry Run Script Generated</div>
           <div className="modal__body">
             <p className="modal__summary">Script saved to your home folder:</p>
@@ -149,6 +150,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
         destPanel: pending.destPanel,
         conflictPolicy,
         background,
+        ...(background && startPaused ? { startPaused: true } : {}),
         ...(dryMode ? { dryMode: true } : {}),
       });
       if (background) {
@@ -159,7 +161,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
 
     return (
       <div className="modal-overlay" ref={modalRef} tabIndex={-1} onClick={close} onKeyDown={(e) => { if (e.key === "Tab") e.preventDefault(); }}>
-        <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal modal--fixed" onClick={(e) => e.stopPropagation()}>
           <div className="modal__header">{label}</div>
           <div className="modal__body">
             <p className="modal__summary">
@@ -205,6 +207,18 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
                 {" "}Dry mode (generate bash script instead)
               </label>
             </div>
+            {!dryMode && (
+              <div className="modal__option">
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={startPaused}
+                    onChange={(e) => setStartPaused(e.target.checked)}
+                  />
+                  {" "}Start paused when sent to background
+                </label>
+              </div>
+            )}
           </div>
           <div className="modal__actions">
             <button className="modal__btn modal__btn--primary" disabled={submitted} onClick={() => startOp(false)}>
@@ -239,7 +253,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
 
     return (
       <div className="modal-overlay" ref={modalRef} tabIndex={-1} onClick={isTerminal ? close : undefined} onKeyDown={(e) => { if (e.key === "Tab") e.preventDefault(); }}>
-        <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal modal--fixed" onClick={(e) => e.stopPropagation()}>
           <div className="modal__header">{label} — {activeJob.state}</div>
           <div className="modal__body">
             <div className="modal__job-params">
@@ -337,6 +351,19 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
                 <button className="modal__btn" onClick={close}>
                   Background
                 </button>
+                {activeJob.paused ? (
+                  <button className="modal__btn" onClick={() =>
+                    client.sendIntent("ResumeJob", undefined, { jobId: activeJobId })
+                  }>
+                    Resume
+                  </button>
+                ) : (
+                  <button className="modal__btn" onClick={() =>
+                    client.sendIntent("PauseJob", undefined, { jobId: activeJobId })
+                  }>
+                    Pause
+                  </button>
+                )}
                 <button className="modal__btn" onClick={() =>
                   client.sendIntent("CancelJob", undefined, { jobId: activeJobId })
                 }>
