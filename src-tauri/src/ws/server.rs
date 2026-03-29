@@ -903,6 +903,7 @@ async fn handle_intent(
                         panel.path = target_path;
                         panel.cursor = 0;
                         panel.selection.clear();
+                        panel.filter = None;
                     }
                 }
                 rescan_panel(&panel_id, state, tx, scan_handles, None, None, dir_size_queue).await;
