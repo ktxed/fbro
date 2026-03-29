@@ -411,11 +411,24 @@ export function Panel({ panelId, panel, isFocused, modalActive, client, sources,
   };
 
   const itemCount = isWindowed ? totalCount : panel.entries.length;
-  const totalSize = panel.totalSize;
+  // In non-windowed mode recompute total from live entries so calculated dir sizes are included.
+  const totalSize = !isWindowed
+    ? panel.entries.reduce((sum, e) => e.size !== undefined ? sum + e.size : sum, 0)
+    : panel.totalSize;
+  const selCount = panel.selection.length;
+  // In windowed mode entries outside the window aren't available on the FE, so skip sel size.
+  const selSize = !isWindowed && selCount > 0
+    ? panel.selection.reduce((sum, i) => {
+        const e = panel.entries[i];
+        return e && e.size !== undefined ? sum + e.size : sum;
+      }, 0)
+    : undefined;
   const statusText =
     panel.status === "loading"
       ? "Loading…"
-      : `${itemCount} item${itemCount !== 1 ? "s" : ""}${totalSize !== undefined && totalSize > 0 ? ` (${formatBytes(totalSize)})` : ""}`;
+      : selCount > 0
+        ? `${selCount} / ${itemCount} item${itemCount !== 1 ? "s" : ""}${selSize !== undefined && totalSize !== undefined && (selSize > 0 || totalSize > 0) ? ` (${formatBytes(selSize)} / ${formatBytes(totalSize)})` : ""}`
+        : `${itemCount} item${itemCount !== 1 ? "s" : ""}${totalSize !== undefined && totalSize > 0 ? ` (${formatBytes(totalSize)})` : ""}`;
 
   const source = sources[panel.sourceId];
   const diskText = (source?.freeBytes !== undefined && source?.totalBytes !== undefined)
