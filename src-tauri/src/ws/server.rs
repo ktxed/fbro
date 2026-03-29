@@ -1279,6 +1279,7 @@ async fn handle_intent(
             .inner_size(900.0, 700.0)
             .resizable(true)
             .devtools(true)
+            .background_color(tauri::webview::Color(13, 13, 13, 255)) // matches --bg: #0d0d0d
             .build();
         }
 
