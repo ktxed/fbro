@@ -81,7 +81,7 @@ impl VfsDriver for LocalFsDriver {
             }
 
             let meta = entry.metadata().ok();
-            let (kind, size, mtime, permissions) = if let Some(m) = meta {
+            let (kind, size, mtime, btime, permissions) = if let Some(m) = meta {
                 let kind = if m.is_symlink() {
                     VfsKind::Symlink
                 } else if m.is_dir() {
@@ -93,14 +93,15 @@ impl VfsDriver for LocalFsDriver {
                 };
                 let size = if m.is_file() { Some(m.len()) } else { None };
                 let mtime = m.modified().ok().and_then(format_mtime);
+                let btime = m.created().ok().and_then(format_mtime);
                 let permissions = format_permissions(&m);
-                (kind, size, mtime, permissions)
+                (kind, size, mtime, btime, permissions)
             } else {
-                (VfsKind::Other, None, None, None)
+                (VfsKind::Other, None, None, None, None)
             };
 
             let icon_name = icon_name_for_entry(&name, &kind);
-            entries.push(VfsEntry { name, kind, size, mtime, permissions, icon_name });
+            entries.push(VfsEntry { name, kind, size, mtime, btime, permissions, icon_name });
         }
 
         entries.sort_by(|a, b| {

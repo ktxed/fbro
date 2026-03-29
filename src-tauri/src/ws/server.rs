@@ -1686,6 +1686,7 @@ async fn update_panel_from_patch(
                         kind: e["kind"].as_str().unwrap_or("file").to_string(),
                         size: e["size"].as_u64(),
                         mtime: e["mtime"].as_str().map(String::from),
+                        btime: e["btime"].as_str().map(String::from),
                         permissions: e["permissions"].as_str().map(String::from),
                         icon_name: e["iconName"].as_str().map(String::from),
                     });

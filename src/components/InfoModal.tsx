@@ -88,17 +88,33 @@ export function InfoModal({ info }: InfoModalProps) {
                 <td />
               </tr>
               {info.kind !== "directory" && (
-                <tr>
-                  <td className="modal__info-label">Size</td>
-                  <td className="modal__info-value">{formatSize(info.size)}</td>
-                  <td />
-                </tr>
+                <>
+                  <tr>
+                    <td className="modal__info-label">Size</td>
+                    <td className="modal__info-value">{formatSize(info.size)}</td>
+                    <td />
+                  </tr>
+                  {info.size !== undefined && (
+                    <tr>
+                      <td className="modal__info-label">Size (bytes)</td>
+                      <td className="modal__info-value">{info.size.toLocaleString()} B</td>
+                      <td><CopyButton text={String(info.size)} /></td>
+                    </tr>
+                  )}
+                </>
               )}
               <tr>
                 <td className="modal__info-label">Modified</td>
                 <td className="modal__info-value">{formatMtime(info.mtime)}</td>
                 <td />
               </tr>
+              {info.btime && (
+                <tr>
+                  <td className="modal__info-label">Created</td>
+                  <td className="modal__info-value">{formatMtime(info.btime)}</td>
+                  <td />
+                </tr>
+              )}
               {info.permissions && (
                 <tr>
                   <td className="modal__info-label">Permissions</td>

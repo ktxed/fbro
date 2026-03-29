@@ -5,6 +5,7 @@ export interface VFSEntry {
   kind: "file" | "directory" | "symlink" | "other";
   size?: number;
   mtime?: string;
+  btime?: string; // birth time — file creation; not available on all platforms/filesystems
   permissions?: string;
   iconName?: string;
 }

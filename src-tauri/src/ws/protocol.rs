@@ -150,6 +150,8 @@ pub struct EntrySchema {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mtime: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub btime: Option<String>, // birth time — file creation; not available on all platforms/filesystems
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub permissions: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(rename = "iconName")]

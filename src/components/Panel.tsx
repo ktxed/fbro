@@ -337,9 +337,21 @@ export function Panel({ panelId, panel, isFocused, modalActive, client, sources 
         break;
       case "Tab":
         e.preventDefault();
-        client.sendIntent("SwitchFocus", undefined, {
-          to: panelId === "left" ? "right" : "left",
-        });
+        if (e.ctrlKey || e.shiftKey) {
+          // Ctrl+Tab: next source, Shift+Tab / Ctrl+Shift+Tab: previous source
+          const sourceList = Object.values(sources);
+          if (sourceList.length > 1) {
+            const cur = sourceList.findIndex(s => s.id === panel.sourceId);
+            const next = e.shiftKey
+              ? (cur - 1 + sourceList.length) % sourceList.length
+              : (cur + 1) % sourceList.length;
+            client.sendIntent("NavigateToSource", panelId, { sourceId: sourceList[next].id });
+          }
+        } else {
+          client.sendIntent("SwitchFocus", undefined, {
+            to: panelId === "left" ? "right" : "left",
+          });
+        }
         break;
     }
   }

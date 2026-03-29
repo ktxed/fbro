@@ -23,7 +23,7 @@ const FILE_OP_KEYS: Record<string, FileOpType> = {
 };
 
 /** Resolve an absolute index into the panel's local entries array (handles windowed mode). */
-function entryAt(panel: { entries: { name: string; kind: string; size?: number; mtime?: string; permissions?: string }[]; cursor: number; windowStart?: number }, absIndex: number) {
+function entryAt(panel: { entries: { name: string; kind: string; size?: number; mtime?: string; btime?: string; permissions?: string }[]; cursor: number; windowStart?: number }, absIndex: number) {
   const localIdx = absIndex - (panel.windowStart ?? 0);
   return panel.entries[localIdx];
 }
@@ -43,6 +43,7 @@ function openInfo(state: ReturnType<typeof useAppState>, dispatch: ReturnType<ty
       dirPath,
       size: entry.size,
       mtime: entry.mtime,
+      btime: entry.btime,
       permissions: entry.permissions,
     },
   });

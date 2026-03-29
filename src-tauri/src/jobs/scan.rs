@@ -53,6 +53,7 @@ pub async fn run_scan(
             kind: e.kind.as_str().to_string(),
             size: e.size,
             mtime: e.mtime,
+            btime: e.btime,
             permissions: e.permissions,
             icon_name: e.icon_name,
         })

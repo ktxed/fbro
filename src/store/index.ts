@@ -30,6 +30,7 @@ export interface PendingInfo {
   dirPath: string;
   size?: number;
   mtime?: string;
+  btime?: string; // birth time — file creation; not available on all platforms/filesystems
   permissions?: string;
 }
 

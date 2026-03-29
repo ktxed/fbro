@@ -79,6 +79,7 @@ pub struct VfsEntry {
     pub kind: VfsKind,
     pub size: Option<u64>,
     pub mtime: Option<String>,
+    pub btime: Option<String>, // birth time — file creation; not available on all platforms/filesystems
     pub permissions: Option<String>,
     pub icon_name: Option<String>,
 }
