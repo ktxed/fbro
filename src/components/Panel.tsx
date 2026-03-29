@@ -385,13 +385,18 @@ export function Panel({ panelId, panel, isFocused, modalActive, client, sources 
     }
   }
 
+  const closeFilter = () => {
+    setFilterOpen(false);
+    focusDivRef.current?.focus();
+  };
+
   const handleFilterKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     e.stopPropagation();
     if (e.key === "Enter") {
       client.sendIntent("SetFilter", panelId, { value: filterInput });
-      setFilterOpen(false);
+      closeFilter();
     } else if (e.key === "Escape") {
-      setFilterOpen(false);
+      closeFilter();
     }
   };
 
