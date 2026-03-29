@@ -17,6 +17,7 @@ futures-util = "0.3"
 uuid = { version = "1", features = ["v4"] }
 toml = "0.8"
 http = "1"
+regex = "1"
 
 [profile.release]
 codegen-units = 1

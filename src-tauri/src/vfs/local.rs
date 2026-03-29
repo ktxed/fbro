@@ -59,6 +59,33 @@ impl VfsDriver for LocalFsDriver {
     ) -> Result<Vec<VfsEntry>, VfsError> {
         let dir = fs::read_dir(path).map_err(|e| map_io_err(path, e))?;
 
+        // Build the filter regex once before iterating entries.
+        // Pattern syntax: glob-like with * as wildcard, | as OR separator.
+        // Parts with * are anchored full-match; parts without * are substring searches.
+        // Matching is case-insensitive.
+        let filter_re: Option<regex::Regex> = filter.and_then(|f| {
+            if f.mode != "glob" || f.value.trim().is_empty() { return None; }
+            let regex_str = f.value.split('|').map(|part| {
+                let part = part.trim();
+                if part.contains('*') {
+                    // Glob: anchor and convert * to .*
+                    let escaped: String = part.chars().map(|ch| match ch {
+                        '*' => ".*".to_string(),
+                        '.' | '+' | '?' | '(' | ')' | '[' | ']' | '{' | '}' | '^' | '$' | '\\' => format!("\\{ch}"),
+                        _ => ch.to_string(),
+                    }).collect();
+                    format!("^{escaped}$")
+                } else {
+                    // Substring: escape only, match anywhere
+                    part.chars().map(|ch| match ch {
+                        '.' | '+' | '?' | '(' | ')' | '[' | ']' | '{' | '}' | '^' | '$' | '|' | '\\' | '*' => format!("\\{ch}"),
+                        _ => ch.to_string(),
+                    }).collect()
+                }
+            }).collect::<Vec<_>>().join("|");
+            regex::RegexBuilder::new(&regex_str).case_insensitive(true).build().ok()
+        });
+
         let mut entries: Vec<VfsEntry> = Vec::new();
 
         for entry_result in dir {
@@ -69,15 +96,8 @@ impl VfsDriver for LocalFsDriver {
 
             let name = entry.file_name().to_string_lossy().to_string();
 
-            if let Some(f) = filter {
-                match f.mode.as_str() {
-                    "prefix" => {
-                        if !name.starts_with(&f.value) {
-                            continue;
-                        }
-                    }
-                    _ => {}
-                }
+            if let Some(re) = &filter_re {
+                if !re.is_match(&name) { continue; }
             }
 
             let meta = entry.metadata().ok();

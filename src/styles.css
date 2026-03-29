@@ -379,6 +379,31 @@ body {
   color: var(--text);
 }
 
+.panel__filter-active {
+  color: var(--accent);
+  font-style: italic;
+}
+
+.panel__filter-bar {
+  display: flex;
+  justify-content: center;
+  padding: 3px 0;
+  background: var(--bg-footer);
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.panel__filter-input {
+  width: 50%;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border-focus);
+  font-family: var(--font);
+  font-size: var(--font-size);
+  padding: 2px 6px;
+  outline: none;
+}
+
 /* ── Toolbar ─────────────────────────────────────────────────────────────── */
 
 .toolbar {

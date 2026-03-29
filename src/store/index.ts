@@ -186,6 +186,9 @@ function applyPatch(state: AppState, msg: StatePatchMessage): AppState {
     if (msg.patch.sort !== undefined) {
       updated = { ...updated, sort: msg.patch.sort };
     }
+    if (msg.patch.filter !== undefined) {
+      updated = { ...updated, filter: msg.patch.filter as PanelState["filter"] };
+    }
     if (msg.patch.selection !== undefined) {
       updated = { ...updated, selection: msg.patch.selection };
     }

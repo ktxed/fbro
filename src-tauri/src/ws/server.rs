@@ -349,6 +349,24 @@ async fn handle_intent(
             rescan_panel(&panel_id, state, &tx, scan_handles, None, names, dir_size_queue).await;
         }
 
+        "SetFilter" => {
+            let panel_id = resolve_panel_id(scope, state).await;
+            let value = args.get("value").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+            let names = {
+                let mut s = state.lock().await;
+                let names = selected_names_for(&s, &panel_id);
+                if let Some(panel) = s.panels.get_mut(&panel_id) {
+                    panel.filter = if value.is_empty() {
+                        None
+                    } else {
+                        Some(crate::ws::protocol::FilterSpec { mode: "glob".to_string(), value })
+                    };
+                }
+                names
+            };
+            rescan_panel(&panel_id, state, &tx, scan_handles, None, names, dir_size_queue).await;
+        }
+
         "MoveCursor" => {
             let panel_id = resolve_panel_id(scope, state).await;
             let direction = args.get("direction").and_then(|v| v.as_str()).unwrap_or("down");
@@ -1495,8 +1513,9 @@ async fn navigate_to(
             panel.windowed = false;
             panel.window_start = 0;
             panel.window_count = 0;
+            panel.filter = None; // filter is ephemeral — cleared on navigation
             panel.version += 1;
-            (sid, panel.sort.clone(), panel.filter.clone(), panel.version)
+            (sid, panel.sort.clone(), None, panel.version)
         } else {
             return;
         };
@@ -1517,6 +1536,7 @@ async fn navigate_to(
                 "cursor": 0,
                 "selection": [],
                 "status": "loading",
+                "filter": null,
                 "totalCount": null,
                 "windowStart": null
             }),

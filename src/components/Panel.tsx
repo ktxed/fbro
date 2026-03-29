@@ -154,6 +154,10 @@ export function Panel({ panelId, panel, isFocused, modalActive, client, sources 
   const windowStart = panel.windowStart ?? 0;
   const selectionSet = useMemo(() => new Set(panel.selection), [panel.selection]);
 
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [filterInput, setFilterInput] = useState("");
+  const filterInputRef = useRef<HTMLInputElement>(null);
+
   // Keep focused panel's div focused so it receives keyboard events.
   // Also re-focus when a modal closes (modalActive transitions to false).
   useEffect(() => {
@@ -370,8 +374,26 @@ export function Panel({ panelId, panel, isFocused, modalActive, client, sources 
           });
         }
         break;
+      case "f":
+        if (!modKey(e)) {
+          e.preventDefault();
+          setFilterInput(panel.filter?.value ?? "");
+          setFilterOpen(true);
+          setTimeout(() => filterInputRef.current?.focus(), 0);
+        }
+        break;
     }
   }
+
+  const handleFilterKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    e.stopPropagation();
+    if (e.key === "Enter") {
+      client.sendIntent("SetFilter", panelId, { value: filterInput });
+      setFilterOpen(false);
+    } else if (e.key === "Escape") {
+      setFilterOpen(false);
+    }
+  };
 
   const itemCount = isWindowed ? totalCount : panel.entries.length;
   const statusText =
@@ -486,8 +508,23 @@ export function Panel({ panelId, panel, isFocused, modalActive, client, sources 
         )}
       </div>
 
+      {filterOpen && (
+        <div className="panel__filter-bar">
+          <input
+            ref={filterInputRef}
+            className="panel__filter-input"
+            value={filterInput}
+            onChange={e => setFilterInput(e.target.value)}
+            onKeyDown={handleFilterKeyDown}
+            placeholder="filter…"
+            spellCheck={false}
+          />
+        </div>
+      )}
+
       <div className="panel__footer">
         <span>{statusText}</span>
+        {panel.filter && <span className="panel__filter-active">/{panel.filter.value}/</span>}
         {diskText && <span>{diskText}</span>}
       </div>
     </div>
