@@ -9,16 +9,14 @@ use tokio::sync::{mpsc, Notify};
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::jobs::dirsize::DirSizeQueue;
-use crate::jobs::file_ops::{generate_dry_run_script, run_file_op};
-use crate::jobs::scan::run_scan;
-use crate::jobs::{ConflictPolicy, FileOpEntry, FileOpJob, FileOpType, JobState, ScanHandle};
-use crate::persistence::{PanelSession, SessionState};
+use crate::jobs::ScanHandle;
 use crate::state::{PanelStatus, SharedState};
-use crate::vfs::VfsDriver;
 use crate::watcher::{WatcherAction, WatcherCommand};
-use crate::ws::protocol::{
-    now, ClientMessage, FileOpFileSchema, JobStartSchema, LayoutDomain, PanelSnapshot,
-    ServerMessage, SourceCapabilities, SourceSchema, StateDomains,
+use crate::ws::protocol::{now, ClientMessage, ServerMessage};
+use crate::ws::runtime::{
+    active_job_count, build_state_snapshot, handle_volumes_changed, navigate_up_safe,
+    quiet_rescan_panel, rescan_panel, save_session, selected_names_for, update_panel_from_patch,
+    IntentContext,
 };
 
 const WS_ADDR: &str = "127.0.0.1:7878";
@@ -26,16 +24,15 @@ const CHANNEL_CAP: usize = 512;
 
 pub async fn start(state: SharedState, app_handle: tauri::AppHandle, quit_notify: Arc<Notify>) {
     let listener = match TcpListener::bind(WS_ADDR).await {
-        Ok(l) => l,
-        Err(e) => {
-            eprintln!("[fbro] Failed to bind WebSocket server on {WS_ADDR}: {e}");
+        Ok(listener) => listener,
+        Err(error) => {
+            eprintln!("[fbro] Failed to bind WebSocket server on {WS_ADDR}: {error}");
             return;
         }
     };
     eprintln!("[fbro] WebSocket server listening on ws://{WS_ADDR}");
 
     let dir_size_queue = Arc::new(DirSizeQueue::new());
-
     let platform = state.lock().await.platform.clone();
     let volume_watcher = crate::platform::create_volume_watcher(platform).await;
 
@@ -48,10 +45,16 @@ pub async fn start(state: SharedState, app_handle: tauri::AppHandle, quit_notify
                 let dir_size_queue = Arc::clone(&dir_size_queue);
                 let volume_watcher = Arc::clone(&volume_watcher);
                 tokio::spawn(handle_connection(
-                    stream, addr, state, app_handle, quit_notify, dir_size_queue, volume_watcher,
+                    stream,
+                    addr,
+                    state,
+                    app_handle,
+                    quit_notify,
+                    dir_size_queue,
+                    volume_watcher,
                 ));
             }
-            Err(e) => eprintln!("[fbro] Accept error: {e}"),
+            Err(error) => eprintln!("[fbro] Accept error: {error}"),
         }
     }
 }
@@ -68,9 +71,9 @@ async fn handle_connection(
     eprintln!("[fbro] Client connected: {addr}");
 
     let ws_stream = match tokio_tungstenite::accept_async(stream).await {
-        Ok(ws) => ws,
-        Err(e) => {
-            eprintln!("[fbro] WS handshake failed: {e}");
+        Ok(ws_stream) => ws_stream,
+        Err(error) => {
+            eprintln!("[fbro] WS handshake failed: {error}");
             return;
         }
     };
@@ -78,117 +81,53 @@ async fn handle_connection(
     let (mut ws_tx, mut ws_rx) = ws_stream.split();
     let (tx, mut rx) = mpsc::channel::<ServerMessage>(CHANNEL_CAP);
 
-    // ── Wait for Hello ────────────────────────────────────────────────────────
     let hello_client = loop {
         match ws_rx.next().await {
-            Some(Ok(Message::Text(text))) => {
-                match serde_json::from_str::<ClientMessage>(&text) {
-                    Ok(ClientMessage::Hello { protocol_version, client }) => {
-                        eprintln!("[fbro] Hello from {:?} kind={:?} (protocol v{})", client.name, client.kind, protocol_version);
-                        break client;
-                    }
-                    Ok(_) => eprintln!("[fbro] Expected Hello, got other intent"),
-                    Err(e) => eprintln!("[fbro] Parse error: {e}"),
+            Some(Ok(Message::Text(text))) => match serde_json::from_str::<ClientMessage>(&text) {
+                Ok(ClientMessage::Hello {
+                    protocol_version,
+                    client,
+                }) => {
+                    eprintln!(
+                        "[fbro] Hello from {:?} kind={:?} (protocol v{})",
+                        client.name, client.kind, protocol_version
+                    );
+                    break client;
                 }
-            }
+                Ok(_) => eprintln!("[fbro] Expected Hello, got other intent"),
+                Err(error) => eprintln!("[fbro] Parse error: {error}"),
+            },
             Some(Ok(Message::Close(_))) | None => return,
             _ => {}
         }
     };
 
-    // Viewer connections only need file chunk reads — skip state snapshot and
-    // panel scans, which would corrupt the shared cursor/entry state.
     let is_gui = hello_client.kind == "gui";
-
     let session_id = uuid::Uuid::new_v4().to_string();
 
-    // ── Send Welcome ──────────────────────────────────────────────────────────
     let file_server_port = state.lock().await.file_server_port;
-    let _ = send_msg(&mut ws_tx, &ServerMessage::Welcome {
-        timestamp: now(),
-        protocol_version: "0".to_string(),
-        session_id: session_id.clone(),
-        file_server_port,
-    })
+    let _ = send_msg(
+        &mut ws_tx,
+        &ServerMessage::Welcome {
+            timestamp: now(),
+            protocol_version: "0".to_string(),
+            session_id: session_id.clone(),
+            file_server_port,
+        },
+    )
     .await;
 
-    // ── Send initial StateSnapshot (gui clients only) ──────────────────────────
-    let (snapshot, panel_ids) = if is_gui { {
-        let mut s = state.lock().await;
-        // Clear stale entries so the snapshot + scan don't double on reconnect
-        for panel in s.panels.values_mut() {
+    let (snapshot, panel_ids) = if is_gui {
+        let mut state_guard = state.lock().await;
+        for panel in state_guard.panels.values_mut() {
             panel.entries.clear();
             panel.status = PanelStatus::Loading;
             panel.calculating_size.clear();
             panel.version += 1;
         }
-        let panel_ids: Vec<String> = s.panels.keys().cloned().collect::<Vec<_>>();
-
-        let panels: std::collections::HashMap<String, PanelSnapshot> = s
-            .panels
-            .iter()
-            .map(|(id, p)| {
-                (
-                    id.clone(),
-                    PanelSnapshot {
-                        panel_id: p.panel_id.clone(),
-                        path: p.path.clone(),
-                        status: p.status.as_str().to_string(),
-                        source_id: p.source_id.clone(),
-                        sort: p.sort.clone(),
-                        filter: p.filter.clone(),
-                        cursor: p.cursor,
-                        selection: p.selection.clone(),
-                        entries: p.entries.clone(),
-                        version: p.version,
-                        calculating_size: vec![],
-                        total_count: None,
-                        window_start: None,
-                    },
-                )
-            })
-            .collect();
-
-        let sources: Vec<SourceSchema> = s
-            .sources
-            .values()
-            .map(|src| {
-                let space = if src.mounted { s.platform.disk_space(&src.root_path) } else { None };
-                SourceSchema {
-                    id: src.id.clone(),
-                    name: src.name.clone(),
-                    kind: src.kind.clone(),
-                    supports: src.supports.clone(),
-                    capabilities: SourceCapabilities {
-                        read_only: false,
-                        supports_streaming: true,
-                        supports_jobs: true,
-                    },
-                    root_path: src.root_path.clone(),
-                    mounted: src.mounted,
-                    free_bytes: space.map(|(f, _)| f),
-                    total_bytes: space.map(|(_, t)| t),
-                }
-            })
-            .collect();
-
-        // Sort panel IDs for stable ordering: left then right
-        let mut sorted_panel_ids = panel_ids.clone();
-        sorted_panel_ids.sort();
-
-        let snapshot = ServerMessage::StateSnapshot {
-            timestamp: now(),
-            domains: StateDomains {
-                layout: LayoutDomain { panels: sorted_panel_ids },
-                panels,
-                sources,
-                focus: s.focus.clone(),
-                jobs: vec![],
-            },
-        };
-
-        (Some(snapshot), panel_ids)
-    } } else {
+        let panel_ids = state_guard.panels.keys().cloned().collect::<Vec<_>>();
+        (Some(build_state_snapshot(&state_guard)), panel_ids)
+    } else {
         (None, vec![])
     };
 
@@ -196,35 +135,60 @@ async fn handle_connection(
         let _ = send_msg(&mut ws_tx, &snapshot).await;
     }
 
-    // ── Spawn initial scan jobs (gui clients only) ─────────────────────────────
     let mut scan_handles: HashMap<String, ScanHandle> = HashMap::new();
     let mut decision_senders: HashMap<String, mpsc::Sender<String>> = HashMap::new();
 
     for panel_id in &panel_ids {
         let (path, sort, filter, version_base, driver) = {
-            let s = state.lock().await;
-            let p = s.panels.get(panel_id).unwrap();
-            let driver = s.drivers.get(&p.source_id).cloned().unwrap();
-            (p.path.clone(), p.sort.clone(), p.filter.clone(), p.version, driver)
+            let state_guard = state.lock().await;
+            let panel = state_guard.panels.get(panel_id).unwrap();
+            let driver = state_guard.drivers.get(&panel.source_id).cloned().unwrap();
+            (
+                panel.path.clone(),
+                panel.sort.clone(),
+                panel.filter.clone(),
+                panel.version,
+                driver,
+            )
         };
 
-        let h = spawn_scan(panel_id.clone(), path, sort, filter, version_base, tx.clone(), driver, None, None, Arc::clone(&state), Arc::clone(&dir_size_queue));
-        scan_handles.insert(panel_id.clone(), h);
+        let handle = ScanHandle {
+            handle: tokio::spawn(crate::jobs::scan::run_scan(
+                panel_id.clone(),
+                path,
+                sort,
+                filter,
+                version_base,
+                tx.clone(),
+                driver,
+                None,
+                None,
+                Arc::clone(&state),
+                Arc::clone(&dir_size_queue),
+                false,
+            )),
+        };
+        scan_handles.insert(panel_id.clone(), handle);
     }
 
-    // ── Spawn filesystem watcher (gui clients only) ─────────────────────────────
     let (watcher_cmd_tx, watcher_cmd_rx) = mpsc::channel::<WatcherCommand>(64);
     let (watcher_action_tx, mut watcher_action_rx) = mpsc::channel::<WatcherAction>(64);
 
-    let _watcher_handle = if is_gui {
-        // Send initial Watch for each panel's current path
+    let watcher_handle = if is_gui {
         for panel_id in &panel_ids {
-            let path = state.lock().await.panels.get(panel_id).map(|p| p.path.clone());
+            let path = state
+                .lock()
+                .await
+                .panels
+                .get(panel_id)
+                .map(|panel| panel.path.clone());
             if let Some(path) = path {
-                let _ = watcher_cmd_tx.send(WatcherCommand::Watch {
-                    panel_id: panel_id.clone(),
-                    path: PathBuf::from(&path),
-                }).await;
+                let _ = watcher_cmd_tx
+                    .send(WatcherCommand::Watch {
+                        panel_id: panel_id.clone(),
+                        path: PathBuf::from(&path),
+                    })
+                    .await;
             }
         }
         Some(crate::watcher::spawn_watcher(
@@ -236,18 +200,14 @@ async fn handle_connection(
         None
     };
 
-    // Register GUI client's sender for cross-connection broadcasts
     if is_gui {
-        let mut s = state.lock().await;
-        s.gui_senders.push(tx.clone());
+        let mut state_guard = state.lock().await;
+        state_guard.gui_senders.push(tx.clone());
     }
 
-    // ── Main loop: fanout outgoing messages / dispatch incoming intents ────────
     loop {
         tokio::select! {
-            // Outgoing: messages queued by scan jobs or intent handlers
             Some(msg) = rx.recv() => {
-                // Update our state mirror for patches
                 if let ServerMessage::StatePatch { ref domain, ref entity_id, ref patch, version, .. } = msg {
                     if domain == "panels" {
                         if let Some(panel_id) = entity_id {
@@ -256,23 +216,30 @@ async fn handle_connection(
                     }
                 }
 
-                // When a job completes, rescan affected panels
                 if let ServerMessage::JobEvent { ref job_id, ref event, .. } = msg {
                     if event == "Completed" || event == "Cancelled" || event == "Failed" {
                         let panels_to_rescan = {
-                            let s = state.lock().await;
-                            if let Some(job) = s.job_store.jobs.get(job_id) {
+                            let state_guard = state.lock().await;
+                            if let Some(job) = state_guard.job_store.jobs.get(job_id) {
                                 let mut panels = vec![job.source_panel.clone()];
-                                if let Some(ref dp) = job.dest_panel {
-                                    panels.push(dp.clone());
+                                if let Some(dest_panel) = &job.dest_panel {
+                                    panels.push(dest_panel.clone());
                                 }
                                 panels
                             } else {
                                 vec![]
                             }
                         };
-                        for pid in panels_to_rescan {
-                            rescan_panel(&pid, &state, &tx, &mut scan_handles, None, None, &dir_size_queue).await;
+                        for panel_id in panels_to_rescan {
+                            rescan_panel(
+                                &panel_id,
+                                &state,
+                                &tx,
+                                &mut scan_handles,
+                                None,
+                                None,
+                                &dir_size_queue,
+                            ).await;
                         }
                     }
                 }
@@ -282,33 +249,47 @@ async fn handle_connection(
                 }
             }
 
-            // Filesystem watcher actions
             Some(action) = watcher_action_rx.recv() => {
                 match action {
                     WatcherAction::DirChanged { panel_id } => {
                         let names = {
-                            let s = state.lock().await;
-                            selected_names_for(&s, &panel_id)
+                            let state_guard = state.lock().await;
+                            selected_names_for(&state_guard, &panel_id)
                         };
-                        quiet_rescan_panel(&panel_id, &state, &tx, &mut scan_handles, names, &dir_size_queue).await;
+                        quiet_rescan_panel(
+                            &panel_id,
+                            &state,
+                            &tx,
+                            &mut scan_handles,
+                            names,
+                            &dir_size_queue,
+                        ).await;
                     }
                     WatcherAction::DirDeleted { panel_id } => {
-                        navigate_up_safe(&panel_id, &state, &tx, &mut scan_handles, &watcher_cmd_tx, &dir_size_queue).await;
+                        navigate_up_safe(
+                            &panel_id,
+                            &state,
+                            &tx,
+                            &mut scan_handles,
+                            &watcher_cmd_tx,
+                            &dir_size_queue,
+                        ).await;
                     }
                     WatcherAction::VolumesChanged { volumes } => {
-                        handle_volumes_changed(volumes, &state, &tx, &mut scan_handles, &watcher_cmd_tx, &dir_size_queue).await;
+                        handle_volumes_changed(
+                            volumes,
+                            &state,
+                            &tx,
+                            &mut scan_handles,
+                            &watcher_cmd_tx,
+                            &dir_size_queue,
+                        ).await;
                     }
                 }
             }
 
-            // OS window close button: treat like "Quit" intent
             _ = quit_notify.notified(), if is_gui => {
-                let active_jobs = {
-                    let s = state.lock().await;
-                    s.job_store.jobs.values().filter(|j| {
-                        j.state == JobState::Running || j.state == JobState::AwaitingDecision
-                    }).count()
-                };
+                let active_jobs = active_job_count(&state).await;
                 if active_jobs == 0 {
                     save_session(&state).await;
                     std::process::exit(0);
@@ -320,36 +301,30 @@ async fn handle_connection(
                 }
             }
 
-            // Incoming: intents from the FE
             msg = ws_rx.next() => {
                 match msg {
                     Some(Ok(Message::Text(text))) => {
                         match serde_json::from_str::<ClientMessage>(&text) {
                             Ok(ClientMessage::Intent { name, scope, args, .. }) => {
                                 eprintln!("[fbro] intent: {name} scope={scope} args={args}");
-                                handle_intent(
-                                    &name,
-                                    &scope,
-                                    &args,
-                                    &state,
-                                    &tx,
-                                    &mut scan_handles,
-                                    &mut decision_senders,
-                                    &app_handle,
-                                    &dir_size_queue,
-                                    &watcher_cmd_tx,
-                                    &volume_watcher,
-                                )
-                                .await;
+                                let mut ctx = IntentContext {
+                                    state: &state,
+                                    tx: &tx,
+                                    scan_handles: &mut scan_handles,
+                                    decision_senders: &mut decision_senders,
+                                    app_handle: &app_handle,
+                                    dir_size_queue: &dir_size_queue,
+                                    watcher_cmd_tx: &watcher_cmd_tx,
+                                    volume_watcher: &volume_watcher,
+                                };
+                                crate::ws::intents::dispatch(&name, &scope, &args, &mut ctx).await;
                             }
-                            Ok(ClientMessage::Hello { .. }) => {
-                                // ignore duplicate Hello
-                            }
-                            Err(e) => eprintln!("[fbro] Intent parse error: {e} — raw: {text}"),
+                            Ok(ClientMessage::Hello { .. }) => {}
+                            Err(error) => eprintln!("[fbro] Intent parse error: {error} — raw: {text}"),
                         }
                     }
-                    Some(Ok(Message::Ping(p))) => {
-                        let _ = ws_tx.send(Message::Pong(p)).await;
+                    Some(Ok(Message::Ping(payload))) => {
+                        let _ = ws_tx.send(Message::Pong(payload)).await;
                     }
                     Some(Ok(Message::Close(_))) | None => break,
                     _ => {}
@@ -360,1895 +335,16 @@ async fn handle_connection(
 
     eprintln!("[fbro] Client disconnected: {addr}");
     let _ = watcher_cmd_tx.send(WatcherCommand::Shutdown).await;
-    if let Some(h) = _watcher_handle {
-        h.abort();
+    if let Some(handle) = watcher_handle {
+        handle.abort();
     }
-    for h in scan_handles.values() {
-        h.abort();
+    for handle in scan_handles.values() {
+        handle.abort();
     }
 
-    // Unregister GUI sender
     if is_gui {
-        let mut s = state.lock().await;
-        s.gui_senders.retain(|s| !s.is_closed());
-    }
-}
-
-// ─── Intent dispatch ─────────────────────────────────────────────────────────
-
-async fn handle_intent(
-    name: &str,
-    scope: &serde_json::Value,
-    args: &serde_json::Value,
-    state: &SharedState,
-    tx: &mpsc::Sender<ServerMessage>,
-    scan_handles: &mut HashMap<String, ScanHandle>,
-    decision_senders: &mut HashMap<String, mpsc::Sender<String>>,
-    app_handle: &tauri::AppHandle,
-    dir_size_queue: &Arc<DirSizeQueue>,
-    watcher_cmd_tx: &mpsc::Sender<WatcherCommand>,
-    volume_watcher: &Arc<dyn crate::platform::VolumeWatcher>,
-) {
-    match name {
-        "RefreshPanels" => {
-            let panel_ids_and_names: Vec<(String, Option<Vec<String>>)> = {
-                let s = state.lock().await;
-                s.panels.keys()
-                    .map(|id| (id.clone(), selected_names_for(&s, id)))
-                    .collect()
-            };
-            for (panel_id, names) in panel_ids_and_names {
-                rescan_panel(&panel_id, state, &tx, scan_handles, None, names, dir_size_queue).await;
-            }
-        }
-
-        "SetSort" => {
-            let panel_id = resolve_panel_id(scope, state).await;
-            let by    = args.get("by").and_then(|v| v.as_str()).unwrap_or("name").to_string();
-            let order = args.get("order").and_then(|v| v.as_str()).unwrap_or("asc").to_string();
-            let names = {
-                let mut s = state.lock().await;
-                let names = selected_names_for(&s, &panel_id);
-                if let Some(panel) = s.panels.get_mut(&panel_id) {
-                    panel.sort = crate::ws::protocol::SortSpec { by, order };
-                }
-                names
-            };
-            rescan_panel(&panel_id, state, &tx, scan_handles, None, names, dir_size_queue).await;
-        }
-
-        "SetFilter" => {
-            let panel_id = resolve_panel_id(scope, state).await;
-            let value = args.get("value").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
-            let names = {
-                let mut s = state.lock().await;
-                let names = selected_names_for(&s, &panel_id);
-                if let Some(panel) = s.panels.get_mut(&panel_id) {
-                    panel.filter = if value.is_empty() {
-                        None
-                    } else {
-                        Some(crate::ws::protocol::FilterSpec { mode: "glob".to_string(), value })
-                    };
-                }
-                names
-            };
-            rescan_panel(&panel_id, state, &tx, scan_handles, None, names, dir_size_queue).await;
-        }
-
-        "MoveCursor" => {
-            let panel_id = resolve_panel_id(scope, state).await;
-            let direction = args.get("direction").and_then(|v| v.as_str()).unwrap_or("down");
-            let (new_cursor, version, needs_window) = {
-                let mut s = state.lock().await;
-                if let Some(panel) = s.panels.get_mut(&panel_id) {
-                    let len = panel.entries.len();
-                    if len == 0 {
-                        return;
-                    }
-                    let cursor = match direction {
-                        "up" => panel.cursor.saturating_sub(1),
-                        _ => (panel.cursor + 1).min(len - 1),
-                    };
-                    panel.cursor = cursor;
-                    panel.version += 1;
-                    let needs_window = panel.windowed && (cursor < panel.window_start || cursor >= panel.window_start + panel.window_count);
-                    (cursor, panel.version, needs_window)
-                } else {
-                    return;
-                }
-            };
-            let _ = tx
-                .send(ServerMessage::StatePatch {
-                    timestamp: now(),
-                    domain: "panels".to_string(),
-                    entity_id: Some(panel_id.clone()),
-                    version,
-                    patch: serde_json::json!({ "cursor": new_cursor }),
-                })
-                .await;
-            if needs_window {
-                let count = { state.lock().await.panels.get(&panel_id).map(|p| p.window_count).unwrap_or(200) };
-                let start = new_cursor.saturating_sub(count / 2);
-                send_window(&panel_id, start, count, state, tx).await;
-            }
-        }
-
-        "SetSelection" => {
-            let panel_id = resolve_panel_id(scope, state).await;
-            let indices: Vec<usize> = args
-                .get("indices")
-                .and_then(|v| v.as_array())
-                .map(|arr| arr.iter().filter_map(|v| v.as_u64().map(|n| n as usize)).collect())
-                .unwrap_or_default();
-            let version = {
-                let mut s = state.lock().await;
-                if let Some(panel) = s.panels.get_mut(&panel_id) {
-                    panel.selection = indices.clone();
-                    panel.version += 1;
-                    panel.version
-                } else {
-                    return;
-                }
-            };
-            let _ = tx
-                .send(ServerMessage::StatePatch {
-                    timestamp: now(),
-                    domain: "panels".to_string(),
-                    entity_id: Some(panel_id),
-                    version,
-                    patch: serde_json::json!({ "selection": indices }),
-                })
-                .await;
-        }
-
-        "SelectAtIndex" => {
-            let panel_id = resolve_panel_id(scope, state).await;
-            let index = args.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-            let (new_selection, version) = {
-                let mut s = state.lock().await;
-                if let Some(panel) = s.panels.get_mut(&panel_id) {
-                    if index >= panel.entries.len() || panel.selection.contains(&index) {
-                        return;
-                    }
-                    panel.selection.push(index);
-                    panel.version += 1;
-                    (panel.selection.clone(), panel.version)
-                } else {
-                    return;
-                }
-            };
-            let _ = tx
-                .send(ServerMessage::StatePatch {
-                    timestamp: now(),
-                    domain: "panels".to_string(),
-                    entity_id: Some(panel_id),
-                    version,
-                    patch: serde_json::json!({ "selection": new_selection }),
-                })
-                .await;
-        }
-
-        "DeselectAtIndex" => {
-            let panel_id = resolve_panel_id(scope, state).await;
-            let index = args.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-            let (new_selection, version) = {
-                let mut s = state.lock().await;
-                if let Some(panel) = s.panels.get_mut(&panel_id) {
-                    let before = panel.selection.len();
-                    panel.selection.retain(|&i| i != index);
-                    if panel.selection.len() == before {
-                        return; // wasn't selected, nothing changed
-                    }
-                    panel.version += 1;
-                    (panel.selection.clone(), panel.version)
-                } else {
-                    return;
-                }
-            };
-            let _ = tx
-                .send(ServerMessage::StatePatch {
-                    timestamp: now(),
-                    domain: "panels".to_string(),
-                    entity_id: Some(panel_id),
-                    version,
-                    patch: serde_json::json!({ "selection": new_selection }),
-                })
-                .await;
-        }
-
-        "ToggleSelectionAtIndex" => {
-            let panel_id = resolve_panel_id(scope, state).await;
-            let index = args.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-            let (new_selection, version) = {
-                let mut s = state.lock().await;
-                if let Some(panel) = s.panels.get_mut(&panel_id) {
-                    if index >= panel.entries.len() {
-                        return;
-                    }
-                    if let Some(pos) = panel.selection.iter().position(|&i| i == index) {
-                        panel.selection.remove(pos);
-                    } else {
-                        panel.selection.push(index);
-                    }
-                    panel.version += 1;
-                    (panel.selection.clone(), panel.version)
-                } else {
-                    return;
-                }
-            };
-            let _ = tx
-                .send(ServerMessage::StatePatch {
-                    timestamp: now(),
-                    domain: "panels".to_string(),
-                    entity_id: Some(panel_id),
-                    version,
-                    patch: serde_json::json!({ "selection": new_selection }),
-                })
-                .await;
-        }
-
-        "ToggleSelection" => {
-            let panel_id = resolve_panel_id(scope, state).await;
-            let (new_selection, version) = {
-                let mut s = state.lock().await;
-                if let Some(panel) = s.panels.get_mut(&panel_id) {
-                    let cursor = panel.cursor;
-                    if let Some(pos) = panel.selection.iter().position(|&i| i == cursor) {
-                        panel.selection.remove(pos);
-                    } else {
-                        panel.selection.push(cursor);
-                    }
-                    panel.version += 1;
-                    (panel.selection.clone(), panel.version)
-                } else {
-                    return;
-                }
-            };
-            let _ = tx
-                .send(ServerMessage::StatePatch {
-                    timestamp: now(),
-                    domain: "panels".to_string(),
-                    entity_id: Some(panel_id),
-                    version,
-                    patch: serde_json::json!({ "selection": new_selection }),
-                })
-                .await;
-        }
-
-        "SelectAll" => {
-            let panel_id = resolve_panel_id(scope, state).await;
-            let (indices, version) = {
-                let mut s = state.lock().await;
-                if let Some(panel) = s.panels.get_mut(&panel_id) {
-                    let indices: Vec<usize> = (0..panel.entries.len()).collect();
-                    panel.selection = indices.clone();
-                    panel.version += 1;
-                    (indices, panel.version)
-                } else {
-                    return;
-                }
-            };
-            let _ = tx
-                .send(ServerMessage::StatePatch {
-                    timestamp: now(),
-                    domain: "panels".to_string(),
-                    entity_id: Some(panel_id),
-                    version,
-                    patch: serde_json::json!({ "selection": indices }),
-                })
-                .await;
-        }
-
-        "ClearSelection" => {
-            let panel_id = resolve_panel_id(scope, state).await;
-            let version = {
-                let mut s = state.lock().await;
-                if let Some(panel) = s.panels.get_mut(&panel_id) {
-                    panel.selection.clear();
-                    panel.version += 1;
-                    panel.version
-                } else {
-                    return;
-                }
-            };
-            let _ = tx
-                .send(ServerMessage::StatePatch {
-                    timestamp: now(),
-                    domain: "panels".to_string(),
-                    entity_id: Some(panel_id),
-                    version,
-                    patch: serde_json::json!({ "selection": [] }),
-                })
-                .await;
-        }
-
-        "InvertSelection" => {
-            let panel_id = resolve_panel_id(scope, state).await;
-            let (indices, version) = {
-                let mut s = state.lock().await;
-                if let Some(panel) = s.panels.get_mut(&panel_id) {
-                    let selected: std::collections::HashSet<usize> = panel.selection.iter().copied().collect();
-                    let indices: Vec<usize> = (0..panel.entries.len())
-                        .filter(|i| !selected.contains(i))
-                        .collect();
-                    panel.selection = indices.clone();
-                    panel.version += 1;
-                    (indices, panel.version)
-                } else {
-                    return;
-                }
-            };
-            let _ = tx
-                .send(ServerMessage::StatePatch {
-                    timestamp: now(),
-                    domain: "panels".to_string(),
-                    entity_id: Some(panel_id),
-                    version,
-                    patch: serde_json::json!({ "selection": indices }),
-                })
-                .await;
-        }
-
-        "MoveCursorWithSelect" => {
-            let panel_id = resolve_panel_id(scope, state).await;
-            let direction = args.get("direction").and_then(|v| v.as_str()).unwrap_or("down");
-            let (new_cursor, new_selection, version, needs_window) = {
-                let mut s = state.lock().await;
-                if let Some(panel) = s.panels.get_mut(&panel_id) {
-                    let len = panel.entries.len();
-                    if len == 0 {
-                        return;
-                    }
-                    let cursor = match direction {
-                        "up" => panel.cursor.saturating_sub(1),
-                        _ => (panel.cursor + 1).min(len - 1),
-                    };
-                    let prev = panel.cursor;
-                    panel.cursor = cursor;
-                    if panel.selection.contains(&cursor) {
-                        panel.selection.retain(|&i| i != cursor && i != prev);
-                    } else {
-                        if !panel.selection.contains(&prev) {
-                            panel.selection.push(prev);
-                        }
-                        panel.selection.push(cursor);
-                    }
-                    panel.version += 1;
-                    let needs_window = panel.windowed && (cursor < panel.window_start || cursor >= panel.window_start + panel.window_count);
-                    (cursor, panel.selection.clone(), panel.version, needs_window)
-                } else {
-                    return;
-                }
-            };
-            let _ = tx
-                .send(ServerMessage::StatePatch {
-                    timestamp: now(),
-                    domain: "panels".to_string(),
-                    entity_id: Some(panel_id.clone()),
-                    version,
-                    patch: serde_json::json!({ "cursor": new_cursor, "selection": new_selection }),
-                })
-                .await;
-            if needs_window {
-                let count = { state.lock().await.panels.get(&panel_id).map(|p| p.window_count).unwrap_or(200) };
-                let start = new_cursor.saturating_sub(count / 2);
-                send_window(&panel_id, start, count, state, tx).await;
-            }
-        }
-
-        "MoveCursorBy" => {
-            let panel_id = resolve_panel_id(scope, state).await;
-            let delta = args.get("delta").and_then(|v| v.as_i64()).unwrap_or(0);
-            let (new_cursor, version, needs_window) = {
-                let mut s = state.lock().await;
-                if let Some(panel) = s.panels.get_mut(&panel_id) {
-                    let len = panel.entries.len();
-                    if len == 0 { return; }
-                    let cursor = (panel.cursor as i64 + delta).clamp(0, (len - 1) as i64) as usize;
-                    if cursor == panel.cursor { return; }
-                    panel.cursor = cursor;
-                    panel.version += 1;
-                    let needs_window = panel.windowed && (cursor < panel.window_start || cursor >= panel.window_start + panel.window_count);
-                    (cursor, panel.version, needs_window)
-                } else {
-                    return;
-                }
-            };
-            let _ = tx
-                .send(ServerMessage::StatePatch {
-                    timestamp: now(),
-                    domain: "panels".to_string(),
-                    entity_id: Some(panel_id.clone()),
-                    version,
-                    patch: serde_json::json!({ "cursor": new_cursor }),
-                })
-                .await;
-            if needs_window {
-                let count = { state.lock().await.panels.get(&panel_id).map(|p| p.window_count).unwrap_or(200) };
-                let start = new_cursor.saturating_sub(count / 2);
-                send_window(&panel_id, start, count, state, tx).await;
-            }
-        }
-
-        "MoveCursorToEdge" => {
-            let panel_id = resolve_panel_id(scope, state).await;
-            let edge = args.get("edge").and_then(|v| v.as_str()).unwrap_or("first");
-            let (new_cursor, version, needs_window) = {
-                let mut s = state.lock().await;
-                if let Some(panel) = s.panels.get_mut(&panel_id) {
-                    let len = panel.entries.len();
-                    if len == 0 {
-                        return;
-                    }
-                    let cursor = if edge == "last" { len - 1 } else { 0 };
-                    panel.cursor = cursor;
-                    panel.version += 1;
-                    let needs_window = panel.windowed && (cursor < panel.window_start || cursor >= panel.window_start + panel.window_count);
-                    (cursor, panel.version, needs_window)
-                } else {
-                    return;
-                }
-            };
-            let _ = tx
-                .send(ServerMessage::StatePatch {
-                    timestamp: now(),
-                    domain: "panels".to_string(),
-                    entity_id: Some(panel_id.clone()),
-                    version,
-                    patch: serde_json::json!({ "cursor": new_cursor }),
-                })
-                .await;
-            if needs_window {
-                let count = { state.lock().await.panels.get(&panel_id).map(|p| p.window_count).unwrap_or(200) };
-                let start = new_cursor.saturating_sub(count / 2);
-                send_window(&panel_id, start, count, state, tx).await;
-            }
-        }
-
-        "SetCursor" => {
-            let panel_id = resolve_panel_id(scope, state).await;
-            let index = args.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-            let (new_cursor, version) = {
-                let mut s = state.lock().await;
-                if let Some(panel) = s.panels.get_mut(&panel_id) {
-                    let cursor = index.min(panel.entries.len().saturating_sub(1));
-                    panel.cursor = cursor;
-                    panel.version += 1;
-                    (cursor, panel.version)
-                } else {
-                    return;
-                }
-            };
-            let _ = tx
-                .send(ServerMessage::StatePatch {
-                    timestamp: now(),
-                    domain: "panels".to_string(),
-                    entity_id: Some(panel_id),
-                    version,
-                    patch: serde_json::json!({ "cursor": new_cursor }),
-                })
-                .await;
-        }
-
-        "OpenEntry" => {
-            let panel_id = resolve_panel_id(scope, state).await;
-            let (entry_kind, new_path) = {
-                let s = state.lock().await;
-                if let Some(panel) = s.panels.get(&panel_id) {
-                    if let Some(entry) = panel.entries.get(panel.cursor) {
-                        let kind = entry.kind.clone();
-                        let driver = s.drivers.get(&panel.source_id).unwrap();
-                        let full = driver.resolve_child(&panel.path, &entry.name);
-                        (kind, full)
-                    } else {
-                        return;
-                    }
-                } else {
-                    return;
-                }
-            };
-
-            if entry_kind == "directory" {
-                navigate_to(&panel_id, &new_path, None, state, tx, scan_handles, dir_size_queue, watcher_cmd_tx).await;
-            }
-        }
-
-        "NavigateHome" => {
-            let panel_id = resolve_panel_id(scope, state).await;
-            let home = state.lock().await.platform.home_dir();
-            navigate_to(&panel_id, &home, None, state, tx, scan_handles, dir_size_queue, watcher_cmd_tx).await;
-        }
-
-        "NavigateSourceRoot" => {
-            let panel_id = resolve_panel_id(scope, state).await;
-            let target = {
-                let s = state.lock().await;
-                let panel = match s.panels.get(&panel_id) {
-                    Some(p) => p,
-                    None => return,
-                };
-                let cur = panel.path.as_str();
-                // Find the source whose root_path is the longest prefix of
-                // the current path — this is the volume we're actually on.
-                let root = s.sources.values()
-                    .filter(|src| cur.starts_with(&src.root_path))
-                    .max_by_key(|src| src.root_path.len())
-                    .map(|src| src.root_path.clone())
-                    .unwrap_or_else(|| "/".to_string());
-                let home = s.platform.home_dir();
-                if home.starts_with(&root) && cur.starts_with(&home) {
-                    home
-                } else {
-                    root
-                }
-            };
-            navigate_to(&panel_id, &target, None, state, tx, scan_handles, dir_size_queue, watcher_cmd_tx).await;
-        }
-
-        "NavigatePanelTo" => {
-            let panel_id = args.get("panelId").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let cursor_hint = args.get("cursorHint").and_then(|v| v.as_str()).map(String::from);
-            if !panel_id.is_empty() && !path.is_empty() {
-                navigate_to(&panel_id, &path, cursor_hint, state, tx, scan_handles, dir_size_queue, watcher_cmd_tx).await;
-            }
-        }
-
-        "OpenFile" => {
-            let panel_id = resolve_panel_id(scope, state).await;
-            let (path, entry, platform) = {
-                let s = state.lock().await;
-                let panel = match s.panels.get(&panel_id) {
-                    Some(p) => p,
-                    None => return,
-                };
-                let entry = panel.entries.get(panel.cursor).cloned();
-                (panel.path.clone(), entry, Arc::clone(&s.platform))
-            };
-            if let Some(entry) = entry {
-                if entry.kind != "directory" {
-                    let full_path = format!("{}/{}", path.trim_end_matches('/'), entry.name);
-                    platform.open_file(&full_path);
-                }
-            }
-        }
-
-        "CalculateSize" => {
-            let panel_id = resolve_panel_id(scope, state).await;
-            let name = args.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let full_path = {
-                let s = state.lock().await;
-                s.panels.get(&panel_id).and_then(|panel| {
-                    panel.entries.iter()
-                        .find(|e| e.name == name && e.kind == "directory")
-                        .map(|_| format!("{}/{}", panel.path.trim_end_matches('/'), name))
-                })
-            };
-            if let Some(path) = full_path {
-                dir_size_queue.invalidate_cache(&path).await;
-                dir_size_queue.enqueue(panel_id, name, path, Arc::clone(&state), tx.clone()).await;
-            }
-        }
-
-        "CancelSizeCalculation" => {
-            let panel_id = resolve_panel_id(scope, state).await;
-            let name = args.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            // Signal the background task to stop
-            dir_size_queue.cancel(&panel_id, &name).await;
-            // Immediately remove from calculating_size for instant FE feedback
-            let (calc, version) = {
-                let mut s = state.lock().await;
-                if let Some(panel) = s.panels.get_mut(&panel_id) {
-                    panel.calculating_size.remove(&name);
-                    panel.version += 1;
-                    let calc: Vec<String> = {
-                        let mut v: Vec<String> = panel.calculating_size.iter().cloned().collect();
-                        v.sort();
-                        v
-                    };
-                    (calc, panel.version)
-                } else {
-                    return;
-                }
-            };
-            let _ = tx.send(ServerMessage::StatePatch {
-                timestamp: now(),
-                domain: "panels".to_string(),
-                entity_id: Some(panel_id),
-                version,
-                patch: serde_json::json!({ "calculatingSize": calc }),
-            }).await;
-        }
-
-        "RequestWindow" => {
-            let panel_id = resolve_panel_id(scope, state).await;
-            let start = args.get("start").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-            let count = args.get("count").and_then(|v| v.as_u64()).unwrap_or(200) as usize;
-            send_window(&panel_id, start, count, state, tx).await;
-        }
-
-        "OpenTerminal" => {
-            let panel_id = resolve_panel_id(scope, state).await;
-            let (path, platform) = {
-                let s = state.lock().await;
-                let panel = match s.panels.get(&panel_id) {
-                    Some(p) => p,
-                    None => return,
-                };
-                (panel.path.clone(), Arc::clone(&s.platform))
-            };
-            platform.open_terminal(&path);
-        }
-
-        "NavigateToSource" => {
-            let panel_id = resolve_panel_id(scope, state).await;
-            let source_id = args.get("sourceId").and_then(|v| v.as_str()).unwrap_or("").to_string();
-
-            let root_path = {
-                let s = state.lock().await;
-                s.sources.get(&source_id).map(|src| src.root_path.clone())
-            };
-
-            if let Some(root_path) = root_path {
-                {
-                    let mut s = state.lock().await;
-                    if let Some(panel) = s.panels.get_mut(&panel_id) {
-                        // Save current location for the source we're leaving
-                        panel.source_paths.insert(panel.source_id.clone(), panel.path.clone());
-
-                        // Determine target path: saved path > root_path
-                        let target_path = panel.source_paths.get(&source_id)
-                            .filter(|p| std::path::Path::new(p.as_str()).is_dir())
-                            .cloned()
-                            .unwrap_or(root_path);
-
-                        panel.source_id = source_id;
-                        panel.path = target_path.clone();
-                        panel.cursor = 0;
-                        panel.selection.clear();
-                        panel.filter = None;
-                        let _ = watcher_cmd_tx.send(WatcherCommand::Watch {
-                            panel_id: panel_id.clone(),
-                            path: PathBuf::from(&target_path),
-                        }).await;
-                    }
-                }
-                rescan_panel(&panel_id, state, tx, scan_handles, None, None, dir_size_queue).await;
-            }
-        }
-
-        "MountSource" => {
-            let panel_id = resolve_panel_id(scope, state).await;
-            let source_id = args.get("sourceId").and_then(|v| v.as_str()).unwrap_or("").to_string();
-
-            let device_path = {
-                let s = state.lock().await;
-                s.sources.get(&source_id).and_then(|src| src.device_path.clone())
-            };
-
-            if let Some(device_path) = device_path {
-                match volume_watcher.mount(&device_path).await {
-                    Ok(mount_point) => {
-                        eprintln!("[fbro] Mounted {source_id} at {mount_point}");
-                        {
-                            let mut s = state.lock().await;
-                            if let Some(src) = s.sources.get_mut(&source_id) {
-                                src.mounted = true;
-                                src.root_path = mount_point.clone();
-                                src.supports = vec![
-                                    "ListEntries".to_string(),
-                                    "OpenFolder".to_string(),
-                                    "CopySelection".to_string(),
-                                    "MoveSelection".to_string(),
-                                    "DeleteSelection".to_string(),
-                                    "InspectItem".to_string(),
-                                ];
-                            }
-                            if !s.drivers.contains_key(&source_id) {
-                                let driver: Arc<dyn VfsDriver> = Arc::new(crate::vfs::local::LocalFsDriver);
-                                s.drivers.insert(source_id.clone(), driver);
-                            }
-                        }
-
-                        // Broadcast updated sources
-                        let sources_json = {
-                            let s = state.lock().await;
-                            let sources: Vec<serde_json::Value> = s.sources.values().map(|src| {
-                                let space = if src.mounted { s.platform.disk_space(&src.root_path) } else { None };
-                                serde_json::json!({
-                                    "id": src.id,
-                                    "name": src.name,
-                                    "kind": src.kind,
-                                    "supports": src.supports,
-                                    "capabilities": {
-                                        "readOnly": false,
-                                        "supportsStreaming": true,
-                                        "supportsJobs": true
-                                    },
-                                    "rootPath": src.root_path,
-                                    "mounted": src.mounted,
-                                    "freeBytes": space.map(|(f, _)| f),
-                                    "totalBytes": space.map(|(_, t)| t)
-                                })
-                            }).collect();
-                            sources
-                        };
-
-                        let _ = tx.send(ServerMessage::StatePatch {
-                            timestamp: now(),
-                            domain: "sources".to_string(),
-                            entity_id: None,
-                            version: 0,
-                            patch: serde_json::json!({ "sources": sources_json }),
-                        }).await;
-
-                        // Navigate the panel to the newly mounted source
-                        {
-                            let mut s = state.lock().await;
-                            if let Some(panel) = s.panels.get_mut(&panel_id) {
-                                panel.source_paths.insert(panel.source_id.clone(), panel.path.clone());
-                                panel.source_id = source_id.clone();
-                                panel.path = mount_point.clone();
-                                panel.cursor = 0;
-                                panel.selection.clear();
-                                panel.filter = None;
-                                let _ = watcher_cmd_tx.send(WatcherCommand::Watch {
-                                    panel_id: panel_id.clone(),
-                                    path: PathBuf::from(&mount_point),
-                                }).await;
-                            }
-                        }
-                        rescan_panel(&panel_id, state, tx, scan_handles, None, None, dir_size_queue).await;
-                    }
-                    Err(e) => {
-                        eprintln!("[fbro] Mount failed for {source_id}: {e}");
-                        let _ = tx.send(ServerMessage::Error {
-                            timestamp: now(),
-                            code: "MOUNT_FAILED".to_string(),
-                            message: e,
-                            recoverable: true,
-                            extra: None,
-                        }).await;
-                    }
-                }
-            } else {
-                let _ = tx.send(ServerMessage::Error {
-                    timestamp: now(),
-                    code: "MOUNT_FAILED".to_string(),
-                    message: "Source has no device path for mounting".to_string(),
-                    recoverable: true,
-                    extra: None,
-                }).await;
-            }
-        }
-
-        "NavigateUp" => {
-            let panel_id = resolve_panel_id(scope, state).await;
-            let (current_path, parent_path) = {
-                let s = state.lock().await;
-                if let Some(panel) = s.panels.get(&panel_id) {
-                    let driver = s.drivers.get(&panel.source_id).unwrap();
-                    (Some(panel.path.clone()), driver.parent_path(&panel.path))
-                } else {
-                    (None, None)
-                }
-            };
-            if let Some(path) = current_path {
-                if let Some(parent) = parent_path {
-                    if parent != path {
-                        let dir_name = path.trim_end_matches('/').rsplit('/').next().map(str::to_string);
-                        navigate_to(&panel_id, &parent, dir_name, state, tx, scan_handles, dir_size_queue, watcher_cmd_tx).await;
-                    }
-                }
-            }
-        }
-
-        "SwitchFocus" => {
-            let to = args.get("to").and_then(|v| v.as_str()).map(String::from);
-            if let Some(target) = to {
-                let version = {
-                    let mut s = state.lock().await;
-                    s.focus = target.clone();
-                    1u64
-                };
-                let _ = tx
-                    .send(ServerMessage::StatePatch {
-                        timestamp: now(),
-                        domain: "focus".to_string(),
-                        entity_id: None,
-                        version,
-                        patch: serde_json::json!({ "focus": target }),
-                    })
-                    .await;
-            }
-        }
-
-        "RequestStateSnapshot" => {
-            let s = state.lock().await;
-            let panels = s
-                .panels
-                .iter()
-                .map(|(id, p)| {
-                    (
-                        id.clone(),
-                        crate::ws::protocol::PanelSnapshot {
-                            panel_id: p.panel_id.clone(),
-                            path: p.path.clone(),
-                            status: p.status.as_str().to_string(),
-                            source_id: p.source_id.clone(),
-                            sort: p.sort.clone(),
-                            filter: p.filter.clone(),
-                            cursor: p.cursor,
-                            selection: p.selection.clone(),
-                            entries: p.entries.clone(),
-                            version: p.version,
-                            calculating_size: vec![],
-                            total_count: None,
-                            window_start: None,
-                        },
-                    )
-                })
-                .collect();
-
-            let sources: Vec<SourceSchema> = s
-                .sources
-                .values()
-                .map(|src| {
-                    let space = if src.mounted { s.platform.disk_space(&src.root_path) } else { None };
-                    SourceSchema {
-                        id: src.id.clone(),
-                        name: src.name.clone(),
-                        kind: src.kind.clone(),
-                        supports: src.supports.clone(),
-                        capabilities: SourceCapabilities {
-                            read_only: false,
-                            supports_streaming: true,
-                            supports_jobs: true,
-                        },
-                        root_path: src.root_path.clone(),
-                        mounted: src.mounted,
-                        free_bytes: space.map(|(f, _)| f),
-                        total_bytes: space.map(|(_, t)| t),
-                    }
-                })
-                .collect();
-
-            let mut sorted_panel_ids: Vec<String> = s.panels.keys().cloned().collect();
-            sorted_panel_ids.sort();
-
-            let _ = tx
-                .send(ServerMessage::StateSnapshot {
-                    timestamp: now(),
-                    domains: StateDomains {
-                        layout: LayoutDomain { panels: sorted_panel_ids },
-                        panels,
-                        sources,
-                        focus: s.focus.clone(),
-                        jobs: vec![],
-                    },
-                })
-                .await;
-        }
-
-        "StartFileOp" => {
-            let source_panel_id = args.get("sourcePanel").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let dest_panel_id = args.get("destPanel").and_then(|v| v.as_str()).map(String::from);
-            let op_type_str = args.get("opType").and_then(|v| v.as_str()).unwrap_or("copy");
-            let conflict_str = args.get("conflictPolicy").and_then(|v| v.as_str()).unwrap_or("ask");
-            let background = args.get("background").and_then(|v| v.as_bool()).unwrap_or(false);
-            let start_paused = args.get("startPaused").and_then(|v| v.as_bool()).unwrap_or(false);
-            let dry_mode = args.get("dryMode").and_then(|v| v.as_bool()).unwrap_or(false);
-
-            let op_type = match op_type_str {
-                "move" => FileOpType::Move,
-                "delete" => FileOpType::Delete,
-                _ => FileOpType::Copy,
-            };
-            let conflict_policy = match conflict_str {
-                "skip" => ConflictPolicy::Skip,
-                "overwrite" => ConflictPolicy::Overwrite,
-                _ => ConflictPolicy::Ask,
-            };
-
-            // Gather files from the source panel's selection (or cursor)
-            let (files, source_path, dest_path, src_driver, dst_driver) = {
-                let s = state.lock().await;
-                let Some(src_panel) = s.panels.get(&source_panel_id) else { return };
-                let src_driver = s.drivers.get(&src_panel.source_id).cloned().unwrap();
-
-                let indices: Vec<usize> = if src_panel.selection.is_empty() {
-                    vec![src_panel.cursor]
-                } else {
-                    src_panel.selection.clone()
-                };
-
-                let files: Vec<FileOpEntry> = indices.iter().filter_map(|&idx| {
-                    src_panel.entries.get(idx).map(|e| FileOpEntry {
-                        name: e.name.clone(),
-                        source_path: src_driver.resolve_child(&src_panel.path, &e.name),
-                        size: e.size,
-                        kind: e.kind.clone(),
-                    })
-                }).collect();
-
-                let (dest_path, dst_driver) = if op_type != FileOpType::Delete {
-                    if let Some(dp) = dest_panel_id.as_ref().and_then(|id| s.panels.get(id)) {
-                        let drv = s.drivers.get(&dp.source_id).cloned().unwrap();
-                        (Some(dp.path.clone()), Some(drv))
-                    } else {
-                        (None, None)
-                    }
-                } else {
-                    (None, None)
-                };
-
-                let source_path = src_panel.path.clone();
-                (files, source_path, dest_path, src_driver, dst_driver)
-            };
-
-            if files.is_empty() { return; }
-
-            // Dry mode: generate a bash script instead of performing the operation
-            if dry_mode {
-                let home = {
-                    #[cfg(unix)]
-                    { std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string()) }
-                    #[cfg(windows)]
-                    { std::env::var("USERPROFILE").unwrap_or_else(|_| std::env::temp_dir().to_string_lossy().to_string()) }
-                };
-                let ts = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_secs())
-                    .unwrap_or(0);
-                let op_label = match op_type {
-                    FileOpType::Copy => "copy",
-                    FileOpType::Move => "move",
-                    FileOpType::Delete => "delete",
-                };
-                let script_name = format!("{ts}_dry_{op_label}.sh");
-                let script_path = format!("{}/{}", home, script_name);
-                let script_path_clone = script_path.clone();
-                let files_clone = files.clone();
-                let op_type_clone = op_type.clone();
-                let driver_clone = Arc::clone(&src_driver);
-                let dest_path_clone = dest_path.clone();
-                let dst_driver_clone = dst_driver.as_ref().map(Arc::clone);
-                let result = tokio::task::spawn_blocking(move || {
-                    generate_dry_run_script(
-                        &op_type_clone,
-                        &files_clone,
-                        &script_path_clone,
-                        &*driver_clone,
-                        dest_path_clone.as_deref(),
-                        dst_driver_clone.as_deref(),
-                    )
-                }).await;
-                match result {
-                    Ok(Ok(())) => {
-                        let _ = tx.send(ServerMessage::DryRunReady {
-                            timestamp: now(),
-                            script_path,
-                            script_dir: home,
-                        }).await;
-                    }
-                    Ok(Err(e)) => {
-                        let _ = tx.send(ServerMessage::Error {
-                            timestamp: now(),
-                            code: "DRY_RUN_FAILED".to_string(),
-                            message: e,
-                            recoverable: true,
-                            extra: None,
-                        }).await;
-                    }
-                    Err(e) => {
-                        let _ = tx.send(ServerMessage::Error {
-                            timestamp: now(),
-                            code: "DRY_RUN_FAILED".to_string(),
-                            message: e.to_string(),
-                            recoverable: true,
-                            extra: None,
-                        }).await;
-                    }
-                }
-                return;
-            }
-
-            // Create the job
-            let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
-            let (pause_tx, pause_rx) = tokio::sync::watch::channel(start_paused);
-            let (dec_tx, dec_rx) = mpsc::channel::<String>(4);
-
-            let job_id = {
-                let mut s = state.lock().await;
-                s.job_store.next_job_id()
-            };
-
-            // Send JobStarted to FE
-            let file_schemas: Vec<FileOpFileSchema> = files.iter().map(|f| FileOpFileSchema {
-                name: f.name.clone(),
-                size: f.size,
-                kind: f.kind.clone(),
-            }).collect();
-
-            let total_bytes_total: u64 = files.iter().map(|f| f.size.unwrap_or(0)).sum();
-            let _ = tx.send(ServerMessage::JobStarted {
-                timestamp: now(),
-                job: JobStartSchema {
-                    job_id: job_id.clone(),
-                    op_type: op_type_str.to_string(),
-                    files: file_schemas,
-                    source_panel: source_panel_id.clone(),
-                    source_path,
-                    dest_panel: dest_panel_id.clone(),
-                    dest_path: dest_path.clone(),
-                    total_files: files.len(),
-                    total_bytes_total,
-                    background,
-                },
-            }).await;
-
-            // Store decision sender
-            decision_senders.insert(job_id.clone(), dec_tx);
-
-            // Spawn the job
-            let handle = tokio::spawn(run_file_op(
-                job_id.clone(),
-                op_type.clone(),
-                files.clone(),
-                dest_path.clone(),
-                conflict_policy.clone(),
-                tx.clone(),
-                cancel_rx,
-                pause_rx,
-                dec_rx,
-                src_driver,
-                dst_driver,
-            ));
-
-            // Store job in state
-            {
-                let mut s = state.lock().await;
-                s.job_store.jobs.insert(job_id.clone(), FileOpJob {
-                    job_id: job_id.clone(),
-                    op_type,
-                    source_panel: source_panel_id,
-                    dest_panel: dest_panel_id,
-                    dest_path,
-                    files,
-                    conflict_policy,
-                    state: JobState::Running,
-                    progress: Default::default(),
-                    decision: None,
-                    error: None,
-                    background,
-                    paused: start_paused,
-                    handle,
-                    cancel_tx,
-                    pause_tx,
-                });
-            }
-
-            // Notify FE if the job started paused
-            if start_paused {
-                let _ = tx.send(ServerMessage::JobEvent {
-                    timestamp: now(),
-                    job_id: job_id.clone(),
-                    event: "Paused".to_string(),
-                    progress: None,
-                    decision: None,
-                    error: None,
-                }).await;
-            }
-        }
-
-        "ProvideJobDecision" => {
-            let job_id = args.get("jobId").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let decision = args.get("decision").and_then(|v| v.as_str()).unwrap_or("skip").to_string();
-
-            if let Some(sender) = decision_senders.get(&job_id) {
-                let _ = sender.send(decision).await;
-            }
-        }
-
-        "CancelJob" => {
-            let job_id = args.get("jobId").and_then(|v| v.as_str()).unwrap_or("").to_string();
-
-            let mut s = state.lock().await;
-            if let Some(job) = s.job_store.jobs.get_mut(&job_id) {
-                let _ = job.cancel_tx.send(true);
-                job.state = JobState::Cancelled;
-            }
-            drop(s);
-            decision_senders.remove(&job_id);
-        }
-
-        "PauseJob" => {
-            let job_id = args.get("jobId").and_then(|v| v.as_str()).unwrap_or("").to_string();
-
-            let mut s = state.lock().await;
-            if let Some(job) = s.job_store.jobs.get_mut(&job_id) {
-                if job.state == JobState::Running {
-                    let _ = job.pause_tx.send(true);
-                    job.paused = true;
-                }
-            }
-            drop(s);
-            let _ = tx.send(ServerMessage::JobEvent {
-                timestamp: now(),
-                job_id: job_id.clone(),
-                event: "Paused".to_string(),
-                progress: None,
-                decision: None,
-                error: None,
-            }).await;
-        }
-
-        "ResumeJob" => {
-            let job_id = args.get("jobId").and_then(|v| v.as_str()).unwrap_or("").to_string();
-
-            let mut s = state.lock().await;
-            if let Some(job) = s.job_store.jobs.get_mut(&job_id) {
-                if job.paused {
-                    let _ = job.pause_tx.send(false);
-                    job.paused = false;
-                }
-            }
-            drop(s);
-            let _ = tx.send(ServerMessage::JobEvent {
-                timestamp: now(),
-                job_id: job_id.clone(),
-                event: "Resumed".to_string(),
-                progress: None,
-                decision: None,
-                error: None,
-            }).await;
-        }
-
-        "ViewFile" => {
-            let panel_id  = args.get("panelId").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let dir_path  = args.get("path").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let source_id = args.get("sourceId").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let filename  = args.get("filename").and_then(|v| v.as_str()).unwrap_or("").to_string();
-
-            let full_path = format!("{}/{}", dir_path.trim_end_matches('/'), filename);
-            let (is_local, file_size, file_server_port) = {
-                let s = state.lock().await;
-                let drv = s.drivers.get(&source_id);
-                (
-                    drv.map(|d| d.is_local()).unwrap_or(false),
-                    drv.and_then(|d| d.file_size(&full_path)),
-                    s.file_server_port,
-                )
-            };
-            let label = format!("viewer-{}", uuid::Uuid::new_v4());
-            let mut qs = format!(
-                "?viewer=1&path={}&source={}&name={}&label={}&panel={}",
-                url_encode(&full_path),
-                url_encode(&source_id),
-                url_encode(&filename),
-                url_encode(&label),
-                url_encode(&panel_id),
-            );
-            if is_local { qs.push_str("&local=1"); }
-            if let Some(sz) = file_size { qs.push_str(&format!("&size={sz}")); }
-            if file_server_port > 0 { qs.push_str(&format!("&fsport={file_server_port}")); }
-
-            let _ = tauri::WebviewWindowBuilder::new(
-                app_handle,
-                label,
-                tauri::WebviewUrl::App(qs.into()),
-            )
-            .title(format!("{filename} — fbro viewer"))
-            .inner_size(900.0, 700.0)
-            .resizable(true)
-            .devtools(true)
-            .background_color(tauri::webview::Color(13, 13, 13, 255)) // matches --bg: #0d0d0d
-            .build();
-        }
-
-        "EditFile" => {
-            let dir_path  = args.get("path").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let filename  = args.get("filename").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let full_path = format!("{}/{}", dir_path.trim_end_matches('/'), filename);
-
-            let result = {
-                let s = state.lock().await;
-                s.platform.open_in_editor(&full_path)
-            };
-
-            match result {
-                Ok(_) => {}
-                Err(e) => {
-                    let _ = tx.send(ServerMessage::Error {
-                        timestamp: now(),
-                        code: "NO_EDITOR".to_string(),
-                        message: e,
-                        recoverable: true,
-                        extra: Some(serde_json::json!({ "path": full_path })),
-                    }).await;
-                }
-            }
-        }
-
-        "RenameFile" => {
-            let source_panel = args.get("sourcePanel").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let source_path  = args.get("sourcePath").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let dest_name    = args.get("destName").and_then(|v| v.as_str()).unwrap_or("").to_string();
-
-            // Rename only — no path separators allowed.
-            if dest_name.contains('/') || dest_name.contains('\\') {
-                let _ = tx.send(ServerMessage::Error {
-                    timestamp: now(),
-                    code: "RENAME_FAILED".to_string(),
-                    message: "Rename cannot change directories — use Move (F6) for that.".to_string(),
-                    recoverable: true,
-                    extra: None,
-                }).await;
-                return;
-            }
-            let source_dir = std::path::Path::new(&source_path)
-                .parent()
-                .map(|p| p.to_string_lossy().to_string())
-                .unwrap_or_default();
-            let dest_path = format!("{}/{}", source_dir.trim_end_matches('/'), dest_name);
-
-            let (driver, rename_selection_names) = {
-                let s = state.lock().await;
-                let driver = s.panels.get(&source_panel)
-                    .and_then(|p| s.drivers.get(&p.source_id).cloned());
-                let names = selected_names_for(&s, &source_panel);
-                (driver, names)
-            };
-
-            if let Some(driver) = driver {
-                let src = source_path.clone();
-                let dst = dest_path.clone();
-                let result = tokio::task::spawn_blocking(move || driver.try_rename(&src, &dst)).await;
-                match result {
-                    Ok(Ok(true)) => {
-                        let _ = tx.send(ServerMessage::RenameOk {
-                            timestamp: now(),
-                            panel_id: source_panel.clone(),
-                        }).await;
-                        rescan_panel(&source_panel, state, &tx, scan_handles, Some(dest_name.clone()), rename_selection_names, dir_size_queue).await;
-                    }
-                    Ok(Ok(false)) => {
-                        let _ = tx.send(ServerMessage::Error {
-                            timestamp: now(),
-                            code: "RENAME_FAILED".to_string(),
-                            message: "Cannot rename across filesystems — use Move (F6) instead.".to_string(),
-                            recoverable: true,
-                            extra: None,
-                        }).await;
-                    }
-                    Ok(Err(e)) => {
-                        let _ = tx.send(ServerMessage::Error {
-                            timestamp: now(),
-                            code: "RENAME_FAILED".to_string(),
-                            message: e.to_string(),
-                            recoverable: true,
-                            extra: None,
-                        }).await;
-                    }
-                    Err(_) => {}
-                }
-            }
-        }
-
-        "MakeDir" => {
-            let source_panel = args.get("sourcePanel").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let dir_path     = args.get("dirPath").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let name         = args.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-
-            let full_path = format!("{}/{}", dir_path.trim_end_matches('/'), name);
-
-            let (driver, mkdir_selection_names) = {
-                let s = state.lock().await;
-                let driver = s.panels.get(&source_panel)
-                    .and_then(|p| s.drivers.get(&p.source_id).cloned());
-                let names = selected_names_for(&s, &source_panel);
-                (driver, names)
-            };
-
-            if let Some(driver) = driver {
-                let p = full_path.clone();
-                let result = tokio::task::spawn_blocking(move || driver.create_dir_all(&p)).await;
-                match result {
-                    Ok(Ok(())) => {
-                        let _ = tx.send(ServerMessage::MkdirOk {
-                            timestamp: now(),
-                            panel_id: source_panel.clone(),
-                        }).await;
-                        rescan_panel(&source_panel, state, &tx, scan_handles, Some(name), mkdir_selection_names, dir_size_queue).await;
-                    }
-                    Ok(Err(e)) => {
-                        let _ = tx.send(ServerMessage::Error {
-                            timestamp: now(),
-                            code: "MKDIR_FAILED".to_string(),
-                            message: e.to_string(),
-                            recoverable: true,
-                            extra: None,
-                        }).await;
-                    }
-                    Err(_) => {}
-                }
-            }
-        }
-
-        "CloseViewerWindow" => {
-            let label = args.get("label").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            use tauri::Manager;
-            if let Some(win) = app_handle.get_webview_window(&label) {
-                let _ = win.close();
-            }
-        }
-
-        "ViewerNavigate" => {
-            let panel_id  = args.get("panelId").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let direction = args.get("direction").and_then(|v| v.as_str()).unwrap_or("next").to_string();
-
-            let nav_result = {
-                let mut s = state.lock().await;
-                if let Some(panel) = s.panels.get_mut(&panel_id) {
-                    let new_cursor = if direction == "prev" {
-                        if panel.cursor == 0 { 0 } else { panel.cursor - 1 }
-                    } else {
-                        (panel.cursor + 1).min(panel.entries.len().saturating_sub(1))
-                    };
-                    panel.cursor = new_cursor;
-                    let source_id = panel.source_id.clone();
-                    let dir_path = panel.path.clone();
-                    let entry_info = panel.entries.get(new_cursor).map(|e| {
-                        (e.name.clone(), e.kind.clone())
-                    });
-                    Some((new_cursor, source_id, dir_path, entry_info))
-                } else {
-                    None
-                }
-            };
-
-            if let Some((new_cursor, source_id, dir_path, entry_info)) = nav_result {
-                if let Some((name, kind)) = entry_info {
-                    if kind == "file" {
-                        let full_path = format!("{}/{}", dir_path.trim_end_matches('/'), name);
-                        let drv = state.lock().await.drivers.get(&source_id).cloned();
-                        let (file_size, is_local) = drv.as_ref()
-                            .map(|d| (d.file_size(&full_path), d.is_local()))
-                            .unwrap_or((None, false));
-                        let _ = tx.send(ServerMessage::ViewerFileChanged {
-                            timestamp: now(),
-                            path: full_path,
-                            filename: name,
-                            source_id,
-                            panel_id: panel_id.clone(),
-                            file_size,
-                            is_local,
-                        }).await;
-                    } else {
-                        let _ = tx.send(ServerMessage::Error {
-                            timestamp: now(),
-                            code: "NOT_A_FILE".to_string(),
-                            message: format!("{name} is a {kind}, not a file"),
-                            recoverable: true,
-                            extra: None,
-                        }).await;
-                    }
-                }
-                // Broadcast cursor update to all GUI clients
-                let cursor_patch = ServerMessage::StatePatch {
-                    timestamp: now(),
-                    domain: "panels".to_string(),
-                    entity_id: Some(panel_id),
-                    version: 0,
-                    patch: serde_json::json!({ "cursor": new_cursor }),
-                };
-                let s = state.lock().await;
-                for gui_tx in &s.gui_senders {
-                    let _ = gui_tx.send(cursor_patch.clone()).await;
-                }
-            }
-        }
-
-        "ReadFileChunk" => {
-            let path      = args.get("path").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let source_id = args.get("sourceId").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let offset    = args.get("offset").and_then(|v| v.as_u64()).unwrap_or(0);
-            let size      = args.get("size").and_then(|v| v.as_u64()).unwrap_or(4096) as usize;
-
-            let (driver, file_size) = {
-                let s = state.lock().await;
-                let drv = s.drivers.get(&source_id).cloned();
-                let sz  = drv.as_ref().and_then(|d| d.file_size(&path));
-                (drv, sz)
-            };
-
-            if let Some(driver) = driver {
-                let path_clone = path.clone();
-                let result = tokio::task::spawn_blocking(move || {
-                    driver.read_chunk(&path_clone, offset, size)
-                }).await;
-
-                match result {
-                    Ok(Ok(bytes)) => {
-                        let eof = bytes.len() < size
-                            || file_size.map_or(false, |fs| offset + bytes.len() as u64 >= fs);
-                        let data: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
-                        let _ = tx.send(ServerMessage::FileChunk {
-                            timestamp: now(),
-                            path,
-                            offset,
-                            data,
-                            eof,
-                            file_size,
-                        }).await;
-                    }
-                    Ok(Err(e)) => {
-                        let _ = tx.send(ServerMessage::Error {
-                            timestamp: now(),
-                            code: "READ_CHUNK_FAILED".to_string(),
-                            message: e.to_string(),
-                            recoverable: true,
-                            extra: None,
-                        }).await;
-                    }
-                    Err(_) => {}
-                }
-            }
-        }
-
-        "Quit" => {
-            let active_jobs = {
-                let s = state.lock().await;
-                s.job_store.jobs.values().filter(|j| {
-                    j.state == JobState::Running || j.state == JobState::AwaitingDecision
-                }).count()
-            };
-            if active_jobs == 0 {
-                save_session(state).await;
-                std::process::exit(0);
-            } else {
-                let _ = tx.send(ServerMessage::QuitConfirmRequired {
-                    timestamp: now(),
-                    active_jobs,
-                }).await;
-            }
-        }
-
-        "ConfirmQuit" => {
-            save_session(state).await;
-            std::process::exit(0);
-        }
-
-        unknown => {
-            eprintln!("[fbro] Unknown intent: {unknown}");
-        }
-    }
-}
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
-async fn navigate_to(
-    panel_id: &str,
-    new_path: &str,
-    cursor_hint: Option<String>,
-    state: &SharedState,
-    tx: &mpsc::Sender<ServerMessage>,
-    scan_handles: &mut HashMap<String, ScanHandle>,
-    dir_size_queue: &Arc<DirSizeQueue>,
-    watcher_cmd_tx: &mpsc::Sender<WatcherCommand>,
-) {
-    // Abort any running scan for this panel
-    if let Some(h) = scan_handles.remove(panel_id) {
-        h.abort();
-    }
-
-    let (sort, filter, version, driver) = {
-        let mut s = state.lock().await;
-        let (source_id, sort, filter, version) = if let Some(panel) = s.panels.get_mut(panel_id) {
-            let sid = panel.source_id.clone();
-            panel.path = new_path.to_string();
-            panel.entries.clear();
-            panel.cursor = 0;
-            panel.selection.clear();
-            panel.status = PanelStatus::Loading;
-            panel.windowed = false;
-            panel.window_start = 0;
-            panel.window_count = 0;
-            panel.filter = None; // filter is ephemeral — cleared on navigation
-            panel.version += 1;
-            (sid, panel.sort.clone(), None, panel.version)
-        } else {
-            return;
-        };
-        let driver = s.drivers.get(&source_id).cloned().unwrap();
-        (sort, filter, version, driver)
-    };
-
-    // Inform FE of the path change + cleared entries
-    let _ = tx
-        .send(ServerMessage::StatePatch {
-            timestamp: now(),
-            domain: "panels".to_string(),
-            entity_id: Some(panel_id.to_string()),
-            version,
-            patch: serde_json::json!({
-                "path": new_path,
-                "entries": [],
-                "cursor": 0,
-                "selection": [],
-                "status": "loading",
-                "filter": null,
-                "totalCount": null,
-                "totalSize": null,
-                "windowStart": null
-            }),
-        })
-        .await;
-
-    let _ = watcher_cmd_tx.send(WatcherCommand::Watch {
-        panel_id: panel_id.to_string(),
-        path: PathBuf::from(new_path),
-    }).await;
-
-    let h = spawn_scan(panel_id.to_string(), new_path.to_string(), sort, filter, version, tx.clone(), driver, cursor_hint, None, Arc::clone(state), Arc::clone(dir_size_queue));
-    scan_handles.insert(panel_id.to_string(), h);
-}
-
-fn selected_names_for(state_guard: &crate::state::AppState, panel_id: &str) -> Option<Vec<String>> {
-    state_guard.panels.get(panel_id).map(|panel| {
-        panel.selection.iter()
-            .filter_map(|&i| panel.entries.get(i).map(|e| e.name.clone()))
-            .collect()
-    })
-}
-
-async fn rescan_panel(
-    panel_id: &str,
-    state: &SharedState,
-    tx: &mpsc::Sender<ServerMessage>,
-    scan_handles: &mut HashMap<String, ScanHandle>,
-    cursor_hint: Option<String>,
-    selection_names: Option<Vec<String>>,
-    dir_size_queue: &Arc<DirSizeQueue>,
-) {
-    if let Some(h) = scan_handles.remove(panel_id) {
-        h.abort();
-    }
-    let (path, sort, filter, version, driver, source_id) = {
-        let mut s = state.lock().await;
-        let (source_id, path, sort, filter, version) = if let Some(panel) = s.panels.get_mut(panel_id) {
-            let sid = panel.source_id.clone();
-            panel.entries.clear();
-            panel.selection.clear();
-            panel.status = PanelStatus::Loading;
-            panel.windowed = false;
-            panel.window_start = 0;
-            panel.window_count = 0;
-            panel.version += 1;
-            (sid, panel.path.clone(), panel.sort.clone(), panel.filter.clone(), panel.version)
-        } else {
-            return;
-        };
-        let driver = s.drivers.get(&source_id).cloned().unwrap();
-        (path, sort, filter, version, driver, source_id)
-    };
-    let _ = tx
-        .send(ServerMessage::StatePatch {
-            timestamp: now(),
-            domain: "panels".to_string(),
-            entity_id: Some(panel_id.to_string()),
-            version,
-            patch: serde_json::json!({
-                "path": path,
-                "sourceId": source_id,
-                "entries": [],
-                "cursor": 0,
-                "selection": [],
-                "status": "loading",
-                "sort": { "by": sort.by, "order": sort.order },
-                "totalCount": null,
-                "windowStart": null
-            }),
-        })
-        .await;
-    let h = spawn_scan(panel_id.to_string(), path, sort, filter, version, tx.clone(), driver, cursor_hint, selection_names, Arc::clone(state), Arc::clone(dir_size_queue));
-    scan_handles.insert(panel_id.to_string(), h);
-}
-
-/// Like rescan_panel, but doesn't clear FE entries or show "loading" state.
-/// Uses atomic scan to swap entries in one shot — no flash.
-async fn quiet_rescan_panel(
-    panel_id: &str,
-    state: &SharedState,
-    tx: &mpsc::Sender<ServerMessage>,
-    scan_handles: &mut HashMap<String, ScanHandle>,
-    selection_names: Option<Vec<String>>,
-    dir_size_queue: &Arc<DirSizeQueue>,
-) {
-    if let Some(h) = scan_handles.remove(panel_id) {
-        h.abort();
-    }
-    let (path, sort, filter, version, driver) = {
-        let mut s = state.lock().await;
-        let (sid, path, sort, filter, version) = if let Some(panel) = s.panels.get_mut(panel_id) {
-            let sid = panel.source_id.clone();
-            panel.version += 1;
-            (sid, panel.path.clone(), panel.sort.clone(), panel.filter.clone(), panel.version)
-        } else {
-            return;
-        };
-        let driver = s.drivers.get(&sid).cloned().unwrap();
-        (path, sort, filter, version, driver)
-    };
-    // No StatePatch sent here — FE keeps showing current entries
-    let cursor_hint = {
-        let s = state.lock().await;
-        s.panels.get(panel_id).and_then(|p| p.entries.get(p.cursor).map(|e| e.name.clone()))
-    };
-    let h = spawn_scan_atomic(panel_id.to_string(), path, sort, filter, version, tx.clone(), driver, cursor_hint, selection_names, Arc::clone(state), Arc::clone(dir_size_queue));
-    scan_handles.insert(panel_id.to_string(), h);
-}
-
-async fn navigate_up_safe(
-    panel_id: &str,
-    state: &SharedState,
-    tx: &mpsc::Sender<ServerMessage>,
-    scan_handles: &mut HashMap<String, ScanHandle>,
-    watcher_cmd_tx: &mpsc::Sender<WatcherCommand>,
-    dir_size_queue: &Arc<DirSizeQueue>,
-) {
-    let (current_path, home) = {
-        let s = state.lock().await;
-        let path = s.panels.get(panel_id).map(|p| p.path.clone()).unwrap_or_default();
-        (path, s.platform.home_dir())
-    };
-    let mut target = PathBuf::from(&current_path);
-    loop {
-        match target.parent() {
-            Some(parent) if parent != target => {
-                if parent.is_dir() {
-                    let dir_name = target.file_name().and_then(|n| n.to_str()).map(String::from);
-                    navigate_to(panel_id, &parent.to_string_lossy(), dir_name, state, tx, scan_handles, dir_size_queue, watcher_cmd_tx).await;
-                    return;
-                }
-                target = parent.to_path_buf();
-            }
-            _ => break,
-        }
-    }
-    navigate_to(panel_id, &home, None, state, tx, scan_handles, dir_size_queue, watcher_cmd_tx).await;
-}
-
-async fn handle_volumes_changed(
-    volumes: Vec<crate::platform::VolumeInfo>,
-    state: &SharedState,
-    tx: &mpsc::Sender<ServerMessage>,
-    scan_handles: &mut HashMap<String, ScanHandle>,
-    watcher_cmd_tx: &mpsc::Sender<WatcherCommand>,
-    dir_size_queue: &Arc<DirSizeQueue>,
-) {
-    let (removed, sources_json, panels_to_migrate) = {
-        let mut s = state.lock().await;
-        let removed = s.rebuild_sources(volumes);
-
-        // Check if any panel references a removed source
-        let panels_to_migrate: Vec<String> = s.panels.iter()
-            .filter(|(_, p)| removed.contains(&p.source_id))
-            .map(|(id, _)| id.clone())
-            .collect();
-
-        // Migrate affected panels to the first available source
-        if !panels_to_migrate.is_empty() {
-            let fallback_source = s.sources.keys().next().cloned().unwrap_or_default();
-            let home = s.platform.home_dir();
-            for pid in &panels_to_migrate {
-                if let Some(panel) = s.panels.get_mut(pid) {
-                    panel.source_id = fallback_source.clone();
-                    panel.path = home.clone();
-                }
-            }
-        }
-
-        // Build sources JSON for the patch
-        let sources_json: Vec<serde_json::Value> = s.sources.values().map(|src| {
-            let space = if src.mounted { s.platform.disk_space(&src.root_path) } else { None };
-            serde_json::json!({
-                "id": src.id,
-                "name": src.name,
-                "kind": src.kind,
-                "supports": src.supports,
-                "capabilities": {
-                    "readOnly": false,
-                    "supportsStreaming": true,
-                    "supportsJobs": true
-                },
-                "rootPath": src.root_path,
-                "mounted": src.mounted,
-                "freeBytes": space.map(|(f, _)| f),
-                "totalBytes": space.map(|(_, t)| t)
-            })
-        }).collect();
-
-        (removed, sources_json, panels_to_migrate)
-    };
-
-    // Broadcast updated sources
-    let _ = tx.send(ServerMessage::StatePatch {
-        timestamp: now(),
-        domain: "sources".to_string(),
-        entity_id: None,
-        version: 0,
-        patch: serde_json::json!({ "sources": sources_json }),
-    }).await;
-
-    // Rescan migrated panels
-    for pid in panels_to_migrate {
-        rescan_panel(&pid, state, tx, scan_handles, None, None, dir_size_queue).await;
-        let path = state.lock().await.panels.get(&pid).map(|p| p.path.clone());
-        if let Some(path) = path {
-            let _ = watcher_cmd_tx.send(WatcherCommand::Watch {
-                panel_id: pid,
-                path: PathBuf::from(&path),
-            }).await;
-        }
-    }
-
-    if !removed.is_empty() {
-        eprintln!("[fbro] Volumes changed: removed {:?}", removed);
-    }
-}
-
-async fn send_window(
-    panel_id: &str,
-    requested_start: usize,
-    count: usize,
-    state: &SharedState,
-    tx: &mpsc::Sender<ServerMessage>,
-) {
-    let (window_entries, window_start, total, version) = {
-        let mut s = state.lock().await;
-        let panel = match s.panels.get_mut(panel_id) {
-            Some(p) if p.windowed => p,
-            _ => return,
-        };
-        let total = panel.entries.len();
-        let start = requested_start.min(total.saturating_sub(1));
-        let end = (start + count).min(total);
-        let entries: Vec<&crate::ws::protocol::EntrySchema> = panel.entries[start..end].iter().collect();
-        let json_entries = serde_json::json!(entries);
-        panel.window_start = start;
-        panel.window_count = end - start;
-        panel.version += 1;
-        (json_entries, start, total, panel.version)
-    };
-    let _ = tx
-        .send(ServerMessage::StatePatch {
-            timestamp: now(),
-            domain: "panels".to_string(),
-            entity_id: Some(panel_id.to_string()),
-            version,
-            patch: serde_json::json!({
-                "totalCount": total,
-                "windowStart": window_start,
-                "windowEntries": window_entries,
-            }),
-        })
-        .await;
-}
-
-fn url_encode(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() * 2);
-    for byte in s.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9'
-            | b'-' | b'_' | b'.' | b'/' | b'~' | b':' => out.push(byte as char),
-            b' ' => out.push_str("%20"),
-            b => out.push_str(&format!("%{b:02X}")),
-        }
-    }
-    out
-}
-
-async fn save_session(state: &SharedState) {
-    let s = state.lock().await;
-    let panels = s.panels.iter()
-        .map(|(id, panel)| (id.clone(), PanelSession { path: panel.path.clone() }))
-        .collect();
-    crate::persistence::save(&SessionState { panels });
-}
-
-async fn resolve_panel_id(scope: &serde_json::Value, state: &SharedState) -> String {
-    if scope == "focused-panel" || scope.as_str() == Some("focused-panel") {
-        state.lock().await.focus.clone()
-    } else if let Some(id) = scope.as_str() {
-        id.to_string()
-    } else {
-        state.lock().await.focus.clone()
-    }
-}
-
-fn spawn_scan(
-    panel_id: String,
-    path: String,
-    sort: crate::ws::protocol::SortSpec,
-    filter: Option<crate::ws::protocol::FilterSpec>,
-    version_base: u64,
-    tx: mpsc::Sender<ServerMessage>,
-    driver: Arc<dyn VfsDriver>,
-    cursor_hint: Option<String>,
-    selection_names: Option<Vec<String>>,
-    state: SharedState,
-    dir_size_queue: Arc<DirSizeQueue>,
-) -> ScanHandle {
-    let handle = tokio::spawn(run_scan(panel_id, path, sort, filter, version_base, tx, driver, cursor_hint, selection_names, state, dir_size_queue, false));
-    ScanHandle { handle }
-}
-
-fn spawn_scan_atomic(
-    panel_id: String,
-    path: String,
-    sort: crate::ws::protocol::SortSpec,
-    filter: Option<crate::ws::protocol::FilterSpec>,
-    version_base: u64,
-    tx: mpsc::Sender<ServerMessage>,
-    driver: Arc<dyn VfsDriver>,
-    cursor_hint: Option<String>,
-    selection_names: Option<Vec<String>>,
-    state: SharedState,
-    dir_size_queue: Arc<DirSizeQueue>,
-) -> ScanHandle {
-    let handle = tokio::spawn(run_scan(panel_id, path, sort, filter, version_base, tx, driver, cursor_hint, selection_names, state, dir_size_queue, true));
-    ScanHandle { handle }
-}
-
-async fn update_panel_from_patch(
-    state: &SharedState,
-    panel_id: &str,
-    patch: &serde_json::Value,
-    version: u64,
-) {
-    let mut s = state.lock().await;
-    if let Some(panel) = s.panels.get_mut(panel_id) {
-        // In windowed mode (Mode B), scan.rs already stored entries directly
-        // in state.  Skip appendEntries / entry overwrites for windowed patches
-        // (identified by the presence of "totalCount" or "windowEntries").
-        let is_window_patch = patch.get("totalCount").is_some() || patch.get("windowEntries").is_some();
-
-        if !is_window_patch {
-            if let Some(entries) = patch.get("appendEntries").and_then(|v| v.as_array()) {
-                for e in entries {
-                    panel.entries.push(crate::ws::protocol::EntrySchema {
-                        name: e["name"].as_str().unwrap_or("").to_string(),
-                        kind: e["kind"].as_str().unwrap_or("file").to_string(),
-                        size: e["size"].as_u64(),
-                        mtime: e["mtime"].as_str().map(String::from),
-                        btime: e["btime"].as_str().map(String::from),
-                        permissions: e["permissions"].as_str().map(String::from),
-                        icon_name: e["iconName"].as_str().map(String::from),
-                    });
-                }
-            }
-        }
-        if let Some(status) = patch.get("status").and_then(|v| v.as_str()) {
-            panel.status = match status {
-                "ready" => PanelStatus::Ready,
-                "error" => PanelStatus::Error(String::new()),
-                _ => PanelStatus::Loading,
-            };
-        }
-        if let Some(cursor) = patch.get("cursor").and_then(|v| v.as_u64()) {
-            panel.cursor = cursor as usize;
-        }
-        if let Some(sel) = patch.get("selection").and_then(|v| v.as_array()) {
-            panel.selection = sel.iter()
-                .filter_map(|v| v.as_u64().map(|n| n as usize))
-                .collect();
-        }
-        // Track window position from send_window patches
-        if let Some(ws) = patch.get("windowStart").and_then(|v| v.as_u64()) {
-            panel.window_start = ws as usize;
-        }
-        panel.version = version;
+        let mut state_guard = state.lock().await;
+        state_guard.gui_senders.retain(|sender| !sender.is_closed());
     }
 }
 
@@ -2258,11 +354,14 @@ where
     <S as futures_util::Sink<Message>>::Error: std::fmt::Debug,
 {
     match serde_json::to_string(msg) {
-        Ok(text) => ws_tx.send(Message::Text(text.into())).await.map_err(|e| {
-            eprintln!("[fbro] Send error: {e:?}");
-        }),
-        Err(e) => {
-            eprintln!("[fbro] Serialization error: {e}");
+        Ok(text) => ws_tx
+            .send(Message::Text(text.into()))
+            .await
+            .map_err(|error| {
+                eprintln!("[fbro] Send error: {error:?}");
+            }),
+        Err(error) => {
+            eprintln!("[fbro] Serialization error: {error}");
             Err(())
         }
     }
