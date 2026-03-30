@@ -84,6 +84,23 @@ export interface FileOpFile {
   kind: string;
 }
 
+export interface KeyBinding {
+  key: string;
+  shift?: boolean;
+  ctrl?: boolean;
+  alt?: boolean;
+  meta?: boolean;
+}
+
+export interface InteractiveCommand {
+  id: string;
+  category: string;
+  title: string;
+  bindings: KeyBinding[];
+  defaultBindings: KeyBinding[];
+  intentName?: string;
+}
+
 export interface JobStart {
   jobId: string;
   opType: string;
@@ -150,6 +167,7 @@ export interface StateSnapshotMessage {
     sources?: Source[];
     focus?: string;
     jobs?: Job[];
+    commands?: InteractiveCommand[];
   };
 }
 

@@ -1,3 +1,4 @@
+pub mod commands;
 pub mod intents;
 pub mod protocol;
 pub mod runtime;

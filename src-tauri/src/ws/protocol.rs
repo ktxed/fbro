@@ -107,6 +107,7 @@ pub struct StateDomains {
     pub sources: Vec<SourceSchema>,
     pub focus: String,
     pub jobs: Vec<serde_json::Value>,
+    pub commands: Vec<InteractiveCommandSchema>,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -191,6 +192,32 @@ pub struct SourceCapabilities {
     pub supports_streaming: bool,
     #[serde(rename = "supportsJobs")]
     pub supports_jobs: bool,
+}
+
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct KeyBindingSchema {
+    pub key: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub shift: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub ctrl: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub alt: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub meta: bool,
+}
+
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct InteractiveCommandSchema {
+    pub id: String,
+    pub category: String,
+    pub title: String,
+    pub bindings: Vec<KeyBindingSchema>,
+    pub default_bindings: Vec<KeyBindingSchema>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub intent_name: Option<String>,
 }
 
 #[derive(Serialize, Clone, Debug)]

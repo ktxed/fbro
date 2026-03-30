@@ -11,6 +11,7 @@ use crate::persistence::{PanelSession, SessionState};
 use crate::state::{AppState, Panel, PanelStatus, SharedState};
 use crate::vfs::VfsDriver;
 use crate::watcher::WatcherCommand;
+use crate::ws::commands::build_interactive_commands;
 use crate::ws::protocol::{
     now, FileOpFileSchema, LayoutDomain, PanelSnapshot, ServerMessage, SourceCapabilities,
     SourceSchema, StateDomains,
@@ -47,6 +48,7 @@ pub(crate) fn build_state_snapshot(state: &AppState) -> ServerMessage {
             sources: build_sources(state),
             focus: state.focus.clone(),
             jobs: vec![],
+            commands: build_interactive_commands(),
         },
     }
 }

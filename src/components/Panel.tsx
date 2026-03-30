@@ -1,8 +1,12 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import type { PanelState, VFSEntry, Source } from "../ws/types";
 import type { WsClient } from "../ws/client";
-import { modKey } from "../utils/platform";
-import { useAppState } from "../store";
+import {
+  executeCommand,
+  findMatchingCommand,
+  PANEL_SHORTCUT_COMMAND_IDS,
+} from "../commands/interactive";
+import { useAppDispatch, useAppState } from "../store";
 
 const ROW_HEIGHT = 22;
 
@@ -151,6 +155,8 @@ function formatMtime(mtime: string | undefined): string {
 }
 
 export function Panel({ panelId, panel, isFocused, modalActive, client, sources, otherPanelId }: PanelProps) {
+  const appState = useAppState();
+  const dispatch = useAppDispatch();
   const listRef = useRef<HTMLDivElement>(null);
   const focusDivRef = useRef<HTMLDivElement>(null);
   const rightDrag = useRef({ active: false, everMoved: false, startRow: -1, mode: "select" as "select" | "deselect", preSelection: [] as number[] });
@@ -237,169 +243,32 @@ export function Panel({ panelId, panel, isFocused, modalActive, client, sources,
       e.preventDefault();
       return;
     }
-    switch (e.key) {
-      case "ArrowUp":
-        e.preventDefault();
-        if (e.metaKey) {
-          client.sendIntent("MoveCursorToEdge", "focused-panel", { edge: "first" });
-        } else if (e.shiftKey) {
-          client.sendIntent("MoveCursorWithSelect", "focused-panel", { direction: "up" });
-        } else {
-          client.sendIntent("MoveCursor", "focused-panel", { direction: "up" });
-        }
-        break;
-      case "ArrowDown":
-        e.preventDefault();
-        if (e.metaKey) {
-          client.sendIntent("MoveCursorToEdge", "focused-panel", { edge: "last" });
-        } else if (e.shiftKey) {
-          client.sendIntent("MoveCursorWithSelect", "focused-panel", { direction: "down" });
-        } else {
-          client.sendIntent("MoveCursor", "focused-panel", { direction: "down" });
-        }
-        break;
-      case " ": {
-        e.preventDefault();
-        if (e.shiftKey) {
-          // Shift+Space: calculate sizes for all folders in the panel, or only
-          // selected folders if the selection contains any.
-          const entriesToCalc = panel.selection.length > 0
-            ? panel.selection.map(i => isWindowed
-                ? (i >= windowStart && i < windowStart + panel.entries.length ? panel.entries[i - windowStart] : undefined)
-                : panel.entries[i])
-            : panel.entries;
-          for (const entry of entriesToCalc) {
-            if (!entry || entry.kind !== "directory") continue;
-            if (calcSet.has(entry.name)) {
-              client.sendIntent("CancelSizeCalculation", "focused-panel", { name: entry.name });
-            } else {
-              client.sendIntent("CalculateSize", "focused-panel", { name: entry.name });
-            }
-          }
-        } else {
-          // Space: if cursor is on a folder with no selection, toggle its size
-          // calculation; otherwise toggle selection.
-          const cursorEntry = isWindowed
-            ? (panel.cursor >= windowStart && panel.cursor < windowStart + panel.entries.length
-                ? panel.entries[panel.cursor - windowStart] : undefined)
-            : panel.entries[panel.cursor];
-          if (cursorEntry?.kind === "directory" && panel.selection.length === 0) {
-            if (calcSet.has(cursorEntry.name)) {
-              client.sendIntent("CancelSizeCalculation", "focused-panel", { name: cursorEntry.name });
-            } else {
-              client.sendIntent("CalculateSize", "focused-panel", { name: cursorEntry.name });
-            }
-          } else {
-            client.sendIntent("ToggleSelection", "focused-panel");
-          }
-        }
-        break;
-      }
-      case "a":
-      case "A":
-        if (modKey(e)) {
-          e.preventDefault();
-          if (e.shiftKey) {
-            client.sendIntent("ClearSelection", "focused-panel");
-          } else {
-            client.sendIntent("SelectAll", "focused-panel");
-          }
-        }
-        break;
-      case "i":
-        if (modKey(e)) {
-          e.preventDefault();
-          client.sendIntent("InvertSelection", "focused-panel");
-        }
-        break;
-      case "PageUp":
-      case "PageDown": {
-        e.preventDefault();
-        const list = listRef.current;
-        if (!list) break;
-        const pageSize = Math.max(1, Math.floor(list.clientHeight / ROW_HEIGHT));
-        const delta = e.key === "PageDown" ? pageSize : -pageSize;
-        client.sendIntent("MoveCursorBy", "focused-panel", { delta });
-        break;
-      }
-      case "Home":
-        e.preventDefault();
-        client.sendIntent("MoveCursorToEdge", "focused-panel", { edge: "first" });
-        break;
-      case "End":
-        e.preventDefault();
-        client.sendIntent("MoveCursorToEdge", "focused-panel", { edge: "last" });
-        break;
-      case "Enter": {
-        e.preventDefault();
-        // In windowed mode, the BE knows the cursor entry — just send OpenEntry/OpenFile
-        if (isWindowed) {
-          const localIdx = panel.cursor - windowStart;
-          const entry = panel.entries[localIdx];
-          if (entry && entry.kind !== "directory") {
-            client.sendIntent("OpenFile", "focused-panel");
-          } else {
-            client.sendIntent("OpenEntry", "focused-panel");
-          }
-        } else {
-          const entry = panel.entries[panel.cursor];
-          if (entry && entry.kind !== "directory") {
-            client.sendIntent("OpenFile", "focused-panel");
-          } else {
-            client.sendIntent("OpenEntry", "focused-panel");
-          }
-        }
-        break;
-      }
-      case "ArrowRight":
-        e.preventDefault();
-        client.sendIntent("OpenEntry", "focused-panel");
-        break;
-      case "Backspace":
-      case "ArrowLeft":
-        e.preventDefault();
-        client.sendIntent("NavigateUp", "focused-panel");
-        break;
-      case "F9":
-        e.preventDefault();
-        client.sendIntent("OpenTerminal", "focused-panel");
-        break;
-      case "Tab":
-        e.preventDefault();
-        if (e.ctrlKey || e.shiftKey) {
-          // Ctrl+Tab: next source, Shift+Tab / Ctrl+Shift+Tab: previous source
-          const sourceList = Object.values(sources);
-          if (sourceList.length > 1) {
-            const cur = sourceList.findIndex(s => s.id === panel.sourceId);
-            const next = e.shiftKey
-              ? (cur - 1 + sourceList.length) % sourceList.length
-              : (cur + 1) % sourceList.length;
-            client.sendIntent("NavigateToSource", panelId, { sourceId: sourceList[next].id });
-            setFilterOpen(false);
-          }
-        } else {
-          client.sendIntent("SwitchFocus", undefined, {
-            to: panelId === "left" ? "right" : "left",
-          });
-        }
-        break;
-      case "f":
-        if (!modKey(e)) {
-          e.preventDefault();
-          setFilterInput(panel.filter?.value ?? "");
+    const command = findMatchingCommand(appState.commands, PANEL_SHORTCUT_COMMAND_IDS, e.nativeEvent);
+    if (command) {
+      e.preventDefault();
+      e.stopPropagation();
+      executeCommand(command.id, {
+        state: appState,
+        dispatch,
+        client,
+        panelId,
+        panel,
+        sources,
+        otherPanelId,
+        onOpenFilter: (initialValue) => {
+          setFilterInput(initialValue);
           setFilterOpen(true);
-          setTimeout(() => filterInputRef.current?.focus(), 0);
-        }
-        break;
-      case "s":
-        if (!modKey(e) && otherPanelId) {
-          e.preventDefault();
-          client.sendIntent("NavigatePanelTo", undefined, {
-            panelId: otherPanelId,
-            path: panel.path,
-          });
-        }
-        break;
+          window.setTimeout(() => filterInputRef.current?.focus(), 0);
+        },
+        getPanelPageSize: () => {
+          const list = listRef.current;
+          return list ? Math.max(1, Math.floor(list.clientHeight / ROW_HEIGHT)) : 1;
+        },
+      });
+      if (command.id === "panel.source.next" || command.id === "panel.source.previous") {
+        setFilterOpen(false);
+      }
+      return;
     }
   }
 

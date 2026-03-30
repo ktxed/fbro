@@ -31,7 +31,7 @@ export function RenameModal({ rename, client }: RenameModalProps) {
     const dest = value.trim();
     if (submitting || !dest || dest === rename.filename) { close(); return; }
     if (dest.includes("/") || dest.includes("\\")) {
-      setLocalError("Rename cannot change directories — use Move (F6) for that.");
+      setLocalError("Rename cannot change directories — use Move for that.");
       return;
     }
     setLocalError(null);

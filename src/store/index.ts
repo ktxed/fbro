@@ -4,6 +4,7 @@ import type {
   Source,
   Job,
   BEMessage,
+  InteractiveCommand,
   StateSnapshotMessage,
   StatePatchMessage,
   JobStartedMessage,
@@ -62,6 +63,7 @@ export interface AppState {
   sources: Record<string, Source>;
   focus: string;
   jobs: Record<string, Job>;
+  commands: Record<string, InteractiveCommand>;
   pendingOp: PendingOp | null;
   activeJobId: string | null;
   pendingQuit: { activeJobs: number } | null;
@@ -81,6 +83,7 @@ const initialState: AppState = {
   sources: {},
   focus: "",
   jobs: {},
+  commands: {},
   pendingOp: null,
   activeJobId: null,
   pendingQuit: null,
@@ -139,6 +142,11 @@ function applySnapshot(state: AppState, msg: StateSnapshotMessage): AppState {
     const jobs: Record<string, Job> = {};
     for (const j of domains.jobs) jobs[j.jobId] = j;
     next.jobs = jobs;
+  }
+  if (domains.commands) {
+    const commands: Record<string, InteractiveCommand> = {};
+    for (const command of domains.commands) commands[command.id] = command;
+    next.commands = commands;
   }
   return next;
 }

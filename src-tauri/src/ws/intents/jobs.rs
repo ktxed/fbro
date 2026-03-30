@@ -404,7 +404,7 @@ async fn rename_file(args: &Value, ctx: &mut IntentContext<'_>) {
             .send(ServerMessage::Error {
                 timestamp: now(),
                 code: "RENAME_FAILED".to_string(),
-                message: "Rename cannot change directories — use Move (F6) for that.".to_string(),
+                message: "Rename cannot change directories — use Move for that.".to_string(),
                 recoverable: true,
                 extra: None,
             })
@@ -460,7 +460,7 @@ async fn rename_file(args: &Value, ctx: &mut IntentContext<'_>) {
                     .send(ServerMessage::Error {
                         timestamp: now(),
                         code: "RENAME_FAILED".to_string(),
-                        message: "Cannot rename across filesystems — use Move (F6) instead."
+                        message: "Cannot rename across filesystems — use Move instead."
                             .to_string(),
                         recoverable: true,
                         extra: None,
