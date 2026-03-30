@@ -76,6 +76,8 @@ impl Platform for MacOSPlatform {
                 id: "vol-root".to_string(),
                 name: "/".to_string(),
                 root_path: "/".to_string(),
+                mounted: true,
+                device_path: None,
             }];
         }
 
