@@ -20,7 +20,9 @@ pub trait VfsDriver: Send + Sync {
     /// Returns true if this driver accesses the local native filesystem,
     /// meaning paths it exposes are valid `file://` URLs in the webview.
     /// Remote drivers (SFTP, S3, etc.) must return false.
-    fn is_local(&self) -> bool { false }
+    fn is_local(&self) -> bool {
+        false
+    }
 
     // ── Listing & navigation ────────────────────────────────────────────────
 
@@ -94,54 +96,56 @@ pub fn icon_name_for_entry(name: &str, kind: &VfsKind) -> Option<String> {
         VfsKind::File => {}
     }
     let ext = name.rsplit('.').next()?.to_lowercase();
-    Some(match ext.as_str() {
-        // Languages
-        "rs"                            => "text-rust",
-        "py" | "pyw"                    => "text-x-python",
-        "js" | "mjs" | "cjs"           => "application-javascript",
-        "ts" | "tsx" | "jsx"            => "application-javascript",
-        "java"                          => "text-x-java",
-        "c" | "h"                       => "text-x-csrc",
-        "cpp" | "cc" | "cxx" | "hpp"   => "text-x-c++src",
-        "go"                            => "text-x-go",
-        "rb"                            => "application-x-ruby",
-        "sh" | "bash" | "zsh" | "fish" => "application-x-shellscript",
-        "kt" | "kts"                    => "text-x-kotlin",
-        "hs"                            => "text-x-haskell",
-        "r"                             => "text-x-r",
-        // Markup & text
-        "html" | "htm"                  => "text-html",
-        "css"                           => "text-css",
-        "md" | "markdown"               => "text-markdown",
-        "txt" | "log"                   => "text-x-generic",
-        "json" | "yaml" | "yml" | "toml" | "xml" | "csv" | "ini" | "cfg" => "text-x-generic",
-        // Documents
-        "pdf"                           => "application-pdf",
-        "doc" | "docx"                  => "application-msword",
-        "xls" | "xlsx"                  => "application-vnd.ms-excel",
-        "ppt" | "pptx"                  => "application-vnd.ms-powerpoint",
-        // Images
-        "png" | "jpg" | "jpeg" | "gif" | "bmp" | "webp" | "svg" | "ico" | "tiff" | "tif"
-                                        => "image-x-generic",
-        // Audio
-        "mp3" | "flac" | "ogg" | "wav" | "aac" | "m4a" | "wma" | "opus"
-                                        => "audio-x-generic",
-        // Video
-        "mp4" | "mkv" | "avi" | "mov" | "wmv" | "flv" | "webm"
-                                        => "video-x-generic",
-        // Archives
-        "zip"                           => "application-zip",
-        "tar"                           => "application-x-tar",
-        "gz" | "bz2" | "xz" | "zst"   => "application-x-tar",
-        "7z"                            => "application-7z",
-        "rar"                           => "application-x-rar",
-        "deb"                           => "application-vnd.debian.binary-package",
-        // Executables & objects
-        "exe" | "bin" | "appimage"      => "application-x-executable",
-        "so" | "dylib" | "dll" | "o"   => "application-x-object",
-        // Fallback
-        _                               => "text-x-generic",
-    }.to_string())
+    Some(
+        match ext.as_str() {
+            // Languages
+            "rs" => "text-rust",
+            "py" | "pyw" => "text-x-python",
+            "js" | "mjs" | "cjs" => "application-javascript",
+            "ts" | "tsx" | "jsx" => "application-javascript",
+            "java" => "text-x-java",
+            "c" | "h" => "text-x-csrc",
+            "cpp" | "cc" | "cxx" | "hpp" => "text-x-c++src",
+            "go" => "text-x-go",
+            "rb" => "application-x-ruby",
+            "sh" | "bash" | "zsh" | "fish" => "application-x-shellscript",
+            "kt" | "kts" => "text-x-kotlin",
+            "hs" => "text-x-haskell",
+            "r" => "text-x-r",
+            // Markup & text
+            "html" | "htm" => "text-html",
+            "css" => "text-css",
+            "md" | "markdown" => "text-markdown",
+            "txt" | "log" => "text-x-generic",
+            "json" | "yaml" | "yml" | "toml" | "xml" | "csv" | "ini" | "cfg" => "text-x-generic",
+            // Documents
+            "pdf" => "application-pdf",
+            "doc" | "docx" => "application-msword",
+            "xls" | "xlsx" => "application-vnd.ms-excel",
+            "ppt" | "pptx" => "application-vnd.ms-powerpoint",
+            // Images
+            "png" | "jpg" | "jpeg" | "gif" | "bmp" | "webp" | "svg" | "ico" | "tiff" | "tif" => {
+                "image-x-generic"
+            }
+            // Audio
+            "mp3" | "flac" | "ogg" | "wav" | "aac" | "m4a" | "wma" | "opus" => "audio-x-generic",
+            // Video
+            "mp4" | "mkv" | "avi" | "mov" | "wmv" | "flv" | "webm" => "video-x-generic",
+            // Archives
+            "zip" => "application-zip",
+            "tar" => "application-x-tar",
+            "gz" | "bz2" | "xz" | "zst" => "application-x-tar",
+            "7z" => "application-7z",
+            "rar" => "application-x-rar",
+            "deb" => "application-vnd.debian.binary-package",
+            // Executables & objects
+            "exe" | "bin" | "appimage" => "application-x-executable",
+            "so" | "dylib" | "dll" | "o" => "application-x-object",
+            // Fallback
+            _ => "text-x-generic",
+        }
+        .to_string(),
+    )
 }
 
 #[derive(Clone, Debug, PartialEq)]

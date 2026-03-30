@@ -34,7 +34,14 @@ fn format_permissions(meta: &fs::Metadata) -> Option<String> {
 
 #[cfg(not(unix))]
 fn format_permissions(meta: &fs::Metadata) -> Option<String> {
-    Some(if meta.permissions().readonly() { "r-" } else { "rw" }.to_string())
+    Some(
+        if meta.permissions().readonly() {
+            "r-"
+        } else {
+            "rw"
+        }
+        .to_string(),
+    )
 }
 
 fn map_io_err(path: &str, e: std::io::Error) -> VfsError {
@@ -47,7 +54,9 @@ fn map_io_err(path: &str, e: std::io::Error) -> VfsError {
 }
 
 impl VfsDriver for LocalFsDriver {
-    fn is_local(&self) -> bool { true }
+    fn is_local(&self) -> bool {
+        true
+    }
 
     // ── Listing & navigation ────────────────────────────────────────────────
 
@@ -64,26 +73,43 @@ impl VfsDriver for LocalFsDriver {
         // Parts with * are anchored full-match; parts without * are substring searches.
         // Matching is case-insensitive.
         let filter_re: Option<regex::Regex> = filter.and_then(|f| {
-            if f.mode != "glob" || f.value.trim().is_empty() { return None; }
-            let regex_str = f.value.split('|').map(|part| {
-                let part = part.trim();
-                if part.contains('*') {
-                    // Glob: anchor and convert * to .*
-                    let escaped: String = part.chars().map(|ch| match ch {
-                        '*' => ".*".to_string(),
-                        '.' | '+' | '?' | '(' | ')' | '[' | ']' | '{' | '}' | '^' | '$' | '\\' => format!("\\{ch}"),
-                        _ => ch.to_string(),
-                    }).collect();
-                    format!("^{escaped}$")
-                } else {
-                    // Substring: escape only, match anywhere
-                    part.chars().map(|ch| match ch {
-                        '.' | '+' | '?' | '(' | ')' | '[' | ']' | '{' | '}' | '^' | '$' | '|' | '\\' | '*' => format!("\\{ch}"),
-                        _ => ch.to_string(),
-                    }).collect()
-                }
-            }).collect::<Vec<_>>().join("|");
-            regex::RegexBuilder::new(&regex_str).case_insensitive(true).build().ok()
+            if f.mode != "glob" || f.value.trim().is_empty() {
+                return None;
+            }
+            let regex_str = f
+                .value
+                .split('|')
+                .map(|part| {
+                    let part = part.trim();
+                    if part.contains('*') {
+                        // Glob: anchor and convert * to .*
+                        let escaped: String = part
+                            .chars()
+                            .map(|ch| match ch {
+                                '*' => ".*".to_string(),
+                                '.' | '+' | '?' | '(' | ')' | '[' | ']' | '{' | '}' | '^' | '$'
+                                | '\\' => format!("\\{ch}"),
+                                _ => ch.to_string(),
+                            })
+                            .collect();
+                        format!("^{escaped}$")
+                    } else {
+                        // Substring: escape only, match anywhere
+                        part.chars()
+                            .map(|ch| match ch {
+                                '.' | '+' | '?' | '(' | ')' | '[' | ']' | '{' | '}' | '^' | '$'
+                                | '|' | '\\' | '*' => format!("\\{ch}"),
+                                _ => ch.to_string(),
+                            })
+                            .collect()
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("|");
+            regex::RegexBuilder::new(&regex_str)
+                .case_insensitive(true)
+                .build()
+                .ok()
         });
 
         let mut entries: Vec<VfsEntry> = Vec::new();
@@ -97,7 +123,9 @@ impl VfsDriver for LocalFsDriver {
             let name = entry.file_name().to_string_lossy().to_string();
 
             if let Some(re) = &filter_re {
-                if !re.is_match(&name) { continue; }
+                if !re.is_match(&name) {
+                    continue;
+                }
             }
 
             let meta = entry.metadata().ok();
@@ -121,7 +149,15 @@ impl VfsDriver for LocalFsDriver {
             };
 
             let icon_name = icon_name_for_entry(&name, &kind);
-            entries.push(VfsEntry { name, kind, size, mtime, btime, permissions, icon_name });
+            entries.push(VfsEntry {
+                name,
+                kind,
+                size,
+                mtime,
+                btime,
+                permissions,
+                icon_name,
+            });
         }
 
         entries.sort_by(|a, b| {
@@ -135,13 +171,20 @@ impl VfsDriver for LocalFsDriver {
                 "date" => a.mtime.cmp(&b.mtime),
                 "kind" => {
                     let ext = |e: &VfsEntry| -> String {
-                        e.name.rfind('.').map(|i| e.name[i+1..].to_lowercase()).unwrap_or_default()
+                        e.name
+                            .rfind('.')
+                            .map(|i| e.name[i + 1..].to_lowercase())
+                            .unwrap_or_default()
                     };
                     ext(a).cmp(&ext(b))
                 }
                 _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
             };
-            if sort.order == "desc" { ord.reverse() } else { ord }
+            if sort.order == "desc" {
+                ord.reverse()
+            } else {
+                ord
+            }
         });
 
         Ok(entries)
@@ -152,7 +195,9 @@ impl VfsDriver for LocalFsDriver {
     }
 
     fn parent_path(&self, path: &str) -> Option<String> {
-        Path::new(path).parent().map(|p| normalize_path(p.to_path_buf()))
+        Path::new(path)
+            .parent()
+            .map(|p| normalize_path(p.to_path_buf()))
     }
 
     // ── File I/O ────────────────────────────────────────────────────────────
@@ -189,7 +234,8 @@ impl VfsDriver for LocalFsDriver {
 
     fn read_chunk(&self, path: &str, offset: u64, size: usize) -> Result<Vec<u8>, VfsError> {
         let mut file = fs::File::open(path).map_err(|e| map_io_err(path, e))?;
-        file.seek(SeekFrom::Start(offset)).map_err(|e| map_io_err(path, e))?;
+        file.seek(SeekFrom::Start(offset))
+            .map_err(|e| map_io_err(path, e))?;
         let mut buf = vec![0u8; size];
         let n = file.read(&mut buf).map_err(|e| map_io_err(path, e))?;
         buf.truncate(n);
@@ -224,9 +270,13 @@ impl VfsDriver for LocalFsDriver {
                 // Cross-device move — not an error, caller falls back to copy + delete
                 let is_cross_device = {
                     #[cfg(windows)]
-                    { e.raw_os_error() == Some(17) } // ERROR_NOT_SAME_DEVICE
+                    {
+                        e.raw_os_error() == Some(17)
+                    } // ERROR_NOT_SAME_DEVICE
                     #[cfg(not(windows))]
-                    { e.raw_os_error() == Some(18) } // EXDEV
+                    {
+                        e.raw_os_error() == Some(18)
+                    } // EXDEV
                 };
                 if is_cross_device {
                     Ok(false)

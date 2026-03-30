@@ -79,7 +79,11 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn new_default(platform: Arc<dyn Platform>, initial_paths: HashMap<String, String>, file_server_port: u16) -> Self {
+    pub fn new_default(
+        platform: Arc<dyn Platform>,
+        initial_paths: HashMap<String, String>,
+        file_server_port: u16,
+    ) -> Self {
         let home = platform.home_dir();
 
         // Validate a saved path; fall back to home if it is no longer a directory.
@@ -170,8 +174,8 @@ impl AppState {
         #[cfg(unix)]
         let is_spy = std::env::var("FBRO_SPY").is_ok();
         #[cfg(unix)]
-        let sock_path = std::env::var("FBRO_SPY_SOCK")
-            .unwrap_or_else(|_| "/tmp/fbro-spy.sock".to_string());
+        let sock_path =
+            std::env::var("FBRO_SPY_SOCK").unwrap_or_else(|_| "/tmp/fbro-spy.sock".to_string());
 
         let mut sources = HashMap::new();
         let mut drivers: HashMap<String, Arc<dyn VfsDriver>> = HashMap::new();
@@ -181,7 +185,11 @@ impl AppState {
                 id: vol.id.clone(),
                 name: vol.name,
                 kind: "filesystem".to_string(),
-                supports: if vol.mounted { supports.clone() } else { vec![] },
+                supports: if vol.mounted {
+                    supports.clone()
+                } else {
+                    vec![]
+                },
                 root_path: vol.root_path,
                 mounted: vol.mounted,
                 device_path: vol.device_path,
@@ -230,8 +238,8 @@ impl AppState {
         #[cfg(unix)]
         let is_spy = std::env::var("FBRO_SPY").is_ok();
         #[cfg(unix)]
-        let sock_path = std::env::var("FBRO_SPY_SOCK")
-            .unwrap_or_else(|_| "/tmp/fbro-spy.sock".to_string());
+        let sock_path =
+            std::env::var("FBRO_SPY_SOCK").unwrap_or_else(|_| "/tmp/fbro-spy.sock".to_string());
 
         let new_ids: HashSet<String> = volumes.iter().map(|v| v.id.clone()).collect();
         let old_ids: HashSet<String> = self.sources.keys().cloned().collect();
@@ -277,7 +285,11 @@ impl AppState {
                     id: vol.id.clone(),
                     name: vol.name,
                     kind: "filesystem".to_string(),
-                    supports: if vol.mounted { supports.clone() } else { vec![] },
+                    supports: if vol.mounted {
+                        supports.clone()
+                    } else {
+                        vec![]
+                    },
                     root_path: vol.root_path,
                     mounted: vol.mounted,
                     device_path: vol.device_path,

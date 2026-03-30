@@ -1,3 +1,4 @@
+use crate::platform::{self, Platform};
 /// Minimal HTTP file server for the viewer and icon serving.
 ///
 /// On Linux, WebKitGTK hands <video> URLs to GStreamer for playback.
@@ -12,7 +13,6 @@
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::Arc;
-use crate::platform::{self, Platform};
 
 pub fn start(plat: Arc<dyn Platform>) -> u16 {
     let listener = TcpListener::bind("127.0.0.1:0").expect("file server bind");
@@ -122,10 +122,9 @@ fn percent_decode(s: &str) -> String {
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] == b'%' && i + 2 < bytes.len() {
-            if let Ok(b) = u8::from_str_radix(
-                std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap_or(""),
-                16,
-            ) {
+            if let Ok(b) =
+                u8::from_str_radix(std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap_or(""), 16)
+            {
                 out.push(b);
                 i += 3;
                 continue;

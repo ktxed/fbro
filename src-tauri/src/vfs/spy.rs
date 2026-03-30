@@ -44,16 +44,20 @@ impl SpyFsDriver {
             .map_err(|e| VfsError::IOError(format!("spy serialize: {e}")))?;
         msg.push('\n');
 
-        let mut writer = stream.try_clone()
+        let mut writer = stream
+            .try_clone()
             .map_err(|e| VfsError::IOError(format!("spy clone: {e}")))?;
-        writer.write_all(msg.as_bytes())
+        writer
+            .write_all(msg.as_bytes())
             .map_err(|e| VfsError::IOError(format!("spy write: {e}")))?;
-        writer.flush()
+        writer
+            .flush()
             .map_err(|e| VfsError::IOError(format!("spy flush: {e}")))?;
 
         let mut reader = BufReader::new(stream);
         let mut line = String::new();
-        reader.read_line(&mut line)
+        reader
+            .read_line(&mut line)
             .map_err(|e| VfsError::IOError(format!("spy read: {e}")))?;
 
         let resp: serde_json::Value = serde_json::from_str(line.trim())
@@ -61,13 +65,16 @@ impl SpyFsDriver {
 
         match resp.get("action").and_then(|v| v.as_str()) {
             Some("approve") => {
-                let delay = resp.get("chunk_delay_ms")
+                let delay = resp
+                    .get("chunk_delay_ms")
                     .and_then(|v| v.as_u64())
                     .unwrap_or(0);
                 Ok(delay)
             }
             Some("deny") => Err(VfsError::PermissionDenied(format!("lfs-spy denied: {op}"))),
-            other => Err(VfsError::IOError(format!("spy unexpected action: {other:?}"))),
+            other => Err(VfsError::IOError(format!(
+                "spy unexpected action: {other:?}"
+            ))),
         }
     }
 }
@@ -91,11 +98,18 @@ impl<R: Read + Send> Read for DelayedReader<R> {
 // ─── VfsDriver impl ───────────────────────────────────────────────────────────
 
 impl VfsDriver for SpyFsDriver {
-    fn is_local(&self) -> bool { self.inner.is_local() }
+    fn is_local(&self) -> bool {
+        self.inner.is_local()
+    }
 
     // ── Pass-through (non-mutating) ──────────────────────────────────────────
 
-    fn list(&self, path: &str, sort: &SortSpec, filter: Option<&FilterSpec>) -> Result<Vec<VfsEntry>, VfsError> {
+    fn list(
+        &self,
+        path: &str,
+        sort: &SortSpec,
+        filter: Option<&FilterSpec>,
+    ) -> Result<Vec<VfsEntry>, VfsError> {
         self.inner.list(path, sort, filter)
     }
 

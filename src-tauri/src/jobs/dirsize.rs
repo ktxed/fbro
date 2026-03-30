@@ -26,18 +26,27 @@ pub struct DirSizeCache {
 
 impl DirSizeCache {
     fn new() -> Self {
-        Self { entries: HashMap::new() }
+        Self {
+            entries: HashMap::new(),
+        }
     }
 
     /// Returns the cached size if the entry exists and has not expired.
     pub fn get(&self, path: &str) -> Option<u64> {
-        self.entries.get(path)
+        self.entries
+            .get(path)
             .filter(|e| e.computed_at.elapsed() < CACHE_TTL)
             .map(|e| e.size)
     }
 
     fn insert(&mut self, path: String, size: u64) {
-        self.entries.insert(path, CacheEntry { size, computed_at: Instant::now() });
+        self.entries.insert(
+            path,
+            CacheEntry {
+                size,
+                computed_at: Instant::now(),
+            },
+        );
     }
 
     /// Remove an entry so the next calculation starts fresh.
@@ -126,23 +135,29 @@ impl DirSizeQueue {
 
             // Check if cancelled while waiting in queue
             if *cancel_rx.borrow() {
-                active.lock().await.remove(&(panel_id.clone(), entry_name.clone()));
+                active
+                    .lock()
+                    .await
+                    .remove(&(panel_id.clone(), entry_name.clone()));
                 patch_remove_calculating(&state, &tx, &panel_id, &entry_name).await;
                 return;
             }
 
             let path = full_path.clone();
             let cancel_clone = cancel_rx.clone();
-            let result = tokio::task::spawn_blocking(move || {
-                calculate_dir_size(&path, &cancel_clone)
-            })
-            .await;
+            let result =
+                tokio::task::spawn_blocking(move || calculate_dir_size(&path, &cancel_clone)).await;
 
-            active.lock().await.remove(&(panel_id.clone(), entry_name.clone()));
+            active
+                .lock()
+                .await
+                .remove(&(panel_id.clone(), entry_name.clone()));
 
             match result {
                 Ok(Some(size)) => {
-                    eprintln!("[dirsize] finished: panel={panel_id} entry={entry_name} size={size}");
+                    eprintln!(
+                        "[dirsize] finished: panel={panel_id} entry={entry_name} size={size}"
+                    );
                     let mut s = state.lock().await;
                     if let Some(panel) = s.panels.get_mut(&panel_id) {
                         if let Some(e) = panel.entries.iter_mut().find(|e| e.name == entry_name) {

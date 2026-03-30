@@ -22,10 +22,9 @@ fn percent_decode(s: &str) -> String {
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] == b'%' && i + 2 < bytes.len() {
-            if let Ok(b) = u8::from_str_radix(
-                std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap_or(""),
-                16,
-            ) {
+            if let Ok(b) =
+                u8::from_str_radix(std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap_or(""), 16)
+            {
                 out.push(b);
                 i += 3;
                 continue;
@@ -46,7 +45,9 @@ fn parse_range(header: &str, total: u64) -> Option<(u64, u64)> {
     } else {
         end_str.parse::<u64>().ok()?.min(total.saturating_sub(1))
     };
-    if start > end { return None; }
+    if start > end {
+        return None;
+    }
     Some((start, end))
 }
 
@@ -63,21 +64,21 @@ fn read_file_range(path: &str, start: u64, length: usize) -> std::io::Result<Vec
 fn mime_for_path(path: &str) -> &'static str {
     let ext = path.rsplit('.').next().unwrap_or("").to_lowercase();
     match ext.as_str() {
-        "png"  => "image/png",
+        "png" => "image/png",
         "jpg" | "jpeg" => "image/jpeg",
-        "gif"  => "image/gif",
+        "gif" => "image/gif",
         "webp" => "image/webp",
-        "svg"  => "image/svg+xml",
-        "bmp"  => "image/bmp",
-        "ico"  => "image/x-icon",
+        "svg" => "image/svg+xml",
+        "bmp" => "image/bmp",
+        "ico" => "image/x-icon",
         "avif" => "image/avif",
-        "mp4"  => "video/mp4",
+        "mp4" => "video/mp4",
         "webm" => "video/webm",
-        "ogv"  => "video/ogg",
-        "mkv"  => "video/x-matroska",
-        "mov"  => "video/quicktime",
-        "pdf"  => "application/pdf",
-        _      => "application/octet-stream",
+        "ogv" => "video/ogg",
+        "mkv" => "video/x-matroska",
+        "mov" => "video/quicktime",
+        "pdf" => "application/pdf",
+        _ => "application/octet-stream",
     }
 }
 
@@ -115,7 +116,8 @@ fn main() {
             };
 
             // Check for Range header
-            let range = request.headers()
+            let range = request
+                .headers()
                 .get("Range")
                 .and_then(|v| v.to_str().ok())
                 .and_then(|s| parse_range(s, total));
@@ -170,14 +172,24 @@ fn main() {
                     let _ = window.set_icon(tauri::include_image!("icons/128x128.png"));
                 }
                 let session = persistence::load();
-                let initial_paths = session.panels.into_iter()
+                let initial_paths = session
+                    .panels
+                    .into_iter()
                     .map(|(id, p)| (id, p.path))
                     .collect();
-                let shared_state = Arc::new(Mutex::new(AppState::new_default(platform, initial_paths, file_server_port)));
+                let shared_state = Arc::new(Mutex::new(AppState::new_default(
+                    platform,
+                    initial_paths,
+                    file_server_port,
+                )));
                 let quit_notify = Arc::new(tokio::sync::Notify::new());
                 use tauri::Manager;
                 app.manage(Arc::clone(&quit_notify));
-                tauri::async_runtime::spawn(ws::server::start(shared_state, app_handle, quit_notify));
+                tauri::async_runtime::spawn(ws::server::start(
+                    shared_state,
+                    app_handle,
+                    quit_notify,
+                ));
                 Ok(())
             }
         })

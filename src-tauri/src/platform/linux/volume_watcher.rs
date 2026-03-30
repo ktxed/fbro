@@ -42,7 +42,10 @@ impl VolumeWatcher for UDisks2Watcher {
 /// Try to create a UDisks2-backed watcher. Returns None if udisks2 is not available.
 pub async fn try_udisks2(platform: Arc<dyn Platform>) -> Option<UDisks2Watcher> {
     match UDisks2::new().await {
-        Ok(ud) => Some(UDisks2Watcher { udisks2: ud, platform }),
+        Ok(ud) => Some(UDisks2Watcher {
+            udisks2: ud,
+            platform,
+        }),
         Err(_) => None,
     }
 }

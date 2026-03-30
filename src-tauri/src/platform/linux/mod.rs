@@ -2,8 +2,8 @@ pub mod udisks2;
 pub mod volume_watcher;
 
 use super::{Platform, VolumeInfo};
-use std::process::Command;
 use libc;
+use std::process::Command;
 
 pub struct LinuxPlatform;
 
@@ -17,10 +17,12 @@ impl Platform for LinuxPlatform {
         let cpath = CString::new(path).ok()?;
         let mut stat: libc::statvfs = unsafe { std::mem::zeroed() };
         let ret = unsafe { libc::statvfs(cpath.as_ptr(), &mut stat) };
-        if ret != 0 { return None; }
+        if ret != 0 {
+            return None;
+        }
         let block_size = stat.f_frsize as u64;
         let total = stat.f_blocks as u64 * block_size;
-        let free  = stat.f_bavail as u64 * block_size; // bavail = available to unprivileged user
+        let free = stat.f_bavail as u64 * block_size; // bavail = available to unprivileged user
         Some((free, total))
     }
 
@@ -31,15 +33,15 @@ impl Platform for LinuxPlatform {
         }
         // (terminal, working-directory flag)
         let candidates: &[(&str, Option<&str>)] = &[
-            ("cosmic-term",     Some("--working-directory")),
-            ("gnome-terminal",  Some("--working-directory")),
-            ("xfce4-terminal",  Some("--working-directory")),
-            ("mate-terminal",   Some("--working-directory")),
-            ("tilix",           Some("--working-directory")),
-            ("kitty",           Some("--directory")),
-            ("alacritty",       Some("--working-directory")),
-            ("xterm",           None),
-            ("rxvt",            None),
+            ("cosmic-term", Some("--working-directory")),
+            ("gnome-terminal", Some("--working-directory")),
+            ("xfce4-terminal", Some("--working-directory")),
+            ("mate-terminal", Some("--working-directory")),
+            ("tilix", Some("--working-directory")),
+            ("kitty", Some("--directory")),
+            ("alacritty", Some("--working-directory")),
+            ("xterm", None),
+            ("rxvt", None),
         ];
         for (term, flag) in candidates {
             let mut cmd = Command::new(term);
@@ -92,8 +94,8 @@ impl Platform for LinuxPlatform {
     fn list_volumes(&self) -> Vec<VolumeInfo> {
         const FALLBACK: &str = "/";
         const WHITELIST: &[&str] = &[
-            "ext2", "ext3", "ext4", "btrfs", "xfs", "zfs", "vfat", "exfat",
-            "ntfs", "ntfs3", "f2fs", "jfs", "hfsplus", "fuseblk", "nfs", "nfs4", "cifs",
+            "ext2", "ext3", "ext4", "btrfs", "xfs", "zfs", "vfat", "exfat", "ntfs", "ntfs3",
+            "f2fs", "jfs", "hfsplus", "fuseblk", "nfs", "nfs4", "cifs",
         ];
 
         let contents = match std::fs::read_to_string("/proc/mounts") {
@@ -132,7 +134,8 @@ impl Platform for LinuxPlatform {
                 ("vol-root".to_string(), "/".to_string())
             } else {
                 let id = format!("vol{}", mountpoint.replace('/', "-"));
-                let name = mountpoint.trim_end_matches('/')
+                let name = mountpoint
+                    .trim_end_matches('/')
                     .rsplit('/')
                     .next()
                     .unwrap_or(mountpoint)

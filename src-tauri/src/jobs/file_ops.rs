@@ -5,9 +5,7 @@ use tokio::sync::{mpsc, watch};
 
 use crate::jobs::{ConflictPolicy, DecisionRx, FileOpEntry, FileOpType};
 use crate::vfs::VfsDriver;
-use crate::ws::protocol::{
-    now, ConflictDecisionSchema, FileOpProgressSchema, ServerMessage,
-};
+use crate::ws::protocol::{now, ConflictDecisionSchema, FileOpProgressSchema, ServerMessage};
 
 const COPY_BUF_SIZE: usize = 64 * 1024; // 64 KiB
 
@@ -67,8 +65,12 @@ pub async fn run_file_op(
 /// Block while paused. Returns `true` if the job was cancelled during the wait.
 fn wait_if_paused(pause_rx: &watch::Receiver<bool>, cancel_rx: &watch::Receiver<bool>) -> bool {
     loop {
-        if *cancel_rx.borrow() { return true; }
-        if !*pause_rx.borrow() { return false; }
+        if *cancel_rx.borrow() {
+            return true;
+        }
+        if !*pause_rx.borrow() {
+            return false;
+        }
         std::thread::sleep(std::time::Duration::from_millis(50));
     }
 }
@@ -128,8 +130,15 @@ fn run_file_op_blocking(
                                 total_bytes_completed += entry.size.unwrap_or(0);
                             }
                             send_progress_sync(
-                                tx, job_id, total_files, completed_files, None, 0, 0,
-                                total_bytes_total, total_bytes_completed,
+                                tx,
+                                job_id,
+                                total_files,
+                                completed_files,
+                                None,
+                                0,
+                                0,
+                                total_bytes_total,
+                                total_bytes_completed,
                             );
                             continue;
                         }
@@ -162,15 +171,27 @@ fn run_file_op_blocking(
                     // Check conflict
                     if dst_drv.exists(&dst_str) {
                         match resolve_conflict(
-                            conflict_policy, src, &dst_str, tx, job_id, decision_rx,
+                            conflict_policy,
+                            src,
+                            &dst_str,
+                            tx,
+                            job_id,
+                            decision_rx,
                         )? {
                             ConflictOutcome::Overwrite => { /* proceed */ }
                             ConflictOutcome::Skip => {
                                 total_bytes_completed += entry.size.unwrap_or(0);
                                 completed_files += 1;
                                 send_progress_sync(
-                                    tx, job_id, total_files, completed_files, None, 0, 0,
-                                    total_bytes_total, total_bytes_completed,
+                                    tx,
+                                    job_id,
+                                    total_files,
+                                    completed_files,
+                                    None,
+                                    0,
+                                    0,
+                                    total_bytes_total,
+                                    total_bytes_completed,
                                 );
                                 continue;
                             }
@@ -200,8 +221,15 @@ fn run_file_op_blocking(
                     total_bytes_completed += entry.size.unwrap_or(0);
                     completed_files += 1;
                     send_progress_sync(
-                        tx, job_id, total_files, completed_files, None, 0, 0,
-                        total_bytes_total, total_bytes_completed,
+                        tx,
+                        job_id,
+                        total_files,
+                        completed_files,
+                        None,
+                        0,
+                        0,
+                        total_bytes_total,
+                        total_bytes_completed,
                     );
                 }
 
@@ -219,23 +247,38 @@ fn run_file_op_blocking(
                 let src = &entry.source_path;
 
                 send_progress_sync(
-                    tx, job_id, total_files, completed_files,
-                    Some(entry.name.clone()), 0, 0,
-                    total_bytes_total, total_bytes_completed,
+                    tx,
+                    job_id,
+                    total_files,
+                    completed_files,
+                    Some(entry.name.clone()),
+                    0,
+                    0,
+                    total_bytes_total,
+                    total_bytes_completed,
                 );
 
                 if entry.kind == "directory" {
-                    src_driver.remove_dir_all(src)
+                    src_driver
+                        .remove_dir_all(src)
                         .map_err(|e| format!("Failed to delete {src}: {e}"))?;
                 } else {
-                    src_driver.remove_file(src)
+                    src_driver
+                        .remove_file(src)
                         .map_err(|e| format!("Failed to delete {src}: {e}"))?;
                 }
 
                 completed_files += 1;
                 send_progress_sync(
-                    tx, job_id, total_files, completed_files, None, 0, 0,
-                    total_bytes_total, total_bytes_completed,
+                    tx,
+                    job_id,
+                    total_files,
+                    completed_files,
+                    None,
+                    0,
+                    0,
+                    total_bytes_total,
+                    total_bytes_completed,
                 );
             }
         }
@@ -352,9 +395,15 @@ fn copy_file_with_progress(
 
         if copied % (256 * 1024) < COPY_BUF_SIZE as u64 || copied == file_size {
             send_progress_sync(
-                tx, job_id, total_files, completed_files,
-                Some(src_name.clone()), file_size, copied,
-                total_bytes_total, total_bytes_completed + copied,
+                tx,
+                job_id,
+                total_files,
+                completed_files,
+                Some(src_name.clone()),
+                file_size,
+                copied,
+                total_bytes_total,
+                total_bytes_completed + copied,
             );
         }
     }
@@ -403,10 +452,19 @@ fn copy_dir_recursive(
 
         if child.is_dir {
             copy_dir_recursive(
-                job_id, &child_src, &child_dst, conflict_policy,
-                tx, cancel_rx, pause_rx, total_files, completed_files,
-                total_bytes_total, total_bytes_completed,
-                src_driver, dst_driver,
+                job_id,
+                &child_src,
+                &child_dst,
+                conflict_policy,
+                tx,
+                cancel_rx,
+                pause_rx,
+                total_files,
+                completed_files,
+                total_bytes_total,
+                total_bytes_completed,
+                src_driver,
+                dst_driver,
             )?;
         } else {
             if dst_driver.exists(&child_dst) {
@@ -415,8 +473,15 @@ fn copy_dir_recursive(
                         *completed_files += 1;
                         *total_bytes_completed += child.size;
                         send_progress_sync(
-                            tx, job_id, *total_files, *completed_files, None, 0, 0,
-                            *total_bytes_total, *total_bytes_completed,
+                            tx,
+                            job_id,
+                            *total_files,
+                            *completed_files,
+                            None,
+                            0,
+                            0,
+                            *total_bytes_total,
+                            *total_bytes_completed,
                         );
                         continue;
                     }
@@ -427,17 +492,33 @@ fn copy_dir_recursive(
             }
 
             copy_file_with_progress(
-                job_id, &child_src, &child_dst, child.size,
-                tx, cancel_rx, pause_rx, *total_files, *completed_files,
-                *total_bytes_total, *total_bytes_completed,
-                src_driver, dst_driver,
+                job_id,
+                &child_src,
+                &child_dst,
+                child.size,
+                tx,
+                cancel_rx,
+                pause_rx,
+                *total_files,
+                *completed_files,
+                *total_bytes_total,
+                *total_bytes_completed,
+                src_driver,
+                dst_driver,
             )?;
 
             *completed_files += 1;
             *total_bytes_completed += child.size;
             send_progress_sync(
-                tx, job_id, *total_files, *completed_files, None, 0, 0,
-                *total_bytes_total, *total_bytes_completed,
+                tx,
+                job_id,
+                *total_files,
+                *completed_files,
+                None,
+                0,
+                0,
+                *total_bytes_total,
+                *total_bytes_completed,
             );
         }
     }
@@ -478,7 +559,14 @@ pub fn generate_dry_run_script(
                 let dp = dest_path.ok_or("No destination path for copy dry-run")?;
                 let dd = dst_driver.ok_or("No destination driver for copy dry-run")?;
                 let dst = dd.resolve_child(dp, &entry.name);
-                collect_cp_lines(&entry.source_path, &dst, &entry.kind, src_driver, dd, &mut lines);
+                collect_cp_lines(
+                    &entry.source_path,
+                    &dst,
+                    &entry.kind,
+                    src_driver,
+                    dd,
+                    &mut lines,
+                );
             }
             FileOpType::Move => {
                 let dp = dest_path.ok_or("No destination path for move dry-run")?;
@@ -490,8 +578,7 @@ pub fn generate_dry_run_script(
     }
 
     let content = lines.join("\n") + "\n";
-    std::fs::write(script_path, content)
-        .map_err(|e| format!("Failed to write script: {e}"))?;
+    std::fs::write(script_path, content).map_err(|e| format!("Failed to write script: {e}"))?;
 
     #[cfg(unix)]
     {
@@ -500,8 +587,7 @@ pub fn generate_dry_run_script(
             .map_err(|e| format!("Metadata error: {e}"))?
             .permissions();
         perms.set_mode(0o755);
-        std::fs::set_permissions(script_path, perms)
-            .map_err(|e| format!("chmod error: {e}"))?;
+        std::fs::set_permissions(script_path, perms).map_err(|e| format!("chmod error: {e}"))?;
     }
 
     Ok(())
@@ -541,7 +627,9 @@ fn collect_cp_lines(
                 let child_src = src_driver.resolve_child(src, &child.name);
                 let child_dst = dst_driver.resolve_child(dst, &child.name);
                 let child_kind = if child.is_dir { "directory" } else { "file" };
-                collect_cp_lines(&child_src, &child_dst, child_kind, src_driver, dst_driver, lines);
+                collect_cp_lines(
+                    &child_src, &child_dst, child_kind, src_driver, dst_driver, lines,
+                );
             }
         }
     } else {

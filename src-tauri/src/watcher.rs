@@ -61,17 +61,18 @@ async fn watcher_task(
     });
 
     // Create the filesystem watcher.
-    let mut watcher = match notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
-        if let Ok(event) = res {
-            let _ = sync_tx.send(event);
-        }
-    }) {
-        Ok(w) => w,
-        Err(e) => {
-            eprintln!("[fbro] Failed to create filesystem watcher: {e}");
-            return;
-        }
-    };
+    let mut watcher =
+        match notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
+            if let Ok(event) = res {
+                let _ = sync_tx.send(event);
+            }
+        }) {
+            Ok(w) => w,
+            Err(e) => {
+                eprintln!("[fbro] Failed to create filesystem watcher: {e}");
+                return;
+            }
+        };
 
     // panel_id → watched path
     let mut watched: HashMap<String, PathBuf> = HashMap::new();
@@ -209,7 +210,9 @@ async fn check_volumes(
     current.sort();
     if current != *prev_volumes {
         *prev_volumes = current;
-        let _ = action_tx.send(WatcherAction::VolumesChanged { volumes: vols }).await;
+        let _ = action_tx
+            .send(WatcherAction::VolumesChanged { volumes: vols })
+            .await;
     }
 }
 

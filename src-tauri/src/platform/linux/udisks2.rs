@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use tokio::sync::mpsc;
-use zbus::Connection;
 use zbus::zvariant::{ObjectPath, OwnedObjectPath, OwnedValue, Value};
+use zbus::Connection;
 
 use super::VolumeInfo;
 
@@ -15,8 +15,8 @@ const FS_IFACE: &str = "org.freedesktop.UDisks2.Filesystem";
 
 /// Filesystem types we care about (same whitelist as /proc/mounts path).
 const FS_WHITELIST: &[&str] = &[
-    "ext2", "ext3", "ext4", "btrfs", "xfs", "zfs", "vfat", "exfat",
-    "ntfs", "ntfs3", "f2fs", "jfs", "hfsplus", "fuseblk", "nfs", "nfs4", "cifs",
+    "ext2", "ext3", "ext4", "btrfs", "xfs", "zfs", "vfat", "exfat", "ntfs", "ntfs3", "f2fs", "jfs",
+    "hfsplus", "fuseblk", "nfs", "nfs4", "cifs",
 ];
 
 pub struct UDisks2 {
@@ -33,7 +33,10 @@ impl UDisks2 {
         let proxy = zbus::fdo::DBusProxy::new(&connection)
             .await
             .map_err(|e| format!("DBus proxy: {e}"))?;
-        let names = proxy.list_names().await.map_err(|e| format!("list names: {e}"))?;
+        let names = proxy
+            .list_names()
+            .await
+            .map_err(|e| format!("list names: {e}"))?;
         if !names.iter().any(|n| n.as_str() == UDISKS2_BUS) {
             return Err("udisks2 service not found on D-Bus".to_string());
         }
@@ -127,35 +130,25 @@ impl UDisks2 {
         }
 
         // Sort: mounted first, then by name
-        volumes.sort_by(|a, b| {
-            b.mounted.cmp(&a.mounted).then_with(|| a.name.cmp(&b.name))
-        });
+        volumes.sort_by(|a, b| b.mounted.cmp(&a.mounted).then_with(|| a.name.cmp(&b.name)));
 
         volumes
     }
 
     /// Mount a block device via udisks2. Returns the mount point on success.
     pub async fn mount(&self, object_path: &str) -> Result<String, String> {
-        let path = ObjectPath::try_from(object_path)
-            .map_err(|e| format!("invalid object path: {e}"))?;
+        let path =
+            ObjectPath::try_from(object_path).map_err(|e| format!("invalid object path: {e}"))?;
 
-        let proxy = zbus::Proxy::new(
-            &self.connection,
-            UDISKS2_BUS,
-            path,
-            FS_IFACE,
-        )
-        .await
-        .map_err(|e| format!("proxy creation failed: {e}"))?;
+        let proxy = zbus::Proxy::new(&self.connection, UDISKS2_BUS, path, FS_IFACE)
+            .await
+            .map_err(|e| format!("proxy creation failed: {e}"))?;
 
         let options: HashMap<&str, Value<'_>> = HashMap::new();
-        let reply: String = proxy
-            .call("Mount", &(options,))
-            .await
-            .map_err(|e| {
-                // Extract the human-readable D-Bus error message
-                format!("{e}")
-            })?;
+        let reply: String = proxy.call("Mount", &(options,)).await.map_err(|e| {
+            // Extract the human-readable D-Bus error message
+            format!("{e}")
+        })?;
 
         Ok(reply)
     }
@@ -223,7 +216,10 @@ impl UDisks2 {
 
             while let Some(Ok(msg)) = stream.next().await {
                 // Check if it's about the Filesystem interface
-                if let Ok(body) = msg.body().deserialize::<(String, HashMap<String, OwnedValue>, Vec<String>)>() {
+                if let Ok(body) = msg
+                    .body()
+                    .deserialize::<(String, HashMap<String, OwnedValue>, Vec<String>)>()
+                {
                     if body.0 == FS_IFACE {
                         let _ = tx2.send(()).await;
                     }
@@ -234,7 +230,10 @@ impl UDisks2 {
         rx
     }
 
-    async fn get_managed_objects(&self) -> Result<HashMap<OwnedObjectPath, HashMap<String, HashMap<String, OwnedValue>>>, zbus::Error> {
+    async fn get_managed_objects(
+        &self,
+    ) -> Result<HashMap<OwnedObjectPath, HashMap<String, HashMap<String, OwnedValue>>>, zbus::Error>
+    {
         let proxy = zbus::fdo::ObjectManagerProxy::builder(&self.connection)
             .destination(UDISKS2_BUS)?
             .path(UDISKS2_PATH)?
@@ -260,7 +259,9 @@ impl UDisks2 {
 // ── Property extraction helpers ─────────────────────────────────────────────
 
 fn prop_string(props: &HashMap<String, OwnedValue>, key: &str) -> Option<String> {
-    props.get(key).and_then(|v| <&str>::try_from(v).ok().map(|s| s.to_string()))
+    props
+        .get(key)
+        .and_then(|v| <&str>::try_from(v).ok().map(|s| s.to_string()))
 }
 
 fn prop_bool(props: &HashMap<String, OwnedValue>, key: &str) -> Option<bool> {
@@ -285,12 +286,14 @@ fn prop_byte_array_list(props: &HashMap<String, OwnedValue>, key: &str) -> Vec<S
             .iter()
             .filter_map(|item| {
                 if let Ok(inner) = <&zbus::zvariant::Array>::try_from(item) {
-                    let bytes: Vec<u8> = inner
-                        .iter()
-                        .filter_map(|b| u8::try_from(b).ok())
-                        .collect();
+                    let bytes: Vec<u8> =
+                        inner.iter().filter_map(|b| u8::try_from(b).ok()).collect();
                     // Strip trailing null byte
-                    let trimmed = if bytes.last() == Some(&0) { &bytes[..bytes.len() - 1] } else { &bytes };
+                    let trimmed = if bytes.last() == Some(&0) {
+                        &bytes[..bytes.len() - 1]
+                    } else {
+                        &bytes
+                    };
                     String::from_utf8(trimmed.to_vec()).ok()
                 } else {
                     None

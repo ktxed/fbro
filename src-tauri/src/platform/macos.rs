@@ -1,6 +1,6 @@
 use super::{Platform, VolumeInfo};
-use std::process::Command;
 use libc;
+use std::process::Command;
 
 pub struct MacOSPlatform;
 
@@ -18,15 +18,21 @@ impl Platform for MacOSPlatform {
         let cpath = CString::new(path).ok()?;
         let mut stat: libc::statvfs = unsafe { std::mem::zeroed() };
         let ret = unsafe { libc::statvfs(cpath.as_ptr(), &mut stat) };
-        if ret != 0 { return None; }
+        if ret != 0 {
+            return None;
+        }
         let block_size = stat.f_frsize as u64;
         let total = stat.f_blocks as u64 * block_size;
-        let free  = stat.f_bavail as u64 * block_size;
+        let free = stat.f_bavail as u64 * block_size;
         Some((free, total))
     }
 
     fn open_terminal(&self, path: &str) {
-        let _ = Command::new("open").arg("-a").arg("Terminal").arg(path).spawn();
+        let _ = Command::new("open")
+            .arg("-a")
+            .arg("Terminal")
+            .arg(path)
+            .spawn();
     }
 
     fn open_in_editor(&self, path: &str) -> Result<String, String> {
@@ -62,12 +68,23 @@ impl Platform for MacOSPlatform {
 
         let mut volumes: Vec<VolumeInfo> = dir
             .filter_map(|entry| entry.ok())
-            .filter(|entry| entry.file_type().map(|ft| ft.is_dir() || ft.is_symlink()).unwrap_or(false))
+            .filter(|entry| {
+                entry
+                    .file_type()
+                    .map(|ft| ft.is_dir() || ft.is_symlink())
+                    .unwrap_or(false)
+            })
             .filter_map(|entry| {
                 let name = entry.file_name().to_string_lossy().to_string();
                 let root_path = format!("/Volumes/{}", name);
                 let id = format!("vol-{}", name);
-                Some(VolumeInfo { id, name, root_path, mounted: true, device_path: None })
+                Some(VolumeInfo {
+                    id,
+                    name,
+                    root_path,
+                    mounted: true,
+                    device_path: None,
+                })
             })
             .collect();
 

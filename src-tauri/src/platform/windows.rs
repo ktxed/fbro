@@ -1,5 +1,5 @@
-use std::process::Command;
 use super::{Platform, VolumeInfo};
+use std::process::Command;
 
 pub struct WindowsPlatform;
 
@@ -37,9 +37,8 @@ impl Platform for WindowsPlatform {
     fn home_dir(&self) -> String {
         std::env::var("USERPROFILE")
             .or_else(|_| {
-                std::env::var("HOMEDRIVE").and_then(|d| {
-                    std::env::var("HOMEPATH").map(|p| format!("{d}{p}"))
-                })
+                std::env::var("HOMEDRIVE")
+                    .and_then(|d| std::env::var("HOMEPATH").map(|p| format!("{d}{p}")))
             })
             .map(|p| p.replace('\\', "/"))
             .unwrap_or_else(|_| "C:/Users".to_string())
@@ -50,10 +49,13 @@ impl Platform for WindowsPlatform {
         let mut free: u64 = 0;
         let mut total: u64 = 0;
         let mut total_free: u64 = 0;
-        let ret = unsafe {
-            GetDiskFreeSpaceExW(wide.as_ptr(), &mut free, &mut total, &mut total_free)
-        };
-        if ret != 0 { Some((free, total)) } else { None }
+        let ret =
+            unsafe { GetDiskFreeSpaceExW(wide.as_ptr(), &mut free, &mut total, &mut total_free) };
+        if ret != 0 {
+            Some((free, total))
+        } else {
+            None
+        }
     }
 
     fn open_file(&self, path: &str) {
