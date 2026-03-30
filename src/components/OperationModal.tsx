@@ -79,6 +79,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
   const [submitted, setSubmitted] = useState(false);
   const [dryMode, setDryMode] = useState(false);
   const [startPaused, setStartPaused] = useState(true);
+  const [applyToAll, setApplyToAll] = useState(false);
   const modalRef = useRef<HTMLDivElement>(null);
   const p = activeJob?.progress;
   const speed = useTransferSpeed(p?.currentFile, p?.currentFileBytesCopied ?? 0);
@@ -91,6 +92,12 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
   useEffect(() => {
     if (isVisible) modalRef.current?.focus();
   }, [isVisible]);
+
+  useEffect(() => {
+    if (activeJob?.state !== "AwaitingDecision") {
+      setApplyToAll(false);
+    }
+  }, [activeJob?.state, activeJob?.decision?.destination]);
 
   // Nothing to show
   if (!pendingDryRun && !pending && !activeJob) return null;
@@ -271,17 +278,31 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
               <div className="modal__decision">
                 <p>File already exists:</p>
                 <p className="modal__conflict-path">{activeJob.decision.destination}</p>
+                {activeJob.decision.supportsApplyToAll && (
+                  <div className="modal__option">
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={applyToAll}
+                        onChange={(e) => setApplyToAll(e.target.checked)}
+                      />
+                      {" "}Apply this choice to all conflicts
+                    </label>
+                  </div>
+                )}
                 <div className="modal__actions">
                   {activeJob.decision.options.map((opt) => (
                     <button
                       key={opt}
                       className="modal__btn"
-                      onClick={() =>
+                      onClick={() => {
                         client.sendIntent("ProvideJobDecision", undefined, {
                           jobId: activeJobId,
                           decision: opt,
-                        })
-                      }
+                          applyToAll: applyToAll && opt !== "cancel",
+                        });
+                        setApplyToAll(false);
+                      }}
                     >
                       {opt.charAt(0).toUpperCase() + opt.slice(1)}
                     </button>

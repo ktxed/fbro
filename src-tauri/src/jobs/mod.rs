@@ -36,6 +36,12 @@ pub enum ConflictPolicy {
     Overwrite,
 }
 
+#[derive(Clone, Debug)]
+pub struct DecisionResponse {
+    pub decision: String,
+    pub apply_to_all: bool,
+}
+
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum JobState {
@@ -88,6 +94,7 @@ pub struct FileOpJob {
     pub state: JobState,
     pub progress: FileOpProgress,
     pub decision: Option<ConflictDecision>,
+    pub apply_to_all_decision: Option<ConflictPolicy>,
     pub error: Option<String>,
     pub background: bool,
     pub paused: bool,
@@ -118,4 +125,4 @@ impl JobStore {
 }
 
 /// Channel type for the file_ops worker to receive decisions.
-pub type DecisionRx = mpsc::Receiver<String>;
+pub type DecisionRx = mpsc::Receiver<DecisionResponse>;

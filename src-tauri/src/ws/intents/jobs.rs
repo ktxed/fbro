@@ -4,7 +4,7 @@ use serde_json::Value;
 use tokio::sync::{mpsc, watch};
 
 use crate::jobs::file_ops::{generate_dry_run_script, run_file_op};
-use crate::jobs::{ConflictPolicy, FileOpEntry, FileOpJob, FileOpType, JobState};
+use crate::jobs::{ConflictPolicy, DecisionResponse, FileOpEntry, FileOpJob, FileOpType, JobState};
 use crate::ws::intents::{arg_bool, arg_str};
 use crate::ws::protocol::{now, FileOpFileSchema, JobStartSchema, ServerMessage};
 use crate::ws::runtime::{rescan_panel, selected_names_for, IntentContext};
@@ -49,6 +49,7 @@ impl StartFileOpArgs {
 struct JobDecisionArgs {
     job_id: String,
     decision: String,
+    apply_to_all: bool,
 }
 
 impl JobDecisionArgs {
@@ -56,6 +57,7 @@ impl JobDecisionArgs {
         Self {
             job_id: arg_str(args, "jobId").unwrap_or("").to_string(),
             decision: arg_str(args, "decision").unwrap_or("skip").to_string(),
+            apply_to_all: arg_bool(args, "applyToAll", false),
         }
     }
 }
@@ -241,7 +243,7 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
 
     let (cancel_tx, cancel_rx) = watch::channel(false);
     let (pause_tx, pause_rx) = watch::channel(parsed.start_paused);
-    let (decision_tx, decision_rx) = mpsc::channel::<String>(4);
+    let (decision_tx, decision_rx) = mpsc::channel::<DecisionResponse>(4);
 
     let job_id = {
         let mut state_guard = ctx.state.lock().await;
@@ -307,6 +309,7 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
                 state: JobState::Running,
                 progress: Default::default(),
                 decision: None,
+                apply_to_all_decision: None,
                 error: None,
                 background: parsed.background,
                 paused: parsed.start_paused,
@@ -334,8 +337,27 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
 
 async fn provide_job_decision(args: &Value, ctx: &mut IntentContext<'_>) {
     let parsed = JobDecisionArgs::from_args(args);
+    {
+        let mut state_guard = ctx.state.lock().await;
+        if let Some(job) = state_guard.job_store.jobs.get_mut(&parsed.job_id) {
+            job.apply_to_all_decision = if parsed.apply_to_all {
+                match parsed.decision.as_str() {
+                    "overwrite" => Some(ConflictPolicy::Overwrite),
+                    "skip" => Some(ConflictPolicy::Skip),
+                    _ => None,
+                }
+            } else {
+                None
+            };
+        }
+    }
     if let Some(sender) = ctx.decision_senders.get(&parsed.job_id) {
-        let _ = sender.send(parsed.decision).await;
+        let _ = sender
+            .send(DecisionResponse {
+                decision: parsed.decision,
+                apply_to_all: parsed.apply_to_all,
+            })
+            .await;
     }
 }
 

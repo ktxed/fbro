@@ -9,7 +9,7 @@ use tokio::sync::{mpsc, Notify};
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::jobs::dirsize::DirSizeQueue;
-use crate::jobs::ScanHandle;
+use crate::jobs::{DecisionResponse, ScanHandle};
 use crate::state::{PanelStatus, SharedState};
 use crate::watcher::{WatcherAction, WatcherCommand};
 use crate::ws::protocol::{now, ClientMessage, ServerMessage};
@@ -136,7 +136,7 @@ async fn handle_connection(
     }
 
     let mut scan_handles: HashMap<String, ScanHandle> = HashMap::new();
-    let mut decision_senders: HashMap<String, mpsc::Sender<String>> = HashMap::new();
+    let mut decision_senders: HashMap<String, mpsc::Sender<DecisionResponse>> = HashMap::new();
 
     for panel_id in &panel_ids {
         let (path, sort, filter, version_base, driver) = {

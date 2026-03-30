@@ -3,11 +3,12 @@ use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::{mpsc, watch};
 
-use crate::jobs::{ConflictPolicy, DecisionRx, FileOpEntry, FileOpType};
+use crate::jobs::{ConflictPolicy, DecisionResponse, DecisionRx, FileOpEntry, FileOpType};
 use crate::vfs::VfsDriver;
 use crate::ws::protocol::{now, ConflictDecisionSchema, FileOpProgressSchema, ServerMessage};
 
 const COPY_BUF_SIZE: usize = 64 * 1024; // 64 KiB
+const CANCELLED_ERR: &str = "Cancelled";
 
 /// Run a file operation (copy/move/delete) in a blocking context.
 /// Sends JobEvent messages for progress, decisions, completion, and errors.
@@ -54,7 +55,11 @@ pub async fn run_file_op(
             let _ = tx_event(&tx, &job_id, "Completed", None, None, None).await;
         }
         Ok(Err(err)) => {
-            let _ = tx_event(&tx, &job_id, "Failed", None, None, Some(err)).await;
+            if err == CANCELLED_ERR {
+                let _ = tx_event(&tx, &job_id, "Cancelled", None, None, None).await;
+            } else {
+                let _ = tx_event(&tx, &job_id, "Failed", None, None, Some(err)).await;
+            }
         }
         Err(_) => {
             let _ = tx_event(&tx, &job_id, "Cancelled", None, None, None).await;
@@ -101,6 +106,10 @@ fn run_file_op_blocking(
 
     let mut completed_files = 0usize;
     let mut total_bytes_completed: u64 = 0;
+    let mut apply_to_all = apply_all_outcome(match conflict_policy {
+        ConflictPolicy::Ask => None,
+        other => Some(other),
+    });
 
     // For move: check if source and dest share the same driver (ptr equality).
     // If they do, try_rename may succeed as an O(1) operation.
@@ -119,8 +128,10 @@ fn run_file_op_blocking(
                 let src = &entry.source_path;
                 let dst_str = dst_drv.resolve_child(dest_dir, &entry.name);
 
-                // For move with same driver: try O(1) rename first
-                if *op_type == FileOpType::Move && same_driver {
+                // For move with same driver: only use O(1) rename when the
+                // destination entry does not already exist. Existing targets
+                // must go through the regular conflict-aware copy+delete path.
+                if *op_type == FileOpType::Move && same_driver && !dst_drv.exists(&dst_str) {
                     match src_driver.try_rename(src, &dst_str) {
                         Ok(true) => {
                             // Rename succeeded — we can't know inner file count without
@@ -166,6 +177,8 @@ fn run_file_op_blocking(
                         &mut total_bytes_completed,
                         src_driver,
                         dst_drv,
+                        decision_rx,
+                        &mut apply_to_all,
                     )?;
                 } else {
                     // Check conflict
@@ -177,6 +190,7 @@ fn run_file_op_blocking(
                             tx,
                             job_id,
                             decision_rx,
+                            &mut apply_to_all,
                         )? {
                             ConflictOutcome::Overwrite => { /* proceed */ }
                             ConflictOutcome::Skip => {
@@ -289,10 +303,19 @@ fn run_file_op_blocking(
 
 // ─── Conflict resolution ────────────────────────────────────────────────────
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ConflictOutcome {
     Overwrite,
     Skip,
     Cancel,
+}
+
+fn apply_all_outcome(policy: Option<&ConflictPolicy>) -> Option<ConflictOutcome> {
+    match policy {
+        Some(ConflictPolicy::Overwrite) => Some(ConflictOutcome::Overwrite),
+        Some(ConflictPolicy::Skip) => Some(ConflictOutcome::Skip),
+        _ => None,
+    }
 }
 
 fn resolve_conflict(
@@ -302,11 +325,15 @@ fn resolve_conflict(
     tx: &mpsc::Sender<ServerMessage>,
     job_id: &str,
     decision_rx: &mut DecisionRx,
+    apply_to_all: &mut Option<ConflictOutcome>,
 ) -> Result<ConflictOutcome, String> {
     match policy {
         ConflictPolicy::Skip => Ok(ConflictOutcome::Skip),
         ConflictPolicy::Overwrite => Ok(ConflictOutcome::Overwrite),
         ConflictPolicy::Ask => {
+            if let Some(outcome) = *apply_to_all {
+                return Ok(outcome);
+            }
             send_event_sync(
                 tx,
                 job_id,
@@ -325,11 +352,29 @@ fn resolve_conflict(
                 None,
             );
             let decision = decision_rx.blocking_recv();
-            match decision.as_deref() {
-                Some("overwrite") => Ok(ConflictOutcome::Overwrite),
-                Some("skip") => Ok(ConflictOutcome::Skip),
-                Some("cancel") | None => Ok(ConflictOutcome::Cancel),
-                _ => Ok(ConflictOutcome::Skip),
+            match decision {
+                Some(DecisionResponse {
+                    decision,
+                    apply_to_all: true,
+                }) => {
+                    let outcome = match decision.as_str() {
+                        "overwrite" => ConflictOutcome::Overwrite,
+                        "skip" => ConflictOutcome::Skip,
+                        "cancel" => ConflictOutcome::Cancel,
+                        _ => ConflictOutcome::Skip,
+                    };
+                    if matches!(outcome, ConflictOutcome::Overwrite | ConflictOutcome::Skip) {
+                        *apply_to_all = Some(outcome);
+                    }
+                    Ok(outcome)
+                }
+                Some(DecisionResponse { decision, .. }) => match decision.as_str() {
+                    "overwrite" => Ok(ConflictOutcome::Overwrite),
+                    "skip" => Ok(ConflictOutcome::Skip),
+                    "cancel" => Ok(ConflictOutcome::Cancel),
+                    _ => Ok(ConflictOutcome::Skip),
+                },
+                None => Ok(ConflictOutcome::Cancel),
             }
         }
     }
@@ -377,7 +422,7 @@ fn copy_file_with_progress(
         if wait_if_paused(pause_rx, cancel_rx) {
             drop(writer);
             let _ = dst_driver.remove_file(dst);
-            return Err("Cancelled".to_string());
+            return Err(CANCELLED_ERR.to_string());
         }
 
         let n = reader
@@ -425,6 +470,8 @@ fn copy_dir_recursive(
     total_bytes_completed: &mut u64,
     src_driver: &dyn VfsDriver,
     dst_driver: &dyn VfsDriver,
+    decision_rx: &mut DecisionRx,
+    apply_to_all: &mut Option<ConflictOutcome>,
 ) -> Result<(), String> {
     dst_driver
         .create_dir_all(dst)
@@ -444,7 +491,7 @@ fn copy_dir_recursive(
 
     for child in children {
         if wait_if_paused(pause_rx, cancel_rx) {
-            return Err("Cancelled".to_string());
+            return Err(CANCELLED_ERR.to_string());
         }
 
         let child_src = src_driver.resolve_child(src, &child.name);
@@ -465,11 +512,22 @@ fn copy_dir_recursive(
                 total_bytes_completed,
                 src_driver,
                 dst_driver,
+                decision_rx,
+                apply_to_all,
             )?;
         } else {
             if dst_driver.exists(&child_dst) {
-                match conflict_policy {
-                    ConflictPolicy::Skip => {
+                match resolve_conflict(
+                    conflict_policy,
+                    &child_src,
+                    &child_dst,
+                    tx,
+                    job_id,
+                    decision_rx,
+                    apply_to_all,
+                )? {
+                    ConflictOutcome::Overwrite => {}
+                    ConflictOutcome::Skip => {
                         *completed_files += 1;
                         *total_bytes_completed += child.size;
                         send_progress_sync(
@@ -485,8 +543,8 @@ fn copy_dir_recursive(
                         );
                         continue;
                     }
-                    ConflictPolicy::Overwrite | ConflictPolicy::Ask => {
-                        // Inside recursive dir copy, honour the top-level policy
+                    ConflictOutcome::Cancel => {
+                        return Err(CANCELLED_ERR.to_string());
                     }
                 }
             }

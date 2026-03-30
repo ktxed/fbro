@@ -6,7 +6,7 @@ use tokio::sync::mpsc;
 
 use crate::jobs::dirsize::DirSizeQueue;
 use crate::jobs::scan::run_scan;
-use crate::jobs::{JobState, ScanHandle};
+use crate::jobs::{DecisionResponse, JobState, ScanHandle};
 use crate::persistence::{PanelSession, SessionState};
 use crate::state::{AppState, Panel, PanelStatus, SharedState};
 use crate::vfs::VfsDriver;
@@ -21,7 +21,7 @@ pub(crate) struct IntentContext<'a> {
     pub state: &'a SharedState,
     pub tx: &'a mpsc::Sender<ServerMessage>,
     pub scan_handles: &'a mut HashMap<String, ScanHandle>,
-    pub decision_senders: &'a mut HashMap<String, mpsc::Sender<String>>,
+    pub decision_senders: &'a mut HashMap<String, mpsc::Sender<DecisionResponse>>,
     pub app_handle: &'a tauri::AppHandle,
     pub dir_size_queue: &'a Arc<DirSizeQueue>,
     pub watcher_cmd_tx: &'a mpsc::Sender<WatcherCommand>,
