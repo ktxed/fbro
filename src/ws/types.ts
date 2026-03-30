@@ -35,6 +35,7 @@ export interface PanelState {
   filter: null | { mode: string; value: string };
   cursor: number;
   selection: number[];
+  selectedEntries: FileOpFile[];
   entries: VFSEntry[];
   version: number;
   calculatingSize: string[];
@@ -167,6 +168,7 @@ export interface StatePatchMessage {
     sourceId?: string;
     entries?: VFSEntry[];
     selection?: number[];
+    selectedEntries?: FileOpFile[];
     [key: string]: unknown;
   };
 }

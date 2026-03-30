@@ -131,7 +131,7 @@ function applySnapshot(state: AppState, msg: StateSnapshotMessage): AppState {
   if (domains.panels) {
     const panels: Record<string, PanelState> = {};
     for (const [id, p] of Object.entries(domains.panels)) {
-      panels[id] = { ...p, panelId: id, entries: p.entries ?? [], selection: p.selection ?? [], version: p.version ?? 0, calculatingSize: p.calculatingSize ?? [], totalCount: p.totalCount, totalSize: p.totalSize, windowStart: p.windowStart };
+      panels[id] = { ...p, panelId: id, entries: p.entries ?? [], selection: p.selection ?? [], selectedEntries: p.selectedEntries ?? [], version: p.version ?? 0, calculatingSize: p.calculatingSize ?? [], totalCount: p.totalCount, totalSize: p.totalSize, windowStart: p.windowStart };
     }
     next.panels = panels;
   }
@@ -165,6 +165,9 @@ function applyPatch(state: AppState, msg: StatePatchMessage): AppState {
     }
     if (msg.patch.selection !== undefined) {
       preGuardPanel = { ...preGuardPanel, selection: msg.patch.selection as number[] };
+    }
+    if (msg.patch.selectedEntries !== undefined) {
+      preGuardPanel = { ...preGuardPanel, selectedEntries: msg.patch.selectedEntries as PanelState["selectedEntries"] };
     }
     if (msg.patch.calculatingSize !== undefined) {
       preGuardPanel = { ...preGuardPanel, calculatingSize: msg.patch.calculatingSize as string[] };
@@ -202,6 +205,9 @@ function applyPatch(state: AppState, msg: StatePatchMessage): AppState {
     }
     if (msg.patch.selection !== undefined) {
       updated = { ...updated, selection: msg.patch.selection };
+    }
+    if (msg.patch.selectedEntries !== undefined) {
+      updated = { ...updated, selectedEntries: msg.patch.selectedEntries as PanelState["selectedEntries"] };
     }
     if (msg.patch.sourceId !== undefined) {
       updated = { ...updated, sourceId: msg.patch.sourceId as string };

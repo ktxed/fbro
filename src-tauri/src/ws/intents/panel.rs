@@ -5,8 +5,8 @@ use serde_json::Value;
 use crate::ws::intents::{arg_i64, arg_str, arg_u64, arg_usize_vec};
 use crate::ws::protocol::{now, ServerMessage};
 use crate::ws::runtime::{
-    build_state_snapshot, rescan_panel, resolve_panel_id, selected_names_for, send_window,
-    IntentContext,
+    build_state_snapshot, rescan_panel, resolve_panel_id, selected_entries_for_panel,
+    selected_names_for, send_window, IntentContext,
 };
 
 pub(crate) async fn handle(name: &str, scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
@@ -287,12 +287,12 @@ async fn move_cursor(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
 async fn set_selection(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
     let panel_id = resolve_panel_id(scope, ctx.state).await;
     let parsed = SelectionArgs::from_args(args);
-    let version = {
+    let (version, selected_entries) = {
         let mut state_guard = ctx.state.lock().await;
         if let Some(panel) = state_guard.panels.get_mut(&panel_id) {
             panel.selection = parsed.indices.clone();
             panel.version += 1;
-            panel.version
+            (panel.version, selected_entries_for_panel(panel))
         } else {
             return;
         }
@@ -301,7 +301,7 @@ async fn set_selection(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>)
         ctx,
         panel_id,
         version,
-        serde_json::json!({ "selection": parsed.indices }),
+        serde_json::json!({ "selection": parsed.indices, "selectedEntries": selected_entries }),
     )
     .await;
 }
@@ -309,7 +309,7 @@ async fn set_selection(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>)
 async fn select_at_index(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
     let panel_id = resolve_panel_id(scope, ctx.state).await;
     let parsed = IndexArgs::from_args(args);
-    let (new_selection, version) = {
+    let (new_selection, version, selected_entries) = {
         let mut state_guard = ctx.state.lock().await;
         if let Some(panel) = state_guard.panels.get_mut(&panel_id) {
             if parsed.index >= panel.entries.len() || panel.selection.contains(&parsed.index) {
@@ -317,7 +317,11 @@ async fn select_at_index(scope: &Value, args: &Value, ctx: &mut IntentContext<'_
             }
             panel.selection.push(parsed.index);
             panel.version += 1;
-            (panel.selection.clone(), panel.version)
+            (
+                panel.selection.clone(),
+                panel.version,
+                selected_entries_for_panel(panel),
+            )
         } else {
             return;
         }
@@ -326,7 +330,7 @@ async fn select_at_index(scope: &Value, args: &Value, ctx: &mut IntentContext<'_
         ctx,
         panel_id,
         version,
-        serde_json::json!({ "selection": new_selection }),
+        serde_json::json!({ "selection": new_selection, "selectedEntries": selected_entries }),
     )
     .await;
 }
@@ -334,7 +338,7 @@ async fn select_at_index(scope: &Value, args: &Value, ctx: &mut IntentContext<'_
 async fn deselect_at_index(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
     let panel_id = resolve_panel_id(scope, ctx.state).await;
     let parsed = IndexArgs::from_args(args);
-    let (new_selection, version) = {
+    let (new_selection, version, selected_entries) = {
         let mut state_guard = ctx.state.lock().await;
         if let Some(panel) = state_guard.panels.get_mut(&panel_id) {
             let before = panel.selection.len();
@@ -343,7 +347,11 @@ async fn deselect_at_index(scope: &Value, args: &Value, ctx: &mut IntentContext<
                 return;
             }
             panel.version += 1;
-            (panel.selection.clone(), panel.version)
+            (
+                panel.selection.clone(),
+                panel.version,
+                selected_entries_for_panel(panel),
+            )
         } else {
             return;
         }
@@ -352,7 +360,7 @@ async fn deselect_at_index(scope: &Value, args: &Value, ctx: &mut IntentContext<
         ctx,
         panel_id,
         version,
-        serde_json::json!({ "selection": new_selection }),
+        serde_json::json!({ "selection": new_selection, "selectedEntries": selected_entries }),
     )
     .await;
 }
@@ -360,7 +368,7 @@ async fn deselect_at_index(scope: &Value, args: &Value, ctx: &mut IntentContext<
 async fn toggle_selection_at_index(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
     let panel_id = resolve_panel_id(scope, ctx.state).await;
     let parsed = IndexArgs::from_args(args);
-    let (new_selection, version) = {
+    let (new_selection, version, selected_entries) = {
         let mut state_guard = ctx.state.lock().await;
         if let Some(panel) = state_guard.panels.get_mut(&panel_id) {
             if parsed.index >= panel.entries.len() {
@@ -376,7 +384,11 @@ async fn toggle_selection_at_index(scope: &Value, args: &Value, ctx: &mut Intent
                 panel.selection.push(parsed.index);
             }
             panel.version += 1;
-            (panel.selection.clone(), panel.version)
+            (
+                panel.selection.clone(),
+                panel.version,
+                selected_entries_for_panel(panel),
+            )
         } else {
             return;
         }
@@ -385,14 +397,14 @@ async fn toggle_selection_at_index(scope: &Value, args: &Value, ctx: &mut Intent
         ctx,
         panel_id,
         version,
-        serde_json::json!({ "selection": new_selection }),
+        serde_json::json!({ "selection": new_selection, "selectedEntries": selected_entries }),
     )
     .await;
 }
 
 async fn toggle_selection(scope: &Value, ctx: &mut IntentContext<'_>) {
     let panel_id = resolve_panel_id(scope, ctx.state).await;
-    let (new_selection, version) = {
+    let (new_selection, version, selected_entries) = {
         let mut state_guard = ctx.state.lock().await;
         if let Some(panel) = state_guard.panels.get_mut(&panel_id) {
             let cursor = panel.cursor;
@@ -402,7 +414,11 @@ async fn toggle_selection(scope: &Value, ctx: &mut IntentContext<'_>) {
                 panel.selection.push(cursor);
             }
             panel.version += 1;
-            (panel.selection.clone(), panel.version)
+            (
+                panel.selection.clone(),
+                panel.version,
+                selected_entries_for_panel(panel),
+            )
         } else {
             return;
         }
@@ -411,20 +427,20 @@ async fn toggle_selection(scope: &Value, ctx: &mut IntentContext<'_>) {
         ctx,
         panel_id,
         version,
-        serde_json::json!({ "selection": new_selection }),
+        serde_json::json!({ "selection": new_selection, "selectedEntries": selected_entries }),
     )
     .await;
 }
 
 async fn select_all(scope: &Value, ctx: &mut IntentContext<'_>) {
     let panel_id = resolve_panel_id(scope, ctx.state).await;
-    let (selection, version) = {
+    let (selection, version, selected_entries) = {
         let mut state_guard = ctx.state.lock().await;
         if let Some(panel) = state_guard.panels.get_mut(&panel_id) {
             let selection: Vec<usize> = (0..panel.entries.len()).collect();
             panel.selection = selection.clone();
             panel.version += 1;
-            (selection, panel.version)
+            (selection, panel.version, selected_entries_for_panel(panel))
         } else {
             return;
         }
@@ -433,7 +449,7 @@ async fn select_all(scope: &Value, ctx: &mut IntentContext<'_>) {
         ctx,
         panel_id,
         version,
-        serde_json::json!({ "selection": selection }),
+        serde_json::json!({ "selection": selection, "selectedEntries": selected_entries }),
     )
     .await;
 }
@@ -454,14 +470,14 @@ async fn clear_selection(scope: &Value, ctx: &mut IntentContext<'_>) {
         ctx,
         panel_id,
         version,
-        serde_json::json!({ "selection": [] }),
+        serde_json::json!({ "selection": [], "selectedEntries": [] }),
     )
     .await;
 }
 
 async fn invert_selection(scope: &Value, ctx: &mut IntentContext<'_>) {
     let panel_id = resolve_panel_id(scope, ctx.state).await;
-    let (selection, version) = {
+    let (selection, version, selected_entries) = {
         let mut state_guard = ctx.state.lock().await;
         if let Some(panel) = state_guard.panels.get_mut(&panel_id) {
             let selected: HashSet<usize> = panel.selection.iter().copied().collect();
@@ -470,7 +486,7 @@ async fn invert_selection(scope: &Value, ctx: &mut IntentContext<'_>) {
                 .collect();
             panel.selection = selection.clone();
             panel.version += 1;
-            (selection, panel.version)
+            (selection, panel.version, selected_entries_for_panel(panel))
         } else {
             return;
         }
@@ -479,7 +495,7 @@ async fn invert_selection(scope: &Value, ctx: &mut IntentContext<'_>) {
         ctx,
         panel_id,
         version,
-        serde_json::json!({ "selection": selection }),
+        serde_json::json!({ "selection": selection, "selectedEntries": selected_entries }),
     )
     .await;
 }
@@ -487,7 +503,7 @@ async fn invert_selection(scope: &Value, ctx: &mut IntentContext<'_>) {
 async fn move_cursor_with_select(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
     let panel_id = resolve_panel_id(scope, ctx.state).await;
     let parsed = DirectionArgs::from_args(args);
-    let (new_cursor, new_selection, version, needs_window) = {
+    let (new_cursor, new_selection, version, needs_window, selected_entries) = {
         let mut state_guard = ctx.state.lock().await;
         if let Some(panel) = state_guard.panels.get_mut(&panel_id) {
             let len = panel.entries.len();
@@ -514,7 +530,13 @@ async fn move_cursor_with_select(scope: &Value, args: &Value, ctx: &mut IntentCo
             let needs_window = panel.windowed
                 && (cursor < panel.window_start
                     || cursor >= panel.window_start + panel.window_count);
-            (cursor, panel.selection.clone(), panel.version, needs_window)
+            (
+                cursor,
+                panel.selection.clone(),
+                panel.version,
+                needs_window,
+                selected_entries_for_panel(panel),
+            )
         } else {
             return;
         }
@@ -523,7 +545,11 @@ async fn move_cursor_with_select(scope: &Value, args: &Value, ctx: &mut IntentCo
         ctx,
         panel_id.clone(),
         version,
-        serde_json::json!({ "cursor": new_cursor, "selection": new_selection }),
+        serde_json::json!({
+            "cursor": new_cursor,
+            "selection": new_selection,
+            "selectedEntries": selected_entries
+        }),
     )
     .await;
     if needs_window {

@@ -126,6 +126,8 @@ pub struct PanelSnapshot {
     pub filter: Option<FilterSpec>,
     pub cursor: usize,
     pub selection: Vec<usize>,
+    #[serde(rename = "selectedEntries")]
+    pub selected_entries: Vec<FileOpFileSchema>,
     pub entries: Vec<EntrySchema>,
     pub version: u64,
     #[serde(rename = "calculatingSize")]

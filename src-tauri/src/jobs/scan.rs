@@ -4,11 +4,24 @@ use tokio::sync::mpsc;
 use crate::jobs::dirsize::DirSizeQueue;
 use crate::state::SharedState;
 use crate::vfs::VfsDriver;
-use crate::ws::protocol::{EntrySchema, FilterSpec, ServerMessage, SortSpec};
+use crate::ws::protocol::{EntrySchema, FileOpFileSchema, FilterSpec, ServerMessage, SortSpec};
 
 const BATCH_SIZE: usize = 50;
 pub const WINDOWED_THRESHOLD: usize = 1500;
 pub const INITIAL_WINDOW_SIZE: usize = 200;
+
+fn build_selected_entries(entries: &[EntrySchema], selection: &[usize]) -> Vec<FileOpFileSchema> {
+    selection
+        .iter()
+        .filter_map(|&index| {
+            entries.get(index).map(|entry| FileOpFileSchema {
+                name: entry.name.clone(),
+                size: entry.size,
+                kind: entry.kind.clone(),
+            })
+        })
+        .collect()
+}
 
 pub async fn run_scan(
     panel_id: String,
@@ -25,10 +38,8 @@ pub async fn run_scan(
     atomic: bool,
 ) {
     let path_clone = path.clone();
-    let result = tokio::task::spawn_blocking(move || {
-        driver.list(&path_clone, &sort, filter.as_ref())
-    })
-    .await;
+    let result =
+        tokio::task::spawn_blocking(move || driver.list(&path_clone, &sort, filter.as_ref())).await;
 
     let entries = match result {
         Ok(Ok(e)) => e,
@@ -75,7 +86,8 @@ pub async fn run_scan(
     }
 
     // Sum sizes of all file entries (directories excluded — their size is optional/computed separately).
-    let total_file_size: u64 = schema_entries.iter()
+    let total_file_size: u64 = schema_entries
+        .iter()
         .filter(|e| e.kind == "file")
         .filter_map(|e| e.size)
         .sum();
@@ -88,7 +100,9 @@ pub async fn run_scan(
     let selection: Vec<usize> = match selection_names {
         Some(names) => {
             let name_set: std::collections::HashSet<_> = names.into_iter().collect();
-            schema_entries.iter().enumerate()
+            schema_entries
+                .iter()
+                .enumerate()
                 .filter(|(_, e)| name_set.contains(&e.name))
                 .map(|(i, _)| i)
                 .collect()
@@ -99,8 +113,12 @@ pub async fn run_scan(
     if total > WINDOWED_THRESHOLD {
         // ── Mode B: windowed ─────────────────────────────────────────────
         let window_count = INITIAL_WINDOW_SIZE.min(total);
-        let window_start = cursor.saturating_sub(window_count / 2).min(total.saturating_sub(window_count));
-        let window_json = serde_json::json!(&schema_entries[window_start..window_start + window_count]);
+        let window_start = cursor
+            .saturating_sub(window_count / 2)
+            .min(total.saturating_sub(window_count));
+        let window_json =
+            serde_json::json!(&schema_entries[window_start..window_start + window_count]);
+        let selected_entries = build_selected_entries(&schema_entries, &selection);
 
         // Store full entries directly in BE state
         {
@@ -131,6 +149,7 @@ pub async fn run_scan(
                     "windowEntries": window_json,
                     "cursor": cursor,
                     "selection": selection,
+                    "selectedEntries": selected_entries,
                 }),
             })
             .await;
@@ -164,6 +183,7 @@ pub async fn run_scan(
                     "totalSize": total_file_size,
                     "cursor": cursor,
                     "selection": selection,
+                    "selectedEntries": build_selected_entries(&schema_entries, &selection),
                 }),
             })
             .await;
@@ -194,13 +214,21 @@ pub async fn run_scan(
         }
 
         version += 1;
+        let selected_entries = build_selected_entries(&schema_entries, &selection);
         let _ = tx
             .send(ServerMessage::StatePatch {
                 timestamp: crate::ws::protocol::now(),
                 domain: "panels".to_string(),
                 entity_id: Some(panel_id),
                 version,
-                patch: serde_json::json!({ "status": "ready", "total": total, "totalSize": total_file_size, "cursor": cursor, "selection": selection }),
+                patch: serde_json::json!({
+                    "status": "ready",
+                    "total": total,
+                    "totalSize": total_file_size,
+                    "cursor": cursor,
+                    "selection": selection,
+                    "selectedEntries": selected_entries,
+                }),
             })
             .await;
     }

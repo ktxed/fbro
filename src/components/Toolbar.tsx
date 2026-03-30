@@ -76,14 +76,12 @@ export function Toolbar({ client, onOpenJobsView }: { client: WsClient; onOpenJo
     if (!panel) return;
 
     // Files: selection or cursor item
-    const indices = panel.selection.length > 0
-      ? panel.selection
-      : [panel.cursor];
-
-    const files: FileOpFile[] = indices
-      .map((idx) => entryAt(panel, idx))
-      .filter(Boolean)
-      .map((e) => ({ name: e.name, size: e.size, kind: e.kind }));
+    const files: FileOpFile[] = panel.selection.length > 0
+      ? panel.selectedEntries
+      : (() => {
+          const entry = entryAt(panel, panel.cursor);
+          return entry ? [{ name: entry.name, size: entry.size, kind: entry.kind }] : [];
+        })();
 
     if (files.length === 0) return;
 

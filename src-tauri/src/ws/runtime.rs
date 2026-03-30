@@ -12,7 +12,8 @@ use crate::state::{AppState, Panel, PanelStatus, SharedState};
 use crate::vfs::VfsDriver;
 use crate::watcher::WatcherCommand;
 use crate::ws::protocol::{
-    now, LayoutDomain, PanelSnapshot, ServerMessage, SourceCapabilities, SourceSchema, StateDomains,
+    now, FileOpFileSchema, LayoutDomain, PanelSnapshot, ServerMessage, SourceCapabilities,
+    SourceSchema, StateDomains,
 };
 
 pub(crate) struct IntentContext<'a> {
@@ -96,6 +97,20 @@ pub(crate) fn selected_names_for(state_guard: &AppState, panel_id: &str) -> Opti
     })
 }
 
+pub(crate) fn selected_entries_for_panel(panel: &Panel) -> Vec<FileOpFileSchema> {
+    panel
+        .selection
+        .iter()
+        .filter_map(|&index| {
+            panel.entries.get(index).map(|entry| FileOpFileSchema {
+                name: entry.name.clone(),
+                size: entry.size,
+                kind: entry.kind.clone(),
+            })
+        })
+        .collect()
+}
+
 pub(crate) async fn resolve_panel_id(scope: &serde_json::Value, state: &SharedState) -> String {
     if scope == "focused-panel" || scope.as_str() == Some("focused-panel") {
         state.lock().await.focus.clone()
@@ -154,6 +169,7 @@ pub(crate) async fn navigate_to(
                 "entries": [],
                 "cursor": 0,
                 "selection": [],
+                "selectedEntries": [],
                 "status": "loading",
                 "filter": null,
                 "totalCount": null,
@@ -237,6 +253,7 @@ pub(crate) async fn rescan_panel(
                 "entries": [],
                 "cursor": 0,
                 "selection": [],
+                "selectedEntries": [],
                 "status": "loading",
                 "sort": { "by": sort.by, "order": sort.order },
                 "totalCount": null,
@@ -602,6 +619,7 @@ fn build_panel_snapshot(panel: &Panel) -> PanelSnapshot {
         filter: panel.filter.clone(),
         cursor: panel.cursor,
         selection: panel.selection.clone(),
+        selected_entries: selected_entries_for_panel(panel),
         entries: panel.entries.clone(),
         version: panel.version,
         calculating_size: vec![],
