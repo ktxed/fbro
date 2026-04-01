@@ -72,6 +72,7 @@ export interface AppState {
   pendingMkdir: PendingMkdir | null;
   pendingNoEditor: PendingNoEditor | null;
   pendingDryRun: PendingDryRun | null;
+  commandPaletteOpen: boolean;
 }
 
 const initialState: AppState = {
@@ -92,6 +93,7 @@ const initialState: AppState = {
   pendingMkdir: null,
   pendingNoEditor: null,
   pendingDryRun: null,
+  commandPaletteOpen: false,
 };
 
 // ─── Actions ─────────────────────────────────────────────────────────────────
@@ -112,7 +114,9 @@ export type AppAction =
   | { type: "CLOSE_MKDIR" }
   | { type: "OPEN_NO_EDITOR"; noEditor: PendingNoEditor }
   | { type: "CLOSE_NO_EDITOR" }
-  | { type: "CLOSE_DRY_RUN" };
+  | { type: "CLOSE_DRY_RUN" }
+  | { type: "OPEN_COMMAND_PALETTE" }
+  | { type: "CLOSE_COMMAND_PALETTE" };
 
 // ─── Reducer ─────────────────────────────────────────────────────────────────
 
@@ -405,6 +409,10 @@ function reducer(state: AppState, action: AppAction): AppState {
       return { ...state, pendingNoEditor: null };
     case "CLOSE_DRY_RUN":
       return { ...state, pendingDryRun: null };
+    case "OPEN_COMMAND_PALETTE":
+      return { ...state, commandPaletteOpen: true };
+    case "CLOSE_COMMAND_PALETTE":
+      return { ...state, commandPaletteOpen: false };
   }
 }
 

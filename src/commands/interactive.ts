@@ -24,7 +24,10 @@ export const TOOLBAR_COMMAND_IDS = [
   "app.quit",
 ] as const;
 
+export const COMMAND_PALETTE_COMMAND_ID = "app.command_palette" as const;
+
 export const GLOBAL_SHORTCUT_COMMAND_IDS = [
+  COMMAND_PALETTE_COMMAND_ID,
   "app.open_jobs",
   "panel.navigate_source_root",
   "file.info",
@@ -56,6 +59,13 @@ export const PANEL_SHORTCUT_COMMAND_IDS = [
   "panel.path.sync",
 ] as const;
 
+export const COMMAND_PALETTE_COMMAND_IDS = [
+  ...new Set([
+    ...GLOBAL_SHORTCUT_COMMAND_IDS,
+    ...PANEL_SHORTCUT_COMMAND_IDS,
+  ]),
+].filter((commandId) => commandId !== COMMAND_PALETTE_COMMAND_ID);
+
 const KEY_LABELS: Record<string, string> = {
   " ": "Space",
   ArrowUp: "Up",
@@ -75,6 +85,7 @@ interface ExecuteCommandContext {
   sources?: Record<string, Source>;
   otherPanelId?: string;
   onOpenJobsView?: () => void;
+  onOpenCommandPalette?: () => void;
   onOpenFilter?: (initialValue: string) => void;
   getPanelPageSize?: () => number;
 }
@@ -309,6 +320,9 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
   const focused = getFocusedPanel(state, context.panel, context.panelId);
 
   switch (commandId) {
+    case COMMAND_PALETTE_COMMAND_ID:
+      context.onOpenCommandPalette?.();
+      return !!context.onOpenCommandPalette;
     case "app.open_jobs":
       context.onOpenJobsView?.();
       return !!context.onOpenJobsView;

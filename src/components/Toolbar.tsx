@@ -2,6 +2,8 @@ import { useEffect } from "react";
 import { useAppState, useAppDispatch } from "../store";
 import type { WsClient } from "../ws/client";
 import {
+  bindingMatches,
+  COMMAND_PALETTE_COMMAND_ID,
   executeCommand,
   findMatchingCommand,
   formatPrimaryBinding,
@@ -42,14 +44,28 @@ const TOOLBAR_LABELS: Record<(typeof TOOLBAR_COMMAND_IDS)[number], string> = {
   "app.quit": "Quit",
 };
 
-export function Toolbar({ client, onOpenJobsView }: { client: WsClient; onOpenJobsView: () => void; }) {
+export function Toolbar({ client, jobsViewOpen, onOpenJobsView }: { client: WsClient; jobsViewOpen: boolean; onOpenJobsView: () => void; }) {
   const state = useAppState();
   const dispatch = useAppDispatch();
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      const blockingModalActive = state.pendingOp || state.activeJobId || state.pendingQuit || state.pendingRename || state.pendingInfo || state.pendingMkdir || state.pendingNoEditor || state.pendingDryRun || jobsViewOpen;
+      const paletteCommand = getCommand(state.commands, COMMAND_PALETTE_COMMAND_ID);
+      if (!blockingModalActive && paletteCommand && paletteCommand.bindings.some((binding) => bindingMatches(e, binding))) {
+        e.preventDefault();
+        executeCommand(paletteCommand.id, {
+          state,
+          dispatch,
+          client,
+          onOpenJobsView,
+          onOpenCommandPalette: () => dispatch({ type: "OPEN_COMMAND_PALETTE" }),
+        });
+        return;
+      }
+
       // Don't handle keys while a modal is active
-      if (state.pendingOp || state.activeJobId || state.pendingQuit || state.pendingRename || state.pendingInfo || state.pendingMkdir || state.pendingNoEditor) return;
+      if (blockingModalActive || state.commandPaletteOpen) return;
       if (isEditableTarget(e.target)) return;
       const command = findMatchingCommand(state.commands, GLOBAL_SHORTCUT_COMMAND_IDS, e);
       if (!command) return;
@@ -59,11 +75,12 @@ export function Toolbar({ client, onOpenJobsView }: { client: WsClient; onOpenJo
         dispatch,
         client,
         onOpenJobsView,
+        onOpenCommandPalette: () => dispatch({ type: "OPEN_COMMAND_PALETTE" }),
       });
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [client, dispatch, onOpenJobsView, state]);
+  }, [client, dispatch, jobsViewOpen, onOpenJobsView, state]);
 
   return (
     <div className="toolbar">

@@ -32,9 +32,9 @@ export function App() {
         </div>
       )}
       <div className="app">
-        {client && <Layout client={client} jobsViewOpen={jobsViewOpen} onCloseJobsView={() => setJobsViewOpen(false)} />}
+        {client && <Layout client={client} jobsViewOpen={jobsViewOpen} onCloseJobsView={() => setJobsViewOpen(false)} onOpenJobsView={() => setJobsViewOpen(true)} />}
         {client && <JobsBar client={client} />}
-        {client && <Toolbar client={client} onOpenJobsView={() => setJobsViewOpen(true)} />}
+        {client && <Toolbar client={client} jobsViewOpen={jobsViewOpen} onOpenJobsView={() => setJobsViewOpen(true)} />}
       </div>
     </AppContext.Provider>
   );

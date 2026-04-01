@@ -65,6 +65,13 @@ fn command(
 
 pub(crate) fn build_interactive_commands() -> Vec<InteractiveCommandSchema> {
     vec![
+        command(
+            "app.command_palette",
+            "App",
+            "Open Command Palette",
+            vec![mod_binding("p", true)],
+            None,
+        ),
         command("app.open_jobs", "App", "Open Jobs", vec![keybinding("j")], None),
         command(
             "panel.navigate_source_root",
