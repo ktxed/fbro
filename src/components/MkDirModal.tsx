@@ -41,7 +41,11 @@ export function MkDirModal({ mkdir, client }: MkDirModalProps) {
   };
 
   return (
-    <div className="modal-overlay" tabIndex={-1} onClick={close} onKeyDown={(e) => { if (e.key === "Tab") e.preventDefault(); }}>
+    <div className="modal-overlay" tabIndex={-1} onClick={close} onKeyDown={(e) => {
+      if (e.key === "Tab") { e.preventDefault(); return; }
+      if (e.key === "Enter") { e.preventDefault(); submit(); return; }
+      if (e.key === "Escape") { e.preventDefault(); close(); }
+    }}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal__header">Create Directory</div>
         <div className="modal__body">

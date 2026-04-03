@@ -87,11 +87,21 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
   const close = () => { setSubmitted(false); setDryMode(false); dispatch({ type: "CLOSE_OPERATION" }); };
   const closeDryRun = () => { setSubmitted(false); setDryMode(false); dispatch({ type: "CLOSE_DRY_RUN" }); };
 
-  // Auto-focus the modal when it appears
+  // Re-focus when the modal appears or changes phase so terminal/decision states
+  // still receive keyboard handling after in-place transitions.
   const isVisible = !!(pending || activeJob || pendingDryRun);
+  const focusToken = pendingDryRun
+    ? `dry:${pendingDryRun.scriptPath}`
+    : pending
+      ? `pending:${pending.opType}:${pending.sourcePanel}:${pending.destPanel ?? ""}`
+      : activeJob
+        ? `job:${activeJobId ?? ""}:${activeJob.state}:${activeJob.decision?.destination ?? ""}`
+        : "hidden";
   useEffect(() => {
-    if (isVisible) modalRef.current?.focus();
-  }, [isVisible]);
+    if (!isVisible) return;
+    const timer = window.setTimeout(() => modalRef.current?.focus(), 0);
+    return () => window.clearTimeout(timer);
+  }, [focusToken, isVisible]);
 
   useEffect(() => {
     if (activeJob?.state !== "AwaitingDecision") {
@@ -147,6 +157,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
     const fileCount = pending.files.length;
     const isDelete = pending.opType === "delete";
     const label = opLabel(pending.opType);
+    const canStartInBackground = !dryMode;
 
     const startOp = (background: boolean) => {
       if (submitted) return;
@@ -166,8 +177,29 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
       // The reducer will transition to activeJobId when JobStarted arrives
     };
 
+    const handlePendingKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+      if (e.key === "Tab") {
+        e.preventDefault();
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        close();
+        return;
+      }
+      if (e.key === "Enter") {
+        e.preventDefault();
+        startOp(false);
+        return;
+      }
+      if (canStartInBackground && (e.key === "b" || e.key === "B")) {
+        e.preventDefault();
+        startOp(true);
+      }
+    };
+
     return (
-      <div className="modal-overlay" ref={modalRef} tabIndex={-1} onClick={close} onKeyDown={(e) => { if (e.key === "Tab") e.preventDefault(); }}>
+      <div className="modal-overlay" ref={modalRef} tabIndex={-1} onClick={close} onKeyDown={handlePendingKeyDown}>
         <div className="modal modal--fixed" onClick={(e) => e.stopPropagation()}>
           <div className="modal__header">{label}</div>
           <div className="modal__body">
@@ -231,7 +263,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
             <button className="modal__btn modal__btn--primary" disabled={submitted} onClick={() => startOp(false)}>
               {submitted ? "Starting…" : label}
             </button>
-            {!dryMode && (
+            {canStartInBackground && (
               <button className="modal__btn" disabled={submitted} onClick={() => startOp(true)}>
                 Background
               </button>
@@ -249,7 +281,13 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
   if (activeJob) {
     const isTerminal = activeJob.state === "Completed" || activeJob.state === "Cancelled" || activeJob.state === "Failed";
     const isDecision = activeJob.state === "AwaitingDecision";
+    const isProgress = !isTerminal && !isDecision;
     const label = opLabel(activeJob.type);
+    const decisionOptions = activeJob.decision?.options ?? [];
+    const primaryDecision = decisionOptions.includes("overwrite")
+      ? "overwrite"
+      : decisionOptions[0];
+    const skipDecision = decisionOptions.find((opt) => opt === "skip");
 
     const filePercent = p && p.currentFileBytesTotal > 0
       ? Math.round((p.currentFileBytesCopied / p.currentFileBytesTotal) * 100)
@@ -258,8 +296,80 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
       ? Math.round((p.completedFiles / p.totalFiles) * 100)
       : 0;
 
+    const submitDecision = (decision: string) => {
+      if (!activeJobId) return;
+      client.sendIntent("ProvideJobDecision", undefined, {
+        jobId: activeJobId,
+        decision,
+        applyToAll: applyToAll && decision !== "cancel",
+      });
+      setApplyToAll(false);
+    };
+
+    const cancelJob = () => {
+      if (!activeJobId) return;
+      client.sendIntent("CancelJob", undefined, { jobId: activeJobId });
+      setApplyToAll(false);
+    };
+
+    const resumeJob = () => {
+      if (!activeJobId) return;
+      client.sendIntent("ResumeJob", undefined, { jobId: activeJobId });
+    };
+
+    const pauseJob = () => {
+      if (!activeJobId) return;
+      client.sendIntent("PauseJob", undefined, { jobId: activeJobId });
+    };
+
+    const handleActiveJobKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+      if (e.key === "Tab") {
+        e.preventDefault();
+        return;
+      }
+      if (isDecision) {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          cancelJob();
+          return;
+        }
+        if (e.key === "Enter" && primaryDecision) {
+          e.preventDefault();
+          submitDecision(primaryDecision);
+          return;
+        }
+        if ((e.key === "s" || e.key === "S") && skipDecision) {
+          e.preventDefault();
+          submitDecision(skipDecision);
+          return;
+        }
+      }
+      if (isProgress) {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          close();
+          return;
+        }
+        if (e.key === "Escape") {
+          e.preventDefault();
+          cancelJob();
+          return;
+        }
+        if ((e.key === "r" || e.key === "R") && activeJob.paused) {
+          e.preventDefault();
+          resumeJob();
+          return;
+        }
+      }
+      if (!isTerminal) return;
+      if (e.key === "Escape" || e.key === "Enter") {
+        e.preventDefault();
+        close();
+      }
+    };
+
     return (
-      <div className="modal-overlay" ref={modalRef} tabIndex={-1} onClick={isTerminal ? close : undefined} onKeyDown={(e) => { if (e.key === "Tab") e.preventDefault(); }}>
+      <div className="modal-overlay" ref={modalRef} tabIndex={-1} onClick={isTerminal ? close : undefined} onKeyDown={handleActiveJobKeyDown}>
         <div className="modal modal--fixed" onClick={(e) => e.stopPropagation()}>
           <div className="modal__header">{label} — {activeJob.state}</div>
           <div className="modal__body">
@@ -291,20 +401,17 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
                   </div>
                 )}
                 <div className="modal__actions">
-                  {activeJob.decision.options.map((opt) => (
+                  {decisionOptions.map((opt) => (
                     <button
                       key={opt}
-                      className="modal__btn"
-                      onClick={() => {
-                        client.sendIntent("ProvideJobDecision", undefined, {
-                          jobId: activeJobId,
-                          decision: opt,
-                          applyToAll: applyToAll && opt !== "cancel",
-                        });
-                        setApplyToAll(false);
-                      }}
+                      className={`modal__btn${opt === primaryDecision ? " modal__btn--primary" : ""}`}
+                      onClick={() => submitDecision(opt)}
                     >
-                      {opt.charAt(0).toUpperCase() + opt.slice(1)}
+                      {opt === primaryDecision
+                        ? opt.charAt(0).toUpperCase() + opt.slice(1)
+                        : opt === skipDecision
+                          ? `${opt.charAt(0).toUpperCase() + opt.slice(1)} (S)`
+                          : opt.charAt(0).toUpperCase() + opt.slice(1)}
                     </button>
                   ))}
                 </div>
@@ -369,30 +476,29 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
             )}
           </div>
           <div className="modal__actions">
-            {!isTerminal && !isDecision && (
+            {isProgress && (
               <>
-                <button className="modal__btn" onClick={close}>
+                <button className="modal__btn modal__btn--primary" onClick={close}>
                   Background
                 </button>
                 {activeJob.paused ? (
-                  <button className="modal__btn" onClick={() =>
-                    client.sendIntent("ResumeJob", undefined, { jobId: activeJobId })
-                  }>
+                  <button className="modal__btn" onClick={resumeJob}>
                     Resume
                   </button>
                 ) : (
-                  <button className="modal__btn" onClick={() =>
-                    client.sendIntent("PauseJob", undefined, { jobId: activeJobId })
-                  }>
+                  <button className="modal__btn" onClick={pauseJob}>
                     Pause
                   </button>
                 )}
-                <button className="modal__btn" onClick={() =>
-                  client.sendIntent("CancelJob", undefined, { jobId: activeJobId })
-                }>
+                <button className="modal__btn" onClick={cancelJob}>
                   Cancel
                 </button>
               </>
+            )}
+            {isDecision && (
+              <button className="modal__btn" onClick={cancelJob}>
+                Cancel
+              </button>
             )}
             {isTerminal && (
               <button className="modal__btn modal__btn--primary" onClick={() => {
