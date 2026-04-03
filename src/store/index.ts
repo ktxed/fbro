@@ -138,7 +138,7 @@ function applySnapshot(state: AppState, msg: StateSnapshotMessage): AppState {
   if (domains.panels) {
     const panels: Record<string, PanelState> = {};
     for (const [id, p] of Object.entries(domains.panels)) {
-      panels[id] = { ...p, panelId: id, entries: p.entries ?? [], selection: p.selection ?? [], selectedEntries: p.selectedEntries ?? [], version: p.version ?? 0, calculatingSize: p.calculatingSize ?? [], totalCount: p.totalCount, totalSize: p.totalSize, windowStart: p.windowStart };
+      panels[id] = { ...p, panelId: id, entries: p.entries ?? [], selection: p.selection ?? [], selectedEntries: p.selectedEntries ?? [], version: p.version ?? 0, calculatingSize: p.calculatingSize ?? [], totalCount: p.totalCount, totalSize: p.totalSize, windowStart: p.windowStart, filterModeActive: p.filterModeActive ?? false };
     }
     next.panels = panels;
   }
@@ -214,6 +214,9 @@ function applyPatch(state: AppState, msg: StatePatchMessage): AppState {
     }
     if (msg.patch.filter !== undefined) {
       updated = { ...updated, filter: msg.patch.filter as PanelState["filter"] };
+    }
+    if (msg.patch.filterModeActive !== undefined) {
+      updated = { ...updated, filterModeActive: msg.patch.filterModeActive as boolean };
     }
     if (msg.patch.selection !== undefined) {
       updated = { ...updated, selection: msg.patch.selection };

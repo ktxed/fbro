@@ -225,6 +225,7 @@ async fn navigate_to_source(scope: &Value, args: &Value, ctx: &mut IntentContext
                 panel.cursor = 0;
                 panel.selection.clear();
                 panel.filter = None;
+                panel.filter_mode_active = false;
                 target_path
             } else {
                 return;
@@ -311,6 +312,7 @@ async fn mount_source(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) 
                         panel.cursor = 0;
                         panel.selection.clear();
                         panel.filter = None;
+                        panel.filter_mode_active = false;
                     }
                 }
 

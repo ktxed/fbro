@@ -125,6 +125,8 @@ pub struct PanelSnapshot {
     pub source_id: String,
     pub sort: SortSpec,
     pub filter: Option<FilterSpec>,
+    #[serde(rename = "filterModeActive")]
+    pub filter_mode_active: bool,
     pub cursor: usize,
     pub selection: Vec<usize>,
     #[serde(rename = "selectedEntries")]
@@ -145,7 +147,7 @@ pub struct SortSpec {
     pub order: String,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct FilterSpec {
     pub mode: String,
     pub value: String,

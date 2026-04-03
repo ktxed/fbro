@@ -4,11 +4,13 @@ import type { WsClient } from "../ws/client";
 import {
   executeCommand,
   findMatchingCommand,
+  GLOBAL_SHORTCUT_COMMAND_IDS,
   PANEL_SHORTCUT_COMMAND_IDS,
 } from "../commands/interactive";
 import { useAppDispatch, useAppState } from "../store";
 
 const ROW_HEIGHT = 22;
+const FILTER_DEBOUNCE_MS = 200;
 
 function SortHeader({ sort, panelId, client }: {
   sort: PanelState["sort"];
@@ -168,17 +170,87 @@ export function Panel({ panelId, panel, isFocused, modalActive, client, sources,
   const windowStart = panel.windowStart ?? 0;
   const selectionSet = useMemo(() => new Set(panel.selection), [panel.selection]);
 
-  const [filterOpen, setFilterOpen] = useState(false);
-  const [filterInput, setFilterInput] = useState("");
+  const [filterInput, setFilterInput] = useState(panel.filter?.value ?? "");
   const filterInputRef = useRef<HTMLInputElement>(null);
+  const filterDebounceRef = useRef<number>(0);
+  const shouldFocusFilterRef = useRef(false);
+
+  const sendFilterValue = useCallback((value: string) => {
+    client.sendIntent("SetFilter", panelId, { value });
+  }, [client, panelId]);
+
+  const flushFilterValue = useCallback((value: string) => {
+    clearTimeout(filterDebounceRef.current);
+    if (value.trim() === (panel.filter?.value ?? "")) return;
+    sendFilterValue(value);
+  }, [panel.filter?.value, sendFilterValue]);
+
+  const focusPanel = useCallback(() => {
+    shouldFocusFilterRef.current = false;
+    focusDivRef.current?.focus();
+  }, []);
+
+  const closeFilterMode = useCallback((options?: { clear?: boolean }) => {
+    const clear = options?.clear ?? false;
+    clearTimeout(filterDebounceRef.current);
+    if (clear) {
+      setFilterInput("");
+      if ((panel.filter?.value ?? "") !== "" || filterInput.trim() !== "") {
+        sendFilterValue("");
+      }
+    } else {
+      flushFilterValue(filterInput);
+    }
+    shouldFocusFilterRef.current = false;
+    client.sendIntent("SetFilterMode", panelId, { active: false });
+    focusDivRef.current?.focus();
+  }, [client, filterInput, flushFilterValue, panel.filter?.value, panelId, sendFilterValue]);
+
+  const openFilterMode = useCallback((initialValue: string) => {
+    clearTimeout(filterDebounceRef.current);
+    shouldFocusFilterRef.current = true;
+    setFilterInput(initialValue);
+    client.sendIntent("SetFilterMode", panelId, { active: true });
+    window.setTimeout(() => filterInputRef.current?.focus(), 0);
+  }, [client, panelId]);
 
   // Keep focused panel's div focused so it receives keyboard events.
   // Also re-focus when a modal closes (modalActive transitions to false).
   useEffect(() => {
-    if (isFocused && !modalActive) {
+    if (!isFocused || modalActive) return;
+    if (panel.filterModeActive && shouldFocusFilterRef.current) {
+      window.setTimeout(() => filterInputRef.current?.focus(), 0);
+    } else {
       focusDivRef.current?.focus();
     }
-  }, [isFocused, modalActive]);
+  }, [isFocused, modalActive, panel.filterModeActive]);
+
+  useEffect(() => {
+    if (!panel.filterModeActive) {
+      shouldFocusFilterRef.current = false;
+      setFilterInput(panel.filter?.value ?? "");
+      return;
+    }
+    if (document.activeElement !== filterInputRef.current) {
+      setFilterInput(panel.filter?.value ?? "");
+    }
+  }, [panel.filter?.value, panel.filterModeActive]);
+
+  useEffect(() => {
+    if (!panel.filterModeActive) {
+      clearTimeout(filterDebounceRef.current);
+      return;
+    }
+    if (filterInput.trim() === (panel.filter?.value ?? "")) {
+      clearTimeout(filterDebounceRef.current);
+      return;
+    }
+    clearTimeout(filterDebounceRef.current);
+    filterDebounceRef.current = window.setTimeout(() => {
+      sendFilterValue(filterInput);
+    }, FILTER_DEBOUNCE_MS);
+    return () => clearTimeout(filterDebounceRef.current);
+  }, [filterInput, panel.filter?.value, panel.filterModeActive, sendFilterValue]);
 
   // End right-drag on mouse up anywhere; if a drag occurred, send final SetSelection
   useEffect(() => {
@@ -243,6 +315,12 @@ export function Panel({ panelId, panel, isFocused, modalActive, client, sources,
       e.preventDefault();
       return;
     }
+    if (panel.filterModeActive && e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      closeFilterMode({ clear: true });
+      return;
+    }
     const command = findMatchingCommand(appState.commands, PANEL_SHORTCUT_COMMAND_IDS, e.nativeEvent);
     if (command) {
       e.preventDefault();
@@ -256,35 +334,60 @@ export function Panel({ panelId, panel, isFocused, modalActive, client, sources,
         sources,
         otherPanelId,
         onOpenFilter: (initialValue) => {
-          setFilterInput(initialValue);
-          setFilterOpen(true);
-          window.setTimeout(() => filterInputRef.current?.focus(), 0);
+          openFilterMode(initialValue);
         },
         getPanelPageSize: () => {
           const list = listRef.current;
           return list ? Math.max(1, Math.floor(list.clientHeight / ROW_HEIGHT)) : 1;
         },
       });
-      if (command.id === "panel.source.next" || command.id === "panel.source.previous") {
-        setFilterOpen(false);
-      }
       return;
     }
   }
 
-  const closeFilter = () => {
-    setFilterOpen(false);
-    focusDivRef.current?.focus();
-  };
-
   const handleFilterKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    e.stopPropagation();
     if (e.key === "Enter") {
-      client.sendIntent("SetFilter", panelId, { value: filterInput });
-      closeFilter();
-    } else if (e.key === "Escape") {
-      closeFilter();
+      e.preventDefault();
+      e.stopPropagation();
+      closeFilterMode();
+      return;
     }
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      closeFilterMode({ clear: true });
+      return;
+    }
+    const hasEditModifier = e.ctrlKey || e.metaKey;
+    const isPrintable = e.key.length === 1 && !e.altKey && !hasEditModifier;
+    const isEditShortcut = hasEditModifier && ["a", "c", "v", "x", "z", "y"].includes(e.key.toLowerCase());
+    const isLocalEditingKey =
+      isPrintable ||
+      isEditShortcut ||
+      e.key === "Backspace" ||
+      e.key === "Delete" ||
+      e.key === "ArrowLeft" ||
+      e.key === "ArrowRight" ||
+      e.key === "Home" ||
+      e.key === "End";
+
+    if (isLocalEditingKey) {
+      e.stopPropagation();
+      return;
+    }
+
+    const matchingPanelCommand = findMatchingCommand(appState.commands, PANEL_SHORTCUT_COMMAND_IDS, e.nativeEvent);
+    if (matchingPanelCommand) {
+      focusPanel();
+      return;
+    }
+
+    const matchingGlobalCommand = findMatchingCommand(appState.commands, GLOBAL_SHORTCUT_COMMAND_IDS, e.nativeEvent);
+    if (matchingGlobalCommand) {
+      return;
+    }
+
+    e.stopPropagation();
   };
 
   const itemCount = isWindowed ? totalCount : panel.entries.length;
@@ -401,7 +504,7 @@ export function Panel({ panelId, panel, isFocused, modalActive, client, sources,
         >~</button>
       </div>
 
-      <VolumeHeader sources={sources} panel={panel} onNavigateToSource={(sourceId) => { client.sendIntent("NavigateToSource", panelId, { sourceId }); setFilterOpen(false); }} onMountSource={(sourceId) => { client.sendIntent("MountSource", panelId, { sourceId }); }} />
+      <VolumeHeader sources={sources} panel={panel} onNavigateToSource={(sourceId) => { shouldFocusFilterRef.current = false; client.sendIntent("NavigateToSource", panelId, { sourceId }); }} onMountSource={(sourceId) => { shouldFocusFilterRef.current = false; client.sendIntent("MountSource", panelId, { sourceId }); }} />
 
       <SortHeader sort={panel.sort} panelId={panelId} client={client} />
 
@@ -420,7 +523,7 @@ export function Panel({ panelId, panel, isFocused, modalActive, client, sources,
         )}
       </div>
 
-      {filterOpen && (
+      {panel.filterModeActive && (
         <div className="panel__filter-bar">
           <input
             ref={filterInputRef}
@@ -428,6 +531,9 @@ export function Panel({ panelId, panel, isFocused, modalActive, client, sources,
             value={filterInput}
             onChange={e => setFilterInput(e.target.value)}
             onKeyDown={handleFilterKeyDown}
+            onFocus={() => {
+              shouldFocusFilterRef.current = true;
+            }}
             placeholder="filter…"
             spellCheck={false}
           />

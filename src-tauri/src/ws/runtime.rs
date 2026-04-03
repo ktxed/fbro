@@ -151,6 +151,7 @@ pub(crate) async fn navigate_to(
                 panel.window_start = 0;
                 panel.window_count = 0;
                 panel.filter = None;
+                panel.filter_mode_active = false;
                 panel.version += 1;
                 (source_id, panel.sort.clone(), None, panel.version)
             } else {
@@ -174,6 +175,7 @@ pub(crate) async fn navigate_to(
                 "selectedEntries": [],
                 "status": "loading",
                 "filter": null,
+                "filterModeActive": false,
                 "totalCount": null,
                 "totalSize": null,
                 "windowStart": null
@@ -217,9 +219,9 @@ pub(crate) async fn rescan_panel(
         handle.abort();
     }
 
-    let (path, sort, filter, version, driver, source_id) = {
+    let (path, sort, filter, filter_mode_active, version, driver, source_id) = {
         let mut state_guard = state.lock().await;
-        let (source_id, path, sort, filter, version) =
+        let (source_id, path, sort, filter, filter_mode_active, version) =
             if let Some(panel) = state_guard.panels.get_mut(panel_id) {
                 let source_id = panel.source_id.clone();
                 panel.entries.clear();
@@ -234,13 +236,22 @@ pub(crate) async fn rescan_panel(
                     panel.path.clone(),
                     panel.sort.clone(),
                     panel.filter.clone(),
+                    panel.filter_mode_active,
                     panel.version,
                 )
             } else {
                 return;
             };
         let driver = state_guard.drivers.get(&source_id).cloned().unwrap();
-        (path, sort, filter, version, driver, source_id)
+        (
+            path,
+            sort,
+            filter,
+            filter_mode_active,
+            version,
+            driver,
+            source_id,
+        )
     };
 
     let _ = tx
@@ -258,6 +269,8 @@ pub(crate) async fn rescan_panel(
                 "selectedEntries": [],
                 "status": "loading",
                 "sort": { "by": sort.by, "order": sort.order },
+                "filter": filter,
+                "filterModeActive": filter_mode_active,
                 "totalCount": null,
                 "windowStart": null
             }),
@@ -604,6 +617,12 @@ pub(crate) async fn update_panel_from_patch(
                 .filter_map(|value| value.as_u64().map(|index| index as usize))
                 .collect();
         }
+        if let Some(filter) = patch.get("filter") {
+            panel.filter = serde_json::from_value(filter.clone()).ok().flatten();
+        }
+        if let Some(filter_mode_active) = patch.get("filterModeActive").and_then(|value| value.as_bool()) {
+            panel.filter_mode_active = filter_mode_active;
+        }
         if let Some(window_start) = patch.get("windowStart").and_then(|value| value.as_u64()) {
             panel.window_start = window_start as usize;
         }
@@ -619,6 +638,7 @@ fn build_panel_snapshot(panel: &Panel) -> PanelSnapshot {
         source_id: panel.source_id.clone(),
         sort: panel.sort.clone(),
         filter: panel.filter.clone(),
+        filter_mode_active: panel.filter_mode_active,
         cursor: panel.cursor,
         selection: panel.selection.clone(),
         selected_entries: selected_entries_for_panel(panel),

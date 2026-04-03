@@ -33,6 +33,7 @@ export interface PanelState {
   sourceId: string;
   sort: { by: string; order: "asc" | "desc" };
   filter: null | { mode: string; value: string };
+  filterModeActive: boolean;
   cursor: number;
   selection: number[];
   selectedEntries: FileOpFile[];
@@ -185,6 +186,8 @@ export interface StatePatchMessage {
     path?: string;
     sourceId?: string;
     entries?: VFSEntry[];
+    filter?: PanelState["filter"];
+    filterModeActive?: boolean;
     selection?: number[];
     selectedEntries?: FileOpFile[];
     [key: string]: unknown;

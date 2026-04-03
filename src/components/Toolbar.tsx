@@ -14,6 +14,7 @@ import {
 
 function isEditableTarget(target: EventTarget | null) {
   if (!(target instanceof HTMLElement)) return false;
+  if (target.classList.contains("panel__filter-input")) return false;
   return target.isContentEditable
     || target instanceof HTMLInputElement
     || target instanceof HTMLTextAreaElement

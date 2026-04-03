@@ -13,6 +13,7 @@ pub async fn dispatch(name: &str, scope: &Value, args: &Value, ctx: &mut IntentC
         "RefreshPanels"
         | "SetSort"
         | "SetFilter"
+        | "SetFilterMode"
         | "MoveCursor"
         | "SetSelection"
         | "SelectAtIndex"

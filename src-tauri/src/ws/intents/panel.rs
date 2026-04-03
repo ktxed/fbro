@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use serde_json::Value;
 
-use crate::ws::intents::{arg_i64, arg_str, arg_u64, arg_usize_vec};
+use crate::ws::intents::{arg_bool, arg_i64, arg_str, arg_u64, arg_usize_vec};
 use crate::ws::protocol::{now, ServerMessage};
 use crate::ws::runtime::{
     build_state_snapshot, rescan_panel, resolve_panel_id, selected_entries_for_panel,
@@ -14,6 +14,7 @@ pub(crate) async fn handle(name: &str, scope: &Value, args: &Value, ctx: &mut In
         "RefreshPanels" => refresh_panels(ctx).await,
         "SetSort" => set_sort(scope, args, ctx).await,
         "SetFilter" => set_filter(scope, args, ctx).await,
+        "SetFilterMode" => set_filter_mode(scope, args, ctx).await,
         "MoveCursor" => move_cursor(scope, args, ctx).await,
         "SetSelection" => set_selection(scope, args, ctx).await,
         "SelectAtIndex" => select_at_index(scope, args, ctx).await,
@@ -58,6 +59,18 @@ impl FilterArgs {
     fn from_args(args: &Value) -> Self {
         Self {
             value: arg_str(args, "value").unwrap_or("").trim().to_string(),
+        }
+    }
+}
+
+struct FilterModeArgs {
+    active: bool,
+}
+
+impl FilterModeArgs {
+    fn from_args(args: &Value) -> Self {
+        Self {
+            active: arg_bool(args, "active", false),
         }
     }
 }
@@ -212,11 +225,11 @@ async fn set_sort(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
 async fn set_filter(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
     let panel_id = resolve_panel_id(scope, ctx.state).await;
     let parsed = FilterArgs::from_args(args);
-    let names = {
+    let (names, changed) = {
         let mut state_guard = ctx.state.lock().await;
         let names = selected_names_for(&state_guard, &panel_id);
         if let Some(panel) = state_guard.panels.get_mut(&panel_id) {
-            panel.filter = if parsed.value.is_empty() {
+            let next_filter = if parsed.value.is_empty() {
                 None
             } else {
                 Some(crate::ws::protocol::FilterSpec {
@@ -224,9 +237,16 @@ async fn set_filter(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
                     value: parsed.value,
                 })
             };
+            let changed = panel.filter != next_filter;
+            panel.filter = next_filter.clone();
+            (names, changed)
+        } else {
+            return;
         }
-        names
     };
+    if !changed {
+        return;
+    }
     rescan_panel(
         &panel_id,
         ctx.state,
@@ -235,6 +255,31 @@ async fn set_filter(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
         None,
         names,
         ctx.dir_size_queue,
+    )
+    .await;
+}
+
+async fn set_filter_mode(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
+    let panel_id = resolve_panel_id(scope, ctx.state).await;
+    let parsed = FilterModeArgs::from_args(args);
+    let version = {
+        let mut state_guard = ctx.state.lock().await;
+        if let Some(panel) = state_guard.panels.get_mut(&panel_id) {
+            if panel.filter_mode_active == parsed.active {
+                return;
+            }
+            panel.filter_mode_active = parsed.active;
+            panel.version += 1;
+            panel.version
+        } else {
+            return;
+        }
+    };
+    send_panel_patch(
+        ctx,
+        panel_id,
+        version,
+        serde_json::json!({ "filterModeActive": parsed.active }),
     )
     .await;
 }
