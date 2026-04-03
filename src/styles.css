@@ -694,6 +694,11 @@ body {
   color: var(--text-dim);
 }
 
+.modal__mnemonic {
+  text-decoration: underline;
+  text-underline-offset: 0.08em;
+}
+
 .modal__option select {
   background: var(--bg);
   color: var(--text);

@@ -13,6 +13,18 @@ interface OperationModalProps {
   client: WsClient;
 }
 
+function MnemonicLabel({ text, mnemonic }: { text: string; mnemonic: string }) {
+  const idx = text.toLowerCase().indexOf(mnemonic.toLowerCase());
+  if (idx < 0) return <>{text}</>;
+  return (
+    <>
+      {text.slice(0, idx)}
+      <span className="modal__mnemonic">{text[idx]}</span>
+      {text.slice(idx + 1)}
+    </>
+  );
+}
+
 function opLabel(t: string) {
   switch (t) {
     case "copy": return "Copy";
@@ -158,6 +170,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
     const isDelete = pending.opType === "delete";
     const label = opLabel(pending.opType);
     const canStartInBackground = !dryMode;
+    const conflictPolicies: ConflictPolicy[] = ["ask", "overwrite", "skip"];
 
     const startOp = (background: boolean) => {
       if (submitted) return;
@@ -177,6 +190,13 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
       // The reducer will transition to activeJobId when JobStarted arrives
     };
 
+    const cycleConflictPolicy = () => {
+      if (isDelete || submitted) return;
+      const index = conflictPolicies.indexOf(conflictPolicy);
+      const next = conflictPolicies[(index + 1 + conflictPolicies.length) % conflictPolicies.length];
+      setConflictPolicy(next);
+    };
+
     const handlePendingKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
       if (e.key === "Tab") {
         e.preventDefault();
@@ -190,6 +210,21 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
       if (e.key === "Enter") {
         e.preventDefault();
         startOp(false);
+        return;
+      }
+      if ((e.key === "d" || e.key === "D") && !submitted) {
+        e.preventDefault();
+        setDryMode((current) => !current);
+        return;
+      }
+      if ((e.key === "p" || e.key === "P") && canStartInBackground && !submitted) {
+        e.preventDefault();
+        setStartPaused((current) => !current);
+        return;
+      }
+      if ((e.key === "a" || e.key === "A")) {
+        e.preventDefault();
+        cycleConflictPolicy();
         return;
       }
       if (canStartInBackground && (e.key === "b" || e.key === "B")) {
@@ -225,14 +260,14 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
 
             {!isDelete && (
               <div className="modal__option">
-                <label>If file exists:</label>
+                <label><MnemonicLabel text="Action if file exists:" mnemonic="a" /></label>
                 <select
                   value={conflictPolicy}
                   onChange={(e) => setConflictPolicy(e.target.value as ConflictPolicy)}
                 >
                   <option value="ask">Ask</option>
-                  <option value="skip">Skip</option>
                   <option value="overwrite">Overwrite</option>
+                  <option value="skip">Skip</option>
                 </select>
               </div>
             )}
@@ -243,7 +278,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
                   checked={dryMode}
                   onChange={(e) => setDryMode(e.target.checked)}
                 />
-                {" "}Dry mode (generate bash script instead)
+                {" "}<MnemonicLabel text="Dry mode (generate bash script instead)" mnemonic="d" />
               </label>
             </div>
             {!dryMode && (
@@ -254,7 +289,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
                     checked={startPaused}
                     onChange={(e) => setStartPaused(e.target.checked)}
                   />
-                  {" "}Start paused when sent to background
+                  {" "}<MnemonicLabel text="Start paused when sent to background" mnemonic="p" />
                 </label>
               </div>
             )}
@@ -265,7 +300,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
             </button>
             {canStartInBackground && (
               <button className="modal__btn" disabled={submitted} onClick={() => startOp(true)}>
-                Background
+                <MnemonicLabel text="Background" mnemonic="b" />
               </button>
             )}
             <button className="modal__btn" onClick={close}>
@@ -328,6 +363,11 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
         return;
       }
       if (isDecision) {
+        if ((e.key === "a" || e.key === "A") && activeJob.decision?.supportsApplyToAll) {
+          e.preventDefault();
+          setApplyToAll((current) => !current);
+          return;
+        }
         if (e.key === "Escape") {
           e.preventDefault();
           cancelJob();
@@ -396,7 +436,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
                         checked={applyToAll}
                         onChange={(e) => setApplyToAll(e.target.checked)}
                       />
-                      {" "}Apply this choice to all conflicts
+                      {" "}<MnemonicLabel text="Apply this choice to all conflicts" mnemonic="a" />
                     </label>
                   </div>
                 )}
@@ -410,7 +450,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
                       {opt === primaryDecision
                         ? opt.charAt(0).toUpperCase() + opt.slice(1)
                         : opt === skipDecision
-                          ? `${opt.charAt(0).toUpperCase() + opt.slice(1)} (S)`
+                          ? <MnemonicLabel text={opt.charAt(0).toUpperCase() + opt.slice(1)} mnemonic="s" />
                           : opt.charAt(0).toUpperCase() + opt.slice(1)}
                     </button>
                   ))}
@@ -483,7 +523,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
                 </button>
                 {activeJob.paused ? (
                   <button className="modal__btn" onClick={resumeJob}>
-                    Resume
+                    <MnemonicLabel text="Resume" mnemonic="r" />
                   </button>
                 ) : (
                   <button className="modal__btn" onClick={pauseJob}>
