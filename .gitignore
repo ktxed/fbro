@@ -21,3 +21,7 @@ Thumbs.db
 # Env
 .env
 .env.local
+
+# Local Codex / session artifacts
+/.codex
+/chat-dump.jsonl
