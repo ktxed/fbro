@@ -7,7 +7,7 @@ use serde_json::Value;
 use crate::vfs::VfsDriver;
 use crate::watcher::WatcherCommand;
 use crate::ws::intents::arg_str;
-use crate::ws::protocol::{now, ServerMessage};
+use crate::ws::protocol::{now, OpenWithAppSchema, ServerMessage};
 use crate::ws::runtime::{
     build_sources_json, navigate_to, rescan_panel, resolve_panel_id, IntentContext,
 };
@@ -24,6 +24,8 @@ pub(crate) async fn handle(name: &str, scope: &Value, args: &Value, ctx: &mut In
         "MountSource" => mount_source(scope, args, ctx).await,
         "NavigateUp" => navigate_up(scope, ctx).await,
         "RevealInFileManager" => reveal_in_file_manager(args, ctx).await,
+        "ListOpenWithApps" => list_open_with_apps(args, ctx).await,
+        "LaunchOpenWithApp" => launch_open_with_app(args, ctx).await,
         _ => {}
     }
 }
@@ -59,6 +61,36 @@ impl SourceArgs {
 struct RevealArgs {
     path: String,
     kind: String,
+}
+
+struct ListOpenWithArgs {
+    request_id: String,
+    path: String,
+    kind: String,
+}
+
+impl ListOpenWithArgs {
+    fn from_args(args: &Value) -> Self {
+        Self {
+            request_id: arg_str(args, "requestId").unwrap_or("").to_string(),
+            path: arg_str(args, "path").unwrap_or("").to_string(),
+            kind: arg_str(args, "kind").unwrap_or("file").to_string(),
+        }
+    }
+}
+
+struct LaunchOpenWithArgs {
+    request_id: String,
+    app_id: String,
+}
+
+impl LaunchOpenWithArgs {
+    fn from_args(args: &Value) -> Self {
+        Self {
+            request_id: arg_str(args, "requestId").unwrap_or("").to_string(),
+            app_id: arg_str(args, "appId").unwrap_or("").to_string(),
+        }
+    }
 }
 
 impl RevealArgs {
@@ -219,6 +251,111 @@ async fn reveal_in_file_manager(args: &Value, ctx: &mut IntentContext<'_>) {
         Arc::clone(&state_guard.platform)
     };
     platform.reveal_in_file_manager(&parsed.path, &parsed.kind);
+}
+
+async fn list_open_with_apps(args: &Value, ctx: &mut IntentContext<'_>) {
+    let parsed = ListOpenWithArgs::from_args(args);
+    if parsed.request_id.is_empty() || parsed.path.is_empty() {
+        return;
+    }
+
+    let platform = {
+        let state_guard = ctx.state.lock().await;
+        Arc::clone(&state_guard.platform)
+    };
+
+    match platform.list_open_with_apps(&parsed.path, &parsed.kind) {
+        Ok(apps) => {
+            let schemas = apps
+                .iter()
+                .map(|app| OpenWithAppSchema {
+                    id: app.option.id.clone(),
+                    label: app.option.label.clone(),
+                    detail: app.option.detail.clone(),
+                    is_default: app.option.is_default,
+                    source: app.option.source.clone(),
+                })
+                .collect();
+
+            {
+                let mut state_guard = ctx.state.lock().await;
+                state_guard.open_with_requests.insert(
+                    parsed.request_id.clone(),
+                    crate::state::OpenWithRequest {
+                        path: parsed.path.clone(),
+                        kind: parsed.kind.clone(),
+                        apps,
+                    },
+                );
+                if state_guard.open_with_requests.len() > 32 {
+                    if let Some(oldest) = state_guard.open_with_requests.keys().next().cloned() {
+                        state_guard.open_with_requests.remove(&oldest);
+                    }
+                }
+            }
+
+            let _ = ctx
+                .tx
+                .send(ServerMessage::OpenWithOptionsReady {
+                    timestamp: now(),
+                    request_id: parsed.request_id,
+                    apps: schemas,
+                })
+                .await;
+        }
+        Err(message) => {
+            let _ = ctx
+                .tx
+                .send(ServerMessage::OpenWithOptionsFailed {
+                    timestamp: now(),
+                    request_id: parsed.request_id,
+                    message,
+                })
+                .await;
+        }
+    }
+}
+
+async fn launch_open_with_app(args: &Value, ctx: &mut IntentContext<'_>) {
+    let parsed = LaunchOpenWithArgs::from_args(args);
+    if parsed.request_id.is_empty() || parsed.app_id.is_empty() {
+        return;
+    }
+
+    let (platform, request) = {
+        let mut state_guard = ctx.state.lock().await;
+        let request = match state_guard.open_with_requests.remove(&parsed.request_id) {
+            Some(request) => request,
+            None => return,
+        };
+        (Arc::clone(&state_guard.platform), request)
+    };
+
+    let Some(app) = request
+        .apps
+        .iter()
+        .find(|app| app.option.id == parsed.app_id)
+        .cloned()
+    else {
+        return;
+    };
+
+    if let Err(message) = platform.launch_open_with(&request.path, &app) {
+        let _ = ctx
+            .tx
+            .send(ServerMessage::Error {
+                timestamp: now(),
+                code: "OPEN_WITH_LAUNCH_FAILED".to_string(),
+                message,
+                recoverable: true,
+                extra: Some(serde_json::json!({
+                    "requestId": parsed.request_id,
+                    "appId": parsed.app_id,
+                    "path": request.path,
+                })),
+            })
+            .await;
+    }
 }
 
 async fn navigate_to_source(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {

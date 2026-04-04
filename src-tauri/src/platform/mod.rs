@@ -17,6 +17,37 @@ pub struct VolumeInfo {
     pub device_path: Option<String>, // udisks2 object path for mount operations
 }
 
+#[derive(Clone, Debug)]
+pub struct OpenWithAppOption {
+    pub id: String,
+    pub label: String,
+    pub detail: Option<String>,
+    pub is_default: bool,
+    pub source: String,
+}
+
+#[derive(Clone, Debug)]
+pub enum OpenWithLaunch {
+    Default,
+    Command {
+        program: String,
+        args: Vec<String>,
+    },
+    LinuxApp {
+        content_type: String,
+        app_key: String,
+    },
+    MacApplication {
+        application_path: String,
+    },
+}
+
+#[derive(Clone, Debug)]
+pub struct ResolvedOpenWithApp {
+    pub option: OpenWithAppOption,
+    pub launch: OpenWithLaunch,
+}
+
 /// Abstraction over platform-specific environment queries and services.
 pub trait Platform: Send + Sync {
     /// Returns the current user's home directory.
@@ -40,6 +71,36 @@ pub trait Platform: Send + Sync {
 
     /// Reveals a path in the platform file manager.
     fn reveal_in_file_manager(&self, _path: &str, _kind: &str) {}
+
+    /// Lists applications that can open the given path.
+    fn list_open_with_apps(&self, _path: &str, _kind: &str) -> Result<Vec<ResolvedOpenWithApp>, String> {
+        Ok(vec![])
+    }
+
+    /// Launches the given path using one of the applications returned by `list_open_with_apps`.
+    fn launch_open_with(&self, path: &str, app: &ResolvedOpenWithApp) -> Result<(), String> {
+        match &app.launch {
+            OpenWithLaunch::Default => {
+                self.open_file(path);
+                Ok(())
+            }
+            OpenWithLaunch::Command { program, args } => {
+                let mut cmd = std::process::Command::new(program);
+                cmd.args(args).arg(path);
+                cmd.spawn().map(|_| ()).map_err(|e| e.to_string())
+            }
+            OpenWithLaunch::MacApplication { application_path } => {
+                std::process::Command::new("open")
+                    .arg("-a")
+                    .arg(application_path)
+                    .arg(path)
+                    .spawn()
+                    .map(|_| ())
+                    .map_err(|e| e.to_string())
+            }
+            OpenWithLaunch::LinuxApp { .. } => Err("Open With is not supported for this app on this platform".to_string()),
+        }
+    }
 
     /// Returns (free_bytes, total_bytes) for the filesystem containing `path`.
     fn disk_space(&self, _path: &str) -> Option<(u64, u64)> {
@@ -87,6 +148,29 @@ pub fn create_platform() -> std::sync::Arc<dyn Platform> {
     }
     #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
     compile_error!("unsupported platform")
+}
+
+pub fn append_supplemental_apps(
+    apps: &mut Vec<ResolvedOpenWithApp>,
+    supplements: Vec<ResolvedOpenWithApp>,
+) {
+    let mut seen: std::collections::HashSet<String> = apps
+        .iter()
+        .map(|app| normalize_open_with_key(&app.option.label, app.option.detail.as_deref()))
+        .collect();
+
+    for app in supplements {
+        let key = normalize_open_with_key(&app.option.label, app.option.detail.as_deref());
+        if seen.insert(key) {
+            apps.push(app);
+        }
+    }
+}
+
+fn normalize_open_with_key(label: &str, detail: Option<&str>) -> String {
+    let label = label.trim().to_lowercase();
+    let detail = detail.unwrap_or("").trim().to_lowercase();
+    format!("{label}::{detail}")
 }
 
 // ── Volume watcher abstraction ──────────────────────────────────────────────

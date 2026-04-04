@@ -4,7 +4,7 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
 
 use crate::jobs::JobStore;
-use crate::platform::Platform;
+use crate::platform::{Platform, ResolvedOpenWithApp};
 use crate::vfs::VfsDriver;
 use crate::ws::protocol::{EntrySchema, FilterSpec, ServerMessage, SortSpec};
 
@@ -72,11 +72,18 @@ pub struct AppState {
     pub focus: String,
     pub platform: Arc<dyn Platform>,
     pub job_store: JobStore,
+    pub open_with_requests: HashMap<String, OpenWithRequest>,
     /// Senders for all connected GUI clients — used to broadcast state updates
     /// from non-GUI connections (e.g. viewer windows).
     pub gui_senders: Vec<mpsc::Sender<ServerMessage>>,
     /// Port of the local HTTP file server used by viewer windows for media streaming.
     pub file_server_port: u16,
+}
+
+pub struct OpenWithRequest {
+    pub path: String,
+    pub kind: String,
+    pub apps: Vec<ResolvedOpenWithApp>,
 }
 
 impl AppState {
@@ -221,6 +228,7 @@ impl AppState {
             focus: "left".to_string(),
             platform,
             job_store: JobStore::new(),
+            open_with_requests: HashMap::new(),
             gui_senders: Vec::new(),
             file_server_port,
         }

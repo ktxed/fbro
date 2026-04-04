@@ -110,6 +110,14 @@ export interface InteractiveCommand {
   intentName?: string;
 }
 
+export interface OpenWithAppItem {
+  id: string;
+  label: string;
+  detail?: string;
+  isDefault: boolean;
+  source: "system" | "supplement";
+}
+
 export interface JobStart {
   jobId: string;
   opType: string;
@@ -275,6 +283,20 @@ export interface DryRunReadyMessage {
   scriptDir: string;
 }
 
+export interface OpenWithOptionsReadyMessage {
+  type: "OpenWithOptionsReady";
+  timestamp: number;
+  requestId: string;
+  apps: OpenWithAppItem[];
+}
+
+export interface OpenWithOptionsFailedMessage {
+  type: "OpenWithOptionsFailed";
+  timestamp: number;
+  requestId: string;
+  message: string;
+}
+
 // ─── Union types ─────────────────────────────────────────────────────────────
 
 export type BEMessage =
@@ -289,6 +311,8 @@ export type BEMessage =
   | RenameOkMessage
   | MkdirOkMessage
   | ViewerFileChangedMessage
-  | DryRunReadyMessage;
+  | DryRunReadyMessage
+  | OpenWithOptionsReadyMessage
+  | OpenWithOptionsFailedMessage;
 
 export type FEMessage = HelloMessage | IntentMessage;

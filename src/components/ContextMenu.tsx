@@ -25,8 +25,8 @@ export function ContextMenu({ client, menu }: ContextMenuProps) {
   const [highlightedIndex, setHighlightedIndex] = useState(0);
 
   const items = useMemo(
-    () => buildContextMenuItems(state.commands, menu.fullPath, menu.name),
-    [state.commands, menu.fullPath, menu.name],
+    () => buildContextMenuItems(state.commands, menu.fullPath, menu.name, menu.kind),
+    [state.commands, menu.fullPath, menu.name, menu.kind],
   );
   const selectableItems = items.filter((item) => item.kind !== "separator");
 
@@ -116,6 +116,30 @@ export function ContextMenu({ client, menu }: ContextMenuProps) {
 
     if (item.kind === "clipboard" && item.clipboardText) {
       await navigator.clipboard.writeText(item.clipboardText);
+      return;
+    }
+
+    if (item.kind === "openWith") {
+      const requestId = globalThis.crypto?.randomUUID?.() ?? `open-with-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      dispatch({
+        type: "OPEN_OPEN_WITH",
+        openWith: {
+          panelId: menu.panelId,
+          absIndex: menu.absIndex,
+          name: menu.name,
+          kind: menu.kind,
+          dirPath: menu.dirPath,
+          fullPath: menu.fullPath,
+          requestId,
+          status: "loading",
+          apps: [],
+        },
+      });
+      client.sendIntent("ListOpenWithApps", undefined, {
+        requestId,
+        path: menu.fullPath,
+        kind: menu.kind,
+      });
       return;
     }
 

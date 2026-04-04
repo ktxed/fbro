@@ -98,6 +98,18 @@ pub enum ServerMessage {
         #[serde(rename = "scriptDir")]
         script_dir: String,
     },
+    OpenWithOptionsReady {
+        timestamp: u64,
+        #[serde(rename = "requestId")]
+        request_id: String,
+        apps: Vec<OpenWithAppSchema>,
+    },
+    OpenWithOptionsFailed {
+        timestamp: u64,
+        #[serde(rename = "requestId")]
+        request_id: String,
+        message: String,
+    },
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -237,6 +249,17 @@ pub struct InteractiveCommandSchema {
     pub default_bindings: Vec<KeyBindingSchema>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub intent_name: Option<String>,
+}
+
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenWithAppSchema {
+    pub id: String,
+    pub label: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    pub is_default: bool,
+    pub source: String,
 }
 
 #[derive(Serialize, Clone, Debug)]

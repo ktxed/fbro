@@ -901,6 +901,28 @@ body {
   padding: 18px 12px;
 }
 
+.open-with {
+  min-width: 520px;
+}
+
+.open-with__body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px;
+}
+
+.open-with__target {
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.open-with__list {
+  max-height: min(52vh, 440px);
+}
+
 /* Progress */
 
 .modal__progress-section {

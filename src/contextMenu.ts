@@ -6,7 +6,7 @@ export type ContextMenuItem =
   | { id: string; kind: "separator" }
   | {
       id: string;
-      kind: "command" | "clipboard" | "platform";
+      kind: "command" | "clipboard" | "platform" | "openWith";
       label: string;
       shortcut?: string;
       commandId?: string;
@@ -58,9 +58,15 @@ export function buildContextMenuItems(
   commands: Record<string, InteractiveCommand>,
   fullPath: string,
   name: string,
+  kind: string,
 ): ContextMenuItem[] {
+  const openWithItem: ContextMenuItem | null = kind === "file" || kind === "directory"
+    ? { id: "platform.open_with", kind: "openWith", label: "Open With..." }
+    : null;
+
   return [
     platformItem(),
+    ...(openWithItem ? [openWithItem] : []),
     commandItem("file.copy", "Copy", commands),
     commandItem("file.rename", "Rename", commands),
     commandItem("file.delete", "Delete", commands),

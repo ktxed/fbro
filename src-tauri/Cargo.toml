@@ -22,6 +22,7 @@ notify = { version = "7", features = ["macos_fsevent"] }
 async-trait = "0.1"
 
 [target.'cfg(target_os = "linux")'.dependencies]
+gio = "0.18.4"
 zbus = { version = "5", default-features = false, features = ["tokio"] }
 
 [profile.release]

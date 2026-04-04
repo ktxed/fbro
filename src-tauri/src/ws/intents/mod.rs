@@ -34,7 +34,7 @@ pub async fn dispatch(name: &str, scope: &Value, args: &Value, ctx: &mut IntentC
         | "RequestStateSnapshot" => panel::handle(name, scope, args, ctx).await,
         "OpenEntry" | "NavigateHome" | "NavigateSourceRoot" | "NavigatePanelTo" | "OpenFile"
         | "OpenTerminal" | "NavigateToSource" | "MountSource" | "NavigateUp"
-        | "RevealInFileManager" => {
+        | "RevealInFileManager" | "ListOpenWithApps" | "LaunchOpenWithApp" => {
             navigation::handle(name, scope, args, ctx).await
         }
         "StartFileOp" | "ProvideJobDecision" | "CancelJob" | "PauseJob" | "ResumeJob"

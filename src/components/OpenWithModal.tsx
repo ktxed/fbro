@@ -1,0 +1,153 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+
+import { useAppDispatch, useAppState, type PendingOpenWith } from "../store";
+import type { WsClient } from "../ws/client";
+
+interface OpenWithModalProps {
+  client: WsClient;
+  openWith: PendingOpenWith;
+}
+
+export function OpenWithModal({ client, openWith }: OpenWithModalProps) {
+  const state = useAppState();
+  const dispatch = useAppDispatch();
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const [selectedIndex, setSelectedIndex] = useState(0);
+
+  const apps = openWith.apps;
+
+  useEffect(() => {
+    dialogRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    if (apps.length === 0) {
+      setSelectedIndex(0);
+      return;
+    }
+    setSelectedIndex((current) => Math.min(current, apps.length - 1));
+  }, [apps]);
+
+  useEffect(() => {
+    const selected = listRef.current?.querySelector<HTMLElement>("[data-selected='true']");
+    selected?.scrollIntoView({ block: "nearest" });
+  }, [apps, selectedIndex]);
+
+  useEffect(() => {
+    const panel = state.panels[openWith.panelId];
+    if (!panel || panel.path.replace(/[/\\]+$/, "") !== openWith.dirPath) {
+      dispatch({ type: "CLOSE_OPEN_WITH" });
+      return;
+    }
+    const entry = panel.entries[openWith.absIndex - (panel.windowStart ?? 0)];
+    if (!entry || entry.name !== openWith.name) {
+      dispatch({ type: "CLOSE_OPEN_WITH" });
+    }
+  }, [dispatch, openWith.absIndex, openWith.dirPath, openWith.name, openWith.panelId, state.panels]);
+
+  const close = () => dispatch({ type: "CLOSE_OPEN_WITH" });
+
+  const selectedApp = useMemo(
+    () => apps[selectedIndex],
+    [apps, selectedIndex],
+  );
+
+  const launchApp = (appId: string) => {
+    close();
+    client.sendIntent("LaunchOpenWithApp", undefined, {
+      requestId: openWith.requestId,
+      appId,
+    });
+  };
+
+  const launchSelected = () => {
+    if (!selectedApp) return;
+    launchApp(selectedApp.id);
+  };
+
+  const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      close();
+      return;
+    }
+    if (e.key === "Tab") {
+      e.preventDefault();
+      return;
+    }
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      if (apps.length > 0) {
+        setSelectedIndex((current) => (current + 1) % apps.length);
+      }
+      return;
+    }
+    if (e.key === "ArrowUp") {
+      e.preventDefault();
+      if (apps.length > 0) {
+        setSelectedIndex((current) => (current - 1 + apps.length) % apps.length);
+      }
+      return;
+    }
+    if (e.key === "Enter") {
+      e.preventDefault();
+      launchSelected();
+    }
+  };
+
+  return (
+    <div className="modal-overlay" onClick={close}>
+      <div
+        ref={dialogRef}
+        className="modal command-palette open-with"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Open With"
+        tabIndex={-1}
+        onClick={(e) => e.stopPropagation()}
+        onKeyDown={onKeyDown}
+      >
+        <div className="modal__header">Open With...</div>
+        <div className="modal__body open-with__body">
+          <div className="open-with__target">{openWith.name}</div>
+          <div className="command-palette__list open-with__list" ref={listRef}>
+            {openWith.status === "loading" && (
+              <div className="command-palette__empty">Looking up applications...</div>
+            )}
+            {openWith.status === "error" && (
+              <div className="command-palette__empty">{openWith.error ?? "Failed to load applications."}</div>
+            )}
+            {openWith.status === "ready" && apps.length === 0 && (
+              <div className="command-palette__empty">No applications available.</div>
+            )}
+            {openWith.status === "ready" && apps.map((app, index) => {
+              const selected = index === selectedIndex;
+              return (
+                <button
+                  key={app.id}
+                  type="button"
+                  className={`command-palette__item${selected ? " command-palette__item--selected" : ""}`}
+                  data-selected={selected ? "true" : "false"}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onMouseEnter={() => setSelectedIndex(index)}
+                  onClick={() => launchApp(app.id)}
+                >
+                  <span className="command-palette__item-main">
+                    <span className="command-palette__item-title">{app.label}</span>
+                    <span className="command-palette__item-category">
+                      {app.detail ?? (app.source === "supplement" ? "Detected application" : "Registered application")}
+                    </span>
+                  </span>
+                  <span className="command-palette__item-binding">
+                    {app.isDefault ? "Default" : ""}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

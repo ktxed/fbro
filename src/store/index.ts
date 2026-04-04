@@ -14,6 +14,9 @@ import type {
   QuitConfirmRequiredMessage,
   VFSEntry,
   DryRunReadyMessage,
+  OpenWithAppItem,
+  OpenWithOptionsFailedMessage,
+  OpenWithOptionsReadyMessage,
 } from "../ws/types";
 
 // ─── State ───────────────────────────────────────────────────────────────────
@@ -69,6 +72,19 @@ export interface PendingContextMenu {
   anchorBottom: number;
 }
 
+export interface PendingOpenWith {
+  panelId: string;
+  absIndex: number;
+  name: string;
+  kind: string;
+  dirPath: string;
+  fullPath: string;
+  requestId: string;
+  status: "loading" | "ready" | "error";
+  apps: OpenWithAppItem[];
+  error?: string;
+}
+
 export interface AppState {
   connected: boolean;
   sessionId: string | null;
@@ -89,6 +105,7 @@ export interface AppState {
   pendingNoEditor: PendingNoEditor | null;
   pendingDryRun: PendingDryRun | null;
   pendingContextMenu: PendingContextMenu | null;
+  pendingOpenWith: PendingOpenWith | null;
   commandPaletteOpen: boolean;
 }
 
@@ -112,6 +129,7 @@ const initialState: AppState = {
   pendingNoEditor: null,
   pendingDryRun: null,
   pendingContextMenu: null,
+  pendingOpenWith: null,
   commandPaletteOpen: false,
 };
 
@@ -136,6 +154,8 @@ export type AppAction =
   | { type: "CLOSE_DRY_RUN" }
   | { type: "OPEN_CONTEXT_MENU"; menu: PendingContextMenu }
   | { type: "CLOSE_CONTEXT_MENU" }
+  | { type: "OPEN_OPEN_WITH"; openWith: PendingOpenWith }
+  | { type: "CLOSE_OPEN_WITH" }
   | { type: "OPEN_COMMAND_PALETTE" }
   | { type: "CLOSE_COMMAND_PALETTE" };
 
@@ -408,6 +428,32 @@ function reducer(state: AppState, action: AppAction): AppState {
             },
           };
         }
+        case "OpenWithOptionsReady":
+          if (!state.pendingOpenWith || state.pendingOpenWith.requestId !== (msg as OpenWithOptionsReadyMessage).requestId) {
+            return state;
+          }
+          return {
+            ...state,
+            pendingOpenWith: {
+              ...state.pendingOpenWith,
+              status: "ready",
+              apps: (msg as OpenWithOptionsReadyMessage).apps,
+              error: undefined,
+            },
+          };
+        case "OpenWithOptionsFailed":
+          if (!state.pendingOpenWith || state.pendingOpenWith.requestId !== (msg as OpenWithOptionsFailedMessage).requestId) {
+            return state;
+          }
+          return {
+            ...state,
+            pendingOpenWith: {
+              ...state.pendingOpenWith,
+              status: "error",
+              error: (msg as OpenWithOptionsFailedMessage).message,
+              apps: [],
+            },
+          };
         case "QuitConfirmRequired":
           return applyQuitConfirmRequired(state, msg);
         default:
@@ -444,6 +490,10 @@ function reducer(state: AppState, action: AppAction): AppState {
       return { ...state, pendingContextMenu: action.menu };
     case "CLOSE_CONTEXT_MENU":
       return { ...state, pendingContextMenu: null };
+    case "OPEN_OPEN_WITH":
+      return { ...state, pendingContextMenu: null, pendingOpenWith: action.openWith };
+    case "CLOSE_OPEN_WITH":
+      return { ...state, pendingOpenWith: null };
     case "OPEN_COMMAND_PALETTE":
       return { ...state, commandPaletteOpen: true };
     case "CLOSE_COMMAND_PALETTE":
