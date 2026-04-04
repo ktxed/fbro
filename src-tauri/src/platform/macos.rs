@@ -1,10 +1,50 @@
 use super::{append_supplemental_apps, OpenWithAppOption, OpenWithLaunch, Platform, ResolvedOpenWithApp, VolumeInfo};
 use libc;
 use std::env;
+use std::ffi::{c_void, CString};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 pub struct MacOSPlatform;
+
+type CFAllocatorRef = *const c_void;
+type CFArrayRef = *const c_void;
+type CFURLRef = *const c_void;
+type CFTypeRef = *const c_void;
+type CFIndex = isize;
+type Boolean = u8;
+type LSRolesMask = u32;
+
+const K_LS_ROLES_ALL: LSRolesMask = u32::MAX;
+
+#[link(name = "CoreFoundation", kind = "framework")]
+extern "C" {
+    fn CFRelease(cf: CFTypeRef);
+    fn CFArrayGetCount(the_array: CFArrayRef) -> CFIndex;
+    fn CFArrayGetValueAtIndex(the_array: CFArrayRef, idx: CFIndex) -> *const c_void;
+    fn CFURLCreateFromFileSystemRepresentation(
+        allocator: CFAllocatorRef,
+        buffer: *const u8,
+        buf_len: CFIndex,
+        is_directory: Boolean,
+    ) -> CFURLRef;
+    fn CFURLGetFileSystemRepresentation(
+        url: CFURLRef,
+        resolve_against_base: Boolean,
+        buffer: *mut u8,
+        max_buf_len: CFIndex,
+    ) -> Boolean;
+}
+
+#[link(name = "CoreServices", kind = "framework")]
+extern "C" {
+    fn LSCopyDefaultApplicationURLForURL(
+        in_url: CFURLRef,
+        in_role_mask: LSRolesMask,
+        out_error: *mut CFTypeRef,
+    ) -> CFURLRef;
+    fn LSCopyApplicationURLsForURL(in_url: CFURLRef, in_role_mask: LSRolesMask) -> CFArrayRef;
+}
 
 impl Platform for MacOSPlatform {
     fn home_dir(&self) -> String {
@@ -42,41 +82,65 @@ impl Platform for MacOSPlatform {
     }
 
     fn list_open_with_apps(&self, path: &str, kind: &str) -> Result<Vec<ResolvedOpenWithApp>, String> {
-        let mut apps = vec![ResolvedOpenWithApp {
-            option: OpenWithAppOption {
-                id: "mac:default".to_string(),
-                label: "Default application".to_string(),
-                detail: None,
-                is_default: true,
-                source: "system".to_string(),
-            },
-            launch: OpenWithLaunch::Default,
-        }];
+        let file_url = create_file_url(path, kind == "directory")
+            .ok_or_else(|| "Failed to resolve the target URL".to_string())?;
 
-        let content_type = if kind == "directory" {
-            "public.folder".to_string()
-        } else {
-            mac_content_type(path).unwrap_or_else(|| "public.data".to_string())
+        let default_path = unsafe {
+            let mut error: CFTypeRef = std::ptr::null();
+            let url = LSCopyDefaultApplicationURLForURL(file_url, K_LS_ROLES_ALL, &mut error);
+            if !error.is_null() {
+                CFRelease(error);
+            }
+            cf_url_to_path(url)
         };
 
-        let query = format!("kMDItemContentTypeTree == '{content_type}'c && kMDItemContentType == 'com.apple.application-bundle'");
-        if let Ok(output) = Command::new("mdfind").arg(query).output() {
-            if output.status.success() {
-                for app_path in String::from_utf8_lossy(&output.stdout).lines().map(str::trim).filter(|line| !line.is_empty()) {
-                    apps.push(ResolvedOpenWithApp {
-                        option: OpenWithAppOption {
-                            id: format!("mac:app:{app_path}"),
-                            label: app_bundle_name(app_path),
-                            detail: Some(app_path.to_string()),
-                            is_default: false,
-                            source: "system".to_string(),
-                        },
-                        launch: OpenWithLaunch::MacApplication {
-                            application_path: app_path.to_string(),
-                        },
-                    });
+        let mut apps = Vec::new();
+        let mut seen_paths = std::collections::HashSet::new();
+
+        if let Some(default_path) = default_path {
+            seen_paths.insert(default_path.clone());
+            apps.push(ResolvedOpenWithApp {
+                option: OpenWithAppOption {
+                    id: format!("mac:app:{default_path}"),
+                    label: app_bundle_name(&default_path),
+                    detail: Some(default_path.clone()),
+                    is_default: true,
+                    source: "system".to_string(),
+                },
+                launch: OpenWithLaunch::MacApplication {
+                    application_path: default_path,
+                },
+            });
+        }
+
+        unsafe {
+            let app_urls = LSCopyApplicationURLsForURL(file_url, K_LS_ROLES_ALL);
+            if !app_urls.is_null() {
+                let count = CFArrayGetCount(app_urls);
+                for index in 0..count {
+                    let value = CFArrayGetValueAtIndex(app_urls, index);
+                    let app_url = value as CFURLRef;
+                    if let Some(app_path) = cf_url_to_path_no_release(app_url) {
+                        if !seen_paths.insert(app_path.clone()) {
+                            continue;
+                        }
+                        apps.push(ResolvedOpenWithApp {
+                            option: OpenWithAppOption {
+                                id: format!("mac:app:{app_path}"),
+                                label: app_bundle_name(&app_path),
+                                detail: Some(app_path.clone()),
+                                is_default: false,
+                                source: "system".to_string(),
+                            },
+                            launch: OpenWithLaunch::MacApplication {
+                                application_path: app_path,
+                            },
+                        });
+                    }
                 }
+                CFRelease(app_urls);
             }
+            CFRelease(file_url);
         }
 
         append_supplemental_apps(&mut apps, mac_supplemental_apps());
@@ -151,20 +215,49 @@ impl Platform for MacOSPlatform {
     }
 }
 
-fn mac_content_type(path: &str) -> Option<String> {
-    let output = Command::new("mdls")
-        .args(["-name", "kMDItemContentType", "-raw", path])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if value.is_empty() || value == "(null)" {
+fn create_file_url(path: &str, is_directory: bool) -> Option<CFURLRef> {
+    let path = CString::new(path).ok()?;
+    let url = unsafe {
+        CFURLCreateFromFileSystemRepresentation(
+            std::ptr::null(),
+            path.as_ptr() as *const u8,
+            path.as_bytes().len() as CFIndex,
+            if is_directory { 1 } else { 0 },
+        )
+    };
+    if url.is_null() {
         None
     } else {
-        Some(value)
+        Some(url)
     }
+}
+
+fn cf_url_to_path(url: CFURLRef) -> Option<String> {
+    let path = unsafe { cf_url_to_path_no_release(url) };
+    if !url.is_null() {
+        unsafe { CFRelease(url) };
+    }
+    path
+}
+
+unsafe fn cf_url_to_path_no_release(url: CFURLRef) -> Option<String> {
+    if url.is_null() {
+        return None;
+    }
+
+    let mut buffer = vec![0u8; libc::PATH_MAX as usize];
+    let ok = CFURLGetFileSystemRepresentation(
+        url,
+        1,
+        buffer.as_mut_ptr(),
+        buffer.len() as CFIndex,
+    );
+    if ok == 0 {
+        return None;
+    }
+
+    let nul = buffer.iter().position(|byte| *byte == 0).unwrap_or(buffer.len());
+    String::from_utf8(buffer[..nul].to_vec()).ok()
 }
 
 fn app_bundle_name(path: &str) -> String {
