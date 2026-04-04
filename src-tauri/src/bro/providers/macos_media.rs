@@ -1,6 +1,7 @@
 use crate::bro::model::{BroOption, BroProtocol, BroSource, LaunchRecipe, ResolvedBro};
 use crate::bro::providers::{BroDiscoveryContext, BroProvider};
-use crate::bro::system::{command_version, macos_app_bundle_executable, native_version};
+use crate::bro::system::{macos_app_bundle_executable, native_version};
+use std::process::Command;
 
 pub struct MacOSMediaProvider;
 
@@ -10,7 +11,7 @@ impl BroProvider for MacOSMediaProvider {
         let mut bros = Vec::new();
         let mut seen_programs = std::collections::HashSet::new();
 
-        if let Some(version) = command_version("mpv", "-version") {
+        if let Some(version) = probe_mpv_on_path() {
             seen_programs.insert("mpv".to_string());
             bros.push(native_command_bro(
                 "native:mpv",
@@ -41,6 +42,23 @@ impl BroProvider for MacOSMediaProvider {
 
         bros
     }
+}
+
+fn probe_mpv_on_path() -> Option<String> {
+    Command::new("mpv")
+        .arg("-version")
+        .output()
+        .ok()
+        .and_then(|output| {
+            if !output.status.success() {
+                return None;
+            }
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            stdout
+                .lines()
+                .find(|line| !line.trim().is_empty())
+                .map(|line| line.trim().to_string())
+        })
 }
 
 fn native_command_bro(
@@ -80,7 +98,7 @@ fn macos_mpv_bundle_candidates() -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::macos_mpv_bundle_candidates;
+    use super::{macos_mpv_bundle_candidates, probe_mpv_on_path};
 
     #[test]
     fn includes_global_applications_bundle_path() {
@@ -88,5 +106,10 @@ mod tests {
         assert!(candidates
             .iter()
             .any(|path| path == "/Applications/mpv.app"));
+    }
+
+    #[test]
+    fn path_probe_is_safe_when_mpv_is_missing() {
+        let _ = probe_mpv_on_path();
     }
 }

@@ -22,13 +22,8 @@ pub(crate) fn find_executable(candidates: &[&str]) -> Option<String> {
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(crate) fn native_version(program: &str) -> String {
-    command_version(program, "--version").unwrap_or_else(|| "unknown".to_string())
-}
-
-#[cfg(any(target_os = "linux", target_os = "macos"))]
-pub(crate) fn command_version(program: &str, version_arg: &str) -> Option<String> {
     Command::new(program)
-        .arg(version_arg)
+        .arg("--version")
         .output()
         .ok()
         .and_then(|output| {
@@ -43,6 +38,7 @@ pub(crate) fn command_version(program: &str, version_arg: &str) -> Option<String
                     .map(|line| line.trim().to_string())
             })
         })
+        .unwrap_or_else(|| "unknown".to_string())
 }
 
 #[cfg(target_os = "macos")]
