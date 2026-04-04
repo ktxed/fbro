@@ -11,6 +11,7 @@
     "spy": "FBRO_SPY=1 tauri dev"
   },
   "dependencies": {
+    "@floating-ui/react": "^0.27.19",
     "@tauri-apps/api": "^2",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"

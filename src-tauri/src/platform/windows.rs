@@ -75,6 +75,13 @@ impl Platform for WindowsPlatform {
         }
     }
 
+    fn reveal_in_file_manager(&self, path: &str, _kind: &str) {
+        let windows_path = path.replace('/', "\\");
+        let _ = Command::new("explorer")
+            .arg(format!("/select,{windows_path}"))
+            .spawn();
+    }
+
     fn open_in_editor(&self, path: &str) -> Result<String, String> {
         let output = Command::new("cmd")
             .args(["/c", "start", "", path])

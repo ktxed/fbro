@@ -55,6 +55,20 @@ export interface PendingDryRun {
   sourcePanel: string;
 }
 
+export interface PendingContextMenu {
+  panelId: string;
+  absIndex: number;
+  name: string;
+  kind: string;
+  size?: number;
+  dirPath: string;
+  fullPath: string;
+  anchorLeft: number;
+  anchorRight: number;
+  anchorTop: number;
+  anchorBottom: number;
+}
+
 export interface AppState {
   connected: boolean;
   sessionId: string | null;
@@ -74,6 +88,7 @@ export interface AppState {
   pendingMkdir: PendingMkdir | null;
   pendingNoEditor: PendingNoEditor | null;
   pendingDryRun: PendingDryRun | null;
+  pendingContextMenu: PendingContextMenu | null;
   commandPaletteOpen: boolean;
 }
 
@@ -96,6 +111,7 @@ const initialState: AppState = {
   pendingMkdir: null,
   pendingNoEditor: null,
   pendingDryRun: null,
+  pendingContextMenu: null,
   commandPaletteOpen: false,
 };
 
@@ -118,6 +134,8 @@ export type AppAction =
   | { type: "OPEN_NO_EDITOR"; noEditor: PendingNoEditor }
   | { type: "CLOSE_NO_EDITOR" }
   | { type: "CLOSE_DRY_RUN" }
+  | { type: "OPEN_CONTEXT_MENU"; menu: PendingContextMenu }
+  | { type: "CLOSE_CONTEXT_MENU" }
   | { type: "OPEN_COMMAND_PALETTE" }
   | { type: "CLOSE_COMMAND_PALETTE" };
 
@@ -397,7 +415,7 @@ function reducer(state: AppState, action: AppAction): AppState {
       }
     }
     case "OPEN_OPERATION":
-      return { ...state, pendingOp: action.op };
+      return { ...state, pendingOp: action.op, pendingContextMenu: null };
     case "CLOSE_OPERATION":
       return { ...state, pendingOp: null, activeJobId: null };
     case "SET_ACTIVE_JOB":
@@ -422,6 +440,10 @@ function reducer(state: AppState, action: AppAction): AppState {
       return { ...state, pendingNoEditor: null };
     case "CLOSE_DRY_RUN":
       return { ...state, pendingDryRun: null };
+    case "OPEN_CONTEXT_MENU":
+      return { ...state, pendingContextMenu: action.menu };
+    case "CLOSE_CONTEXT_MENU":
+      return { ...state, pendingContextMenu: null };
     case "OPEN_COMMAND_PALETTE":
       return { ...state, commandPaletteOpen: true };
     case "CLOSE_COMMAND_PALETTE":

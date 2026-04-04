@@ -3,6 +3,7 @@ pub mod volume_watcher;
 
 use super::{Platform, VolumeInfo};
 use libc;
+use std::path::Path;
 use std::process::Command;
 
 pub struct LinuxPlatform;
@@ -53,6 +54,11 @@ impl Platform for LinuxPlatform {
                 return;
             }
         }
+    }
+
+    fn reveal_in_file_manager(&self, path: &str, _kind: &str) {
+        let target = Path::new(path).parent().unwrap_or_else(|| Path::new(path));
+        let _ = Command::new("xdg-open").arg(target).spawn();
     }
 
     fn open_in_editor(&self, path: &str) -> Result<String, String> {

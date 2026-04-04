@@ -162,6 +162,14 @@ export function Panel({ panelId, panel, isFocused, modalActive, client, sources,
   const listRef = useRef<HTMLDivElement>(null);
   const focusDivRef = useRef<HTMLDivElement>(null);
   const rightDrag = useRef({ active: false, everMoved: false, startRow: -1, mode: "select" as "select" | "deselect", preSelection: [] as number[] });
+  const contextMenuOpenRef = useRef(false);
+  const contextMenuHoldStartRef = useRef(0);
+  const contextMenuPendingRef = useRef<null | {
+    entry: VFSEntry;
+    absIndex: number;
+    rect: DOMRect;
+  }>(null);
+  const suppressNextContextMenuRef = useRef(false);
   const calcSet = new Set(panel.calculatingSize ?? []);
   const windowTimerRef = useRef<number>(0);
 
@@ -252,17 +260,6 @@ export function Panel({ panelId, panel, isFocused, modalActive, client, sources,
     return () => clearTimeout(filterDebounceRef.current);
   }, [filterInput, panel.filter?.value, panel.filterModeActive, sendFilterValue]);
 
-  // End right-drag on mouse up anywhere; if a drag occurred, send final SetSelection
-  useEffect(() => {
-    const onMouseUp = (e: MouseEvent) => {
-      if (e.button === 2) {
-        rightDrag.current.active = false;
-      }
-    };
-    window.addEventListener("mouseup", onMouseUp);
-    return () => window.removeEventListener("mouseup", onMouseUp);
-  }, []);
-
   // Scroll cursor into view within panel__list.
   useEffect(() => {
     const list = listRef.current;
@@ -310,6 +307,65 @@ export function Panel({ panelId, panel, isFocused, modalActive, client, sources,
     }, 50);
   }, [isWindowed, panelId, client]);
 
+  const openContextMenuForEntry = useCallback((entry: VFSEntry, absIndex: number, rect: DOMRect) => {
+    const dirPath = panel.path.replace(/[/\\]+$/, "");
+    const fullPath = entry.name === ".." ? dirPath : `${dirPath}/${entry.name}`;
+    if (entry.name === "..") return;
+
+    if (!isFocused) {
+      client.sendIntent("SwitchFocus", undefined, { to: panelId });
+    }
+    client.sendIntent("SetCursor", panelId, { index: absIndex });
+    rightDrag.current.active = false;
+    contextMenuOpenRef.current = true;
+    dispatch({
+      type: "OPEN_CONTEXT_MENU",
+      menu: {
+        panelId,
+        absIndex,
+        name: entry.name,
+        kind: entry.kind,
+        size: entry.size,
+        dirPath,
+        fullPath,
+        anchorLeft: rect.left,
+        anchorRight: rect.right,
+        anchorTop: rect.top,
+        anchorBottom: rect.bottom,
+      },
+    });
+  }, [client, dispatch, isFocused, panel.path, panelId]);
+
+  const openContextMenuAtCursor = useCallback(() => {
+    const entry = panel.entries[panel.cursor - (panel.windowStart ?? 0)];
+    if (!entry || entry.name === "..") return;
+
+    const row = listRef.current?.querySelector<HTMLElement>(`[data-abs-index="${panel.cursor}"]`);
+    const rect = row?.getBoundingClientRect() ?? focusDivRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    openContextMenuForEntry(entry, panel.cursor, rect);
+  }, [openContextMenuForEntry, panel]);
+
+  // End right-drag on mouse up anywhere; if the right button was held long
+  // enough without becoming a drag, open the contextual menu on release.
+  useEffect(() => {
+    const onMouseUp = (e: MouseEvent) => {
+      if (e.button === 2) {
+        const heldLongEnough = contextMenuHoldStartRef.current > 0 && Date.now() - contextMenuHoldStartRef.current >= 400;
+        const pending = contextMenuPendingRef.current;
+        if (pending && heldLongEnough && !rightDrag.current.everMoved) {
+          suppressNextContextMenuRef.current = true;
+          openContextMenuForEntry(pending.entry, pending.absIndex, pending.rect);
+        }
+        rightDrag.current.active = false;
+        contextMenuHoldStartRef.current = 0;
+        contextMenuPendingRef.current = null;
+      }
+    };
+    window.addEventListener("mouseup", onMouseUp);
+    return () => window.removeEventListener("mouseup", onMouseUp);
+  }, [openContextMenuForEntry]);
+
   function handleKeyDown(e: React.KeyboardEvent) {
     if (modalActive) {
       e.preventDefault();
@@ -319,6 +375,12 @@ export function Panel({ panelId, panel, isFocused, modalActive, client, sources,
       e.preventDefault();
       e.stopPropagation();
       closeFilterMode({ clear: true });
+      return;
+    }
+    if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) {
+      e.preventDefault();
+      e.stopPropagation();
+      openContextMenuAtCursor();
       return;
     }
     const command = findMatchingCommand(appState.commands, PANEL_SHORTCUT_COMMAND_IDS, e.nativeEvent);
@@ -419,6 +481,7 @@ export function Panel({ panelId, panel, isFocused, modalActive, client, sources,
     return (
       <div
         key={entry.name}
+        data-abs-index={absIndex}
         className={[
           "panel__row",
           absIndex === panel.cursor ? "panel__row--cursor" : "",
@@ -427,10 +490,21 @@ export function Panel({ panelId, panel, isFocused, modalActive, client, sources,
         style={isWindowed ? { position: "absolute", top: absIndex * ROW_HEIGHT, height: ROW_HEIGHT, left: 0, right: 0 } : undefined}
         onMouseDown={(e) => {
           if (e.button === 2) {
+            const rect = DOMRect.fromRect({
+              x: e.clientX,
+              y: e.clientY,
+              width: 0,
+              height: 0,
+            });
+            if (!isFocused) client.sendIntent("SwitchFocus", undefined, { to: panelId });
             const mode = selectionSet.has(absIndex) ? "deselect" : "select";
             rightDrag.current = { active: true, everMoved: false, startRow: absIndex, mode, preSelection: [...panel.selection] };
+            contextMenuOpenRef.current = false;
+            contextMenuHoldStartRef.current = Date.now();
+            contextMenuPendingRef.current = entry.name === ".." ? null : { entry, absIndex, rect };
             return;
           }
+          dispatch({ type: "CLOSE_CONTEXT_MENU" });
           if (!isFocused) client.sendIntent("SwitchFocus", undefined, { to: panelId });
           client.sendIntent("SetCursor", "focused-panel", { index: absIndex });
         }}
@@ -450,15 +524,26 @@ export function Panel({ panelId, panel, isFocused, modalActive, client, sources,
             rangeSet.forEach(r => merged.add(r));
             indices = [...merged];
           }
-          client.sendIntent("SetSelection", "focused-panel", { indices });
+          client.sendIntent("SetSelection", panelId, { indices });
         }}
         onContextMenu={(e) => {
           e.preventDefault();
+          if (contextMenuOpenRef.current) {
+            window.setTimeout(() => {
+              contextMenuOpenRef.current = false;
+            }, 0);
+            return;
+          }
+          if (suppressNextContextMenuRef.current) {
+            suppressNextContextMenuRef.current = false;
+            return;
+          }
           if (!rightDrag.current.everMoved) {
-            client.sendIntent("ToggleSelectionAtIndex", "focused-panel", { index: absIndex });
+            client.sendIntent("ToggleSelectionAtIndex", panelId, { index: absIndex });
           }
         }}
         onDoubleClick={() => {
+          dispatch({ type: "CLOSE_CONTEXT_MENU" });
           client.sendIntent("SetCursor", "focused-panel", { index: absIndex });
           if (entry.kind !== "directory") {
             client.sendIntent("OpenFile", "focused-panel");

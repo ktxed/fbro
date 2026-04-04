@@ -23,6 +23,7 @@ pub(crate) async fn handle(name: &str, scope: &Value, args: &Value, ctx: &mut In
         "NavigateToSource" => navigate_to_source(scope, args, ctx).await,
         "MountSource" => mount_source(scope, args, ctx).await,
         "NavigateUp" => navigate_up(scope, ctx).await,
+        "RevealInFileManager" => reveal_in_file_manager(args, ctx).await,
         _ => {}
     }
 }
@@ -51,6 +52,20 @@ impl SourceArgs {
     fn from_args(args: &Value) -> Self {
         Self {
             source_id: arg_str(args, "sourceId").unwrap_or("").to_string(),
+        }
+    }
+}
+
+struct RevealArgs {
+    path: String,
+    kind: String,
+}
+
+impl RevealArgs {
+    fn from_args(args: &Value) -> Self {
+        Self {
+            path: arg_str(args, "path").unwrap_or("").to_string(),
+            kind: arg_str(args, "kind").unwrap_or("file").to_string(),
         }
     }
 }
@@ -191,6 +206,19 @@ async fn open_terminal(scope: &Value, ctx: &mut IntentContext<'_>) {
         (panel.path.clone(), Arc::clone(&state_guard.platform))
     };
     platform.open_terminal(&path);
+}
+
+async fn reveal_in_file_manager(args: &Value, ctx: &mut IntentContext<'_>) {
+    let parsed = RevealArgs::from_args(args);
+    if parsed.path.is_empty() {
+        return;
+    }
+
+    let platform = {
+        let state_guard = ctx.state.lock().await;
+        Arc::clone(&state_guard.platform)
+    };
+    platform.reveal_in_file_manager(&parsed.path, &parsed.kind);
 }
 
 async fn navigate_to_source(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {

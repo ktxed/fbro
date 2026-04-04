@@ -33,7 +33,8 @@ pub async fn dispatch(name: &str, scope: &Value, args: &Value, ctx: &mut IntentC
         | "SwitchFocus"
         | "RequestStateSnapshot" => panel::handle(name, scope, args, ctx).await,
         "OpenEntry" | "NavigateHome" | "NavigateSourceRoot" | "NavigatePanelTo" | "OpenFile"
-        | "OpenTerminal" | "NavigateToSource" | "MountSource" | "NavigateUp" => {
+        | "OpenTerminal" | "NavigateToSource" | "MountSource" | "NavigateUp"
+        | "RevealInFileManager" => {
             navigation::handle(name, scope, args, ctx).await
         }
         "StartFileOp" | "ProvideJobDecision" | "CancelJob" | "PauseJob" | "ResumeJob"

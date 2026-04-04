@@ -7,6 +7,7 @@ import { MkDirModal } from "./MkDirModal";
 import { NoEditorModal } from "./NoEditorModal";
 import { JobsModal } from "./JobsModal";
 import { CommandPaletteModal } from "./CommandPaletteModal";
+import { ContextMenu } from "./ContextMenu";
 import { useAppState } from "../store";
 import type { WsClient } from "../ws/client";
 
@@ -27,7 +28,7 @@ export function Layout({ client, jobsViewOpen, onCloseJobsView, onOpenJobsView }
   }
 
   const activeJob = state.activeJobId ? state.jobs[state.activeJobId] ?? null : null;
-  const modalActive = state.pendingOp !== null || state.activeJobId !== null || state.pendingQuit !== null || state.pendingRename !== null || state.pendingInfo !== null || state.pendingMkdir !== null || state.pendingNoEditor !== null || state.pendingDryRun !== null || state.commandPaletteOpen || jobsViewOpen;
+  const modalActive = state.pendingOp !== null || state.activeJobId !== null || state.pendingQuit !== null || state.pendingRename !== null || state.pendingInfo !== null || state.pendingMkdir !== null || state.pendingNoEditor !== null || state.pendingDryRun !== null || state.pendingContextMenu !== null || state.commandPaletteOpen || jobsViewOpen;
 
   return (
     <>
@@ -75,6 +76,9 @@ export function Layout({ client, jobsViewOpen, onCloseJobsView, onOpenJobsView }
       )}
       {jobsViewOpen && (
         <JobsModal onClose={onCloseJobsView} client={client} />
+      )}
+      {state.pendingContextMenu && (
+        <ContextMenu client={client} menu={state.pendingContextMenu} />
       )}
       {state.commandPaletteOpen && (
         <CommandPaletteModal client={client} onOpenJobsView={onOpenJobsView} />

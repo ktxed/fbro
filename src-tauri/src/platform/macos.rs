@@ -35,6 +35,10 @@ impl Platform for MacOSPlatform {
             .spawn();
     }
 
+    fn reveal_in_file_manager(&self, path: &str, _kind: &str) {
+        let _ = Command::new("open").arg("-R").arg(path).spawn();
+    }
+
     fn open_in_editor(&self, path: &str) -> Result<String, String> {
         let output = Command::new("open")
             .arg(path)

@@ -90,6 +90,15 @@ interface ExecuteCommandContext {
   getPanelPageSize?: () => number;
 }
 
+export interface ContextActionTarget {
+  panelId: string;
+  dirPath: string;
+  fullPath: string;
+  name: string;
+  kind: string;
+  size?: number;
+}
+
 function normalizeKey(key: string): string {
   return key.length === 1 ? key.toLowerCase() : key;
 }
@@ -153,13 +162,22 @@ function openRename(dispatch: Dispatch<AppAction>, panel: PanelState) {
   if (!entry || entry.name === "..") return false;
 
   const dirPath = panel.path.replace(/[/\\]+$/, "");
+  return openRenameForTarget(dispatch, {
+    panelId: panel.panelId,
+    dirPath,
+    fullPath: `${dirPath}/${entry.name}`,
+    name: entry.name,
+  });
+}
+
+function openRenameForTarget(dispatch: Dispatch<AppAction>, target: Pick<ContextActionTarget, "panelId" | "dirPath" | "fullPath" | "name">) {
   dispatch({
     type: "OPEN_RENAME",
     rename: {
-      sourcePanel: panel.panelId,
-      sourcePath: `${dirPath}/${entry.name}`,
-      dirPath,
-      filename: entry.name,
+      sourcePanel: target.panelId,
+      sourcePath: target.fullPath,
+      dirPath: target.dirPath,
+      filename: target.name,
     },
   });
   return true;
@@ -173,10 +191,20 @@ function openFileOp(state: AppState, dispatch: Dispatch<AppAction>, panel: Panel
         return entry ? [{ name: entry.name, size: entry.size, kind: entry.kind }] : [];
       })();
 
+  return openFileOpForEntries(state, dispatch, panel.panelId, files, opType);
+}
+
+function openFileOpForEntries(
+  state: AppState,
+  dispatch: Dispatch<AppAction>,
+  sourcePanel: string,
+  files: FileOpFile[],
+  opType: FileOpType,
+) {
   if (files.length === 0) return false;
 
   const destPanelId = opType !== "delete"
-    ? getOtherPanelId(state, panel.panelId) ?? undefined
+    ? getOtherPanelId(state, sourcePanel) ?? undefined
     : undefined;
   const destPath = destPanelId ? state.panels[destPanelId]?.path : undefined;
 
@@ -185,13 +213,38 @@ function openFileOp(state: AppState, dispatch: Dispatch<AppAction>, panel: Panel
     op: {
       opType,
       files,
-      sourcePanel: panel.panelId,
+      sourcePanel,
       destPanel: destPanelId,
       destPath,
       conflictPolicy: "ask",
     },
   });
   return true;
+}
+
+export function executeTargetedCommand(
+  commandId: string,
+  context: Pick<ExecuteCommandContext, "state" | "dispatch" | "client">,
+  target: ContextActionTarget,
+) {
+  const file: FileOpFile = {
+    name: target.name,
+    size: target.size,
+    kind: target.kind,
+  };
+
+  switch (commandId) {
+    case "file.copy":
+      return openFileOpForEntries(context.state, context.dispatch, target.panelId, [file], "copy");
+    case "file.move":
+      return openFileOpForEntries(context.state, context.dispatch, target.panelId, [file], "move");
+    case "file.delete":
+      return openFileOpForEntries(context.state, context.dispatch, target.panelId, [file], "delete");
+    case "file.rename":
+      return openRenameForTarget(context.dispatch, target);
+    default:
+      return false;
+  }
 }
 
 function openViewerIntent(client: WsClient, panel: PanelState, intentName: "ViewFile" | "EditFile") {
