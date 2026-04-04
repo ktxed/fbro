@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use tokio::sync::{mpsc, watch, Mutex, Semaphore};
@@ -10,6 +11,40 @@ use crate::ws::protocol::{now, ServerMessage};
 
 const MAX_CONCURRENT: usize = 4;
 const CACHE_TTL: Duration = Duration::from_secs(60);
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DirSizeTaskStatus {
+    Queued,
+    Running,
+}
+
+impl DirSizeTaskStatus {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Queued => "Queued",
+            Self::Running => "Running",
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct TrackedTask {
+    task_id: u64,
+    full_path: String,
+    enqueued_at: u64,
+    status: DirSizeTaskStatus,
+    cancel_tx: watch::Sender<bool>,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DirSizeTaskSnapshot {
+    pub panel_id: String,
+    pub entry_name: String,
+    pub full_path: String,
+    pub enqueued_at: u64,
+    pub status: String,
+}
 
 // ── DirSizeCache ─────────────────────────────────────────────────────────────
 
@@ -59,17 +94,40 @@ impl DirSizeCache {
 
 pub struct DirSizeQueue {
     semaphore: Arc<Semaphore>,
-    active: Arc<Mutex<HashMap<(String, String), watch::Sender<bool>>>>,
+    tasks: Arc<Mutex<HashMap<(String, String), TrackedTask>>>,
     cache: Arc<Mutex<DirSizeCache>>,
+    next_task_id: AtomicU64,
 }
 
 impl DirSizeQueue {
     pub fn new() -> Self {
         Self {
             semaphore: Arc::new(Semaphore::new(MAX_CONCURRENT)),
-            active: Arc::new(Mutex::new(HashMap::new())),
+            tasks: Arc::new(Mutex::new(HashMap::new())),
             cache: Arc::new(Mutex::new(DirSizeCache::new())),
+            next_task_id: AtomicU64::new(1),
         }
+    }
+
+    pub async fn snapshot(&self) -> Vec<DirSizeTaskSnapshot> {
+        let tasks = self.tasks.lock().await;
+        let mut snapshot: Vec<DirSizeTaskSnapshot> = tasks
+            .iter()
+            .map(|((panel_id, entry_name), task)| DirSizeTaskSnapshot {
+                panel_id: panel_id.clone(),
+                entry_name: entry_name.clone(),
+                full_path: task.full_path.clone(),
+                enqueued_at: task.enqueued_at,
+                status: task.status.as_str().to_string(),
+            })
+            .collect();
+        snapshot.sort_by(|left, right| {
+            left.enqueued_at
+                .cmp(&right.enqueued_at)
+                .then_with(|| left.panel_id.cmp(&right.panel_id))
+                .then_with(|| left.entry_name.cmp(&right.entry_name))
+        });
+        snapshot
     }
 
     /// Return a cached size for `path` if one exists and has not expired.
@@ -94,14 +152,25 @@ impl DirSizeQueue {
         tx: mpsc::Sender<ServerMessage>,
     ) {
         let (cancel_tx, cancel_rx) = watch::channel(false);
+        let task_id = self.next_task_id.fetch_add(1, Ordering::Relaxed);
 
         // Cancel any existing task for this entry and replace it
         {
-            let mut active = self.active.lock().await;
-            if let Some(old) = active.insert((panel_id.clone(), entry_name.clone()), cancel_tx) {
-                let _ = old.send(true);
+            let mut tasks = self.tasks.lock().await;
+            if let Some(old) = tasks.insert(
+                (panel_id.clone(), entry_name.clone()),
+                TrackedTask {
+                    task_id,
+                    full_path: full_path.clone(),
+                    enqueued_at: now(),
+                    status: DirSizeTaskStatus::Queued,
+                    cancel_tx: cancel_tx.clone(),
+                },
+            ) {
+                let _ = old.cancel_tx.send(true);
             }
         }
+        emit_queue_patch(&self.tasks, &tx).await;
 
         // Mark as calculating in panel state immediately
         {
@@ -119,6 +188,11 @@ impl DirSizeQueue {
                     patch: serde_json::json!({ "calculatingSize": calc }),
                 });
             } else {
+                {
+                    let mut tasks = self.tasks.lock().await;
+                    tasks.remove(&(panel_id.clone(), entry_name.clone()));
+                }
+                emit_queue_patch(&self.tasks, &tx).await;
                 return;
             }
         }
@@ -126,7 +200,7 @@ impl DirSizeQueue {
         eprintln!("[dirsize] enqueued: panel={panel_id} entry={entry_name} path={full_path}");
 
         let semaphore = Arc::clone(&self.semaphore);
-        let active = Arc::clone(&self.active);
+        let tasks = Arc::clone(&self.tasks);
         let cache = Arc::clone(&self.cache);
 
         tokio::spawn(async move {
@@ -135,23 +209,29 @@ impl DirSizeQueue {
 
             // Check if cancelled while waiting in queue
             if *cancel_rx.borrow() {
-                active
-                    .lock()
-                    .await
-                    .remove(&(panel_id.clone(), entry_name.clone()));
+                remove_task_if_matches(&tasks, &panel_id, &entry_name, task_id).await;
+                emit_queue_patch(&tasks, &tx).await;
                 patch_remove_calculating(&state, &tx, &panel_id, &entry_name).await;
                 return;
             }
+
+            {
+                let mut tasks_guard = tasks.lock().await;
+                if let Some(task) = tasks_guard.get_mut(&(panel_id.clone(), entry_name.clone())) {
+                    if task.task_id == task_id {
+                        task.status = DirSizeTaskStatus::Running;
+                    }
+                }
+            }
+            emit_queue_patch(&tasks, &tx).await;
 
             let path = full_path.clone();
             let cancel_clone = cancel_rx.clone();
             let result =
                 tokio::task::spawn_blocking(move || calculate_dir_size(&path, &cancel_clone)).await;
 
-            active
-                .lock()
-                .await
-                .remove(&(panel_id.clone(), entry_name.clone()));
+            remove_task_if_matches(&tasks, &panel_id, &entry_name, task_id).await;
+            emit_queue_patch(&tasks, &tx).await;
 
             match result {
                 Ok(Some(size)) => {
@@ -196,15 +276,76 @@ impl DirSizeQueue {
     /// Signal an active calculation to stop. The state update happens
     /// immediately (called from the intent handler) so the FE gets instant
     /// feedback; the background task will clean up when it detects the signal.
-    pub async fn cancel(&self, panel_id: &str, entry_name: &str) {
-        let active = self.active.lock().await;
-        if let Some(tx) = active.get(&(panel_id.to_string(), entry_name.to_string())) {
-            let _ = tx.send(true);
+    pub async fn cancel(
+        &self,
+        panel_id: &str,
+        entry_name: &str,
+        tx: &mpsc::Sender<ServerMessage>,
+    ) {
+        let removed = {
+            let mut tasks = self.tasks.lock().await;
+            tasks.remove(&(panel_id.to_string(), entry_name.to_string()))
+        };
+        if let Some(task) = removed {
+            let _ = task.cancel_tx.send(true);
+            emit_queue_patch(&self.tasks, tx).await;
         }
     }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+async fn remove_task_if_matches(
+    tasks: &Arc<Mutex<HashMap<(String, String), TrackedTask>>>,
+    panel_id: &str,
+    entry_name: &str,
+    task_id: u64,
+) {
+    let mut tasks = tasks.lock().await;
+    let key = (panel_id.to_string(), entry_name.to_string());
+    let should_remove = tasks
+        .get(&key)
+        .map(|task| task.task_id == task_id)
+        .unwrap_or(false);
+    if should_remove {
+        tasks.remove(&key);
+    }
+}
+
+async fn emit_queue_patch(
+    tasks: &Arc<Mutex<HashMap<(String, String), TrackedTask>>>,
+    tx: &mpsc::Sender<ServerMessage>,
+) {
+    let snapshot = {
+        let tasks = tasks.lock().await;
+        let mut snapshot: Vec<DirSizeTaskSnapshot> = tasks
+            .iter()
+            .map(|((panel_id, entry_name), task)| DirSizeTaskSnapshot {
+                panel_id: panel_id.clone(),
+                entry_name: entry_name.clone(),
+                full_path: task.full_path.clone(),
+                enqueued_at: task.enqueued_at,
+                status: task.status.as_str().to_string(),
+            })
+            .collect();
+        snapshot.sort_by(|left, right| {
+            left.enqueued_at
+                .cmp(&right.enqueued_at)
+                .then_with(|| left.panel_id.cmp(&right.panel_id))
+                .then_with(|| left.entry_name.cmp(&right.entry_name))
+        });
+        snapshot
+    };
+    let _ = tx
+        .send(ServerMessage::StatePatch {
+            timestamp: now(),
+            domain: "dirSizeQueue".to_string(),
+            entity_id: None,
+            version: 0,
+            patch: serde_json::json!({ "tasks": snapshot }),
+        })
+        .await;
+}
 
 fn calculating_vec(set: &std::collections::HashSet<String>) -> Vec<String> {
     let mut v: Vec<String> = set.iter().cloned().collect();

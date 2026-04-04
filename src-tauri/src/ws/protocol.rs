@@ -107,7 +107,24 @@ pub struct StateDomains {
     pub sources: Vec<SourceSchema>,
     pub focus: String,
     pub jobs: Vec<serde_json::Value>,
+    #[serde(rename = "dirSizeQueue")]
+    pub dir_size_queue: DirSizeQueueSnapshot,
     pub commands: Vec<InteractiveCommandSchema>,
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct DirSizeQueueSnapshot {
+    pub tasks: Vec<DirSizeTaskSchema>,
+}
+
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct DirSizeTaskSchema {
+    pub panel_id: String,
+    pub entry_name: String,
+    pub full_path: String,
+    pub enqueued_at: u64,
+    pub status: String,
 }
 
 #[derive(Serialize, Clone, Debug)]

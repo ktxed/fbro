@@ -1109,6 +1109,7 @@ body {
 }
 
 .jobs-modal__state--running    { color: #4a9eff; }
+.jobs-modal__state--queued     { color: #f0a040; }
 .jobs-modal__state--awaitingdecision { color: #f0a040; }
 .jobs-modal__state--completed  { color: #5ac45a; }
 .jobs-modal__state--cancelled  { color: var(--text-dim); }

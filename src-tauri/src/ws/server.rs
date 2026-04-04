@@ -118,15 +118,22 @@ async fn handle_connection(
     .await;
 
     let (snapshot, panel_ids) = if is_gui {
-        let mut state_guard = state.lock().await;
-        for panel in state_guard.panels.values_mut() {
-            panel.entries.clear();
-            panel.status = PanelStatus::Loading;
-            panel.calculating_size.clear();
-            panel.version += 1;
-        }
-        let panel_ids = state_guard.panels.keys().cloned().collect::<Vec<_>>();
-        (Some(build_state_snapshot(&state_guard)), panel_ids)
+        let panel_ids = {
+            let mut state_guard = state.lock().await;
+            for panel in state_guard.panels.values_mut() {
+                panel.entries.clear();
+                panel.status = PanelStatus::Loading;
+                panel.calculating_size.clear();
+                panel.version += 1;
+            }
+            state_guard.panels.keys().cloned().collect::<Vec<_>>()
+        };
+        let dir_size_tasks = dir_size_queue.snapshot().await;
+        let snapshot = {
+            let state_guard = state.lock().await;
+            build_state_snapshot(&state_guard, dir_size_tasks)
+        };
+        (Some(snapshot), panel_ids)
     } else {
         (None, vec![])
     };

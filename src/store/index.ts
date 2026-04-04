@@ -3,6 +3,7 @@ import type {
   PanelState,
   Source,
   Job,
+  DirSizeTask,
   BEMessage,
   InteractiveCommand,
   StateSnapshotMessage,
@@ -63,6 +64,7 @@ export interface AppState {
   sources: Record<string, Source>;
   focus: string;
   jobs: Record<string, Job>;
+  dirSizeQueue: DirSizeTask[];
   commands: Record<string, InteractiveCommand>;
   pendingOp: PendingOp | null;
   activeJobId: string | null;
@@ -84,6 +86,7 @@ const initialState: AppState = {
   sources: {},
   focus: "",
   jobs: {},
+  dirSizeQueue: [],
   commands: {},
   pendingOp: null,
   activeJobId: null,
@@ -146,6 +149,9 @@ function applySnapshot(state: AppState, msg: StateSnapshotMessage): AppState {
     const jobs: Record<string, Job> = {};
     for (const j of domains.jobs) jobs[j.jobId] = j;
     next.jobs = jobs;
+  }
+  if (domains.dirSizeQueue) {
+    next.dirSizeQueue = domains.dirSizeQueue.tasks ?? [];
   }
   if (domains.commands) {
     const commands: Record<string, InteractiveCommand> = {};
@@ -258,6 +264,10 @@ function applyPatch(state: AppState, msg: StatePatchMessage): AppState {
     const sources: Record<string, Source> = {};
     for (const s of msg.patch.sources as Source[]) sources[s.id] = s;
     return { ...state, sources };
+  }
+
+  if (msg.domain === "dirSizeQueue") {
+    return { ...state, dirSizeQueue: (msg.patch.tasks as DirSizeTask[]) ?? [] };
   }
 
   return state;

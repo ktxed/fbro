@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use tokio::sync::mpsc;
 
-use crate::jobs::dirsize::DirSizeQueue;
+use crate::jobs::dirsize::{DirSizeQueue, DirSizeTaskSnapshot};
 use crate::jobs::scan::run_scan;
 use crate::jobs::{DecisionResponse, JobState, ScanHandle};
 use crate::persistence::{PanelSession, SessionState};
@@ -13,8 +13,8 @@ use crate::vfs::VfsDriver;
 use crate::watcher::WatcherCommand;
 use crate::ws::commands::build_interactive_commands;
 use crate::ws::protocol::{
-    now, FileOpFileSchema, LayoutDomain, PanelSnapshot, ServerMessage, SourceCapabilities,
-    SourceSchema, StateDomains,
+    now, DirSizeQueueSnapshot, DirSizeTaskSchema, FileOpFileSchema, LayoutDomain, PanelSnapshot,
+    ServerMessage, SourceCapabilities, SourceSchema, StateDomains,
 };
 
 pub(crate) struct IntentContext<'a> {
@@ -28,7 +28,10 @@ pub(crate) struct IntentContext<'a> {
     pub volume_watcher: &'a Arc<dyn crate::platform::VolumeWatcher>,
 }
 
-pub(crate) fn build_state_snapshot(state: &AppState) -> ServerMessage {
+pub(crate) fn build_state_snapshot(
+    state: &AppState,
+    dir_size_tasks: Vec<DirSizeTaskSnapshot>,
+) -> ServerMessage {
     let panels = state
         .panels
         .iter()
@@ -48,6 +51,18 @@ pub(crate) fn build_state_snapshot(state: &AppState) -> ServerMessage {
             sources: build_sources(state),
             focus: state.focus.clone(),
             jobs: vec![],
+            dir_size_queue: DirSizeQueueSnapshot {
+                tasks: dir_size_tasks
+                    .into_iter()
+                    .map(|task| DirSizeTaskSchema {
+                        panel_id: task.panel_id,
+                        entry_name: task.entry_name,
+                        full_path: task.full_path,
+                        enqueued_at: task.enqueued_at,
+                        status: task.status,
+                    })
+                    .collect(),
+            },
             commands: build_interactive_commands(),
         },
     }
@@ -631,6 +646,8 @@ pub(crate) async fn update_panel_from_patch(
 }
 
 fn build_panel_snapshot(panel: &Panel) -> PanelSnapshot {
+    let mut calculating_size: Vec<String> = panel.calculating_size.iter().cloned().collect();
+    calculating_size.sort();
     PanelSnapshot {
         panel_id: panel.panel_id.clone(),
         path: panel.path.clone(),
@@ -644,7 +661,7 @@ fn build_panel_snapshot(panel: &Panel) -> PanelSnapshot {
         selected_entries: selected_entries_for_panel(panel),
         entries: panel.entries.clone(),
         version: panel.version,
-        calculating_size: vec![],
+        calculating_size,
         total_count: None,
         window_start: None,
     }

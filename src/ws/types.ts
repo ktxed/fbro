@@ -62,6 +62,14 @@ export interface Job {
   error?: string;
 }
 
+export interface DirSizeTask {
+  panelId: string;
+  entryName: string;
+  fullPath: string;
+  enqueuedAt: number;
+  status: "Queued" | "Running";
+}
+
 export interface FileOpProgress {
   totalFiles: number;
   completedFiles: number;
@@ -168,6 +176,7 @@ export interface StateSnapshotMessage {
     sources?: Source[];
     focus?: string;
     jobs?: Job[];
+    dirSizeQueue?: { tasks: DirSizeTask[] };
     commands?: InteractiveCommand[];
   };
 }
@@ -175,7 +184,7 @@ export interface StateSnapshotMessage {
 export interface StatePatchMessage {
   type: "StatePatch";
   timestamp: number;
-  domain: "panels" | "layout" | "focus" | "selections" | "jobs" | "sources";
+  domain: "panels" | "layout" | "focus" | "selections" | "jobs" | "sources" | "dirSizeQueue";
   entityId?: string;
   version: number;
   patch: {

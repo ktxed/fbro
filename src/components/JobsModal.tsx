@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { useAppState } from "../store";
-import type { Job, FileOpProgress } from "../ws/types";
+import type { DirSizeTask, FileOpProgress, Job } from "../ws/types";
 import type { WsClient } from "../ws/client";
 
 function formatBytes(n: number): string {
@@ -106,6 +106,36 @@ function JobRow({ job, client }: { job: Job; client: WsClient }) {
   );
 }
 
+function DirSizeTaskRow({ task, client }: { task: DirSizeTask; client: WsClient }) {
+  return (
+    <div className="jobs-modal__row jobs-modal__row--active">
+      <div className="jobs-modal__row-header">
+        <span className="jobs-modal__type">Folder size</span>
+        <span className="jobs-modal__timestamp">{new Date(task.enqueuedAt).toLocaleTimeString()}</span>
+        <span className={`jobs-modal__state jobs-modal__state--${task.status.toLowerCase()}`}>
+          {task.status}
+        </span>
+        <button
+          className="jobs-modal__cancel"
+          title="Cancel folder size calculation"
+          onClick={() => client.sendIntent("CancelSizeCalculation", task.panelId, { name: task.entryName })}
+        >
+          ✕ Cancel
+        </button>
+      </div>
+
+      <div className="jobs-modal__paths">
+        <span className="jobs-modal__path" title={task.fullPath}>
+          Folder: {task.fullPath}
+        </span>
+        <span className="jobs-modal__path">
+          Panel: {task.panelId}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 export function JobsModal({ onClose, client }: { onClose: () => void; client: WsClient }) {
   const state = useAppState();
   const overlayRef = useRef<HTMLDivElement>(null);
@@ -114,6 +144,7 @@ export function JobsModal({ onClose, client }: { onClose: () => void; client: Ws
   const jobs = Object.values(state.jobs).sort(byNewest);
   const active = jobs.filter(j => j.state === "Running" || j.state === "AwaitingDecision");
   const finished = jobs.filter(j => j.state !== "Running" && j.state !== "AwaitingDecision");
+  const dirSizeTasks = [...state.dirSizeQueue].sort((a, b) => a.enqueuedAt - b.enqueuedAt);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -136,7 +167,7 @@ export function JobsModal({ onClose, client }: { onClose: () => void; client: Ws
         </div>
 
         <div className="modal__body jobs-modal__body">
-          {jobs.length === 0 && (
+          {jobs.length === 0 && dirSizeTasks.length === 0 && (
             <div className="jobs-modal__empty">No jobs.</div>
           )}
 
@@ -144,6 +175,19 @@ export function JobsModal({ onClose, client }: { onClose: () => void; client: Ws
             <section>
               <div className="jobs-modal__section-title">Active</div>
               {active.map(j => <JobRow key={j.jobId} job={j} client={client} />)}
+            </section>
+          )}
+
+          {dirSizeTasks.length > 0 && (
+            <section>
+              <div className="jobs-modal__section-title">Folder Size Queue</div>
+              {dirSizeTasks.map(task => (
+                <DirSizeTaskRow
+                  key={`${task.panelId}:${task.entryName}:${task.enqueuedAt}`}
+                  task={task}
+                  client={client}
+                />
+              ))}
             </section>
           )}
 

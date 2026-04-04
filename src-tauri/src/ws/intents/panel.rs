@@ -751,7 +751,7 @@ async fn calculate_size(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>
 async fn cancel_size_calculation(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
     let panel_id = resolve_panel_id(scope, ctx.state).await;
     let parsed = NameArgs::from_args(args);
-    ctx.dir_size_queue.cancel(&panel_id, &parsed.name).await;
+    ctx.dir_size_queue.cancel(&panel_id, &parsed.name, ctx.tx).await;
 
     let (calculating_size, version) = {
         let mut state_guard = ctx.state.lock().await;
@@ -804,8 +804,12 @@ async fn switch_focus(args: &Value, ctx: &mut IntentContext<'_>) {
 }
 
 async fn request_state_snapshot(ctx: &mut IntentContext<'_>) {
+    let dir_size_tasks = ctx.dir_size_queue.snapshot().await;
     let state_guard = ctx.state.lock().await;
-    let _ = ctx.tx.send(build_state_snapshot(&state_guard)).await;
+    let _ = ctx
+        .tx
+        .send(build_state_snapshot(&state_guard, dir_size_tasks))
+        .await;
 }
 
 async fn send_panel_patch(
