@@ -32,8 +32,10 @@ export function BroModal({ client, bro }: BroModalProps) {
   const listRef = useRef<HTMLDivElement>(null);
   const firstFieldRef = useRef<HTMLInputElement>(null);
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [activeFormBroId, setActiveFormBroId] = useState<string | null>(null);
   const [outputs, setOutputs] = useState<Record<string, string>>({});
   const [params, setParams] = useState<Record<string, string>>({});
+  const [focusFieldsTick, setFocusFieldsTick] = useState(0);
 
   const bros = bro.bros;
   const broParams = selectedBroParams(bros[selectedIndex]);
@@ -45,10 +47,17 @@ export function BroModal({ client, bro }: BroModalProps) {
   useEffect(() => {
     if (bros.length === 0) {
       setSelectedIndex(0);
+      setActiveFormBroId(null);
       return;
     }
-    setSelectedIndex((current) => Math.min(current, bros.length - 1));
-  }, [bros]);
+    setSelectedIndex((current) => {
+      const nextIndex = Math.min(current, bros.length - 1);
+      if (activeFormBroId && !bros.some((bro) => bro.id === activeFormBroId)) {
+        setActiveFormBroId(null);
+      }
+      return nextIndex;
+    });
+  }, [activeFormBroId, bros]);
 
   useEffect(() => {
     const selected = listRef.current?.querySelector<HTMLElement>("[data-selected='true']");
@@ -82,13 +91,14 @@ export function BroModal({ client, bro }: BroModalProps) {
   }, [bros, selectedIndex]);
 
   useEffect(() => {
+    if (focusFieldsTick === 0) return;
     const selectedBro = bros[selectedIndex];
     if (!selectedBro || (!selectedBro.output && broParams.length === 0)) return;
     firstFieldRef.current?.focus();
     if (firstFieldRef.current instanceof HTMLInputElement) {
       firstFieldRef.current.select();
     }
-  }, [broParams.length, bros, selectedIndex]);
+  }, [broParams.length, bros, focusFieldsTick, selectedIndex]);
 
   useEffect(() => {
     const panel = state.panels[bro.panelId];
@@ -103,36 +113,40 @@ export function BroModal({ client, bro }: BroModalProps) {
     () => bros[selectedIndex],
     [bros, selectedIndex],
   );
+  const activeFormBro = useMemo(
+    () => bros.find((item) => item.id === activeFormBroId),
+    [activeFormBroId, bros],
+  );
 
   const selectedInputValues = useMemo(() => {
-    if (!selectedBro) return {};
+    if (!activeFormBro) return {};
     return Object.fromEntries(
-      broParams.map((input) => [
+      selectedBroParams(activeFormBro).map((input) => [
         input.id,
-        params[`${selectedBro.id}:${input.id}`] ?? input.defaultValue ?? "",
+        params[`${activeFormBro.id}:${input.id}`] ?? input.defaultValue ?? "",
       ]),
     );
-  }, [broParams, params, selectedBro]);
+  }, [activeFormBro, params]);
 
   const selectedOutputValue = useMemo(() => {
-    if (!selectedBro?.output) return "";
-    return outputs[selectedBro.id] ?? selectedBro.output.defaultValue ?? "";
-  }, [outputs, selectedBro]);
+    if (!activeFormBro?.output) return "";
+    return outputs[activeFormBro.id] ?? activeFormBro.output.defaultValue ?? "";
+  }, [activeFormBro, outputs]);
 
   const missingRequiredParam = useMemo(
-    () => broParams.find((input) => input.required && !selectedInputValues[input.id]?.trim()),
-    [broParams, selectedInputValues],
+    () => selectedBroParams(activeFormBro).find((input) => input.required && !selectedInputValues[input.id]?.trim()),
+    [activeFormBro, selectedInputValues],
   );
 
   const outputError = useMemo(() => {
-    if (!selectedBro?.output) return undefined;
-    return selectedOutputValue.trim() ? undefined : `${selectedBro.output.label} is required.`;
-  }, [selectedBro, selectedOutputValue]);
+    if (!activeFormBro?.output) return undefined;
+    return selectedOutputValue.trim() ? undefined : `${activeFormBro.output.label} is required.`;
+  }, [activeFormBro, selectedOutputValue]);
 
   const paramError = useMemo(() => {
-    if (!selectedBro) return undefined;
+    if (!activeFormBro) return undefined;
     if (missingRequiredParam) return `${missingRequiredParam.label} is required.`;
-    for (const input of broParams) {
+    for (const input of selectedBroParams(activeFormBro)) {
       if (input.kind !== "int") continue;
       const rawValue = selectedInputValues[input.id]?.trim();
       if (!rawValue) continue;
@@ -146,7 +160,7 @@ export function BroModal({ client, bro }: BroModalProps) {
       }
     }
     return undefined;
-  }, [broParams, missingRequiredParam, selectedBro, selectedInputValues]);
+  }, [activeFormBro, missingRequiredParam, selectedInputValues]);
 
   const launchBro = (broId: string, output?: string, launchParams: Record<string, string> = {}) => {
     close();
@@ -161,7 +175,26 @@ export function BroModal({ client, bro }: BroModalProps) {
   const launchSelected = () => {
     if (!selectedBro) return;
     if (outputError || paramError) return;
-    launchBro(selectedBro.id, selectedBro.output ? selectedOutputValue : undefined, selectedInputValues);
+    launchBro(selectedBro.id, activeFormBro?.output ? selectedOutputValue : undefined, selectedInputValues);
+  };
+
+  const activateBroForm = (bro: PendingBro["bros"][number] | undefined, options?: { focusFields?: boolean }) => {
+    if (!bro || (!bro.output && selectedBroParams(bro).length === 0)) {
+      setActiveFormBroId(null);
+      return;
+    }
+    setActiveFormBroId(bro.id);
+    if (options?.focusFields) {
+      setFocusFieldsTick((current) => current + 1);
+    }
+  };
+
+  const selectBro = (index: number) => {
+    const bro = bros[index];
+    setSelectedIndex(index);
+    if (!bro || (!bro.output && selectedBroParams(bro).length === 0)) {
+      setActiveFormBroId(null);
+    }
   };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -177,19 +210,30 @@ export function BroModal({ client, bro }: BroModalProps) {
     if (e.key === "ArrowDown") {
       e.preventDefault();
       if (bros.length > 0) {
-        setSelectedIndex((current) => (current + 1) % bros.length);
+        const nextIndex = (selectedIndex + 1) % bros.length;
+        selectBro(nextIndex);
       }
       return;
     }
     if (e.key === "ArrowUp") {
       e.preventDefault();
       if (bros.length > 0) {
-        setSelectedIndex((current) => (current - 1 + bros.length) % bros.length);
+        const nextIndex = (selectedIndex - 1 + bros.length) % bros.length;
+        selectBro(nextIndex);
       }
       return;
     }
     if (e.key === "Enter") {
       e.preventDefault();
+      if (!selectedBro) return;
+      if (!selectedBro.output && selectedBroParams(selectedBro).length === 0) {
+        launchBro(selectedBro.id);
+        return;
+      }
+      if (activeFormBro?.id !== selectedBro.id) {
+        activateBroForm(selectedBro, { focusFields: true });
+        return;
+      }
       launchSelected();
     }
   };
@@ -227,14 +271,15 @@ export function BroModal({ client, bro }: BroModalProps) {
                   type="button"
                   className={`command-palette__item${selected ? " command-palette__item--selected" : ""}`}
                   data-selected={selected ? "true" : "false"}
-                    onMouseDown={(e) => e.preventDefault()}
-                    onMouseEnter={() => setSelectedIndex(index)}
-                    onClick={() => {
-                      setSelectedIndex(index);
-                      if (!item.output && selectedBroParams(item).length === 0) {
-                        launchBro(item.id);
-                      }
-                    }}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => {
+                    selectBro(index);
+                    if (!item.output && selectedBroParams(item).length === 0) {
+                      launchBro(item.id);
+                      return;
+                    }
+                    activateBroForm(item, { focusFields: true });
+                  }}
                   title={item.detail}
                 >
                   <span className="command-palette__item-main">
@@ -248,11 +293,11 @@ export function BroModal({ client, bro }: BroModalProps) {
               );
             })}
           </div>
-          {bro.status === "ready" && selectedBro && (selectedBro.output || broParams.length > 0) && (
+          {bro.status === "ready" && activeFormBro && (activeFormBro.output || selectedBroParams(activeFormBro).length > 0) && (
             <div className="modal__body" style={{ padding: "12px 0 0" }}>
-              {selectedBro.output && (
+              {activeFormBro.output && (
                 <div className="modal__rename-row">
-                  <label className="modal__rename-label">{selectedBro.output.label}:</label>
+                  <label className="modal__rename-label">{activeFormBro.output.label}:</label>
                   <input
                     ref={firstFieldRef}
                     className="modal__rename-input"
@@ -261,7 +306,7 @@ export function BroModal({ client, bro }: BroModalProps) {
                       const nextValue = e.target.value;
                       setOutputs((current) => ({
                         ...current,
-                        [selectedBro.id]: nextValue,
+                        [activeFormBro.id]: nextValue,
                       }));
                     }}
                     onKeyDown={(e) => {
@@ -286,11 +331,11 @@ export function BroModal({ client, bro }: BroModalProps) {
                   />
                 </div>
               )}
-              {broParams.map((input, index) => {
+              {selectedBroParams(activeFormBro).map((input, index) => {
                 const value = selectedInputValues[input.id] ?? "";
-                const isFirstField = !selectedBro.output && index === 0;
+                const isFirstField = !activeFormBro.output && index === 0;
                 return (
-                  <div className="modal__rename-row" key={`${selectedBro.id}:${input.id}`}>
+                  <div className="modal__rename-row" key={`${activeFormBro.id}:${input.id}`}>
                     <label className="modal__rename-label">{input.label}:</label>
                     <BroParamField
                       input={input}
@@ -299,7 +344,7 @@ export function BroModal({ client, bro }: BroModalProps) {
                       onChange={(nextValue) => {
                         setParams((current) => ({
                           ...current,
-                          [`${selectedBro.id}:${input.id}`]: nextValue,
+                          [`${activeFormBro.id}:${input.id}`]: nextValue,
                         }));
                       }}
                       onSubmit={launchSelected}
