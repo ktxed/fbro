@@ -158,8 +158,14 @@ export function JobsModal({ onClose, client }: { onClose: () => void; client: Ws
 
   const byNewest = (a: Job, b: Job) => b.startedAt - a.startedAt;
   const jobs = Object.values(state.jobs).sort(byNewest);
-  const active = jobs.filter(j => j.state === "Queued" || j.state === "Running" || j.state === "AwaitingDecision");
-  const finished = jobs.filter(j => j.state !== "Queued" && j.state !== "Running" && j.state !== "AwaitingDecision");
+  const fileJobs = jobs.filter((job) => job.kind === "file-op");
+  const broJobs = jobs.filter((job) => job.kind === "fp-bro");
+  const activeFileJobs = fileJobs.filter(
+    (job) => job.state === "Queued" || job.state === "Running" || job.state === "AwaitingDecision"
+  );
+  const finishedFileJobs = fileJobs.filter(
+    (job) => job.state !== "Queued" && job.state !== "Running" && job.state !== "AwaitingDecision"
+  );
   const dirSizeTasks = [...state.dirSizeQueue].sort((a, b) => a.enqueuedAt - b.enqueuedAt);
 
   useEffect(() => {
@@ -183,14 +189,21 @@ export function JobsModal({ onClose, client }: { onClose: () => void; client: Ws
         </div>
 
         <div className="modal__body jobs-modal__body">
-          {jobs.length === 0 && dirSizeTasks.length === 0 && (
+          {fileJobs.length === 0 && broJobs.length === 0 && dirSizeTasks.length === 0 && (
             <div className="jobs-modal__empty">No jobs.</div>
           )}
 
-          {active.length > 0 && (
+          {activeFileJobs.length > 0 && (
             <section>
-              <div className="jobs-modal__section-title">Active</div>
-              {active.map(j => <JobRow key={j.jobId} job={j} client={client} />)}
+              <div className="jobs-modal__section-title">Active File Jobs</div>
+              {activeFileJobs.map(j => <JobRow key={j.jobId} job={j} client={client} />)}
+            </section>
+          )}
+
+          {broJobs.length > 0 && (
+            <section>
+              <div className="jobs-modal__section-title">Bro Jobs</div>
+              {broJobs.map(j => <JobRow key={j.jobId} job={j} client={client} />)}
             </section>
           )}
 
@@ -207,10 +220,10 @@ export function JobsModal({ onClose, client }: { onClose: () => void; client: Ws
             </section>
           )}
 
-          {finished.length > 0 && (
+          {finishedFileJobs.length > 0 && (
             <section>
-              <div className="jobs-modal__section-title">Finished</div>
-              {finished.map(j => <JobRow key={j.jobId} job={j} client={client} />)}
+              <div className="jobs-modal__section-title">Finished File Jobs</div>
+              {finishedFileJobs.map(j => <JobRow key={j.jobId} job={j} client={client} />)}
             </section>
           )}
         </div>
