@@ -25,8 +25,9 @@ pub fn launch_bro(inputs: &[BroInputItem], bro: &ResolvedBro) -> Result<(), Stri
 #[cfg(test)]
 mod tests {
     use super::{launch_bro, list_bros};
-    use crate::bro::model::LaunchRecipe;
-    use crate::bro::{BroInputItem, BroOption, BroProtocol, BroSource, ResolvedBro};
+    use crate::bro::model::{
+        BroInputItem, BroOption, BroProtocol, BroSource, LaunchRecipe, ResolvedBro,
+    };
 
     fn sample_inputs() -> Vec<BroInputItem> {
         vec![

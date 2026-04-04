@@ -1,26 +1,5 @@
-#[cfg(target_os = "linux")]
-use std::env;
-#[cfg(any(target_os = "linux", target_os = "macos"))]
 use std::process::Command;
-#[cfg(target_os = "macos")]
-use std::{env, path::PathBuf};
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
-pub(crate) fn find_executable(candidates: &[&str]) -> Option<String> {
-    let path_var = env::var_os("PATH")?;
-    env::split_paths(&path_var).find_map(|dir| {
-        candidates.iter().find_map(|candidate| {
-            let joined = dir.join(candidate);
-            if joined.is_file() {
-                Some(joined.to_string_lossy().to_string())
-            } else {
-                None
-            }
-        })
-    })
-}
-
-#[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(crate) fn native_version(program: &str) -> String {
     Command::new(program)
         .arg("--version")
@@ -39,34 +18,6 @@ pub(crate) fn native_version(program: &str) -> String {
             })
         })
         .unwrap_or_else(|| "unknown".to_string())
-}
-
-#[cfg(target_os = "macos")]
-pub(crate) fn macos_app_bundle_executable(
-    bundle_path: &str,
-    executable_name: &str,
-) -> Option<String> {
-    let path = PathBuf::from(bundle_path);
-    if !path.is_dir() {
-        return None;
-    }
-    let executable = path.join("Contents").join("MacOS").join(executable_name);
-    if executable.is_file() {
-        Some(executable.to_string_lossy().to_string())
-    } else {
-        None
-    }
-}
-
-#[cfg(target_os = "linux")]
-pub(crate) fn flatpak_installed(app_id: &str) -> bool {
-    Command::new("flatpak")
-        .arg("info")
-        .arg("--show-ref")
-        .arg(app_id)
-        .output()
-        .map(|output| output.status.success())
-        .unwrap_or(false)
 }
 
 #[cfg(target_os = "linux")]
@@ -92,7 +43,6 @@ pub(crate) fn flatpak_version(app_id: &str) -> String {
         .unwrap_or_else(|| "unknown".to_string())
 }
 
-#[cfg(target_os = "linux")]
 fn extract_version(line: &str) -> Option<String> {
     line.split_whitespace().find_map(|token| {
         let trimmed =

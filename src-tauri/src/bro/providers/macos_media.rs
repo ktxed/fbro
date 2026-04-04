@@ -1,6 +1,7 @@
 use crate::bro::model::{BroOption, BroProtocol, BroSource, LaunchRecipe, ResolvedBro};
+use crate::bro::probe::{macos_app_executable, macos_app_exists};
 use crate::bro::providers::{BroDiscoveryContext, BroProvider};
-use crate::bro::system::{macos_app_bundle_executable, native_version};
+use crate::bro::version::native_version;
 use std::process::Command;
 
 pub struct MacOSMediaProvider;
@@ -24,18 +25,22 @@ impl BroProvider for MacOSMediaProvider {
         }
 
         for bundle_path in macos_mpv_bundle_candidates() {
-            let Some(program) = macos_app_bundle_executable(&bundle_path, "mpv") else {
+            if !macos_app_exists(&bundle_path) {
+                continue;
+            }
+            let Some(program) = macos_app_executable(&bundle_path, "mpv") else {
                 continue;
             };
             if !seen_programs.insert(program.clone()) {
                 continue;
             }
+            let version = native_version(&program);
             bros.push(native_command_bro(
                 &format!("native:mpv-bundle:{bundle_path}"),
                 "mpv",
                 program,
                 Some(bundle_path),
-                native_version(&program),
+                version,
                 vec!["--".to_string()],
             ));
         }

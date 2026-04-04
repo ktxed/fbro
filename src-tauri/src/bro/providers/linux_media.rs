@@ -1,6 +1,7 @@
 use crate::bro::model::{BroOption, BroProtocol, BroSource, LaunchRecipe, ResolvedBro};
+use crate::bro::probe::{find_binary_on_path, flatpak_app_installed};
 use crate::bro::providers::{BroDiscoveryContext, BroProvider};
-use crate::bro::system::{find_executable, flatpak_installed, flatpak_version, native_version};
+use crate::bro::version::{flatpak_version, native_version};
 
 pub struct LinuxMediaProvider;
 
@@ -9,7 +10,7 @@ impl BroProvider for LinuxMediaProvider {
         let _ = ctx.inputs;
         let mut bros = Vec::new();
 
-        if let Some(program) = find_executable(&["mpv"]) {
+        if let Some(program) = find_binary_on_path(&["mpv"]) {
             bros.push(native_command_bro(
                 "native:mpv",
                 "mpv",
@@ -19,7 +20,7 @@ impl BroProvider for LinuxMediaProvider {
             ));
         }
 
-        if let Some(program) = find_executable(&["vlc"]) {
+        if let Some(program) = find_binary_on_path(&["vlc"]) {
             bros.push(native_command_bro(
                 "native:vlc",
                 "VLC",
@@ -29,11 +30,11 @@ impl BroProvider for LinuxMediaProvider {
             ));
         }
 
-        if flatpak_installed("io.mpv.Mpv") {
+        if flatpak_app_installed("io.mpv.Mpv") {
             bros.push(flatpak_command_bro("io.mpv.Mpv", "mpv"));
         }
 
-        if flatpak_installed("org.videolan.VLC") {
+        if flatpak_app_installed("org.videolan.VLC") {
             bros.push(flatpak_command_bro("org.videolan.VLC", "VLC"));
         }
 
