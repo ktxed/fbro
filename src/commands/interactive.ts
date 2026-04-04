@@ -51,6 +51,7 @@ export const PANEL_SHORTCUT_COMMAND_IDS = [
   "panel.open",
   "panel.open_entry",
   "panel.navigate_up",
+  "panel.navigate_home",
   "app.open_terminal",
   "panel.focus.switch",
   "panel.source.next",
@@ -351,8 +352,17 @@ export function formatPrimaryBinding(command?: InteractiveCommand) {
 }
 
 export function bindingMatches(event: KeyboardLikeEvent, binding: KeyBinding) {
+  const normalizedEventKey = normalizeKey(event.key);
+  const normalizedBindingKey = normalizeKey(binding.key);
+  const isShiftProducedSymbol =
+    normalizedEventKey === normalizedBindingKey
+    && normalizedBindingKey.length === 1
+    && /[^a-z0-9]/i.test(normalizedBindingKey)
+    && !binding.shift
+    && event.shiftKey;
+
   return normalizeKey(event.key) === normalizeKey(binding.key)
-    && !!binding.shift === event.shiftKey
+    && (isShiftProducedSymbol || !!binding.shift === event.shiftKey)
     && !!binding.ctrl === event.ctrlKey
     && !!binding.alt === event.altKey
     && !!binding.meta === event.metaKey;
@@ -454,6 +464,9 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
       return true;
     case "panel.navigate_up":
       client.sendIntent("NavigateUp", "focused-panel");
+      return true;
+    case "panel.navigate_home":
+      client.sendIntent("NavigateHome", "focused-panel");
       return true;
     case "panel.focus.switch": {
       if (!focused) return false;
