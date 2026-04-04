@@ -76,7 +76,21 @@ async fn list_bros_for_request(scope: &Value, args: &Value, ctx: &mut IntentCont
         }
     };
 
-    let bros = list_bros(&inputs);
+    let lookup_inputs = inputs.clone();
+    let bros = match tokio::task::spawn_blocking(move || list_bros(&lookup_inputs)).await {
+        Ok(bros) => bros,
+        Err(_) => {
+            let _ = ctx
+                .tx
+                .send(ServerMessage::BroOptionsFailed {
+                    timestamp: now(),
+                    request_id: parsed.request_id,
+                    message: "Bro discovery failed.".to_string(),
+                })
+                .await;
+            return;
+        }
+    };
     let input_schemas = inputs
         .iter()
         .map(|input| BroInputSchema {
@@ -91,9 +105,9 @@ async fn list_bros_for_request(scope: &Value, args: &Value, ctx: &mut IntentCont
             id: bro.option.id.clone(),
             name: bro.option.name.clone(),
             version: bro.option.version.clone(),
-            source: bro.option.source.clone(),
+            source: bro.option.source.as_str().to_string(),
             detail: bro.option.detail.clone(),
-            protocol: bro.option.protocol.clone(),
+            protocol: bro.option.protocol.as_str().to_string(),
         })
         .collect::<Vec<_>>();
 
