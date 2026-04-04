@@ -1,4 +1,4 @@
-use crate::bro::model::{BroOption, BroProtocol, BroSource, LaunchRecipe, ResolvedBro};
+use crate::bro::model::{BroOption, BroProtocol, BroSource, LaunchArg, LaunchRecipe, ResolvedBro};
 use crate::bro::probe::{macos_app_executable, macos_app_exists};
 use crate::bro::providers::{BroDiscoveryContext, BroProvider};
 use crate::bro::version::native_version;
@@ -20,7 +20,7 @@ impl BroProvider for MacOSMediaProvider {
                 "mpv".to_string(),
                 Some("mpv".to_string()),
                 version,
-                vec!["--".to_string()],
+                vec![LaunchArg::Literal("--".to_string()), LaunchArg::TargetPaths],
             ));
         }
 
@@ -41,7 +41,7 @@ impl BroProvider for MacOSMediaProvider {
                 program,
                 Some(bundle_path),
                 version,
-                vec!["--".to_string()],
+                vec![LaunchArg::Literal("--".to_string()), LaunchArg::TargetPaths],
             ));
         }
 
@@ -72,7 +72,7 @@ fn native_command_bro(
     program: String,
     detail: Option<String>,
     version: String,
-    args_before_inputs: Vec<String>,
+    args: Vec<LaunchArg>,
 ) -> ResolvedBro {
     ResolvedBro {
         option: BroOption {
@@ -82,11 +82,12 @@ fn native_command_bro(
             source: BroSource::Native,
             detail,
             protocol: BroProtocol::Fnf,
+            inputs: vec![],
         },
         launch: LaunchRecipe::Command {
             program,
-            args_before_inputs,
-            args_after_inputs: vec![],
+            cwd: None,
+            args,
         },
     }
 }

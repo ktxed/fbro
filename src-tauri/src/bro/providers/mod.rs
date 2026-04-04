@@ -4,9 +4,12 @@ use crate::bro::model::{BroInputItem, ResolvedBro};
 pub mod linux_media;
 #[cfg(target_os = "macos")]
 pub mod macos_media;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub mod tar;
 
 pub struct BroDiscoveryContext<'a> {
     pub inputs: &'a [BroInputItem],
+    pub suggested_output_dir: Option<&'a str>,
 }
 
 pub trait BroProvider: Send + Sync {
@@ -20,6 +23,8 @@ pub fn builtin_providers() -> Vec<Box<dyn BroProvider>> {
     providers.push(Box::new(linux_media::LinuxMediaProvider));
     #[cfg(target_os = "macos")]
     providers.push(Box::new(macos_media::MacOSMediaProvider));
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    providers.push(Box::new(tar::TarProvider));
 
     providers
 }

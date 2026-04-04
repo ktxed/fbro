@@ -7,8 +7,8 @@ A **bro** is a processor selected by the user to handle one or more filesystem
 entries. The name comes from "browser processor" / "brocessor".
 
 In v0, bros are strictly **fire-and-forget** integrations: fbro launches them
-with resolved input paths and does not wait for completion, track progress, or
-consume any output.
+with resolved input paths plus optional launch inputs and does not wait for
+completion, track progress, or consume any output.
 
 ---
 
@@ -48,6 +48,13 @@ After invocation, FE opens a modal:
 * shows a compact summary of the resolved target inputs
 * requests available bros from BE
 * lets the user select one bro and launch it
+* renders required launch inputs for bros that declare them
+
+For the built-in `tar` bro:
+
+* FE passes the other panel path as a suggested output directory during bro lookup
+* BE uses that suggestion to prefill the archive output path
+* the user can edit the archive path before launch
 
 Keyboard behavior:
 
@@ -69,6 +76,7 @@ A bro is a user-selectable processor with:
 * `source`
 * optional `detail`
 * `protocol`
+* optional launch `inputs`
 
 ### 2.2 Brovider
 
@@ -110,7 +118,8 @@ Request bro discovery for a panel and optional explicit target.
   "scope": "left",
   "args": {
     "requestId": "req-123",
-    "targetPath": "/home/user/file.mp4"
+    "targetPath": "/home/user/file.mp4",
+    "suggestedOutputDir": "/home/user/archive-output"
   }
 }
 ```
@@ -119,6 +128,7 @@ Notes:
 
 * `scope` identifies the panel whose semantic state should be used
 * `targetPath` is optional
+* `suggestedOutputDir` is optional
 * if `targetPath` is omitted, BE resolves selection-or-cursor for that panel
 
 #### `LaunchBro`
@@ -131,7 +141,10 @@ Launch the selected bro for a previously resolved bro request.
   "name": "LaunchBro",
   "args": {
     "requestId": "req-123",
-    "broId": "native:mpv"
+    "broId": "native:tar",
+    "inputs": {
+      "outputPath": "/home/user/archive-output/file.mp4.tar"
+    }
   }
 }
 ```
@@ -161,7 +174,8 @@ Sent when BE successfully resolves inputs and bro options.
       "version": "0.40.0",
       "source": "native",
       "detail": "/usr/bin/mpv",
-      "protocol": "fnf"
+      "protocol": "fnf",
+      "inputs": []
     }
   ]
 }
@@ -221,7 +235,20 @@ Sent only when BE fails to start the chosen bro process.
   "version": "3.0.21",
   "source": "flatpak",
   "detail": "org.videolan.VLC",
-  "protocol": "fnf"
+  "protocol": "fnf",
+  "inputs": []
+}
+```
+
+### 4.3 `BroLaunchInput`
+
+```json
+{
+  "id": "outputPath",
+  "label": "Archive path",
+  "kind": "path",
+  "required": true,
+  "defaultValue": "/home/user/archive-output/file.mp4.tar"
 }
 ```
 
@@ -233,6 +260,7 @@ Field meanings:
 * `source`: install/discovery source, e.g. `native`, `flatpak`
 * `detail`: secondary display info
 * `protocol`: current execution contract
+* `inputs`: optional launch-input declarations
 
 ---
 
@@ -250,14 +278,15 @@ That means:
 
 ### 5.2 v0 built-in discovery
 
-v0 ships built-in bro discovery only for Linux.
+v0 ships built-in bro discovery for Linux and macOS, excluding Windows.
 
-Initial Linux bros:
+Built-in bros:
 
 * native `mpv`
 * native `vlc`
 * Flatpak `io.mpv.Mpv`
 * Flatpak `org.videolan.VLC`
+* native `tar`
 
 Discovery rules:
 
@@ -265,6 +294,7 @@ Discovery rules:
 * Flatpak bros are detected from installed app IDs
 * native and Flatpak installs are listed separately if both exist
 * version is best-effort and may fall back to `unknown`
+* `tar` is only exposed on non-Windows platforms and declares one required launch input: archive output path
 
 ---
 
@@ -272,16 +302,24 @@ Discovery rules:
 
 ### 6.1 Input passing
 
-In v0, fbro passes the resolved input paths **raw**.
+In v0, fbro passes the resolved input paths **raw** unless the selected bro uses
+an alternate launch recipe.
 
 This means:
 
 * no media filtering
 * no compatibility gating
-* no additional prompting
 * directories and mixed selections are passed through unchanged
 
 The selected bro decides what to do with the provided paths.
+
+The built-in `tar` bro is the first small protocol extension that requires an
+extra launch input:
+
+* `outputPath`: destination archive path
+* BE prefills it from the other panel path when FE provides `suggestedOutputDir`
+* `tar` is launched from the parent directory of the selected inputs
+* selected entries are passed by entry name so the archive does not capture absolute input paths
 
 ### 6.2 Linux launch recipes
 
@@ -290,6 +328,7 @@ Current launch forms:
 * native `mpv`: `mpv -- <paths...>`
 * native `vlc`: `vlc <paths...>`
 * Flatpak `mpv` / `VLC`: `flatpak run --file-forwarding <APP_ID> @@ <paths...> @@`
+* native `tar`: `tar -cf <outputPath> <entry names...>` with working directory set to the parent directory of the selected inputs
 
 ### 6.3 Fire-and-forget contract
 
@@ -311,6 +350,7 @@ For bro requests, BE is responsible for:
 * discovering bros from registered broviders
 * caching request data by `requestId`
 * validating the selected `broId` against the cached request
+* validating required launch inputs for bros that declare them
 * spawning the bro process
 
 FE must not reimplement selection semantics or derive its own input set.
@@ -323,7 +363,7 @@ The v0 design intentionally leaves room for richer bro protocols later.
 
 Examples:
 
-* bros that require additional inputs before launch
+* bros that require more than one launch input before launch
 * bros that return a result synchronously
 * bros that create a tracked BE job
 * bros that stream progress or status back to FE

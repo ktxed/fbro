@@ -124,6 +124,14 @@ export interface BroInputItem {
   kind: string;
 }
 
+export interface BroLaunchInputItem {
+  id: string;
+  label: string;
+  kind: "path";
+  required: boolean;
+  defaultValue?: string;
+}
+
 export interface BroItem {
   id: string;
   name: string;
@@ -131,6 +139,7 @@ export interface BroItem {
   source: string;
   detail?: string;
   protocol: "fnf";
+  inputs: BroLaunchInputItem[];
 }
 
 export interface JobStart {

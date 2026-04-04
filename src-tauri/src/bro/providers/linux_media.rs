@@ -1,4 +1,4 @@
-use crate::bro::model::{BroOption, BroProtocol, BroSource, LaunchRecipe, ResolvedBro};
+use crate::bro::model::{BroOption, BroProtocol, BroSource, LaunchArg, LaunchRecipe, ResolvedBro};
 use crate::bro::probe::{find_binary_on_path, flatpak_app_installed};
 use crate::bro::providers::{BroDiscoveryContext, BroProvider};
 use crate::bro::version::{flatpak_version, native_version};
@@ -16,7 +16,7 @@ impl BroProvider for LinuxMediaProvider {
                 "mpv",
                 program.clone(),
                 native_version(&program),
-                vec!["--".to_string()],
+                vec![LaunchArg::Literal("--".to_string()), LaunchArg::TargetPaths],
             ));
         }
 
@@ -26,7 +26,7 @@ impl BroProvider for LinuxMediaProvider {
                 "VLC",
                 program.clone(),
                 native_version(&program),
-                vec![],
+                vec![LaunchArg::TargetPaths],
             ));
         }
 
@@ -47,7 +47,7 @@ fn native_command_bro(
     name: &str,
     program: String,
     version: String,
-    args_before_inputs: Vec<String>,
+    args: Vec<LaunchArg>,
 ) -> ResolvedBro {
     resolved_command_bro(
         BroOption {
@@ -57,10 +57,10 @@ fn native_command_bro(
             source: BroSource::Native,
             detail: Some(program.clone()),
             protocol: BroProtocol::Fnf,
+            inputs: vec![],
         },
         program,
-        args_before_inputs,
-        vec![],
+        args,
     )
 }
 
@@ -73,30 +73,27 @@ fn flatpak_command_bro(app_id: &str, name: &str) -> ResolvedBro {
             source: BroSource::Flatpak,
             detail: Some(app_id.to_string()),
             protocol: BroProtocol::Fnf,
+            inputs: vec![],
         },
         "flatpak".to_string(),
         vec![
-            "run".to_string(),
-            "--file-forwarding".to_string(),
-            app_id.to_string(),
-            "@@".to_string(),
+            LaunchArg::Literal("run".to_string()),
+            LaunchArg::Literal("--file-forwarding".to_string()),
+            LaunchArg::Literal(app_id.to_string()),
+            LaunchArg::Literal("@@".to_string()),
+            LaunchArg::TargetPaths,
+            LaunchArg::Literal("@@".to_string()),
         ],
-        vec!["@@".to_string()],
     )
 }
 
-fn resolved_command_bro(
-    option: BroOption,
-    program: String,
-    args_before_inputs: Vec<String>,
-    args_after_inputs: Vec<String>,
-) -> ResolvedBro {
+fn resolved_command_bro(option: BroOption, program: String, args: Vec<LaunchArg>) -> ResolvedBro {
     ResolvedBro {
         option,
         launch: LaunchRecipe::Command {
             program,
-            args_before_inputs,
-            args_after_inputs,
+            cwd: None,
+            args,
         },
     }
 }

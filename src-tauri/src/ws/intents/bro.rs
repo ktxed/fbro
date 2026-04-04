@@ -1,8 +1,10 @@
+use std::collections::HashMap;
+
 use serde_json::Value;
 
 use crate::bro::{launch_bro, list_bros, BroInputItem};
 use crate::ws::intents::arg_str;
-use crate::ws::protocol::{now, BroInputSchema, BroSchema, ServerMessage};
+use crate::ws::protocol::{now, BroInputSchema, BroLaunchInputSchema, BroSchema, ServerMessage};
 use crate::ws::runtime::{resolve_panel_id, IntentContext};
 
 pub(crate) async fn handle(name: &str, scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
@@ -16,6 +18,7 @@ pub(crate) async fn handle(name: &str, scope: &Value, args: &Value, ctx: &mut In
 struct ListBrosArgs {
     request_id: String,
     target_path: Option<String>,
+    suggested_output_dir: Option<String>,
 }
 
 impl ListBrosArgs {
@@ -23,6 +26,7 @@ impl ListBrosArgs {
         Self {
             request_id: arg_str(args, "requestId").unwrap_or("").to_string(),
             target_path: arg_str(args, "targetPath").map(String::from),
+            suggested_output_dir: arg_str(args, "suggestedOutputDir").map(String::from),
         }
     }
 }
@@ -30,6 +34,7 @@ impl ListBrosArgs {
 struct LaunchBroArgs {
     request_id: String,
     bro_id: String,
+    inputs: HashMap<String, String>,
 }
 
 impl LaunchBroArgs {
@@ -37,6 +42,18 @@ impl LaunchBroArgs {
         Self {
             request_id: arg_str(args, "requestId").unwrap_or("").to_string(),
             bro_id: arg_str(args, "broId").unwrap_or("").to_string(),
+            inputs: args
+                .get("inputs")
+                .and_then(Value::as_object)
+                .map(|values| {
+                    values
+                        .iter()
+                        .filter_map(|(key, value)| {
+                            value.as_str().map(|value| (key.clone(), value.to_string()))
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
         }
     }
 }
@@ -77,7 +94,12 @@ async fn list_bros_for_request(scope: &Value, args: &Value, ctx: &mut IntentCont
     };
 
     let lookup_inputs = inputs.clone();
-    let bros = match tokio::task::spawn_blocking(move || list_bros(&lookup_inputs)).await {
+    let suggested_output_dir = parsed.suggested_output_dir.clone();
+    let bros = match tokio::task::spawn_blocking(move || {
+        list_bros(&lookup_inputs, suggested_output_dir.as_deref())
+    })
+    .await
+    {
         Ok(bros) => bros,
         Err(_) => {
             let _ = ctx
@@ -108,6 +130,18 @@ async fn list_bros_for_request(scope: &Value, args: &Value, ctx: &mut IntentCont
             source: bro.option.source.as_str().to_string(),
             detail: bro.option.detail.clone(),
             protocol: bro.option.protocol.as_str().to_string(),
+            inputs: bro
+                .option
+                .inputs
+                .iter()
+                .map(|input| BroLaunchInputSchema {
+                    id: input.id.clone(),
+                    label: input.label.clone(),
+                    kind: input.kind.as_str().to_string(),
+                    required: input.required,
+                    default_value: input.default_value.clone(),
+                })
+                .collect(),
         })
         .collect::<Vec<_>>();
 
@@ -159,7 +193,7 @@ async fn launch_selected_bro(args: &Value, ctx: &mut IntentContext<'_>) {
         return;
     };
 
-    if let Err(message) = launch_bro(&request.inputs, &bro) {
+    if let Err(message) = launch_bro(&request.inputs, &bro, &parsed.inputs) {
         let _ = ctx
             .tx
             .send(ServerMessage::Error {

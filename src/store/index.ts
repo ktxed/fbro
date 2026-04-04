@@ -551,13 +551,17 @@ function reducer(state: AppState, action: AppAction): AppState {
           if (!state.pendingBro || state.pendingBro.requestId !== (msg as BroOptionsReadyMessage).requestId) {
             return state;
           }
+          const normalizedBros = (msg as BroOptionsReadyMessage).bros.map((bro) => ({
+            ...bro,
+            inputs: bro.inputs ?? [],
+          }));
           return {
             ...state,
             pendingBro: {
               ...state.pendingBro,
               status: "ready",
               inputs: (msg as BroOptionsReadyMessage).inputs,
-              bros: (msg as BroOptionsReadyMessage).bros,
+              bros: normalizedBros,
               error: undefined,
             },
           };

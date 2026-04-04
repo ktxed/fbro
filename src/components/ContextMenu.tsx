@@ -148,6 +148,9 @@ export function ContextMenu({ client, menu }: ContextMenuProps) {
 
     if (item.kind === "bro") {
       const requestId = globalThis.crypto?.randomUUID?.() ?? `bro-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      const otherPanelId = (state.layout.panels.length > 0 ? state.layout.panels : Object.keys(state.panels))
+        .find((panelId) => panelId !== menu.panelId);
+      const suggestedOutputDir = otherPanelId ? state.panels[otherPanelId]?.path : undefined;
       dispatch({
         type: "OPEN_BRO",
         bro: {
@@ -163,6 +166,7 @@ export function ContextMenu({ client, menu }: ContextMenuProps) {
       client.sendIntent("ListBros", menu.panelId, {
         requestId,
         targetPath: menu.fullPath,
+        suggestedOutputDir,
       });
       return;
     }

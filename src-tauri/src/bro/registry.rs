@@ -1,24 +1,35 @@
+use std::collections::HashMap;
 use std::process::Command;
 
 use crate::bro::model::{BroInputItem, ResolvedBro};
 use crate::bro::providers::{builtin_providers, BroDiscoveryContext};
 
-pub fn list_bros(inputs: &[BroInputItem]) -> Vec<ResolvedBro> {
-    let ctx = BroDiscoveryContext { inputs };
+pub fn list_bros(inputs: &[BroInputItem], suggested_output_dir: Option<&str>) -> Vec<ResolvedBro> {
+    let ctx = BroDiscoveryContext {
+        inputs,
+        suggested_output_dir,
+    };
     builtin_providers()
         .into_iter()
         .flat_map(|provider| provider.list(&ctx))
         .collect()
 }
 
-pub fn launch_bro(inputs: &[BroInputItem], bro: &ResolvedBro) -> Result<(), String> {
+pub fn launch_bro(
+    inputs: &[BroInputItem],
+    bro: &ResolvedBro,
+    launch_inputs: &HashMap<String, String>,
+) -> Result<(), String> {
     if inputs.is_empty() {
         return Err("No input entries were resolved for this bro".to_string());
     }
 
-    let (program, args) = bro.build_command(inputs);
+    let (program, args, cwd) = bro.build_command(inputs, launch_inputs)?;
     let mut cmd = Command::new(&program);
     cmd.args(args);
+    if let Some(cwd) = cwd {
+        cmd.current_dir(cwd);
+    }
     cmd.spawn().map(|_| ()).map_err(|e| e.to_string())
 }
 
@@ -26,8 +37,10 @@ pub fn launch_bro(inputs: &[BroInputItem], bro: &ResolvedBro) -> Result<(), Stri
 mod tests {
     use super::{launch_bro, list_bros};
     use crate::bro::model::{
-        BroInputItem, BroOption, BroProtocol, BroSource, LaunchRecipe, ResolvedBro,
+        BroInputItem, BroLaunchInput, BroLaunchInputKind, BroOption, BroProtocol, BroSource,
+        LaunchArg, LaunchCwd, LaunchRecipe, ResolvedBro,
     };
+    use std::collections::HashMap;
 
     fn sample_inputs() -> Vec<BroInputItem> {
         vec![
@@ -53,6 +66,7 @@ mod tests {
                 source,
                 detail: None,
                 protocol: BroProtocol::Fnf,
+                inputs: vec![],
             },
             launch,
         }
@@ -64,13 +78,16 @@ mod tests {
             BroSource::Native,
             LaunchRecipe::Command {
                 program: "mpv".to_string(),
-                args_before_inputs: vec!["--".to_string()],
-                args_after_inputs: vec![],
+                cwd: None,
+                args: vec![LaunchArg::Literal("--".to_string()), LaunchArg::TargetPaths],
             },
         );
-        let (program, args) = bro.build_command(&sample_inputs());
+        let (program, args, cwd) = bro
+            .build_command(&sample_inputs(), &HashMap::new())
+            .unwrap();
         assert_eq!(program, "mpv");
         assert_eq!(args, vec!["--", "/tmp/a.mp4", "/tmp/b.mp3"]);
+        assert_eq!(cwd, None);
     }
 
     #[test]
@@ -79,13 +96,16 @@ mod tests {
             BroSource::Native,
             LaunchRecipe::Command {
                 program: "vlc".to_string(),
-                args_before_inputs: vec![],
-                args_after_inputs: vec![],
+                cwd: None,
+                args: vec![LaunchArg::TargetPaths],
             },
         );
-        let (program, args) = bro.build_command(&sample_inputs());
+        let (program, args, cwd) = bro
+            .build_command(&sample_inputs(), &HashMap::new())
+            .unwrap();
         assert_eq!(program, "vlc");
         assert_eq!(args, vec!["/tmp/a.mp4", "/tmp/b.mp3"]);
+        assert_eq!(cwd, None);
     }
 
     #[test]
@@ -94,16 +114,20 @@ mod tests {
             BroSource::Flatpak,
             LaunchRecipe::Command {
                 program: "flatpak".to_string(),
-                args_before_inputs: vec![
-                    "run".to_string(),
-                    "--file-forwarding".to_string(),
-                    "org.videolan.VLC".to_string(),
-                    "@@".to_string(),
+                cwd: None,
+                args: vec![
+                    LaunchArg::Literal("run".to_string()),
+                    LaunchArg::Literal("--file-forwarding".to_string()),
+                    LaunchArg::Literal("org.videolan.VLC".to_string()),
+                    LaunchArg::Literal("@@".to_string()),
+                    LaunchArg::TargetPaths,
+                    LaunchArg::Literal("@@".to_string()),
                 ],
-                args_after_inputs: vec!["@@".to_string()],
             },
         );
-        let (program, args) = bro.build_command(&sample_inputs());
+        let (program, args, cwd) = bro
+            .build_command(&sample_inputs(), &HashMap::new())
+            .unwrap();
         assert_eq!(program, "flatpak");
         assert_eq!(
             args,
@@ -116,6 +140,46 @@ mod tests {
                 "/tmp/b.mp3",
                 "@@",
             ]
+        );
+        assert_eq!(cwd, None);
+    }
+
+    #[test]
+    fn builds_tar_command_with_launch_input_and_input_names() {
+        let bro = ResolvedBro {
+            option: BroOption {
+                id: "native:tar".to_string(),
+                name: "tar".to_string(),
+                version: "unknown".to_string(),
+                source: BroSource::Native,
+                detail: None,
+                protocol: BroProtocol::Fnf,
+                inputs: vec![BroLaunchInput {
+                    id: "outputPath".to_string(),
+                    label: "Archive path".to_string(),
+                    kind: BroLaunchInputKind::Path,
+                    required: true,
+                    default_value: Some("/tmp/out/archive.tar".to_string()),
+                }],
+            },
+            launch: LaunchRecipe::Command {
+                program: "tar".to_string(),
+                cwd: Some(LaunchCwd::FirstInputParent),
+                args: vec![
+                    LaunchArg::Literal("-cf".to_string()),
+                    LaunchArg::UserInput("outputPath".to_string()),
+                    LaunchArg::TargetNames,
+                ],
+            },
+        };
+        let launch_inputs =
+            HashMap::from([("outputPath".to_string(), "/tmp/out/archive.tar".to_string())]);
+        let (program, args, cwd) = bro.build_command(&sample_inputs(), &launch_inputs).unwrap();
+        assert_eq!(program, "tar");
+        assert_eq!(args, vec!["-cf", "/tmp/out/archive.tar", "a.mp4", "b.mp3"]);
+        assert_eq!(
+            cwd.map(|path| path.to_string_lossy().to_string()),
+            Some("/tmp".to_string())
         );
     }
 
@@ -132,22 +196,22 @@ mod tests {
             BroSource::Native,
             LaunchRecipe::Command {
                 program: "vlc".to_string(),
-                args_before_inputs: vec![],
-                args_after_inputs: vec![],
+                cwd: None,
+                args: vec![LaunchArg::TargetPaths],
             },
         );
-        let result = launch_bro(&[], &bro);
+        let result = launch_bro(&[], &bro, &HashMap::new());
         assert!(result.is_err());
     }
 
     #[test]
     fn returns_empty_registry_result_on_unsupported_platforms() {
-        #[cfg(not(target_os = "linux"))]
-        assert!(list_bros(&sample_inputs()).is_empty());
+        #[cfg(target_os = "windows")]
+        assert!(list_bros(&sample_inputs(), None).is_empty());
 
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         {
-            let _ = list_bros(&sample_inputs());
+            let _ = list_bros(&sample_inputs(), None);
         }
     }
 }

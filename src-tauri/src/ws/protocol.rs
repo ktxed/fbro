@@ -290,6 +290,17 @@ pub struct BroInputSchema {
 
 #[derive(Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
+pub struct BroLaunchInputSchema {
+    pub id: String,
+    pub label: String,
+    pub kind: String,
+    pub required: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_value: Option<String>,
+}
+
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
 pub struct BroSchema {
     pub id: String,
     pub name: String,
@@ -298,6 +309,8 @@ pub struct BroSchema {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
     pub protocol: String,
+    #[serde(default)]
+    pub inputs: Vec<BroLaunchInputSchema>,
 }
 
 #[derive(Serialize, Clone, Debug)]

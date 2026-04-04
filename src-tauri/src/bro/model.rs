@@ -1,3 +1,6 @@
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BroInputItem {
     pub path: String,
@@ -34,6 +37,28 @@ impl BroSource {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub enum BroLaunchInputKind {
+    Path,
+}
+
+impl BroLaunchInputKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Path => "path",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BroLaunchInput {
+    pub id: String,
+    pub label: String,
+    pub kind: BroLaunchInputKind,
+    pub required: bool,
+    pub default_value: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BroOption {
     pub id: String,
     pub name: String,
@@ -41,15 +66,29 @@ pub struct BroOption {
     pub source: BroSource,
     pub detail: Option<String>,
     pub protocol: BroProtocol,
+    pub inputs: Vec<BroLaunchInput>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum LaunchRecipe {
     Command {
         program: String,
-        args_before_inputs: Vec<String>,
-        args_after_inputs: Vec<String>,
+        cwd: Option<LaunchCwd>,
+        args: Vec<LaunchArg>,
     },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum LaunchCwd {
+    FirstInputParent,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum LaunchArg {
+    Literal(String),
+    TargetPaths,
+    TargetNames,
+    UserInput(String),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -59,18 +98,56 @@ pub struct ResolvedBro {
 }
 
 impl ResolvedBro {
-    pub(crate) fn build_command(&self, inputs: &[BroInputItem]) -> (String, Vec<String>) {
+    pub(crate) fn build_command(
+        &self,
+        target_inputs: &[BroInputItem],
+        launch_inputs: &HashMap<String, String>,
+    ) -> Result<(String, Vec<String>, Option<PathBuf>), String> {
         match &self.launch {
-            LaunchRecipe::Command {
-                program,
-                args_before_inputs,
-                args_after_inputs,
-            } => {
-                let mut args = args_before_inputs.clone();
-                args.extend(inputs.iter().map(|input| input.path.clone()));
-                args.extend(args_after_inputs.clone());
-                (program.clone(), args)
+            LaunchRecipe::Command { program, cwd, args } => {
+                let cwd = match cwd {
+                    Some(LaunchCwd::FirstInputParent) => {
+                        let first = target_inputs.first().ok_or_else(|| {
+                            "No input entries were resolved for this bro".to_string()
+                        })?;
+                        let parent = Path::new(&first.path).parent().ok_or_else(|| {
+                            "Failed to resolve a working directory for this bro".to_string()
+                        })?;
+                        Some(parent.to_path_buf())
+                    }
+                    None => None,
+                };
+
+                let mut resolved_args = Vec::new();
+                for arg in args {
+                    match arg {
+                        LaunchArg::Literal(value) => resolved_args.push(value.clone()),
+                        LaunchArg::TargetPaths => resolved_args
+                            .extend(target_inputs.iter().map(|input| input.path.clone())),
+                        LaunchArg::TargetNames => resolved_args
+                            .extend(target_inputs.iter().map(|input| input.name.clone())),
+                        LaunchArg::UserInput(id) => {
+                            let value = launch_inputs
+                                .get(id)
+                                .map(|value| value.trim())
+                                .filter(|value| !value.is_empty())
+                                .ok_or_else(|| missing_input_message(&self.option, id))?;
+                            resolved_args.push(value.to_string());
+                        }
+                    }
+                }
+
+                Ok((program.clone(), resolved_args, cwd))
             }
         }
     }
+}
+
+fn missing_input_message(option: &BroOption, input_id: &str) -> String {
+    option
+        .inputs
+        .iter()
+        .find(|input| input.id == input_id)
+        .map(|input| format!("Missing required input: {}", input.label))
+        .unwrap_or_else(|| format!("Missing required input: {input_id}"))
 }

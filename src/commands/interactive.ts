@@ -198,8 +198,20 @@ function openFileOp(state: AppState, dispatch: Dispatch<AppAction>, panel: Panel
   return openFileOpForEntries(state, dispatch, panel.panelId, files, opType);
 }
 
-function openPassToBro(dispatch: Dispatch<AppAction>, client: WsClient, panel: PanelState, explicitPath?: string) {
+function broSuggestedOutputDir(state: AppState, panelId: string) {
+  const otherPanelId = getOtherPanelId(state, panelId);
+  return otherPanelId ? state.panels[otherPanelId]?.path : undefined;
+}
+
+function openPassToBro(
+  state: AppState,
+  dispatch: Dispatch<AppAction>,
+  client: WsClient,
+  panel: PanelState,
+  explicitPath?: string,
+) {
   const requestId = globalThis.crypto?.randomUUID?.() ?? `bro-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const suggestedOutputDir = broSuggestedOutputDir(state, panel.panelId);
   dispatch({
     type: "OPEN_BRO",
     bro: {
@@ -215,6 +227,7 @@ function openPassToBro(dispatch: Dispatch<AppAction>, client: WsClient, panel: P
   client.sendIntent("ListBros", panel.panelId, {
     requestId,
     targetPath: explicitPath,
+    suggestedOutputDir,
   });
   return true;
 }
@@ -261,7 +274,7 @@ export function executeTargetedCommand(
   switch (commandId) {
     case "panel.pass_to_bro":
       return context.state.panels[target.panelId]
-        ? openPassToBro(context.dispatch, context.client, context.state.panels[target.panelId], target.fullPath)
+        ? openPassToBro(context.state, context.dispatch, context.client, context.state.panels[target.panelId], target.fullPath)
         : false;
     case "file.copy":
       return openFileOpForEntries(context.state, context.dispatch, target.panelId, [file], "copy");
@@ -422,7 +435,7 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
       client.sendIntent("NavigateSourceRoot", focused?.panelId ?? state.focus);
       return true;
     case "panel.pass_to_bro":
-      return focused ? openPassToBro(dispatch, client, focused.panel) : false;
+      return focused ? openPassToBro(state, dispatch, client, focused.panel) : false;
     case "file.info":
       return focused ? openInfo(dispatch, focused.panel) : false;
     case "file.rename":
