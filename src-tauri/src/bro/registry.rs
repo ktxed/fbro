@@ -69,6 +69,7 @@ mod tests {
                 inputs: vec![],
             },
             launch,
+            output_path_input_id: None,
         }
     }
 
@@ -153,7 +154,7 @@ mod tests {
                 version: "unknown".to_string(),
                 source: BroSource::Native,
                 detail: None,
-                protocol: BroProtocol::Fnf,
+                protocol: BroProtocol::Fp,
                 inputs: vec![BroLaunchInput {
                     id: "outputPath".to_string(),
                     label: "Archive path".to_string(),
@@ -171,6 +172,7 @@ mod tests {
                     LaunchArg::TargetNames,
                 ],
             },
+            output_path_input_id: Some("outputPath".to_string()),
         };
         let launch_inputs =
             HashMap::from([("outputPath".to_string(), "/tmp/out/archive.tar".to_string())]);
@@ -188,6 +190,7 @@ mod tests {
         assert_eq!(BroSource::Native.as_str(), "native");
         assert_eq!(BroSource::Flatpak.as_str(), "flatpak");
         assert_eq!(BroProtocol::Fnf.as_str(), "fnf");
+        assert_eq!(BroProtocol::Fp.as_str(), "fp");
     }
 
     #[test]

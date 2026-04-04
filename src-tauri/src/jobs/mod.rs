@@ -1,10 +1,13 @@
 pub mod dirsize;
 pub mod file_ops;
+pub mod fp_bro;
 pub mod scan;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
+
+use crate::bro::{BroInputItem, ResolvedBro};
 
 // ─── Scan handle (existing) ─────────────────────────────────────────────────
 
@@ -45,6 +48,7 @@ pub struct DecisionResponse {
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum JobState {
+    Queued,
     Running,
     AwaitingDecision,
     Completed,
@@ -83,29 +87,50 @@ pub struct ConflictDecision {
 }
 
 /// Tracks a running file operation job.
-pub struct FileOpJob {
+pub struct AppJob {
     pub job_id: String,
-    pub op_type: FileOpType,
+    pub kind: JobKind,
     pub source_panel: String,
     pub dest_panel: Option<String>,
+    pub source_path: String,
     pub dest_path: Option<String>,
-    pub files: Vec<FileOpEntry>,
-    pub conflict_policy: ConflictPolicy,
     pub state: JobState,
     pub progress: FileOpProgress,
     pub decision: Option<ConflictDecision>,
-    pub apply_to_all_decision: Option<ConflictPolicy>,
     pub error: Option<String>,
     pub background: bool,
     pub paused: bool,
-    pub handle: JoinHandle<()>,
+    pub handle: Option<JoinHandle<()>>,
     pub cancel_tx: watch::Sender<bool>,
     pub pause_tx: watch::Sender<bool>,
 }
 
+pub enum JobKind {
+    FileOp(FileOpJobMeta),
+    FpBro(FpBroJobMeta),
+}
+
+pub struct FileOpJobMeta {
+    pub op_type: FileOpType,
+    pub files: Vec<FileOpEntry>,
+    pub conflict_policy: ConflictPolicy,
+    pub apply_to_all_decision: Option<ConflictPolicy>,
+}
+
+pub struct FpBroJobMeta {
+    pub bro_id: String,
+    pub bro_name: String,
+    pub output_path: String,
+    pub inputs: Vec<BroInputItem>,
+    pub launch_inputs: HashMap<String, String>,
+    pub bro: ResolvedBro,
+}
+
 /// Container for all active jobs in AppState.
 pub struct JobStore {
-    pub jobs: HashMap<String, FileOpJob>,
+    pub jobs: HashMap<String, AppJob>,
+    pub fp_queue: VecDeque<String>,
+    pub fp_running: Option<String>,
     next_id: u64,
 }
 
@@ -113,6 +138,8 @@ impl JobStore {
     pub fn new() -> Self {
         Self {
             jobs: HashMap::new(),
+            fp_queue: VecDeque::new(),
+            fp_running: None,
             next_id: 1,
         }
     }
@@ -121,6 +148,12 @@ impl JobStore {
         let id = format!("job-{}", self.next_id);
         self.next_id += 1;
         id
+    }
+
+    pub fn remove_from_fp_queue(&mut self, job_id: &str) {
+        if let Some(index) = self.fp_queue.iter().position(|queued| queued == job_id) {
+            self.fp_queue.remove(index);
+        }
     }
 }
 

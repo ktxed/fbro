@@ -40,6 +40,10 @@ pub enum ServerMessage {
         decision: Option<ConflictDecisionSchema>,
         #[serde(skip_serializing_if = "Option::is_none")]
         error: Option<String>,
+        #[serde(rename = "resultPath", skip_serializing_if = "Option::is_none")]
+        result_path: Option<String>,
+        #[serde(rename = "resultPanelId", skip_serializing_if = "Option::is_none")]
+        result_panel_id: Option<String>,
     },
     JobStarted {
         timestamp: u64,
@@ -345,15 +349,20 @@ pub struct ConflictDecisionSchema {
 #[serde(rename_all = "camelCase")]
 pub struct JobStartSchema {
     pub job_id: String,
+    pub kind: String,
     pub op_type: String,
     pub files: Vec<FileOpFileSchema>,
     pub source_panel: String,
     pub source_path: String,
     pub dest_panel: Option<String>,
     pub dest_path: Option<String>,
+    pub initial_state: String,
     pub total_files: usize,
     pub total_bytes_total: u64,
     pub background: bool,
+    pub supports_pause: bool,
+    pub result_path: Option<String>,
+    pub result_panel_id: Option<String>,
 }
 
 #[derive(Serialize, Clone, Debug)]

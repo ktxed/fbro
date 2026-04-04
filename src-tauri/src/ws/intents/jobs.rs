@@ -4,7 +4,10 @@ use serde_json::Value;
 use tokio::sync::{mpsc, watch};
 
 use crate::jobs::file_ops::{generate_dry_run_script, run_file_op};
-use crate::jobs::{ConflictPolicy, DecisionResponse, FileOpEntry, FileOpJob, FileOpType, JobState};
+use crate::jobs::{
+    AppJob, ConflictPolicy, DecisionResponse, FileOpEntry, FileOpJobMeta, FileOpType, JobKind,
+    JobState,
+};
 use crate::ws::intents::{arg_bool, arg_str};
 use crate::ws::protocol::{now, FileOpFileSchema, JobStartSchema, ServerMessage};
 use crate::ws::runtime::{rescan_panel, selected_names_for, IntentContext};
@@ -265,15 +268,20 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
             timestamp: now(),
             job: JobStartSchema {
                 job_id: job_id.clone(),
+                kind: "file-op".to_string(),
                 op_type: parsed.op_type.clone(),
                 files: file_schemas,
                 source_panel: parsed.source_panel.clone(),
-                source_path,
+                source_path: source_path.clone(),
                 dest_panel: parsed.dest_panel.clone(),
                 dest_path: dest_path.clone(),
+                initial_state: "Running".to_string(),
                 total_files: files.len(),
                 total_bytes_total,
                 background: parsed.background,
+                supports_pause: true,
+                result_path: None,
+                result_panel_id: None,
             },
         })
         .await;
@@ -298,22 +306,25 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
         let mut state_guard = ctx.state.lock().await;
         state_guard.job_store.jobs.insert(
             job_id.clone(),
-            FileOpJob {
+            AppJob {
                 job_id: job_id.clone(),
-                op_type,
+                kind: JobKind::FileOp(FileOpJobMeta {
+                    op_type,
+                    files,
+                    conflict_policy,
+                    apply_to_all_decision: None,
+                }),
                 source_panel: parsed.source_panel,
                 dest_panel: parsed.dest_panel,
+                source_path,
                 dest_path,
-                files,
-                conflict_policy,
                 state: JobState::Running,
                 progress: Default::default(),
                 decision: None,
-                apply_to_all_decision: None,
                 error: None,
                 background: parsed.background,
                 paused: parsed.start_paused,
-                handle,
+                handle: Some(handle),
                 cancel_tx,
                 pause_tx,
             },
@@ -325,30 +336,46 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
             .tx
             .send(ServerMessage::JobEvent {
                 timestamp: now(),
-                job_id,
-                event: "Paused".to_string(),
-                progress: None,
-                decision: None,
-                error: None,
-            })
-            .await;
-    }
+            job_id,
+            event: "Paused".to_string(),
+            progress: None,
+            decision: None,
+            error: None,
+            result_path: None,
+            result_panel_id: None,
+        })
+        .await;
+}
 }
 
 async fn provide_job_decision(args: &Value, ctx: &mut IntentContext<'_>) {
     let parsed = JobDecisionArgs::from_args(args);
+    if crate::ws::intents::bro::handle_fp_bro_job_decision(
+        &parsed.job_id,
+        &parsed.decision,
+        ctx.state,
+        ctx.tx,
+    )
+    .await
+    .unwrap_or(false)
+    {
+        return;
+    }
+
     {
         let mut state_guard = ctx.state.lock().await;
         if let Some(job) = state_guard.job_store.jobs.get_mut(&parsed.job_id) {
-            job.apply_to_all_decision = if parsed.apply_to_all {
-                match parsed.decision.as_str() {
-                    "overwrite" => Some(ConflictPolicy::Overwrite),
-                    "skip" => Some(ConflictPolicy::Skip),
-                    _ => None,
-                }
-            } else {
-                None
-            };
+            if let JobKind::FileOp(meta) = &mut job.kind {
+                meta.apply_to_all_decision = if parsed.apply_to_all {
+                    match parsed.decision.as_str() {
+                        "overwrite" => Some(ConflictPolicy::Overwrite),
+                        "skip" => Some(ConflictPolicy::Skip),
+                        _ => None,
+                    }
+                } else {
+                    None
+                };
+            }
         }
     }
     if let Some(sender) = ctx.decision_senders.get(&parsed.job_id) {
@@ -363,23 +390,64 @@ async fn provide_job_decision(args: &Value, ctx: &mut IntentContext<'_>) {
 
 async fn cancel_job(args: &Value, ctx: &mut IntentContext<'_>) {
     let parsed = JobIdArgs::from_args(args);
-    let mut state_guard = ctx.state.lock().await;
-    if let Some(job) = state_guard.job_store.jobs.get_mut(&parsed.job_id) {
-        let _ = job.cancel_tx.send(true);
-        job.state = JobState::Cancelled;
+    let mut send_cancelled_event = false;
+    {
+        let mut state_guard = ctx.state.lock().await;
+        let fp_queued = state_guard
+            .job_store
+            .jobs
+            .get(&parsed.job_id)
+            .map(|job| matches!(job.kind, JobKind::FpBro(_)) && job.state == JobState::Queued)
+            .unwrap_or(false);
+        if fp_queued {
+            state_guard.job_store.remove_from_fp_queue(&parsed.job_id);
+        }
+
+        if let Some(job) = state_guard.job_store.jobs.get_mut(&parsed.job_id) {
+            match &job.kind {
+                JobKind::FpBro(_) if job.state == JobState::Queued
+                    || job.state == JobState::AwaitingDecision =>
+                {
+                    job.state = JobState::Cancelled;
+                    send_cancelled_event = true;
+                }
+                _ => {
+                    let _ = job.cancel_tx.send(true);
+                    job.state = JobState::Cancelled;
+                }
+            }
+        }
     }
-    drop(state_guard);
     ctx.decision_senders.remove(&parsed.job_id);
+    if send_cancelled_event {
+        let _ = ctx
+            .tx
+            .send(ServerMessage::JobEvent {
+                timestamp: now(),
+                job_id: parsed.job_id,
+                event: "Cancelled".to_string(),
+                progress: None,
+                decision: None,
+                error: None,
+                result_path: None,
+                result_panel_id: None,
+            })
+            .await;
+    }
 }
 
 async fn pause_job(args: &Value, ctx: &mut IntentContext<'_>) {
     let parsed = JobIdArgs::from_args(args);
     let mut state_guard = ctx.state.lock().await;
     if let Some(job) = state_guard.job_store.jobs.get_mut(&parsed.job_id) {
-        if job.state == JobState::Running {
+        if matches!(job.kind, JobKind::FileOp(_)) && job.state == JobState::Running {
             let _ = job.pause_tx.send(true);
             job.paused = true;
+        } else {
+            return;
         }
+    } else {
+        return;
     }
     drop(state_guard);
     let _ = ctx
@@ -391,6 +459,8 @@ async fn pause_job(args: &Value, ctx: &mut IntentContext<'_>) {
             progress: None,
             decision: None,
             error: None,
+            result_path: None,
+            result_panel_id: None,
         })
         .await;
 }
@@ -399,10 +469,14 @@ async fn resume_job(args: &Value, ctx: &mut IntentContext<'_>) {
     let parsed = JobIdArgs::from_args(args);
     let mut state_guard = ctx.state.lock().await;
     if let Some(job) = state_guard.job_store.jobs.get_mut(&parsed.job_id) {
-        if job.paused {
+        if matches!(job.kind, JobKind::FileOp(_)) && job.paused {
             let _ = job.pause_tx.send(false);
             job.paused = false;
+        } else {
+            return;
         }
+    } else {
+        return;
     }
     drop(state_guard);
     let _ = ctx
@@ -414,6 +488,8 @@ async fn resume_job(args: &Value, ctx: &mut IntentContext<'_>) {
             progress: None,
             decision: None,
             error: None,
+            result_path: None,
+            result_panel_id: None,
         })
         .await;
 }

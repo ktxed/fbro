@@ -34,6 +34,18 @@ function opLabel(t: string) {
   }
 }
 
+function splitParentAndName(fullPath: string): { parent: string; name: string } {
+  const normalized = fullPath.replace(/\\/g, "/");
+  const lastSlash = normalized.lastIndexOf("/");
+  if (lastSlash <= 0) {
+    return { parent: "/", name: normalized.slice(lastSlash + 1) || normalized };
+  }
+  return {
+    parent: normalized.slice(0, lastSlash) || "/",
+    name: normalized.slice(lastSlash + 1),
+  };
+}
+
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KiB`;
@@ -316,7 +328,9 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
   if (activeJob) {
     const isTerminal = activeJob.state === "Completed" || activeJob.state === "Cancelled" || activeJob.state === "Failed";
     const isDecision = activeJob.state === "AwaitingDecision";
-    const isProgress = !isTerminal && !isDecision;
+    const isQueued = activeJob.state === "Queued";
+    const isProgress = activeJob.state === "Running";
+    const isFpBro = activeJob.kind === "fp-bro";
     const label = opLabel(activeJob.type);
     const decisionOptions = activeJob.decision?.options ?? [];
     const primaryDecision = decisionOptions.includes("overwrite")
@@ -357,6 +371,20 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
       client.sendIntent("PauseJob", undefined, { jobId: activeJobId });
     };
 
+    const showResult = () => {
+      if (!activeJob.resultPath) return;
+      const { parent, name } = splitParentAndName(activeJob.resultPath);
+      const targetPanel = activeJob.resultPanelId ?? panelIds[0];
+      if (targetPanel) {
+        client.sendIntent("NavigatePanelTo", undefined, {
+          panelId: targetPanel,
+          path: parent,
+          cursorHint: name,
+        });
+      }
+      close();
+    };
+
     const handleActiveJobKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
       if (e.key === "Tab") {
         e.preventDefault();
@@ -384,7 +412,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
           return;
         }
       }
-      if (isProgress) {
+      if (isQueued || isProgress) {
         if (e.key === "Enter") {
           e.preventDefault();
           close();
@@ -395,7 +423,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
           cancelJob();
           return;
         }
-        if ((e.key === "r" || e.key === "R") && activeJob.paused) {
+        if ((e.key === "r" || e.key === "R") && activeJob.supportsPause && activeJob.paused) {
           e.preventDefault();
           resumeJob();
           return;
@@ -414,14 +442,29 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
           <div className="modal__header">{label} — {activeJob.state}</div>
           <div className="modal__body">
             <div className="modal__job-params">
-              <span className="modal__job-param-label">From:</span>
-              <span className="modal__job-param-value" title={activeJob.sourcePath}>{activeJob.sourcePath}</span>
-              <button className="modal__job-param-copy" onClick={() => navigator.clipboard.writeText(activeJob.sourcePath)} title="Copy path">⧉</button>
-              {activeJob.destPath && (<>
-                <span className="modal__job-param-label">To:</span>
-                <span className="modal__job-param-value" title={activeJob.destPath}>{activeJob.destPath}</span>
-                <button className="modal__job-param-copy" onClick={() => navigator.clipboard.writeText(activeJob.destPath!)} title="Copy path">⧉</button>
-              </>)}
+              {isFpBro ? (
+                <>
+                  <span className="modal__job-param-label">Inputs:</span>
+                  <span className="modal__job-param-value" title={activeJob.sourcePath}>{activeJob.sourcePath}</span>
+                  <button className="modal__job-param-copy" onClick={() => navigator.clipboard.writeText(activeJob.sourcePath)} title="Copy path">⧉</button>
+                  {activeJob.resultPath && (<>
+                    <span className="modal__job-param-label">Result:</span>
+                    <span className="modal__job-param-value" title={activeJob.resultPath}>{activeJob.resultPath}</span>
+                    <button className="modal__job-param-copy" onClick={() => navigator.clipboard.writeText(activeJob.resultPath!)} title="Copy path">⧉</button>
+                  </>)}
+                </>
+              ) : (
+                <>
+                  <span className="modal__job-param-label">From:</span>
+                  <span className="modal__job-param-value" title={activeJob.sourcePath}>{activeJob.sourcePath}</span>
+                  <button className="modal__job-param-copy" onClick={() => navigator.clipboard.writeText(activeJob.sourcePath)} title="Copy path">⧉</button>
+                  {activeJob.destPath && (<>
+                    <span className="modal__job-param-label">To:</span>
+                    <span className="modal__job-param-value" title={activeJob.destPath}>{activeJob.destPath}</span>
+                    <button className="modal__job-param-copy" onClick={() => navigator.clipboard.writeText(activeJob.destPath!)} title="Copy path">⧉</button>
+                  </>)}
+                </>
+              )}
             </div>
             {/* Decision required */}
             {isDecision && activeJob.decision && (
@@ -459,7 +502,13 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
             )}
 
             {/* Progress */}
-            {!isDecision && p && (
+            {isQueued && (
+              <p className="modal__terminal">
+                This bro job is queued and will start after the current file-producing bro finishes.
+              </p>
+            )}
+
+            {!isDecision && !isQueued && p && (
               <div className="modal__progress">
                 {/* Current file progress */}
                 <div className="modal__progress-section">
@@ -508,28 +557,45 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
 
             {/* Terminal state */}
             {isTerminal && (
-              <p className="modal__terminal">
-                {activeJob.state === "Completed" && "Operation completed successfully."}
-                {activeJob.state === "Cancelled" && "Operation was cancelled."}
-                {activeJob.state === "Failed" && `Operation failed: ${activeJob.error ?? "unknown error"}`}
-              </p>
+              <>
+                <p className="modal__terminal">
+                  {activeJob.state === "Completed" && (isFpBro ? "Bro completed successfully." : "Operation completed successfully.")}
+                  {activeJob.state === "Cancelled" && (isFpBro ? "Bro job was cancelled." : "Operation was cancelled.")}
+                  {activeJob.state === "Failed" && (isFpBro ? `Bro failed: ${activeJob.error ?? "unknown error"}` : `Operation failed: ${activeJob.error ?? "unknown error"}`)}
+                </p>
+                {isFpBro && activeJob.state === "Completed" && activeJob.resultPath && (
+                  <div className="modal__job-params">
+                    <span className="modal__job-param-label">Output:</span>
+                    <button
+                      className="modal__dry-run-name"
+                      title={activeJob.resultPath}
+                      onClick={showResult}
+                    >{splitParentAndName(activeJob.resultPath).name}</button>
+                    <button
+                      className="modal__job-param-copy"
+                      onClick={() => navigator.clipboard.writeText(activeJob.resultPath!)}
+                      title="Copy path"
+                    >⧉</button>
+                  </div>
+                )}
+              </>
             )}
           </div>
           <div className="modal__actions">
-            {isProgress && (
+            {(isQueued || isProgress) && (
               <>
                 <button className="modal__btn modal__btn--primary" onClick={close}>
                   Background
                 </button>
-                {activeJob.paused ? (
+                {activeJob.supportsPause && activeJob.paused ? (
                   <button className="modal__btn" onClick={resumeJob}>
                     <MnemonicLabel text="Resume" mnemonic="r" />
                   </button>
-                ) : (
+                ) : activeJob.supportsPause ? (
                   <button className="modal__btn" onClick={pauseJob}>
                     Pause
                   </button>
-                )}
+                ) : null}
                 <button className="modal__btn" onClick={cancelJob}>
                   Cancel
                 </button>
@@ -541,12 +607,24 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
               </button>
             )}
             {isTerminal && (
-              <button className="modal__btn modal__btn--primary" onClick={() => {
-                client.sendIntent("RefreshPanels");
-                close();
-              }}>
-                Close
-              </button>
+              <>
+                {isFpBro && activeJob.state === "Completed" && activeJob.resultPath && (
+                  <button className="modal__btn" onClick={showResult}>
+                    Show Result
+                  </button>
+                )}
+                {isFpBro && activeJob.resultPath && (
+                  <button className="modal__btn" onClick={() => navigator.clipboard.writeText(activeJob.resultPath!)}>
+                    Copy Path
+                  </button>
+                )}
+                <button className="modal__btn modal__btn--primary" onClick={() => {
+                  client.sendIntent("RefreshPanels");
+                  close();
+                }}>
+                  Close
+                </button>
+              </>
             )}
           </div>
         </div>

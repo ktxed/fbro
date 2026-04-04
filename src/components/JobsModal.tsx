@@ -37,10 +37,11 @@ function ProgressBar({ p }: { p: FileOpProgress }) {
 }
 
 function JobRow({ job, client }: { job: Job; client: WsClient }) {
-  const isActive = job.state === "Running" || job.state === "AwaitingDecision";
+  const isActive = job.state === "Queued" || job.state === "Running" || job.state === "AwaitingDecision";
   const typeLabel = job.type.charAt(0).toUpperCase() + job.type.slice(1);
 
   const stateLabel: Record<string, string> = {
+    Queued: "Queued",
     Running: "Running",
     AwaitingDecision: "Waiting",
     Completed: "Done",
@@ -58,7 +59,7 @@ function JobRow({ job, client }: { job: Job; client: WsClient }) {
         </span>
         {isActive && (
           <>
-            {job.paused ? (
+            {job.supportsPause && job.paused ? (
               <button
                 className="jobs-modal__cancel"
                 title="Resume job"
@@ -66,7 +67,7 @@ function JobRow({ job, client }: { job: Job; client: WsClient }) {
               >
                 ▶ Resume
               </button>
-            ) : (
+            ) : job.supportsPause ? (
               <button
                 className="jobs-modal__cancel"
                 title="Pause job"
@@ -74,7 +75,7 @@ function JobRow({ job, client }: { job: Job; client: WsClient }) {
               >
                 ⏸ Pause
               </button>
-            )}
+            ) : null}
             <button
               className="jobs-modal__cancel"
               title="Force cancel"
@@ -87,13 +88,28 @@ function JobRow({ job, client }: { job: Job; client: WsClient }) {
       </div>
 
       <div className="jobs-modal__paths">
-        <span className="jobs-modal__path" title={job.sourcePath}>
-          From: {job.sourcePath}
-        </span>
-        {job.destPath && (
-          <span className="jobs-modal__path" title={job.destPath}>
-            To: {job.destPath}
-          </span>
+        {job.kind === "fp-bro" ? (
+          <>
+            <span className="jobs-modal__path" title={job.sourcePath}>
+              Inputs: {job.sourcePath}
+            </span>
+            {job.resultPath && (
+              <span className="jobs-modal__path" title={job.resultPath}>
+                Result: {job.resultPath}
+              </span>
+            )}
+          </>
+        ) : (
+          <>
+            <span className="jobs-modal__path" title={job.sourcePath}>
+              From: {job.sourcePath}
+            </span>
+            {job.destPath && (
+              <span className="jobs-modal__path" title={job.destPath}>
+                To: {job.destPath}
+              </span>
+            )}
+          </>
         )}
       </div>
 
@@ -142,8 +158,8 @@ export function JobsModal({ onClose, client }: { onClose: () => void; client: Ws
 
   const byNewest = (a: Job, b: Job) => b.startedAt - a.startedAt;
   const jobs = Object.values(state.jobs).sort(byNewest);
-  const active = jobs.filter(j => j.state === "Running" || j.state === "AwaitingDecision");
-  const finished = jobs.filter(j => j.state !== "Running" && j.state !== "AwaitingDecision");
+  const active = jobs.filter(j => j.state === "Queued" || j.state === "Running" || j.state === "AwaitingDecision");
+  const finished = jobs.filter(j => j.state !== "Queued" && j.state !== "Running" && j.state !== "AwaitingDecision");
   const dirSizeTasks = [...state.dirSizeQueue].sort((a, b) => a.enqueuedAt - b.enqueuedAt);
 
   useEffect(() => {

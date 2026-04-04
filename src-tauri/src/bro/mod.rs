@@ -4,5 +4,5 @@ mod providers;
 mod registry;
 mod version;
 
-pub use model::{BroInputItem, ResolvedBro};
+pub use model::{BroInputItem, BroProtocol, ResolvedBro};
 pub use registry::{launch_bro, list_bros};

@@ -10,7 +10,7 @@ export function JobsBar({ client }: { client: WsClient }) {
   const [scrollIndex, setScrollIndex] = useState(0);
 
   const activeJobs = Object.values(state.jobs).filter(
-    (j) => j.state === "Running" || j.state === "AwaitingDecision"
+    (j) => j.state === "Queued" || j.state === "Running" || j.state === "AwaitingDecision"
   );
 
   if (activeJobs.length === 0) return null;
@@ -40,7 +40,9 @@ export function JobsBar({ client }: { client: WsClient }) {
       {visible.map((job) => {
         const isActive = job.jobId === state.activeJobId;
         const p = job.progress;
-        const pct = p && p.totalFiles > 0
+        const pct = job.state === "Queued"
+          ? null
+          : p && p.totalFiles > 0
           ? Math.round((p.completedFiles / p.totalFiles) * 100)
           : null;
         const typeLabel = job.type.charAt(0).toUpperCase() + job.type.slice(1);
@@ -52,6 +54,7 @@ export function JobsBar({ client }: { client: WsClient }) {
             onClick={() => dispatch({ type: "SET_ACTIVE_JOB", jobId: job.jobId })}
           >
             <span className="jobs-bar__job-label">{typeLabel}</span>
+            {job.state === "Queued" && <span className="jobs-bar__job-pct">Queued</span>}
             {pct !== null && <span className="jobs-bar__job-pct">{pct}%</span>}
             <span
               className="jobs-bar__job-close"

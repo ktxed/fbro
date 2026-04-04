@@ -89,6 +89,8 @@ pub struct OpenWithRequest {
 }
 
 pub struct BroRequest {
+    pub source_panel_id: String,
+    pub result_panel_id: Option<String>,
     pub inputs: Vec<BroInputItem>,
     pub bros: Vec<ResolvedBro>,
 }

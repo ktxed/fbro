@@ -728,6 +728,8 @@ fn send_progress_sync(
         progress: Some(progress),
         decision: None,
         error: None,
+        result_path: None,
+        result_panel_id: None,
     };
     let _ = tx.try_send(msg);
 }
@@ -747,6 +749,8 @@ fn send_event_sync(
         progress,
         decision,
         error,
+        result_path: None,
+        result_panel_id: None,
     };
     let _ = tx.try_send(msg);
 }
@@ -766,6 +770,8 @@ async fn tx_event(
         progress,
         decision,
         error,
+        result_path: None,
+        result_panel_id: None,
     })
     .await
     .map_err(|_| ())

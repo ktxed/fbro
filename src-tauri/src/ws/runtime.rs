@@ -568,7 +568,11 @@ pub(crate) async fn active_job_count(state: &SharedState) -> usize {
         .job_store
         .jobs
         .values()
-        .filter(|job| job.state == JobState::Running || job.state == JobState::AwaitingDecision)
+        .filter(|job| {
+            job.state == JobState::Queued
+                || job.state == JobState::Running
+                || job.state == JobState::AwaitingDecision
+        })
         .count()
 }
 

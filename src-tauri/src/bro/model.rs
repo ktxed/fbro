@@ -11,12 +11,14 @@ pub struct BroInputItem {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum BroProtocol {
     Fnf,
+    Fp,
 }
 
 impl BroProtocol {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Fnf => "fnf",
+            Self::Fp => "fp",
         }
     }
 }
@@ -95,6 +97,7 @@ pub(crate) enum LaunchArg {
 pub struct ResolvedBro {
     pub option: BroOption,
     pub(crate) launch: LaunchRecipe,
+    pub(crate) output_path_input_id: Option<String>,
 }
 
 impl ResolvedBro {
@@ -140,6 +143,21 @@ impl ResolvedBro {
                 Ok((program.clone(), resolved_args, cwd))
             }
         }
+    }
+
+    pub(crate) fn output_path(
+        &self,
+        launch_inputs: &HashMap<String, String>,
+    ) -> Result<Option<String>, String> {
+        let Some(input_id) = &self.output_path_input_id else {
+            return Ok(None);
+        };
+        let value = launch_inputs
+            .get(input_id)
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| missing_input_message(&self.option, input_id))?;
+        Ok(Some(value.to_string()))
     }
 }
 

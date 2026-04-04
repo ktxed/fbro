@@ -89,6 +89,7 @@ fn native_command_bro(
             cwd: None,
             args,
         },
+        output_path_input_id: None,
     }
 }
 

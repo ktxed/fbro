@@ -95,5 +95,6 @@ fn resolved_command_bro(option: BroOption, program: String, args: Vec<LaunchArg>
             cwd: None,
             args,
         },
+        output_path_input_id: None,
     }
 }

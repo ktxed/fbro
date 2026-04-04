@@ -6,9 +6,10 @@ used by fbro.
 A **bro** is a processor selected by the user to handle one or more filesystem
 entries. The name comes from "browser processor" / "brocessor".
 
-In v0, bros are strictly **fire-and-forget** integrations: fbro launches them
-with resolved input paths plus optional launch inputs and does not wait for
-completion, track progress, or consume any output.
+In v0, bros support two execution contracts:
+
+* `fnf` for fire-and-forget launchers
+* `fp` for file-producing reducer bros that are assimilated into the job system
 
 ---
 
@@ -92,16 +93,23 @@ configuration format yet.
 
 ### 2.3 Protocol kind
 
-The current protocol kind is:
+The current protocol kinds are:
 
 * `fnf` = fire-and-forget
+* `fp` = file-producing reducer
 
-Meaning:
+`fnf` means:
 
-* BE launches the bro
+* BE launches the bro directly
 * BE does not create a job
-* FE does not block on a result
-* FE does not expect completion, output, or additional prompts
+* FE does not wait for completion
+
+`fp` means:
+
+* the bro takes `1..N` input entries and produces exactly one output file
+* the bro may declare required launch inputs, including the output file path
+* BE creates a first-class job instead of detached launch
+* FE observes progress or, at minimum, running and terminal job state
 
 ---
 
@@ -217,6 +225,13 @@ Sent only when BE fails to start the chosen bro process.
 }
 ```
 
+For `fp` bros, launch success is represented through the existing job messages:
+
+* `JobStarted`
+* `JobEvent`
+
+`fp` bros do not have a separate bro-specific completion channel.
+
 ---
 
 ## 4. Data Shapes
@@ -242,6 +257,28 @@ Sent only when BE fails to start the chosen bro process.
   "detail": "org.videolan.VLC",
   "protocol": "fnf",
   "inputs": []
+}
+```
+
+`fp` example:
+
+```json
+{
+  "id": "native:tar",
+  "name": "tar",
+  "version": "1.35",
+  "source": "native",
+  "detail": "/usr/bin/tar",
+  "protocol": "fp",
+  "inputs": [
+    {
+      "id": "outputPath",
+      "label": "Archive path",
+      "kind": "path",
+      "required": true,
+      "defaultValue": "/home/user/out/source.tar"
+    }
+  ]
 }
 ```
 
@@ -327,8 +364,7 @@ This means:
 
 The selected bro decides what to do with the provided paths.
 
-The built-in `tar` bro is the first small protocol extension that requires an
-extra launch input:
+The built-in `tar` bro is the first `fp` bro and requires an extra launch input:
 
 * `outputPath`: destination archive path
 * BE prefills it from the other panel path when FE provides `suggestedOutputDir`
@@ -344,14 +380,35 @@ Current launch forms:
 * Flatpak `mpv` / `VLC`: `flatpak run --file-forwarding <APP_ID> @@ <paths...> @@`
 * native `tar`: `tar -cf <outputPath> <entry names...>` with working directory set to the parent directory of the selected inputs
 
-### 6.3 Fire-and-forget contract
+### 6.3 `fnf` contract
 
-After launch:
+After `fnf` launch:
 
 * fbro does not track process lifetime
 * fbro does not capture stdout/stderr as protocol output
 * fbro does not create a background job entry
 * fbro does not refresh panel state unless some unrelated watcher event occurs
+
+### 6.4 `fp` contract
+
+For `fp` bros:
+
+* BE validates the declared output file path before start
+* if the output path already exists, BE requests an overwrite-or-skip decision
+* BE creates a job and runs the bro in the dedicated FP bro queue
+* only one FP bro runs at a time
+* regular copy/move/delete jobs remain separate from the FP bro queue
+* progress reporting is optional per bro; completion-only reporting is valid
+
+Result handling:
+
+* an FP bro job carries the output file path as result metadata
+* on success, FE can reveal the result file in a panel and copy its path
+* the preferred result panel is the opposite panel when available, otherwise the source panel
+
+Current built-in `fp` bro:
+
+* `tar`
 
 ---
 
@@ -365,7 +422,8 @@ For bro requests, BE is responsible for:
 * caching request data by `requestId`
 * validating the selected `broId` against the cached request
 * validating required launch inputs for bros that declare them
-* spawning the bro process
+* dispatching `fnf` bros to direct launch
+* dispatching `fp` bros into the FP bro queue and job flow
 
 FE must not reimplement selection semantics or derive its own input set.
 
@@ -379,14 +437,12 @@ Examples:
 
 * bros that require more than one launch input before launch
 * bros that return a result synchronously
-* bros that create a tracked BE job
-* bros that stream progress or status back to FE
+* progress-aware FP bros with richer reporting than coarse running/completed state
 * bros that mutate files and need structured result reporting
 
 Possible future protocol kinds could include:
 
 * blocking request/response
-* async job-backed execution
 * interactive multi-step bro sessions
 
 Those are explicitly out of scope for v0.

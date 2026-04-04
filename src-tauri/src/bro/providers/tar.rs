@@ -23,7 +23,7 @@ impl BroProvider for TarProvider {
                 version: native_version(&program),
                 source: BroSource::Native,
                 detail: Some(program.clone()),
-                protocol: BroProtocol::Fnf,
+                protocol: BroProtocol::Fp,
                 inputs: vec![BroLaunchInput {
                     id: "outputPath".to_string(),
                     label: "Archive path".to_string(),
@@ -41,6 +41,7 @@ impl BroProvider for TarProvider {
                     LaunchArg::TargetNames,
                 ],
             },
+            output_path_input_id: Some("outputPath".to_string()),
         }]
     }
 }

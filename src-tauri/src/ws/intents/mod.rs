@@ -1,5 +1,5 @@
 mod app;
-mod bro;
+pub(crate) mod bro;
 mod jobs;
 mod navigation;
 mod panel;

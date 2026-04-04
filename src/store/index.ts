@@ -376,12 +376,17 @@ function applyJobStarted(state: AppState, msg: JobStartedMessage): AppState {
   const { job } = msg;
   const newJob: Job = {
     jobId: job.jobId,
+    kind: job.kind,
     type: job.opType,
-    state: "Running",
+    state: job.initialState,
     paused: false,
+    supportsPause: job.supportsPause,
     startedAt: msg.timestamp,
     sourcePath: job.sourcePath,
     destPath: job.destPath,
+    resultPath: job.resultPath,
+    resultPanelId: job.resultPanelId,
+    files: job.files,
     progress: {
       totalFiles: job.totalFiles,
       completedFiles: 0,
@@ -410,6 +415,9 @@ function applyJobEvent(state: AppState, msg: JobEventMessage): AppState {
   let updated: Job;
 
   switch (msg.event) {
+    case "Queued":
+      updated = { ...job, state: "Queued", paused: false, decision: undefined };
+      break;
     case "Progress":
       updated = { ...job, state: "Running", paused: false, progress: msg.progress ?? job.progress, decision: undefined };
       break;
@@ -423,13 +431,35 @@ function applyJobEvent(state: AppState, msg: JobEventMessage): AppState {
       updated = { ...job, paused: false };
       break;
     case "Completed":
-      updated = { ...job, state: "Completed", paused: false, decision: undefined };
+      updated = {
+        ...job,
+        state: "Completed",
+        paused: false,
+        decision: undefined,
+        resultPath: msg.resultPath ?? job.resultPath,
+        resultPanelId: msg.resultPanelId ?? job.resultPanelId,
+      };
       break;
     case "Failed":
-      updated = { ...job, state: "Failed", paused: false, error: msg.error, decision: undefined };
+      updated = {
+        ...job,
+        state: "Failed",
+        paused: false,
+        error: msg.error,
+        decision: undefined,
+        resultPath: msg.resultPath ?? job.resultPath,
+        resultPanelId: msg.resultPanelId ?? job.resultPanelId,
+      };
       break;
     case "Cancelled":
-      updated = { ...job, state: "Cancelled", paused: false, decision: undefined };
+      updated = {
+        ...job,
+        state: "Cancelled",
+        paused: false,
+        decision: undefined,
+        resultPath: msg.resultPath ?? job.resultPath,
+        resultPanelId: msg.resultPanelId ?? job.resultPanelId,
+      };
       break;
     default:
       return state;

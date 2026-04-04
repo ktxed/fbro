@@ -51,12 +51,17 @@ export interface LayoutDomain {
 
 export interface Job {
   jobId: string;
+  kind: "file-op" | "fp-bro";
   type: string;
-  state: "Running" | "AwaitingDecision" | "Completed" | "Cancelled" | "Failed";
+  state: "Queued" | "Running" | "AwaitingDecision" | "Completed" | "Cancelled" | "Failed";
   paused: boolean;
+  supportsPause: boolean;
   startedAt: number;
   sourcePath: string;
   destPath?: string;
+  resultPath?: string;
+  resultPanelId?: string;
+  files: FileOpFile[];
   progress?: FileOpProgress;
   decision?: DecisionRequest;
   error?: string;
@@ -138,21 +143,26 @@ export interface BroItem {
   version: string;
   source: string;
   detail?: string;
-  protocol: "fnf";
+  protocol: "fnf" | "fp";
   inputs: BroLaunchInputItem[];
 }
 
 export interface JobStart {
   jobId: string;
+  kind: "file-op" | "fp-bro";
   opType: string;
   files: FileOpFile[];
   sourcePanel: string;
   sourcePath: string;
   destPanel?: string;
   destPath?: string;
+  initialState: Job["state"];
   totalFiles: number;
   totalBytesTotal: number;
   background: boolean;
+  supportsPause: boolean;
+  resultPath?: string;
+  resultPanelId?: string;
 }
 
 export type FileOpType = "copy" | "move" | "delete";
@@ -251,10 +261,12 @@ export interface JobEventMessage {
   type: "JobEvent";
   timestamp: number;
   jobId: string;
-  event: "Progress" | "DecisionRequired" | "Completed" | "Failed" | "Cancelled" | "Paused" | "Resumed";
+  event: "Queued" | "Progress" | "DecisionRequired" | "Completed" | "Failed" | "Cancelled" | "Paused" | "Resumed";
   progress?: FileOpProgress;
   decision?: DecisionRequest;
   error?: string;
+  resultPath?: string;
+  resultPanelId?: string;
 }
 
 export interface ErrorMessage {

@@ -9,7 +9,7 @@ use tokio::sync::{mpsc, Notify};
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::jobs::dirsize::DirSizeQueue;
-use crate::jobs::{DecisionResponse, ScanHandle};
+use crate::jobs::{DecisionResponse, JobState, ScanHandle};
 use crate::state::{PanelStatus, SharedState};
 use crate::watcher::{WatcherAction, WatcherCommand};
 use crate::ws::protocol::{now, ClientMessage, ServerMessage};
@@ -224,6 +224,7 @@ async fn handle_connection(
                 }
 
                 if let ServerMessage::JobEvent { ref job_id, ref event, .. } = msg {
+                    apply_job_event_to_state(&state, &msg).await;
                     if event == "Completed" || event == "Cancelled" || event == "Failed" {
                         let panels_to_rescan = {
                             let state_guard = state.lock().await;
@@ -248,6 +249,7 @@ async fn handle_connection(
                                 &dir_size_queue,
                             ).await;
                         }
+                        let _ = crate::ws::intents::bro::maybe_start_next_fp_job(&state, &tx).await;
                     }
                 }
 
@@ -371,5 +373,95 @@ where
             eprintln!("[fbro] Serialization error: {error}");
             Err(())
         }
+    }
+}
+
+async fn apply_job_event_to_state(state: &SharedState, msg: &ServerMessage) {
+    let ServerMessage::JobEvent {
+        job_id,
+        event,
+        progress,
+        decision,
+        error,
+        ..
+    } = msg
+    else {
+        return;
+    };
+
+    let mut state_guard = state.lock().await;
+    let is_fp_job = state_guard
+        .job_store
+        .jobs
+        .get(job_id)
+        .map(|job| matches!(job.kind, crate::jobs::JobKind::FpBro(_)))
+        .unwrap_or(false);
+
+    if let Some(job) = state_guard.job_store.jobs.get_mut(job_id) {
+        match event.as_str() {
+            "Queued" => {
+                job.state = JobState::Queued;
+                job.paused = false;
+                job.error = None;
+                job.decision = None;
+            }
+            "Progress" => {
+                job.state = JobState::Running;
+                job.paused = false;
+                if let Some(progress) = progress {
+                    job.progress.total_files = progress.total_files;
+                    job.progress.completed_files = progress.completed_files;
+                    job.progress.current_file = progress.current_file.clone();
+                    job.progress.current_file_bytes_total = progress.current_file_bytes_total;
+                    job.progress.current_file_bytes_copied = progress.current_file_bytes_copied;
+                }
+                job.decision = None;
+                job.error = None;
+            }
+            "DecisionRequired" => {
+                job.state = JobState::AwaitingDecision;
+                job.decision = decision.as_ref().map(|decision| crate::jobs::ConflictDecision {
+                    source: decision.source.clone(),
+                    destination: decision.destination.clone(),
+                    options: decision.options.clone(),
+                    supports_apply_to_all: decision.supports_apply_to_all,
+                });
+            }
+            "Paused" => {
+                job.paused = true;
+            }
+            "Resumed" => {
+                job.state = JobState::Running;
+                job.paused = false;
+            }
+            "Completed" => {
+                job.state = JobState::Completed;
+                job.paused = false;
+                job.decision = None;
+                job.error = None;
+                job.handle = None;
+            }
+            "Failed" => {
+                job.state = JobState::Failed;
+                job.paused = false;
+                job.decision = None;
+                job.error = error.clone();
+                job.handle = None;
+            }
+            "Cancelled" => {
+                job.state = JobState::Cancelled;
+                job.paused = false;
+                job.decision = None;
+                job.handle = None;
+            }
+            _ => {}
+        }
+    }
+
+    if is_fp_job && matches!(event.as_str(), "Completed" | "Failed" | "Cancelled") {
+        if state_guard.job_store.fp_running.as_deref() == Some(job_id.as_str()) {
+            state_guard.job_store.fp_running = None;
+        }
+        state_guard.job_store.remove_from_fp_queue(job_id);
     }
 }
