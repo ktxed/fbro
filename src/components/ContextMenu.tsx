@@ -77,7 +77,10 @@ export function ContextMenu({ client, menu }: ContextMenuProps) {
   }, [items]);
 
   useLayoutEffect(() => {
-    menuRef.current?.focus();
+    const focusMenu = () => menuRef.current?.focus();
+    focusMenu();
+    const rafId = window.requestAnimationFrame(focusMenu);
+    return () => window.cancelAnimationFrame(rafId);
   }, []);
 
   useEffect(() => {
@@ -159,28 +162,28 @@ export function ContextMenu({ client, menu }: ContextMenuProps) {
     if (nextIndex >= 0) setHighlightedIndex(nextIndex);
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (e.key === "Tab") {
-      e.preventDefault();
+  const handleMenuKeyDown = (event: Pick<KeyboardEvent, "key" | "shiftKey" | "ctrlKey" | "altKey" | "metaKey" | "preventDefault">) => {
+    if (event.key === "Tab") {
+      event.preventDefault();
       return;
     }
-    if (e.key === "Escape") {
-      e.preventDefault();
+    if (event.key === "Escape") {
+      event.preventDefault();
       close();
       return;
     }
-    if (e.key === "ArrowDown") {
-      e.preventDefault();
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
       moveHighlight(1);
       return;
     }
-    if (e.key === "ArrowUp") {
-      e.preventDefault();
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
       moveHighlight(-1);
       return;
     }
-    if (e.key === "Enter") {
-      e.preventDefault();
+    if (event.key === "Enter") {
+      event.preventDefault();
       void runItem(highlightedIndex);
       return;
     }
@@ -188,16 +191,25 @@ export function ContextMenu({ client, menu }: ContextMenuProps) {
     const shortcutIndex = items.findIndex((item) => {
       if (item.kind !== "command" || !item.commandId) return false;
       const command = state.commands[item.commandId];
-      return !!command && command.bindings.some((binding) => bindingMatches(e.nativeEvent, binding));
+      return !!command && command.bindings.some((binding) => bindingMatches(event as KeyboardEvent, binding));
     });
     if (shortcutIndex >= 0) {
-      e.preventDefault();
+      event.preventDefault();
       void runItem(shortcutIndex);
       return;
     }
 
-    e.preventDefault();
+    event.preventDefault();
   };
+
+  useEffect(() => {
+    const onWindowKeyDown = (event: KeyboardEvent) => {
+      handleMenuKeyDown(event);
+    };
+
+    window.addEventListener("keydown", onWindowKeyDown, true);
+    return () => window.removeEventListener("keydown", onWindowKeyDown, true);
+  }, [highlightedIndex, items, state.commands]);
 
   return (
     <FloatingPortal>
@@ -211,7 +223,6 @@ export function ContextMenu({ client, menu }: ContextMenuProps) {
           role="menu"
           tabIndex={-1}
           style={floatingStyles}
-          onKeyDown={handleKeyDown}
           onMouseDown={(e) => e.stopPropagation()}
         >
           {items.map((item, index) => {
