@@ -53,6 +53,7 @@ export const PANEL_SHORTCUT_COMMAND_IDS = [
   "panel.navigate_up",
   "panel.navigate_home",
   "panel.navigate_to_path",
+  "panel.history.open",
   "app.open_terminal",
   "panel.focus.switch",
   "panel.source.next",
@@ -474,6 +475,16 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
       dispatch({
         type: "OPEN_GO_TO_PATH",
         goToPath: {
+          panelId: focused.panelId,
+          currentPath: focused.panel.path,
+        },
+      });
+      return true;
+    case "panel.history.open":
+      if (!focused) return false;
+      dispatch({
+        type: "OPEN_PANEL_HISTORY",
+        panelHistory: {
           panelId: focused.panelId,
           currentPath: focused.panel.path,
         },

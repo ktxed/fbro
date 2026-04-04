@@ -235,7 +235,7 @@ async fn navigate_panel_to(args: &Value, ctx: &mut IntentContext<'_>) {
                 .tx
                 .send(ServerMessage::Error {
                     timestamp: now(),
-                    code: "GO_TO_PATH_FAILED".to_string(),
+                    code: "NAVIGATE_FAILED".to_string(),
                     message,
                     recoverable: true,
                     extra: Some(serde_json::json!({ "panelId": parsed.panel_id })),

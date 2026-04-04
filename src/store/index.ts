@@ -57,6 +57,12 @@ export interface PendingGoToPath {
   error?: string;
 }
 
+export interface PendingPanelHistory {
+  panelId: string;
+  currentPath: string;
+  error?: string;
+}
+
 export interface PendingDryRun {
   scriptPath: string;
   scriptDir: string;
@@ -97,6 +103,7 @@ export interface AppState {
   fileServerPort: number;
   layout: { panels: string[] };
   panels: Record<string, PanelState>;
+  panelHistory: Record<string, string[]>;
   sources: Record<string, Source>;
   focus: string;
   jobs: Record<string, Job>;
@@ -110,6 +117,7 @@ export interface AppState {
   pendingMkdir: PendingMkdir | null;
   pendingNoEditor: PendingNoEditor | null;
   pendingGoToPath: PendingGoToPath | null;
+  pendingPanelHistory: PendingPanelHistory | null;
   pendingDryRun: PendingDryRun | null;
   pendingContextMenu: PendingContextMenu | null;
   pendingOpenWith: PendingOpenWith | null;
@@ -122,6 +130,7 @@ const initialState: AppState = {
   fileServerPort: 0,
   layout: { panels: [] },
   panels: {},
+  panelHistory: {},
   sources: {},
   focus: "",
   jobs: {},
@@ -135,6 +144,7 @@ const initialState: AppState = {
   pendingMkdir: null,
   pendingNoEditor: null,
   pendingGoToPath: null,
+  pendingPanelHistory: null,
   pendingDryRun: null,
   pendingContextMenu: null,
   pendingOpenWith: null,
@@ -161,6 +171,8 @@ export type AppAction =
   | { type: "CLOSE_NO_EDITOR" }
   | { type: "OPEN_GO_TO_PATH"; goToPath: PendingGoToPath }
   | { type: "CLOSE_GO_TO_PATH" }
+  | { type: "OPEN_PANEL_HISTORY"; panelHistory: PendingPanelHistory }
+  | { type: "CLOSE_PANEL_HISTORY" }
   | { type: "CLOSE_DRY_RUN" }
   | { type: "OPEN_CONTEXT_MENU"; menu: PendingContextMenu }
   | { type: "CLOSE_CONTEXT_MENU" }
@@ -168,6 +180,19 @@ export type AppAction =
   | { type: "CLOSE_OPEN_WITH" }
   | { type: "OPEN_COMMAND_PALETTE" }
   | { type: "CLOSE_COMMAND_PALETTE" };
+
+function pushPanelHistoryEntry(
+  panelHistory: Record<string, string[]>,
+  panelId: string,
+  previousPath: string,
+  nextPath: string,
+) {
+  if (!previousPath || previousPath === nextPath) return panelHistory;
+
+  const current = panelHistory[panelId] ?? [];
+  const next = [previousPath, ...current.filter((path) => path !== previousPath)].slice(0, 20);
+  return { ...panelHistory, [panelId]: next };
+}
 
 // ─── Reducer ─────────────────────────────────────────────────────────────────
 
@@ -192,6 +217,9 @@ function applySnapshot(state: AppState, msg: StateSnapshotMessage): AppState {
       panels[id] = { ...p, panelId: id, entries: p.entries ?? [], selection: p.selection ?? [], selectedEntries: p.selectedEntries ?? [], version: p.version ?? 0, calculatingSize: p.calculatingSize ?? [], totalCount: p.totalCount, totalSize: p.totalSize, windowStart: p.windowStart, filterModeActive: p.filterModeActive ?? false };
     }
     next.panels = panels;
+    next.panelHistory = Object.fromEntries(
+      Object.keys(panels).map((panelId) => [panelId, state.panelHistory[panelId] ?? []]),
+    );
   }
   if (domains.jobs) {
     const jobs: Record<string, Job> = {};
@@ -301,7 +329,11 @@ function applyPatch(state: AppState, msg: StatePatchMessage): AppState {
       updated = { ...updated, entries: msg.patch.windowEntries as VFSEntry[] };
     }
 
-    return { ...state, panels: { ...state.panels, [panelId]: updated } };
+    const nextHistory = updated.path !== panel.path
+      ? pushPanelHistoryEntry(state.panelHistory, panelId, panel.path, updated.path)
+      : state.panelHistory;
+
+    return { ...state, panels: { ...state.panels, [panelId]: updated }, panelHistory: nextHistory };
   }
 
   if (msg.domain === "focus") {
@@ -418,16 +450,31 @@ function reducer(state: AppState, action: AppAction): AppState {
             const filename = path.replace(/\\/g, "/").split("/").filter(Boolean).pop() || path;
             return { ...state, pendingNoEditor: { filename, fullPath: path } };
           }
-          if (msg.code === "GO_TO_PATH_FAILED" && state.pendingGoToPath) {
+          if (msg.code === "NAVIGATE_FAILED") {
             const panelId = msg.extra?.panelId as string | undefined;
-            if (!panelId || panelId !== state.pendingGoToPath.panelId) return state;
-            return {
-              ...state,
-              pendingGoToPath: {
-                ...state.pendingGoToPath,
-                error: msg.message,
-              },
-            };
+            if (!panelId) return state;
+            let next = state;
+            const pendingGoToPath = state.pendingGoToPath;
+            if (pendingGoToPath?.panelId === panelId) {
+              next = {
+                ...next,
+                pendingGoToPath: {
+                  ...pendingGoToPath,
+                  error: msg.message,
+                },
+              };
+            }
+            const pendingPanelHistory = state.pendingPanelHistory;
+            if (pendingPanelHistory?.panelId === panelId) {
+              next = {
+                ...next,
+                pendingPanelHistory: {
+                  ...pendingPanelHistory,
+                  error: msg.message,
+                },
+              };
+            }
+            return next;
           }
           console.error("BE error:", msg.code, msg.message);
           return state;
@@ -436,10 +483,11 @@ function reducer(state: AppState, action: AppAction): AppState {
         case "MkdirOk":
           return { ...state, pendingMkdir: null };
         case "NavigateOk":
-          if (state.pendingGoToPath?.panelId === msg.panelId) {
-            return { ...state, pendingGoToPath: null };
-          }
-          return state;
+          return {
+            ...state,
+            pendingGoToPath: state.pendingGoToPath?.panelId === msg.panelId ? null : state.pendingGoToPath,
+            pendingPanelHistory: state.pendingPanelHistory?.panelId === msg.panelId ? null : state.pendingPanelHistory,
+          };
         case "DryRunReady": {
           const m = msg as DryRunReadyMessage;
           const scriptName = m.scriptPath.replace(/\\/g, "/").split("/").filter(Boolean).pop() ?? m.scriptPath;
@@ -514,6 +562,10 @@ function reducer(state: AppState, action: AppAction): AppState {
       return { ...state, pendingGoToPath: action.goToPath };
     case "CLOSE_GO_TO_PATH":
       return { ...state, pendingGoToPath: null };
+    case "OPEN_PANEL_HISTORY":
+      return { ...state, pendingPanelHistory: action.panelHistory };
+    case "CLOSE_PANEL_HISTORY":
+      return { ...state, pendingPanelHistory: null };
     case "CLOSE_DRY_RUN":
       return { ...state, pendingDryRun: null };
     case "OPEN_CONTEXT_MENU":

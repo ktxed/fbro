@@ -277,6 +277,13 @@ pub(crate) fn build_interactive_commands() -> Vec<InteractiveCommandSchema> {
             None,
         ),
         command(
+            "panel.history.open",
+            "Navigation",
+            "Open Panel History",
+            vec![keybinding("h")],
+            None,
+        ),
+        command(
             "panel.focus.switch",
             "Navigation",
             "Switch Focus",
