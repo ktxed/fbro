@@ -62,6 +62,11 @@ Keyboard behavior:
 * `Enter`: launch selected bro
 * `Esc`: close modal
 
+Mouse behavior:
+
+* clicking a bro with no required launch inputs launches it immediately
+* clicking a bro with launch inputs selects it and keeps the modal open
+
 ---
 
 ## 2. Core Concepts
@@ -260,7 +265,7 @@ Field meanings:
 * `source`: install/discovery source, e.g. `native`, `flatpak`
 * `detail`: secondary display info
 * `protocol`: current execution contract
-* `inputs`: optional launch-input declarations
+* `inputs`: launch-input declarations; on the wire this field is always present and is `[]` when the bro requires no extra inputs
 
 ---
 
@@ -280,12 +285,20 @@ That means:
 
 v0 ships built-in bro discovery for Linux and macOS, excluding Windows.
 
-Built-in bros:
+Current built-in bros by platform:
+
+Linux:
 
 * native `mpv`
 * native `vlc`
 * Flatpak `io.mpv.Mpv`
 * Flatpak `org.videolan.VLC`
+* native `tar`
+
+macOS:
+
+* native `mpv` from `PATH`
+* native `mpv` from discovered `.app` bundles
 * native `tar`
 
 Discovery rules:
@@ -295,6 +308,7 @@ Discovery rules:
 * native and Flatpak installs are listed separately if both exist
 * version is best-effort and may fall back to `unknown`
 * `tar` is only exposed on non-Windows platforms and declares one required launch input: archive output path
+* macOS media discovery is currently specialized only for `mpv`
 
 ---
 
@@ -321,7 +335,7 @@ extra launch input:
 * `tar` is launched from the parent directory of the selected inputs
 * selected entries are passed by entry name so the archive does not capture absolute input paths
 
-### 6.2 Linux launch recipes
+### 6.2 Current launch recipes
 
 Current launch forms:
 
