@@ -1,9 +1,11 @@
 #[cfg(target_os = "linux")]
 use std::env;
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 use std::process::Command;
+#[cfg(target_os = "macos")]
+use std::{env, path::PathBuf};
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(crate) fn find_executable(candidates: &[&str]) -> Option<String> {
     let path_var = env::var_os("PATH")?;
     env::split_paths(&path_var).find_map(|dir| {
@@ -18,10 +20,15 @@ pub(crate) fn find_executable(candidates: &[&str]) -> Option<String> {
     })
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(crate) fn native_version(program: &str) -> String {
+    command_version(program, "--version").unwrap_or_else(|| "unknown".to_string())
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(crate) fn command_version(program: &str, version_arg: &str) -> Option<String> {
     Command::new(program)
-        .arg("--version")
+        .arg(version_arg)
         .output()
         .ok()
         .and_then(|output| {
@@ -36,7 +43,23 @@ pub(crate) fn native_version(program: &str) -> String {
                     .map(|line| line.trim().to_string())
             })
         })
-        .unwrap_or_else(|| "unknown".to_string())
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn macos_app_bundle_executable(
+    bundle_path: &str,
+    executable_name: &str,
+) -> Option<String> {
+    let path = PathBuf::from(bundle_path);
+    if !path.is_dir() {
+        return None;
+    }
+    let executable = path.join("Contents").join("MacOS").join(executable_name);
+    if executable.is_file() {
+        Some(executable.to_string_lossy().to_string())
+    } else {
+        None
+    }
 }
 
 #[cfg(target_os = "linux")]
