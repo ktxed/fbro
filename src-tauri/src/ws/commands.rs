@@ -270,6 +270,13 @@ pub(crate) fn build_interactive_commands() -> Vec<InteractiveCommandSchema> {
             Some("NavigateHome"),
         ),
         command(
+            "panel.navigate_to_path",
+            "Navigation",
+            "Go To Path",
+            vec![keybinding("g")],
+            None,
+        ),
+        command(
             "panel.focus.switch",
             "Navigation",
             "Switch Focus",

@@ -5,6 +5,7 @@ import { RenameModal } from "./RenameModal";
 import { InfoModal } from "./InfoModal";
 import { MkDirModal } from "./MkDirModal";
 import { NoEditorModal } from "./NoEditorModal";
+import { GoToPathModal } from "./GoToPathModal";
 import { JobsModal } from "./JobsModal";
 import { CommandPaletteModal } from "./CommandPaletteModal";
 import { ContextMenu } from "./ContextMenu";
@@ -29,7 +30,7 @@ export function Layout({ client, jobsViewOpen, onCloseJobsView, onOpenJobsView }
   }
 
   const activeJob = state.activeJobId ? state.jobs[state.activeJobId] ?? null : null;
-  const modalActive = state.pendingOp !== null || state.activeJobId !== null || state.pendingQuit !== null || state.pendingRename !== null || state.pendingInfo !== null || state.pendingMkdir !== null || state.pendingNoEditor !== null || state.pendingDryRun !== null || state.pendingContextMenu !== null || state.pendingOpenWith !== null || state.commandPaletteOpen || jobsViewOpen;
+  const modalActive = state.pendingOp !== null || state.activeJobId !== null || state.pendingQuit !== null || state.pendingRename !== null || state.pendingInfo !== null || state.pendingMkdir !== null || state.pendingNoEditor !== null || state.pendingGoToPath !== null || state.pendingDryRun !== null || state.pendingContextMenu !== null || state.pendingOpenWith !== null || state.commandPaletteOpen || jobsViewOpen;
 
   return (
     <>
@@ -74,6 +75,9 @@ export function Layout({ client, jobsViewOpen, onCloseJobsView, onOpenJobsView }
       )}
       {state.pendingNoEditor && (
         <NoEditorModal noEditor={state.pendingNoEditor} />
+      )}
+      {state.pendingGoToPath && (
+        <GoToPathModal goToPath={state.pendingGoToPath} client={client} />
       )}
       {jobsViewOpen && (
         <JobsModal onClose={onCloseJobsView} client={client} />

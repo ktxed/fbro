@@ -78,6 +78,11 @@ pub enum ServerMessage {
         #[serde(rename = "panelId")]
         panel_id: String,
     },
+    NavigateOk {
+        timestamp: u64,
+        #[serde(rename = "panelId")]
+        panel_id: String,
+    },
     ViewerFileChanged {
         timestamp: u64,
         path: String,

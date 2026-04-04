@@ -52,6 +52,7 @@ export const PANEL_SHORTCUT_COMMAND_IDS = [
   "panel.open_entry",
   "panel.navigate_up",
   "panel.navigate_home",
+  "panel.navigate_to_path",
   "app.open_terminal",
   "panel.focus.switch",
   "panel.source.next",
@@ -467,6 +468,16 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
       return true;
     case "panel.navigate_home":
       client.sendIntent("NavigateHome", "focused-panel");
+      return true;
+    case "panel.navigate_to_path":
+      if (!focused) return false;
+      dispatch({
+        type: "OPEN_GO_TO_PATH",
+        goToPath: {
+          panelId: focused.panelId,
+          currentPath: focused.panel.path,
+        },
+      });
       return true;
     case "panel.focus.switch": {
       if (!focused) return false;

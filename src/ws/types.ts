@@ -143,6 +143,12 @@ export interface PendingOp {
   conflictPolicy: ConflictPolicy;
 }
 
+export interface NavigateOkMessage {
+  type: "NavigateOk";
+  timestamp: number;
+  panelId: string;
+}
+
 // ─── Client → BE messages ────────────────────────────────────────────────────
 
 export interface HelloMessage {
@@ -310,6 +316,7 @@ export type BEMessage =
   | FileChunkMessage
   | RenameOkMessage
   | MkdirOkMessage
+  | NavigateOkMessage
   | ViewerFileChangedMessage
   | DryRunReadyMessage
   | OpenWithOptionsReadyMessage

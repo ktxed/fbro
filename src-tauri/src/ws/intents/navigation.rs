@@ -191,10 +191,72 @@ async fn navigate_source_root(scope: &Value, ctx: &mut IntentContext<'_>) {
 async fn navigate_panel_to(args: &Value, ctx: &mut IntentContext<'_>) {
     let parsed = NavigatePanelArgs::from_args(args);
     if !parsed.panel_id.is_empty() && !parsed.path.is_empty() {
+        let requested_path = parsed.path.trim().to_string();
+        let resolved_target = {
+            let state_guard = ctx.state.lock().await;
+            let panel = match state_guard.panels.get(&parsed.panel_id) {
+                Some(panel) => panel,
+                None => return,
+            };
+            let driver = match state_guard.drivers.get(&panel.source_id) {
+                Some(driver) => driver,
+                None => return,
+            };
+
+            if !driver.exists(&requested_path) {
+                Err("Path does not exist.".to_string())
+            } else {
+                let target_path = Path::new(&requested_path);
+                if target_path.is_dir() {
+                    Ok((requested_path.clone(), parsed.cursor_hint.clone()))
+                } else if target_path.is_file() {
+                    if let Some(parent) = target_path
+                        .parent()
+                        .map(|path| path.to_string_lossy().to_string())
+                        .filter(|path| !path.is_empty())
+                    {
+                        let cursor_hint = target_path
+                            .file_name()
+                            .map(|name| name.to_string_lossy().to_string());
+                        Ok((parent, cursor_hint))
+                    } else {
+                        Err("File has no parent directory.".to_string())
+                    }
+                } else {
+                    Err("Path is not a directory.".to_string())
+                }
+            }
+        };
+
+        let (validated_path, cursor_hint) = match resolved_target {
+            Ok(target) => target,
+            Err(message) => {
+            let _ = ctx
+                .tx
+                .send(ServerMessage::Error {
+                    timestamp: now(),
+                    code: "GO_TO_PATH_FAILED".to_string(),
+                    message,
+                    recoverable: true,
+                    extra: Some(serde_json::json!({ "panelId": parsed.panel_id })),
+                })
+                .await;
+            return;
+            }
+        };
+
+        let _ = ctx
+            .tx
+            .send(ServerMessage::NavigateOk {
+                timestamp: now(),
+                panel_id: parsed.panel_id.clone(),
+            })
+            .await;
+
         navigate_to(
             &parsed.panel_id,
-            &parsed.path,
-            parsed.cursor_hint,
+            &validated_path,
+            cursor_hint,
             ctx.state,
             ctx.tx,
             ctx.scan_handles,

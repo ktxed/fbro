@@ -51,6 +51,12 @@ export interface PendingNoEditor {
   fullPath: string;
 }
 
+export interface PendingGoToPath {
+  panelId: string;
+  currentPath: string;
+  error?: string;
+}
+
 export interface PendingDryRun {
   scriptPath: string;
   scriptDir: string;
@@ -103,6 +109,7 @@ export interface AppState {
   pendingInfo: PendingInfo | null;
   pendingMkdir: PendingMkdir | null;
   pendingNoEditor: PendingNoEditor | null;
+  pendingGoToPath: PendingGoToPath | null;
   pendingDryRun: PendingDryRun | null;
   pendingContextMenu: PendingContextMenu | null;
   pendingOpenWith: PendingOpenWith | null;
@@ -127,6 +134,7 @@ const initialState: AppState = {
   pendingInfo: null,
   pendingMkdir: null,
   pendingNoEditor: null,
+  pendingGoToPath: null,
   pendingDryRun: null,
   pendingContextMenu: null,
   pendingOpenWith: null,
@@ -151,6 +159,8 @@ export type AppAction =
   | { type: "CLOSE_MKDIR" }
   | { type: "OPEN_NO_EDITOR"; noEditor: PendingNoEditor }
   | { type: "CLOSE_NO_EDITOR" }
+  | { type: "OPEN_GO_TO_PATH"; goToPath: PendingGoToPath }
+  | { type: "CLOSE_GO_TO_PATH" }
   | { type: "CLOSE_DRY_RUN" }
   | { type: "OPEN_CONTEXT_MENU"; menu: PendingContextMenu }
   | { type: "CLOSE_CONTEXT_MENU" }
@@ -408,12 +418,28 @@ function reducer(state: AppState, action: AppAction): AppState {
             const filename = path.replace(/\\/g, "/").split("/").filter(Boolean).pop() || path;
             return { ...state, pendingNoEditor: { filename, fullPath: path } };
           }
+          if (msg.code === "GO_TO_PATH_FAILED" && state.pendingGoToPath) {
+            const panelId = msg.extra?.panelId as string | undefined;
+            if (!panelId || panelId !== state.pendingGoToPath.panelId) return state;
+            return {
+              ...state,
+              pendingGoToPath: {
+                ...state.pendingGoToPath,
+                error: msg.message,
+              },
+            };
+          }
           console.error("BE error:", msg.code, msg.message);
           return state;
         case "RenameOk":
           return { ...state, pendingRename: null };
         case "MkdirOk":
           return { ...state, pendingMkdir: null };
+        case "NavigateOk":
+          if (state.pendingGoToPath?.panelId === msg.panelId) {
+            return { ...state, pendingGoToPath: null };
+          }
+          return state;
         case "DryRunReady": {
           const m = msg as DryRunReadyMessage;
           const scriptName = m.scriptPath.replace(/\\/g, "/").split("/").filter(Boolean).pop() ?? m.scriptPath;
@@ -484,6 +510,10 @@ function reducer(state: AppState, action: AppAction): AppState {
       return { ...state, pendingNoEditor: action.noEditor };
     case "CLOSE_NO_EDITOR":
       return { ...state, pendingNoEditor: null };
+    case "OPEN_GO_TO_PATH":
+      return { ...state, pendingGoToPath: action.goToPath };
+    case "CLOSE_GO_TO_PATH":
+      return { ...state, pendingGoToPath: null };
     case "CLOSE_DRY_RUN":
       return { ...state, pendingDryRun: null };
     case "OPEN_CONTEXT_MENU":
