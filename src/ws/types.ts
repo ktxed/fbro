@@ -129,12 +129,24 @@ export interface BroInputItem {
   kind: string;
 }
 
-export interface BroLaunchInputItem {
+export interface BroOutputItem {
+  label: string;
+  defaultValue?: string;
+}
+
+export interface BroParamItem {
   id: string;
   label: string;
-  kind: "path";
+  kind: "int" | "password";
   required: boolean;
   defaultValue?: string;
+  minValue?: number;
+  maxValue?: number;
+}
+
+export interface BroPreItem {
+  score: number;
+  reason: string;
 }
 
 export interface BroItem {
@@ -144,7 +156,9 @@ export interface BroItem {
   source: string;
   detail?: string;
   protocol: "fnf" | "fp";
-  inputs: BroLaunchInputItem[];
+  pre: BroPreItem;
+  output?: BroOutputItem;
+  params: BroParamItem[];
 }
 
 export interface JobStart {

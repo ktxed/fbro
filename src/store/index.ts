@@ -583,7 +583,8 @@ function reducer(state: AppState, action: AppAction): AppState {
           }
           const normalizedBros = (msg as BroOptionsReadyMessage).bros.map((bro) => ({
             ...bro,
-            inputs: bro.inputs ?? [],
+            pre: bro.pre ?? { score: 0, reason: "Available for this selection" },
+            params: bro.params ?? [],
           }));
           return {
             ...state,

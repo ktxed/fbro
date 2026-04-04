@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useAppDispatch, useAppState, type PendingBro } from "../store";
 import type { WsClient } from "../ws/client";
+import type { BroParamItem } from "../ws/types";
 
 interface BroModalProps {
   client: WsClient;
@@ -14,8 +15,14 @@ function formatTarget(inputs: PendingBro["inputs"]) {
   return `${inputs.length} items (${inputs[0].name} first)`;
 }
 
-function selectedBroInputs(item: PendingBro["bros"][number] | undefined) {
-  return item?.inputs ?? [];
+function selectedBroParams(item: PendingBro["bros"][number] | undefined) {
+  return item?.params ?? [];
+}
+
+function broMetaLine(item: PendingBro["bros"][number]) {
+  const detail = item.detail ?? item.source;
+  if (!item.pre?.reason) return detail;
+  return `${item.pre.reason} | ${detail}`;
 }
 
 export function BroModal({ client, bro }: BroModalProps) {
@@ -23,12 +30,13 @@ export function BroModal({ client, bro }: BroModalProps) {
   const dispatch = useAppDispatch();
   const dialogRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
-  const firstInputRef = useRef<HTMLInputElement>(null);
+  const firstFieldRef = useRef<HTMLInputElement>(null);
   const [selectedIndex, setSelectedIndex] = useState(0);
-  const [launchInputs, setLaunchInputs] = useState<Record<string, string>>({});
+  const [outputs, setOutputs] = useState<Record<string, string>>({});
+  const [params, setParams] = useState<Record<string, string>>({});
 
   const bros = bro.bros;
-  const broInputs = selectedBroInputs(bros[selectedIndex]);
+  const broParams = selectedBroParams(bros[selectedIndex]);
 
   useEffect(() => {
     dialogRef.current?.focus();
@@ -49,11 +57,21 @@ export function BroModal({ client, bro }: BroModalProps) {
 
   useEffect(() => {
     const selectedBro = bros[selectedIndex];
-    const inputs = selectedBroInputs(selectedBro);
-    if (!selectedBro || inputs.length === 0) return;
-    setLaunchInputs((current) => {
+    const paramsForBro = selectedBroParams(selectedBro);
+    if (!selectedBro) return;
+    setOutputs((current) => {
+      if (selectedBro.output === undefined || current[selectedBro.id] !== undefined) {
+        return current;
+      }
+      return {
+        ...current,
+        [selectedBro.id]: selectedBro.output.defaultValue ?? "",
+      };
+    });
+    if (paramsForBro.length === 0) return;
+    setParams((current) => {
       const next = { ...current };
-      for (const input of inputs) {
+      for (const input of paramsForBro) {
         const key = `${selectedBro.id}:${input.id}`;
         if (next[key] === undefined) {
           next[key] = input.defaultValue ?? "";
@@ -65,10 +83,12 @@ export function BroModal({ client, bro }: BroModalProps) {
 
   useEffect(() => {
     const selectedBro = bros[selectedIndex];
-    if (!selectedBro || broInputs.length === 0) return;
-    firstInputRef.current?.focus();
-    firstInputRef.current?.select();
-  }, [broInputs.length, bros, selectedIndex]);
+    if (!selectedBro || (!selectedBro.output && broParams.length === 0)) return;
+    firstFieldRef.current?.focus();
+    if (firstFieldRef.current instanceof HTMLInputElement) {
+      firstFieldRef.current.select();
+    }
+  }, [broParams.length, bros, selectedIndex]);
 
   useEffect(() => {
     const panel = state.panels[bro.panelId];
@@ -87,31 +107,61 @@ export function BroModal({ client, bro }: BroModalProps) {
   const selectedInputValues = useMemo(() => {
     if (!selectedBro) return {};
     return Object.fromEntries(
-      broInputs.map((input) => [
+      broParams.map((input) => [
         input.id,
-        launchInputs[`${selectedBro.id}:${input.id}`] ?? input.defaultValue ?? "",
+        params[`${selectedBro.id}:${input.id}`] ?? input.defaultValue ?? "",
       ]),
     );
-  }, [broInputs, launchInputs, selectedBro]);
+  }, [broParams, params, selectedBro]);
 
-  const missingRequiredInput = useMemo(
-    () => broInputs.find((input) => input.required && !selectedInputValues[input.id]?.trim()),
-    [broInputs, selectedInputValues],
+  const selectedOutputValue = useMemo(() => {
+    if (!selectedBro?.output) return "";
+    return outputs[selectedBro.id] ?? selectedBro.output.defaultValue ?? "";
+  }, [outputs, selectedBro]);
+
+  const missingRequiredParam = useMemo(
+    () => broParams.find((input) => input.required && !selectedInputValues[input.id]?.trim()),
+    [broParams, selectedInputValues],
   );
 
-  const launchBro = (broId: string, inputs: Record<string, string> = {}) => {
+  const outputError = useMemo(() => {
+    if (!selectedBro?.output) return undefined;
+    return selectedOutputValue.trim() ? undefined : `${selectedBro.output.label} is required.`;
+  }, [selectedBro, selectedOutputValue]);
+
+  const paramError = useMemo(() => {
+    if (!selectedBro) return undefined;
+    if (missingRequiredParam) return `${missingRequiredParam.label} is required.`;
+    for (const input of broParams) {
+      if (input.kind !== "int") continue;
+      const rawValue = selectedInputValues[input.id]?.trim();
+      if (!rawValue) continue;
+      if (!/^-?\d+$/.test(rawValue)) return `${input.label} must be a whole number.`;
+      const value = Number(rawValue);
+      if (input.minValue !== undefined && value < input.minValue) {
+        return `${input.label} must be at least ${input.minValue}.`;
+      }
+      if (input.maxValue !== undefined && value > input.maxValue) {
+        return `${input.label} must be at most ${input.maxValue}.`;
+      }
+    }
+    return undefined;
+  }, [broParams, missingRequiredParam, selectedBro, selectedInputValues]);
+
+  const launchBro = (broId: string, output?: string, launchParams: Record<string, string> = {}) => {
     close();
     client.sendIntent("LaunchBro", undefined, {
       requestId: bro.requestId,
       broId,
-      inputs,
+      output,
+      params: launchParams,
     });
   };
 
   const launchSelected = () => {
     if (!selectedBro) return;
-    if (missingRequiredInput) return;
-    launchBro(selectedBro.id, selectedInputValues);
+    if (outputError || paramError) return;
+    launchBro(selectedBro.id, selectedBro.output ? selectedOutputValue : undefined, selectedInputValues);
   };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -181,15 +231,16 @@ export function BroModal({ client, bro }: BroModalProps) {
                     onMouseEnter={() => setSelectedIndex(index)}
                     onClick={() => {
                       setSelectedIndex(index);
-                      if (selectedBroInputs(item).length === 0) {
+                      if (!item.output && selectedBroParams(item).length === 0) {
                         launchBro(item.id);
                       }
                     }}
+                  title={item.detail}
                 >
                   <span className="command-palette__item-main">
                     <span className="command-palette__item-title">{item.name} {item.version}</span>
                     <span className="command-palette__item-category">
-                      {item.detail ?? item.source}
+                      {broMetaLine(item)}
                     </span>
                   </span>
                   <span className="command-palette__item-binding">{item.protocol}</span>
@@ -197,49 +248,68 @@ export function BroModal({ client, bro }: BroModalProps) {
               );
             })}
           </div>
-          {bro.status === "ready" && selectedBro && broInputs.length > 0 && (
+          {bro.status === "ready" && selectedBro && (selectedBro.output || broParams.length > 0) && (
             <div className="modal__body" style={{ padding: "12px 0 0" }}>
-              {broInputs.map((input, index) => {
+              {selectedBro.output && (
+                <div className="modal__rename-row">
+                  <label className="modal__rename-label">{selectedBro.output.label}:</label>
+                  <input
+                    ref={firstFieldRef}
+                    className="modal__rename-input"
+                    value={selectedOutputValue}
+                    onChange={(e) => {
+                      const nextValue = e.target.value;
+                      setOutputs((current) => ({
+                        ...current,
+                        [selectedBro.id]: nextValue,
+                      }));
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "ArrowUp" || e.key === "ArrowDown" || e.key === "Tab") {
+                        e.stopPropagation();
+                      }
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        launchSelected();
+                      }
+                      if (e.key === "Escape") {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        close();
+                      }
+                    }}
+                    spellCheck={false}
+                    autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="off"
+                  />
+                </div>
+              )}
+              {broParams.map((input, index) => {
                 const value = selectedInputValues[input.id] ?? "";
+                const isFirstField = !selectedBro.output && index === 0;
                 return (
                   <div className="modal__rename-row" key={`${selectedBro.id}:${input.id}`}>
                     <label className="modal__rename-label">{input.label}:</label>
-                    <input
-                      ref={index === 0 ? firstInputRef : undefined}
-                      className="modal__rename-input"
+                    <BroParamField
+                      input={input}
                       value={value}
-                      onChange={(e) => {
-                        const nextValue = e.target.value;
-                        setLaunchInputs((current) => ({
+                      inputRef={isFirstField ? firstFieldRef : undefined}
+                      onChange={(nextValue) => {
+                        setParams((current) => ({
                           ...current,
                           [`${selectedBro.id}:${input.id}`]: nextValue,
                         }));
                       }}
-                      onKeyDown={(e) => {
-                        if (e.key === "ArrowUp" || e.key === "ArrowDown" || e.key === "Tab") {
-                          e.stopPropagation();
-                        }
-                        if (e.key === "Enter") {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          launchSelected();
-                        }
-                        if (e.key === "Escape") {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          close();
-                        }
-                      }}
-                      spellCheck={false}
-                      autoComplete="off"
-                      autoCorrect="off"
-                      autoCapitalize="off"
+                      onSubmit={launchSelected}
+                      onCancel={close}
                     />
                   </div>
                 );
               })}
-              {missingRequiredInput && (
-                <p className="modal__rename-error">{missingRequiredInput.label} is required.</p>
+              {(outputError || paramError) && (
+                <p className="modal__rename-error">{outputError ?? paramError}</p>
               )}
             </div>
           )}
@@ -247,7 +317,7 @@ export function BroModal({ client, bro }: BroModalProps) {
         <div className="modal__actions">
           <button
             className="modal__btn modal__btn--primary"
-            disabled={bro.status !== "ready" || !selectedBro || !!missingRequiredInput}
+            disabled={bro.status !== "ready" || !selectedBro || !!outputError || !!paramError}
             onClick={launchSelected}
           >
             Launch
@@ -258,5 +328,68 @@ export function BroModal({ client, bro }: BroModalProps) {
         </div>
       </div>
     </div>
+  );
+}
+
+interface BroParamFieldProps {
+  input: BroParamItem;
+  value: string;
+  inputRef?: React.RefObject<HTMLInputElement | null>;
+  onChange: (value: string) => void;
+  onSubmit: () => void;
+  onCancel: () => void;
+}
+
+function BroParamField({ input, value, inputRef, onChange, onSubmit, onCancel }: BroParamFieldProps) {
+  const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "ArrowUp" || e.key === "ArrowDown" || e.key === "Tab") {
+      e.stopPropagation();
+    }
+    if (e.key === "Enter") {
+      e.preventDefault();
+      e.stopPropagation();
+      onSubmit();
+    }
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      onCancel();
+    }
+  };
+
+  if (input.kind === "password") {
+    return (
+      <input
+        ref={inputRef as React.RefObject<HTMLInputElement>}
+        className="modal__rename-input"
+        type="password"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={onKeyDown}
+        spellCheck={false}
+        autoComplete="off"
+        autoCorrect="off"
+        autoCapitalize="off"
+      />
+    );
+  }
+
+  return (
+    <input
+      ref={inputRef as React.RefObject<HTMLInputElement>}
+      className="modal__rename-input"
+      type="number"
+      inputMode="numeric"
+      min={input.minValue}
+      max={input.maxValue}
+      step={1}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      onKeyDown={onKeyDown}
+      spellCheck={false}
+      autoComplete="off"
+      autoCorrect="off"
+      autoCapitalize="off"
+    />
   );
 }

@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::process::Command;
 
 use crate::bro::model::{BroInputItem, ResolvedBro};
+use crate::bro::pre::rank_bros;
 use crate::bro::providers::{builtin_providers, BroDiscoveryContext};
 
 pub fn list_bros(inputs: &[BroInputItem], suggested_output_dir: Option<&str>) -> Vec<ResolvedBro> {
@@ -9,22 +10,24 @@ pub fn list_bros(inputs: &[BroInputItem], suggested_output_dir: Option<&str>) ->
         inputs,
         suggested_output_dir,
     };
-    builtin_providers()
+    let bros = builtin_providers()
         .into_iter()
         .flat_map(|provider| provider.list(&ctx))
-        .collect()
+        .collect();
+    rank_bros(inputs, bros)
 }
 
 pub fn launch_bro(
     inputs: &[BroInputItem],
     bro: &ResolvedBro,
-    launch_inputs: &HashMap<String, String>,
+    output_path: Option<&str>,
+    params: &HashMap<String, String>,
 ) -> Result<(), String> {
     if inputs.is_empty() {
         return Err("No input entries were resolved for this bro".to_string());
     }
 
-    let (program, args, cwd) = bro.build_command(inputs, launch_inputs)?;
+    let (program, args, cwd) = bro.build_command(inputs, output_path, params)?;
     let mut cmd = Command::new(&program);
     cmd.args(args);
     if let Some(cwd) = cwd {
@@ -37,8 +40,8 @@ pub fn launch_bro(
 mod tests {
     use super::{launch_bro, list_bros};
     use crate::bro::model::{
-        BroInputItem, BroLaunchInput, BroLaunchInputKind, BroOption, BroProtocol, BroSource,
-        LaunchArg, LaunchCwd, LaunchRecipe, ResolvedBro,
+        BroInputItem, BroLaunchInputKind, BroOption, BroOutput, BroParam, BroPre, BroProtocol,
+        BroSource, LaunchArg, LaunchCwd, LaunchRecipe, ResolvedBro,
     };
     use std::collections::HashMap;
 
@@ -66,10 +69,14 @@ mod tests {
                 source,
                 detail: None,
                 protocol: BroProtocol::Fnf,
-                inputs: vec![],
+                output: None,
+                params: vec![],
+                pre: BroPre {
+                    score: 0,
+                    reason: String::new(),
+                },
             },
             launch,
-            output_path_input_id: None,
         }
     }
 
@@ -84,7 +91,7 @@ mod tests {
             },
         );
         let (program, args, cwd) = bro
-            .build_command(&sample_inputs(), &HashMap::new())
+            .build_command(&sample_inputs(), None, &HashMap::new())
             .unwrap();
         assert_eq!(program, "mpv");
         assert_eq!(args, vec!["--", "/tmp/a.mp4", "/tmp/b.mp3"]);
@@ -102,7 +109,7 @@ mod tests {
             },
         );
         let (program, args, cwd) = bro
-            .build_command(&sample_inputs(), &HashMap::new())
+            .build_command(&sample_inputs(), None, &HashMap::new())
             .unwrap();
         assert_eq!(program, "vlc");
         assert_eq!(args, vec!["/tmp/a.mp4", "/tmp/b.mp3"]);
@@ -127,7 +134,7 @@ mod tests {
             },
         );
         let (program, args, cwd) = bro
-            .build_command(&sample_inputs(), &HashMap::new())
+            .build_command(&sample_inputs(), None, &HashMap::new())
             .unwrap();
         assert_eq!(program, "flatpak");
         assert_eq!(
@@ -155,28 +162,29 @@ mod tests {
                 source: BroSource::Native,
                 detail: None,
                 protocol: BroProtocol::Fp,
-                inputs: vec![BroLaunchInput {
-                    id: "outputPath".to_string(),
+                output: Some(BroOutput {
                     label: "Archive path".to_string(),
-                    kind: BroLaunchInputKind::Path,
-                    required: true,
                     default_value: Some("/tmp/out/archive.tar".to_string()),
-                }],
+                }),
+                params: vec![],
+                pre: BroPre {
+                    score: 0,
+                    reason: String::new(),
+                },
             },
             launch: LaunchRecipe::Command {
                 program: "tar".to_string(),
                 cwd: Some(LaunchCwd::FirstInputParent),
                 args: vec![
                     LaunchArg::Literal("-cf".to_string()),
-                    LaunchArg::UserInput("outputPath".to_string()),
+                    LaunchArg::OutputPath,
                     LaunchArg::TargetNames,
                 ],
             },
-            output_path_input_id: Some("outputPath".to_string()),
         };
-        let launch_inputs =
-            HashMap::from([("outputPath".to_string(), "/tmp/out/archive.tar".to_string())]);
-        let (program, args, cwd) = bro.build_command(&sample_inputs(), &launch_inputs).unwrap();
+        let (program, args, cwd) = bro
+            .build_command(&sample_inputs(), Some("/tmp/out/archive.tar"), &HashMap::new())
+            .unwrap();
         assert_eq!(program, "tar");
         assert_eq!(args, vec!["-cf", "/tmp/out/archive.tar", "a.mp4", "b.mp3"]);
         assert_eq!(
@@ -203,8 +211,149 @@ mod tests {
                 args: vec![LaunchArg::TargetPaths],
             },
         );
-        let result = launch_bro(&[], &bro, &HashMap::new());
+        let result = launch_bro(&[], &bro, None, &HashMap::new());
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn builds_seven_zip_command_with_output_and_params() {
+        let bro = ResolvedBro {
+            option: BroOption {
+                id: "native:7z".to_string(),
+                name: "7z".to_string(),
+                version: "unknown".to_string(),
+                source: BroSource::Native,
+                detail: None,
+                protocol: BroProtocol::Fp,
+                output: Some(BroOutput {
+                    label: "Archive path".to_string(),
+                    default_value: Some("/tmp/out/archive.7z".to_string()),
+                }),
+                params: vec![
+                    BroParam {
+                        id: "compressionLevel".to_string(),
+                        label: "Compression level".to_string(),
+                        kind: BroLaunchInputKind::Int,
+                        required: true,
+                        default_value: Some("5".to_string()),
+                        min_value: Some(0),
+                        max_value: Some(9),
+                    },
+                    BroParam {
+                        id: "password".to_string(),
+                        label: "Password".to_string(),
+                        kind: BroLaunchInputKind::Password,
+                        required: false,
+                        default_value: None,
+                        min_value: None,
+                        max_value: None,
+                    },
+                ],
+                pre: BroPre {
+                    score: 0,
+                    reason: String::new(),
+                },
+            },
+            launch: LaunchRecipe::Command {
+                program: "7z".to_string(),
+                cwd: Some(LaunchCwd::FirstInputParent),
+                args: vec![
+                    LaunchArg::Literal("a".to_string()),
+                    LaunchArg::PrefixedParam {
+                        id: "compressionLevel".to_string(),
+                        prefix: "-mx".to_string(),
+                    },
+                    LaunchArg::OptionalPrefixedParam {
+                        id: "password".to_string(),
+                        prefix: "-p".to_string(),
+                    },
+                    LaunchArg::OutputPath,
+                    LaunchArg::Literal("--".to_string()),
+                    LaunchArg::TargetNames,
+                ],
+            },
+        };
+        let params = HashMap::from([
+            ("compressionLevel".to_string(), "7".to_string()),
+            ("password".to_string(), "hunter2".to_string()),
+        ]);
+        let (program, args, cwd) = bro
+            .build_command(&sample_inputs(), Some("/tmp/out/archive.7z"), &params)
+            .unwrap();
+        assert_eq!(program, "7z");
+        assert_eq!(
+            args,
+            vec![
+                "a",
+                "-mx7",
+                "-phunter2",
+                "/tmp/out/archive.7z",
+                "--",
+                "a.mp4",
+                "b.mp3"
+            ]
+        );
+        assert_eq!(
+            cwd.map(|path| path.to_string_lossy().to_string()),
+            Some("/tmp".to_string())
+        );
+    }
+
+    #[test]
+    fn omits_optional_seven_zip_password_when_empty() {
+        let bro = ResolvedBro {
+            option: BroOption {
+                id: "native:7z".to_string(),
+                name: "7z".to_string(),
+                version: "unknown".to_string(),
+                source: BroSource::Native,
+                detail: None,
+                protocol: BroProtocol::Fp,
+                output: Some(BroOutput {
+                    label: "Archive path".to_string(),
+                    default_value: Some("/tmp/out/archive.7z".to_string()),
+                }),
+                params: vec![BroParam {
+                    id: "compressionLevel".to_string(),
+                    label: "Compression level".to_string(),
+                    kind: BroLaunchInputKind::Int,
+                    required: true,
+                    default_value: Some("5".to_string()),
+                    min_value: Some(0),
+                    max_value: Some(9),
+                }],
+                pre: BroPre {
+                    score: 0,
+                    reason: String::new(),
+                },
+            },
+            launch: LaunchRecipe::Command {
+                program: "7z".to_string(),
+                cwd: Some(LaunchCwd::FirstInputParent),
+                args: vec![
+                    LaunchArg::Literal("a".to_string()),
+                    LaunchArg::PrefixedParam {
+                        id: "compressionLevel".to_string(),
+                        prefix: "-mx".to_string(),
+                    },
+                    LaunchArg::OptionalPrefixedParam {
+                        id: "password".to_string(),
+                        prefix: "-p".to_string(),
+                    },
+                    LaunchArg::OutputPath,
+                    LaunchArg::Literal("--".to_string()),
+                    LaunchArg::TargetNames,
+                ],
+            },
+        };
+        let params = HashMap::from([("compressionLevel".to_string(), "5".to_string())]);
+        let (_, args, _) = bro
+            .build_command(&sample_inputs(), Some("/tmp/out/archive.7z"), &params)
+            .unwrap();
+        assert_eq!(
+            args,
+            vec!["a", "-mx5", "/tmp/out/archive.7z", "--", "a.mp4", "b.mp3"]
+        );
     }
 
     #[test]

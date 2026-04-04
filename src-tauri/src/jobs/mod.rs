@@ -122,7 +122,7 @@ pub struct FpBroJobMeta {
     pub bro_name: String,
     pub output_path: String,
     pub inputs: Vec<BroInputItem>,
-    pub launch_inputs: HashMap<String, String>,
+    pub params: HashMap<String, String>,
     pub bro: ResolvedBro,
 }
 

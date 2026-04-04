@@ -4,13 +4,13 @@ use std::path::Path;
 use serde_json::Value;
 use tokio::sync::watch;
 
-use crate::bro::{launch_bro, list_bros, BroInputItem, BroProtocol, ResolvedBro};
+use crate::bro::{launch_bro, list_bros, BroInputItem, BroLaunchInputKind, BroProtocol, ResolvedBro};
 use crate::jobs::fp_bro::run_fp_bro;
 use crate::jobs::{AppJob, FileOpProgress, FpBroJobMeta, JobKind, JobState};
 use crate::ws::intents::arg_str;
 use crate::ws::protocol::{
-    now, BroInputSchema, BroLaunchInputSchema, BroSchema, FileOpFileSchema, JobStartSchema,
-    ServerMessage,
+    now, BroInputSchema, BroOutputSchema, BroParamSchema, BroPreSchema, BroSchema,
+    FileOpFileSchema, JobStartSchema, ServerMessage,
 };
 use crate::ws::runtime::{resolve_panel_id, IntentContext};
 
@@ -41,7 +41,8 @@ impl ListBrosArgs {
 struct LaunchBroArgs {
     request_id: String,
     bro_id: String,
-    inputs: HashMap<String, String>,
+    output: Option<String>,
+    params: HashMap<String, String>,
 }
 
 impl LaunchBroArgs {
@@ -49,8 +50,9 @@ impl LaunchBroArgs {
         Self {
             request_id: arg_str(args, "requestId").unwrap_or("").to_string(),
             bro_id: arg_str(args, "broId").unwrap_or("").to_string(),
-            inputs: args
-                .get("inputs")
+            output: arg_str(args, "output").map(String::from),
+            params: args
+                .get("params")
                 .and_then(Value::as_object)
                 .map(|values| {
                     values
@@ -134,16 +136,26 @@ async fn list_bros_for_request(scope: &Value, args: &Value, ctx: &mut IntentCont
             source: bro.option.source.as_str().to_string(),
             detail: bro.option.detail.clone(),
             protocol: bro.option.protocol.as_str().to_string(),
-            inputs: bro
+            pre: BroPreSchema {
+                score: bro.option.pre.score,
+                reason: bro.option.pre.reason.clone(),
+            },
+            output: bro.option.output.as_ref().map(|output| BroOutputSchema {
+                label: output.label.clone(),
+                default_value: output.default_value.clone(),
+            }),
+            params: bro
                 .option
-                .inputs
+                .params
                 .iter()
-                .map(|input| BroLaunchInputSchema {
+                .map(|input| BroParamSchema {
                     id: input.id.clone(),
                     label: input.label.clone(),
                     kind: input.kind.as_str().to_string(),
                     required: input.required,
                     default_value: input.default_value.clone(),
+                    min_value: input.min_value,
+                    max_value: input.max_value,
                 })
                 .collect(),
         })
@@ -204,7 +216,7 @@ async fn launch_selected_bro(args: &Value, ctx: &mut IntentContext<'_>) {
 
     match bro.option.protocol {
         BroProtocol::Fnf => {
-            if let Err(message) = launch_bro(&request.inputs, &bro, &parsed.inputs) {
+            if let Err(message) = launch_bro(&request.inputs, &bro, parsed.output.as_deref(), &parsed.params) {
                 let _ = ctx
                     .tx
                     .send(ServerMessage::Error {
@@ -221,7 +233,7 @@ async fn launch_selected_bro(args: &Value, ctx: &mut IntentContext<'_>) {
             }
         }
         BroProtocol::Fp => {
-            if let Err(message) = launch_fp_bro(request, bro, parsed.inputs, ctx).await {
+            if let Err(message) = launch_fp_bro(request, bro, parsed.output, parsed.params, ctx).await {
                 let _ = ctx
                     .tx
                     .send(ServerMessage::Error {
@@ -243,13 +255,15 @@ async fn launch_selected_bro(args: &Value, ctx: &mut IntentContext<'_>) {
 async fn launch_fp_bro(
     request: crate::state::BroRequest,
     bro: ResolvedBro,
-    launch_inputs: HashMap<String, String>,
+    output: Option<String>,
+    launch_params: HashMap<String, String>,
     ctx: &mut IntentContext<'_>,
 ) -> Result<(), String> {
     let output_path = bro
-        .output_path(&launch_inputs)?
+        .output_path(output.as_deref())?
         .ok_or_else(|| "This bro does not declare an output file path.".to_string())?;
     validate_output_path(&output_path)?;
+    validate_bro_params(&bro, &launch_params)?;
 
     let output_exists = Path::new(&output_path).exists();
     let source_path = first_input_parent(&request.inputs)
@@ -310,7 +324,7 @@ async fn launch_fp_bro(
                     bro_name: bro.option.name.clone(),
                     output_path: output_path.clone(),
                     inputs: request.inputs.clone(),
-                    launch_inputs,
+                    params: launch_params,
                     bro,
                 }),
                 source_panel: request.source_panel_id,
@@ -492,7 +506,7 @@ async fn start_fp_job(
     state: &crate::state::SharedState,
     tx: &tokio::sync::mpsc::Sender<ServerMessage>,
 ) -> Result<(), String> {
-    let (bro, inputs, launch_inputs, cancel_rx) = {
+    let (bro, inputs, output_path, params, cancel_rx) = {
         let mut state_guard = state.lock().await;
         let Some(job) = state_guard.job_store.jobs.get_mut(&job_id) else {
             return Err("Queued bro job no longer exists.".to_string());
@@ -503,7 +517,8 @@ async fn start_fp_job(
         (
             meta.bro.clone(),
             meta.inputs.clone(),
-            meta.launch_inputs.clone(),
+            meta.output_path.clone(),
+            meta.params.clone(),
             job.cancel_tx.subscribe(),
         )
     };
@@ -512,7 +527,8 @@ async fn start_fp_job(
         job_id.clone(),
         bro,
         inputs,
-        launch_inputs,
+        output_path,
+        params,
         tx.clone(),
         cancel_rx,
     ));
@@ -531,6 +547,40 @@ fn validate_output_path(output_path: &str) -> Result<(), String> {
     };
     if !parent.is_dir() {
         return Err("The output directory does not exist.".to_string());
+    }
+    Ok(())
+}
+
+fn validate_bro_params(
+    bro: &ResolvedBro,
+    params: &HashMap<String, String>,
+) -> Result<(), String> {
+    for param in &bro.option.params {
+        let value = params.get(&param.id).map(|value| value.trim()).unwrap_or("");
+        if param.required && value.is_empty() {
+            return Err(format!("Missing required input: {}", param.label));
+        }
+        if value.is_empty() {
+            continue;
+        }
+        match param.kind {
+            BroLaunchInputKind::Int => {
+                let parsed = value.parse::<i32>().map_err(|_| {
+                    format!("{} must be a whole number.", param.label)
+                })?;
+                if let Some(min) = param.min_value {
+                    if parsed < min {
+                        return Err(format!("{} must be at least {}.", param.label, min));
+                    }
+                }
+                if let Some(max) = param.max_value {
+                    if parsed > max {
+                        return Err(format!("{} must be at most {}.", param.label, max));
+                    }
+                }
+            }
+            BroLaunchInputKind::Password => {}
+        }
     }
     Ok(())
 }

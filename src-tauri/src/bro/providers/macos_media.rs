@@ -1,4 +1,6 @@
-use crate::bro::model::{BroOption, BroProtocol, BroSource, LaunchArg, LaunchRecipe, ResolvedBro};
+use crate::bro::model::{
+    BroOption, BroPre, BroProtocol, BroSource, LaunchArg, LaunchRecipe, ResolvedBro,
+};
 use crate::bro::probe::{macos_app_executable, macos_app_exists};
 use crate::bro::providers::{BroDiscoveryContext, BroProvider};
 use crate::bro::version::native_version;
@@ -82,14 +84,18 @@ fn native_command_bro(
             source: BroSource::Native,
             detail,
             protocol: BroProtocol::Fnf,
-            inputs: vec![],
+            output: None,
+            params: vec![],
+            pre: BroPre {
+                score: 0,
+                reason: String::new(),
+            },
         },
         launch: LaunchRecipe::Command {
             program,
             cwd: None,
             args,
         },
-        output_path_input_id: None,
     }
 }
 

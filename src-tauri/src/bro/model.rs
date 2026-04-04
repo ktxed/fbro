@@ -40,24 +40,40 @@ impl BroSource {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum BroLaunchInputKind {
-    Path,
+    Int,
+    Password,
 }
 
 impl BroLaunchInputKind {
     pub fn as_str(&self) -> &'static str {
         match self {
-            Self::Path => "path",
+            Self::Int => "int",
+            Self::Password => "password",
         }
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct BroLaunchInput {
+pub struct BroParam {
     pub id: String,
     pub label: String,
     pub kind: BroLaunchInputKind,
     pub required: bool,
     pub default_value: Option<String>,
+    pub min_value: Option<i32>,
+    pub max_value: Option<i32>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BroOutput {
+    pub label: String,
+    pub default_value: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BroPre {
+    pub score: i32,
+    pub reason: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -68,7 +84,9 @@ pub struct BroOption {
     pub source: BroSource,
     pub detail: Option<String>,
     pub protocol: BroProtocol,
-    pub inputs: Vec<BroLaunchInput>,
+    pub output: Option<BroOutput>,
+    pub params: Vec<BroParam>,
+    pub pre: BroPre,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -90,21 +108,23 @@ pub(crate) enum LaunchArg {
     Literal(String),
     TargetPaths,
     TargetNames,
-    UserInput(String),
+    OutputPath,
+    PrefixedParam { id: String, prefix: String },
+    OptionalPrefixedParam { id: String, prefix: String },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ResolvedBro {
     pub option: BroOption,
     pub(crate) launch: LaunchRecipe,
-    pub(crate) output_path_input_id: Option<String>,
 }
 
 impl ResolvedBro {
     pub(crate) fn build_command(
         &self,
         target_inputs: &[BroInputItem],
-        launch_inputs: &HashMap<String, String>,
+        output_path: Option<&str>,
+        launch_params: &HashMap<String, String>,
     ) -> Result<(String, Vec<String>, Option<PathBuf>), String> {
         match &self.launch {
             LaunchRecipe::Command { program, cwd, args } => {
@@ -129,13 +149,26 @@ impl ResolvedBro {
                             .extend(target_inputs.iter().map(|input| input.path.clone())),
                         LaunchArg::TargetNames => resolved_args
                             .extend(target_inputs.iter().map(|input| input.name.clone())),
-                        LaunchArg::UserInput(id) => {
-                            let value = launch_inputs
+                        LaunchArg::OutputPath => {
+                            let value = output_path
+                                .map(str::trim)
+                                .filter(|value| !value.is_empty())
+                                .ok_or_else(|| missing_output_message(&self.option))?;
+                            resolved_args.push(value.to_string());
+                        }
+                        LaunchArg::PrefixedParam { id, prefix } => {
+                            let value = launch_params
                                 .get(id)
                                 .map(|value| value.trim())
                                 .filter(|value| !value.is_empty())
-                                .ok_or_else(|| missing_input_message(&self.option, id))?;
-                            resolved_args.push(value.to_string());
+                                .ok_or_else(|| missing_param_message(&self.option, id))?;
+                            resolved_args.push(format!("{prefix}{value}"));
+                        }
+                        LaunchArg::OptionalPrefixedParam { id, prefix } => {
+                            let value = launch_params.get(id).map(|value| value.trim()).unwrap_or("");
+                            if !value.is_empty() {
+                                resolved_args.push(format!("{prefix}{value}"));
+                            }
                         }
                     }
                 }
@@ -145,25 +178,33 @@ impl ResolvedBro {
         }
     }
 
-    pub(crate) fn output_path(
-        &self,
-        launch_inputs: &HashMap<String, String>,
-    ) -> Result<Option<String>, String> {
-        let Some(input_id) = &self.output_path_input_id else {
+    pub(crate) fn output_path(&self, output_path: Option<&str>) -> Result<Option<String>, String> {
+        let Some(output) = &self.option.output else {
             return Ok(None);
         };
-        let value = launch_inputs
-            .get(input_id)
-            .map(|value| value.trim())
+        let value = output_path
+            .map(str::trim)
             .filter(|value| !value.is_empty())
-            .ok_or_else(|| missing_input_message(&self.option, input_id))?;
+            .ok_or_else(|| missing_output_message_for_label(&output.label))?;
         Ok(Some(value.to_string()))
     }
 }
 
-fn missing_input_message(option: &BroOption, input_id: &str) -> String {
+fn missing_output_message(option: &BroOption) -> String {
     option
-        .inputs
+        .output
+        .as_ref()
+        .map(|output| missing_output_message_for_label(&output.label))
+        .unwrap_or_else(|| "Missing required output".to_string())
+}
+
+fn missing_output_message_for_label(label: &str) -> String {
+    format!("Missing required output: {label}")
+}
+
+fn missing_param_message(option: &BroOption, input_id: &str) -> String {
+    option
+        .params
         .iter()
         .find(|input| input.id == input_id)
         .map(|input| format!("Missing required input: {}", input.label))

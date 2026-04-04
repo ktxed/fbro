@@ -1,8 +1,8 @@
 use std::path::{Path, PathBuf};
 
 use crate::bro::model::{
-    BroLaunchInput, BroLaunchInputKind, BroOption, BroProtocol, BroSource, LaunchArg, LaunchCwd,
-    LaunchRecipe, ResolvedBro,
+    BroOption, BroOutput, BroPre, BroProtocol, BroSource, LaunchArg, LaunchCwd, LaunchRecipe,
+    ResolvedBro,
 };
 use crate::bro::probe::find_binary_on_path;
 use crate::bro::providers::{BroDiscoveryContext, BroProvider};
@@ -24,24 +24,25 @@ impl BroProvider for TarProvider {
                 source: BroSource::Native,
                 detail: Some(program.clone()),
                 protocol: BroProtocol::Fp,
-                inputs: vec![BroLaunchInput {
-                    id: "outputPath".to_string(),
+                output: Some(BroOutput {
                     label: "Archive path".to_string(),
-                    kind: BroLaunchInputKind::Path,
-                    required: true,
                     default_value: default_output_path(ctx),
-                }],
+                }),
+                params: vec![],
+                pre: BroPre {
+                    score: 0,
+                    reason: String::new(),
+                },
             },
             launch: LaunchRecipe::Command {
                 program,
                 cwd: Some(LaunchCwd::FirstInputParent),
                 args: vec![
                     LaunchArg::Literal("-cf".to_string()),
-                    LaunchArg::UserInput("outputPath".to_string()),
+                    LaunchArg::OutputPath,
                     LaunchArg::TargetNames,
                 ],
             },
-            output_path_input_id: Some("outputPath".to_string()),
         }]
     }
 }

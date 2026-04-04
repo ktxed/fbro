@@ -5,6 +5,8 @@ pub mod linux_media;
 #[cfg(target_os = "macos")]
 pub mod macos_media;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
+pub mod seven_zip;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 pub mod tar;
 
 pub struct BroDiscoveryContext<'a> {
@@ -23,6 +25,8 @@ pub fn builtin_providers() -> Vec<Box<dyn BroProvider>> {
     providers.push(Box::new(linux_media::LinuxMediaProvider));
     #[cfg(target_os = "macos")]
     providers.push(Box::new(macos_media::MacOSMediaProvider));
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    providers.push(Box::new(seven_zip::SevenZipProvider));
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     providers.push(Box::new(tar::TarProvider));
 

@@ -8,7 +8,8 @@ pub async fn run_fp_bro(
     job_id: String,
     bro: ResolvedBro,
     inputs: Vec<BroInputItem>,
-    launch_inputs: std::collections::HashMap<String, String>,
+    output_path: String,
+    params: std::collections::HashMap<String, String>,
     tx: mpsc::Sender<ServerMessage>,
     mut cancel_rx: watch::Receiver<bool>,
 ) {
@@ -35,7 +36,7 @@ pub async fn run_fp_bro(
         })
         .await;
 
-    let (program, args, cwd) = match bro.build_command(&inputs, &launch_inputs) {
+    let (program, args, cwd) = match bro.build_command(&inputs, Some(&output_path), &params) {
         Ok(command) => command,
         Err(error) => {
             let _ = tx
@@ -112,7 +113,7 @@ pub async fn run_fp_bro(
                     progress: Some(final_progress),
                     decision: None,
                     error: None,
-                    result_path: None,
+                    result_path: Some(output_path.clone()),
                     result_panel_id: None,
                 })
                 .await;
@@ -124,7 +125,7 @@ pub async fn run_fp_bro(
                     progress: None,
                     decision: None,
                     error: None,
-                    result_path: None,
+                    result_path: Some(output_path),
                     result_panel_id: None,
                 })
                 .await;

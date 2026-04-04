@@ -294,13 +294,32 @@ pub struct BroInputSchema {
 
 #[derive(Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
-pub struct BroLaunchInputSchema {
+pub struct BroOutputSchema {
+    pub label: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_value: Option<String>,
+}
+
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct BroPreSchema {
+    pub score: i32,
+    pub reason: String,
+}
+
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct BroParamSchema {
     pub id: String,
     pub label: String,
     pub kind: String,
     pub required: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_value: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_value: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_value: Option<i32>,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -313,8 +332,11 @@ pub struct BroSchema {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
     pub protocol: String,
+    pub pre: BroPreSchema,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output: Option<BroOutputSchema>,
     #[serde(default)]
-    pub inputs: Vec<BroLaunchInputSchema>,
+    pub params: Vec<BroParamSchema>,
 }
 
 #[derive(Serialize, Clone, Debug)]

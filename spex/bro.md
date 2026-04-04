@@ -11,6 +11,9 @@ In v0, bros support two execution contracts:
 * `fnf` for fire-and-forget launchers
 * `fp` for file-producing reducer bros that are assimilated into the job system
 
+The bro discovery pipeline also includes an initial **pre-bro** advisory pass
+that scores and sorts discovered bros against the resolved file inputs.
+
 ---
 
 ## 1. User Feature
@@ -49,12 +52,13 @@ After invocation, FE opens a modal:
 * shows a compact summary of the resolved target inputs
 * requests available bros from BE
 * lets the user select one bro and launch it
-* renders required launch inputs for bros that declare them
+* renders first-class output fields for `fp` bros
+* renders additional bro-declared params for bros that declare them
 
-For the built-in `tar` bro:
+For built-in archive bros like `tar` and `7z`:
 
 * FE passes the other panel path as a suggested output directory during bro lookup
-* BE uses that suggestion to prefill the archive output path
+* BE uses that suggestion to prefill the output archive path
 * the user can edit the archive path before launch
 
 Keyboard behavior:
@@ -82,7 +86,9 @@ A bro is a user-selectable processor with:
 * `source`
 * optional `detail`
 * `protocol`
-* optional launch `inputs`
+* `pre`
+* optional first-class `output`
+* optional bro-declared `params`
 
 ### 2.2 Brovider
 
@@ -91,7 +97,26 @@ A **brovider** is a BE-side bro discovery source.
 In v0, broviders are internal backend registry entries. There is no user
 configuration format yet.
 
-### 2.3 Protocol kind
+### 2.3 Pre-Bro
+
+A **pre-bro** is the advisory stage that runs after bro discovery and before the
+bro list is shown to FE.
+
+It is consultative, not authoritative.
+
+Its current responsibilities are:
+
+* score each discovered bro against the resolved file inputs
+* attach a short human-readable fit reason
+* sort the bro list before it reaches FE
+
+It does not:
+
+* block launch
+* recurse deeply into large selections
+* promise that a bro will succeed
+
+### 2.4 Protocol kind
 
 The current protocol kinds are:
 
@@ -107,7 +132,8 @@ The current protocol kinds are:
 `fp` means:
 
 * the bro takes `1..N` input entries and produces exactly one output file
-* the bro may declare required launch inputs, including the output file path
+* the output file is first-class protocol data
+* the bro may additionally declare launch params
 * BE creates a first-class job instead of detached launch
 * FE observes progress or, at minimum, running and terminal job state
 
@@ -154,9 +180,11 @@ Launch the selected bro for a previously resolved bro request.
   "name": "LaunchBro",
   "args": {
     "requestId": "req-123",
-    "broId": "native:tar",
-    "inputs": {
-      "outputPath": "/home/user/archive-output/file.mp4.tar"
+    "broId": "native:7z",
+    "output": "/home/user/archive-output/file.mp4.7z",
+    "params": {
+      "compressionLevel": "5",
+      "password": "secret"
     }
   }
 }
@@ -188,7 +216,11 @@ Sent when BE successfully resolves inputs and bro options.
       "source": "native",
       "detail": "/usr/bin/mpv",
       "protocol": "fnf",
-      "inputs": []
+      "pre": {
+        "score": 100,
+        "reason": "Strong fit for this media file"
+      },
+      "params": []
     }
   ]
 }
@@ -256,7 +288,11 @@ For `fp` bros, launch success is represented through the existing job messages:
   "source": "flatpak",
   "detail": "org.videolan.VLC",
   "protocol": "fnf",
-  "inputs": []
+  "pre": {
+    "score": 100,
+    "reason": "Strong fit for this media file"
+  },
+  "params": []
 }
 ```
 
@@ -264,33 +300,60 @@ For `fp` bros, launch success is represented through the existing job messages:
 
 ```json
 {
-  "id": "native:tar",
-  "name": "tar",
-  "version": "1.35",
+  "id": "native:7z",
+  "name": "7z",
+  "version": "unknown",
   "source": "native",
-  "detail": "/usr/bin/tar",
+  "detail": "/usr/bin/7z",
   "protocol": "fp",
-  "inputs": [
+  "pre": {
+    "score": 98,
+    "reason": "Strong fit for archiving this selection"
+  },
+  "output": {
+    "label": "Archive path",
+    "defaultValue": "/home/user/out/source.7z"
+  },
+  "params": [
     {
-      "id": "outputPath",
-      "label": "Archive path",
-      "kind": "path",
+      "id": "compressionLevel",
+      "label": "Compression level",
+      "kind": "int",
       "required": true,
-      "defaultValue": "/home/user/out/source.tar"
+      "defaultValue": "5",
+      "minValue": 0,
+      "maxValue": 9
+    },
+    {
+      "id": "password",
+      "label": "Password",
+      "kind": "password",
+      "required": false
     }
   ]
 }
 ```
 
-### 4.3 `BroLaunchInput`
+### 4.3 `BroOutput`
 
 ```json
 {
-  "id": "outputPath",
   "label": "Archive path",
-  "kind": "path",
+  "defaultValue": "/home/user/archive-output/file.mp4.7z"
+}
+```
+
+### 4.4 `BroParam`
+
+```json
+{
+  "id": "compressionLevel",
+  "label": "Compression level",
+  "kind": "int",
   "required": true,
-  "defaultValue": "/home/user/archive-output/file.mp4.tar"
+  "defaultValue": "5",
+  "minValue": 0,
+  "maxValue": 9
 }
 ```
 
@@ -302,7 +365,9 @@ Field meanings:
 * `source`: install/discovery source, e.g. `native`, `flatpak`
 * `detail`: secondary display info
 * `protocol`: current execution contract
-* `inputs`: launch-input declarations; on the wire this field is always present and is `[]` when the bro requires no extra inputs
+* `pre`: advisory pre-bro score + reason used to sort and explain the bro list
+* `output`: first-class output-file declaration for `fp` bros
+* `params`: bro-declared launch params; on the wire this field is always present and is `[]` when the bro requires no extra params
 
 ---
 
@@ -330,12 +395,14 @@ Linux:
 * native `vlc`
 * Flatpak `io.mpv.Mpv`
 * Flatpak `org.videolan.VLC`
+* native `7z`
 * native `tar`
 
 macOS:
 
 * native `mpv` from `PATH`
 * native `mpv` from discovered `.app` bundles
+* native `7z`
 * native `tar`
 
 Discovery rules:
@@ -344,8 +411,23 @@ Discovery rules:
 * Flatpak bros are detected from installed app IDs
 * native and Flatpak installs are listed separately if both exist
 * version is best-effort and may fall back to `unknown`
-* `tar` is only exposed on non-Windows platforms and declares one required launch input: archive output path
+* `tar` and `7z` are only exposed on non-Windows platforms
+* `7z` is an external native dependency, not a bundled tool
+* `7z` probes native binaries in `PATH` with fallback order `7z`, `7zz`, `7za`, `7zr`
+* `7z` also probes common Homebrew install paths on macOS when GUI PATH resolution is thin
 * macOS media discovery is currently specialized only for `mpv`
+
+Operational note:
+
+* on systems where `7z` is expected, it must be installed separately
+* on macOS, `brew install sevenzip` is the intended setup path
+
+After discovery, pre-bro scoring sorts the list cheaply from the resolved
+selection shape:
+
+* media bros rank high for obvious media selections
+* archive bros rank high for multi-file or directory-heavy selections
+* weak fits are still shown with a lower score and an explanatory reason
 
 ---
 
@@ -364,12 +446,12 @@ This means:
 
 The selected bro decides what to do with the provided paths.
 
-The built-in `tar` bro is the first `fp` bro and requires an extra launch input:
+For `fp` bros:
 
-* `outputPath`: destination archive path
+* the output path is first-class protocol data
 * BE prefills it from the other panel path when FE provides `suggestedOutputDir`
-* `tar` is launched from the parent directory of the selected inputs
-* selected entries are passed by entry name so the archive does not capture absolute input paths
+* the process is launched from the parent directory of the selected inputs
+* selected entries are passed by entry name so archives do not capture absolute input paths
 
 ### 6.2 Current launch recipes
 
@@ -379,6 +461,7 @@ Current launch forms:
 * native `vlc`: `vlc <paths...>`
 * Flatpak `mpv` / `VLC`: `flatpak run --file-forwarding <APP_ID> @@ <paths...> @@`
 * native `tar`: `tar -cf <outputPath> <entry names...>` with working directory set to the parent directory of the selected inputs
+* native `7z`: `7z a -mx<level> [-p<password>] <outputPath> -- <entry names...>` with working directory set to the parent directory of the selected inputs
 
 ### 6.3 `fnf` contract
 
@@ -408,6 +491,7 @@ Result handling:
 
 Current built-in `fp` bro:
 
+* `7z`
 * `tar`
 
 ---
@@ -421,7 +505,8 @@ For bro requests, BE is responsible for:
 * discovering bros from registered broviders
 * caching request data by `requestId`
 * validating the selected `broId` against the cached request
-* validating required launch inputs for bros that declare them
+* validating first-class output for `fp` bros
+* validating bro-declared params for bros that declare them
 * dispatching `fnf` bros to direct launch
 * dispatching `fp` bros into the FP bro queue and job flow
 

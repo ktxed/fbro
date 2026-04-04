@@ -1,4 +1,6 @@
-use crate::bro::model::{BroOption, BroProtocol, BroSource, LaunchArg, LaunchRecipe, ResolvedBro};
+use crate::bro::model::{
+    BroOption, BroPre, BroProtocol, BroSource, LaunchArg, LaunchRecipe, ResolvedBro,
+};
 use crate::bro::probe::{find_binary_on_path, flatpak_app_installed};
 use crate::bro::providers::{BroDiscoveryContext, BroProvider};
 use crate::bro::version::{flatpak_version, native_version};
@@ -57,7 +59,12 @@ fn native_command_bro(
             source: BroSource::Native,
             detail: Some(program.clone()),
             protocol: BroProtocol::Fnf,
-            inputs: vec![],
+            output: None,
+            params: vec![],
+            pre: BroPre {
+                score: 0,
+                reason: String::new(),
+            },
         },
         program,
         args,
@@ -73,7 +80,12 @@ fn flatpak_command_bro(app_id: &str, name: &str) -> ResolvedBro {
             source: BroSource::Flatpak,
             detail: Some(app_id.to_string()),
             protocol: BroProtocol::Fnf,
-            inputs: vec![],
+            output: None,
+            params: vec![],
+            pre: BroPre {
+                score: 0,
+                reason: String::new(),
+            },
         },
         "flatpak".to_string(),
         vec![
@@ -95,6 +107,5 @@ fn resolved_command_bro(option: BroOption, program: String, args: Vec<LaunchArg>
             cwd: None,
             args,
         },
-        output_path_input_id: None,
     }
 }
