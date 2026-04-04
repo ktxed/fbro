@@ -51,7 +51,7 @@ export function Toolbar({ client, jobsViewOpen, onOpenJobsView }: { client: WsCl
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      const blockingModalActive = state.pendingOp || state.activeJobId || state.pendingQuit || state.pendingRename || state.pendingInfo || state.pendingMkdir || state.pendingNoEditor || state.pendingDryRun || jobsViewOpen;
+      const blockingModalActive = state.pendingOp || state.activeJobId || state.pendingQuit || state.pendingRename || state.pendingInfo || state.pendingMkdir || state.pendingNoEditor || state.pendingGoToPath || state.pendingPanelHistory || state.pendingDryRun || state.pendingContextMenu || state.pendingOpenWith || state.pendingBro || jobsViewOpen;
       const paletteCommand = getCommand(state.commands, COMMAND_PALETTE_COMMAND_ID);
       if (!blockingModalActive && paletteCommand && paletteCommand.bindings.some((binding) => bindingMatches(e, binding))) {
         e.preventDefault();

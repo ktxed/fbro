@@ -1,7 +1,10 @@
 pub mod udisks2;
 pub mod volume_watcher;
 
-use super::{append_supplemental_apps, OpenWithAppOption, OpenWithLaunch, Platform, ResolvedOpenWithApp, VolumeInfo};
+use super::{
+    append_supplemental_apps, OpenWithAppOption, OpenWithLaunch, Platform, ResolvedOpenWithApp,
+    VolumeInfo,
+};
 use gio::prelude::*;
 use libc;
 use std::collections::HashSet;
@@ -70,7 +73,11 @@ impl Platform for LinuxPlatform {
         let _ = Command::new("xdg-open").arg(target).spawn();
     }
 
-    fn list_open_with_apps(&self, path: &str, kind: &str) -> Result<Vec<ResolvedOpenWithApp>, String> {
+    fn list_open_with_apps(
+        &self,
+        path: &str,
+        kind: &str,
+    ) -> Result<Vec<ResolvedOpenWithApp>, String> {
         let content_type = if kind == "directory" {
             "inode/directory".to_string()
         } else {
@@ -106,11 +113,7 @@ impl Platform for LinuxPlatform {
                 continue;
             };
 
-            let label = app
-                .display_name()
-                .to_string()
-                .trim()
-                .to_string();
+            let label = app.display_name().to_string().trim().to_string();
             let label = if label.is_empty() {
                 app.name().to_string()
             } else {
@@ -139,7 +142,10 @@ impl Platform for LinuxPlatform {
 
     fn launch_open_with(&self, path: &str, app: &ResolvedOpenWithApp) -> Result<(), String> {
         match &app.launch {
-            OpenWithLaunch::LinuxApp { content_type, app_key } => {
+            OpenWithLaunch::LinuxApp {
+                content_type,
+                app_key,
+            } => {
                 let (app_key, launch_mode) = parse_linux_app_key(app_key);
                 let file = gio::File::for_path(path);
                 let app_info = gio::AppInfo::default_for_type(content_type, false)
@@ -351,12 +357,9 @@ fn linux_content_type_for_path(path: &str) -> String {
         }
     }
 
-    gio::content_type_guess(
-        Path::new(path).file_name().map(Path::new),
-        &[],
-    )
-    .0
-    .to_string()
+    gio::content_type_guess(Path::new(path).file_name().map(Path::new), &[])
+        .0
+        .to_string()
 }
 
 fn linux_app_key(app: &gio::AppInfo) -> Option<String> {
@@ -411,9 +414,7 @@ fn linux_supplemental_apps() -> Vec<ResolvedOpenWithApp> {
     ])
 }
 
-fn supplemental_command_apps(
-    specs: &[(&str, &str, &[&str])],
-) -> Vec<ResolvedOpenWithApp> {
+fn supplemental_command_apps(specs: &[(&str, &str, &[&str])]) -> Vec<ResolvedOpenWithApp> {
     specs
         .iter()
         .filter_map(|(id, label, executables)| {
@@ -436,17 +437,16 @@ fn supplemental_command_apps(
 
 fn find_executable(candidates: &[&str]) -> Option<String> {
     let path_var = env::var_os("PATH")?;
-    env::split_paths(&path_var)
-        .find_map(|dir| {
-            candidates.iter().find_map(|candidate| {
-                let joined = dir.join(candidate);
-                if joined.is_file() {
-                    Some(joined.to_string_lossy().to_string())
-                } else {
-                    None
-                }
-            })
+    env::split_paths(&path_var).find_map(|dir| {
+        candidates.iter().find_map(|candidate| {
+            let joined = dir.join(candidate);
+            if joined.is_file() {
+                Some(joined.to_string_lossy().to_string())
+            } else {
+                None
+            }
         })
+    })
 }
 
 #[cfg(unix)]

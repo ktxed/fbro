@@ -635,7 +635,10 @@ pub(crate) async fn update_panel_from_patch(
         if let Some(filter) = patch.get("filter") {
             panel.filter = serde_json::from_value(filter.clone()).ok().flatten();
         }
-        if let Some(filter_mode_active) = patch.get("filterModeActive").and_then(|value| value.as_bool()) {
+        if let Some(filter_mode_active) = patch
+            .get("filterModeActive")
+            .and_then(|value| value.as_bool())
+        {
             panel.filter_mode_active = filter_mode_active;
         }
         if let Some(window_start) = patch.get("windowStart").and_then(|value| value.as_u64()) {

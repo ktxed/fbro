@@ -482,8 +482,7 @@ async fn rename_file(args: &Value, ctx: &mut IntentContext<'_>) {
                     .send(ServerMessage::Error {
                         timestamp: now(),
                         code: "RENAME_FAILED".to_string(),
-                        message: "Cannot rename across filesystems — use Move instead."
-                            .to_string(),
+                        message: "Cannot rename across filesystems — use Move instead.".to_string(),
                         recoverable: true,
                         extra: None,
                     })

@@ -115,6 +115,19 @@ pub enum ServerMessage {
         request_id: String,
         message: String,
     },
+    BroOptionsReady {
+        timestamp: u64,
+        #[serde(rename = "requestId")]
+        request_id: String,
+        inputs: Vec<BroInputSchema>,
+        bros: Vec<BroSchema>,
+    },
+    BroOptionsFailed {
+        timestamp: u64,
+        #[serde(rename = "requestId")]
+        request_id: String,
+        message: String,
+    },
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -265,6 +278,26 @@ pub struct OpenWithAppSchema {
     pub detail: Option<String>,
     pub is_default: bool,
     pub source: String,
+}
+
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct BroInputSchema {
+    pub path: String,
+    pub name: String,
+    pub kind: String,
+}
+
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct BroSchema {
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    pub source: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    pub protocol: String,
 }
 
 #[derive(Serialize, Clone, Debug)]

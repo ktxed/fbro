@@ -17,6 +17,10 @@ import type {
   OpenWithAppItem,
   OpenWithOptionsFailedMessage,
   OpenWithOptionsReadyMessage,
+  BroInputItem,
+  BroItem,
+  BroOptionsFailedMessage,
+  BroOptionsReadyMessage,
 } from "../ws/types";
 
 // ─── State ───────────────────────────────────────────────────────────────────
@@ -97,6 +101,17 @@ export interface PendingOpenWith {
   error?: string;
 }
 
+export interface PendingBro {
+  panelId: string;
+  dirPath: string;
+  requestId: string;
+  explicitPath?: string;
+  status: "loading" | "ready" | "error";
+  inputs: BroInputItem[];
+  bros: BroItem[];
+  error?: string;
+}
+
 export interface AppState {
   connected: boolean;
   sessionId: string | null;
@@ -121,6 +136,7 @@ export interface AppState {
   pendingDryRun: PendingDryRun | null;
   pendingContextMenu: PendingContextMenu | null;
   pendingOpenWith: PendingOpenWith | null;
+  pendingBro: PendingBro | null;
   commandPaletteOpen: boolean;
 }
 
@@ -148,6 +164,7 @@ const initialState: AppState = {
   pendingDryRun: null,
   pendingContextMenu: null,
   pendingOpenWith: null,
+  pendingBro: null,
   commandPaletteOpen: false,
 };
 
@@ -178,6 +195,8 @@ export type AppAction =
   | { type: "CLOSE_CONTEXT_MENU" }
   | { type: "OPEN_OPEN_WITH"; openWith: PendingOpenWith }
   | { type: "CLOSE_OPEN_WITH" }
+  | { type: "OPEN_BRO"; bro: PendingBro }
+  | { type: "CLOSE_BRO" }
   | { type: "OPEN_COMMAND_PALETTE" }
   | { type: "CLOSE_COMMAND_PALETTE" };
 
@@ -528,6 +547,34 @@ function reducer(state: AppState, action: AppAction): AppState {
               apps: [],
             },
           };
+        case "BroOptionsReady":
+          if (!state.pendingBro || state.pendingBro.requestId !== (msg as BroOptionsReadyMessage).requestId) {
+            return state;
+          }
+          return {
+            ...state,
+            pendingBro: {
+              ...state.pendingBro,
+              status: "ready",
+              inputs: (msg as BroOptionsReadyMessage).inputs,
+              bros: (msg as BroOptionsReadyMessage).bros,
+              error: undefined,
+            },
+          };
+        case "BroOptionsFailed":
+          if (!state.pendingBro || state.pendingBro.requestId !== (msg as BroOptionsFailedMessage).requestId) {
+            return state;
+          }
+          return {
+            ...state,
+            pendingBro: {
+              ...state.pendingBro,
+              status: "error",
+              error: (msg as BroOptionsFailedMessage).message,
+              inputs: [],
+              bros: [],
+            },
+          };
         case "QuitConfirmRequired":
           return applyQuitConfirmRequired(state, msg);
         default:
@@ -576,6 +623,10 @@ function reducer(state: AppState, action: AppAction): AppState {
       return { ...state, pendingContextMenu: null, pendingOpenWith: action.openWith };
     case "CLOSE_OPEN_WITH":
       return { ...state, pendingOpenWith: null };
+    case "OPEN_BRO":
+      return { ...state, pendingContextMenu: null, pendingBro: action.bro };
+    case "CLOSE_BRO":
+      return { ...state, pendingBro: null };
     case "OPEN_COMMAND_PALETTE":
       return { ...state, commandPaletteOpen: true };
     case "CLOSE_COMMAND_PALETTE":

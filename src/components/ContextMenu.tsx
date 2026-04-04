@@ -146,6 +146,27 @@ export function ContextMenu({ client, menu }: ContextMenuProps) {
       return;
     }
 
+    if (item.kind === "bro") {
+      const requestId = globalThis.crypto?.randomUUID?.() ?? `bro-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      dispatch({
+        type: "OPEN_BRO",
+        bro: {
+          panelId: menu.panelId,
+          dirPath: menu.dirPath,
+          requestId,
+          explicitPath: menu.fullPath,
+          status: "loading",
+          inputs: [],
+          bros: [],
+        },
+      });
+      client.sendIntent("ListBros", menu.panelId, {
+        requestId,
+        targetPath: menu.fullPath,
+      });
+      return;
+    }
+
     if (item.kind === "platform" && item.actionId) {
       client.sendIntent("RevealInFileManager", undefined, {
         path: menu.fullPath,

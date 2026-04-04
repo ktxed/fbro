@@ -1,4 +1,7 @@
-use super::{append_supplemental_apps, OpenWithAppOption, OpenWithLaunch, Platform, ResolvedOpenWithApp, VolumeInfo};
+use super::{
+    append_supplemental_apps, OpenWithAppOption, OpenWithLaunch, Platform, ResolvedOpenWithApp,
+    VolumeInfo,
+};
 use libc;
 use std::env;
 use std::ffi::{c_void, CString};
@@ -81,7 +84,11 @@ impl Platform for MacOSPlatform {
         let _ = Command::new("open").arg("-R").arg(path).spawn();
     }
 
-    fn list_open_with_apps(&self, path: &str, kind: &str) -> Result<Vec<ResolvedOpenWithApp>, String> {
+    fn list_open_with_apps(
+        &self,
+        path: &str,
+        kind: &str,
+    ) -> Result<Vec<ResolvedOpenWithApp>, String> {
         let file_url = create_file_url(path, kind == "directory")
             .ok_or_else(|| "Failed to resolve the target URL".to_string())?;
 
@@ -246,17 +253,15 @@ unsafe fn cf_url_to_path_no_release(url: CFURLRef) -> Option<String> {
     }
 
     let mut buffer = vec![0u8; libc::PATH_MAX as usize];
-    let ok = CFURLGetFileSystemRepresentation(
-        url,
-        1,
-        buffer.as_mut_ptr(),
-        buffer.len() as CFIndex,
-    );
+    let ok = CFURLGetFileSystemRepresentation(url, 1, buffer.as_mut_ptr(), buffer.len() as CFIndex);
     if ok == 0 {
         return None;
     }
 
-    let nul = buffer.iter().position(|byte| *byte == 0).unwrap_or(buffer.len());
+    let nul = buffer
+        .iter()
+        .position(|byte| *byte == 0)
+        .unwrap_or(buffer.len());
     String::from_utf8(buffer[..nul].to_vec()).ok()
 }
 

@@ -84,7 +84,11 @@ impl Platform for WindowsPlatform {
             .spawn();
     }
 
-    fn list_open_with_apps(&self, path: &str, kind: &str) -> Result<Vec<ResolvedOpenWithApp>, String> {
+    fn list_open_with_apps(
+        &self,
+        path: &str,
+        kind: &str,
+    ) -> Result<Vec<ResolvedOpenWithApp>, String> {
         let mut apps = vec![ResolvedOpenWithApp {
             option: OpenWithAppOption {
                 id: "windows:default".to_string(),
@@ -171,17 +175,49 @@ impl Platform for WindowsPlatform {
 
 fn windows_supplemental_apps(_path: &str) -> Vec<ResolvedOpenWithApp> {
     [
-        ("supplement:code", "Visual Studio Code", &["code.cmd", "code.exe"][..]),
-        ("supplement:codium", "VSCodium", &["codium.cmd", "codium.exe"][..]),
+        (
+            "supplement:code",
+            "Visual Studio Code",
+            &["code.cmd", "code.exe"][..],
+        ),
+        (
+            "supplement:codium",
+            "VSCodium",
+            &["codium.cmd", "codium.exe"][..],
+        ),
         ("supplement:cursor", "Cursor", &["cursor.exe"][..]),
         ("supplement:zed", "Zed", &["zed.exe"][..]),
         ("supplement:sublime", "Sublime Text", &["subl.exe"][..]),
-        ("supplement:idea", "IntelliJ IDEA", &["idea64.exe", "idea.exe"][..]),
-        ("supplement:pycharm", "PyCharm", &["pycharm64.exe", "pycharm.exe"][..]),
-        ("supplement:webstorm", "WebStorm", &["webstorm64.exe", "webstorm.exe"][..]),
-        ("supplement:clion", "CLion", &["clion64.exe", "clion.exe"][..]),
-        ("supplement:goland", "GoLand", &["goland64.exe", "goland.exe"][..]),
-        ("supplement:rustrover", "RustRover", &["rustrover64.exe", "rustrover.exe"][..]),
+        (
+            "supplement:idea",
+            "IntelliJ IDEA",
+            &["idea64.exe", "idea.exe"][..],
+        ),
+        (
+            "supplement:pycharm",
+            "PyCharm",
+            &["pycharm64.exe", "pycharm.exe"][..],
+        ),
+        (
+            "supplement:webstorm",
+            "WebStorm",
+            &["webstorm64.exe", "webstorm.exe"][..],
+        ),
+        (
+            "supplement:clion",
+            "CLion",
+            &["clion64.exe", "clion.exe"][..],
+        ),
+        (
+            "supplement:goland",
+            "GoLand",
+            &["goland64.exe", "goland.exe"][..],
+        ),
+        (
+            "supplement:rustrover",
+            "RustRover",
+            &["rustrover64.exe", "rustrover.exe"][..],
+        ),
     ]
     .iter()
     .filter_map(|(id, label, executables)| {

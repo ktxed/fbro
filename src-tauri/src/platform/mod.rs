@@ -73,7 +73,11 @@ pub trait Platform: Send + Sync {
     fn reveal_in_file_manager(&self, _path: &str, _kind: &str) {}
 
     /// Lists applications that can open the given path.
-    fn list_open_with_apps(&self, _path: &str, _kind: &str) -> Result<Vec<ResolvedOpenWithApp>, String> {
+    fn list_open_with_apps(
+        &self,
+        _path: &str,
+        _kind: &str,
+    ) -> Result<Vec<ResolvedOpenWithApp>, String> {
         Ok(vec![])
     }
 
@@ -98,7 +102,9 @@ pub trait Platform: Send + Sync {
                     .map(|_| ())
                     .map_err(|e| e.to_string())
             }
-            OpenWithLaunch::LinuxApp { .. } => Err("Open With is not supported for this app on this platform".to_string()),
+            OpenWithLaunch::LinuxApp { .. } => {
+                Err("Open With is not supported for this app on this platform".to_string())
+            }
         }
     }
 

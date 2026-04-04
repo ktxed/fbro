@@ -3,6 +3,7 @@ use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
 
+use crate::bro::{BroInputItem, ResolvedBro};
 use crate::jobs::JobStore;
 use crate::platform::{Platform, ResolvedOpenWithApp};
 use crate::vfs::VfsDriver;
@@ -73,6 +74,7 @@ pub struct AppState {
     pub platform: Arc<dyn Platform>,
     pub job_store: JobStore,
     pub open_with_requests: HashMap<String, OpenWithRequest>,
+    pub bro_requests: HashMap<String, BroRequest>,
     /// Senders for all connected GUI clients — used to broadcast state updates
     /// from non-GUI connections (e.g. viewer windows).
     pub gui_senders: Vec<mpsc::Sender<ServerMessage>>,
@@ -84,6 +86,11 @@ pub struct OpenWithRequest {
     pub path: String,
     pub kind: String,
     pub apps: Vec<ResolvedOpenWithApp>,
+}
+
+pub struct BroRequest {
+    pub inputs: Vec<BroInputItem>,
+    pub bros: Vec<ResolvedBro>,
 }
 
 impl AppState {
@@ -229,6 +236,7 @@ impl AppState {
             platform,
             job_store: JobStore::new(),
             open_with_requests: HashMap::new(),
+            bro_requests: HashMap::new(),
             gui_senders: Vec::new(),
             file_server_port,
         }

@@ -54,6 +54,7 @@ export const PANEL_SHORTCUT_COMMAND_IDS = [
   "panel.navigate_home",
   "panel.navigate_to_path",
   "panel.history.open",
+  "panel.pass_to_bro",
   "app.open_terminal",
   "panel.focus.switch",
   "panel.source.next",
@@ -197,6 +198,27 @@ function openFileOp(state: AppState, dispatch: Dispatch<AppAction>, panel: Panel
   return openFileOpForEntries(state, dispatch, panel.panelId, files, opType);
 }
 
+function openPassToBro(dispatch: Dispatch<AppAction>, client: WsClient, panel: PanelState, explicitPath?: string) {
+  const requestId = globalThis.crypto?.randomUUID?.() ?? `bro-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  dispatch({
+    type: "OPEN_BRO",
+    bro: {
+      panelId: panel.panelId,
+      dirPath: panel.path.replace(/[/\\]+$/, ""),
+      requestId,
+      explicitPath,
+      status: "loading",
+      inputs: [],
+      bros: [],
+    },
+  });
+  client.sendIntent("ListBros", panel.panelId, {
+    requestId,
+    targetPath: explicitPath,
+  });
+  return true;
+}
+
 function openFileOpForEntries(
   state: AppState,
   dispatch: Dispatch<AppAction>,
@@ -237,6 +259,10 @@ export function executeTargetedCommand(
   };
 
   switch (commandId) {
+    case "panel.pass_to_bro":
+      return context.state.panels[target.panelId]
+        ? openPassToBro(context.dispatch, context.client, context.state.panels[target.panelId], target.fullPath)
+        : false;
     case "file.copy":
       return openFileOpForEntries(context.state, context.dispatch, target.panelId, [file], "copy");
     case "file.move":
@@ -395,6 +421,8 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
     case "panel.navigate_source_root":
       client.sendIntent("NavigateSourceRoot", focused?.panelId ?? state.focus);
       return true;
+    case "panel.pass_to_bro":
+      return focused ? openPassToBro(dispatch, client, focused.panel) : false;
     case "file.info":
       return focused ? openInfo(dispatch, focused.panel) : false;
     case "file.rename":

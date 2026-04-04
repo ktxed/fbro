@@ -1,4 +1,5 @@
 mod app;
+mod bro;
 mod jobs;
 mod navigation;
 mod panel;
@@ -32,11 +33,19 @@ pub async fn dispatch(name: &str, scope: &Value, args: &Value, ctx: &mut IntentC
         | "RequestWindow"
         | "SwitchFocus"
         | "RequestStateSnapshot" => panel::handle(name, scope, args, ctx).await,
-        "OpenEntry" | "NavigateHome" | "NavigateSourceRoot" | "NavigatePanelTo" | "OpenFile"
-        | "OpenTerminal" | "NavigateToSource" | "MountSource" | "NavigateUp"
-        | "RevealInFileManager" | "ListOpenWithApps" | "LaunchOpenWithApp" => {
-            navigation::handle(name, scope, args, ctx).await
-        }
+        "OpenEntry"
+        | "NavigateHome"
+        | "NavigateSourceRoot"
+        | "NavigatePanelTo"
+        | "OpenFile"
+        | "OpenTerminal"
+        | "NavigateToSource"
+        | "MountSource"
+        | "NavigateUp"
+        | "RevealInFileManager"
+        | "ListOpenWithApps"
+        | "LaunchOpenWithApp" => navigation::handle(name, scope, args, ctx).await,
+        "ListBros" | "LaunchBro" => bro::handle(name, scope, args, ctx).await,
         "StartFileOp" | "ProvideJobDecision" | "CancelJob" | "PauseJob" | "ResumeJob"
         | "RenameFile" | "MakeDir" => jobs::handle(name, scope, args, ctx).await,
         "ViewFile" | "EditFile" | "CloseViewerWindow" | "ViewerNavigate" | "ReadFileChunk" => {

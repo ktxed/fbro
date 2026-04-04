@@ -6,7 +6,7 @@ export type ContextMenuItem =
   | { id: string; kind: "separator" }
   | {
       id: string;
-      kind: "command" | "clipboard" | "platform" | "openWith";
+      kind: "command" | "clipboard" | "platform" | "openWith" | "bro";
       label: string;
       shortcut?: string;
       commandId?: string;
@@ -63,9 +63,13 @@ export function buildContextMenuItems(
   const openWithItem: ContextMenuItem | null = kind === "file" || kind === "directory"
     ? { id: "platform.open_with", kind: "openWith", label: "Open With..." }
     : null;
+  const broItem: ContextMenuItem | null = kind === "file" || kind === "directory"
+    ? { id: "platform.pass_to_bro", kind: "bro", label: "Pass to Bro..." }
+    : null;
 
   return [
     platformItem(),
+    ...(broItem ? [broItem] : []),
     ...(openWithItem ? [openWithItem] : []),
     commandItem("file.copy", "Copy", commands),
     commandItem("file.rename", "Rename", commands),

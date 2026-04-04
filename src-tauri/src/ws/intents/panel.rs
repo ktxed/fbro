@@ -751,7 +751,9 @@ async fn calculate_size(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>
 async fn cancel_size_calculation(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
     let panel_id = resolve_panel_id(scope, ctx.state).await;
     let parsed = NameArgs::from_args(args);
-    ctx.dir_size_queue.cancel(&panel_id, &parsed.name, ctx.tx).await;
+    ctx.dir_size_queue
+        .cancel(&panel_id, &parsed.name, ctx.tx)
+        .await;
 
     let (calculating_size, version) = {
         let mut state_guard = ctx.state.lock().await;

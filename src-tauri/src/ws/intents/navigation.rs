@@ -231,17 +231,17 @@ async fn navigate_panel_to(args: &Value, ctx: &mut IntentContext<'_>) {
         let (validated_path, cursor_hint) = match resolved_target {
             Ok(target) => target,
             Err(message) => {
-            let _ = ctx
-                .tx
-                .send(ServerMessage::Error {
-                    timestamp: now(),
-                    code: "NAVIGATE_FAILED".to_string(),
-                    message,
-                    recoverable: true,
-                    extra: Some(serde_json::json!({ "panelId": parsed.panel_id })),
-                })
-                .await;
-            return;
+                let _ = ctx
+                    .tx
+                    .send(ServerMessage::Error {
+                        timestamp: now(),
+                        code: "NAVIGATE_FAILED".to_string(),
+                        message,
+                        recoverable: true,
+                        extra: Some(serde_json::json!({ "panelId": parsed.panel_id })),
+                    })
+                    .await;
+                return;
             }
         };
 

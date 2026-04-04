@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use tokio::sync::{mpsc, watch, Mutex, Semaphore};
@@ -276,12 +276,7 @@ impl DirSizeQueue {
     /// Signal an active calculation to stop. The state update happens
     /// immediately (called from the intent handler) so the FE gets instant
     /// feedback; the background task will clean up when it detects the signal.
-    pub async fn cancel(
-        &self,
-        panel_id: &str,
-        entry_name: &str,
-        tx: &mpsc::Sender<ServerMessage>,
-    ) {
+    pub async fn cancel(&self, panel_id: &str, entry_name: &str, tx: &mpsc::Sender<ServerMessage>) {
         let removed = {
             let mut tasks = self.tasks.lock().await;
             tasks.remove(&(panel_id.to_string(), entry_name.to_string()))

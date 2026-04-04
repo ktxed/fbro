@@ -118,6 +118,21 @@ export interface OpenWithAppItem {
   source: "system" | "supplement";
 }
 
+export interface BroInputItem {
+  path: string;
+  name: string;
+  kind: string;
+}
+
+export interface BroItem {
+  id: string;
+  name: string;
+  version: string;
+  source: string;
+  detail?: string;
+  protocol: "fnf";
+}
+
 export interface JobStart {
   jobId: string;
   opType: string;
@@ -303,6 +318,21 @@ export interface OpenWithOptionsFailedMessage {
   message: string;
 }
 
+export interface BroOptionsReadyMessage {
+  type: "BroOptionsReady";
+  timestamp: number;
+  requestId: string;
+  inputs: BroInputItem[];
+  bros: BroItem[];
+}
+
+export interface BroOptionsFailedMessage {
+  type: "BroOptionsFailed";
+  timestamp: number;
+  requestId: string;
+  message: string;
+}
+
 // ─── Union types ─────────────────────────────────────────────────────────────
 
 export type BEMessage =
@@ -320,6 +350,8 @@ export type BEMessage =
   | ViewerFileChangedMessage
   | DryRunReadyMessage
   | OpenWithOptionsReadyMessage
-  | OpenWithOptionsFailedMessage;
+  | OpenWithOptionsFailedMessage
+  | BroOptionsReadyMessage
+  | BroOptionsFailedMessage;
 
 export type FEMessage = HelloMessage | IntentMessage;

@@ -72,7 +72,13 @@ pub(crate) fn build_interactive_commands() -> Vec<InteractiveCommandSchema> {
             vec![mod_binding("p", true)],
             None,
         ),
-        command("app.open_jobs", "App", "Open Jobs", vec![keybinding("j")], None),
+        command(
+            "app.open_jobs",
+            "App",
+            "Open Jobs",
+            vec![keybinding("j")],
+            None,
+        ),
         command(
             "panel.navigate_source_root",
             "Navigation",
@@ -80,13 +86,26 @@ pub(crate) fn build_interactive_commands() -> Vec<InteractiveCommandSchema> {
             vec![keybinding("/")],
             Some("NavigateSourceRoot"),
         ),
-        command("file.info", "File", "Inspect Item", vec![keybinding("i")], None),
+        command(
+            "file.info",
+            "File",
+            "Inspect Item",
+            vec![keybinding("i")],
+            None,
+        ),
         command(
             "file.rename",
             "File",
             "Rename",
             vec![toolbar_binding("F2", "2")],
             None,
+        ),
+        command(
+            "panel.pass_to_bro",
+            "File",
+            "Pass to Bro",
+            vec![keybinding("F1")],
+            Some("ListBros"),
         ),
         command(
             "file.view",
@@ -182,14 +201,22 @@ pub(crate) fn build_interactive_commands() -> Vec<InteractiveCommandSchema> {
             "panel.selection.extend_up",
             "Selection",
             "Extend Selection Up",
-            vec![keybinding_with_modifiers("ArrowUp", true, false, false, false)],
+            vec![keybinding_with_modifiers(
+                "ArrowUp", true, false, false, false,
+            )],
             Some("MoveCursorWithSelect"),
         ),
         command(
             "panel.selection.extend_down",
             "Selection",
             "Extend Selection Down",
-            vec![keybinding_with_modifiers("ArrowDown", true, false, false, false)],
+            vec![keybinding_with_modifiers(
+                "ArrowDown",
+                true,
+                false,
+                false,
+                false,
+            )],
             Some("MoveCursorWithSelect"),
         ),
         command(
