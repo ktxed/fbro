@@ -359,6 +359,7 @@ export function bindingMatches(event: KeyboardLikeEvent, binding: KeyBinding) {
   const isShiftProducedSymbol =
     normalizedEventKey === normalizedBindingKey
     && normalizedBindingKey.length === 1
+    && normalizedBindingKey.trim().length > 0
     && /[^a-z0-9]/i.test(normalizedBindingKey)
     && !binding.shift
     && event.shiftKey;
