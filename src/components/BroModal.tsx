@@ -117,6 +117,8 @@ export function BroModal({ client, bro }: BroModalProps) {
     () => bros.find((item) => item.id === activeFormBroId),
     [activeFormBroId, bros],
   );
+  const selectedBroHasLaunchInputs = !!selectedBro && (!!selectedBro.output || selectedBroParams(selectedBro).length > 0);
+  const selectedBroIsActivated = !!selectedBro && activeFormBro?.id === selectedBro.id;
 
   const selectedInputValues = useMemo(() => {
     if (!activeFormBro) return {};
@@ -174,8 +176,16 @@ export function BroModal({ client, bro }: BroModalProps) {
 
   const launchSelected = () => {
     if (!selectedBro) return;
+    if (!selectedBroHasLaunchInputs) {
+      launchBro(selectedBro.id);
+      return;
+    }
+    if (!selectedBroIsActivated) {
+      activateBroForm(selectedBro, { focusFields: true });
+      return;
+    }
     if (outputError || paramError) return;
-    launchBro(selectedBro.id, activeFormBro?.output ? selectedOutputValue : undefined, selectedInputValues);
+    launchBro(selectedBro.id, selectedBro.output ? selectedOutputValue : undefined, selectedInputValues);
   };
 
   const activateBroForm = (bro: PendingBro["bros"][number] | undefined, options?: { focusFields?: boolean }) => {
@@ -192,9 +202,7 @@ export function BroModal({ client, bro }: BroModalProps) {
   const selectBro = (index: number) => {
     const bro = bros[index];
     setSelectedIndex(index);
-    if (!bro || (!bro.output && selectedBroParams(bro).length === 0)) {
-      setActiveFormBroId(null);
-    }
+    setActiveFormBroId((current) => (bro && current === bro.id ? current : null));
   };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -293,7 +301,7 @@ export function BroModal({ client, bro }: BroModalProps) {
               );
             })}
           </div>
-          {bro.status === "ready" && activeFormBro && (activeFormBro.output || selectedBroParams(activeFormBro).length > 0) && (
+          {bro.status === "ready" && selectedBroIsActivated && activeFormBro && (activeFormBro.output || selectedBroParams(activeFormBro).length > 0) && (
             <div className="modal__body" style={{ padding: "12px 0 0" }}>
               {activeFormBro.output && (
                 <div className="modal__rename-row">
@@ -362,7 +370,13 @@ export function BroModal({ client, bro }: BroModalProps) {
         <div className="modal__actions">
           <button
             className="modal__btn modal__btn--primary"
-            disabled={bro.status !== "ready" || !selectedBro || !!outputError || !!paramError}
+            disabled={
+              bro.status !== "ready"
+              || !selectedBro
+              || (selectedBroHasLaunchInputs && !selectedBroIsActivated)
+              || !!outputError
+              || !!paramError
+            }
             onClick={launchSelected}
           >
             Launch
