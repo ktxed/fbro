@@ -82,6 +82,7 @@ pub struct AppState {
     pub file_server_port: u16,
 }
 
+#[allow(dead_code)]
 pub struct OpenWithRequest {
     pub path: String,
     pub kind: String,

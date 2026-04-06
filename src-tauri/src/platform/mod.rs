@@ -27,6 +27,7 @@ pub struct OpenWithAppOption {
 }
 
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 pub enum OpenWithLaunch {
     Default,
     Command {
@@ -197,10 +198,12 @@ pub trait VolumeWatcher: Send + Sync {
 
 /// Fallback volume watcher: uses Platform::list_volumes() (sync) and does not
 /// support mounting. Used on non-Linux platforms or when udisks2 is unavailable.
+#[allow(dead_code)]
 pub struct FallbackVolumeWatcher {
     platform: Arc<dyn Platform>,
 }
 
+#[allow(dead_code)]
 impl FallbackVolumeWatcher {
     pub fn new(platform: Arc<dyn Platform>) -> Self {
         Self { platform }

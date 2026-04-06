@@ -390,10 +390,13 @@ function applyJobStarted(state: AppState, msg: JobStartedMessage): AppState {
     progress: {
       totalFiles: job.totalFiles,
       completedFiles: 0,
+      statusText: undefined,
       currentFileBytesTotal: 0,
       currentFileBytesCopied: 0,
       totalBytesTotal: job.totalBytesTotal,
       totalBytesCopied: 0,
+      currentFilePercent: undefined,
+      overallPercent: undefined,
     },
   };
   return {

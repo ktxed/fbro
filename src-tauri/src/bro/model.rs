@@ -96,6 +96,10 @@ pub(crate) enum LaunchRecipe {
         cwd: Option<LaunchCwd>,
         args: Vec<LaunchArg>,
     },
+    HostedStdio {
+        program: String,
+        args: Vec<String>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -104,6 +108,7 @@ pub(crate) enum LaunchCwd {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[allow(dead_code)]
 pub(crate) enum LaunchArg {
     Literal(String),
     TargetPaths,
@@ -174,6 +179,9 @@ impl ResolvedBro {
                 }
 
                 Ok((program.clone(), resolved_args, cwd))
+            }
+            LaunchRecipe::HostedStdio { .. } => {
+                Err("This bro uses a hosted fp runtime and cannot be launched directly".to_string())
             }
         }
     }

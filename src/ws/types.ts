@@ -79,10 +79,13 @@ export interface FileOpProgress {
   totalFiles: number;
   completedFiles: number;
   currentFile?: string;
+  statusText?: string;
   currentFileBytesTotal: number;
   currentFileBytesCopied: number;
   totalBytesTotal: number;
   totalBytesCopied: number;
+  currentFilePercent?: number;
+  overallPercent?: number;
 }
 
 export interface DecisionRequest {

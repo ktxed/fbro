@@ -340,10 +340,15 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
 
     const filePercent = p && p.currentFileBytesTotal > 0
       ? Math.round((p.currentFileBytesCopied / p.currentFileBytesTotal) * 100)
-      : 0;
-    const jobPercent = p && p.totalFiles > 0
-      ? Math.round((p.completedFiles / p.totalFiles) * 100)
-      : 0;
+      : p?.currentFilePercent ?? 0;
+    const jobPercent = p && p.totalBytesTotal > 0
+      ? Math.round((p.totalBytesCopied / p.totalBytesTotal) * 100)
+      : p?.overallPercent ?? (
+        p && p.totalFiles > 0
+          ? Math.round((p.completedFiles / p.totalFiles) * 100)
+          : 0
+      );
+    const currentProgressLabel = p?.currentFile ?? p?.statusText ?? "⏳";
 
     const submitDecision = (decision: string) => {
       if (!activeJobId) return;
@@ -512,7 +517,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
               <div className="modal__progress">
                 {/* Current file progress */}
                 <div className="modal__progress-section">
-                  <span className="modal__progress-label">{p.currentFile ?? "⏳"}</span>
+                  <span className="modal__progress-label">{currentProgressLabel}</span>
                   <div className="modal__progress-bar">
                     <div
                       className="modal__progress-fill"
@@ -520,7 +525,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
                     />
                   </div>
                   <span className="modal__progress-text">
-                    {p.currentFile ? (
+                    {p.currentFileBytesTotal > 0 ? (
                       <>
                         {filePercent}% ({formatBytes(p.currentFileBytesCopied)} / {formatBytes(p.currentFileBytesTotal)})
                         {speed !== null && p.currentFileBytesTotal >= LARGE_FILE_THRESHOLD && (
@@ -532,7 +537,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
                           </span>
                         )}
                       </>
-                    ) : "⏳"}
+                    ) : p.currentFilePercent !== undefined ? `${filePercent}%` : currentProgressLabel}
                   </span>
                 </div>
 
@@ -546,10 +551,11 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
                     />
                   </div>
                   <span className="modal__progress-text">
-                    {p.completedFiles + (p.currentFile ? 1 : 0)} / {p.totalFiles} files
-                    {p.totalBytesTotal > 0 && (
-                      <> · {formatBytes(p.totalBytesCopied)} / {formatBytes(p.totalBytesTotal)}</>
-                    )}
+                    {p.totalBytesTotal > 0
+                      ? `${formatBytes(p.totalBytesCopied)} / ${formatBytes(p.totalBytesTotal)}`
+                      : p.overallPercent !== undefined
+                        ? `${jobPercent}%`
+                        : `${p.completedFiles + (p.currentFile ? 1 : 0)} / ${p.totalFiles} files`}
                   </span>
                 </div>
               </div>

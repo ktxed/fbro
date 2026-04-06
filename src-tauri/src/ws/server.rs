@@ -412,8 +412,13 @@ async fn apply_job_event_to_state(state: &SharedState, msg: &ServerMessage) {
                     job.progress.total_files = progress.total_files;
                     job.progress.completed_files = progress.completed_files;
                     job.progress.current_file = progress.current_file.clone();
+                    job.progress.status_text = progress.status_text.clone();
                     job.progress.current_file_bytes_total = progress.current_file_bytes_total;
                     job.progress.current_file_bytes_copied = progress.current_file_bytes_copied;
+                    job.progress.total_bytes_total = progress.total_bytes_total;
+                    job.progress.total_bytes_copied = progress.total_bytes_copied;
+                    job.progress.current_file_percent = progress.current_file_percent;
+                    job.progress.overall_percent = progress.overall_percent;
                 }
                 job.decision = None;
                 job.error = None;

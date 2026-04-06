@@ -13,9 +13,12 @@ function formatBytes(n: number): string {
 function ProgressBar({ p }: { p: FileOpProgress }) {
   const totalPct = p.totalBytesTotal > 0
     ? Math.round((p.totalBytesCopied / p.totalBytesTotal) * 100)
-    : p.totalFiles > 0
-    ? Math.round((p.completedFiles / p.totalFiles) * 100)
-    : 0;
+    : p.overallPercent ?? (
+      p.totalFiles > 0
+        ? Math.round((p.completedFiles / p.totalFiles) * 100)
+        : 0
+    );
+  const currentLabel = p.currentFile?.split("/").pop() || p.statusText || "⏳";
 
   return (
     <div className="jobs-modal__progress">
@@ -29,8 +32,8 @@ function ProgressBar({ p }: { p: FileOpProgress }) {
       <div className="jobs-modal__bar">
         <div className="jobs-modal__bar-fill" style={{ width: `${totalPct}%` }} />
       </div>
-      <div className="jobs-modal__current-file" title={p.currentFile}>
-        {p.currentFile?.split("/").pop() || "⏳"}
+      <div className="jobs-modal__current-file" title={p.currentFile ?? p.statusText}>
+        {currentLabel}
       </div>
     </div>
   );

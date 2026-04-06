@@ -716,10 +716,13 @@ fn send_progress_sync(
         total_files,
         completed_files,
         current_file,
+        status_text: None,
         current_file_bytes_total,
         current_file_bytes_copied,
         total_bytes_total,
         total_bytes_copied,
+        current_file_percent: None,
+        overall_percent: None,
     };
     let msg = ServerMessage::JobEvent {
         timestamp: now(),

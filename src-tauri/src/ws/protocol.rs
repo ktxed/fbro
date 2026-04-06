@@ -351,10 +351,16 @@ pub struct FileOpProgressSchema {
     pub total_files: usize,
     pub completed_files: usize,
     pub current_file: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status_text: Option<String>,
     pub current_file_bytes_total: u64,
     pub current_file_bytes_copied: u64,
     pub total_bytes_total: u64,
     pub total_bytes_copied: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub current_file_percent: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub overall_percent: Option<u8>,
 }
 
 #[derive(Serialize, Clone, Debug)]

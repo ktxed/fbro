@@ -1,8 +1,9 @@
+use std::env;
 use std::path::{Path, PathBuf};
 
 use crate::bro::model::{
-    BroLaunchInputKind, BroOption, BroOutput, BroParam, BroPre, BroProtocol, BroSource, LaunchArg,
-    LaunchCwd, LaunchRecipe, ResolvedBro,
+    BroLaunchInputKind, BroOption, BroOutput, BroParam, BroPre, BroProtocol, BroSource,
+    LaunchRecipe, ResolvedBro,
 };
 #[cfg(target_os = "macos")]
 use crate::bro::probe::macos_common_cli_candidates;
@@ -14,7 +15,10 @@ pub struct SevenZipProvider;
 
 impl BroProvider for SevenZipProvider {
     fn list(&self, ctx: &BroDiscoveryContext<'_>) -> Vec<ResolvedBro> {
-        let Some(program) = find_seven_zip_binary() else {
+        let Some(seven_zip_program) = find_seven_zip_binary() else {
+            return vec![];
+        };
+        let Some(host_program) = find_fp_host_binary() else {
             return vec![];
         };
 
@@ -22,9 +26,9 @@ impl BroProvider for SevenZipProvider {
             option: BroOption {
                 id: "native:7z".to_string(),
                 name: "7z".to_string(),
-                version: native_version(&program),
+                version: native_version(&seven_zip_program),
                 source: BroSource::Native,
-                detail: Some(program.clone()),
+                detail: Some(seven_zip_program.clone()),
                 protocol: BroProtocol::Fp,
                 output: Some(BroOutput {
                     label: "Archive path".to_string(),
@@ -55,22 +59,13 @@ impl BroProvider for SevenZipProvider {
                     reason: String::new(),
                 },
             },
-            launch: LaunchRecipe::Command {
-                program,
-                cwd: Some(LaunchCwd::FirstInputParent),
+            launch: LaunchRecipe::HostedStdio {
+                program: host_program,
                 args: vec![
-                    LaunchArg::Literal("a".to_string()),
-                    LaunchArg::PrefixedParam {
-                        id: "compressionLevel".to_string(),
-                        prefix: "-mx".to_string(),
-                    },
-                    LaunchArg::OptionalPrefixedParam {
-                        id: "password".to_string(),
-                        prefix: "-p".to_string(),
-                    },
-                    LaunchArg::OutputPath,
-                    LaunchArg::Literal("--".to_string()),
-                    LaunchArg::TargetNames,
+                    "--adapter".to_string(),
+                    "seven-zip".to_string(),
+                    "--tool".to_string(),
+                    seven_zip_program,
                 ],
             },
         }]
@@ -95,6 +90,16 @@ fn explicit_binary_candidates() -> Vec<String> {
     {
         Vec::new()
     }
+}
+
+fn find_fp_host_binary() -> Option<String> {
+    let binary_name = if cfg!(windows) {
+        "fp_bro_host.exe"
+    } else {
+        "fp_bro_host"
+    };
+    let path = env::current_exe().ok()?.with_file_name(binary_name);
+    path.is_file().then(|| path.to_string_lossy().to_string())
 }
 
 fn default_output_path(ctx: &BroDiscoveryContext<'_>) -> Option<String> {

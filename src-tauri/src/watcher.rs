@@ -9,6 +9,7 @@ use tokio::time::{Duration, Instant};
 use crate::platform::{VolumeInfo, VolumeWatcher};
 
 /// Commands sent from the main loop to the watcher task.
+#[allow(dead_code)]
 pub enum WatcherCommand {
     /// Start watching a directory for a panel. Replaces any existing watch.
     Watch { panel_id: String, path: PathBuf },

@@ -72,8 +72,16 @@ pub struct FileOpProgress {
     pub total_files: usize,
     pub completed_files: usize,
     pub current_file: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status_text: Option<String>,
     pub current_file_bytes_total: u64,
     pub current_file_bytes_copied: u64,
+    pub total_bytes_total: u64,
+    pub total_bytes_copied: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub current_file_percent: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub overall_percent: Option<u8>,
 }
 
 /// A pending conflict decision the job is waiting on.
@@ -87,6 +95,7 @@ pub struct ConflictDecision {
 }
 
 /// Tracks a running file operation job.
+#[allow(dead_code)]
 pub struct AppJob {
     pub job_id: String,
     pub kind: JobKind,
@@ -110,6 +119,7 @@ pub enum JobKind {
     FpBro(FpBroJobMeta),
 }
 
+#[allow(dead_code)]
 pub struct FileOpJobMeta {
     pub op_type: FileOpType,
     pub files: Vec<FileOpEntry>,
@@ -117,6 +127,7 @@ pub struct FileOpJobMeta {
     pub apply_to_all_decision: Option<ConflictPolicy>,
 }
 
+#[allow(dead_code)]
 pub struct FpBroJobMeta {
     pub bro_id: String,
     pub bro_name: String,
