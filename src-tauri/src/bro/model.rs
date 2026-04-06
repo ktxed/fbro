@@ -96,10 +96,8 @@ pub(crate) enum LaunchRecipe {
         cwd: Option<LaunchCwd>,
         args: Vec<LaunchArg>,
     },
-    HostedStdio {
-        program: String,
-        args: Vec<String>,
-    },
+    BuiltInSevenZip,
+    BuiltInZip,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -170,7 +168,10 @@ impl ResolvedBro {
                             resolved_args.push(format!("{prefix}{value}"));
                         }
                         LaunchArg::OptionalPrefixedParam { id, prefix } => {
-                            let value = launch_params.get(id).map(|value| value.trim()).unwrap_or("");
+                            let value = launch_params
+                                .get(id)
+                                .map(|value| value.trim())
+                                .unwrap_or("");
                             if !value.is_empty() {
                                 resolved_args.push(format!("{prefix}{value}"));
                             }
@@ -180,9 +181,10 @@ impl ResolvedBro {
 
                 Ok((program.clone(), resolved_args, cwd))
             }
-            LaunchRecipe::HostedStdio { .. } => {
-                Err("This bro uses a hosted fp runtime and cannot be launched directly".to_string())
-            }
+            LaunchRecipe::BuiltInSevenZip | LaunchRecipe::BuiltInZip => Err(
+                "This bro uses an in-process fp runtime and cannot be launched directly"
+                    .to_string(),
+            ),
         }
     }
 

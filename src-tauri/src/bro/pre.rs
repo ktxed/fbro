@@ -29,6 +29,10 @@ fn evaluate_bro(inputs: &[BroInputItem], bro: &BroOption) -> BroPre {
         return evaluate_seven_zip_bro(inputs);
     }
 
+    if is_zip_bro(bro) {
+        return evaluate_zip_bro(inputs);
+    }
+
     if is_tar_bro(bro) {
         return evaluate_tar_bro(inputs);
     }
@@ -49,6 +53,10 @@ fn is_tar_bro(bro: &BroOption) -> bool {
 
 fn is_seven_zip_bro(bro: &BroOption) -> bool {
     bro.name.eq_ignore_ascii_case("7z")
+}
+
+fn is_zip_bro(bro: &BroOption) -> bool {
+    bro.name.eq_ignore_ascii_case("zip")
 }
 
 fn evaluate_media_bro(inputs: &[BroInputItem]) -> BroPre {
@@ -131,6 +139,28 @@ fn evaluate_seven_zip_bro(inputs: &[BroInputItem]) -> BroPre {
 
     BroPre {
         score: 72,
+        reason: "Good fit for a single-file archive".to_string(),
+    }
+}
+
+fn evaluate_zip_bro(inputs: &[BroInputItem]) -> BroPre {
+    let summary = summarize_inputs(inputs);
+    if summary.total_inputs == 0 {
+        return BroPre {
+            score: 0,
+            reason: "No input entries resolved".to_string(),
+        };
+    }
+
+    if summary.directory_inputs > 0 || summary.total_inputs > 1 {
+        return BroPre {
+            score: 96,
+            reason: "Strong fit for a broadly compatible archive".to_string(),
+        };
+    }
+
+    BroPre {
+        score: 68,
         reason: "Good fit for a single-file archive".to_string(),
     }
 }

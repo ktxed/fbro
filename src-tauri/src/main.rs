@@ -3,7 +3,6 @@
 
 mod bro;
 mod fileserver;
-mod fp_host_protocol;
 mod jobs;
 mod persistence;
 mod platform;

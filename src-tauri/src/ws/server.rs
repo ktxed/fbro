@@ -425,12 +425,14 @@ async fn apply_job_event_to_state(state: &SharedState, msg: &ServerMessage) {
             }
             "DecisionRequired" => {
                 job.state = JobState::AwaitingDecision;
-                job.decision = decision.as_ref().map(|decision| crate::jobs::ConflictDecision {
-                    source: decision.source.clone(),
-                    destination: decision.destination.clone(),
-                    options: decision.options.clone(),
-                    supports_apply_to_all: decision.supports_apply_to_all,
-                });
+                job.decision = decision
+                    .as_ref()
+                    .map(|decision| crate::jobs::ConflictDecision {
+                        source: decision.source.clone(),
+                        destination: decision.destination.clone(),
+                        options: decision.options.clone(),
+                        supports_apply_to_all: decision.supports_apply_to_all,
+                    });
             }
             "Paused" => {
                 job.paused = true;

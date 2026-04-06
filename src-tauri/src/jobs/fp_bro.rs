@@ -1,19 +1,25 @@
 use std::collections::HashMap;
-use std::path::Path;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use std::fs::File;
+use std::io::{self, Read, Write};
+use std::path::{Path, PathBuf};
+use std::sync::{
+    atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
+    Arc,
+};
+use std::time::{Duration, Instant};
+
+use sevenz_rust2::encoder_options::{AesEncoderOptions, Lzma2Options};
+use sevenz_rust2::{ArchiveEntry, ArchiveWriter, Password};
 use tokio::process::Command;
 use tokio::sync::{mpsc, watch};
-use tokio::time::Duration;
+use zip::write::{FullFileOptions, SimpleFileOptions};
+use zip::{AesMode, CompressionMethod, ZipWriter};
 
-use crate::bro::{BroInputItem, LaunchCwd, LaunchRecipe, ResolvedBro};
-use crate::fp_host_protocol::{
-    FpHostInput, FpHostProgress, FpHostToRunnerMessage, FpRunnerToHostMessage,
-    FP_HOST_PROTOCOL_VERSION,
-};
+use crate::bro::LaunchRecipe;
+use crate::bro::{BroInputItem, ResolvedBro};
 use crate::ws::protocol::{now, FileOpProgressSchema, ServerMessage};
 
-const FP_HOST_HELLO_TIMEOUT: Duration = Duration::from_secs(3);
-const FP_HOST_CANCEL_GRACE: Duration = Duration::from_secs(2);
+const ARCHIVE_PROGRESS_INTERVAL: Duration = Duration::from_millis(100);
 
 pub async fn run_fp_bro(
     job_id: String,
@@ -24,12 +30,11 @@ pub async fn run_fp_bro(
     tx: mpsc::Sender<ServerMessage>,
     cancel_rx: watch::Receiver<bool>,
 ) {
-    let total_files = inputs.len();
     let _ = send_progress(
         &tx,
         &job_id,
         FileOpProgressSchema {
-            total_files,
+            total_files: inputs.len(),
             completed_files: 0,
             current_file: Some(format!("Starting {}", bro.option.name)),
             status_text: Some(format!("Starting {}", bro.option.name)),
@@ -47,19 +52,11 @@ pub async fn run_fp_bro(
         LaunchRecipe::Command { .. } => {
             run_legacy_fp_bro(job_id, bro, inputs, output_path, params, tx, cancel_rx).await;
         }
-        LaunchRecipe::HostedStdio { program, args } => {
-            run_hosted_fp_bro(
-                job_id,
-                bro,
-                inputs,
-                output_path,
-                params,
-                program,
-                args,
-                tx,
-                cancel_rx,
-            )
-            .await;
+        LaunchRecipe::BuiltInSevenZip => {
+            run_builtin_seven_zip(job_id, bro, inputs, output_path, params, tx, cancel_rx).await;
+        }
+        LaunchRecipe::BuiltInZip => {
+            run_builtin_zip(job_id, bro, inputs, output_path, params, tx, cancel_rx).await;
         }
     }
 }
@@ -147,365 +144,670 @@ async fn run_legacy_fp_bro(
     }
 }
 
-async fn run_hosted_fp_bro(
+async fn run_builtin_seven_zip(
     job_id: String,
     bro: ResolvedBro,
     inputs: Vec<BroInputItem>,
     output_path: String,
     params: HashMap<String, String>,
-    host_program: String,
-    host_args: Vec<String>,
     tx: mpsc::Sender<ServerMessage>,
     mut cancel_rx: watch::Receiver<bool>,
 ) {
-    let total_files = inputs.len();
-    let working_dir = working_dir_for_inputs(&bro, &inputs);
+    let cancel_flag = Arc::new(AtomicBool::new(false));
+    let cancel_flag_for_task = Arc::clone(&cancel_flag);
+    let cancel_task = tokio::spawn(async move {
+        while cancel_rx.changed().await.is_ok() {
+            if *cancel_rx.borrow() {
+                cancel_flag_for_task.store(true, Ordering::SeqCst);
+                break;
+            }
+        }
+    });
 
-    let mut host = Command::new(&host_program);
-    host.args(&host_args);
-    host.stdin(std::process::Stdio::piped());
-    host.stdout(std::process::Stdio::piped());
-    host.stderr(std::process::Stdio::piped());
+    let tx_for_worker = tx.clone();
+    let job_id_for_worker = job_id.clone();
+    let bro_name = bro.option.name.clone();
+    let output_path_for_worker = output_path.clone();
+    let worker = tokio::task::spawn_blocking(move || {
+        run_builtin_seven_zip_blocking(
+            &job_id_for_worker,
+            &bro_name,
+            &inputs,
+            &output_path_for_worker,
+            &params,
+            &tx_for_worker,
+            cancel_flag,
+        )
+    });
 
-    let mut child = match host.spawn() {
-        Ok(child) => child,
+    let result = worker.await;
+    cancel_task.abort();
+
+    match result {
+        Ok(Ok(summary)) => {
+            let _ = send_progress(
+                &tx,
+                &job_id,
+                FileOpProgressSchema {
+                    total_files: summary.total_files,
+                    completed_files: summary.total_files,
+                    current_file: None,
+                    status_text: Some(format!("{} completed", bro.option.name)),
+                    current_file_bytes_total: 0,
+                    current_file_bytes_copied: 0,
+                    total_bytes_total: summary.total_bytes_total,
+                    total_bytes_copied: summary.total_bytes_total,
+                    current_file_percent: Some(100),
+                    overall_percent: Some(100),
+                },
+            )
+            .await;
+            let _ = send_terminal(&tx, &job_id, "Completed", None, Some(output_path)).await;
+        }
+        Ok(Err(ArchiveRunError::Cancelled)) => {
+            let _ = send_terminal(&tx, &job_id, "Cancelled", None, None).await;
+        }
+        Ok(Err(ArchiveRunError::Failed(error))) => {
+            let _ = send_terminal(&tx, &job_id, "Failed", Some(error), None).await;
+        }
         Err(error) => {
             let _ = send_terminal(
                 &tx,
                 &job_id,
                 "Failed",
-                Some(format!("Failed to start fp host: {error}")),
+                Some(format!("{} failed: {error}", bro.option.name)),
                 None,
             )
             .await;
-            return;
         }
-    };
+    }
+}
 
-    let Some(mut stdin) = child.stdin.take() else {
-        let _ = send_terminal(&tx, &job_id, "Failed", Some("fp host stdin was unavailable".to_string()), None).await;
-        let _ = child.kill().await;
-        return;
-    };
-    let Some(stdout) = child.stdout.take() else {
-        let _ = send_terminal(&tx, &job_id, "Failed", Some("fp host stdout was unavailable".to_string()), None).await;
-        let _ = child.kill().await;
-        return;
-    };
-    let Some(stderr) = child.stderr.take() else {
-        let _ = send_terminal(&tx, &job_id, "Failed", Some("fp host stderr was unavailable".to_string()), None).await;
-        let _ = child.kill().await;
-        return;
-    };
+fn run_builtin_seven_zip_blocking(
+    job_id: &str,
+    bro_name: &str,
+    inputs: &[BroInputItem],
+    output_path: &str,
+    params: &HashMap<String, String>,
+    tx: &mpsc::Sender<ServerMessage>,
+    cancel_flag: Arc<AtomicBool>,
+) -> Result<ArchiveSummary, ArchiveRunError> {
+    let plan = build_archive_plan(inputs).map_err(ArchiveRunError::Failed)?;
+    send_progress_sync(
+        tx,
+        job_id,
+        FileOpProgressSchema {
+            total_files: plan.total_files,
+            completed_files: 0,
+            current_file: None,
+            status_text: Some(format!("Preparing {bro_name} archive")),
+            current_file_bytes_total: 0,
+            current_file_bytes_copied: 0,
+            total_bytes_total: plan.total_bytes_total,
+            total_bytes_copied: 0,
+            current_file_percent: None,
+            overall_percent: None,
+        },
+    );
 
-    let mut stdout_lines = BufReader::new(stdout).lines();
-    let hello = match tokio::time::timeout(FP_HOST_HELLO_TIMEOUT, stdout_lines.next_line()).await {
-        Ok(Ok(Some(line))) => match parse_host_message(&line) {
-            Ok(FpHostToRunnerMessage::Hello {
-                protocol_version,
-                capabilities,
-            }) => {
-                if protocol_version != FP_HOST_PROTOCOL_VERSION {
-                    let _ = send_terminal(
-                        &tx,
-                        &job_id,
-                        "Failed",
-                        Some(format!("fp host uses unsupported protocol version {protocol_version}")),
+    let mut writer = ArchiveWriter::create(output_path)
+        .map_err(|error| ArchiveRunError::Failed(error.to_string()))?;
+    writer.set_content_methods(seven_zip_methods(params));
+
+    let completed_files = Arc::new(AtomicUsize::new(0));
+    let total_bytes_copied = Arc::new(AtomicU64::new(0));
+
+    for item in &plan.items {
+        if cancel_flag.load(Ordering::SeqCst) {
+            return Err(ArchiveRunError::Cancelled);
+        }
+
+        match item {
+            ArchiveItem::Directory {
+                source_path,
+                archive_name,
+            } => {
+                writer
+                    .push_archive_entry::<io::Empty>(
+                        ArchiveEntry::from_path(source_path, archive_name.clone()),
                         None,
                     )
-                    .await;
-                    let _ = child.kill().await;
-                    return;
-                }
-                Some(capabilities)
+                    .map_err(|error| ArchiveRunError::Failed(error.to_string()))?;
             }
-            Ok(_) => {
-                let _ = send_terminal(
-                    &tx,
-                    &job_id,
-                    "Failed",
-                    Some("fp host did not send an initial hello frame".to_string()),
-                    None,
-                )
-                .await;
-                let _ = child.kill().await;
-                return;
+            ArchiveItem::File {
+                source_path,
+                archive_name,
+                size,
+            } => {
+                let file = File::open(source_path)
+                    .map_err(|error| ArchiveRunError::Failed(error.to_string()))?;
+                let reader = ProgressReader::new(
+                    file,
+                    ProgressReporter::new(
+                        tx.clone(),
+                        job_id.to_string(),
+                        plan.total_files,
+                        plan.total_bytes_total,
+                        Arc::clone(&completed_files),
+                        Arc::clone(&total_bytes_copied),
+                        Arc::clone(&cancel_flag),
+                    ),
+                    archive_name.clone(),
+                    *size,
+                );
+                writer
+                    .push_archive_entry(
+                        ArchiveEntry::from_path(source_path, archive_name.clone()),
+                        Some(reader),
+                    )
+                    .map_err(|error| map_archive_error(error, &cancel_flag))?;
             }
-            Err(error) => {
-                let _ = send_terminal(&tx, &job_id, "Failed", Some(error), None).await;
-                let _ = child.kill().await;
-                return;
-            }
-        },
-        Ok(Ok(None)) => {
-            let _ = send_terminal(
-                &tx,
-                &job_id,
-                "Failed",
-                Some("fp host exited before handshake".to_string()),
-                None,
-            )
-            .await;
-            return;
         }
-        Ok(Err(error)) => {
-            let _ = send_terminal(&tx, &job_id, "Failed", Some(error.to_string()), None).await;
-            let _ = child.kill().await;
-            return;
-        }
-        Err(_) => {
-            let _ = send_terminal(
-                &tx,
-                &job_id,
-                "Failed",
-                Some("Timed out waiting for fp host handshake".to_string()),
-                None,
-            )
-            .await;
-            let _ = child.kill().await;
-            return;
-        }
-    };
-
-    if !hello.unwrap_or_default().progress {
-        let _ = send_terminal(
-            &tx,
-            &job_id,
-            "Failed",
-            Some("fp host does not advertise progress support".to_string()),
-            None,
-        )
-        .await;
-        let _ = child.kill().await;
-        return;
     }
 
-    let start_message = FpRunnerToHostMessage::Start {
-        job_id: job_id.clone(),
-        bro_id: bro.option.id.clone(),
-        bro_name: bro.option.name.clone(),
-        inputs: inputs
-            .iter()
-            .map(|input| FpHostInput {
-                path: input.path.clone(),
-                name: input.name.clone(),
-                kind: input.kind.clone(),
-            })
-            .collect(),
-        output_path: output_path.clone(),
-        params,
-        working_dir,
-    };
-
-    if let Err(error) = write_host_message(&mut stdin, &start_message).await {
-        let _ = send_terminal(&tx, &job_id, "Failed", Some(error), None).await;
-        let _ = child.kill().await;
-        return;
+    if cancel_flag.load(Ordering::SeqCst) {
+        return Err(ArchiveRunError::Cancelled);
     }
 
-    tokio::spawn(async move {
-        let mut stderr_lines = BufReader::new(stderr).lines();
-        while let Ok(Some(_)) = stderr_lines.next_line().await {}
-    });
+    writer
+        .finish()
+        .map_err(|error| map_archive_error(error, &cancel_flag))?;
 
-    let (msg_tx, mut msg_rx) = mpsc::channel::<Result<FpHostToRunnerMessage, String>>(32);
-    tokio::spawn(async move {
-        while let Ok(Some(line)) = stdout_lines.next_line().await {
-            if msg_tx.send(parse_host_message(&line)).await.is_err() {
-                return;
-            }
-        }
-    });
+    Ok(ArchiveSummary {
+        total_files: plan.total_files,
+        total_bytes_total: plan.total_bytes_total,
+    })
+}
 
-    let mut cancel_sent = false;
-    let mut terminal: Option<Result<Option<String>, String>> = None;
-    let mut host_status: Option<Result<std::process::ExitStatus, std::io::Error>> = None;
-
-    loop {
-        tokio::select! {
-            maybe_msg = msg_rx.recv() => {
-                match maybe_msg {
-                    Some(Ok(FpHostToRunnerMessage::Progress(progress))) => {
-                        if let Some(progress) = normalize_progress(&progress, total_files) {
-                            let _ = send_progress(&tx, &job_id, progress).await;
-                        }
-                    }
-                    Some(Ok(FpHostToRunnerMessage::Completed { result_path })) => {
-                        terminal = Some(Ok(result_path.or_else(|| Some(output_path.clone()))));
-                        break;
-                    }
-                    Some(Ok(FpHostToRunnerMessage::Failed { error })) => {
-                        terminal = Some(Err(error));
-                        break;
-                    }
-                    Some(Ok(FpHostToRunnerMessage::Log { .. })) => {}
-                    Some(Ok(FpHostToRunnerMessage::Hello { .. })) => {
-                        terminal = Some(Err("fp host sent a duplicate hello frame".to_string()));
-                        break;
-                    }
-                    Some(Err(error)) => {
-                        terminal = Some(Err(error));
-                        break;
-                    }
-                    None => {}
-                }
-            }
-            status = child.wait() => {
-                host_status = Some(status);
+async fn run_builtin_zip(
+    job_id: String,
+    bro: ResolvedBro,
+    inputs: Vec<BroInputItem>,
+    output_path: String,
+    params: HashMap<String, String>,
+    tx: mpsc::Sender<ServerMessage>,
+    mut cancel_rx: watch::Receiver<bool>,
+) {
+    let cancel_flag = Arc::new(AtomicBool::new(false));
+    let cancel_flag_for_task = Arc::clone(&cancel_flag);
+    let cancel_task = tokio::spawn(async move {
+        while cancel_rx.changed().await.is_ok() {
+            if *cancel_rx.borrow() {
+                cancel_flag_for_task.store(true, Ordering::SeqCst);
                 break;
             }
-            changed = cancel_rx.changed(), if !cancel_sent => {
-                match changed {
-                    Ok(_) if *cancel_rx.borrow() => {
-                        cancel_sent = true;
-                        let _ = write_host_message(&mut stdin, &FpRunnerToHostMessage::Cancel).await;
-                        tokio::time::sleep(FP_HOST_CANCEL_GRACE).await;
-                        let _ = child.kill().await;
-                    }
-                    Ok(_) => {}
-                    Err(_) => {}
-                }
-            }
         }
-    }
+    });
 
-    if cancel_sent {
-        let _ = send_terminal(&tx, &job_id, "Cancelled", None, None).await;
-        return;
-    }
+    let tx_for_worker = tx.clone();
+    let job_id_for_worker = job_id.clone();
+    let bro_name = bro.option.name.clone();
+    let output_path_for_worker = output_path.clone();
+    let worker = tokio::task::spawn_blocking(move || {
+        run_builtin_zip_blocking(
+            &job_id_for_worker,
+            &bro_name,
+            &inputs,
+            &output_path_for_worker,
+            &params,
+            &tx_for_worker,
+            cancel_flag,
+        )
+    });
 
-    match terminal {
-        Some(Ok(result_path)) => {
+    let result = worker.await;
+    cancel_task.abort();
+
+    match result {
+        Ok(Ok(summary)) => {
             let _ = send_progress(
                 &tx,
                 &job_id,
                 FileOpProgressSchema {
-                    total_files,
-                    completed_files: total_files,
+                    total_files: summary.total_files,
+                    completed_files: summary.total_files,
                     current_file: None,
                     status_text: Some(format!("{} completed", bro.option.name)),
                     current_file_bytes_total: 0,
                     current_file_bytes_copied: 0,
-                    total_bytes_total: 0,
-                    total_bytes_copied: 0,
-                    current_file_percent: None,
+                    total_bytes_total: summary.total_bytes_total,
+                    total_bytes_copied: summary.total_bytes_total,
+                    current_file_percent: Some(100),
                     overall_percent: Some(100),
                 },
             )
             .await;
+            let _ = send_terminal(&tx, &job_id, "Completed", None, Some(output_path)).await;
+        }
+        Ok(Err(ArchiveRunError::Cancelled)) => {
+            let _ = send_terminal(&tx, &job_id, "Cancelled", None, None).await;
+        }
+        Ok(Err(ArchiveRunError::Failed(error))) => {
+            let _ = send_terminal(&tx, &job_id, "Failed", Some(error), None).await;
+        }
+        Err(error) => {
             let _ = send_terminal(
                 &tx,
                 &job_id,
-                "Completed",
+                "Failed",
+                Some(format!("{} failed: {error}", bro.option.name)),
                 None,
-                result_path.or(Some(output_path)),
             )
             .await;
         }
-        Some(Err(error)) => {
-            let _ = child.kill().await;
-            let _ = send_terminal(&tx, &job_id, "Failed", Some(error), None).await;
+    }
+}
+
+fn run_builtin_zip_blocking(
+    job_id: &str,
+    bro_name: &str,
+    inputs: &[BroInputItem],
+    output_path: &str,
+    params: &HashMap<String, String>,
+    tx: &mpsc::Sender<ServerMessage>,
+    cancel_flag: Arc<AtomicBool>,
+) -> Result<ArchiveSummary, ArchiveRunError> {
+    let plan = build_archive_plan(inputs).map_err(ArchiveRunError::Failed)?;
+    send_progress_sync(
+        tx,
+        job_id,
+        FileOpProgressSchema {
+            total_files: plan.total_files,
+            completed_files: 0,
+            current_file: None,
+            status_text: Some(format!("Preparing {bro_name} archive")),
+            current_file_bytes_total: 0,
+            current_file_bytes_copied: 0,
+            total_bytes_total: plan.total_bytes_total,
+            total_bytes_copied: 0,
+            current_file_percent: None,
+            overall_percent: None,
+        },
+    );
+
+    let output =
+        File::create(output_path).map_err(|error| ArchiveRunError::Failed(error.to_string()))?;
+    let mut writer = ZipWriter::new(output);
+    let completed_files = Arc::new(AtomicUsize::new(0));
+    let total_bytes_copied = Arc::new(AtomicU64::new(0));
+    let password = params
+        .get("password")
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty());
+
+    for item in &plan.items {
+        if cancel_flag.load(Ordering::SeqCst) {
+            return Err(ArchiveRunError::Cancelled);
         }
-        None => {
-            match host_status {
-                Some(Ok(status)) if status.success() => {
-                    let _ = send_terminal(
-                        &tx,
-                        &job_id,
-                        "Failed",
-                        Some("fp host exited without a terminal completion frame".to_string()),
-                        None,
-                    )
-                    .await;
-                }
-                Some(Ok(status)) => {
-                    let error = status
-                        .code()
-                        .map(|code| format!("fp host exited with status {}", code))
-                        .unwrap_or_else(|| "fp host failed".to_string());
-                    let _ = send_terminal(&tx, &job_id, "Failed", Some(error), None).await;
-                }
-                Some(Err(error)) => {
-                    let _ = send_terminal(&tx, &job_id, "Failed", Some(error.to_string()), None).await;
-                }
-                None => {
-                    let _ = send_terminal(
-                        &tx,
-                        &job_id,
-                        "Failed",
-                        Some("fp host stopped unexpectedly".to_string()),
-                        None,
-                    )
-                    .await;
-                }
+
+        match item {
+            ArchiveItem::Directory { archive_name, .. } => {
+                writer
+                    .add_directory(archive_name.as_str(), SimpleFileOptions::default())
+                    .map_err(|error| ArchiveRunError::Failed(error.to_string()))?;
+            }
+            ArchiveItem::File {
+                source_path,
+                archive_name,
+                size,
+            } => {
+                let file = File::open(source_path)
+                    .map_err(|error| ArchiveRunError::Failed(error.to_string()))?;
+                writer
+                    .start_file(archive_name, zip_file_options(password, *size, params))
+                    .map_err(|error| map_archive_error(error, &cancel_flag))?;
+                let mut reader = ProgressReader::new(
+                    file,
+                    ProgressReporter::new(
+                        tx.clone(),
+                        job_id.to_string(),
+                        plan.total_files,
+                        plan.total_bytes_total,
+                        Arc::clone(&completed_files),
+                        Arc::clone(&total_bytes_copied),
+                        Arc::clone(&cancel_flag),
+                    ),
+                    archive_name.clone(),
+                    *size,
+                );
+                io::copy(&mut reader, &mut writer)
+                    .map_err(|error| map_archive_error(error, &cancel_flag))?;
+                writer
+                    .flush()
+                    .map_err(|error| map_archive_error(error, &cancel_flag))?;
             }
         }
     }
-}
 
-fn normalize_progress(progress: &FpHostProgress, fallback_total_files: usize) -> Option<FileOpProgressSchema> {
-    let total_files = progress.total_files.unwrap_or(fallback_total_files);
-    let completed_files = progress.completed_files.unwrap_or(0).min(total_files);
-    let current_file_percent = progress.current_file_percent.map(clamp_percent);
-    let overall_percent = progress.overall_percent.map(clamp_percent);
-
-    if total_files == 0
-        && completed_files == 0
-        && progress.current_file.is_none()
-        && progress.status_text.is_none()
-        && progress.current_bytes.is_none()
-        && progress.current_bytes_total.is_none()
-        && progress.total_bytes.is_none()
-        && progress.total_bytes_total.is_none()
-        && current_file_percent.is_none()
-        && overall_percent.is_none()
-    {
-        return None;
+    if cancel_flag.load(Ordering::SeqCst) {
+        return Err(ArchiveRunError::Cancelled);
     }
 
-    Some(FileOpProgressSchema {
-        total_files,
-        completed_files,
-        current_file: progress.current_file.clone(),
-        status_text: progress.status_text.clone(),
-        current_file_bytes_total: progress.current_bytes_total.unwrap_or(0),
-        current_file_bytes_copied: progress.current_bytes.unwrap_or(0),
-        total_bytes_total: progress.total_bytes_total.unwrap_or(0),
-        total_bytes_copied: progress.total_bytes.unwrap_or(0),
-        current_file_percent,
-        overall_percent,
+    writer
+        .finish()
+        .map_err(|error| map_archive_error(error, &cancel_flag))?;
+
+    Ok(ArchiveSummary {
+        total_files: plan.total_files,
+        total_bytes_total: plan.total_bytes_total,
     })
 }
 
-fn clamp_percent(value: u8) -> u8 {
-    value.min(100)
-}
-
-fn working_dir_for_inputs(bro: &ResolvedBro, inputs: &[BroInputItem]) -> Option<String> {
-    match &bro.launch {
-        LaunchRecipe::Command { cwd: Some(LaunchCwd::FirstInputParent), .. } => inputs
-            .first()
-            .and_then(|input| Path::new(&input.path).parent())
-            .map(|path| path.to_string_lossy().to_string()),
-        LaunchRecipe::HostedStdio { .. } => inputs
-            .first()
-            .and_then(|input| Path::new(&input.path).parent())
-            .map(|path| path.to_string_lossy().to_string()),
-        _ => None,
+fn map_archive_error(error: impl ToString, cancel_flag: &AtomicBool) -> ArchiveRunError {
+    if cancel_flag.load(Ordering::SeqCst) {
+        ArchiveRunError::Cancelled
+    } else {
+        ArchiveRunError::Failed(error.to_string())
     }
 }
 
-fn parse_host_message(line: &str) -> Result<FpHostToRunnerMessage, String> {
-    serde_json::from_str(line).map_err(|error| format!("Invalid fp host message: {error}"))
+fn seven_zip_methods(params: &HashMap<String, String>) -> Vec<sevenz_rust2::EncoderConfiguration> {
+    let level = params
+        .get("compressionLevel")
+        .and_then(|value| value.trim().parse::<u32>().ok())
+        .unwrap_or(5);
+    let password = params
+        .get("password")
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(Password::from)
+        .unwrap_or_else(Password::empty);
+
+    let mut methods = Vec::new();
+    if !password.is_empty() {
+        methods.push(AesEncoderOptions::new(password).into());
+    }
+    methods.push(Lzma2Options::from_level(level).into());
+    methods
 }
 
-async fn write_host_message(
-    stdin: &mut tokio::process::ChildStdin,
-    message: &FpRunnerToHostMessage,
+fn zip_file_options<'a>(
+    password: Option<&'a str>,
+    size: u64,
+    params: &HashMap<String, String>,
+) -> FullFileOptions<'a> {
+    let level = params
+        .get("compressionLevel")
+        .and_then(|value| value.trim().parse::<i64>().ok())
+        .unwrap_or(6);
+    let options = FullFileOptions::default()
+        .compression_method(CompressionMethod::Deflated)
+        .compression_level(Some(level))
+        .large_file(size > u32::MAX as u64);
+    match password {
+        Some(password) => options.with_aes_encryption(AesMode::Aes256, password),
+        None => options,
+    }
+}
+
+fn build_archive_plan(inputs: &[BroInputItem]) -> Result<ArchivePlan, String> {
+    let root = first_input_parent(inputs)
+        .ok_or_else(|| "No input entries were resolved for this bro".to_string())?;
+    let mut items = Vec::new();
+    let mut total_files = 0usize;
+    let mut total_bytes_total = 0u64;
+
+    for input in inputs {
+        let source_path = PathBuf::from(&input.path);
+        collect_plan_item(
+            &source_path,
+            Path::new(&root),
+            &mut items,
+            &mut total_files,
+            &mut total_bytes_total,
+        )?;
+    }
+
+    Ok(ArchivePlan {
+        items,
+        total_files,
+        total_bytes_total,
+    })
+}
+
+fn collect_plan_item(
+    source_path: &Path,
+    root: &Path,
+    items: &mut Vec<ArchiveItem>,
+    total_files: &mut usize,
+    total_bytes_total: &mut u64,
 ) -> Result<(), String> {
-    let payload = serde_json::to_vec(message).map_err(|error| error.to_string())?;
-    stdin.write_all(&payload).await.map_err(|error| error.to_string())?;
-    stdin.write_all(b"\n").await.map_err(|error| error.to_string())
+    let metadata = source_path
+        .metadata()
+        .map_err(|error| format!("Failed to stat {}: {error}", source_path.display()))?;
+    let archive_name = archive_entry_name(root, source_path)?;
+
+    if metadata.is_dir() {
+        items.push(ArchiveItem::Directory {
+            source_path: source_path.to_path_buf(),
+            archive_name,
+        });
+
+        let mut children = source_path
+            .read_dir()
+            .map_err(|error| format!("Failed to read {}: {error}", source_path.display()))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| format!("Failed to read {}: {error}", source_path.display()))?;
+        children.sort_by_key(|entry| entry.file_name());
+        for child in children {
+            collect_plan_item(&child.path(), root, items, total_files, total_bytes_total)?;
+        }
+    } else if metadata.is_file() {
+        *total_files += 1;
+        *total_bytes_total += metadata.len();
+        items.push(ArchiveItem::File {
+            source_path: source_path.to_path_buf(),
+            archive_name,
+            size: metadata.len(),
+        });
+    }
+
+    Ok(())
+}
+
+fn archive_entry_name(root: &Path, source_path: &Path) -> Result<String, String> {
+    let relative = source_path
+        .strip_prefix(root)
+        .map_err(|error| format!("Failed to derive archive name: {error}"))?;
+    let mut name = relative.to_string_lossy().replace('\\', "/");
+    if name.is_empty() {
+        name = source_path
+            .file_name()
+            .map(|name| name.to_string_lossy().to_string())
+            .unwrap_or_default();
+    }
+    Ok(name)
+}
+
+fn first_input_parent(inputs: &[BroInputItem]) -> Option<String> {
+    let first = inputs.first()?;
+    Path::new(&first.path)
+        .parent()
+        .map(|path| path.to_string_lossy().to_string())
+}
+
+struct ProgressReader<R> {
+    inner: R,
+    reporter: ProgressReporter,
+    current_file: String,
+    current_file_total: u64,
+    current_file_copied: u64,
+    last_emit: Instant,
+}
+
+impl<R: Read> ProgressReader<R> {
+    fn new(
+        inner: R,
+        reporter: ProgressReporter,
+        current_file: String,
+        current_file_total: u64,
+    ) -> Self {
+        let now = Instant::now();
+        reporter.send_snapshot(
+            Some(current_file.clone()),
+            Some(format!("Compressing {}", current_file)),
+            current_file_total,
+            0,
+            false,
+        );
+        Self {
+            inner,
+            reporter,
+            current_file,
+            current_file_total,
+            current_file_copied: 0,
+            last_emit: now,
+        }
+    }
+}
+
+impl<R: Read> Read for ProgressReader<R> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        if self.reporter.is_cancelled() {
+            return Err(io::Error::new(io::ErrorKind::Interrupted, "Cancelled"));
+        }
+
+        let n = self.inner.read(buf)?;
+        if n == 0 {
+            self.reporter.file_completed(
+                self.current_file.clone(),
+                self.current_file_total,
+                self.current_file_copied,
+            );
+            return Ok(0);
+        }
+
+        let n = n as u64;
+        self.current_file_copied += n;
+        self.reporter
+            .total_bytes_copied
+            .fetch_add(n, Ordering::SeqCst);
+
+        if self.last_emit.elapsed() >= ARCHIVE_PROGRESS_INTERVAL
+            || self.current_file_copied >= self.current_file_total
+        {
+            self.reporter.send_snapshot(
+                Some(self.current_file.clone()),
+                Some(format!("Compressing {}", self.current_file)),
+                self.current_file_total,
+                self.current_file_copied,
+                false,
+            );
+            self.last_emit = Instant::now();
+        }
+
+        Ok(n as usize)
+    }
+}
+
+#[derive(Clone)]
+struct ProgressReporter {
+    tx: mpsc::Sender<ServerMessage>,
+    job_id: String,
+    total_files: usize,
+    total_bytes_total: u64,
+    completed_files: Arc<AtomicUsize>,
+    total_bytes_copied: Arc<AtomicU64>,
+    cancel_flag: Arc<AtomicBool>,
+}
+
+impl ProgressReporter {
+    fn new(
+        tx: mpsc::Sender<ServerMessage>,
+        job_id: String,
+        total_files: usize,
+        total_bytes_total: u64,
+        completed_files: Arc<AtomicUsize>,
+        total_bytes_copied: Arc<AtomicU64>,
+        cancel_flag: Arc<AtomicBool>,
+    ) -> Self {
+        Self {
+            tx,
+            job_id,
+            total_files,
+            total_bytes_total,
+            completed_files,
+            total_bytes_copied,
+            cancel_flag,
+        }
+    }
+
+    fn is_cancelled(&self) -> bool {
+        self.cancel_flag.load(Ordering::SeqCst)
+    }
+
+    fn send_snapshot(
+        &self,
+        current_file: Option<String>,
+        status_text: Option<String>,
+        current_file_total: u64,
+        current_file_copied: u64,
+        completed_file: bool,
+    ) {
+        let completed_files = if completed_file {
+            self.completed_files.fetch_add(1, Ordering::SeqCst) + 1
+        } else {
+            self.completed_files.load(Ordering::SeqCst)
+        };
+        let total_bytes_copied = self.total_bytes_copied.load(Ordering::SeqCst);
+
+        send_progress_sync(
+            &self.tx,
+            &self.job_id,
+            FileOpProgressSchema {
+                total_files: self.total_files,
+                completed_files,
+                current_file,
+                status_text,
+                current_file_bytes_total: current_file_total,
+                current_file_bytes_copied: current_file_copied,
+                total_bytes_total: self.total_bytes_total,
+                total_bytes_copied,
+                current_file_percent: percent(current_file_copied, current_file_total),
+                overall_percent: percent(total_bytes_copied, self.total_bytes_total),
+            },
+        );
+    }
+
+    fn file_completed(
+        &self,
+        current_file: String,
+        current_file_total: u64,
+        current_file_copied: u64,
+    ) {
+        self.send_snapshot(
+            Some(current_file),
+            Some("File compressed".to_string()),
+            current_file_total,
+            current_file_copied,
+            true,
+        );
+    }
+}
+
+fn percent(numerator: u64, denominator: u64) -> Option<u8> {
+    if denominator == 0 {
+        return None;
+    }
+    let pct = ((numerator.saturating_mul(100)) / denominator).min(100);
+    u8::try_from(pct).ok()
+}
+
+fn send_progress_sync(
+    tx: &mpsc::Sender<ServerMessage>,
+    job_id: &str,
+    progress: FileOpProgressSchema,
+) {
+    let _ = tx.try_send(ServerMessage::JobEvent {
+        timestamp: now(),
+        job_id: job_id.to_string(),
+        event: "Progress".to_string(),
+        progress: Some(progress),
+        decision: None,
+        error: None,
+        result_path: None,
+        result_panel_id: None,
+    });
 }
 
 async fn send_progress(
@@ -548,39 +850,52 @@ async fn send_terminal(
     .map_err(|_| ())
 }
 
+struct ArchivePlan {
+    items: Vec<ArchiveItem>,
+    total_files: usize,
+    total_bytes_total: u64,
+}
+
+enum ArchiveItem {
+    Directory {
+        source_path: PathBuf,
+        archive_name: String,
+    },
+    File {
+        source_path: PathBuf,
+        archive_name: String,
+        size: u64,
+    },
+}
+
+struct ArchiveSummary {
+    total_files: usize,
+    total_bytes_total: u64,
+}
+
+enum ArchiveRunError {
+    Cancelled,
+    Failed(String),
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn normalize_progress_keeps_explicit_percents() {
-        let progress = normalize_progress(
-            &FpHostProgress {
-                current_file: Some("movie.mkv".to_string()),
-                status_text: Some("Compressing".to_string()),
-                completed_files: None,
-                total_files: Some(4),
-                current_bytes: None,
-                current_bytes_total: None,
-                total_bytes: None,
-                total_bytes_total: None,
-                current_file_percent: Some(12),
-                overall_percent: Some(54),
-            },
-            4,
-        )
-        .expect("progress should normalize");
-
-        assert_eq!(progress.total_files, 4);
-        assert_eq!(progress.completed_files, 0);
-        assert_eq!(progress.current_file.as_deref(), Some("movie.mkv"));
-        assert_eq!(progress.current_file_percent, Some(12));
-        assert_eq!(progress.overall_percent, Some(54));
+    fn percent_clamps_to_hundred() {
+        assert_eq!(percent(15, 10), Some(100));
+        assert_eq!(percent(5, 10), Some(50));
+        assert_eq!(percent(0, 0), None);
     }
 
     #[test]
-    fn normalize_progress_rejects_empty_payload() {
-        let progress = normalize_progress(&FpHostProgress::default(), 0);
-        assert!(progress.is_none());
+    fn build_methods_keeps_password_optional() {
+        let mut params = HashMap::new();
+        params.insert("compressionLevel".to_string(), "9".to_string());
+        params.insert("password".to_string(), "secret".to_string());
+
+        let methods = seven_zip_methods(&params);
+        assert_eq!(methods.len(), 2);
     }
 }

@@ -1,34 +1,22 @@
-use std::env;
 use std::path::{Path, PathBuf};
 
 use crate::bro::model::{
     BroLaunchInputKind, BroOption, BroOutput, BroParam, BroPre, BroProtocol, BroSource,
     LaunchRecipe, ResolvedBro,
 };
-#[cfg(target_os = "macos")]
-use crate::bro::probe::macos_common_cli_candidates;
-use crate::bro::probe::{find_binary_on_path, resolve_existing_executable};
 use crate::bro::providers::{BroDiscoveryContext, BroProvider};
-use crate::bro::version::native_version;
 
 pub struct SevenZipProvider;
 
 impl BroProvider for SevenZipProvider {
     fn list(&self, ctx: &BroDiscoveryContext<'_>) -> Vec<ResolvedBro> {
-        let Some(seven_zip_program) = find_seven_zip_binary() else {
-            return vec![];
-        };
-        let Some(host_program) = find_fp_host_binary() else {
-            return vec![];
-        };
-
         vec![ResolvedBro {
             option: BroOption {
                 id: "native:7z".to_string(),
                 name: "7z".to_string(),
-                version: native_version(&seven_zip_program),
+                version: "builtin".to_string(),
                 source: BroSource::Native,
-                detail: Some(seven_zip_program.clone()),
+                detail: Some("Built-in 7z encoder".to_string()),
                 protocol: BroProtocol::Fp,
                 output: Some(BroOutput {
                     label: "Archive path".to_string(),
@@ -59,47 +47,9 @@ impl BroProvider for SevenZipProvider {
                     reason: String::new(),
                 },
             },
-            launch: LaunchRecipe::HostedStdio {
-                program: host_program,
-                args: vec![
-                    "--adapter".to_string(),
-                    "seven-zip".to_string(),
-                    "--tool".to_string(),
-                    seven_zip_program,
-                ],
-            },
+            launch: LaunchRecipe::BuiltInSevenZip,
         }]
     }
-}
-
-fn find_seven_zip_binary() -> Option<String> {
-    find_binary_on_path(&["7z", "7zz", "7za", "7zr"]).or_else(|| {
-        explicit_binary_candidates()
-            .into_iter()
-            .find_map(|path| resolve_existing_executable(&path))
-    })
-}
-
-fn explicit_binary_candidates() -> Vec<String> {
-    #[cfg(target_os = "macos")]
-    {
-        return macos_common_cli_candidates(&["7z", "7zz", "7za", "7zr"]);
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    {
-        Vec::new()
-    }
-}
-
-fn find_fp_host_binary() -> Option<String> {
-    let binary_name = if cfg!(windows) {
-        "fp_bro_host.exe"
-    } else {
-        "fp_bro_host"
-    };
-    let path = env::current_exe().ok()?.with_file_name(binary_name);
-    path.is_file().then(|| path.to_string_lossy().to_string())
 }
 
 fn default_output_path(ctx: &BroDiscoveryContext<'_>) -> Option<String> {

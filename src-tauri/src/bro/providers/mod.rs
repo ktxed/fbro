@@ -8,6 +8,8 @@ pub mod macos_media;
 pub mod seven_zip;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub mod tar;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub mod zip;
 
 pub struct BroDiscoveryContext<'a> {
     pub inputs: &'a [BroInputItem],
@@ -29,6 +31,8 @@ pub fn builtin_providers() -> Vec<Box<dyn BroProvider>> {
     providers.push(Box::new(seven_zip::SevenZipProvider));
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     providers.push(Box::new(tar::TarProvider));
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    providers.push(Box::new(zip::ZipProvider));
 
     providers
 }

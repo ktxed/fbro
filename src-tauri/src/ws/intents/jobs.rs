@@ -336,16 +336,16 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
             .tx
             .send(ServerMessage::JobEvent {
                 timestamp: now(),
-            job_id,
-            event: "Paused".to_string(),
-            progress: None,
-            decision: None,
-            error: None,
-            result_path: None,
-            result_panel_id: None,
-        })
-        .await;
-}
+                job_id,
+                event: "Paused".to_string(),
+                progress: None,
+                decision: None,
+                error: None,
+                result_path: None,
+                result_panel_id: None,
+            })
+            .await;
+    }
 }
 
 async fn provide_job_decision(args: &Value, ctx: &mut IntentContext<'_>) {
@@ -405,8 +405,8 @@ async fn cancel_job(args: &Value, ctx: &mut IntentContext<'_>) {
 
         if let Some(job) = state_guard.job_store.jobs.get_mut(&parsed.job_id) {
             match &job.kind {
-                JobKind::FpBro(_) if job.state == JobState::Queued
-                    || job.state == JobState::AwaitingDecision =>
+                JobKind::FpBro(_)
+                    if job.state == JobState::Queued || job.state == JobState::AwaitingDecision =>
                 {
                     job.state = JobState::Cancelled;
                     send_cancelled_event = true;

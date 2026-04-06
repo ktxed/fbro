@@ -4,7 +4,9 @@ use std::path::Path;
 use serde_json::Value;
 use tokio::sync::watch;
 
-use crate::bro::{launch_bro, list_bros, BroInputItem, BroLaunchInputKind, BroProtocol, ResolvedBro};
+use crate::bro::{
+    launch_bro, list_bros, BroInputItem, BroLaunchInputKind, BroProtocol, ResolvedBro,
+};
 use crate::jobs::fp_bro::run_fp_bro;
 use crate::jobs::{AppJob, FileOpProgress, FpBroJobMeta, JobKind, JobState};
 use crate::ws::intents::arg_str;
@@ -76,10 +78,13 @@ async fn list_bros_for_request(scope: &Value, args: &Value, ctx: &mut IntentCont
 
     let (result, result_panel_id) = {
         let state_guard = ctx.state.lock().await;
-        let result_panel_id = Some(other_panel_id(&state_guard, &panel_id).unwrap_or_else(|| panel_id.clone()));
+        let result_panel_id =
+            Some(other_panel_id(&state_guard, &panel_id).unwrap_or_else(|| panel_id.clone()));
         let result = match state_guard.panels.get(&panel_id) {
             Some(panel) => match state_guard.drivers.get(&panel.source_id) {
-                Some(driver) => resolve_inputs(panel, driver.as_ref(), parsed.target_path.as_deref()),
+                Some(driver) => {
+                    resolve_inputs(panel, driver.as_ref(), parsed.target_path.as_deref())
+                }
                 None => Err("Source driver is not available.".to_string()),
             },
             None => Err("Panel not found.".to_string()),
@@ -104,21 +109,24 @@ async fn list_bros_for_request(scope: &Value, args: &Value, ctx: &mut IntentCont
 
     let lookup_inputs = inputs.clone();
     let suggested_output_dir = parsed.suggested_output_dir.clone();
-    let bros =
-        match tokio::task::spawn_blocking(move || list_bros(&lookup_inputs, suggested_output_dir.as_deref())).await {
-            Ok(bros) => bros,
-            Err(_) => {
-                let _ = ctx
-                    .tx
-                    .send(ServerMessage::BroOptionsFailed {
-                        timestamp: now(),
-                        request_id: parsed.request_id,
-                        message: "Bro discovery failed.".to_string(),
-                    })
-                    .await;
-                return;
-            }
-        };
+    let bros = match tokio::task::spawn_blocking(move || {
+        list_bros(&lookup_inputs, suggested_output_dir.as_deref())
+    })
+    .await
+    {
+        Ok(bros) => bros,
+        Err(_) => {
+            let _ = ctx
+                .tx
+                .send(ServerMessage::BroOptionsFailed {
+                    timestamp: now(),
+                    request_id: parsed.request_id,
+                    message: "Bro discovery failed.".to_string(),
+                })
+                .await;
+            return;
+        }
+    };
     let input_schemas = inputs
         .iter()
         .map(|input| BroInputSchema {
@@ -216,7 +224,12 @@ async fn launch_selected_bro(args: &Value, ctx: &mut IntentContext<'_>) {
 
     match bro.option.protocol {
         BroProtocol::Fnf => {
-            if let Err(message) = launch_bro(&request.inputs, &bro, parsed.output.as_deref(), &parsed.params) {
+            if let Err(message) = launch_bro(
+                &request.inputs,
+                &bro,
+                parsed.output.as_deref(),
+                &parsed.params,
+            ) {
                 let _ = ctx
                     .tx
                     .send(ServerMessage::Error {
@@ -233,7 +246,9 @@ async fn launch_selected_bro(args: &Value, ctx: &mut IntentContext<'_>) {
             }
         }
         BroProtocol::Fp => {
-            if let Err(message) = launch_fp_bro(request, bro, parsed.output, parsed.params, ctx).await {
+            if let Err(message) =
+                launch_fp_bro(request, bro, parsed.output, parsed.params, ctx).await
+            {
                 let _ = ctx
                     .tx
                     .send(ServerMessage::Error {
@@ -266,8 +281,13 @@ async fn launch_fp_bro(
     validate_bro_params(&bro, &launch_params)?;
 
     let output_exists = Path::new(&output_path).exists();
-    let source_path = first_input_parent(&request.inputs)
-        .unwrap_or_else(|| request.inputs.first().map(|input| input.path.clone()).unwrap_or_default());
+    let source_path = first_input_parent(&request.inputs).unwrap_or_else(|| {
+        request
+            .inputs
+            .first()
+            .map(|input| input.path.clone())
+            .unwrap_or_default()
+    });
     let file_schemas = bro_input_files(&request.inputs);
 
     let job_id = {
@@ -556,12 +576,12 @@ fn validate_output_path(output_path: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn validate_bro_params(
-    bro: &ResolvedBro,
-    params: &HashMap<String, String>,
-) -> Result<(), String> {
+fn validate_bro_params(bro: &ResolvedBro, params: &HashMap<String, String>) -> Result<(), String> {
     for param in &bro.option.params {
-        let value = params.get(&param.id).map(|value| value.trim()).unwrap_or("");
+        let value = params
+            .get(&param.id)
+            .map(|value| value.trim())
+            .unwrap_or("");
         if param.required && value.is_empty() {
             return Err(format!("Missing required input: {}", param.label));
         }
@@ -570,9 +590,9 @@ fn validate_bro_params(
         }
         match param.kind {
             BroLaunchInputKind::Int => {
-                let parsed = value.parse::<i32>().map_err(|_| {
-                    format!("{} must be a whole number.", param.label)
-                })?;
+                let parsed = value
+                    .parse::<i32>()
+                    .map_err(|_| format!("{} must be a whole number.", param.label))?;
                 if let Some(min) = param.min_value {
                     if parsed < min {
                         return Err(format!("{} must be at least {}.", param.label, min));
@@ -602,7 +622,11 @@ fn job_state_wire(state: &JobState) -> &'static str {
 }
 
 fn other_panel_id(state: &crate::state::AppState, panel_id: &str) -> Option<String> {
-    state.panels.keys().find(|id| id.as_str() != panel_id).cloned()
+    state
+        .panels
+        .keys()
+        .find(|id| id.as_str() != panel_id)
+        .cloned()
 }
 
 fn first_input_parent(inputs: &[BroInputItem]) -> Option<String> {

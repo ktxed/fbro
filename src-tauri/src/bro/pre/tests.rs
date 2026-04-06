@@ -11,7 +11,7 @@ fn bro(name: &str) -> ResolvedBro {
             version: "unknown".to_string(),
             source: BroSource::Native,
             detail: None,
-            protocol: if name == "tar" {
+            protocol: if name == "tar" || name == "zip" || name == "7z" {
                 BroProtocol::Fp
             } else {
                 BroProtocol::Fnf
@@ -52,7 +52,10 @@ fn tar_sorts_above_media_bros_for_folder_selection() {
     }];
     let bros = rank_bros(&inputs, vec![bro("mpv"), bro("tar")]);
     assert_eq!(bros[0].option.name, "tar");
-    assert_eq!(bros[0].option.pre.reason, "Strong fit for bundling files and folders");
+    assert_eq!(
+        bros[0].option.pre.reason,
+        "Strong fit for bundling files and folders"
+    );
 }
 
 #[test]
@@ -71,5 +74,24 @@ fn seven_zip_sorts_above_tar_for_archive_selection() {
     ];
     let bros = rank_bros(&inputs, vec![bro("tar"), bro("7z")]);
     assert_eq!(bros[0].option.name, "7z");
+    assert!(bros[0].option.pre.score > bros[1].option.pre.score);
+}
+
+#[test]
+fn zip_sorts_above_tar_for_archive_selection() {
+    let inputs = vec![
+        BroInputItem {
+            path: "/tmp/source/a.txt".to_string(),
+            name: "a.txt".to_string(),
+            kind: "file".to_string(),
+        },
+        BroInputItem {
+            path: "/tmp/source/b.txt".to_string(),
+            name: "b.txt".to_string(),
+            kind: "file".to_string(),
+        },
+    ];
+    let bros = rank_bros(&inputs, vec![bro("tar"), bro("zip")]);
+    assert_eq!(bros[0].option.name, "zip");
     assert!(bros[0].option.pre.score > bros[1].option.pre.score);
 }

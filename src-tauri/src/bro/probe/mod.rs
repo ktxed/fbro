@@ -1,7 +1,6 @@
 mod path;
 
 pub(crate) use path::find_binary_on_path;
-pub(crate) use path::resolve_existing_executable;
 
 #[cfg(target_os = "linux")]
 mod flatpak;

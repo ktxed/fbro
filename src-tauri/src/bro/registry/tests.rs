@@ -143,7 +143,11 @@ fn builds_tar_command_with_launch_input_and_input_names() {
         },
     };
     let (program, args, cwd) = bro
-        .build_command(&sample_inputs(), Some("/tmp/out/archive.tar"), &HashMap::new())
+        .build_command(
+            &sample_inputs(),
+            Some("/tmp/out/archive.tar"),
+            &HashMap::new(),
+        )
         .unwrap();
     assert_eq!(program, "tar");
     assert_eq!(args, vec!["-cf", "/tmp/out/archive.tar", "a.mp4", "b.mp3"]);

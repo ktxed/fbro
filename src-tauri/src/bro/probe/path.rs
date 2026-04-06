@@ -15,10 +15,12 @@ pub(crate) fn find_binary_on_path(candidates: &[&str]) -> Option<String> {
     })
 }
 
+#[allow(dead_code)]
 pub(crate) fn executable_exists(path: &str) -> bool {
     Path::new(path).is_file()
 }
 
+#[allow(dead_code)]
 pub(crate) fn resolve_existing_executable(path: &str) -> Option<String> {
     executable_exists(path).then(|| path.to_string())
 }
