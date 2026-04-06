@@ -104,7 +104,7 @@ pub(crate) fn build_interactive_commands() -> Vec<InteractiveCommandSchema> {
             "panel.pass_to_bro",
             "File",
             "Pass to Bro",
-            vec![keybinding("F1")],
+            vec![toolbar_binding("F1", "1")],
             Some("ListBros"),
         ),
         command(
