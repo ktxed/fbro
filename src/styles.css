@@ -381,9 +381,57 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 8px;
 }
 
 .panel--focused .panel__footer {
+  color: var(--text);
+}
+
+.panel__footer-left,
+.panel__footer-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.panel__footer-left {
+  flex: 1;
+  overflow: hidden;
+}
+
+.panel__footer-right {
+  flex-shrink: 0;
+}
+
+.panel__footer-status {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.panel__selection-clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.panel__selection-clear:hover {
+  background: var(--bg-focused);
+  border-color: var(--border-focus);
   color: var(--text);
 }
 

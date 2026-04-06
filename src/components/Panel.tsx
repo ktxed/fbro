@@ -477,6 +477,15 @@ export function Panel({ panelId, panel, isFocused, modalActive, client, sources,
     ? `${formatBytes(source.freeBytes)} / ${formatBytes(source.totalBytes)} free`
     : "";
 
+  function handleClearSelection() {
+    shouldFocusFilterRef.current = false;
+    if (!isFocused && !modalActive) {
+      client.sendIntent("SwitchFocus", undefined, { to: panelId });
+    }
+    client.sendIntent("ClearSelection", panelId);
+    focusDivRef.current?.focus();
+  }
+
   function renderRow(entry: VFSEntry, absIndex: number) {
     return (
       <div
@@ -626,9 +635,26 @@ export function Panel({ panelId, panel, isFocused, modalActive, client, sources,
       )}
 
       <div className="panel__footer">
-        <span>{statusText}</span>
-        {panel.filter && <span className="panel__filter-active">/{panel.filter.value}/</span>}
-        {diskText && <span>{diskText}</span>}
+        <div className="panel__footer-left">
+          {selCount > 0 && (
+            <button
+              className="panel__selection-clear"
+              tabIndex={-1}
+              type="button"
+              title="Clear selection"
+              aria-label="Clear selection"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={handleClearSelection}
+            >
+              ×
+            </button>
+          )}
+          <span className="panel__footer-status">{statusText}</span>
+        </div>
+        <div className="panel__footer-right">
+          {panel.filter && <span className="panel__filter-active">/{panel.filter.value}/</span>}
+          {diskText && <span>{diskText}</span>}
+        </div>
       </div>
     </div>
   );
