@@ -1,4 +1,4 @@
-use crate::bro::probe::resolve_existing_executable;
+use super::path::resolve_existing_executable;
 use std::path::PathBuf;
 
 pub(crate) fn macos_app_exists(bundle_path: &str) -> bool {
