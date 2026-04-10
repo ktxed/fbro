@@ -42,6 +42,7 @@ struct StartFileOpArgs {
 
 struct PasteExternalClipboardArgs {
     panel_id: String,
+    preferred_op: Option<String>,
 }
 
 impl StartFileOpArgs {
@@ -68,6 +69,7 @@ impl PasteExternalClipboardArgs {
     fn from_args(args: &Value) -> Self {
         Self {
             panel_id: arg_str(args, "panelId").unwrap_or("").to_string(),
+            preferred_op: arg_str(args, "preferredOp").map(str::to_string),
         }
     }
 }
@@ -144,7 +146,9 @@ fn normalize_source_path(path: &str) -> String {
 }
 
 fn source_root_matches_path(root_path: &str, source_path: &str) -> bool {
-    let normalized_root = normalize_source_path(root_path).trim_end_matches('/').to_string();
+    let normalized_root = normalize_source_path(root_path)
+        .trim_end_matches('/')
+        .to_string();
     let normalized_path = normalize_source_path(source_path);
 
     if normalized_root.is_empty() || normalized_root == "/" {
@@ -166,6 +170,33 @@ fn resolve_source_id_for_path(state: &crate::state::AppState, source_path: &str)
         .filter(|source| source_root_matches_path(&source.root_path, source_path))
         .max_by_key(|source| source.root_path.len())
         .map(|source| source.id.clone())
+        .or_else(|| fallback_local_source_id(state, source_path))
+}
+
+#[cfg(target_os = "macos")]
+fn fallback_local_source_id(state: &crate::state::AppState, source_path: &str) -> Option<String> {
+    if !Path::new(source_path).is_absolute() {
+        return None;
+    }
+
+    state
+        .sources
+        .values()
+        .filter(|source| {
+            source.mounted && source.kind == "filesystem" && state.drivers.contains_key(&source.id)
+        })
+        .min_by(|a, b| {
+            a.root_path
+                .len()
+                .cmp(&b.root_path.len())
+                .then_with(|| a.id.cmp(&b.id))
+        })
+        .map(|source| source.id.clone())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn fallback_local_source_id(_state: &crate::state::AppState, _source_path: &str) -> Option<String> {
+    None
 }
 
 fn resolve_common_driver_for_paths(
@@ -179,7 +210,10 @@ fn resolve_common_driver_for_paths(
             .ok_or_else(|| format!("Clipboard item is not on a mounted source: {source_path}"))?;
         if let Some(current) = &source_id {
             if current != &resolved {
-                return Err("Clipboard items from multiple mounted sources are not supported yet.".to_string());
+                return Err(
+                    "Clipboard items from multiple mounted sources are not supported yet."
+                        .to_string(),
+                );
             }
         } else {
             source_id = Some(resolved);
@@ -217,7 +251,11 @@ fn schema_from_source_path(source_path: &str) -> Result<FileOpFileSchema, String
 
     Ok(FileOpFileSchema {
         name: file_name,
-        size: if file_type.is_file() { Some(metadata.len()) } else { None },
+        size: if file_type.is_file() {
+            Some(metadata.len())
+        } else {
+            None
+        },
         kind: kind.to_string(),
         source_path: Some(source_path.replace('\\', "/")),
     })
@@ -264,22 +302,23 @@ async fn paste_external_clipboard(args: &Value, ctx: &mut IntentContext<'_>) {
         )
     };
 
-    let payload = match tokio::task::spawn_blocking(move || platform.read_external_file_clipboard()).await {
-        Ok(Ok(payload)) => payload,
-        Ok(Err(error)) => {
-            let _ = send_error(ctx, "PASTE_EXTERNAL_CLIPBOARD_ERROR", error).await;
-            return;
-        }
-        Err(error) => {
-            let _ = send_error(
-                ctx,
-                "PASTE_EXTERNAL_CLIPBOARD_ERROR",
-                format!("Failed to read the system clipboard: {error}"),
-            )
-            .await;
-            return;
-        }
-    };
+    let payload =
+        match tokio::task::spawn_blocking(move || platform.read_external_file_clipboard()).await {
+            Ok(Ok(payload)) => payload,
+            Ok(Err(error)) => {
+                let _ = send_error(ctx, "PASTE_EXTERNAL_CLIPBOARD_ERROR", error).await;
+                return;
+            }
+            Err(error) => {
+                let _ = send_error(
+                    ctx,
+                    "PASTE_EXTERNAL_CLIPBOARD_ERROR",
+                    format!("Failed to read the system clipboard: {error}"),
+                )
+                .await;
+                return;
+            }
+        };
 
     let Some(payload) = payload else {
         let _ = send_error(
@@ -321,9 +360,13 @@ async fn paste_external_clipboard(args: &Value, ctx: &mut IntentContext<'_>) {
         files
     };
 
-    let op_type = match payload.op {
-        ExternalClipboardOp::Copy => "copy",
-        ExternalClipboardOp::Move => "move",
+    let op_type = match parsed.preferred_op.as_deref() {
+        Some("move") => "move",
+        Some("copy") => "copy",
+        _ => match payload.op {
+            ExternalClipboardOp::Copy => "copy",
+            ExternalClipboardOp::Move => "move",
+        },
     };
 
     let _ = ctx
@@ -373,7 +416,8 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
                     })
                 })
                 .collect::<Result<_, _>>()?;
-            let (_source_id, driver) = resolve_common_driver_for_paths(&state_guard, &explicit_paths)?;
+            let (_source_id, driver) =
+                resolve_common_driver_for_paths(&state_guard, &explicit_paths)?;
             let files = parsed
                 .files
                 .iter()

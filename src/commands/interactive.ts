@@ -32,6 +32,7 @@ export const GLOBAL_SHORTCUT_COMMAND_IDS = [
   "panel.navigate_source_root",
   "file.info",
   "file.paste_external",
+  "file.paste_external_move",
   ...TOOLBAR_COMMAND_IDS,
 ] as const;
 
@@ -79,7 +80,7 @@ const KEY_LABELS: Record<string, string> = {
   ArrowRight: "Right",
 };
 
-type KeyboardLikeEvent = Pick<KeyboardEvent, "key" | "shiftKey" | "ctrlKey" | "altKey" | "metaKey">;
+type KeyboardLikeEvent = Pick<KeyboardEvent, "key" | "shiftKey" | "ctrlKey" | "altKey" | "metaKey" | "code">;
 
 interface ExecuteCommandContext {
   state: AppState;
@@ -396,6 +397,10 @@ export function formatPrimaryBinding(command?: InteractiveCommand) {
 export function bindingMatches(event: KeyboardLikeEvent, binding: KeyBinding) {
   const normalizedEventKey = normalizeKey(event.key);
   const normalizedBindingKey = normalizeKey(binding.key);
+  const matchesPhysicalLetterKey =
+    normalizedBindingKey.length === 1
+    && /^[a-z]$/i.test(normalizedBindingKey)
+    && event.code === `Key${normalizedBindingKey.toUpperCase()}`;
   const isShiftProducedSymbol =
     normalizedEventKey === normalizedBindingKey
     && normalizedBindingKey.length === 1
@@ -404,7 +409,7 @@ export function bindingMatches(event: KeyboardLikeEvent, binding: KeyBinding) {
     && !binding.shift
     && event.shiftKey;
 
-  return normalizeKey(event.key) === normalizeKey(binding.key)
+  return (normalizedEventKey === normalizedBindingKey || matchesPhysicalLetterKey)
     && (isShiftProducedSymbol || !!binding.shift === event.shiftKey)
     && !!binding.ctrl === event.ctrlKey
     && !!binding.alt === event.altKey
@@ -452,6 +457,13 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
     case "file.paste_external":
       if (!focused) return false;
       client.sendIntent("PasteExternalClipboard", undefined, { panelId: focused.panelId });
+      return true;
+    case "file.paste_external_move":
+      if (!focused) return false;
+      client.sendIntent("PasteExternalClipboard", undefined, {
+        panelId: focused.panelId,
+        preferredOp: "move",
+      });
       return true;
     case "file.mkdir":
       if (!focused) return false;

@@ -143,6 +143,17 @@ pub(crate) fn build_interactive_commands() -> Vec<InteractiveCommandSchema> {
             Some("PasteExternalClipboard"),
         ),
         command(
+            "file.paste_external_move",
+            "File Operation",
+            "Paste External Clipboard As Move",
+            if is_macos() {
+                vec![keybinding_with_modifiers("v", false, false, true, true)]
+            } else {
+                vec![]
+            },
+            Some("PasteExternalClipboard"),
+        ),
+        command(
             "file.mkdir",
             "File",
             "Create Directory",
