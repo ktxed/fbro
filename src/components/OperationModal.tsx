@@ -189,8 +189,10 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
       setSubmitted(true);
       client.sendIntent("StartFileOp", undefined, {
         opType: pending.opType,
+        files: pending.files,
         sourcePanel: pending.sourcePanel,
         destPanel: pending.destPanel,
+        destPath: pending.destPath,
         conflictPolicy,
         background,
         ...(background && startPaused ? { startPaused: true } : {}),

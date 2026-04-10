@@ -393,11 +393,11 @@ pub struct JobStartSchema {
     pub result_panel_id: Option<String>,
 }
 
-#[derive(Serialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct FileOpFileSchema {
-    pub name: String,
-    pub size: Option<u64>,
-    pub kind: String,
+  pub name: String,
+  pub size: Option<u64>,
+  pub kind: String,
 }
 
 // ─── Incoming (FE → BE) ───────────────────────────────────────────────────────

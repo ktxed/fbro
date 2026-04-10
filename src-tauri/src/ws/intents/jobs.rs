@@ -28,11 +28,13 @@ pub(crate) async fn handle(name: &str, _scope: &Value, args: &Value, ctx: &mut I
 struct StartFileOpArgs {
     source_panel: String,
     dest_panel: Option<String>,
+    dest_path: Option<String>,
     op_type: String,
     conflict_policy: String,
     background: bool,
     start_paused: bool,
     dry_mode: bool,
+    files: Vec<FileOpFileSchema>,
 }
 
 impl StartFileOpArgs {
@@ -40,11 +42,17 @@ impl StartFileOpArgs {
         Self {
             source_panel: arg_str(args, "sourcePanel").unwrap_or("").to_string(),
             dest_panel: arg_str(args, "destPanel").map(String::from),
+            dest_path: arg_str(args, "destPath").map(String::from),
             op_type: arg_str(args, "opType").unwrap_or("copy").to_string(),
             conflict_policy: arg_str(args, "conflictPolicy").unwrap_or("ask").to_string(),
             background: arg_bool(args, "background", false),
             start_paused: arg_bool(args, "startPaused", false),
             dry_mode: arg_bool(args, "dryMode", false),
+            files: args
+                .get("files")
+                .cloned()
+                .and_then(|value| serde_json::from_value(value).ok())
+                .unwrap_or_default(),
         }
     }
 }
@@ -133,23 +141,36 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
             .cloned()
             .unwrap();
 
-        let indices: Vec<usize> = if source_panel.selection.is_empty() {
-            vec![source_panel.cursor]
-        } else {
-            source_panel.selection.clone()
-        };
+        let files: Vec<FileOpEntry> = if parsed.files.is_empty() {
+            let indices: Vec<usize> = if source_panel.selection.is_empty() {
+                vec![source_panel.cursor]
+            } else {
+                source_panel.selection.clone()
+            };
 
-        let files: Vec<FileOpEntry> = indices
-            .iter()
-            .filter_map(|&index| {
-                source_panel.entries.get(index).map(|entry| FileOpEntry {
-                    name: entry.name.clone(),
-                    source_path: src_driver.resolve_child(&source_panel.path, &entry.name),
-                    size: entry.size,
-                    kind: entry.kind.clone(),
+            indices
+                .iter()
+                .filter_map(|&index| {
+                    source_panel.entries.get(index).map(|entry| FileOpEntry {
+                        name: entry.name.clone(),
+                        source_path: src_driver.resolve_child(&source_panel.path, &entry.name),
+                        size: entry.size,
+                        kind: entry.kind.clone(),
+                    })
                 })
-            })
-            .collect();
+                .collect()
+        } else {
+            parsed
+                .files
+                .iter()
+                .map(|file| FileOpEntry {
+                    name: file.name.clone(),
+                    source_path: src_driver.resolve_child(&source_panel.path, &file.name),
+                    size: file.size,
+                    kind: file.kind.clone(),
+                })
+                .collect()
+        };
 
         let (dest_path, dst_driver) = if op_type != FileOpType::Delete {
             if let Some(dest_panel) = parsed
@@ -162,7 +183,15 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
                     .get(&dest_panel.source_id)
                     .cloned()
                     .unwrap();
-                (Some(dest_panel.path.clone()), Some(driver))
+                (
+                    parsed
+                        .dest_path
+                        .clone()
+                        .or_else(|| Some(dest_panel.path.clone())),
+                    Some(driver),
+                )
+            } else if parsed.dest_path.is_some() {
+                (parsed.dest_path.clone(), Some(Arc::clone(&src_driver)))
             } else {
                 (None, None)
             }

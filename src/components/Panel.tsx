@@ -47,6 +47,12 @@ interface PanelProps {
   client: WsClient;
   sources: Record<string, Source>;
   otherPanelId: string;
+  onRowPointerDown: (payload: { absIndex: number; clientX: number; clientY: number }) => void;
+  dragActive: boolean;
+  dragSource: boolean;
+  dragHovered: boolean;
+  dragDropAllowed: boolean;
+  dragHoverAbsIndex: number | null;
 }
 
 function VolumeHeader({ sources, panel, onNavigateToSource, onMountSource }: {
@@ -156,7 +162,21 @@ function formatMtime(mtime: string | undefined): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
-export function Panel({ panelId, panel, isFocused, modalActive, client, sources, otherPanelId }: PanelProps) {
+export function Panel({
+  panelId,
+  panel,
+  isFocused,
+  modalActive,
+  client,
+  sources,
+  otherPanelId,
+  onRowPointerDown,
+  dragActive,
+  dragSource,
+  dragHovered,
+  dragDropAllowed,
+  dragHoverAbsIndex,
+}: PanelProps) {
   const appState = useAppState();
   const dispatch = useAppDispatch();
   const listRef = useRef<HTMLDivElement>(null);
@@ -495,6 +515,7 @@ export function Panel({ panelId, panel, isFocused, modalActive, client, sources,
           "panel__row",
           absIndex === panel.cursor ? "panel__row--cursor" : "",
           selectionSet.has(absIndex) ? "panel__row--selected" : "",
+          dragActive && dragDropAllowed && dragHoverAbsIndex === absIndex ? "panel__row--drop-target" : "",
         ].filter(Boolean).join(" ")}
         style={isWindowed ? { position: "absolute", top: absIndex * ROW_HEIGHT, height: ROW_HEIGHT, left: 0, right: 0 } : undefined}
         onMouseDown={(e) => {
@@ -515,7 +536,7 @@ export function Panel({ panelId, panel, isFocused, modalActive, client, sources,
           }
           dispatch({ type: "CLOSE_CONTEXT_MENU" });
           if (!isFocused) client.sendIntent("SwitchFocus", undefined, { to: panelId });
-          client.sendIntent("SetCursor", "focused-panel", { index: absIndex });
+          onRowPointerDown({ absIndex, clientX: e.clientX, clientY: e.clientY });
         }}
         onMouseEnter={() => {
           const drag = rightDrag.current;
@@ -572,7 +593,14 @@ export function Panel({ panelId, panel, isFocused, modalActive, client, sources,
 
   return (
     <div
-      className={`panel ${isFocused ? "panel--focused" : ""}`}
+      className={[
+        "panel",
+        isFocused ? "panel--focused" : "",
+        dragActive && dragSource ? "panel--drag-source" : "",
+        dragActive && dragHovered ? "panel--drag-hover" : "",
+        dragActive && dragDropAllowed ? "panel--drag-hover-valid" : "",
+      ].filter(Boolean).join(" ")}
+      data-panel-id={panelId}
       ref={focusDivRef}
       tabIndex={0}
       onKeyDown={handleKeyDown}

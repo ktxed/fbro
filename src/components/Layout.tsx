@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { Panel } from "./Panel";
 import { OperationModal } from "./OperationModal";
 import { QuitModal } from "./QuitModal";
@@ -12,7 +13,8 @@ import { CommandPaletteModal } from "./CommandPaletteModal";
 import { ContextMenu } from "./ContextMenu";
 import { OpenWithModal } from "./OpenWithModal";
 import { BroModal } from "./BroModal";
-import { useAppState } from "../store";
+import { useAppDispatch, useAppState } from "../store";
+import type { FileOpFile, FileOpType, PanelState, VFSEntry } from "../ws/types";
 import type { WsClient } from "../ws/client";
 
 interface LayoutProps {
@@ -22,10 +24,206 @@ interface LayoutProps {
   onOpenJobsView: () => void;
 }
 
+interface DragCandidate {
+  sourcePanelId: string;
+  sourcePath: string;
+  absIndex: number;
+  clientX: number;
+  clientY: number;
+  files: FileOpFile[] | null;
+  sourceAbsIndices: number[] | null;
+}
+
+interface ActiveDragSession {
+  sourcePanelId: string;
+  sourcePath: string;
+  anchorAbsIndex: number;
+  files: FileOpFile[];
+  sourceAbsIndices: number[];
+  sourceNames: string[];
+  pointerX: number;
+  pointerY: number;
+  hoverPanelId: string | null;
+  hoverAbsIndex: number | null;
+  dropDestPath: string | null;
+  dropAllowed: boolean;
+  opType: FileOpType;
+}
+
+const DRAG_THRESHOLD_PX = 6;
+
+function normalizeDirPath(path: string): string {
+  const normalized = path.replace(/\\/g, "/").replace(/\/+$/, "");
+  return normalized || "/";
+}
+
+function joinChildPath(dirPath: string, name: string): string {
+  const base = normalizeDirPath(dirPath);
+  return base === "/" ? `/${name}` : `${base}/${name}`;
+}
+
+function getEntryAtAbsIndex(panel: PanelState, absIndex: number): VFSEntry | null {
+  const isWindowed = panel.totalCount !== undefined && panel.totalCount > panel.entries.length;
+  if (isWindowed) {
+    const windowStart = panel.windowStart ?? 0;
+    if (absIndex < windowStart || absIndex >= windowStart + panel.entries.length) return null;
+    return panel.entries[absIndex - windowStart] ?? null;
+  }
+  return panel.entries[absIndex] ?? null;
+}
+
+function resolveDropTarget(
+  drag: ActiveDragSession,
+  panels: Record<string, PanelState>,
+  clientX: number,
+  clientY: number,
+) {
+  const hoveredElement = document.elementFromPoint(clientX, clientY);
+  const panelElement = hoveredElement?.closest<HTMLElement>("[data-panel-id]");
+  const hoverPanelId = panelElement?.dataset.panelId ?? null;
+
+  if (!hoverPanelId || hoverPanelId === drag.sourcePanelId) {
+    return {
+      hoverPanelId,
+      hoverAbsIndex: null,
+      dropDestPath: null,
+      dropAllowed: false,
+    };
+  }
+
+  const targetPanel = panels[hoverPanelId];
+  if (!targetPanel) {
+    return {
+      hoverPanelId,
+      hoverAbsIndex: null,
+      dropDestPath: null,
+      dropAllowed: false,
+    };
+  }
+
+  const rowElement = hoveredElement?.closest<HTMLElement>("[data-abs-index]");
+  const hoverAbsIndex = rowElement ? Number.parseInt(rowElement.dataset.absIndex ?? "", 10) : null;
+  const resolvedHoverAbsIndex = hoverAbsIndex !== null && Number.isFinite(hoverAbsIndex) ? hoverAbsIndex : null;
+  const samePath = normalizeDirPath(targetPanel.path) === drag.sourcePath;
+
+  if (!samePath) {
+    return {
+      hoverPanelId,
+      hoverAbsIndex: resolvedHoverAbsIndex,
+      dropDestPath: targetPanel.path,
+      dropAllowed: true,
+    };
+  }
+
+  const hoverEntry = resolvedHoverAbsIndex !== null ? getEntryAtAbsIndex(targetPanel, resolvedHoverAbsIndex) : null;
+  const dropAllowed = !!hoverEntry
+    && hoverEntry.kind === "directory"
+    && hoverEntry.name !== ".."
+    && !drag.sourceNames.includes(hoverEntry.name);
+
+  return {
+    hoverPanelId,
+    hoverAbsIndex: resolvedHoverAbsIndex,
+    dropDestPath: dropAllowed && hoverEntry ? joinChildPath(targetPanel.path, hoverEntry.name) : null,
+    dropAllowed,
+  };
+}
+
 export function Layout({ client, jobsViewOpen, onCloseJobsView, onOpenJobsView }: LayoutProps) {
   const state = useAppState();
+  const dispatch = useAppDispatch();
+  const [dragCandidate, setDragCandidate] = useState<DragCandidate | null>(null);
+  const [activeDrag, setActiveDrag] = useState<ActiveDragSession | null>(null);
 
   const panelIds = state.layout.panels.length > 0 ? state.layout.panels : Object.keys(state.panels);
+
+  useEffect(() => {
+    if (!dragCandidate && !activeDrag) return;
+
+    const handleMouseMove = (event: MouseEvent) => {
+      setActiveDrag((current) => {
+        if (current) {
+          const nextOpType: FileOpType = event.shiftKey ? "move" : "copy";
+          const drop = resolveDropTarget(current, state.panels, event.clientX, event.clientY);
+          return {
+            ...current,
+            pointerX: event.clientX,
+            pointerY: event.clientY,
+            opType: nextOpType,
+            ...drop,
+          };
+        }
+
+        if (!dragCandidate) return null;
+
+        const distance = Math.hypot(event.clientX - dragCandidate.clientX, event.clientY - dragCandidate.clientY);
+        if (distance < DRAG_THRESHOLD_PX || !dragCandidate.files || !dragCandidate.sourceAbsIndices) {
+          return null;
+        }
+
+        const nextOpType: FileOpType = event.shiftKey ? "move" : "copy";
+        const nextDrag: ActiveDragSession = {
+          sourcePanelId: dragCandidate.sourcePanelId,
+          sourcePath: dragCandidate.sourcePath,
+          anchorAbsIndex: dragCandidate.absIndex,
+          files: dragCandidate.files,
+          sourceAbsIndices: dragCandidate.sourceAbsIndices,
+          sourceNames: dragCandidate.files.map((file) => file.name),
+          pointerX: event.clientX,
+          pointerY: event.clientY,
+          hoverPanelId: null,
+          hoverAbsIndex: null,
+          dropDestPath: null,
+          dropAllowed: false,
+          opType: nextOpType,
+        };
+        return { ...nextDrag, ...resolveDropTarget(nextDrag, state.panels, event.clientX, event.clientY) };
+      });
+    };
+
+    const handleMouseUp = () => {
+      if (activeDrag) {
+        if (activeDrag.dropAllowed && activeDrag.hoverPanelId && activeDrag.dropDestPath) {
+          dispatch({
+            type: "OPEN_OPERATION",
+            op: {
+              opType: activeDrag.opType,
+              files: activeDrag.files,
+              sourcePanel: activeDrag.sourcePanelId,
+              destPanel: activeDrag.hoverPanelId,
+              destPath: activeDrag.dropDestPath,
+              conflictPolicy: "ask",
+            },
+          });
+        } else {
+          dispatch({ type: "CLOSE_CONTEXT_MENU" });
+        }
+      } else if (dragCandidate) {
+        dispatch({ type: "CLOSE_CONTEXT_MENU" });
+        client.sendIntent("SetCursor", dragCandidate.sourcePanelId, { index: dragCandidate.absIndex });
+      }
+
+      setDragCandidate(null);
+      setActiveDrag(null);
+    };
+
+    const handleShiftChange = (event: KeyboardEvent) => {
+      if (event.key !== "Shift") return;
+      setActiveDrag((current) => current ? { ...current, opType: event.type === "keydown" ? "move" : "copy" } : current);
+    };
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+    window.addEventListener("keydown", handleShiftChange);
+    window.addEventListener("keyup", handleShiftChange);
+
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+      window.removeEventListener("keydown", handleShiftChange);
+      window.removeEventListener("keyup", handleShiftChange);
+    };
+  }, [activeDrag, client, dispatch, dragCandidate, state.panels]);
 
   if (panelIds.length === 0) {
     return <div className="layout__empty">Connecting…</div>;
@@ -34,9 +232,17 @@ export function Layout({ client, jobsViewOpen, onCloseJobsView, onOpenJobsView }
   const activeJob = state.activeJobId ? state.jobs[state.activeJobId] ?? null : null;
   const modalActive = state.pendingOp !== null || state.activeJobId !== null || state.pendingQuit !== null || state.pendingRename !== null || state.pendingInfo !== null || state.pendingMkdir !== null || state.pendingNoEditor !== null || state.pendingGoToPath !== null || state.pendingPanelHistory !== null || state.pendingDryRun !== null || state.pendingContextMenu !== null || state.pendingOpenWith !== null || state.pendingBro !== null || state.commandPaletteOpen || jobsViewOpen;
 
+  const dragCursorClass = activeDrag
+    ? activeDrag.dropAllowed
+      ? activeDrag.opType === "move"
+        ? "layout--drag-move"
+        : "layout--drag-copy"
+      : "layout--drag-no-drop"
+    : "";
+
   return (
     <>
-      <div className="layout">
+      <div className={`layout ${dragCursorClass}`.trim()}>
         {panelIds.map((id) => {
           const panel = state.panels[id];
           if (!panel) return null;
@@ -51,6 +257,44 @@ export function Layout({ client, jobsViewOpen, onCloseJobsView, onOpenJobsView }
               client={client}
               sources={state.sources}
               otherPanelId={otherPanelId}
+              onRowPointerDown={({ absIndex, clientX, clientY }) => {
+                const currentPanel = state.panels[id];
+                const entry = currentPanel ? getEntryAtAbsIndex(currentPanel, absIndex) : null;
+                if (!currentPanel || !entry) return;
+
+                const normalizedPath = normalizeDirPath(currentPanel.path);
+                const hasSelection = currentPanel.selection.length > 0;
+                const rowSelected = currentPanel.selection.includes(absIndex);
+
+                let files: FileOpFile[] | null = null;
+                let sourceAbsIndices: number[] | null = null;
+
+                if (!hasSelection) {
+                  if (entry.name !== "..") {
+                    files = [{ name: entry.name, size: entry.size, kind: entry.kind }];
+                    sourceAbsIndices = [absIndex];
+                  }
+                } else if (rowSelected) {
+                  files = currentPanel.selectedEntries;
+                  sourceAbsIndices = currentPanel.selection;
+                }
+
+                setActiveDrag(null);
+                setDragCandidate({
+                  sourcePanelId: id,
+                  sourcePath: normalizedPath,
+                  absIndex,
+                  clientX,
+                  clientY,
+                  files,
+                  sourceAbsIndices,
+                });
+              }}
+              dragActive={activeDrag !== null}
+              dragSource={activeDrag?.sourcePanelId === id}
+              dragHovered={activeDrag?.hoverPanelId === id}
+              dragDropAllowed={activeDrag?.hoverPanelId === id && activeDrag.dropAllowed}
+              dragHoverAbsIndex={activeDrag?.hoverPanelId === id ? activeDrag.hoverAbsIndex : null}
             />
           );
         })}
