@@ -534,6 +534,7 @@ export function Panel({
             contextMenuPendingRef.current = entry.name === ".." ? null : { entry, absIndex, rect };
             return;
           }
+          e.preventDefault();
           dispatch({ type: "CLOSE_CONTEXT_MENU" });
           if (!isFocused) client.sendIntent("SwitchFocus", undefined, { to: panelId });
           onRowPointerDown({ absIndex, clientX: e.clientX, clientY: e.clientY });
