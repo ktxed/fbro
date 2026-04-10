@@ -99,6 +99,7 @@ export interface FileOpFile {
   name: string;
   size?: number;
   kind: string;
+  sourcePath?: string;
 }
 
 export interface KeyBinding {
@@ -198,6 +199,15 @@ export interface NavigateOkMessage {
   type: "NavigateOk";
   timestamp: number;
   panelId: string;
+}
+
+export interface ExternalClipboardReadyMessage {
+  type: "ExternalClipboardReady";
+  timestamp: number;
+  panelId: string;
+  opType: Extract<FileOpType, "copy" | "move">;
+  files: FileOpFile[];
+  destPath: string;
 }
 
 // ─── Client → BE messages ────────────────────────────────────────────────────
@@ -385,6 +395,7 @@ export type BEMessage =
   | RenameOkMessage
   | MkdirOkMessage
   | NavigateOkMessage
+  | ExternalClipboardReadyMessage
   | ViewerFileChangedMessage
   | DryRunReadyMessage
   | OpenWithOptionsReadyMessage

@@ -87,6 +87,16 @@ pub enum ServerMessage {
         #[serde(rename = "panelId")]
         panel_id: String,
     },
+    ExternalClipboardReady {
+        timestamp: u64,
+        #[serde(rename = "panelId")]
+        panel_id: String,
+        #[serde(rename = "opType")]
+        op_type: String,
+        files: Vec<FileOpFileSchema>,
+        #[serde(rename = "destPath")]
+        dest_path: String,
+    },
     ViewerFileChanged {
         timestamp: u64,
         path: String,
@@ -395,9 +405,11 @@ pub struct JobStartSchema {
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct FileOpFileSchema {
-  pub name: String,
-  pub size: Option<u64>,
-  pub kind: String,
+    pub name: String,
+    pub size: Option<u64>,
+    pub kind: String,
+    #[serde(rename = "sourcePath", skip_serializing_if = "Option::is_none")]
+    pub source_path: Option<String>,
 }
 
 // ─── Incoming (FE → BE) ───────────────────────────────────────────────────────

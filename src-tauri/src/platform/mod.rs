@@ -49,6 +49,18 @@ pub struct ResolvedOpenWithApp {
     pub launch: OpenWithLaunch,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ExternalClipboardOp {
+    Copy,
+    Move,
+}
+
+#[derive(Clone, Debug)]
+pub struct ExternalClipboardPayload {
+    pub op: ExternalClipboardOp,
+    pub source_paths: Vec<String>,
+}
+
 /// Abstraction over platform-specific environment queries and services.
 pub trait Platform: Send + Sync {
     /// Returns the current user's home directory.
@@ -117,6 +129,11 @@ pub trait Platform: Send + Sync {
     /// Returns all available volumes / mount points on this platform.
     fn list_volumes(&self) -> Vec<VolumeInfo> {
         vec![]
+    }
+
+    /// Reads an external file-manager clipboard payload, if available.
+    fn read_external_file_clipboard(&self) -> Result<Option<ExternalClipboardPayload>, String> {
+        Ok(None)
     }
 }
 

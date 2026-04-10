@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::sync::Arc;
 
 use serde_json::Value;
@@ -8,6 +9,7 @@ use crate::jobs::{
     AppJob, ConflictPolicy, DecisionResponse, FileOpEntry, FileOpJobMeta, FileOpType, JobKind,
     JobState,
 };
+use crate::platform::ExternalClipboardOp;
 use crate::ws::intents::{arg_bool, arg_str};
 use crate::ws::protocol::{now, FileOpFileSchema, JobStartSchema, ServerMessage};
 use crate::ws::runtime::{rescan_panel, selected_names_for, IntentContext};
@@ -15,6 +17,7 @@ use crate::ws::runtime::{rescan_panel, selected_names_for, IntentContext};
 pub(crate) async fn handle(name: &str, _scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
     match name {
         "StartFileOp" => start_file_op(args, ctx).await,
+        "PasteExternalClipboard" => paste_external_clipboard(args, ctx).await,
         "ProvideJobDecision" => provide_job_decision(args, ctx).await,
         "CancelJob" => cancel_job(args, ctx).await,
         "PauseJob" => pause_job(args, ctx).await,
@@ -37,6 +40,10 @@ struct StartFileOpArgs {
     files: Vec<FileOpFileSchema>,
 }
 
+struct PasteExternalClipboardArgs {
+    panel_id: String,
+}
+
 impl StartFileOpArgs {
     fn from_args(args: &Value) -> Self {
         Self {
@@ -53,6 +60,14 @@ impl StartFileOpArgs {
                 .cloned()
                 .and_then(|value| serde_json::from_value(value).ok())
                 .unwrap_or_default(),
+        }
+    }
+}
+
+impl PasteExternalClipboardArgs {
+    fn from_args(args: &Value) -> Self {
+        Self {
+            panel_id: arg_str(args, "panelId").unwrap_or("").to_string(),
         }
     }
 }
@@ -117,6 +132,212 @@ impl MakeDirArgs {
     }
 }
 
+fn normalize_source_path(path: &str) -> String {
+    #[cfg(windows)]
+    {
+        path.replace('\\', "/").to_lowercase()
+    }
+    #[cfg(not(windows))]
+    {
+        path.replace('\\', "/")
+    }
+}
+
+fn source_root_matches_path(root_path: &str, source_path: &str) -> bool {
+    let normalized_root = normalize_source_path(root_path).trim_end_matches('/').to_string();
+    let normalized_path = normalize_source_path(source_path);
+
+    if normalized_root.is_empty() || normalized_root == "/" {
+        return normalized_path.starts_with('/');
+    }
+
+    normalized_path == normalized_root
+        || normalized_path
+            .strip_prefix(&normalized_root)
+            .map(|rest| rest.starts_with('/'))
+            .unwrap_or(false)
+}
+
+fn resolve_source_id_for_path(state: &crate::state::AppState, source_path: &str) -> Option<String> {
+    state
+        .sources
+        .values()
+        .filter(|source| source.mounted && state.drivers.contains_key(&source.id))
+        .filter(|source| source_root_matches_path(&source.root_path, source_path))
+        .max_by_key(|source| source.root_path.len())
+        .map(|source| source.id.clone())
+}
+
+fn resolve_common_driver_for_paths(
+    state: &crate::state::AppState,
+    source_paths: &[String],
+) -> Result<(String, Arc<dyn crate::vfs::VfsDriver>), String> {
+    let mut source_id: Option<String> = None;
+
+    for source_path in source_paths {
+        let resolved = resolve_source_id_for_path(state, source_path)
+            .ok_or_else(|| format!("Clipboard item is not on a mounted source: {source_path}"))?;
+        if let Some(current) = &source_id {
+            if current != &resolved {
+                return Err("Clipboard items from multiple mounted sources are not supported yet.".to_string());
+            }
+        } else {
+            source_id = Some(resolved);
+        }
+    }
+
+    let source_id = source_id.ok_or_else(|| "Clipboard has no external files.".to_string())?;
+    let driver = state
+        .drivers
+        .get(&source_id)
+        .cloned()
+        .ok_or_else(|| "Clipboard source is unavailable.".to_string())?;
+
+    Ok((source_id, driver))
+}
+
+fn schema_from_source_path(source_path: &str) -> Result<FileOpFileSchema, String> {
+    let metadata = std::fs::symlink_metadata(source_path)
+        .map_err(|error| format!("Clipboard item is no longer available: {error}"))?;
+    let file_name = Path::new(source_path)
+        .file_name()
+        .map(|value| value.to_string_lossy().to_string())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "Clipboard item has an invalid path.".to_string())?;
+    let file_type = metadata.file_type();
+    let kind = if file_type.is_symlink() {
+        "symlink"
+    } else if file_type.is_dir() {
+        "directory"
+    } else if file_type.is_file() {
+        "file"
+    } else {
+        "other"
+    };
+
+    Ok(FileOpFileSchema {
+        name: file_name,
+        size: if file_type.is_file() { Some(metadata.len()) } else { None },
+        kind: kind.to_string(),
+        source_path: Some(source_path.replace('\\', "/")),
+    })
+}
+
+async fn paste_external_clipboard(args: &Value, ctx: &mut IntentContext<'_>) {
+    let parsed = PasteExternalClipboardArgs::from_args(args);
+    if parsed.panel_id.is_empty() {
+        let _ = send_error(
+            ctx,
+            "PASTE_EXTERNAL_NO_PANEL",
+            "No focused panel is available for paste.".to_string(),
+        )
+        .await;
+        return;
+    }
+
+    let (panel_path, panel_id, platform) = {
+        let state_guard = ctx.state.lock().await;
+        let Some(panel) = state_guard.panels.get(&parsed.panel_id) else {
+            let _ = send_error(
+                ctx,
+                "PASTE_EXTERNAL_NO_PANEL",
+                "No focused panel is available for paste.".to_string(),
+            )
+            .await;
+            return;
+        };
+
+        if !state_guard.drivers.contains_key(&panel.source_id) {
+            let _ = send_error(
+                ctx,
+                "PASTE_EXTERNAL_UNSUPPORTED_DESTINATION",
+                "The focused panel does not support external paste.".to_string(),
+            )
+            .await;
+            return;
+        }
+
+        (
+            panel.path.clone(),
+            panel.panel_id.clone(),
+            Arc::clone(&state_guard.platform),
+        )
+    };
+
+    let payload = match tokio::task::spawn_blocking(move || platform.read_external_file_clipboard()).await {
+        Ok(Ok(payload)) => payload,
+        Ok(Err(error)) => {
+            let _ = send_error(ctx, "PASTE_EXTERNAL_CLIPBOARD_ERROR", error).await;
+            return;
+        }
+        Err(error) => {
+            let _ = send_error(
+                ctx,
+                "PASTE_EXTERNAL_CLIPBOARD_ERROR",
+                format!("Failed to read the system clipboard: {error}"),
+            )
+            .await;
+            return;
+        }
+    };
+
+    let Some(payload) = payload else {
+        let _ = send_error(
+            ctx,
+            "PASTE_EXTERNAL_NO_CLIPBOARD_PAYLOAD",
+            "Clipboard does not contain external files to paste.".to_string(),
+        )
+        .await;
+        return;
+    };
+
+    if payload.source_paths.is_empty() {
+        let _ = send_error(
+            ctx,
+            "PASTE_EXTERNAL_NO_CLIPBOARD_PAYLOAD",
+            "Clipboard does not contain external files to paste.".to_string(),
+        )
+        .await;
+        return;
+    }
+
+    let files = {
+        let state_guard = ctx.state.lock().await;
+        if let Err(error) = resolve_common_driver_for_paths(&state_guard, &payload.source_paths) {
+            let _ = send_error(ctx, "PASTE_EXTERNAL_MULTI_SOURCE", error).await;
+            return;
+        }
+
+        let mut files = Vec::with_capacity(payload.source_paths.len());
+        for source_path in &payload.source_paths {
+            match schema_from_source_path(source_path) {
+                Ok(file) => files.push(file),
+                Err(error) => {
+                    let _ = send_error(ctx, "PASTE_EXTERNAL_SOURCE_UNAVAILABLE", error).await;
+                    return;
+                }
+            }
+        }
+        files
+    };
+
+    let op_type = match payload.op {
+        ExternalClipboardOp::Copy => "copy",
+        ExternalClipboardOp::Move => "move",
+    };
+
+    let _ = ctx
+        .tx
+        .send(ServerMessage::ExternalClipboardReady {
+            timestamp: now(),
+            panel_id,
+            op_type: op_type.to_string(),
+            files,
+            dest_path: panel_path,
+        })
+        .await;
+}
+
 async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
     let parsed = StartFileOpArgs::from_args(args);
     let op_type = match parsed.op_type.as_str() {
@@ -130,46 +351,87 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
         _ => ConflictPolicy::Ask,
     };
 
-    let (files, source_path, dest_path, src_driver, dst_driver) = {
+    let prepared: Result<_, String> = async {
         let state_guard = ctx.state.lock().await;
         let Some(source_panel) = state_guard.panels.get(&parsed.source_panel) else {
-            return;
+            return Err("Source panel is unavailable.".to_string());
         };
-        let src_driver = state_guard
-            .drivers
-            .get(&source_panel.source_id)
-            .cloned()
-            .unwrap();
 
-        let files: Vec<FileOpEntry> = if parsed.files.is_empty() {
-            let indices: Vec<usize> = if source_panel.selection.is_empty() {
-                vec![source_panel.cursor]
-            } else {
-                source_panel.selection.clone()
-            };
+        let has_explicit_sources = parsed.files.iter().any(|file| file.source_path.is_some());
 
-            indices
-                .iter()
-                .filter_map(|&index| {
-                    source_panel.entries.get(index).map(|entry| FileOpEntry {
-                        name: entry.name.clone(),
-                        source_path: src_driver.resolve_child(&source_panel.path, &entry.name),
-                        size: entry.size,
-                        kind: entry.kind.clone(),
-                    })
-                })
-                .collect()
-        } else {
-            parsed
+        let (src_driver, source_path, files): (
+            Arc<dyn crate::vfs::VfsDriver>,
+            String,
+            Vec<FileOpEntry>,
+        ) = if has_explicit_sources {
+            let explicit_paths: Vec<String> = parsed
                 .files
                 .iter()
-                .map(|file| FileOpEntry {
-                    name: file.name.clone(),
-                    source_path: src_driver.resolve_child(&source_panel.path, &file.name),
-                    size: file.size,
-                    kind: file.kind.clone(),
+                .map(|file| {
+                    file.source_path.clone().ok_or_else(|| {
+                        "Clipboard file is missing its absolute source path.".to_string()
+                    })
                 })
-                .collect()
+                .collect::<Result<_, _>>()?;
+            let (_source_id, driver) = resolve_common_driver_for_paths(&state_guard, &explicit_paths)?;
+            let files = parsed
+                .files
+                .iter()
+                .map(|file| {
+                    let source_path = file.source_path.clone().ok_or_else(|| {
+                        "Clipboard file is missing its absolute source path.".to_string()
+                    })?;
+                    Ok(FileOpEntry {
+                        name: file.name.clone(),
+                        source_path,
+                        size: file.size,
+                        kind: file.kind.clone(),
+                    })
+                })
+                .collect::<Result<Vec<_>, String>>()?;
+            let representative_source = explicit_paths
+                .first()
+                .and_then(|path| Path::new(path).parent())
+                .map(|path| path.to_string_lossy().to_string())
+                .unwrap_or_else(|| explicit_paths.first().cloned().unwrap_or_default());
+            (driver, representative_source, files)
+        } else {
+            let driver = state_guard
+                .drivers
+                .get(&source_panel.source_id)
+                .cloned()
+                .ok_or_else(|| "Source panel driver is unavailable.".to_string())?;
+            let files = if parsed.files.is_empty() {
+                let indices: Vec<usize> = if source_panel.selection.is_empty() {
+                    vec![source_panel.cursor]
+                } else {
+                    source_panel.selection.clone()
+                };
+
+                indices
+                    .iter()
+                    .filter_map(|&index| {
+                        source_panel.entries.get(index).map(|entry| FileOpEntry {
+                            name: entry.name.clone(),
+                            source_path: driver.resolve_child(&source_panel.path, &entry.name),
+                            size: entry.size,
+                            kind: entry.kind.clone(),
+                        })
+                    })
+                    .collect()
+            } else {
+                parsed
+                    .files
+                    .iter()
+                    .map(|file| FileOpEntry {
+                        name: file.name.clone(),
+                        source_path: driver.resolve_child(&source_panel.path, &file.name),
+                        size: file.size,
+                        kind: file.kind.clone(),
+                    })
+                    .collect()
+            };
+            (driver, source_panel.path.clone(), files)
         };
 
         let (dest_path, dst_driver) = if op_type != FileOpType::Delete {
@@ -182,7 +444,7 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
                     .drivers
                     .get(&dest_panel.source_id)
                     .cloned()
-                    .unwrap();
+                    .ok_or_else(|| "Destination panel driver is unavailable.".to_string())?;
                 (
                     parsed
                         .dest_path
@@ -198,14 +460,16 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
         } else {
             (None, None)
         };
+        Ok((files, source_path, dest_path, src_driver, dst_driver))
+    }
+    .await;
 
-        (
-            files,
-            source_panel.path.clone(),
-            dest_path,
-            src_driver,
-            dst_driver,
-        )
+    let (files, source_path, dest_path, src_driver, dst_driver) = match prepared {
+        Ok(prepared) => prepared,
+        Err(error) => {
+            let _ = send_error(ctx, "START_FILE_OP_FAILED", error).await;
+            return;
+        }
     };
 
     if files.is_empty() {
@@ -288,6 +552,7 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
             name: file.name.clone(),
             size: file.size,
             kind: file.kind.clone(),
+            source_path: Some(file.source_path.clone()),
         })
         .collect();
     let total_bytes_total: u64 = files.iter().map(|file| file.size.unwrap_or(0)).sum();

@@ -89,6 +89,9 @@ fn main() {
         std::env::set_var("GDK_BACKEND", "wayland");
     }
 
+    #[cfg(target_os = "linux")]
+    let _ = gtk::init();
+
     let platform = platform::create_platform();
     let file_server_port = fileserver::start(platform.clone());
     let icon_cache: Arc<StdMutex<HashMap<String, (Vec<u8>, &'static str)>>> =

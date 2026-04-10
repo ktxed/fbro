@@ -18,6 +18,7 @@ fn build_selected_entries(entries: &[EntrySchema], selection: &[usize]) -> Vec<F
                 name: entry.name.clone(),
                 size: entry.size,
                 kind: entry.kind.clone(),
+                source_path: None,
             })
         })
         .collect()

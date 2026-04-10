@@ -123,6 +123,7 @@ pub(crate) fn selected_entries_for_panel(panel: &Panel) -> Vec<FileOpFileSchema>
                 name: entry.name.clone(),
                 size: entry.size,
                 kind: entry.kind.clone(),
+                source_path: None,
             })
         })
         .collect()

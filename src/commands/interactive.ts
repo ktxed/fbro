@@ -31,6 +31,7 @@ export const GLOBAL_SHORTCUT_COMMAND_IDS = [
   "app.open_jobs",
   "panel.navigate_source_root",
   "file.info",
+  "file.paste_external",
   ...TOOLBAR_COMMAND_IDS,
 ] as const;
 
@@ -448,6 +449,10 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
       return focused ? openFileOp(state, dispatch, focused.panel, "copy") : false;
     case "file.move":
       return focused ? openFileOp(state, dispatch, focused.panel, "move") : false;
+    case "file.paste_external":
+      if (!focused) return false;
+      client.sendIntent("PasteExternalClipboard", undefined, { panelId: focused.panelId });
+      return true;
     case "file.mkdir":
       if (!focused) return false;
       dispatch({

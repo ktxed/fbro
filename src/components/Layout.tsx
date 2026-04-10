@@ -225,6 +225,14 @@ export function Layout({ client, jobsViewOpen, onCloseJobsView, onOpenJobsView }
     };
   }, [activeDrag, client, dispatch, dragCandidate, state.panels]);
 
+  useEffect(() => {
+    if (!state.transientHint) return;
+    const timer = window.setTimeout(() => {
+      dispatch({ type: "CLOSE_TRANSIENT_HINT" });
+    }, 2400);
+    return () => window.clearTimeout(timer);
+  }, [dispatch, state.transientHint]);
+
   if (panelIds.length === 0) {
     return <div className="layout__empty">Connecting…</div>;
   }
@@ -342,6 +350,11 @@ export function Layout({ client, jobsViewOpen, onCloseJobsView, onOpenJobsView }
       )}
       {state.commandPaletteOpen && (
         <CommandPaletteModal client={client} onOpenJobsView={onOpenJobsView} />
+      )}
+      {state.transientHint && (
+        <div className="transient-hint" role="status" aria-live="polite">
+          {state.transientHint.message}
+        </div>
       )}
     </>
   );

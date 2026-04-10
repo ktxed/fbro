@@ -1,5 +1,9 @@
-use super::{OpenWithAppOption, OpenWithLaunch, Platform, ResolvedOpenWithApp, VolumeInfo};
+use super::{
+    ExternalClipboardOp, ExternalClipboardPayload, OpenWithAppOption, OpenWithLaunch, Platform,
+    ResolvedOpenWithApp, VolumeInfo,
+};
 use std::env;
+use std::ffi::c_void;
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -28,7 +32,18 @@ extern "system" {
         lpFileSystemNameBuffer: *mut u16,
         nFileSystemNameSize: u32,
     ) -> i32;
+    fn OpenClipboard(h_wnd_new_owner: *mut c_void) -> i32;
+    fn CloseClipboard() -> i32;
+    fn GetClipboardData(u_format: u32) -> *mut c_void;
+    fn RegisterClipboardFormatW(lp_string: *const u16) -> u32;
+    fn DragQueryFileW(h_drop: *mut c_void, i_file: u32, lpsz_file: *mut u16, cch: u32) -> u32;
+    fn GlobalLock(h_mem: *mut c_void) -> *mut c_void;
+    fn GlobalUnlock(h_mem: *mut c_void) -> i32;
 }
+
+const CF_HDROP: u32 = 15;
+const DROP_EFFECT_COPY: u32 = 1;
+const DROP_EFFECT_MOVE: u32 = 2;
 
 /// Encode a Rust string as a null-terminated UTF-16 buffer for WinAPI calls.
 fn to_wide(s: &str) -> Vec<u16> {
@@ -171,6 +186,90 @@ impl Platform for WindowsPlatform {
 
         volumes
     }
+
+    fn read_external_file_clipboard(&self) -> Result<Option<ExternalClipboardPayload>, String> {
+        read_windows_external_clipboard()
+    }
+}
+
+fn read_windows_external_clipboard() -> Result<Option<ExternalClipboardPayload>, String> {
+    unsafe {
+        if OpenClipboard(std::ptr::null_mut()) == 0 {
+            return Err("Failed to open the system clipboard.".to_string());
+        }
+    }
+
+    let result = (|| {
+        let hdrop = unsafe { GetClipboardData(CF_HDROP) };
+        if hdrop.is_null() {
+            return Ok(None);
+        }
+
+        let file_count = unsafe { DragQueryFileW(hdrop, u32::MAX, std::ptr::null_mut(), 0) };
+        if file_count == 0 {
+            return Ok(None);
+        }
+
+        let mut source_paths = Vec::with_capacity(file_count as usize);
+        for index in 0..file_count {
+            let len = unsafe { DragQueryFileW(hdrop, index, std::ptr::null_mut(), 0) };
+            if len == 0 {
+                continue;
+            }
+            let mut buffer = vec![0u16; len as usize + 1];
+            let written = unsafe { DragQueryFileW(hdrop, index, buffer.as_mut_ptr(), buffer.len() as u32) };
+            if written == 0 {
+                continue;
+            }
+            let path = String::from_utf16_lossy(&buffer[..written as usize]).replace('\\', "/");
+            source_paths.push(path);
+        }
+
+        if source_paths.is_empty() {
+            return Ok(None);
+        }
+
+        let preferred_drop_effect = unsafe {
+            RegisterClipboardFormatW(
+                "Preferred DropEffect"
+                    .encode_utf16()
+                    .chain(std::iter::once(0))
+                    .collect::<Vec<u16>>()
+                    .as_ptr(),
+            )
+        };
+        let op = if preferred_drop_effect != 0 {
+            let handle = unsafe { GetClipboardData(preferred_drop_effect) };
+            if !handle.is_null() {
+                let ptr = unsafe { GlobalLock(handle) };
+                if !ptr.is_null() {
+                    let effect = unsafe { *(ptr as *const u32) };
+                    unsafe {
+                        GlobalUnlock(handle);
+                    }
+                    if effect & DROP_EFFECT_MOVE != 0 {
+                        ExternalClipboardOp::Move
+                    } else {
+                        ExternalClipboardOp::Copy
+                    }
+                } else {
+                    ExternalClipboardOp::Copy
+                }
+            } else {
+                ExternalClipboardOp::Copy
+            }
+        } else {
+            ExternalClipboardOp::Copy
+        };
+
+        Ok(Some(ExternalClipboardPayload { op, source_paths }))
+    })();
+
+    unsafe {
+        CloseClipboard();
+    }
+
+    result
 }
 
 fn windows_supplemental_apps(_path: &str) -> Vec<ResolvedOpenWithApp> {

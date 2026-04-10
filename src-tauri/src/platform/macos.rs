@@ -1,6 +1,6 @@
 use super::{
-    append_supplemental_apps, OpenWithAppOption, OpenWithLaunch, Platform, ResolvedOpenWithApp,
-    VolumeInfo,
+    append_supplemental_apps, ExternalClipboardOp, ExternalClipboardPayload, OpenWithAppOption,
+    OpenWithLaunch, Platform, ResolvedOpenWithApp, VolumeInfo,
 };
 use libc;
 use std::env;
@@ -219,6 +219,45 @@ impl Platform for MacOSPlatform {
 
         volumes.sort_by(|a, b| a.name.cmp(&b.name));
         volumes
+    }
+
+    fn read_external_file_clipboard(&self) -> Result<Option<ExternalClipboardPayload>, String> {
+        let script = r#"try
+set clipboardItems to the clipboard as alias list
+set outputText to ""
+repeat with clipboardItem in clipboardItems
+set outputText to outputText & POSIX path of clipboardItem & linefeed
+end repeat
+return outputText
+on error
+return ""
+end try"#;
+
+        let output = Command::new("osascript")
+            .arg("-e")
+            .arg(script)
+            .output()
+            .map_err(|error| error.to_string())?;
+
+        if !output.status.success() {
+            return Ok(None);
+        }
+
+        let source_paths = String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+
+        if source_paths.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(ExternalClipboardPayload {
+                op: ExternalClipboardOp::Copy,
+                source_paths,
+            }))
+        }
     }
 }
 

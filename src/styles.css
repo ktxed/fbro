@@ -99,6 +99,22 @@ body {
   color: var(--text-dim);
 }
 
+.transient-hint {
+  position: fixed;
+  left: 50%;
+  bottom: 54px;
+  transform: translateX(-50%);
+  z-index: 1200;
+  max-width: min(640px, calc(100vw - 24px));
+  padding: 7px 12px;
+  border: 1px solid #6a5a22;
+  background: rgba(42, 30, 8, 0.96);
+  color: #f0d27a;
+  font-size: var(--font-size);
+  line-height: 1.35;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+}
+
 /* ── Panel ───────────────────────────────────────────────────────────────── */
 
 .panel {

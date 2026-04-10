@@ -21,6 +21,7 @@ import type {
   BroItem,
   BroOptionsFailedMessage,
   BroOptionsReadyMessage,
+  ExternalClipboardReadyMessage,
 } from "../ws/types";
 
 // ─── State ───────────────────────────────────────────────────────────────────
@@ -138,6 +139,7 @@ export interface AppState {
   pendingOpenWith: PendingOpenWith | null;
   pendingBro: PendingBro | null;
   commandPaletteOpen: boolean;
+  transientHint: { message: string; token: number } | null;
 }
 
 const initialState: AppState = {
@@ -166,6 +168,7 @@ const initialState: AppState = {
   pendingOpenWith: null,
   pendingBro: null,
   commandPaletteOpen: false,
+  transientHint: null,
 };
 
 // ─── Actions ─────────────────────────────────────────────────────────────────
@@ -198,7 +201,8 @@ export type AppAction =
   | { type: "OPEN_BRO"; bro: PendingBro }
   | { type: "CLOSE_BRO" }
   | { type: "OPEN_COMMAND_PALETTE" }
-  | { type: "CLOSE_COMMAND_PALETTE" };
+  | { type: "CLOSE_COMMAND_PALETTE" }
+  | { type: "CLOSE_TRANSIENT_HINT" };
 
 function pushPanelHistoryEntry(
   panelHistory: Record<string, string[]>,
@@ -528,6 +532,25 @@ function reducer(state: AppState, action: AppAction): AppState {
             }
             return next;
           }
+          if (msg.code.startsWith("PASTE_EXTERNAL_")) {
+            return {
+              ...state,
+              transientHint: {
+                message: msg.message,
+                token: msg.timestamp,
+              },
+            };
+          }
+          if (msg.code === "START_FILE_OP_FAILED") {
+            return {
+              ...state,
+              pendingOp: null,
+              transientHint: {
+                message: msg.message,
+                token: msg.timestamp,
+              },
+            };
+          }
           console.error("BE error:", msg.code, msg.message);
           return state;
         case "RenameOk":
@@ -540,6 +563,22 @@ function reducer(state: AppState, action: AppAction): AppState {
             pendingGoToPath: state.pendingGoToPath?.panelId === msg.panelId ? null : state.pendingGoToPath,
             pendingPanelHistory: state.pendingPanelHistory?.panelId === msg.panelId ? null : state.pendingPanelHistory,
           };
+        case "ExternalClipboardReady": {
+          const m = msg as ExternalClipboardReadyMessage;
+          return {
+            ...state,
+            pendingOp: {
+              opType: m.opType,
+              files: m.files,
+              sourcePanel: m.panelId,
+              destPanel: m.panelId,
+              destPath: m.destPath,
+              conflictPolicy: "ask",
+            },
+            pendingContextMenu: null,
+            transientHint: null,
+          };
+        }
         case "DryRunReady": {
           const m = msg as DryRunReadyMessage;
           const scriptName = m.scriptPath.replace(/\\/g, "/").split("/").filter(Boolean).pop() ?? m.scriptPath;
@@ -669,6 +708,8 @@ function reducer(state: AppState, action: AppAction): AppState {
       return { ...state, commandPaletteOpen: true };
     case "CLOSE_COMMAND_PALETTE":
       return { ...state, commandPaletteOpen: false };
+    case "CLOSE_TRANSIENT_HINT":
+      return { ...state, transientHint: null };
   }
 }
 

@@ -136,6 +136,13 @@ pub(crate) fn build_interactive_commands() -> Vec<InteractiveCommandSchema> {
             None,
         ),
         command(
+            "file.paste_external",
+            "File Operation",
+            "Paste External Clipboard",
+            vec![mod_binding("v", false)],
+            Some("PasteExternalClipboard"),
+        ),
+        command(
             "file.mkdir",
             "File",
             "Create Directory",

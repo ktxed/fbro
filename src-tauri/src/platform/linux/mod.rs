@@ -2,8 +2,8 @@ pub mod udisks2;
 pub mod volume_watcher;
 
 use super::{
-    append_supplemental_apps, OpenWithAppOption, OpenWithLaunch, Platform, ResolvedOpenWithApp,
-    VolumeInfo,
+    append_supplemental_apps, ExternalClipboardOp, ExternalClipboardPayload, OpenWithAppOption,
+    OpenWithLaunch, Platform, ResolvedOpenWithApp, VolumeInfo,
 };
 use gio::prelude::*;
 use libc;
@@ -303,6 +303,16 @@ impl Platform for LinuxPlatform {
         volumes
     }
 
+    fn read_external_file_clipboard(&self) -> Result<Option<ExternalClipboardPayload>, String> {
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        gtk::glib::MainContext::default().invoke(move || {
+            let result = read_linux_external_clipboard();
+            let _ = tx.send(result);
+        });
+        rx.recv()
+            .map_err(|_| "Failed to receive clipboard data from the GTK main context.".to_string())?
+    }
+
     fn home_dir(&self) -> String {
         // Prefer $HOME; fall back to /etc/passwd entry for current uid
         if let Ok(h) = std::env::var("HOME") {
@@ -395,6 +405,70 @@ fn path_buf_to_string(path: std::path::PathBuf) -> Option<String> {
         None
     } else {
         Some(value)
+    }
+}
+
+fn read_linux_external_clipboard() -> Result<Option<ExternalClipboardPayload>, String> {
+    if !gtk::is_initialized() {
+        gtk::init().map_err(|error| error.to_string())?;
+    }
+
+    let clipboard = gtk::Clipboard::get(&gdk::SELECTION_CLIPBOARD);
+
+    let gnome_atom = gdk::Atom::intern("x-special/gnome-copied-files");
+    if let Some(selection) = clipboard.wait_for_contents(&gnome_atom) {
+        if let Ok(text) = String::from_utf8(selection.data()) {
+            if let Some(payload) = parse_gnome_clipboard_payload(&text) {
+                return Ok(Some(payload));
+            }
+        }
+    }
+
+    let source_paths: Vec<String> = clipboard
+        .wait_for_uris()
+        .into_iter()
+        .filter_map(|uri| gio::File::for_uri(uri.as_str()).path())
+        .map(|path| path.to_string_lossy().to_string())
+        .collect();
+
+    if source_paths.is_empty() {
+        return Ok(None);
+    }
+
+    let kde_cut_atom = gdk::Atom::intern("application/x-kde-cutselection");
+    let op = clipboard
+        .wait_for_contents(&kde_cut_atom)
+        .map(|selection| selection.data())
+        .and_then(|bytes| bytes.first().copied())
+        .map(|byte| {
+            if byte == b'1' {
+                ExternalClipboardOp::Move
+            } else {
+                ExternalClipboardOp::Copy
+            }
+        })
+        .unwrap_or(ExternalClipboardOp::Copy);
+
+    Ok(Some(ExternalClipboardPayload { op, source_paths }))
+}
+
+fn parse_gnome_clipboard_payload(text: &str) -> Option<ExternalClipboardPayload> {
+    let mut lines = text.lines().map(str::trim).filter(|line| !line.is_empty());
+    let op = match lines.next()? {
+        "copy" => ExternalClipboardOp::Copy,
+        "cut" => ExternalClipboardOp::Move,
+        _ => return None,
+    };
+
+    let source_paths = lines
+        .filter_map(|uri| gio::File::for_uri(uri).path())
+        .map(|path| path.to_string_lossy().to_string())
+        .collect::<Vec<_>>();
+
+    if source_paths.is_empty() {
+        None
+    } else {
+        Some(ExternalClipboardPayload { op, source_paths })
     }
 }
 

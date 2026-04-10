@@ -643,6 +643,7 @@ fn bro_input_files(inputs: &[BroInputItem]) -> Vec<FileOpFileSchema> {
             name: input.name.clone(),
             size: None,
             kind: input.kind.clone(),
+            source_path: None,
         })
         .collect()
 }
