@@ -97,6 +97,13 @@ pub enum ServerMessage {
         #[serde(rename = "destPath")]
         dest_path: String,
     },
+    ExternalClipboardWritten {
+        timestamp: u64,
+        #[serde(rename = "opType")]
+        op_type: String,
+        #[serde(rename = "itemCount")]
+        item_count: usize,
+    },
     ViewerFileChanged {
         timestamp: u64,
         path: String,

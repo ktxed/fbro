@@ -46,7 +46,8 @@ pub async fn dispatch(name: &str, scope: &Value, args: &Value, ctx: &mut IntentC
         | "ListOpenWithApps"
         | "LaunchOpenWithApp" => navigation::handle(name, scope, args, ctx).await,
         "ListBros" | "LaunchBro" => bro::handle(name, scope, args, ctx).await,
-        "StartFileOp" | "PasteExternalClipboard" | "ProvideJobDecision" | "CancelJob"
+        "StartFileOp" | "PasteExternalClipboard" | "WriteExternalClipboard"
+        | "ProvideJobDecision" | "CancelJob"
         | "PauseJob" | "ResumeJob" | "RenameFile" | "MakeDir" => {
             jobs::handle(name, scope, args, ctx).await
         }

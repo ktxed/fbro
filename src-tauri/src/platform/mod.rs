@@ -135,6 +135,14 @@ pub trait Platform: Send + Sync {
     fn read_external_file_clipboard(&self) -> Result<Option<ExternalClipboardPayload>, String> {
         Ok(None)
     }
+
+    /// Writes a host file-manager clipboard payload.
+    fn write_external_file_clipboard(
+        &self,
+        _payload: &ExternalClipboardPayload,
+    ) -> Result<(), String> {
+        Err("Writing to the host clipboard is not supported on this platform.".to_string())
+    }
 }
 
 // ── Embedded fallback icons ─────────────────────────────────────────────────

@@ -129,11 +129,29 @@ pub(crate) fn build_interactive_commands() -> Vec<InteractiveCommandSchema> {
             None,
         ),
         command(
+            "file.copy_external",
+            "File Operation",
+            "Copy To Host Clipboard",
+            vec![mod_binding("c", false)],
+            Some("WriteExternalClipboard"),
+        ),
+        command(
             "file.move",
             "File Operation",
             "Move",
             vec![toolbar_binding("F6", "6")],
             None,
+        ),
+        command(
+            "file.cut_external",
+            "File Operation",
+            "Cut To Host Clipboard",
+            if is_macos() {
+                vec![]
+            } else {
+                vec![mod_binding("x", false)]
+            },
+            Some("WriteExternalClipboard"),
         ),
         command(
             "file.paste_external",

@@ -245,6 +245,13 @@ impl Platform for MacOSPlatform {
     fn read_external_file_clipboard(&self) -> Result<Option<ExternalClipboardPayload>, String> {
         read_external_file_clipboard_native()
     }
+
+    fn write_external_file_clipboard(
+        &self,
+        payload: &ExternalClipboardPayload,
+    ) -> Result<(), String> {
+        write_external_file_clipboard_native(payload)
+    }
 }
 
 fn disk_image_mount_points() -> std::collections::HashSet<String> {
@@ -337,6 +344,60 @@ fn read_external_file_clipboard_native() -> Result<Option<ExternalClipboardPaylo
                 op: ExternalClipboardOp::Copy,
                 source_paths,
             }))
+        }
+    };
+    unsafe { objc_autoreleasePoolPop(pool) };
+    result
+}
+
+fn write_external_file_clipboard_native(payload: &ExternalClipboardPayload) -> Result<(), String> {
+    if payload.op == ExternalClipboardOp::Move {
+        return Err("Host cut export is not available on macOS yet.".to_string());
+    }
+
+    if payload.source_paths.is_empty() {
+        return Err("No files are available to export to the host clipboard.".to_string());
+    }
+
+    let pool = unsafe { objc_autoreleasePoolPush() };
+    let result = unsafe {
+        let pasteboard_class = get_objc_class("NSPasteboard")?;
+        let pasteboard = msg_send0::<ObjcId>(pasteboard_class, "generalPasteboard");
+        if pasteboard.is_null() {
+            return Err("Failed to access the system pasteboard.".to_string());
+        }
+
+        let _: isize = msg_send0(pasteboard, "clearContents");
+
+        let array_class = get_objc_class("NSMutableArray")?;
+        let urls = msg_send0::<ObjcId>(array_class, "array");
+        if urls.is_null() {
+            return Err("Failed to prepare pasteboard URLs.".to_string());
+        }
+
+        let url_class = get_objc_class("NSURL")?;
+        for source_path in &payload.source_paths {
+            let ns_path = make_nsstring(source_path)?;
+            let is_directory = std::fs::symlink_metadata(source_path)
+                .map(|metadata| metadata.file_type().is_dir())
+                .unwrap_or(false);
+            let url = msg_send2::<ObjcId, Boolean, ObjcId>(
+                url_class,
+                "fileURLWithPath:isDirectory:",
+                ns_path,
+                if is_directory { 1 } else { 0 },
+            );
+            if url.is_null() {
+                return Err("Failed to build a file URL for the host clipboard.".to_string());
+            }
+            let _: () = msg_send1(urls, "addObject:", url);
+        }
+
+        let success = msg_send1::<ObjcId, Boolean>(pasteboard, "writeObjects:", urls);
+        if success == 0 {
+            Err("Failed to publish files to the system pasteboard.".to_string())
+        } else {
+            Ok(())
         }
     };
     unsafe { objc_autoreleasePoolPop(pool) };

@@ -22,6 +22,7 @@ import type {
   BroOptionsFailedMessage,
   BroOptionsReadyMessage,
   ExternalClipboardReadyMessage,
+  ExternalClipboardWrittenMessage,
 } from "../ws/types";
 
 // ─── State ───────────────────────────────────────────────────────────────────
@@ -541,6 +542,15 @@ function reducer(state: AppState, action: AppAction): AppState {
               },
             };
           }
+          if (msg.code.startsWith("WRITE_EXTERNAL_")) {
+            return {
+              ...state,
+              transientHint: {
+                message: msg.message,
+                token: msg.timestamp,
+              },
+            };
+          }
           if (msg.code === "START_FILE_OP_FAILED") {
             return {
               ...state,
@@ -577,6 +587,18 @@ function reducer(state: AppState, action: AppAction): AppState {
             },
             pendingContextMenu: null,
             transientHint: null,
+          };
+        }
+        case "ExternalClipboardWritten": {
+          const m = msg as ExternalClipboardWrittenMessage;
+          const verb = m.opType === "move" ? "Cut" : "Copied";
+          const noun = m.itemCount === 1 ? "item" : "items";
+          return {
+            ...state,
+            transientHint: {
+              message: `${verb} ${m.itemCount} ${noun} to the system clipboard.`,
+              token: m.timestamp,
+            },
           };
         }
         case "DryRunReady": {

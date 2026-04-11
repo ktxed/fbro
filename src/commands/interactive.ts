@@ -31,6 +31,8 @@ export const GLOBAL_SHORTCUT_COMMAND_IDS = [
   "app.open_jobs",
   "panel.navigate_source_root",
   "file.info",
+  "file.copy_external",
+  "file.cut_external",
   "file.paste_external",
   "file.paste_external_move",
   ...TOOLBAR_COMMAND_IDS,
@@ -452,8 +454,22 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
       return focused ? openViewerIntent(client, focused.panel, "EditFile") : false;
     case "file.copy":
       return focused ? openFileOp(state, dispatch, focused.panel, "copy") : false;
+    case "file.copy_external":
+      if (!focused) return false;
+      client.sendIntent("WriteExternalClipboard", undefined, {
+        panelId: focused.panelId,
+        opType: "copy",
+      });
+      return true;
     case "file.move":
       return focused ? openFileOp(state, dispatch, focused.panel, "move") : false;
+    case "file.cut_external":
+      if (!focused) return false;
+      client.sendIntent("WriteExternalClipboard", undefined, {
+        panelId: focused.panelId,
+        opType: "move",
+      });
+      return true;
     case "file.paste_external":
       if (!focused) return false;
       client.sendIntent("PasteExternalClipboard", undefined, { panelId: focused.panelId });

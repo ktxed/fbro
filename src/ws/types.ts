@@ -210,6 +210,13 @@ export interface ExternalClipboardReadyMessage {
   destPath: string;
 }
 
+export interface ExternalClipboardWrittenMessage {
+  type: "ExternalClipboardWritten";
+  timestamp: number;
+  opType: Extract<FileOpType, "copy" | "move">;
+  itemCount: number;
+}
+
 // ─── Client → BE messages ────────────────────────────────────────────────────
 
 export interface HelloMessage {
@@ -396,6 +403,7 @@ export type BEMessage =
   | MkdirOkMessage
   | NavigateOkMessage
   | ExternalClipboardReadyMessage
+  | ExternalClipboardWrittenMessage
   | ViewerFileChangedMessage
   | DryRunReadyMessage
   | OpenWithOptionsReadyMessage

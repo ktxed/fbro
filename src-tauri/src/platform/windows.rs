@@ -6,6 +6,8 @@ use std::env;
 use std::ffi::c_void;
 use std::path::PathBuf;
 use std::process::Command;
+use std::ptr;
+use std::slice;
 
 pub struct WindowsPlatform;
 
@@ -34,9 +36,13 @@ extern "system" {
     ) -> i32;
     fn OpenClipboard(h_wnd_new_owner: *mut c_void) -> i32;
     fn CloseClipboard() -> i32;
+    fn EmptyClipboard() -> i32;
     fn GetClipboardData(u_format: u32) -> *mut c_void;
+    fn SetClipboardData(u_format: u32, h_mem: *mut c_void) -> *mut c_void;
     fn RegisterClipboardFormatW(lp_string: *const u16) -> u32;
     fn DragQueryFileW(h_drop: *mut c_void, i_file: u32, lpsz_file: *mut u16, cch: u32) -> u32;
+    fn GlobalAlloc(u_flags: u32, dw_bytes: usize) -> *mut c_void;
+    fn GlobalFree(h_mem: *mut c_void) -> *mut c_void;
     fn GlobalLock(h_mem: *mut c_void) -> *mut c_void;
     fn GlobalUnlock(h_mem: *mut c_void) -> i32;
 }
@@ -44,6 +50,16 @@ extern "system" {
 const CF_HDROP: u32 = 15;
 const DROP_EFFECT_COPY: u32 = 1;
 const DROP_EFFECT_MOVE: u32 = 2;
+const GMEM_MOVEABLE: u32 = 0x0002;
+
+#[repr(C)]
+struct DropFiles {
+    p_files: u32,
+    pt_x: i32,
+    pt_y: i32,
+    f_nc: i32,
+    f_wide: i32,
+}
 
 /// Encode a Rust string as a null-terminated UTF-16 buffer for WinAPI calls.
 fn to_wide(s: &str) -> Vec<u16> {
@@ -190,6 +206,13 @@ impl Platform for WindowsPlatform {
     fn read_external_file_clipboard(&self) -> Result<Option<ExternalClipboardPayload>, String> {
         read_windows_external_clipboard()
     }
+
+    fn write_external_file_clipboard(
+        &self,
+        payload: &ExternalClipboardPayload,
+    ) -> Result<(), String> {
+        write_windows_external_clipboard(payload)
+    }
 }
 
 fn read_windows_external_clipboard() -> Result<Option<ExternalClipboardPayload>, String> {
@@ -270,6 +293,125 @@ fn read_windows_external_clipboard() -> Result<Option<ExternalClipboardPayload>,
     }
 
     result
+}
+
+fn write_windows_external_clipboard(payload: &ExternalClipboardPayload) -> Result<(), String> {
+    unsafe {
+        if OpenClipboard(std::ptr::null_mut()) == 0 {
+            return Err("Failed to open the system clipboard.".to_string());
+        }
+    }
+
+    let result = (|| {
+        if unsafe { EmptyClipboard() } == 0 {
+            return Err("Failed to clear the system clipboard.".to_string());
+        }
+
+        let hdrop_handle = build_windows_hdrop(payload)?;
+        if unsafe { SetClipboardData(CF_HDROP, hdrop_handle) }.is_null() {
+            unsafe {
+                GlobalFree(hdrop_handle);
+            }
+            return Err("Failed to publish file paths to the system clipboard.".to_string());
+        }
+
+        let drop_effect_format = unsafe {
+            RegisterClipboardFormatW(
+                "Preferred DropEffect"
+                    .encode_utf16()
+                    .chain(std::iter::once(0))
+                    .collect::<Vec<u16>>()
+                    .as_ptr(),
+            )
+        };
+
+        if drop_effect_format != 0 {
+            let effect = match payload.op {
+                ExternalClipboardOp::Move => DROP_EFFECT_MOVE,
+                ExternalClipboardOp::Copy => DROP_EFFECT_COPY,
+            };
+            let effect_handle = alloc_global_bytes(&effect.to_le_bytes())?;
+            if unsafe { SetClipboardData(drop_effect_format, effect_handle) }.is_null() {
+                unsafe {
+                    GlobalFree(effect_handle);
+                }
+                return Err("Failed to publish clipboard operation metadata.".to_string());
+            }
+        }
+
+        Ok(())
+    })();
+
+    unsafe {
+        CloseClipboard();
+    }
+
+    result
+}
+
+fn build_windows_hdrop(payload: &ExternalClipboardPayload) -> Result<*mut c_void, String> {
+    if payload.source_paths.is_empty() {
+        return Err("No files are available to export to the host clipboard.".to_string());
+    }
+
+    let mut encoded_paths = Vec::new();
+    for source_path in &payload.source_paths {
+        let wide_path: Vec<u16> = source_path
+            .replace('/', "\\")
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
+        encoded_paths.extend(wide_path);
+    }
+    encoded_paths.push(0);
+
+    let header = DropFiles {
+        p_files: std::mem::size_of::<DropFiles>() as u32,
+        pt_x: 0,
+        pt_y: 0,
+        f_nc: 0,
+        f_wide: 1,
+    };
+
+    let header_bytes = unsafe {
+        slice::from_raw_parts(
+            (&header as *const DropFiles).cast::<u8>(),
+            std::mem::size_of::<DropFiles>(),
+        )
+    };
+    let path_bytes = unsafe {
+        slice::from_raw_parts(
+            encoded_paths.as_ptr().cast::<u8>(),
+            encoded_paths.len() * std::mem::size_of::<u16>(),
+        )
+    };
+
+    let mut bytes = Vec::with_capacity(header_bytes.len() + path_bytes.len());
+    bytes.extend_from_slice(header_bytes);
+    bytes.extend_from_slice(path_bytes);
+    alloc_global_bytes(&bytes)
+}
+
+fn alloc_global_bytes(bytes: &[u8]) -> Result<*mut c_void, String> {
+    let handle = unsafe { GlobalAlloc(GMEM_MOVEABLE, bytes.len()) };
+    if handle.is_null() {
+        return Err("Failed to allocate clipboard memory.".to_string());
+    }
+
+    let ptr = unsafe { GlobalLock(handle) };
+    if ptr.is_null() {
+        unsafe {
+            GlobalFree(handle);
+        }
+        return Err("Failed to access clipboard memory.".to_string());
+    }
+
+    unsafe {
+        ptr::copy_nonoverlapping(bytes.as_ptr(), ptr.cast::<u8>(), bytes.len());
+        GlobalUnlock(handle);
+    }
+
+    Ok(handle)
 }
 
 fn windows_supplemental_apps(_path: &str) -> Vec<ResolvedOpenWithApp> {

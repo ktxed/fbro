@@ -313,6 +313,20 @@ impl Platform for LinuxPlatform {
             .map_err(|_| "Failed to receive clipboard data from the GTK main context.".to_string())?
     }
 
+    fn write_external_file_clipboard(
+        &self,
+        payload: &ExternalClipboardPayload,
+    ) -> Result<(), String> {
+        let payload = payload.clone();
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        gtk::glib::MainContext::default().invoke(move || {
+            let result = write_linux_external_clipboard(&payload);
+            let _ = tx.send(result);
+        });
+        rx.recv()
+            .map_err(|_| "Failed to write clipboard data from the GTK main context.".to_string())?
+    }
+
     fn home_dir(&self) -> String {
         // Prefer $HOME; fall back to /etc/passwd entry for current uid
         if let Ok(h) = std::env::var("HOME") {
@@ -450,6 +464,75 @@ fn read_linux_external_clipboard() -> Result<Option<ExternalClipboardPayload>, S
         .unwrap_or(ExternalClipboardOp::Copy);
 
     Ok(Some(ExternalClipboardPayload { op, source_paths }))
+}
+
+fn write_linux_external_clipboard(payload: &ExternalClipboardPayload) -> Result<(), String> {
+    if !gtk::is_initialized() {
+        gtk::init().map_err(|error| error.to_string())?;
+    }
+
+    const GNOME_INFO: u32 = 1;
+    const URI_INFO: u32 = 2;
+    const KDE_INFO: u32 = 3;
+
+    let clipboard = gtk::Clipboard::get(&gdk::SELECTION_CLIPBOARD);
+    let uri_strings: Vec<String> = payload
+        .source_paths
+        .iter()
+        .map(|path| gio::File::for_path(path).uri().to_string())
+        .collect();
+
+    if uri_strings.is_empty() {
+        return Err("No files are available to export to the host clipboard.".to_string());
+    }
+
+    let op_line = match payload.op {
+        ExternalClipboardOp::Copy => "copy",
+        ExternalClipboardOp::Move => "cut",
+    };
+    let gnome_payload = format!("{op_line}\n{}\n", uri_strings.join("\n"));
+    let kde_payload = [match payload.op {
+        ExternalClipboardOp::Move => b'1',
+        ExternalClipboardOp::Copy => b'0',
+    }];
+    let targets = vec![
+        gtk::TargetEntry::new(
+            "x-special/gnome-copied-files",
+            gtk::TargetFlags::OTHER_APP,
+            GNOME_INFO,
+        ),
+        gtk::TargetEntry::new("text/uri-list", gtk::TargetFlags::OTHER_APP, URI_INFO),
+        gtk::TargetEntry::new(
+            "application/x-kde-cutselection",
+            gtk::TargetFlags::OTHER_APP,
+            KDE_INFO,
+        ),
+    ];
+
+    let success = clipboard.set_with_data(&targets, move |_clipboard, selection_data, info| {
+        match info {
+            GNOME_INFO => {
+                let atom = gdk::Atom::intern("x-special/gnome-copied-files");
+                selection_data.set(&atom, 8, gnome_payload.as_bytes());
+            }
+            URI_INFO => {
+                let uris = uri_strings.iter().map(String::as_str).collect::<Vec<_>>();
+                let _ = selection_data.set_uris(&uris);
+            }
+            KDE_INFO => {
+                let atom = gdk::Atom::intern("application/x-kde-cutselection");
+                selection_data.set(&atom, 8, &kde_payload);
+            }
+            _ => {}
+        }
+    });
+
+    if !success {
+        return Err("Failed to publish the host clipboard payload.".to_string());
+    }
+
+    clipboard.store();
+    Ok(())
 }
 
 fn parse_gnome_clipboard_payload(text: &str) -> Option<ExternalClipboardPayload> {

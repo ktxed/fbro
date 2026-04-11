@@ -9,7 +9,7 @@ use crate::jobs::{
     AppJob, ConflictPolicy, DecisionResponse, FileOpEntry, FileOpJobMeta, FileOpType, JobKind,
     JobState,
 };
-use crate::platform::ExternalClipboardOp;
+use crate::platform::{ExternalClipboardOp, ExternalClipboardPayload};
 use crate::ws::intents::{arg_bool, arg_str};
 use crate::ws::protocol::{now, FileOpFileSchema, JobStartSchema, ServerMessage};
 use crate::ws::runtime::{rescan_panel, selected_names_for, IntentContext};
@@ -18,6 +18,7 @@ pub(crate) async fn handle(name: &str, _scope: &Value, args: &Value, ctx: &mut I
     match name {
         "StartFileOp" => start_file_op(args, ctx).await,
         "PasteExternalClipboard" => paste_external_clipboard(args, ctx).await,
+        "WriteExternalClipboard" => write_external_clipboard(args, ctx).await,
         "ProvideJobDecision" => provide_job_decision(args, ctx).await,
         "CancelJob" => cancel_job(args, ctx).await,
         "PauseJob" => pause_job(args, ctx).await,
@@ -45,6 +46,11 @@ struct PasteExternalClipboardArgs {
     preferred_op: Option<String>,
 }
 
+struct WriteExternalClipboardArgs {
+    panel_id: String,
+    op_type: String,
+}
+
 impl StartFileOpArgs {
     fn from_args(args: &Value) -> Self {
         Self {
@@ -70,6 +76,15 @@ impl PasteExternalClipboardArgs {
         Self {
             panel_id: arg_str(args, "panelId").unwrap_or("").to_string(),
             preferred_op: arg_str(args, "preferredOp").map(str::to_string),
+        }
+    }
+}
+
+impl WriteExternalClipboardArgs {
+    fn from_args(args: &Value) -> Self {
+        Self {
+            panel_id: arg_str(args, "panelId").unwrap_or("").to_string(),
+            op_type: arg_str(args, "opType").unwrap_or("copy").to_string(),
         }
     }
 }
@@ -259,6 +274,159 @@ fn schema_from_source_path(source_path: &str) -> Result<FileOpFileSchema, String
         kind: kind.to_string(),
         source_path: Some(source_path.replace('\\', "/")),
     })
+}
+
+fn source_paths_for_external_clipboard(
+    state: &crate::state::AppState,
+    panel_id: &str,
+) -> Result<(Arc<dyn crate::platform::Platform>, ExternalClipboardPayload), (String, String)> {
+    let Some(panel) = state.panels.get(panel_id) else {
+        return Err((
+            "WRITE_EXTERNAL_NO_PANEL".to_string(),
+            "No focused panel is available for host clipboard export.".to_string(),
+        ));
+    };
+
+    let Some(source) = state.sources.get(&panel.source_id) else {
+        return Err((
+            "WRITE_EXTERNAL_UNSUPPORTED_SOURCE".to_string(),
+            "The focused panel cannot export files to the host clipboard.".to_string(),
+        ));
+    };
+
+    let Some(driver) = state.drivers.get(&panel.source_id).cloned() else {
+        return Err((
+            "WRITE_EXTERNAL_UNSUPPORTED_SOURCE".to_string(),
+            "The focused panel cannot export files to the host clipboard.".to_string(),
+        ));
+    };
+
+    if source.kind != "filesystem" || !source.mounted || !driver.is_local() {
+        return Err((
+            "WRITE_EXTERNAL_UNSUPPORTED_SOURCE".to_string(),
+            "The focused panel cannot export files to the host clipboard.".to_string(),
+        ));
+    }
+
+    let indices: Vec<usize> = if panel.selection.is_empty() {
+        vec![panel.cursor]
+    } else {
+        panel.selection.clone()
+    };
+
+    if indices.is_empty() {
+        return Err((
+            "WRITE_EXTERNAL_NO_ELIGIBLE_ITEMS".to_string(),
+            "No files or folders are available to export to the host clipboard.".to_string(),
+        ));
+    }
+
+    let mut source_paths = Vec::with_capacity(indices.len());
+    for index in indices {
+        let Some(entry) = panel.entries.get(index) else {
+            return Err((
+                "WRITE_EXTERNAL_NO_ELIGIBLE_ITEMS".to_string(),
+                "A selected item is no longer available.".to_string(),
+            ));
+        };
+
+        if entry.name == ".." {
+            return Err((
+                "WRITE_EXTERNAL_PARENT_ENTRY".to_string(),
+                "The parent directory entry cannot be exported to the host clipboard."
+                    .to_string(),
+            ));
+        }
+
+        let source_path = driver.resolve_child(&panel.path, &entry.name);
+        if !Path::new(&source_path).is_absolute() {
+            return Err((
+                "WRITE_EXTERNAL_UNSUPPORTED_SOURCE".to_string(),
+                "The focused panel cannot export files to the host clipboard.".to_string(),
+            ));
+        }
+        source_paths.push(source_path);
+    }
+
+    if source_paths.is_empty() {
+        return Err((
+            "WRITE_EXTERNAL_NO_ELIGIBLE_ITEMS".to_string(),
+            "No files or folders are available to export to the host clipboard.".to_string(),
+        ));
+    }
+
+    Ok((
+        Arc::clone(&state.platform),
+        ExternalClipboardPayload {
+            op: ExternalClipboardOp::Copy,
+            source_paths,
+        },
+    ))
+}
+
+async fn write_external_clipboard(args: &Value, ctx: &mut IntentContext<'_>) {
+    let parsed = WriteExternalClipboardArgs::from_args(args);
+    if parsed.panel_id.is_empty() {
+        let _ = send_error(
+            ctx,
+            "WRITE_EXTERNAL_NO_PANEL",
+            "No focused panel is available for host clipboard export.".to_string(),
+        )
+        .await;
+        return;
+    }
+
+    let requested_op = match parsed.op_type.as_str() {
+        "move" => ExternalClipboardOp::Move,
+        _ => ExternalClipboardOp::Copy,
+    };
+
+    let (platform, mut payload) = {
+        let state_guard = ctx.state.lock().await;
+        match source_paths_for_external_clipboard(&state_guard, &parsed.panel_id) {
+            Ok(value) => value,
+            Err((code, message)) => {
+                let _ = send_error(ctx, &code, message).await;
+                return;
+            }
+        }
+    };
+
+    payload.op = requested_op.clone();
+    let item_count = payload.source_paths.len();
+
+    let write_result = tokio::task::spawn_blocking(move || {
+        platform.write_external_file_clipboard(&payload)
+    })
+    .await;
+
+    match write_result {
+        Ok(Ok(())) => {
+            let op_type = match requested_op {
+                ExternalClipboardOp::Move => "move",
+                ExternalClipboardOp::Copy => "copy",
+            };
+            let _ = ctx
+                .tx
+                .send(ServerMessage::ExternalClipboardWritten {
+                    timestamp: now(),
+                    op_type: op_type.to_string(),
+                    item_count,
+                })
+                .await;
+        }
+        Ok(Err(error)) => {
+            let _ = send_error(ctx, "WRITE_EXTERNAL_CLIPBOARD_ERROR", error).await;
+        }
+        Err(error) => {
+            let _ = send_error(
+                ctx,
+                "WRITE_EXTERNAL_CLIPBOARD_ERROR",
+                format!("Failed to write the system clipboard: {error}"),
+            )
+            .await;
+        }
+    }
 }
 
 async fn paste_external_clipboard(args: &Value, ctx: &mut IntentContext<'_>) {
