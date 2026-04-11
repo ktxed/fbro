@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { Panel } from "./Panel";
 import { OperationModal } from "./OperationModal";
 import { QuitModal } from "./QuitModal";
@@ -134,6 +135,9 @@ export function Layout({ client, jobsViewOpen, onCloseJobsView, onOpenJobsView }
   const dispatch = useAppDispatch();
   const [dragCandidate, setDragCandidate] = useState<DragCandidate | null>(null);
   const [activeDrag, setActiveDrag] = useState<ActiveDragSession | null>(null);
+  const [externalDragHover, setExternalDragHover] = useState<{ panelId: string; absIndex: number | null } | null>(null);
+  const externalDragPanelId = useRef<string | null>(null);
+  const externalDragHoverIndex = useRef<number | null>(null);
 
   const panelIds = state.layout.panels.length > 0 ? state.layout.panels : Object.keys(state.panels);
 
@@ -233,6 +237,113 @@ export function Layout({ client, jobsViewOpen, onCloseJobsView, onOpenJobsView }
     return () => window.clearTimeout(timer);
   }, [dispatch, state.transientHint]);
 
+  const handleExternalDrop = useCallback((panelId: string, files: FileOpFile[], destPath: string) => {
+    console.log("[fbro] handleExternalDrop called:", { panelId, files, destPath });
+    setExternalDragHover(null);
+    externalDragPanelId.current = null;
+    externalDragHoverIndex.current = null;
+    dispatch({
+      type: "OPEN_OPERATION",
+      op: {
+        opType: "copy",
+        files,
+        sourcePanel: panelId,
+        destPanel: panelId,
+        destPath,
+        conflictPolicy: "ask",
+      },
+    });
+  }, [dispatch]);
+
+  useEffect(() => {
+    const webview = getCurrentWebview();
+    
+    const findPanelAtPosition = (position: { x: number; y: number }): { panelId: string; absIndex: number | null } | null => {
+      const hoveredElement = document.elementFromPoint(position.x, position.y);
+      const panelElement = hoveredElement?.closest<HTMLElement>("[data-panel-id]");
+      const panelId = panelElement?.dataset.panelId ?? null;
+      
+      if (panelId) {
+        const rowElement = hoveredElement?.closest<HTMLElement>("[data-abs-index]");
+        const absIndex = rowElement ? Number.parseInt(rowElement.dataset.absIndex ?? "", 10) : null;
+        return { panelId, absIndex: Number.isFinite(absIndex) ? absIndex : null };
+      }
+      return null;
+    };
+
+    const handleDragOver = (position: { x: number; y: number }) => {
+      const result = findPanelAtPosition(position);
+      if (result) {
+        externalDragPanelId.current = result.panelId;
+        externalDragHoverIndex.current = result.absIndex;
+        setExternalDragHover({ panelId: result.panelId, absIndex: result.absIndex });
+      } else {
+        setExternalDragHover(null);
+        externalDragPanelId.current = null;
+        externalDragHoverIndex.current = null;
+      }
+    };
+
+    const handleDrop = (paths: string[], position: { x: number; y: number }) => {
+      console.log("[fbro] tauri drop event, paths:", paths, "position:", position);
+      
+      if (paths.length > 0) {
+        const files: FileOpFile[] = paths.map((path) => ({
+          name: path.split(/[/\\]/).pop() ?? path,
+          kind: "file",
+          sourcePath: path,
+        }));
+        
+        const result = findPanelAtPosition(position);
+        const panelId = result?.panelId ?? state.focus;
+        const panel = panelId ? state.panels[panelId] : null;
+        
+        let destPath = panel?.path ?? "/";
+        
+        if (result?.absIndex !== null && result?.absIndex !== undefined) {
+          const isWindowed = panel && panel.totalCount !== undefined && panel.totalCount > panel.entries.length;
+          const entryIndex = isWindowed ? result.absIndex - (panel?.windowStart ?? 0) : result.absIndex;
+          const entry = panel?.entries[entryIndex];
+          if (entry && entry.kind === "directory" && entry.name !== "..") {
+            destPath = `${panel.path.replace(/[/\\]+$/, "")}/${entry.name}`;
+          }
+        }
+        
+        console.log("[fbro] using panelId:", panelId, "destPath:", destPath);
+        
+        if (panelId) {
+          handleExternalDrop(panelId, files, destPath);
+        }
+      }
+      setExternalDragHover(null);
+      externalDragPanelId.current = null;
+      externalDragHoverIndex.current = null;
+    };
+
+    const handleDragCancel = () => {
+      setExternalDragHover(null);
+      externalDragPanelId.current = null;
+      externalDragHoverIndex.current = null;
+    };
+
+    webview.onDragDropEvent((event) => {
+      console.log("[fbro] drag drop event:", event.payload.type);
+      if (event.payload.type === "over") {
+        handleDragOver(event.payload.position);
+      } else if (event.payload.type === "drop") {
+        handleDrop(event.payload.paths, event.payload.position);
+      } else {
+        handleDragCancel();
+      }
+    }).then((unlisten) => {
+      return () => unlisten();
+    });
+
+    return () => {
+      // Cleanup handled by promise
+    };
+  }, [handleExternalDrop, state.panels]);
+
   if (panelIds.length === 0) {
     return <div className="layout__empty">Connecting…</div>;
   }
@@ -303,6 +414,7 @@ export function Layout({ client, jobsViewOpen, onCloseJobsView, onOpenJobsView }
               dragHovered={activeDrag?.hoverPanelId === id}
               dragDropAllowed={activeDrag?.hoverPanelId === id && activeDrag.dropAllowed}
               dragHoverAbsIndex={activeDrag?.hoverPanelId === id ? activeDrag.hoverAbsIndex : null}
+              externalDragHovered={externalDragHover?.panelId === id}
             />
           );
         })}

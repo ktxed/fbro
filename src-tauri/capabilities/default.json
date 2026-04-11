@@ -1,0 +1,10 @@
+{
+  "$schema": "https://schemas.tauri.app/config/2/capabilities",
+  "identifier": "default",
+  "description": "Default capabilities for the main window",
+  "windows": ["main"],
+  "permissions": [
+    "core:event:default",
+    "core:webview:default"
+  ]
+}

@@ -53,6 +53,7 @@ interface PanelProps {
   dragHovered: boolean;
   dragDropAllowed: boolean;
   dragHoverAbsIndex: number | null;
+  externalDragHovered: boolean;
 }
 
 function VolumeHeader({ sources, panel, onNavigateToSource, onMountSource }: {
@@ -176,6 +177,7 @@ export function Panel({
   dragHovered,
   dragDropAllowed,
   dragHoverAbsIndex,
+  externalDragHovered,
 }: PanelProps) {
   const appState = useAppState();
   const dispatch = useAppDispatch();
@@ -600,6 +602,7 @@ export function Panel({
         dragActive && dragSource ? "panel--drag-source" : "",
         dragActive && dragHovered ? "panel--drag-hover" : "",
         dragActive && dragDropAllowed ? "panel--drag-hover-valid" : "",
+        externalDragHovered ? "panel--external-drag-hover" : "",
       ].filter(Boolean).join(" ")}
       data-panel-id={panelId}
       ref={focusDivRef}
