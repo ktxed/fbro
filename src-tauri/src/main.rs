@@ -12,6 +12,7 @@ mod watcher;
 mod ws;
 
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::{Arc, Mutex as StdMutex};
 
 use state::AppState;
@@ -60,6 +61,34 @@ fn read_file_range(path: &str, start: u64, length: usize) -> std::io::Result<Vec
     let n = file.read(&mut buf)?;
     buf.truncate(n);
     Ok(buf)
+}
+
+#[derive(serde::Serialize)]
+struct PathInfo {
+    kind: String,
+    size: Option<u64>,
+}
+
+#[tauri::command]
+fn get_path_info(path: &str) -> Result<PathInfo, String> {
+    let metadata = std::fs::symlink_metadata(path)
+        .map_err(|e| format!("Cannot stat {}: {e}", path))?;
+    let file_type = metadata.file_type();
+    let kind = if file_type.is_symlink() {
+        "symlink"
+    } else if file_type.is_dir() {
+        "directory"
+    } else if file_type.is_file() {
+        "file"
+    } else {
+        "other"
+    };
+    let size = if file_type.is_file() {
+        Some(metadata.len())
+    } else {
+        None
+    };
+    Ok(PathInfo { kind: kind.to_string(), size })
 }
 
 fn mime_for_path(path: &str) -> &'static str {
@@ -168,6 +197,7 @@ fn main() {
                     .unwrap()
             }
         })
+        .invoke_handler(tauri::generate_handler![get_path_info])
         .setup({
             let platform = platform.clone();
             move |app| {

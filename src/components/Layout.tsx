@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { invoke } from "@tauri-apps/api/core";
 import { Panel } from "./Panel";
 import { OperationModal } from "./OperationModal";
 import { QuitModal } from "./QuitModal";
@@ -284,15 +285,26 @@ export function Layout({ client, jobsViewOpen, onCloseJobsView, onOpenJobsView }
       }
     };
 
-    const handleDrop = (paths: string[], position: { x: number; y: number }) => {
-      console.log("[fbro] tauri drop event, paths:", paths, "position:", position);
-      
+    const handleDrop = async (paths: string[], position: { x: number; y: number }) => {
       if (paths.length > 0) {
-        const files: FileOpFile[] = paths.map((path) => ({
-          name: path.split(/[/\\]/).pop() ?? path,
-          kind: "file",
-          sourcePath: path,
-        }));
+        const files: FileOpFile[] = [];
+        for (const path of paths) {
+          try {
+            const info = await invoke<{ kind: string; size: number | null }>("get_path_info", { path });
+            files.push({
+              name: path.split(/[/\\]/).pop() ?? path,
+              kind: info.kind,
+              size: info.size ?? undefined,
+              sourcePath: path,
+            });
+          } catch {
+            files.push({
+              name: path.split(/[/\\]/).pop() ?? path,
+              kind: "file",
+              sourcePath: path,
+            });
+          }
+        }
         
         const result = findPanelAtPosition(position);
         const panelId = result?.panelId ?? state.focus;
