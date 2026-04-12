@@ -145,6 +145,13 @@ export function Layout({ client, jobsViewOpen, onCloseJobsView, onOpenJobsView }
 
   const panelIds = state.layout.panels.length > 0 ? state.layout.panels : Object.keys(state.panels);
 
+  // Keep a ref to always-current state so the external drag-drop listener
+  // (registered once) never reads stale closure values.
+  const stateRef = useRef(state);
+  useEffect(() => {
+    stateRef.current = state;
+  });
+
   useEffect(() => {
     if (!dragCandidate && !activeDrag) return;
 
@@ -341,8 +348,9 @@ export function Layout({ client, jobsViewOpen, onCloseJobsView, onOpenJobsView }
         }
         
         const result = findPanelAtPosition(position);
-        const panelId = result?.panelId ?? state.focus;
-        const panel = panelId ? state.panels[panelId] : null;
+        const currentState = stateRef.current;
+        const panelId = result?.panelId ?? currentState.focus;
+        const panel = panelId ? currentState.panels[panelId] : null;
         
         let destPath = panel?.path ?? "/";
         
@@ -372,6 +380,9 @@ export function Layout({ client, jobsViewOpen, onCloseJobsView, onOpenJobsView }
       externalDragHoverIndex.current = null;
     };
 
+    let unlisten: (() => void) | null = null;
+    let cancelled = false;
+
     webview.onDragDropEvent((event) => {
       console.log("[fbro] drag drop event:", event.payload.type);
       if (event.payload.type === "over") {
@@ -381,14 +392,19 @@ export function Layout({ client, jobsViewOpen, onCloseJobsView, onOpenJobsView }
       } else {
         handleDragCancel();
       }
-    }).then((unlisten) => {
-      return () => unlisten();
+    }).then((fn) => {
+      if (cancelled) {
+        fn();
+      } else {
+        unlisten = fn;
+      }
     });
 
     return () => {
-      // Cleanup handled by promise
+      cancelled = true;
+      unlisten?.();
     };
-  }, [handleExternalDrop, state.panels]);
+  }, [handleExternalDrop]);
 
   if (panelIds.length === 0) {
     return <div className="layout__empty">Connecting…</div>;
