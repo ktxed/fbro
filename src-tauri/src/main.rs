@@ -2,6 +2,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod bro;
+#[cfg(target_os = "linux")]
+mod drag_out;
 mod fileserver;
 mod jobs;
 mod persistence;
@@ -11,8 +13,23 @@ mod vfs;
 mod watcher;
 mod ws;
 
+#[cfg(target_os = "linux")]
+mod drag_out_cmd {
+    #[tauri::command]
+    pub fn start_drag_out(paths: Vec<String>) -> Result<(), String> {
+        super::drag_out::start_drag_out(paths)
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+mod drag_out_cmd {
+    #[tauri::command]
+    pub fn start_drag_out(_paths: Vec<String>) -> Result<(), String> {
+        Err("Drag-out is not supported on this platform".to_string())
+    }
+}
+
 use std::collections::HashMap;
-use std::path::Path;
 use std::sync::{Arc, Mutex as StdMutex};
 
 use state::AppState;
@@ -197,13 +214,23 @@ fn main() {
                     .unwrap()
             }
         })
-        .invoke_handler(tauri::generate_handler![get_path_info])
+        .invoke_handler(tauri::generate_handler![get_path_info, crate::drag_out_cmd::start_drag_out])
         .setup({
             let platform = platform.clone();
             move |app| {
                 let app_handle = app.handle().clone();
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.set_icon(tauri::include_image!("icons/128x128.png"));
+                }
+
+                #[cfg(target_os = "linux")]
+                {
+                    if let Some(window) = app.get_webview_window("main") {
+                        if let Ok(gtk_window) = window.gtk_window() {
+                            let handle = drag_out::init_drag_out(&gtk_window, app.handle().clone());
+                            drag_out::set_drag_out_handle(handle);
+                        }
+                    }
                 }
                 let session = persistence::load();
                 let initial_paths = session

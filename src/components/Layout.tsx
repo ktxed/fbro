@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { Panel } from "./Panel";
 import { OperationModal } from "./OperationModal";
 import { QuitModal } from "./QuitModal";
@@ -136,6 +137,8 @@ export function Layout({ client, jobsViewOpen, onCloseJobsView, onOpenJobsView }
   const dispatch = useAppDispatch();
   const [dragCandidate, setDragCandidate] = useState<DragCandidate | null>(null);
   const [activeDrag, setActiveDrag] = useState<ActiveDragSession | null>(null);
+  const [dragOutInProgress, setDragOutInProgress] = useState(false);
+  const dragOutInProgressRef = useRef(false);
   const [externalDragHover, setExternalDragHover] = useState<{ panelId: string; absIndex: number | null } | null>(null);
   const externalDragPanelId = useRef<string | null>(null);
   const externalDragHoverIndex = useRef<number | null>(null);
@@ -187,6 +190,11 @@ export function Layout({ client, jobsViewOpen, onCloseJobsView, onOpenJobsView }
     };
 
     const handleMouseUp = () => {
+      if (dragOutInProgressRef.current) {
+        setDragCandidate(null);
+        return;
+      }
+
       if (activeDrag) {
         if (activeDrag.dropAllowed && activeDrag.hoverPanelId && activeDrag.dropDestPath) {
           dispatch({
@@ -237,6 +245,32 @@ export function Layout({ client, jobsViewOpen, onCloseJobsView, onOpenJobsView }
     }, 2400);
     return () => window.clearTimeout(timer);
   }, [dispatch, state.transientHint]);
+
+  useEffect(() => {
+    const unlisten = listen<{ success: boolean }>("drag-out-complete", () => {
+      setDragOutInProgress(false);
+      dragOutInProgressRef.current = false;
+    });
+    return () => { unlisten.then(fn => fn()); };
+  }, []);
+
+  const handleLayoutMouseLeave = useCallback(() => {
+    if (!activeDrag || activeDrag.files.length === 0 || dragOutInProgressRef.current) return;
+
+    const paths = activeDrag.files.map(f =>
+      f.sourcePath ?? `${activeDrag.sourcePath}/${f.name}`
+    );
+
+    setDragOutInProgress(true);
+    dragOutInProgressRef.current = true;
+    setActiveDrag(null);
+    setDragCandidate(null);
+
+    invoke("start_drag_out", { paths }).catch(() => {
+      setDragOutInProgress(false);
+      dragOutInProgressRef.current = false;
+    });
+  }, [activeDrag]);
 
   const handleExternalDrop = useCallback((panelId: string, files: FileOpFile[], destPath: string) => {
     console.log("[fbro] handleExternalDrop called:", { panelId, files, destPath });
@@ -363,17 +397,19 @@ export function Layout({ client, jobsViewOpen, onCloseJobsView, onOpenJobsView }
   const activeJob = state.activeJobId ? state.jobs[state.activeJobId] ?? null : null;
   const modalActive = state.pendingOp !== null || state.activeJobId !== null || state.pendingQuit !== null || state.pendingRename !== null || state.pendingInfo !== null || state.pendingMkdir !== null || state.pendingNoEditor !== null || state.pendingGoToPath !== null || state.pendingPanelHistory !== null || state.pendingDryRun !== null || state.pendingContextMenu !== null || state.pendingOpenWith !== null || state.pendingBro !== null || state.commandPaletteOpen || jobsViewOpen;
 
-  const dragCursorClass = activeDrag
-    ? activeDrag.dropAllowed
-      ? activeDrag.opType === "move"
-        ? "layout--drag-move"
-        : "layout--drag-copy"
-      : "layout--drag-no-drop"
-    : "";
+  const dragCursorClass = dragOutInProgress
+    ? "layout--drag-out"
+    : activeDrag
+      ? activeDrag.dropAllowed
+        ? activeDrag.opType === "move"
+          ? "layout--drag-move"
+          : "layout--drag-copy"
+        : "layout--drag-no-drop"
+      : "";
 
   return (
     <>
-      <div className={`layout ${dragCursorClass}`.trim()}>
+      <div className={`layout ${dragCursorClass}`.trim()} onMouseLeave={handleLayoutMouseLeave}>
         {panelIds.map((id) => {
           const panel = state.panels[id];
           if (!panel) return null;

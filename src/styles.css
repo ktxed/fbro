@@ -91,6 +91,11 @@ body {
   cursor: no-drop !important;
 }
 
+.layout--drag-out,
+.layout--drag-out * {
+  cursor: grabbing !important;
+}
+
 .layout__empty {
   display: flex;
   align-items: center;
