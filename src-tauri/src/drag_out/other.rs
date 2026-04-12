@@ -9,7 +9,7 @@ struct DragOutResult {
 }
 
 // The AppHandle is stored once during setup so the Tauri command (which
-// runs on a thread-pool thread) can emit the "drag-out-complete" event.
+// runs on a thread-pool thread) can reach it.
 static APP_HANDLE: OnceLock<tauri::AppHandle> = OnceLock::new();
 
 pub fn init_drag_out(app_handle: tauri::AppHandle) {
@@ -39,28 +39,29 @@ pub fn start_drag_out(paths: Vec<String>, window: tauri::WebviewWindow) -> Resul
         .join("icons")
         .join("32x32.png");
     let image = drag::Image::File(icon_path);
+    let item = drag::DragItem::Files(path_bufs);
 
-    // `drag::start_drag` blocks the calling thread until the OS drag
-    // operation ends (drop or cancel). We run it on a dedicated thread so
-    // we don't block the Tauri command dispatcher.
-    std::thread::spawn(move || {
-        let item = drag::DragItem::Files(path_bufs);
+    // `drag::start_drag` on macOS calls `beginDraggingSessionWithItems` which
+    // reads `NSApp().currentEvent` and must be invoked on the main (AppKit) thread
+    // while the mouse button is still held down. Tauri commands run on a
+    // thread-pool thread, so we dispatch back to the main thread here.
+    app_handle
+        .run_on_main_thread(move || {
+            let result = drag::start_drag(
+                &window,
+                item,
+                image,
+                move |drag_result, _cursor_pos| {
+                    let success = matches!(drag_result, drag::DragResult::Dropped);
+                    let _ = app_handle.emit("drag-out-complete", DragOutResult { success });
+                },
+                drag::Options::default(),
+            );
 
-        let result = drag::start_drag(
-            &window,
-            item,
-            image,
-            move |drag_result, _cursor_pos| {
-                let success = matches!(drag_result, drag::DragResult::Dropped);
-                let _ = app_handle.emit("drag-out-complete", DragOutResult { success });
-            },
-            drag::Options::default(),
-        );
-
-        if let Err(e) = result {
-            eprintln!("[fbro] drag-out failed: {e}");
-        }
-    });
-
-    Ok(())
+            if let Err(e) = result {
+                eprintln!("[fbro] drag-out failed: {e}");
+                let _ = app_handle.emit("drag-out-complete", DragOutResult { success: false });
+            }
+        })
+        .map_err(|e| format!("run_on_main_thread failed: {e}"))
 }
