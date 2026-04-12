@@ -341,6 +341,10 @@ body {
   user-select: none;
 }
 
+.panel__row:nth-child(even) {
+  background: rgba(255, 255, 255, 0.03);
+}
+
 .panel__row:hover {
   background: rgba(74, 124, 191, 0.12);
 }
@@ -352,11 +356,12 @@ body {
 
 .panel__row--cursor {
   background: var(--bg-cursor) !important;
+  color: var(--accent) !important;
 }
 
 .panel--focused .panel__row--cursor {
   background: var(--accent) !important;
-  color: #fff;
+  color: #fff !important;
 }
 
 .panel__col-icon {
@@ -422,12 +427,12 @@ body {
 /* cursor wins over selection highlight, but keeps selection color */
 .panel__row--cursor.panel__row--selected {
   background: var(--bg-cursor) !important;
-  color: #f0d060;
+  color: var(--accent) !important;
 }
 
 .panel--focused .panel__row--cursor.panel__row--selected {
   background: var(--accent) !important;
-  color: #f0d060;
+  color: #fff !important;
 }
 
 .panel__loading {
