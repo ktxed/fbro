@@ -71,6 +71,7 @@ export function CommandPaletteModal({ client, onOpenJobsView }: CommandPaletteMo
       client,
       onOpenJobsView,
       onOpenCommandPalette: () => dispatch({ type: "OPEN_COMMAND_PALETTE" }),
+      onOpenContextMenu: () => dispatch({ type: "CLOSE_COMMAND_PALETTE" }),
     });
   };
 

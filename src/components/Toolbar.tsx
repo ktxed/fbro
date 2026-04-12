@@ -61,6 +61,7 @@ export function Toolbar({ client, jobsViewOpen, onOpenJobsView }: { client: WsCl
           client,
           onOpenJobsView,
           onOpenCommandPalette: () => dispatch({ type: "OPEN_COMMAND_PALETTE" }),
+          onOpenContextMenu: () => dispatch({ type: "CLOSE_COMMAND_PALETTE" }),
         });
         return;
       }
@@ -77,6 +78,7 @@ export function Toolbar({ client, jobsViewOpen, onOpenJobsView }: { client: WsCl
         client,
         onOpenJobsView,
         onOpenCommandPalette: () => dispatch({ type: "OPEN_COMMAND_PALETTE" }),
+        onOpenContextMenu: () => dispatch({ type: "CLOSE_COMMAND_PALETTE" }),
       });
     };
     window.addEventListener("keydown", handler);
@@ -103,6 +105,8 @@ export function Toolbar({ client, jobsViewOpen, onOpenJobsView }: { client: WsCl
                 dispatch,
                 client,
                 onOpenJobsView,
+                onOpenCommandPalette: () => dispatch({ type: "OPEN_COMMAND_PALETTE" }),
+                onOpenContextMenu: () => dispatch({ type: "CLOSE_COMMAND_PALETTE" }),
               });
             }}
           >

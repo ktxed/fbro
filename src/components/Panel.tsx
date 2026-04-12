@@ -420,6 +420,9 @@ export function Panel({
         onOpenFilter: (initialValue) => {
           openFilterMode(initialValue);
         },
+        onOpenContextMenu: () => {
+          openContextMenuAtCursor();
+        },
         getPanelPageSize: () => {
           const list = listRef.current;
           return list ? Math.max(1, Math.floor(list.clientHeight / ROW_HEIGHT)) : 1;

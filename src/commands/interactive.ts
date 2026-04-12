@@ -65,6 +65,7 @@ export const PANEL_SHORTCUT_COMMAND_IDS = [
   "panel.source.previous",
   "panel.filter.open",
   "panel.path.sync",
+  "panel.context_menu",
 ] as const;
 
 export const COMMAND_PALETTE_COMMAND_IDS = [
@@ -95,6 +96,7 @@ interface ExecuteCommandContext {
   onOpenJobsView?: () => void;
   onOpenCommandPalette?: () => void;
   onOpenFilter?: (initialValue: string) => void;
+  onOpenContextMenu?: () => void;
   getPanelPageSize?: () => number;
 }
 
@@ -588,6 +590,35 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
         panelId: otherPanelId,
         path: focused.panel.path,
       });
+      return true;
+    }
+    case "panel.context_menu": {
+      if (!focused) return false;
+      const panelElement = document.querySelector<HTMLElement>(`[data-panel-id="${focused.panelId}"]`);
+      const row = panelElement?.querySelector<HTMLElement>(`[data-abs-index="${focused.panel.cursor}"]`);
+      const rect = row?.getBoundingClientRect();
+      if (!rect) return false;
+      const entry = currentEntry(focused.panel);
+      if (!entry || entry.name === "..") return false;
+      const dirPath = focused.panel.path.replace(/[/\\]+$/, "");
+      dispatch({
+        type: "OPEN_CONTEXT_MENU",
+        menu: {
+          panelId: focused.panelId,
+          absIndex: focused.panel.cursor,
+          name: entry.name,
+          kind: entry.kind,
+          size: entry.size,
+          dirPath,
+          fullPath: `${dirPath}/${entry.name}`,
+          anchorLeft: rect.left,
+          anchorRight: rect.right,
+          anchorTop: rect.top,
+          anchorBottom: rect.bottom,
+        },
+      });
+      const panelDiv = document.querySelector<HTMLElement>(`[data-panel-id="${focused.panelId}"]`);
+      panelDiv?.focus();
       return true;
     }
     default:

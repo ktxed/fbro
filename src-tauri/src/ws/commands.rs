@@ -384,5 +384,12 @@ pub(crate) fn build_interactive_commands() -> Vec<InteractiveCommandSchema> {
             vec![keybinding("s")],
             None,
         ),
+        command(
+            "panel.context_menu",
+            "Navigation",
+            "Open Context Menu",
+            vec![keybinding("c")],
+            None,
+        ),
     ]
 }
