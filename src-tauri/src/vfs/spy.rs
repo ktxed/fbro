@@ -109,8 +109,9 @@ impl VfsDriver for SpyFsDriver {
         path: &str,
         sort: &SortSpec,
         filter: Option<&FilterSpec>,
+        show_hidden: bool,
     ) -> Result<Vec<VfsEntry>, VfsError> {
-        self.inner.list(path, sort, filter)
+        self.inner.list(path, sort, filter, show_hidden)
     }
 
     fn resolve_child(&self, base: &str, name: &str) -> String {

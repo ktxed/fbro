@@ -391,5 +391,12 @@ pub(crate) fn build_interactive_commands() -> Vec<InteractiveCommandSchema> {
             vec![keybinding("c")],
             None,
         ),
+        command(
+            "panel.toggle_hidden",
+            "Navigation",
+            "Toggle Hidden Files",
+            vec![keybinding(".")],
+            Some("ToggleHidden"),
+        ),
     ]
 }

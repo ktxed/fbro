@@ -15,6 +15,7 @@ pub async fn dispatch(name: &str, scope: &Value, args: &Value, ctx: &mut IntentC
         | "SetSort"
         | "SetFilter"
         | "SetFilterMode"
+        | "ToggleHidden"
         | "MoveCursor"
         | "SetSelection"
         | "SelectAtIndex"

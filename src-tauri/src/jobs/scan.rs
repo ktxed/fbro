@@ -37,10 +37,11 @@ pub async fn run_scan(
     state: SharedState,
     dir_size_queue: Arc<DirSizeQueue>,
     atomic: bool,
+    show_hidden: bool,
 ) {
     let path_clone = path.clone();
     let result =
-        tokio::task::spawn_blocking(move || driver.list(&path_clone, &sort, filter.as_ref())).await;
+        tokio::task::spawn_blocking(move || driver.list(&path_clone, &sort, filter.as_ref(), show_hidden)).await;
 
     let entries = match result {
         Ok(Ok(e)) => e,

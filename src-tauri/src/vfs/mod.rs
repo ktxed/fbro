@@ -31,6 +31,7 @@ pub trait VfsDriver: Send + Sync {
         path: &str,
         sort: &SortSpec,
         filter: Option<&FilterSpec>,
+        show_hidden: bool,
     ) -> Result<Vec<VfsEntry>, VfsError>;
 
     fn resolve_child(&self, base: &str, name: &str) -> String;

@@ -195,6 +195,8 @@ pub struct PanelSnapshot {
     pub filter: Option<FilterSpec>,
     #[serde(rename = "filterModeActive")]
     pub filter_mode_active: bool,
+    #[serde(rename = "showHidden")]
+    pub show_hidden: bool,
     pub cursor: usize,
     pub selection: Vec<usize>,
     #[serde(rename = "selectedEntries")]

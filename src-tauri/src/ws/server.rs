@@ -146,7 +146,7 @@ async fn handle_connection(
     let mut decision_senders: HashMap<String, mpsc::Sender<DecisionResponse>> = HashMap::new();
 
     for panel_id in &panel_ids {
-        let (path, sort, filter, version_base, driver) = {
+        let (path, sort, filter, show_hidden, version_base, driver) = {
             let state_guard = state.lock().await;
             let panel = state_guard.panels.get(panel_id).unwrap();
             let driver = state_guard.drivers.get(&panel.source_id).cloned().unwrap();
@@ -154,6 +154,7 @@ async fn handle_connection(
                 panel.path.clone(),
                 panel.sort.clone(),
                 panel.filter.clone(),
+                panel.show_hidden,
                 panel.version,
                 driver,
             )
@@ -173,6 +174,7 @@ async fn handle_connection(
                 Arc::clone(&state),
                 Arc::clone(&dir_size_queue),
                 false,
+                show_hidden,
             )),
         };
         scan_handles.insert(panel_id.clone(), handle);

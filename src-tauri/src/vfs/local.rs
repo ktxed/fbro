@@ -65,8 +65,12 @@ impl VfsDriver for LocalFsDriver {
         path: &str,
         sort: &SortSpec,
         filter: Option<&FilterSpec>,
+        show_hidden: bool,
     ) -> Result<Vec<VfsEntry>, VfsError> {
         let dir = fs::read_dir(path).map_err(|e| map_io_err(path, e))?;
+
+        // Filter out hidden files unless show_hidden is true
+        let hide_hidden = !show_hidden;
 
         // Build the filter regex once before iterating entries.
         // Pattern syntax: glob-like with * as wildcard, | as OR separator.
@@ -121,6 +125,11 @@ impl VfsDriver for LocalFsDriver {
             };
 
             let name = entry.file_name().to_string_lossy().to_string();
+
+            // Skip hidden files unless show_hidden is enabled
+            if hide_hidden && name.starts_with('.') && name != ".." {
+                continue;
+            }
 
             if let Some(re) = &filter_re {
                 if !re.is_match(&name) {

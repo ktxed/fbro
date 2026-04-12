@@ -15,6 +15,7 @@ pub(crate) async fn handle(name: &str, scope: &Value, args: &Value, ctx: &mut In
         "SetSort" => set_sort(scope, args, ctx).await,
         "SetFilter" => set_filter(scope, args, ctx).await,
         "SetFilterMode" => set_filter_mode(scope, args, ctx).await,
+        "ToggleHidden" => toggle_hidden(scope, args, ctx).await,
         "MoveCursor" => move_cursor(scope, args, ctx).await,
         "SetSelection" => set_selection(scope, args, ctx).await,
         "SelectAtIndex" => select_at_index(scope, args, ctx).await,
@@ -280,6 +281,42 @@ async fn set_filter_mode(scope: &Value, args: &Value, ctx: &mut IntentContext<'_
         panel_id,
         version,
         serde_json::json!({ "filterModeActive": parsed.active }),
+    )
+    .await;
+}
+
+async fn toggle_hidden(scope: &Value, _args: &Value, ctx: &mut IntentContext<'_>) {
+    let panel_id = resolve_panel_id(scope, ctx.state).await;
+    let (new_value, version) = {
+        let mut state_guard = ctx.state.lock().await;
+        if let Some(panel) = state_guard.panels.get_mut(&panel_id) {
+            panel.show_hidden = !panel.show_hidden;
+            panel.version += 1;
+            (panel.show_hidden, panel.version)
+        } else {
+            return;
+        }
+    };
+    let selection_names = {
+        let state_guard = ctx.state.lock().await;
+        selected_names_for(&state_guard, &panel_id)
+    };
+    send_panel_patch(
+        ctx,
+        panel_id.clone(),
+        version,
+        serde_json::json!({ "showHidden": new_value }),
+    )
+    .await;
+
+    rescan_panel(
+        &panel_id,
+        ctx.state,
+        ctx.tx,
+        ctx.scan_handles,
+        None,
+        selection_names,
+        ctx.dir_size_queue,
     )
     .await;
 }

@@ -153,9 +153,9 @@ pub(crate) async fn navigate_to(
         handle.abort();
     }
 
-    let (sort, filter, version, driver) = {
+    let (sort, filter, show_hidden, version, driver) = {
         let mut state_guard = state.lock().await;
-        let (source_id, sort, filter, version) =
+        let (source_id, sort, filter, show_hidden, version) =
             if let Some(panel) = state_guard.panels.get_mut(panel_id) {
                 let source_id = panel.source_id.clone();
                 panel.path = new_path.to_string();
@@ -169,12 +169,12 @@ pub(crate) async fn navigate_to(
                 panel.filter = None;
                 panel.filter_mode_active = false;
                 panel.version += 1;
-                (source_id, panel.sort.clone(), None, panel.version)
+                (source_id, panel.sort.clone(), panel.filter.clone(), panel.show_hidden, panel.version)
             } else {
                 return;
             };
         let driver = state_guard.drivers.get(&source_id).cloned().unwrap();
-        (sort, filter, version, driver)
+        (sort, filter, show_hidden, version, driver)
     };
 
     let _ = tx
@@ -218,6 +218,7 @@ pub(crate) async fn navigate_to(
         None,
         Arc::clone(state),
         Arc::clone(dir_size_queue),
+        show_hidden,
     );
     scan_handles.insert(panel_id.to_string(), handle);
 }
@@ -235,9 +236,9 @@ pub(crate) async fn rescan_panel(
         handle.abort();
     }
 
-    let (path, sort, filter, filter_mode_active, version, driver, source_id) = {
+    let (path, sort, filter, filter_mode_active, show_hidden, version, driver, source_id) = {
         let mut state_guard = state.lock().await;
-        let (source_id, path, sort, filter, filter_mode_active, version) =
+        let (source_id, path, sort, filter, filter_mode_active, show_hidden, version) =
             if let Some(panel) = state_guard.panels.get_mut(panel_id) {
                 let source_id = panel.source_id.clone();
                 panel.entries.clear();
@@ -253,6 +254,7 @@ pub(crate) async fn rescan_panel(
                     panel.sort.clone(),
                     panel.filter.clone(),
                     panel.filter_mode_active,
+                    panel.show_hidden,
                     panel.version,
                 )
             } else {
@@ -264,6 +266,7 @@ pub(crate) async fn rescan_panel(
             sort,
             filter,
             filter_mode_active,
+            show_hidden,
             version,
             driver,
             source_id,
@@ -287,6 +290,7 @@ pub(crate) async fn rescan_panel(
                 "sort": { "by": sort.by, "order": sort.order },
                 "filter": filter,
                 "filterModeActive": filter_mode_active,
+                "showHidden": show_hidden,
                 "totalCount": null,
                 "windowStart": null
             }),
@@ -305,6 +309,7 @@ pub(crate) async fn rescan_panel(
         selection_names,
         Arc::clone(state),
         Arc::clone(dir_size_queue),
+        show_hidden,
     );
     scan_handles.insert(panel_id.to_string(), handle);
 }
@@ -321,9 +326,9 @@ pub(crate) async fn quiet_rescan_panel(
         handle.abort();
     }
 
-    let (path, sort, filter, version, driver) = {
+    let (path, sort, filter, show_hidden, version, driver) = {
         let mut state_guard = state.lock().await;
-        let (source_id, path, sort, filter, version) =
+        let (source_id, path, sort, filter, show_hidden, version) =
             if let Some(panel) = state_guard.panels.get_mut(panel_id) {
                 panel.version += 1;
                 (
@@ -331,13 +336,14 @@ pub(crate) async fn quiet_rescan_panel(
                     panel.path.clone(),
                     panel.sort.clone(),
                     panel.filter.clone(),
+                    panel.show_hidden,
                     panel.version,
                 )
             } else {
                 return;
             };
         let driver = state_guard.drivers.get(&source_id).cloned().unwrap();
-        (path, sort, filter, version, driver)
+        (path, sort, filter, show_hidden, version, driver)
     };
 
     let cursor_hint = {
@@ -362,6 +368,7 @@ pub(crate) async fn quiet_rescan_panel(
         selection_names,
         Arc::clone(state),
         Arc::clone(dir_size_queue),
+        show_hidden,
     );
     scan_handles.insert(panel_id.to_string(), handle);
 }
@@ -646,6 +653,9 @@ pub(crate) async fn update_panel_from_patch(
         {
             panel.filter_mode_active = filter_mode_active;
         }
+        if let Some(show_hidden) = patch.get("showHidden").and_then(|value| value.as_bool()) {
+            panel.show_hidden = show_hidden;
+        }
         if let Some(window_start) = patch.get("windowStart").and_then(|value| value.as_u64()) {
             panel.window_start = window_start as usize;
         }
@@ -664,6 +674,7 @@ fn build_panel_snapshot(panel: &Panel) -> PanelSnapshot {
         sort: panel.sort.clone(),
         filter: panel.filter.clone(),
         filter_mode_active: panel.filter_mode_active,
+        show_hidden: panel.show_hidden,
         cursor: panel.cursor,
         selection: panel.selection.clone(),
         selected_entries: selected_entries_for_panel(panel),
@@ -687,6 +698,7 @@ fn spawn_scan(
     selection_names: Option<Vec<String>>,
     state: SharedState,
     dir_size_queue: Arc<DirSizeQueue>,
+    show_hidden: bool,
 ) -> ScanHandle {
     let handle = tokio::spawn(run_scan(
         panel_id,
@@ -701,6 +713,7 @@ fn spawn_scan(
         state,
         dir_size_queue,
         false,
+        show_hidden,
     ));
     ScanHandle { handle }
 }
@@ -717,6 +730,7 @@ fn spawn_scan_atomic(
     selection_names: Option<Vec<String>>,
     state: SharedState,
     dir_size_queue: Arc<DirSizeQueue>,
+    show_hidden: bool,
 ) -> ScanHandle {
     let handle = tokio::spawn(run_scan(
         panel_id,
@@ -731,6 +745,7 @@ fn spawn_scan_atomic(
         state,
         dir_size_queue,
         true,
+        show_hidden,
     ));
     ScanHandle { handle }
 }

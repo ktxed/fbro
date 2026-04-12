@@ -34,6 +34,7 @@ export interface PanelState {
   sort: { by: string; order: "asc" | "desc" };
   filter: null | { mode: string; value: string };
   filterModeActive: boolean;
+  showHidden: boolean;
   cursor: number;
   selection: number[];
   selectedEntries: FileOpFile[];

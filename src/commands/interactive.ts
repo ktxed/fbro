@@ -31,6 +31,7 @@ export const GLOBAL_SHORTCUT_COMMAND_IDS = [
   "app.open_jobs",
   "panel.navigate_source_root",
   "file.info",
+  "panel.toggle_hidden",
   "file.copy_external",
   "file.cut_external",
   "file.paste_external",
@@ -66,6 +67,7 @@ export const PANEL_SHORTCUT_COMMAND_IDS = [
   "panel.filter.open",
   "panel.path.sync",
   "panel.context_menu",
+  "panel.toggle_hidden",
 ] as const;
 
 export const COMMAND_PALETTE_COMMAND_IDS = [
@@ -619,6 +621,11 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
       });
       const panelDiv = document.querySelector<HTMLElement>(`[data-panel-id="${focused.panelId}"]`);
       panelDiv?.focus();
+      return true;
+    }
+    case "panel.toggle_hidden": {
+      if (!focused) return false;
+      client.sendIntent("ToggleHidden", focused.panelId, {});
       return true;
     }
     default:
