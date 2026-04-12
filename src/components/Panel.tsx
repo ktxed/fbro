@@ -689,12 +689,12 @@ export function Panel({
         </div>
         <div className="panel__footer-right">
           {panel.filter && <span className="panel__filter-active">/{panel.filter.value}/</span>}
-          {panel.showHidden && (
+          {!panel.showHidden && (
             <button
               type="button"
               className="panel__hidden-indicator"
               data-tooltip-id="hidden-files"
-              data-tooltip-content="Hidden files are visible (press . to toggle)"
+              data-tooltip-content="Hidden files are hidden (press . to show)"
               onClick={() => client.sendIntent("ToggleHidden", panelId, {})}
             >
               H
