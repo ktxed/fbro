@@ -510,6 +510,17 @@ body {
   font-style: italic;
 }
 
+.panel__hidden-indicator {
+  color: var(--accent);
+  font-weight: bold;
+  padding-left: 8px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: inherit;
+  font-family: inherit;
+}
+
 .panel__filter-bar {
   display: flex;
   justify-content: center;

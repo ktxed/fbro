@@ -14,7 +14,8 @@
     "@floating-ui/react": "^0.27.19",
     "@tauri-apps/api": "^2",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "react-tooltip": "^5.30.1"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",

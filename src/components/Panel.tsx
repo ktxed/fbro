@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { Tooltip } from "react-tooltip";
 import type { PanelState, VFSEntry, Source } from "../ws/types";
 import type { WsClient } from "../ws/client";
 import {
@@ -688,9 +689,21 @@ export function Panel({
         </div>
         <div className="panel__footer-right">
           {panel.filter && <span className="panel__filter-active">/{panel.filter.value}/</span>}
+          {panel.showHidden && (
+            <button
+              type="button"
+              className="panel__hidden-indicator"
+              data-tooltip-id="hidden-files"
+              data-tooltip-content="Hidden files are visible (press . to toggle)"
+              onClick={() => client.sendIntent("ToggleHidden", panelId, {})}
+            >
+              H
+            </button>
+          )}
           {diskText && <span>{diskText}</span>}
         </div>
       </div>
+      <Tooltip id="hidden-files" delayShow={0} />
     </div>
   );
 }
