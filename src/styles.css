@@ -1175,6 +1175,10 @@ body {
   width: 1%;
 }
 
+.modal__hotkey {
+  text-decoration: underline;
+}
+
 .modal__info-value {
   color: var(--text);
   word-break: break-all;

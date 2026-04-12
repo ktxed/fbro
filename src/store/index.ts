@@ -203,7 +203,8 @@ export type AppAction =
   | { type: "CLOSE_BRO" }
   | { type: "OPEN_COMMAND_PALETTE" }
   | { type: "CLOSE_COMMAND_PALETTE" }
-  | { type: "CLOSE_TRANSIENT_HINT" };
+  | { type: "CLOSE_TRANSIENT_HINT" }
+  | { type: "SHOW_TRANSIENT_HINT"; message: string };
 
 function pushPanelHistoryEntry(
   panelHistory: Record<string, string[]>,
@@ -735,6 +736,14 @@ function reducer(state: AppState, action: AppAction): AppState {
       return { ...state, commandPaletteOpen: false };
     case "CLOSE_TRANSIENT_HINT":
       return { ...state, transientHint: null };
+    case "SHOW_TRANSIENT_HINT":
+      return {
+        ...state,
+        transientHint: {
+          message: action.message,
+          token: Date.now(),
+        },
+      };
   }
 }
 

@@ -57,6 +57,13 @@ export function InfoModal({ info }: InfoModalProps) {
     if (e.key === "Escape" || e.key === "i" || e.key === "I" || e.key === "Enter") {
       e.preventDefault();
       close();
+      return;
+    }
+    if (e.key === "p" || e.key === "P") {
+      e.preventDefault();
+      navigator.clipboard.writeText(info.fullPath);
+      dispatch({ type: "SHOW_TRANSIENT_HINT", message: "Copied to clipboard" });
+      return;
     }
   };
 
@@ -73,7 +80,7 @@ export function InfoModal({ info }: InfoModalProps) {
                 <td><CopyButton text={info.name} /></td>
               </tr>
               <tr>
-                <td className="modal__info-label">Full path</td>
+                <td className="modal__info-label">Full <span className="modal__hotkey">p</span>ath</td>
                 <td className="modal__info-value" title={info.fullPath}>{info.fullPath}</td>
                 <td><CopyButton text={info.fullPath} /></td>
               </tr>
@@ -126,7 +133,7 @@ export function InfoModal({ info }: InfoModalProps) {
           </table>
         </div>
         <div className="modal__actions">
-          <button className="modal__btn" onClick={close}>Close</button>
+          <button className="modal__btn modal__btn--primary" onClick={close}>Close</button>
         </div>
       </div>
     </div>
