@@ -2,7 +2,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod bro;
-#[cfg(target_os = "linux")]
 mod drag_out;
 mod fileserver;
 mod jobs;
@@ -13,19 +12,20 @@ mod vfs;
 mod watcher;
 mod ws;
 
-#[cfg(target_os = "linux")]
 mod drag_out_cmd {
+    #[cfg(target_os = "linux")]
     #[tauri::command]
     pub fn start_drag_out(paths: Vec<String>) -> Result<(), String> {
         super::drag_out::start_drag_out(paths)
     }
-}
 
-#[cfg(not(target_os = "linux"))]
-mod drag_out_cmd {
+    #[cfg(not(target_os = "linux"))]
     #[tauri::command]
-    pub fn start_drag_out(_paths: Vec<String>) -> Result<(), String> {
-        Err("Drag-out is not supported on this platform".to_string())
+    pub fn start_drag_out(
+        paths: Vec<String>,
+        window: tauri::WebviewWindow,
+    ) -> Result<(), String> {
+        super::drag_out::start_drag_out(paths, window)
     }
 }
 
@@ -231,6 +231,11 @@ fn main() {
                             drag_out::set_drag_out_handle(handle);
                         }
                     }
+                }
+
+                #[cfg(not(target_os = "linux"))]
+                {
+                    drag_out::init_drag_out(app.handle().clone());
                 }
                 let session = persistence::load();
                 let initial_paths = session
