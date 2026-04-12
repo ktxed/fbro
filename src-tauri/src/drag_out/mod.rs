@@ -23,8 +23,8 @@ pub fn init_drag_out(app_handle: tauri::AppHandle) {
     other::init_drag_out(app_handle);
 }
 
-/// Start a drag-out operation (spawns a thread; returns immediately).
+/// Start a drag-out operation on macOS/Windows (dispatches to the main thread).
 #[cfg(not(target_os = "linux"))]
-pub fn start_drag_out(paths: Vec<String>, window: tauri::WebviewWindow) -> Result<(), String> {
-    other::start_drag_out(paths, window)
+pub fn start_drag_out(paths: Vec<String>) -> Result<(), String> {
+    other::start_drag_out(paths)
 }

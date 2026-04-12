@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use std::sync::OnceLock;
 
 use tauri::Emitter;
+use tauri::Manager;
 
 #[derive(Clone, Debug, serde::Serialize)]
 struct DragOutResult {
@@ -16,7 +17,7 @@ pub fn init_drag_out(app_handle: tauri::AppHandle) {
     let _ = APP_HANDLE.set(app_handle);
 }
 
-pub fn start_drag_out(paths: Vec<String>, window: tauri::WebviewWindow) -> Result<(), String> {
+pub fn start_drag_out(paths: Vec<String>) -> Result<(), String> {
     let app_handle = APP_HANDLE
         .get()
         .ok_or_else(|| "Drag-out not initialized".to_string())?
@@ -45,8 +46,20 @@ pub fn start_drag_out(paths: Vec<String>, window: tauri::WebviewWindow) -> Resul
     // reads `NSApp().currentEvent` and must be invoked on the main (AppKit) thread
     // while the mouse button is still held down. Tauri commands run on a
     // thread-pool thread, so we dispatch back to the main thread here.
+    //
+    // `WebviewWindow` is not `Send` on macOS, so we cannot move it into the
+    // closure — we retrieve it fresh from the AppHandle inside the main thread.
     app_handle
         .run_on_main_thread(move || {
+            let window = match app_handle.get_webview_window("main") {
+                Some(w) => w,
+                None => {
+                    eprintln!("[fbro] drag-out: could not get main window");
+                    let _ = app_handle.emit("drag-out-complete", DragOutResult { success: false });
+                    return;
+                }
+            };
+
             let result = drag::start_drag(
                 &window,
                 item,

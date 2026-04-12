@@ -13,19 +13,9 @@ mod watcher;
 mod ws;
 
 mod drag_out_cmd {
-    #[cfg(target_os = "linux")]
     #[tauri::command]
     pub fn start_drag_out(paths: Vec<String>) -> Result<(), String> {
         super::drag_out::start_drag_out(paths)
-    }
-
-    #[cfg(not(target_os = "linux"))]
-    #[tauri::command]
-    pub fn start_drag_out(
-        paths: Vec<String>,
-        window: tauri::WebviewWindow,
-    ) -> Result<(), String> {
-        super::drag_out::start_drag_out(paths, window)
     }
 }
 
