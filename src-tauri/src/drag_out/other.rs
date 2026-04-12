@@ -49,6 +49,11 @@ pub fn start_drag_out(paths: Vec<String>) -> Result<(), String> {
     //
     // `WebviewWindow` is not `Send` on macOS, so we cannot move it into the
     // closure — we retrieve it fresh from the AppHandle inside the main thread.
+    // Clone before entering run_on_main_thread so each closure owns a
+    // separate Send handle — the callback clone will be moved into the
+    // drag::start_drag closure which requires F: Send + 'static.
+    let app_handle_cb = app_handle.clone();
+
     app_handle
         .run_on_main_thread(move || {
             let window = match app_handle.get_webview_window("main") {
@@ -66,7 +71,7 @@ pub fn start_drag_out(paths: Vec<String>) -> Result<(), String> {
                 image,
                 move |drag_result, _cursor_pos| {
                     let success = matches!(drag_result, drag::DragResult::Dropped);
-                    let _ = app_handle.emit("drag-out-complete", DragOutResult { success });
+                    let _ = app_handle_cb.emit("drag-out-complete", DragOutResult { success });
                 },
                 drag::Options::default(),
             );
