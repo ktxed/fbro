@@ -39,22 +39,11 @@ pub fn start_drag_out(paths: Vec<String>) -> Result<(), String> {
     let icon_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("icons")
         .join("32x32.png");
-    let image = drag::Image::File(icon_path);
-    let item = drag::DragItem::Files(path_bufs);
 
-    // `drag::start_drag` on macOS calls `beginDraggingSessionWithItems` which
-    // reads `NSApp().currentEvent` and must be invoked on the main (AppKit) thread
-    // while the mouse button is still held down. Tauri commands run on a
-    // thread-pool thread, so we dispatch back to the main thread here.
-    //
-    // `WebviewWindow` is not `Send` on macOS, so we cannot move it into the
-    // closure — we retrieve it fresh from the AppHandle inside the main thread.
-    // Clone before entering run_on_main_thread so each closure owns a
-    // separate Send handle — the callback clone will be moved into the
-    // drag::start_drag closure which requires F: Send + 'static.
     let app_handle_cb = app_handle.clone();
+    let app_handle_main = app_handle.clone();
 
-    app_handle
+    app_handle_main
         .run_on_main_thread(move || {
             let window = match app_handle.get_webview_window("main") {
                 Some(w) => w,
@@ -64,6 +53,9 @@ pub fn start_drag_out(paths: Vec<String>) -> Result<(), String> {
                     return;
                 }
             };
+
+            let image = drag::Image::File(icon_path);
+            let item = drag::DragItem::Files(path_bufs);
 
             let result = drag::start_drag(
                 &window,
