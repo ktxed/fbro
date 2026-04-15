@@ -5,7 +5,7 @@ import { ImageViewer, IMAGE_LIMIT } from "../viewers/ImageViewer";
 import { detectRenderer, isImageExt } from "../viewers/media";
 import { DirectFileViewer, canUseDirect } from "../viewers/DirectFileViewer";
 
-const SMALL_LIMIT = 5 * 1024 * 1024;  // 5 MiB — files at or below this are loaded fully
+const SMALL_LIMIT = 1 * 1024 * 1024;  // 1 MiB — files at or below this are loaded fully
 const CHUNK_SIZE  = 65536;  // 64 KiB — buffer window for large files
 const LINE_H      = 20;     // px — 13px font × 1.5 line-height (19.5, rounded up)
 const MAX_COL     = 512;    // chars — wrap long lines into multiple display rows
