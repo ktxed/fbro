@@ -13,7 +13,7 @@ export interface VFSEntry {
 export interface Source {
   id: string;
   name: string;
-  kind: "filesystem" | "virtual";
+  kind: "filesystem" | "virtual" | "archive";
   supports: string[];
   capabilities: {
     readOnly: boolean;
@@ -24,6 +24,14 @@ export interface Source {
   mounted: boolean;
   freeBytes?: number;
   totalBytes?: number;
+  shadow?: boolean;
+}
+
+export interface ShadowSource {
+  parentSourceId: string;
+  parentPath: string;
+  archivePath: string;
+  cursorHint?: string;
 }
 
 export interface PanelState {
@@ -44,6 +52,7 @@ export interface PanelState {
   totalCount?: number;
   totalSize?: number;
   windowStart?: number;
+  shadowSource?: ShadowSource;
 }
 
 export interface LayoutDomain {
@@ -389,6 +398,15 @@ export interface BroOptionsFailedMessage {
   message: string;
 }
 
+export interface InputRequiredMessage {
+  type: "InputRequired";
+  timestamp: number;
+  panelId: string;
+  requestId: string;
+  kind: "password" | "text";
+  prompt: string;
+}
+
 // ─── Union types ─────────────────────────────────────────────────────────────
 
 export type BEMessage =
@@ -410,6 +428,7 @@ export type BEMessage =
   | OpenWithOptionsReadyMessage
   | OpenWithOptionsFailedMessage
   | BroOptionsReadyMessage
-  | BroOptionsFailedMessage;
+  | BroOptionsFailedMessage
+  | InputRequiredMessage;
 
 export type FEMessage = HelloMessage | IntentMessage;

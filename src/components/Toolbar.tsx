@@ -51,7 +51,7 @@ export function Toolbar({ client, jobsViewOpen, onOpenJobsView }: { client: WsCl
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      const blockingModalActive = state.pendingOp || state.activeJobId || state.pendingQuit || state.pendingRename || state.pendingInfo || state.pendingMkdir || state.pendingNoEditor || state.pendingGoToPath || state.pendingPanelHistory || state.pendingDryRun || state.pendingContextMenu || state.pendingOpenWith || state.pendingBro || jobsViewOpen;
+      const blockingModalActive = state.pendingOp || state.activeJobId || state.pendingQuit || state.pendingRename || state.pendingInfo || state.pendingMkdir || state.pendingNoEditor || state.pendingGoToPath || state.pendingPanelHistory || state.pendingDryRun || state.pendingContextMenu || state.pendingOpenWith || state.pendingBro || state.pendingInput || jobsViewOpen;
       const paletteCommand = getCommand(state.commands, COMMAND_PALETTE_COMMAND_ID);
       if (!blockingModalActive && paletteCommand && paletteCommand.bindings.some((binding) => bindingMatches(e, binding))) {
         e.preventDefault();
@@ -85,21 +85,28 @@ export function Toolbar({ client, jobsViewOpen, onOpenJobsView }: { client: WsCl
     return () => window.removeEventListener("keydown", handler);
   }, [client, dispatch, jobsViewOpen, onOpenJobsView, state]);
 
+  const focusedPanel = state.panels[state.focus];
+  const isShadow = !!focusedPanel?.shadowSource;
+  const shadowDisabled = new Set(["file.rename", "file.move", "file.delete", "file.mkdir", "app.open_terminal"]);
+
   return (
     <div className="toolbar">
       {TOOLBAR_COMMAND_IDS.map((commandId) => {
         const command = getCommand(state.commands, commandId);
         const key = formatPrimaryBinding(command);
-        const label = TOOLBAR_LABELS[commandId];
+        const isDisabled = isShadow && shadowDisabled.has(commandId);
+        const label = isShadow && commandId === "file.copy" ? "Extract" : TOOLBAR_LABELS[commandId];
         const detail = command?.title ?? label;
         const icon = TOOLBAR_ICONS[commandId];
         return (
           <button
             key={commandId}
-            className="toolbar__btn"
+            className={`toolbar__btn${isDisabled ? " toolbar__btn--disabled" : ""}`}
             tabIndex={-1}
+            disabled={isDisabled}
             title={key ? `${key} — ${detail}` : detail}
             onClick={() => {
+              if (isDisabled) return;
               executeCommand(commandId, {
                 state,
                 dispatch,

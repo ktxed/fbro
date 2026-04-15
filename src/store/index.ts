@@ -88,6 +88,7 @@ export interface PendingContextMenu {
   anchorRight: number;
   anchorTop: number;
   anchorBottom: number;
+  isShadow?: boolean;
 }
 
 export interface PendingOpenWith {
@@ -112,6 +113,13 @@ export interface PendingBro {
   inputs: BroInputItem[];
   bros: BroItem[];
   error?: string;
+}
+
+export interface PendingInput {
+  panelId: string;
+  requestId: string;
+  kind: "password" | "text";
+  prompt: string;
 }
 
 export interface AppState {
@@ -139,6 +147,7 @@ export interface AppState {
   pendingContextMenu: PendingContextMenu | null;
   pendingOpenWith: PendingOpenWith | null;
   pendingBro: PendingBro | null;
+  pendingInput: PendingInput | null;
   commandPaletteOpen: boolean;
   transientHint: { message: string; token: number } | null;
 }
@@ -168,6 +177,7 @@ const initialState: AppState = {
   pendingContextMenu: null,
   pendingOpenWith: null,
   pendingBro: null,
+  pendingInput: null,
   commandPaletteOpen: false,
   transientHint: null,
 };
@@ -204,7 +214,8 @@ export type AppAction =
   | { type: "OPEN_COMMAND_PALETTE" }
   | { type: "CLOSE_COMMAND_PALETTE" }
   | { type: "CLOSE_TRANSIENT_HINT" }
-  | { type: "SHOW_TRANSIENT_HINT"; message: string };
+  | { type: "SHOW_TRANSIENT_HINT"; message: string }
+  | { type: "CLOSE_INPUT" };
 
 function pushPanelHistoryEntry(
   panelHistory: Record<string, string[]>,
@@ -355,6 +366,9 @@ function applyPatch(state: AppState, msg: StatePatchMessage): AppState {
     }
     if (msg.patch.windowEntries !== undefined) {
       updated = { ...updated, entries: msg.patch.windowEntries as VFSEntry[] };
+    }
+    if (msg.patch.shadowSource !== undefined) {
+      updated = { ...updated, shadowSource: msg.patch.shadowSource === null ? undefined : msg.patch.shadowSource as PanelState["shadowSource"] };
     }
 
     const nextHistory = updated.path !== panel.path
@@ -678,6 +692,18 @@ function reducer(state: AppState, action: AppAction): AppState {
               bros: [],
             },
           };
+        case "InputRequired": {
+          const m = msg as import("../ws/types").InputRequiredMessage;
+          return {
+            ...state,
+            pendingInput: {
+              panelId: m.panelId,
+              requestId: m.requestId,
+              kind: m.kind,
+              prompt: m.prompt,
+            },
+          };
+        }
         case "QuitConfirmRequired":
           return applyQuitConfirmRequired(state, msg);
         default:
@@ -744,6 +770,8 @@ function reducer(state: AppState, action: AppAction): AppState {
           token: Date.now(),
         },
       };
+    case "CLOSE_INPUT":
+      return { ...state, pendingInput: null };
   }
 }
 

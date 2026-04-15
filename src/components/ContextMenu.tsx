@@ -25,8 +25,8 @@ export function ContextMenu({ client, menu }: ContextMenuProps) {
   const [highlightedIndex, setHighlightedIndex] = useState(0);
 
   const items = useMemo(
-    () => buildContextMenuItems(state.commands, menu.fullPath, menu.name, menu.kind),
-    [state.commands, menu.fullPath, menu.name, menu.kind],
+    () => buildContextMenuItems(state.commands, menu.fullPath, menu.name, menu.kind, menu.isShadow),
+    [state.commands, menu.fullPath, menu.name, menu.kind, menu.isShadow],
   );
   const selectableItems = items.filter((item) => item.kind !== "separator");
 

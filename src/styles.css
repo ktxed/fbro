@@ -318,6 +318,17 @@ body {
   color: var(--text-path);
 }
 
+.panel__breadcrumb-btn--archive {
+  color: #d670d6;
+}
+.panel__breadcrumb-btn--archive:hover {
+  color: #e890e8;
+}
+.panel__breadcrumb-sep--archive {
+  color: #d670d6;
+  padding: 0 3px;
+}
+
 .panel__home-btn {
   flex-shrink: 0;
   background: none;

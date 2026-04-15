@@ -94,7 +94,7 @@ function VolumeHeader({ sources, panel, onNavigateToSource, onMountSource }: {
     <div className="panel__volumes">
       <button className="panel__volumes-arrow" disabled={!canLeft} tabIndex={-1} onClick={() => scroll(-1)}>‹</button>
       <div className="panel__volumes-list" ref={listRef} onScroll={updateArrows} onWheel={onWheel}>
-        {Object.values(sources).map(src => (
+        {Object.values(sources).filter(src => !src.shadow).map(src => (
           <button
             key={src.id}
             className={`panel__volume-btn${src.id === panel.sourceId ? " panel__volume-btn--active" : ""}${!src.mounted ? " panel__volume-btn--unmounted" : ""}`}
@@ -138,13 +138,33 @@ function buildBreadcrumbs(path: string): Array<{ label: string; path: string }> 
   return crumbs;
 }
 
-function PathBreadcrumbs({ panelId, path, client }: {
+function PathBreadcrumbs({ panelId, path, client, shadowSource }: {
   panelId: string;
   path: string;
   client: WsClient;
+  shadowSource?: import("../ws/types").ShadowSource;
 }) {
   const listRef = useRef<HTMLDivElement>(null);
-  const breadcrumbs = useMemo(() => buildBreadcrumbs(path), [path]);
+
+  // When inside an archive, build breadcrumbs for the archive's host path first,
+  // then append the internal archive path crumbs.
+  const archiveCrumbs = useMemo(() => shadowSource ? buildBreadcrumbs(shadowSource.archivePath) : [], [shadowSource]);
+  const innerCrumbs = useMemo(() => {
+    if (!shadowSource) return buildBreadcrumbs(path);
+    if (!path) return [];
+    // Build relative crumbs for the path inside the archive.
+    const parts = path.split("/").filter(Boolean);
+    const result: Array<{ label: string; path: string }> = [];
+    let current = "";
+    for (const part of parts) {
+      current = current ? `${current}/${part}` : part;
+      result.push({ label: part, path: current });
+    }
+    return result;
+  }, [path, shadowSource]);
+
+  const allCrumbs = shadowSource ? [...archiveCrumbs, ...innerCrumbs] : buildBreadcrumbs(path);
+  const archiveBoundary = shadowSource ? archiveCrumbs.length : -1;
 
   useEffect(() => {
     const el = listRef.current;
@@ -153,7 +173,7 @@ function PathBreadcrumbs({ panelId, path, client }: {
       el.scrollLeft = el.scrollWidth;
     });
     return () => window.cancelAnimationFrame(id);
-  }, [path, breadcrumbs.length]);
+  }, [path, allCrumbs.length]);
 
   const handleWheel = useCallback((e: React.WheelEvent<HTMLDivElement>) => {
     const el = listRef.current;
@@ -163,23 +183,48 @@ function PathBreadcrumbs({ panelId, path, client }: {
     el.scrollBy({ left: e.deltaX !== 0 ? e.deltaX : e.deltaY, behavior: "auto" });
   }, []);
 
+  const fullTitle = shadowSource ? `${shadowSource.archivePath} :: ${path || "/"}` : path;
+
   return (
-    <div className="panel__path" title={path}>
+    <div className="panel__path" title={fullTitle}>
       <div className="panel__path-scroll" ref={listRef} onWheel={handleWheel}>
-        {breadcrumbs.map((crumb, index) => (
-          <span className="panel__breadcrumb" key={`${crumb.path}-${index}`}>
-            {index > 0 && breadcrumbs[index - 1]?.path !== "/" && <span className="panel__breadcrumb-sep">/</span>}
-            <button
-              className={`panel__breadcrumb-btn${index === breadcrumbs.length - 1 ? " panel__breadcrumb-btn--active" : ""}`}
-              type="button"
-              tabIndex={-1}
-              onClick={() => client.sendIntent("NavigatePanelTo", panelId, { panelId, path: crumb.path })}
-              title={crumb.path}
-            >
-              {crumb.label}
-            </button>
-          </span>
-        ))}
+        {allCrumbs.map((crumb, index) => {
+          const isArchiveSegment = index < archiveBoundary;
+          const isArchiveFile = index === archiveBoundary - 1;
+          const isInner = shadowSource && index >= archiveBoundary;
+          const isLast = index === allCrumbs.length - 1;
+
+          const colorClass = (isArchiveFile || isInner) ? " panel__breadcrumb-btn--archive" : "";
+
+          return (
+            <span className="panel__breadcrumb" key={`${crumb.path}-${index}`}>
+              {index > 0 && allCrumbs[index - 1]?.path !== "/" && (
+                <span className={`panel__breadcrumb-sep${isArchiveFile ? " panel__breadcrumb-sep--archive" : ""}`}>
+                  {isArchiveFile ? " :: " : "/"}
+                </span>
+              )}
+              <button
+                className={`panel__breadcrumb-btn${isLast ? " panel__breadcrumb-btn--active" : ""}${colorClass}`}
+                type="button"
+                tabIndex={-1}
+                onClick={() => {
+                  if (isArchiveSegment && !isArchiveFile) {
+                    // Clicking a host-path crumb while in archive: navigate up and out.
+                    client.sendIntent("NavigateHome", "focused-panel");
+                  } else if (isInner || (shadowSource && isLast && index >= archiveBoundary)) {
+                    // Navigate within the archive — use OpenEntry-style navigation.
+                    client.sendIntent("NavigatePanelTo", panelId, { panelId, path: crumb.path });
+                  } else if (!shadowSource) {
+                    client.sendIntent("NavigatePanelTo", panelId, { panelId, path: crumb.path });
+                  }
+                }}
+                title={crumb.path}
+              >
+                {crumb.label}
+              </button>
+            </span>
+          );
+        })}
       </div>
     </div>
   );
@@ -431,9 +476,10 @@ export function Panel({
         anchorRight: rect.right,
         anchorTop: rect.top,
         anchorBottom: rect.bottom,
+        isShadow: !!panel.shadowSource,
       },
     });
-  }, [client, dispatch, isFocused, panel.path, panelId]);
+  }, [client, dispatch, isFocused, panel.path, panel.shadowSource, panelId]);
 
   const openContextMenuAtCursor = useCallback(() => {
     const entry = panel.entries[panel.cursor - (panel.windowStart ?? 0)];
@@ -696,7 +742,7 @@ export function Panel({
       }}
     >
       <div className="panel__header">
-        <PathBreadcrumbs panelId={panelId} path={panel.path} client={client} />
+        <PathBreadcrumbs panelId={panelId} path={panel.path} client={client} shadowSource={panel.shadowSource} />
         <button
           className="panel__home-btn"
           tabIndex={-1}

@@ -58,6 +58,10 @@ impl VfsDriver for LocalFsDriver {
         true
     }
 
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
     // ── Listing & navigation ────────────────────────────────────────────────
 
     fn list(

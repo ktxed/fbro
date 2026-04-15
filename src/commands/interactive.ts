@@ -451,6 +451,7 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
     case "file.info":
       return focused ? openInfo(dispatch, focused.panel) : false;
     case "file.rename":
+      if (focused?.panel.shadowSource) return false;
       return focused ? openRename(dispatch, focused.panel) : false;
     case "file.view":
       return focused ? openViewerIntent(client, focused.panel, "ViewFile") : false;
@@ -459,42 +460,45 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
     case "file.copy":
       return focused ? openFileOp(state, dispatch, focused.panel, "copy") : false;
     case "file.copy_external":
-      if (!focused) return false;
+      if (!focused || focused.panel.shadowSource) return false;
       client.sendIntent("WriteExternalClipboard", undefined, {
         panelId: focused.panelId,
         opType: "copy",
       });
       return true;
     case "file.move":
+      if (focused?.panel.shadowSource) return false;
       return focused ? openFileOp(state, dispatch, focused.panel, "move") : false;
     case "file.cut_external":
-      if (!focused) return false;
+      if (!focused || focused.panel.shadowSource) return false;
       client.sendIntent("WriteExternalClipboard", undefined, {
         panelId: focused.panelId,
         opType: "move",
       });
       return true;
     case "file.paste_external":
-      if (!focused) return false;
+      if (!focused || focused.panel.shadowSource) return false;
       client.sendIntent("PasteExternalClipboard", undefined, { panelId: focused.panelId });
       return true;
     case "file.paste_external_move":
-      if (!focused) return false;
+      if (!focused || focused.panel.shadowSource) return false;
       client.sendIntent("PasteExternalClipboard", undefined, {
         panelId: focused.panelId,
         preferredOp: "move",
       });
       return true;
     case "file.mkdir":
-      if (!focused) return false;
+      if (!focused || focused.panel.shadowSource) return false;
       dispatch({
         type: "OPEN_MKDIR",
         mkdir: { sourcePanel: focused.panelId, dirPath: focused.panel.path },
       });
       return true;
     case "file.delete":
+      if (focused?.panel.shadowSource) return false;
       return focused ? openFileOp(state, dispatch, focused.panel, "delete") : false;
     case "app.open_terminal":
+      if (focused?.panel.shadowSource) return false;
       client.sendIntent("OpenTerminal", focused?.panelId ?? state.focus);
       return true;
     case "app.quit":
@@ -617,6 +621,7 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
           anchorRight: rect.right,
           anchorTop: rect.top,
           anchorBottom: rect.bottom,
+          isShadow: !!focused.panel.shadowSource,
         },
       });
       const panelDiv = document.querySelector<HTMLElement>(`[data-panel-id="${focused.panelId}"]`);

@@ -366,6 +366,19 @@ fn source_paths_for_external_clipboard(
 
 async fn write_external_clipboard(args: &Value, ctx: &mut IntentContext<'_>) {
     let parsed = WriteExternalClipboardArgs::from_args(args);
+
+    // Block clipboard export from shadow sources (zip entries aren't real filesystem paths).
+    {
+        let state_guard = ctx.state.lock().await;
+        if let Some(panel) = state_guard.panels.get(&parsed.panel_id) {
+            if panel.shadow_source.is_some() {
+                drop(state_guard);
+                let _ = send_error(ctx, "OP_NOT_SUPPORTED", "Cannot copy archive entries to the system clipboard.".to_string()).await;
+                return;
+            }
+        }
+    }
+
     if parsed.panel_id.is_empty() {
         let _ = send_error(
             ctx,
@@ -431,6 +444,19 @@ async fn write_external_clipboard(args: &Value, ctx: &mut IntentContext<'_>) {
 
 async fn paste_external_clipboard(args: &Value, ctx: &mut IntentContext<'_>) {
     let parsed = PasteExternalClipboardArgs::from_args(args);
+
+    // Block paste into shadow sources.
+    {
+        let state_guard = ctx.state.lock().await;
+        if let Some(panel) = state_guard.panels.get(&parsed.panel_id) {
+            if panel.shadow_source.is_some() {
+                drop(state_guard);
+                let _ = send_error(ctx, "OP_NOT_SUPPORTED", "Cannot paste into an archive.".to_string()).await;
+                return;
+            }
+        }
+    }
+
     if parsed.panel_id.is_empty() {
         let _ = send_error(
             ctx,
@@ -561,6 +587,43 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
         "overwrite" => ConflictPolicy::Overwrite,
         _ => ConflictPolicy::Ask,
     };
+
+    // Block unsupported operations on shadow (archive) sources.
+    {
+        let state_guard = ctx.state.lock().await;
+        let src_is_shadow = state_guard
+            .panels
+            .get(&parsed.source_panel)
+            .and_then(|p| p.shadow_source.as_ref())
+            .is_some();
+        let dst_is_shadow = parsed
+            .dest_panel
+            .as_ref()
+            .and_then(|id| state_guard.panels.get(id))
+            .and_then(|p| p.shadow_source.as_ref())
+            .is_some();
+
+        if src_is_shadow && (op_type == FileOpType::Move || op_type == FileOpType::Delete) {
+            drop(state_guard);
+            let _ = send_error(
+                ctx,
+                "OP_NOT_SUPPORTED",
+                "Cannot move or delete files inside an archive.".to_string(),
+            )
+            .await;
+            return;
+        }
+        if dst_is_shadow {
+            drop(state_guard);
+            let _ = send_error(
+                ctx,
+                "OP_NOT_SUPPORTED",
+                "Cannot write into an archive.".to_string(),
+            )
+            .await;
+            return;
+        }
+    }
 
     let prepared: Result<_, String> = async {
         let state_guard = ctx.state.lock().await;
@@ -1002,6 +1065,19 @@ async fn resume_job(args: &Value, ctx: &mut IntentContext<'_>) {
 
 async fn rename_file(args: &Value, ctx: &mut IntentContext<'_>) {
     let parsed = RenameArgs::from_args(args);
+
+    // Block rename inside shadow sources (zip archives).
+    {
+        let state_guard = ctx.state.lock().await;
+        if let Some(panel) = state_guard.panels.get(&parsed.source_panel) {
+            if panel.shadow_source.is_some() {
+                drop(state_guard);
+                let _ = send_error(ctx, "OP_NOT_SUPPORTED", "Cannot rename inside an archive.".to_string()).await;
+                return;
+            }
+        }
+    }
+
     if parsed.dest_name.contains('/') || parsed.dest_name.contains('\\') {
         let _ = ctx
             .tx
@@ -1080,6 +1156,19 @@ async fn rename_file(args: &Value, ctx: &mut IntentContext<'_>) {
 
 async fn make_dir(args: &Value, ctx: &mut IntentContext<'_>) {
     let parsed = MakeDirArgs::from_args(args);
+
+    // Block mkdir inside shadow sources (zip archives).
+    {
+        let state_guard = ctx.state.lock().await;
+        if let Some(panel) = state_guard.panels.get(&parsed.source_panel) {
+            if panel.shadow_source.is_some() {
+                drop(state_guard);
+                let _ = send_error(ctx, "OP_NOT_SUPPORTED", "Cannot create directories inside an archive.".to_string()).await;
+                return;
+            }
+        }
+    }
+
     let full_path = format!("{}/{}", parsed.dir_path.trim_end_matches('/'), parsed.name);
 
     let (driver, selection_names) = {

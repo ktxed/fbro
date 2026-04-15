@@ -3,6 +3,7 @@
 pub mod local;
 #[cfg(unix)]
 pub mod spy;
+pub mod zip;
 
 use std::io::{Read, Write};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -23,6 +24,9 @@ pub trait VfsDriver: Send + Sync {
     fn is_local(&self) -> bool {
         false
     }
+
+    /// Downcast helper for runtime type checking (e.g. detecting ZipFsDriver).
+    fn as_any(&self) -> &dyn std::any::Any;
 
     // ── Listing & navigation ────────────────────────────────────────────────
 

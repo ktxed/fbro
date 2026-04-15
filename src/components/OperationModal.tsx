@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import type { WsClient } from "../ws/client";
 import type { PendingOp, Job, ConflictPolicy } from "../ws/types";
-import { useAppDispatch } from "../store";
+import { useAppDispatch, useAppState } from "../store";
 import type { PendingDryRun } from "../store";
 
 interface OperationModalProps {
@@ -98,6 +98,7 @@ function useTransferSpeed(currentFile: string | undefined, bytesCopied: number) 
 }
 
 export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun, panelIds, client }: OperationModalProps) {
+  const state = useAppState();
   const dispatch = useAppDispatch();
   const [conflictPolicy, setConflictPolicy] = useState<ConflictPolicy>("ask");
   const [submitted, setSubmitted] = useState(false);
@@ -180,7 +181,8 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
   if (pending) {
     const fileCount = pending.files.length;
     const isDelete = pending.opType === "delete";
-    const label = opLabel(pending.opType);
+    const isShadowSource = !!state.panels[pending.sourcePanel]?.shadowSource;
+    const label = isShadowSource && pending.opType === "copy" ? "Extract" : opLabel(pending.opType);
     const canStartInBackground = !dryMode;
     const conflictPolicies: ConflictPolicy[] = ["ask", "overwrite", "skip"];
 

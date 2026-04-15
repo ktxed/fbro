@@ -149,6 +149,17 @@ pub enum ServerMessage {
         request_id: String,
         message: String,
     },
+    /// Request text input from the FE (e.g. archive password).
+    InputRequired {
+        timestamp: u64,
+        #[serde(rename = "panelId")]
+        panel_id: String,
+        #[serde(rename = "requestId")]
+        request_id: String,
+        /// The kind of input: "password", "text", etc.
+        kind: String,
+        prompt: String,
+    },
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -209,6 +220,18 @@ pub struct PanelSnapshot {
     pub total_count: Option<usize>,
     #[serde(rename = "windowStart", skip_serializing_if = "Option::is_none")]
     pub window_start: Option<usize>,
+    #[serde(rename = "shadowSource", skip_serializing_if = "Option::is_none")]
+    pub shadow_source: Option<ShadowSourceSchema>,
+}
+
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct ShadowSourceSchema {
+    pub parent_source_id: String,
+    pub parent_path: String,
+    pub archive_path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cursor_hint: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -254,6 +277,8 @@ pub struct SourceSchema {
     pub free_bytes: Option<u64>,
     #[serde(rename = "totalBytes", skip_serializing_if = "Option::is_none")]
     pub total_bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub shadow: bool,
 }
 
 #[derive(Serialize, Clone, Debug)]

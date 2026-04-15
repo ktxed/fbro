@@ -102,6 +102,10 @@ impl VfsDriver for SpyFsDriver {
         self.inner.is_local()
     }
 
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
     // ── Pass-through (non-mutating) ──────────────────────────────────────────
 
     fn list(

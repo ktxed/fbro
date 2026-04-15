@@ -16,6 +16,7 @@ import { CommandPaletteModal } from "./CommandPaletteModal";
 import { ContextMenu } from "./ContextMenu";
 import { OpenWithModal } from "./OpenWithModal";
 import { BroModal } from "./BroModal";
+import { InputModal } from "./InputModal";
 import { useAppDispatch, useAppState } from "../store";
 import type { FileOpFile, FileOpType, PanelState, VFSEntry } from "../ws/types";
 import type { WsClient } from "../ws/client";
@@ -411,7 +412,7 @@ export function Layout({ client, jobsViewOpen, onCloseJobsView, onOpenJobsView }
   }
 
   const activeJob = state.activeJobId ? state.jobs[state.activeJobId] ?? null : null;
-  const modalActive = state.pendingOp !== null || state.activeJobId !== null || state.pendingQuit !== null || state.pendingRename !== null || state.pendingInfo !== null || state.pendingMkdir !== null || state.pendingNoEditor !== null || state.pendingGoToPath !== null || state.pendingPanelHistory !== null || state.pendingDryRun !== null || state.pendingContextMenu !== null || state.pendingOpenWith !== null || state.pendingBro !== null || state.commandPaletteOpen || jobsViewOpen;
+  const modalActive = state.pendingOp !== null || state.activeJobId !== null || state.pendingQuit !== null || state.pendingRename !== null || state.pendingInfo !== null || state.pendingMkdir !== null || state.pendingNoEditor !== null || state.pendingGoToPath !== null || state.pendingPanelHistory !== null || state.pendingDryRun !== null || state.pendingContextMenu !== null || state.pendingOpenWith !== null || state.pendingBro !== null || state.pendingInput !== null || state.commandPaletteOpen || jobsViewOpen;
 
   const dragCursorClass = dragOutInProgress
     ? "layout--drag-out"
@@ -523,6 +524,9 @@ export function Layout({ client, jobsViewOpen, onCloseJobsView, onOpenJobsView }
       )}
       {state.pendingBro && (
         <BroModal client={client} bro={state.pendingBro} />
+      )}
+      {state.pendingInput && (
+        <InputModal input={state.pendingInput} client={client} />
       )}
       {state.commandPaletteOpen && (
         <CommandPaletteModal client={client} onOpenJobsView={onOpenJobsView} />

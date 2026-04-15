@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use serde_json::Value;
 
+use crate::state::{ShadowSource, Source};
 use crate::vfs::VfsDriver;
 use crate::watcher::WatcherCommand;
 use crate::ws::intents::arg_str;
@@ -26,6 +27,7 @@ pub(crate) async fn handle(name: &str, scope: &Value, args: &Value, ctx: &mut In
         "RevealInFileManager" => reveal_in_file_manager(args, ctx).await,
         "ListOpenWithApps" => list_open_with_apps(args, ctx).await,
         "LaunchOpenWithApp" => launch_open_with_app(args, ctx).await,
+        "ProvideInput" => provide_input(args, ctx).await,
         _ => {}
     }
 }
@@ -104,14 +106,16 @@ impl RevealArgs {
 
 async fn open_entry(scope: &Value, ctx: &mut IntentContext<'_>) {
     let panel_id = resolve_panel_id(scope, ctx.state).await;
-    let (entry_kind, new_path) = {
+    let (entry_kind, entry_name, new_path, is_in_shadow) = {
         let state_guard = ctx.state.lock().await;
         if let Some(panel) = state_guard.panels.get(&panel_id) {
             if let Some(entry) = panel.entries.get(panel.cursor) {
                 let driver = state_guard.drivers.get(&panel.source_id).unwrap();
                 (
                     entry.kind.clone(),
+                    entry.name.clone(),
                     driver.resolve_child(&panel.path, &entry.name),
+                    panel.shadow_source.is_some(),
                 )
             } else {
                 return;
@@ -133,11 +137,186 @@ async fn open_entry(scope: &Value, ctx: &mut IntentContext<'_>) {
             ctx.watcher_cmd_tx,
         )
         .await;
+    } else if entry_kind == "file" && entry_name.to_lowercase().ends_with(".zip") && !is_in_shadow {
+        // Enter zip archive as a shadow filesystem.
+        enter_zip_archive(&panel_id, &new_path, &entry_name, ctx).await;
     }
+}
+
+/// Create a ZipFsDriver, register a shadow source, and navigate the panel into the archive root.
+async fn enter_zip_archive(
+    panel_id: &str,
+    archive_path: &str,
+    archive_name: &str,
+    ctx: &mut IntentContext<'_>,
+) {
+    // Try to create the zip driver.
+    let driver = match crate::vfs::zip::ZipFsDriver::new(archive_path) {
+        Ok(d) => Arc::new(d),
+        Err(e) => {
+            let _ = ctx
+                .tx
+                .send(ServerMessage::Error {
+                    timestamp: now(),
+                    code: "ZIP_OPEN_FAILED".to_string(),
+                    message: format!("Cannot open archive: {e}"),
+                    recoverable: true,
+                    extra: Some(serde_json::json!({ "panelId": panel_id })),
+                })
+                .await;
+            return;
+        }
+    };
+
+    let source_id = format!("zip:{}", archive_path);
+
+    // Register shadow source + driver, update panel state.
+    {
+        let mut state_guard = ctx.state.lock().await;
+
+        // Read panel info before mutating.
+        let (parent_source_id, parent_path) = match state_guard.panels.get(panel_id) {
+            Some(p) => (p.source_id.clone(), p.path.clone()),
+            None => return,
+        };
+
+        let shadow = ShadowSource {
+            parent_source_id,
+            parent_path,
+            archive_path: archive_path.to_string(),
+            cursor_hint: Some(archive_name.to_string()),
+        };
+
+        // Register source if not already present (another panel might have it open).
+        if !state_guard.sources.contains_key(&source_id) {
+            state_guard.sources.insert(
+                source_id.clone(),
+                Source {
+                    id: source_id.clone(),
+                    name: archive_name.to_string(),
+                    kind: "archive".to_string(),
+                    supports: vec![
+                        "ListEntries".to_string(),
+                        "OpenFolder".to_string(),
+                        "CopySelection".to_string(),
+                    ],
+                    root_path: String::new(), // root inside the archive is ""
+                    mounted: true,
+                    device_path: None,
+                    shadow: true,
+                },
+            );
+        }
+        if !state_guard.drivers.contains_key(&source_id) {
+            state_guard
+                .drivers
+                .insert(source_id.clone(), driver as Arc<dyn VfsDriver>);
+        }
+
+        // Now mutate the panel.
+        if let Some(panel) = state_guard.panels.get_mut(panel_id) {
+            panel.shadow_source = Some(shadow);
+            panel.source_id = source_id.clone();
+            panel.path = String::new(); // archive root
+            panel.cursor = 0;
+            panel.selection.clear();
+            panel.filter = None;
+            panel.filter_mode_active = false;
+        }
+    }
+
+    // Send a sources patch so FE knows about the new shadow source.
+    let sources_json = {
+        let state_guard = ctx.state.lock().await;
+        build_sources_json(&state_guard)
+    };
+    let _ = ctx
+        .tx
+        .send(ServerMessage::StatePatch {
+            timestamp: now(),
+            domain: "sources".to_string(),
+            entity_id: None,
+            version: 0,
+            patch: serde_json::json!({ "sources": sources_json }),
+        })
+        .await;
+
+    // Navigate into the archive root — this triggers a scan.
+    rescan_panel(
+        panel_id,
+        ctx.state,
+        ctx.tx,
+        ctx.scan_handles,
+        None,
+        None,
+        ctx.dir_size_queue,
+    )
+    .await;
+}
+
+/// Tear down a shadow source for a panel and return to the parent filesystem.
+/// Returns (parent_source_id, parent_path, cursor_hint) if the panel was in a shadow source.
+async fn teardown_shadow_source(
+    panel_id: &str,
+    ctx: &mut IntentContext<'_>,
+) -> Option<(String, String, Option<String>)> {
+    let shadow_info = {
+        let mut state_guard = ctx.state.lock().await;
+        let panel = state_guard.panels.get_mut(panel_id)?;
+        let shadow = panel.shadow_source.take()?;
+        let old_source_id = panel.source_id.clone();
+
+        // Restore parent context.
+        panel.source_id = shadow.parent_source_id.clone();
+        panel.path = shadow.parent_path.clone();
+        panel.cursor = 0;
+        panel.selection.clear();
+        panel.filter = None;
+        panel.filter_mode_active = false;
+
+        // Check if any other panel is still using this shadow source.
+        let still_in_use = state_guard
+            .panels
+            .values()
+            .any(|p| p.panel_id != panel_id && p.source_id == old_source_id);
+
+        if !still_in_use {
+            state_guard.sources.remove(&old_source_id);
+            state_guard.drivers.remove(&old_source_id);
+        }
+
+        Some((
+            shadow.parent_source_id,
+            shadow.parent_path,
+            shadow.cursor_hint,
+        ))
+    };
+
+    if shadow_info.is_some() {
+        // Send updated sources to FE.
+        let sources_json = {
+            let state_guard = ctx.state.lock().await;
+            build_sources_json(&state_guard)
+        };
+        let _ = ctx
+            .tx
+            .send(ServerMessage::StatePatch {
+                timestamp: now(),
+                domain: "sources".to_string(),
+                entity_id: None,
+                version: 0,
+                patch: serde_json::json!({ "sources": sources_json }),
+            })
+            .await;
+    }
+
+    shadow_info
 }
 
 async fn navigate_home(scope: &Value, ctx: &mut IntentContext<'_>) {
     let panel_id = resolve_panel_id(scope, ctx.state).await;
+    // If inside a shadow source, tear it down first.
+    teardown_shadow_source(&panel_id, ctx).await;
     let home = ctx.state.lock().await.platform.home_dir();
     navigate_to(
         &panel_id,
@@ -154,6 +333,8 @@ async fn navigate_home(scope: &Value, ctx: &mut IntentContext<'_>) {
 
 async fn navigate_source_root(scope: &Value, ctx: &mut IntentContext<'_>) {
     let panel_id = resolve_panel_id(scope, ctx.state).await;
+    // If inside a shadow source, tear it down first.
+    teardown_shadow_source(&panel_id, ctx).await;
     let target = {
         let state_guard = ctx.state.lock().await;
         let panel = match state_guard.panels.get(&panel_id) {
@@ -191,6 +372,26 @@ async fn navigate_source_root(scope: &Value, ctx: &mut IntentContext<'_>) {
 async fn navigate_panel_to(args: &Value, ctx: &mut IntentContext<'_>) {
     let parsed = NavigatePanelArgs::from_args(args);
     if !parsed.panel_id.is_empty() && !parsed.path.is_empty() {
+        // Block navigation when inside a shadow source (zip archive).
+        {
+            let state_guard = ctx.state.lock().await;
+            if let Some(panel) = state_guard.panels.get(&parsed.panel_id) {
+                if panel.shadow_source.is_some() {
+                    let _ = ctx
+                        .tx
+                        .send(ServerMessage::Error {
+                            timestamp: now(),
+                            code: "NAVIGATE_FAILED".to_string(),
+                            message: "Cannot navigate to a path while browsing an archive.".to_string(),
+                            recoverable: true,
+                            extra: Some(serde_json::json!({ "panelId": parsed.panel_id })),
+                        })
+                        .await;
+                    return;
+                }
+            }
+        }
+
         let requested_path = parsed.path.trim().to_string();
         let resolved_target = {
             let state_guard = ctx.state.lock().await;
@@ -269,7 +470,7 @@ async fn navigate_panel_to(args: &Value, ctx: &mut IntentContext<'_>) {
 
 async fn open_file(scope: &Value, ctx: &mut IntentContext<'_>) {
     let panel_id = resolve_panel_id(scope, ctx.state).await;
-    let (path, entry, platform) = {
+    let (path, entry, platform, shadow_source, source_id) = {
         let state_guard = ctx.state.lock().await;
         let panel = match state_guard.panels.get(&panel_id) {
             Some(panel) => panel,
@@ -279,26 +480,72 @@ async fn open_file(scope: &Value, ctx: &mut IntentContext<'_>) {
             panel.path.clone(),
             panel.entries.get(panel.cursor).cloned(),
             Arc::clone(&state_guard.platform),
+            panel.shadow_source.clone(),
+            panel.source_id.clone(),
         )
     };
     if let Some(entry) = entry {
         if entry.kind != "directory" {
-            let full_path = format!("{}/{}", path.trim_end_matches('/'), entry.name);
-            platform.open_file(&full_path);
+            if shadow_source.is_some() {
+                // Inside a zip: extract to temp file and open.
+                let inner_path = if path.is_empty() {
+                    entry.name.clone()
+                } else {
+                    format!("{}/{}", path, entry.name)
+                };
+                let state_guard = ctx.state.lock().await;
+                if let Some(driver) = state_guard.drivers.get(&source_id) {
+                    if let Some(zip_driver) = driver
+                        .as_ref()
+                        .as_any()
+                        .downcast_ref::<crate::vfs::zip::ZipFsDriver>()
+                    {
+                        match zip_driver.extract_to_temp(&inner_path) {
+                            Ok(temp_path) => {
+                                drop(state_guard);
+                                platform.open_file(&temp_path.to_string_lossy());
+                            }
+                            Err(e) => {
+                                drop(state_guard);
+                                let _ = ctx
+                                    .tx
+                                    .send(ServerMessage::Error {
+                                        timestamp: now(),
+                                        code: "ZIP_EXTRACT_FAILED".to_string(),
+                                        message: format!("Cannot extract file: {e}"),
+                                        recoverable: true,
+                                        extra: None,
+                                    })
+                                    .await;
+                            }
+                        }
+                    }
+                }
+            } else {
+                let full_path = format!("{}/{}", path.trim_end_matches('/'), entry.name);
+                platform.open_file(&full_path);
+            }
         }
     }
 }
 
 async fn open_terminal(scope: &Value, ctx: &mut IntentContext<'_>) {
     let panel_id = resolve_panel_id(scope, ctx.state).await;
-    let (path, platform) = {
+    let (path, platform, is_shadow) = {
         let state_guard = ctx.state.lock().await;
         let panel = match state_guard.panels.get(&panel_id) {
             Some(panel) => panel,
             None => return,
         };
-        (panel.path.clone(), Arc::clone(&state_guard.platform))
+        (
+            panel.path.clone(),
+            Arc::clone(&state_guard.platform),
+            panel.shadow_source.is_some(),
+        )
     };
+    if is_shadow {
+        return; // Cannot open a terminal inside an archive.
+    }
     platform.open_terminal(&path);
 }
 
@@ -422,6 +669,8 @@ async fn launch_open_with_app(args: &Value, ctx: &mut IntentContext<'_>) {
 
 async fn navigate_to_source(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
     let panel_id = resolve_panel_id(scope, ctx.state).await;
+    // If inside a shadow source, tear it down first.
+    teardown_shadow_source(&panel_id, ctx).await;
     let parsed = SourceArgs::from_args(args);
 
     let root_path = {
@@ -591,18 +840,24 @@ async fn mount_source(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) 
 
 async fn navigate_up(scope: &Value, ctx: &mut IntentContext<'_>) {
     let panel_id = resolve_panel_id(scope, ctx.state).await;
-    let (current_path, parent_path) = {
+    let (current_path, parent_path, has_shadow) = {
         let state_guard = ctx.state.lock().await;
         if let Some(panel) = state_guard.panels.get(&panel_id) {
             let driver = state_guard.drivers.get(&panel.source_id).unwrap();
-            (Some(panel.path.clone()), driver.parent_path(&panel.path))
+            (
+                Some(panel.path.clone()),
+                driver.parent_path(&panel.path),
+                panel.shadow_source.is_some(),
+            )
         } else {
-            (None, None)
+            (None, None, false)
         }
     };
+
     if let Some(current_path) = current_path {
         if let Some(parent) = parent_path {
             if parent != current_path {
+                // Normal navigate up within current source (local FS or inside zip subdirectory).
                 let dir_name = current_path
                     .trim_end_matches('/')
                     .rsplit('/')
@@ -619,6 +874,47 @@ async fn navigate_up(scope: &Value, ctx: &mut IntentContext<'_>) {
                     ctx.watcher_cmd_tx,
                 )
                 .await;
+            }
+        } else if has_shadow {
+            // parent_path is None and we're in a shadow source → exit the archive.
+            if let Some((_parent_source_id, parent_path, cursor_hint)) =
+                teardown_shadow_source(&panel_id, ctx).await
+            {
+                navigate_to(
+                    &panel_id,
+                    &parent_path,
+                    cursor_hint,
+                    ctx.state,
+                    ctx.tx,
+                    ctx.scan_handles,
+                    ctx.dir_size_queue,
+                    ctx.watcher_cmd_tx,
+                )
+                .await;
+            }
+        }
+    }
+}
+
+/// Handle the ProvideInput intent — currently used to provide passwords for encrypted zip archives.
+async fn provide_input(args: &Value, ctx: &mut IntentContext<'_>) {
+    let request_id = arg_str(args, "requestId").unwrap_or("").to_string();
+    let value = arg_str(args, "value").unwrap_or("").to_string();
+
+    if request_id.is_empty() || value.is_empty() {
+        return;
+    }
+
+    // The requestId encodes "zip-password:<source_id>".
+    if let Some(source_id) = request_id.strip_prefix("zip-password:") {
+        let state_guard = ctx.state.lock().await;
+        if let Some(driver) = state_guard.drivers.get(source_id) {
+            if let Some(zip_driver) = driver
+                .as_ref()
+                .as_any()
+                .downcast_ref::<crate::vfs::zip::ZipFsDriver>()
+            {
+                zip_driver.set_password(&value);
             }
         }
     }

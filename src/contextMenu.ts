@@ -59,23 +59,24 @@ export function buildContextMenuItems(
   fullPath: string,
   name: string,
   kind: string,
+  isShadow?: boolean,
 ): ContextMenuItem[] {
-  const openWithItem: ContextMenuItem | null = kind === "file" || kind === "directory"
+  const openWithItem: ContextMenuItem | null = !isShadow && (kind === "file" || kind === "directory")
     ? { id: "platform.open_with", kind: "openWith", label: "Open With..." }
     : null;
-  const broItem: ContextMenuItem | null = kind === "file" || kind === "directory"
+  const broItem: ContextMenuItem | null = !isShadow && (kind === "file" || kind === "directory")
     ? { id: "platform.pass_to_bro", kind: "bro", label: "Pass to Bro..." }
     : null;
 
   return [
-    platformItem(),
+    ...(!isShadow ? [platformItem()] : []),
     ...(broItem ? [broItem] : []),
     ...(openWithItem ? [openWithItem] : []),
-    commandItem("file.copy", "Copy", commands),
-    commandItem("file.rename", "Rename", commands),
-    commandItem("file.delete", "Delete", commands),
+    commandItem("file.copy", isShadow ? "Extract" : "Copy", commands),
+    ...(!isShadow ? [commandItem("file.rename", "Rename", commands)] : []),
+    ...(!isShadow ? [commandItem("file.delete", "Delete", commands)] : []),
     { id: "separator.clipboard", kind: "separator" },
     { id: "clipboard.name", kind: "clipboard", label: "Copy name", clipboardText: name },
-    { id: "clipboard.fullPath", kind: "clipboard", label: "Copy full path", clipboardText: fullPath },
+    ...(!isShadow ? [{ id: "clipboard.fullPath", kind: "clipboard", label: "Copy full path", clipboardText: fullPath } as ContextMenuItem] : []),
   ];
 }

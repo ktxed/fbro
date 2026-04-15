@@ -14,7 +14,7 @@ use crate::watcher::WatcherCommand;
 use crate::ws::commands::build_interactive_commands;
 use crate::ws::protocol::{
     now, DirSizeQueueSnapshot, DirSizeTaskSchema, FileOpFileSchema, LayoutDomain, PanelSnapshot,
-    ServerMessage, SourceCapabilities, SourceSchema, StateDomains,
+    ServerMessage, ShadowSourceSchema, SourceCapabilities, SourceSchema, StateDomains,
 };
 
 pub(crate) struct IntentContext<'a> {
@@ -73,7 +73,7 @@ pub(crate) fn build_sources(state: &AppState) -> Vec<SourceSchema> {
         .sources
         .values()
         .map(|src| {
-            let space = if src.mounted {
+            let space = if src.mounted && !src.shadow {
                 state.platform.disk_space(&src.root_path)
             } else {
                 None
@@ -84,14 +84,15 @@ pub(crate) fn build_sources(state: &AppState) -> Vec<SourceSchema> {
                 kind: src.kind.clone(),
                 supports: src.supports.clone(),
                 capabilities: SourceCapabilities {
-                    read_only: false,
+                    read_only: src.shadow,
                     supports_streaming: true,
-                    supports_jobs: true,
+                    supports_jobs: !src.shadow,
                 },
                 root_path: src.root_path.clone(),
                 mounted: src.mounted,
                 free_bytes: space.map(|(free, _)| free),
                 total_bytes: space.map(|(_, total)| total),
+                shadow: src.shadow,
             }
         })
         .collect()
@@ -153,9 +154,9 @@ pub(crate) async fn navigate_to(
         handle.abort();
     }
 
-    let (sort, filter, show_hidden, version, driver) = {
+    let (sort, filter, show_hidden, version, driver, shadow_source_schema) = {
         let mut state_guard = state.lock().await;
-        let (source_id, sort, filter, show_hidden, version) =
+        let (source_id, sort, filter, show_hidden, version, shadow_schema) =
             if let Some(panel) = state_guard.panels.get_mut(panel_id) {
                 let source_id = panel.source_id.clone();
                 panel.path = new_path.to_string();
@@ -169,12 +170,18 @@ pub(crate) async fn navigate_to(
                 panel.filter = None;
                 panel.filter_mode_active = false;
                 panel.version += 1;
-                (source_id, panel.sort.clone(), panel.filter.clone(), panel.show_hidden, panel.version)
+                let shadow_schema = panel.shadow_source.as_ref().map(|ss| ShadowSourceSchema {
+                    parent_source_id: ss.parent_source_id.clone(),
+                    parent_path: ss.parent_path.clone(),
+                    archive_path: ss.archive_path.clone(),
+                    cursor_hint: ss.cursor_hint.clone(),
+                });
+                (source_id, panel.sort.clone(), panel.filter.clone(), panel.show_hidden, panel.version, shadow_schema)
             } else {
                 return;
             };
         let driver = state_guard.drivers.get(&source_id).cloned().unwrap();
-        (sort, filter, show_hidden, version, driver)
+        (sort, filter, show_hidden, version, driver, shadow_schema)
     };
 
     let _ = tx
@@ -194,17 +201,29 @@ pub(crate) async fn navigate_to(
                 "filterModeActive": false,
                 "totalCount": null,
                 "totalSize": null,
-                "windowStart": null
+                "windowStart": null,
+                "shadowSource": shadow_source_schema
             }),
         })
         .await;
 
-    let _ = watcher_cmd_tx
-        .send(WatcherCommand::Watch {
-            panel_id: panel_id.to_string(),
-            path: PathBuf::from(new_path),
-        })
-        .await;
+    // Skip file watching for shadow sources (zip archives) — their contents don't change.
+    let is_shadow = {
+        let state_guard = state.lock().await;
+        state_guard
+            .panels
+            .get(panel_id)
+            .and_then(|p| p.shadow_source.as_ref())
+            .is_some()
+    };
+    if !is_shadow {
+        let _ = watcher_cmd_tx
+            .send(WatcherCommand::Watch {
+                panel_id: panel_id.to_string(),
+                path: PathBuf::from(new_path),
+            })
+            .await;
+    }
 
     let handle = spawn_scan(
         panel_id.to_string(),
@@ -236,9 +255,9 @@ pub(crate) async fn rescan_panel(
         handle.abort();
     }
 
-    let (path, sort, filter, filter_mode_active, show_hidden, version, driver, source_id) = {
+    let (path, sort, filter, filter_mode_active, show_hidden, version, driver, source_id, shadow_source_schema) = {
         let mut state_guard = state.lock().await;
-        let (source_id, path, sort, filter, filter_mode_active, show_hidden, version) =
+        let (source_id, path, sort, filter, filter_mode_active, show_hidden, version, shadow_schema) =
             if let Some(panel) = state_guard.panels.get_mut(panel_id) {
                 let source_id = panel.source_id.clone();
                 panel.entries.clear();
@@ -248,6 +267,12 @@ pub(crate) async fn rescan_panel(
                 panel.window_start = 0;
                 panel.window_count = 0;
                 panel.version += 1;
+                let shadow_schema = panel.shadow_source.as_ref().map(|ss| ShadowSourceSchema {
+                    parent_source_id: ss.parent_source_id.clone(),
+                    parent_path: ss.parent_path.clone(),
+                    archive_path: ss.archive_path.clone(),
+                    cursor_hint: ss.cursor_hint.clone(),
+                });
                 (
                     source_id,
                     panel.path.clone(),
@@ -256,6 +281,7 @@ pub(crate) async fn rescan_panel(
                     panel.filter_mode_active,
                     panel.show_hidden,
                     panel.version,
+                    shadow_schema,
                 )
             } else {
                 return;
@@ -270,6 +296,7 @@ pub(crate) async fn rescan_panel(
             version,
             driver,
             source_id,
+            shadow_schema,
         )
     };
 
@@ -292,7 +319,8 @@ pub(crate) async fn rescan_panel(
                 "filterModeActive": filter_mode_active,
                 "showHidden": show_hidden,
                 "totalCount": null,
-                "windowStart": null
+                "windowStart": null,
+                "shadowSource": shadow_source_schema
             }),
         })
         .await;
@@ -683,6 +711,12 @@ fn build_panel_snapshot(panel: &Panel) -> PanelSnapshot {
         calculating_size,
         total_count: None,
         window_start: None,
+        shadow_source: panel.shadow_source.as_ref().map(|ss| ShadowSourceSchema {
+            parent_source_id: ss.parent_source_id.clone(),
+            parent_path: ss.parent_path.clone(),
+            archive_path: ss.archive_path.clone(),
+            cursor_hint: ss.cursor_hint.clone(),
+        }),
     }
 }
 

@@ -45,7 +45,8 @@ pub async fn dispatch(name: &str, scope: &Value, args: &Value, ctx: &mut IntentC
         | "NavigateUp"
         | "RevealInFileManager"
         | "ListOpenWithApps"
-        | "LaunchOpenWithApp" => navigation::handle(name, scope, args, ctx).await,
+        | "LaunchOpenWithApp"
+        | "ProvideInput" => navigation::handle(name, scope, args, ctx).await,
         "ListBros" | "LaunchBro" => bro::handle(name, scope, args, ctx).await,
         "StartFileOp" | "PasteExternalClipboard" | "WriteExternalClipboard"
         | "ProvideJobDecision" | "CancelJob"

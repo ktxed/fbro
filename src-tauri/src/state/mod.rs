@@ -20,6 +20,25 @@ pub struct Source {
     pub root_path: String,
     pub mounted: bool,
     pub device_path: Option<String>,
+    /// Shadow sources are transient per-panel sources (e.g. browsing inside a zip archive).
+    /// They are not volumes and must not appear in the volume/source bar.
+    pub shadow: bool,
+}
+
+// ─── Shadow source ────────────────────────────────────────────────────────────
+
+/// Context stored on a panel while it is browsing inside a shadow filesystem
+/// (e.g. a zip archive). Holds everything needed to return to the parent source.
+#[derive(Clone, Debug)]
+pub struct ShadowSource {
+    /// The source_id the panel was using before entering the archive.
+    pub parent_source_id: String,
+    /// The directory path the panel was in before entering the archive.
+    pub parent_path: String,
+    /// Absolute path to the archive file on the host filesystem.
+    pub archive_path: String,
+    /// Name of the archive file (used as cursor hint when exiting).
+    pub cursor_hint: Option<String>,
 }
 
 // ─── Panel ────────────────────────────────────────────────────────────────────
@@ -46,6 +65,8 @@ pub struct Panel {
     pub window_count: usize,
     /// Last visited path per source — used to restore position when switching back.
     pub source_paths: HashMap<String, String>,
+    /// Set when the panel is browsing inside a shadow filesystem (e.g. zip archive).
+    pub shadow_source: Option<ShadowSource>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -167,6 +188,7 @@ impl AppState {
             window_start: 0,
             window_count: 0,
             source_paths: HashMap::new(),
+            shadow_source: None,
         };
 
         let right = Panel {
@@ -187,6 +209,7 @@ impl AppState {
             window_start: 0,
             window_count: 0,
             source_paths: HashMap::new(),
+            shadow_source: None,
         };
 
         let mut panels = HashMap::new();
@@ -216,6 +239,7 @@ impl AppState {
                 root_path: vol.root_path,
                 mounted: vol.mounted,
                 device_path: vol.device_path,
+                shadow: false,
             };
             if vol.mounted {
                 let driver: Arc<dyn VfsDriver> = {
@@ -267,9 +291,14 @@ impl AppState {
             std::env::var("FBRO_SPY_SOCK").unwrap_or_else(|_| "/tmp/fbro-spy.sock".to_string());
 
         let new_ids: HashSet<String> = volumes.iter().map(|v| v.id.clone()).collect();
-        let old_ids: HashSet<String> = self.sources.keys().cloned().collect();
+        let old_ids: HashSet<String> = self
+            .sources
+            .iter()
+            .filter(|(_, src)| !src.shadow)
+            .map(|(id, _)| id.clone())
+            .collect();
 
-        // Remove stale sources/drivers
+        // Remove stale sources/drivers (never touch shadow sources — they have their own lifecycle)
         let removed: Vec<String> = old_ids.difference(&new_ids).cloned().collect();
         for id in &removed {
             self.sources.remove(id);
@@ -318,6 +347,7 @@ impl AppState {
                     root_path: vol.root_path,
                     mounted: vol.mounted,
                     device_path: vol.device_path,
+                    shadow: false,
                 };
                 if vol.mounted {
                     self.drivers.insert(vol.id.clone(), make_driver());

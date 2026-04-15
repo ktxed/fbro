@@ -761,28 +761,74 @@ async fn set_cursor(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
 async fn calculate_size(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
     let panel_id = resolve_panel_id(scope, ctx.state).await;
     let parsed = NameArgs::from_args(args);
-    let full_path = {
+
+    let (full_path, is_shadow, source_id) = {
         let state_guard = ctx.state.lock().await;
-        state_guard.panels.get(&panel_id).and_then(|panel| {
+        match state_guard.panels.get(&panel_id).and_then(|panel| {
             panel
                 .entries
                 .iter()
                 .find(|entry| entry.name == parsed.name && entry.kind == "directory")
-                .map(|_| format!("{}/{}", panel.path.trim_end_matches('/'), parsed.name))
-        })
+                .map(|_| {
+                    let dir_path = if panel.path.is_empty() {
+                        parsed.name.clone()
+                    } else {
+                        format!("{}/{}", panel.path.trim_end_matches('/'), parsed.name)
+                    };
+                    (dir_path, panel.shadow_source.is_some(), panel.source_id.clone())
+                })
+        }) {
+            Some(v) => v,
+            None => return,
+        }
     };
-    if let Some(path) = full_path {
-        ctx.dir_size_queue.invalidate_cache(&path).await;
-        ctx.dir_size_queue
-            .enqueue(
-                panel_id,
-                parsed.name,
-                path,
-                std::sync::Arc::clone(ctx.state),
-                ctx.tx.clone(),
+
+    // Fast path for zip sources: compute size from the in-memory directory tree.
+    if is_shadow {
+        let size = {
+            let state_guard = ctx.state.lock().await;
+            state_guard.drivers.get(&source_id).and_then(|driver| {
+                driver
+                    .as_any()
+                    .downcast_ref::<crate::vfs::zip::ZipFsDriver>()
+                    .map(|zip| zip.dir_size(&full_path))
+            })
+        };
+        if let Some(size) = size {
+            // Update the entry size directly.
+            let version = {
+                let mut state_guard = ctx.state.lock().await;
+                if let Some(panel) = state_guard.panels.get_mut(&panel_id) {
+                    if let Some(entry) = panel.entries.iter_mut().find(|e| e.name == parsed.name) {
+                        entry.size = Some(size);
+                    }
+                    panel.version += 1;
+                    panel.version
+                } else {
+                    return;
+                }
+            };
+            send_panel_patch(
+                ctx,
+                panel_id.clone(),
+                version,
+                serde_json::json!({ "updateEntrySize": { "name": parsed.name, "size": size } }),
             )
             .await;
+        }
+        return;
     }
+
+    ctx.dir_size_queue.invalidate_cache(&full_path).await;
+    ctx.dir_size_queue
+        .enqueue(
+            panel_id,
+            parsed.name,
+            full_path,
+            std::sync::Arc::clone(ctx.state),
+            ctx.tx.clone(),
+        )
+        .await;
 }
 
 async fn cancel_size_calculation(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
