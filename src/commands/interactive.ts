@@ -361,7 +361,12 @@ function toggleSelectedDirectorySizes(client: WsClient, panel: PanelState) {
 function openFocusedEntry(client: WsClient, panel: PanelState) {
   const entry = currentEntry(panel);
   if (entry && entry.kind !== "directory") {
-    client.sendIntent("OpenFile", "focused-panel");
+    // Zip files are navigable — treat Enter the same as navigating into a directory.
+    if (entry.kind === "file" && entry.name.toLowerCase().endsWith(".zip") && !panel.shadowSource) {
+      client.sendIntent("OpenEntry", "focused-panel");
+    } else {
+      client.sendIntent("OpenFile", "focused-panel");
+    }
   } else {
     client.sendIntent("OpenEntry", "focused-panel");
   }
