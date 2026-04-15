@@ -109,6 +109,82 @@ function VolumeHeader({ sources, panel, onNavigateToSource, onMountSource }: {
   );
 }
 
+function buildBreadcrumbs(path: string): Array<{ label: string; path: string }> {
+  if (!path) return [];
+
+  const normalized = path.replace(/\\/g, "/");
+  if (normalized === "/") {
+    return [{ label: "/", path: "/" }];
+  }
+
+  const isAbsolute = normalized.startsWith("/");
+  const parts = normalized.split("/").filter(Boolean);
+  const crumbs: Array<{ label: string; path: string }> = [];
+
+  if (isAbsolute) {
+    crumbs.push({ label: "/", path: "/" });
+  }
+
+  let currentPath = isAbsolute ? "" : "";
+  for (const part of parts) {
+    currentPath = isAbsolute
+      ? `${currentPath}/${part}`
+      : currentPath
+        ? `${currentPath}/${part}`
+        : part;
+    crumbs.push({ label: part, path: currentPath || "/" });
+  }
+
+  return crumbs;
+}
+
+function PathBreadcrumbs({ panelId, path, client }: {
+  panelId: string;
+  path: string;
+  client: WsClient;
+}) {
+  const listRef = useRef<HTMLDivElement>(null);
+  const breadcrumbs = useMemo(() => buildBreadcrumbs(path), [path]);
+
+  useEffect(() => {
+    const el = listRef.current;
+    if (!el) return;
+    const id = window.requestAnimationFrame(() => {
+      el.scrollLeft = el.scrollWidth;
+    });
+    return () => window.cancelAnimationFrame(id);
+  }, [path, breadcrumbs.length]);
+
+  const handleWheel = useCallback((e: React.WheelEvent<HTMLDivElement>) => {
+    const el = listRef.current;
+    if (!el || el.scrollWidth <= el.clientWidth) return;
+    if (Math.abs(e.deltaX) < 0.5 && Math.abs(e.deltaY) < 0.5) return;
+    e.preventDefault();
+    el.scrollBy({ left: e.deltaX !== 0 ? e.deltaX : e.deltaY, behavior: "auto" });
+  }, []);
+
+  return (
+    <div className="panel__path" title={path}>
+      <div className="panel__path-scroll" ref={listRef} onWheel={handleWheel}>
+        {breadcrumbs.map((crumb, index) => (
+          <span className="panel__breadcrumb" key={`${crumb.path}-${index}`}>
+            {index > 0 && breadcrumbs[index - 1]?.path !== "/" && <span className="panel__breadcrumb-sep">/</span>}
+            <button
+              className={`panel__breadcrumb-btn${index === breadcrumbs.length - 1 ? " panel__breadcrumb-btn--active" : ""}`}
+              type="button"
+              tabIndex={-1}
+              onClick={() => client.sendIntent("NavigatePanelTo", panelId, { panelId, path: crumb.path })}
+              title={crumb.path}
+            >
+              {crumb.label}
+            </button>
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function fallbackIcon(entry: VFSEntry): string {
   switch (entry.kind) {
     case "directory": return "▶";
@@ -620,7 +696,7 @@ export function Panel({
       }}
     >
       <div className="panel__header">
-        <span className="panel__path">{panel.path}</span>
+        <PathBreadcrumbs panelId={panelId} path={panel.path} client={client} />
         <button
           className="panel__home-btn"
           tabIndex={-1}

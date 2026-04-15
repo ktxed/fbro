@@ -258,9 +258,64 @@ body {
   color: var(--text-path);
   font-size: var(--font-size);
   flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+
+.panel__path-scroll {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  height: 20px;
+  overflow-x: auto;
+  overflow-y: hidden;
   white-space: nowrap;
+  scrollbar-width: none;
+  min-width: 0;
+}
+
+.panel__path-scroll::-webkit-scrollbar { display: none; }
+
+.panel__breadcrumb {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.panel__breadcrumb-sep {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  color: var(--text-dim);
+  padding: 0 1px;
+}
+
+.panel__breadcrumb-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  box-sizing: border-box;
+  min-height: 20px;
+  color: var(--text-dim);
+  font-family: var(--font);
+  font-size: var(--font-size);
+  line-height: 1.2;
+  padding: 1px 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.panel__breadcrumb-btn:hover {
+  color: var(--text);
+  border-color: var(--border);
+}
+
+.panel__breadcrumb-btn--active {
+  color: var(--text-path);
 }
 
 .panel__home-btn {
