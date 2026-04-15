@@ -425,14 +425,16 @@ body {
 }
 
 .panel__row--cursor {
-  background: var(--bg-cursor) !important;
-  color: var(--accent) !important;
+  background: #2d2d2d !important;
+  color: #274ae7 !important;
 }
+.panel__row--cursor .panel__name { color: #000000 !important; }
 
 .panel--focused .panel__row--cursor {
-  background: var(--accent) !important;
-  color: #fff !important;
+  background: #2d228a !important;
+  color: #000 !important;
 }
+.panel--focused .panel__row--cursor .panel__name { color: #ffffff !important; }
 
 .panel__col-icon {
   flex-shrink: 0;
@@ -502,16 +504,18 @@ body {
   color: #f0d060;
 }
 
-/* cursor wins over selection highlight, but keeps selection color */
+/* cursor wins over selection highlight */
 .panel__row--cursor.panel__row--selected {
-  background: var(--bg-cursor) !important;
-  color: var(--accent) !important;
+  background: #1a3a1a !important;
+  color: #4caf50 !important;
 }
+.panel__row--cursor.panel__row--selected .panel__name { color: #4caf50 !important; }
 
 .panel--focused .panel__row--cursor.panel__row--selected {
-  background: var(--accent) !important;
-  color: #fff !important;
+  background: #4caf50 !important;
+  color: #000 !important;
 }
+.panel--focused .panel__row--cursor.panel__row--selected .panel__name { color: #000 !important; }
 
 .panel__loading {
   padding: 8px;
