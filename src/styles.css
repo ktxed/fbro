@@ -1583,6 +1583,52 @@ body {
   padding-right: 22px;
 }
 
+/* ── Word-wrap mode ──────────────────────────────────────────────────────── */
+
+/* The wrapper shares base styles with .viewer__text but overrides overflow so
+   long lines wrap instead of scrolling horizontally. */
+.viewer__text--wrap {
+  flex-direction: column;
+  overflow-x: hidden;
+}
+
+.viewer__text--wrap.viewer__text--virtual {
+  overflow-x: hidden;
+}
+
+/* Each logical line is a flex row: fixed-width gutter + wrapping content. */
+.viewer__wrap-row {
+  display: flex;
+  align-items: flex-start;
+}
+
+/* Gutter cell: same visual treatment as .viewer__gutter but per-row. */
+.viewer__gutter-cell {
+  flex-shrink: 0;
+  padding: 0 8px 0 12px;
+  text-align: right;
+  color: var(--text-dim, #666);
+  border-right: 1px solid var(--border, #333);
+  user-select: none;
+  white-space: pre;
+  background: var(--bg);
+}
+
+/* Content cell: wraps at the viewport edge. */
+.viewer__content-cell {
+  flex: 1 1 0%;
+  min-width: 0;            /* allow shrinking below content width */
+  padding: 0 12px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  overflow-wrap: break-word;
+}
+
+/* Leave room for virtual scrollbar in wrap mode too */
+.viewer__text--wrap.viewer__text--virtual .viewer__content-cell {
+  padding-right: 22px;
+}
+
 /* DOS/CP437 mode: use a monospace font that renders box-drawing chars correctly */
 .viewer--dos .viewer__content,
 .viewer--dos .viewer__gutter {

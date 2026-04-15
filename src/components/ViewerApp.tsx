@@ -150,6 +150,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
   // 1-based file line number of the first raw line in the current buffer.
   // null = unknown (after a scrollbar jump to an arbitrary byte offset).
   const [dosMode, setDosMode] = useState(false);
+  const [wordWrap, setWordWrap] = useState(false);
 
   const [bufferBaseLine, setBufferBaseLine] = useState<number | null>(1);
   // Synchronous mirror of the current buffer's byte range — used by
@@ -201,7 +202,9 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
     for (let i = 0; i < raw.length; i++) {
       const line = raw[i];
       const fileLineNum = base !== null ? base + i : null;
-      if (line.length <= MAX_COL) {
+      // When word-wrap is on the browser handles visual wrapping — keep each
+      // logical line as a single entry so the gutter stays aligned.
+      if (wordWrap || line.length <= MAX_COL) {
         lines.push(line);
         lineNums.push(fileLineNum);
       } else {
@@ -212,7 +215,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
       }
     }
     return { lines, lineNums };
-  }, [buffer, bufferOffset, effectiveMode, bufferBaseLine, dosMode]);
+  }, [buffer, bufferOffset, effectiveMode, bufferBaseLine, dosMode, wordWrap]);
 
   const maxTopLine = Math.max(0, lines.length - vpLines);
 
@@ -399,6 +402,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
       }
 
       if (e.key === "s" && effectiveMode === "text") { setDosMode(prev => !prev); return; }
+      if (e.key === "w" && effectiveMode === "text") { setWordWrap(prev => !prev); return; }
 
       const goStart = e.key === "Home" || (e.key === "ArrowUp" && e.metaKey);
       const goEnd   = e.key === "End"  || (e.key === "ArrowDown" && e.metaKey);
@@ -553,7 +557,9 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
 
   // Text mode: line-numbered view
   const textView = useMemo(() => {
-    if (effectiveMode !== "text" || !buffer) return { gutterText: "", textContent: "" };
+    if (effectiveMode !== "text" || !buffer) {
+      return { gutterText: "", textContent: "", rows: [] as { gutter: string; content: string }[] };
+    }
     let visLines: string[];
     let visNums: (number | null)[];
     if (isSmall === true) {
@@ -576,8 +582,14 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
       if (num === null) return "~".repeat(w); // unknown position after a jump
       return (prefix + num).padStart(w);
     });
-    return { gutterText: gutterEntries.join("\n"), textContent: visLines.join("\n") };
-  }, [effectiveMode, buffer, isSmall, lines, lineNums, topLine, vpLines]);
+    // Per-line rows used by the word-wrap renderer — each logical line becomes
+    // its own DOM row so the gutter number stays aligned to the first visual
+    // row even when the content wraps across multiple lines.
+    const rows = wordWrap
+      ? visLines.map((content, i) => ({ gutter: gutterEntries[i], content }))
+      : [];
+    return { gutterText: gutterEntries.join("\n"), textContent: visLines.join("\n"), rows };
+  }, [effectiveMode, buffer, isSmall, lines, lineNums, topLine, vpLines, wordWrap]);
 
   // ── Status bar info ───────────────────────────────────────────────────────
 
@@ -667,13 +679,22 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
             3 Hex
           </button>
           {effectiveMode === "text" && (
-            <button
-              className={`viewer__mode-btn${dosMode ? " viewer__mode-btn--active" : ""}`}
-              onClick={() => setDosMode(prev => !prev)}
-              title="DOS/CP437 mode (s)"
-            >
-              S DOS
-            </button>
+            <>
+              <button
+                className={`viewer__mode-btn${dosMode ? " viewer__mode-btn--active" : ""}`}
+                onClick={() => setDosMode(prev => !prev)}
+                title="DOS/CP437 mode (s)"
+              >
+                S DOS
+              </button>
+              <button
+                className={`viewer__mode-btn${wordWrap ? " viewer__mode-btn--active" : ""}`}
+                onClick={() => setWordWrap(prev => !prev)}
+                title="Word wrap (w)"
+              >
+                W Wrap
+              </button>
+            </>
           )}
         </div>
       </div>
@@ -701,6 +722,18 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
               >
                 {content}
               </pre>
+            ) : wordWrap ? (
+              <div
+                className={`viewer__text viewer__text--wrap${isSmall === false ? " viewer__text--virtual" : ""}`}
+                ref={contentRef as React.RefObject<HTMLDivElement>}
+              >
+                {textView.rows.map((row, i) => (
+                  <div className="viewer__wrap-row" key={i}>
+                    <span className="viewer__gutter-cell">{row.gutter}</span>
+                    <span className="viewer__content-cell">{row.content || " "}</span>
+                  </div>
+                ))}
+              </div>
             ) : (
               <div
                 className={`viewer__text${isSmall === false ? " viewer__text--virtual" : ""}`}
@@ -738,7 +771,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
           {isImageMode
             ? "z zoom · j/k prev/next file · 1 text · 2 image · 3 hex"
             : effectiveMode === "text"
-              ? "↑↓ PgDn/PgUp scroll · j/k prev/next · 1 text · 2 image · 3 hex · s dos"
+              ? "↑↓ PgDn/PgUp scroll · j/k prev/next · 1 text · 2 image · 3 hex · s dos · w wrap"
               : "↑↓ PgDn/PgUp scroll · j/k prev/next file · 1 text · 2 image · 3 hex"}
         </span>
       </div>
