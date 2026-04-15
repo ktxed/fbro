@@ -341,7 +341,11 @@ body {
   user-select: none;
 }
 
-.panel__row:nth-child(even) {
+.panel__row:hover {
+  background: rgba(74, 124, 191, 0.12);
+}
+
+.panel__row--alt {
   background: rgba(255, 255, 255, 0.03);
 }
 

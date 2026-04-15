@@ -519,6 +519,7 @@ export function Panel({
         data-abs-index={absIndex}
         className={[
           "panel__row",
+          absIndex % 2 === 1 ? "panel__row--alt" : "",
           absIndex === panel.cursor ? "panel__row--cursor" : "",
           selectionSet.has(absIndex) ? "panel__row--selected" : "",
           dragActive && dragDropAllowed && dragHoverAbsIndex === absIndex ? "panel__row--drop-target" : "",
