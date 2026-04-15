@@ -2,7 +2,9 @@ use std::collections::HashMap;
 use std::io::{Cursor, Read, Write};
 use std::sync::Mutex;
 
-use super::{icon_name_for_entry, DirChild, VfsDriver, VfsEntry, VfsError, VfsKind};
+use super::{
+    color_class_for_entry, icon_name_for_entry, DirChild, VfsDriver, VfsEntry, VfsError, VfsKind,
+};
 use crate::ws::protocol::{FilterSpec, SortSpec};
 
 // ─── In-memory directory tree ───────────────────────────────────────────────
@@ -426,6 +428,7 @@ impl VfsDriver for ZipFsDriver {
                     VfsKind::File
                 };
                 let icon_name = icon_name_for_entry(&e.name, &kind);
+                let cc = color_class_for_entry(&e.name, &kind);
                 VfsEntry {
                     name: e.name.clone(),
                     kind,
@@ -434,6 +437,7 @@ impl VfsDriver for ZipFsDriver {
                     btime: None,
                     permissions: None,
                     icon_name,
+                    cc,
                 }
             })
             .collect();

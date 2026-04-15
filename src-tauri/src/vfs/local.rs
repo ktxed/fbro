@@ -2,7 +2,10 @@ use std::fs;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
 
-use super::{format_mtime, icon_name_for_entry, DirChild, VfsDriver, VfsEntry, VfsError, VfsKind};
+use super::{
+    color_class_for_entry, format_mtime, icon_name_for_entry, DirChild, VfsDriver, VfsEntry,
+    VfsError, VfsKind,
+};
 use crate::ws::protocol::{FilterSpec, SortSpec};
 
 pub struct LocalFsDriver;
@@ -162,6 +165,7 @@ impl VfsDriver for LocalFsDriver {
             };
 
             let icon_name = icon_name_for_entry(&name, &kind);
+            let cc = color_class_for_entry(&name, &kind);
             entries.push(VfsEntry {
                 name,
                 kind,
@@ -170,6 +174,7 @@ impl VfsDriver for LocalFsDriver {
                 btime,
                 permissions,
                 icon_name,
+                cc,
             });
         }
 

@@ -459,6 +459,14 @@ body {
   min-width: 0;
 }
 
+/* ── File-type color classes ──────────────────────────────────────────────── */
+.panel__name.cc-dir     { color: var(--text-dir); }
+.panel__name.cc-link    { color: var(--text-link); }
+.panel__name.cc-archive { color: #d670d6; }
+.panel__name.cc-exec    { color: #8bc34a; }
+.panel__name.cc-media   { color: #3a8794; }
+.panel__name.cc-dot     { color: var(--text-dim); }
+
 .panel__size {
   flex-shrink: 0;
   width: 70px;

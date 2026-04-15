@@ -713,7 +713,7 @@ export function Panel({
         }}
       >
         <EntryIcon entry={entry} />
-        <span className="panel__name">{entry.name}</span>
+        <span className={`panel__name${entry.cc ? ` ${entry.cc}` : ""}`}>{entry.name}</span>
         <span className="panel__size">{formatSize(entry, calcSet)}</span>
         <span className="panel__mtime">{formatMtime(entry.mtime)}</span>
         <span className="panel__perms">{entry.permissions ?? ""}</span>

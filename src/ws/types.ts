@@ -8,6 +8,8 @@ export interface VFSEntry {
   btime?: string; // birth time — file creation; not available on all platforms/filesystems
   permissions?: string;
   iconName?: string;
+  /** Color class hint — a short CSS class name (e.g. "cc-dir", "cc-archive"). */
+  cc?: string;
 }
 
 export interface Source {

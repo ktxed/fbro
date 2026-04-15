@@ -89,6 +89,9 @@ pub struct VfsEntry {
     pub btime: Option<String>, // birth time — file creation; not available on all platforms/filesystems
     pub permissions: Option<String>,
     pub icon_name: Option<String>,
+    /// Color class hint for the FE — a short CSS class name derived from the
+    /// entry kind and file extension (e.g. "cc-dir", "cc-archive").
+    pub cc: Option<String>,
 }
 
 /// Derive a freedesktop icon name from the entry kind and file extension.
@@ -151,6 +154,36 @@ pub fn icon_name_for_entry(name: &str, kind: &VfsKind) -> Option<String> {
         }
         .to_string(),
     )
+}
+
+/// Derive a color class from the entry kind and file extension.
+/// Returns a short CSS class name like "cc-dir", "cc-archive", etc.
+pub fn color_class_for_entry(name: &str, kind: &VfsKind) -> Option<String> {
+    // Dot files and dot folders get a dedicated dim style.
+    if name.starts_with('.') && name != ".." {
+        return Some("cc-dot".to_string());
+    }
+    match kind {
+        VfsKind::Directory => return Some("cc-dir".to_string()),
+        VfsKind::Symlink => return Some("cc-link".to_string()),
+        VfsKind::Other => return None,
+        VfsKind::File => {}
+    }
+    let ext = name.rsplit('.').next()?.to_lowercase();
+    match ext.as_str() {
+        // Archives
+        "zip" | "tar" | "gz" | "bz2" | "xz" | "zst" | "7z" | "rar" | "deb" | "rpm" | "tgz"
+        | "tbz2" | "txz" | "lz" | "lzma" | "cab" | "iso" | "dmg" => Some("cc-archive".to_string()),
+        // Executables / scripts
+        "sh" | "bash" | "zsh" | "fish" | "exe" | "bin" | "appimage" | "cmd" | "bat" | "ps1" => {
+            Some("cc-exec".to_string())
+        }
+        // Images, audio, video
+        "png" | "jpg" | "jpeg" | "gif" | "bmp" | "webp" | "svg" | "ico" | "tiff" | "tif"
+        | "mp3" | "flac" | "ogg" | "wav" | "aac" | "m4a" | "wma" | "opus" | "mp4" | "mkv"
+        | "avi" | "mov" | "wmv" | "flv" | "webm" => Some("cc-media".to_string()),
+        _ => None,
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]

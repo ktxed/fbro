@@ -261,6 +261,8 @@ pub struct EntrySchema {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(rename = "iconName")]
     pub icon_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cc: Option<String>,
 }
 
 #[derive(Serialize, Clone, Debug)]

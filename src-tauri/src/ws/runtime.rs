@@ -651,6 +651,7 @@ pub(crate) async fn update_panel_from_patch(
                         btime: entry["btime"].as_str().map(String::from),
                         permissions: entry["permissions"].as_str().map(String::from),
                         icon_name: entry["iconName"].as_str().map(String::from),
+                        cc: entry["cc"].as_str().map(String::from),
                     });
                 }
             }
