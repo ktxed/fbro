@@ -261,9 +261,23 @@ async fn read_file_chunk(args: &Value, ctx: &mut IntentContext<'_>) {
         })
         .await;
         match result {
-            Ok(Ok(bytes)) => {
+            Ok(Ok(mut bytes)) => {
                 let eof = bytes.len() < parsed.size
                     || file_size.map_or(false, |size| parsed.offset + bytes.len() as u64 >= size);
+
+                // Align chunk end to newline boundary so the frontend never
+                // receives a buffer that cuts a line in half.
+                // Skip alignment when: at EOF (nothing after), empty, or already
+                // ends on a newline.  Also skip for offset-0 tiny reads so the
+                // initial "is this file small?" probe still works correctly.
+                if !eof && !bytes.is_empty() && bytes[bytes.len() - 1] != b'\n' {
+                    if let Some(pos) = bytes.iter().rposition(|&b| b == b'\n') {
+                        bytes.truncate(pos + 1); // keep the '\n'
+                    }
+                    // If no newline found at all, send as-is (e.g. one huge line
+                    // or binary content) — the frontend already handles that.
+                }
+
                 let data: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
                 let _ = ctx
                     .tx

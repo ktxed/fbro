@@ -5,7 +5,7 @@ import { ImageViewer, IMAGE_LIMIT } from "../viewers/ImageViewer";
 import { detectRenderer, isImageExt } from "../viewers/media";
 import { DirectFileViewer, canUseDirect } from "../viewers/DirectFileViewer";
 
-const SMALL_LIMIT = 32768;  // 32 KiB — files at or below this are loaded fully
+const SMALL_LIMIT = 5 * 1024 * 1024;  // 5 MiB — files at or below this are loaded fully
 const CHUNK_SIZE  = 65536;  // 64 KiB — buffer window for large files
 const LINE_H      = 20;     // px — 13px font × 1.5 line-height (19.5, rounded up)
 const MAX_COL     = 512;    // chars — wrap long lines into multiple display rows
@@ -116,7 +116,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
   // Buffer
   const [buffer, setBuffer]             = useState<Uint8Array | null>(null);
   const [bufferOffset, setBufferOffset] = useState(0);
-  const [eof, setEof]                   = useState(false);
+  // eof is tracked via bufRangeRef (synchronous) rather than React state.
 
   // null = undetermined, true = small file, false = large file
   const [isSmall, setIsSmall] = useState<boolean | null>(null);
@@ -138,6 +138,9 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
   const contentRef    = useRef<HTMLElement>(null);
   // After a large-mode buffer load, what to do with topLine
   const afterLoadRef  = useRef<"top" | "bottom">("top");
+  // Synchronous loading guard — prevents duplicate chunk requests within the
+  // same render cycle (React state `loading` only updates on re-render).
+  const loadingRef    = useRef(false);
   // Refs so requestChunk can always use the current path/sourceId without
   // being recreated on navigation (which would tear down and recreate the WS).
   const curPathRef      = useRef(initPath);
@@ -149,9 +152,11 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
   const [dosMode, setDosMode] = useState(false);
 
   const [bufferBaseLine, setBufferBaseLine] = useState<number | null>(1);
-  // Tracks state needed to compute baseLine when the next chunk arrives.
-  const chunkInfoRef = useRef<{ end: number; newlineCount: number; baseLine: number | null }>({
-    end: 0, newlineCount: 0, baseLine: 1,
+  // Synchronous mirror of the current buffer's byte range — used by
+  // scrollByLines so it always computes the next chunk offset from the
+  // *latest* buffer, not a stale React-state closure.
+  const bufRangeRef = useRef<{ offset: number; end: number; eof: boolean }>({
+    offset: 0, end: 0, eof: false,
   });
 
   filenameRef.current  = curFilename;
@@ -185,7 +190,10 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
     if (effectiveMode === "hex") {
       return { lines: renderHexLines(buffer, bufferOffset), lineNums: [] as (number | null)[] };
     }
-    const raw = (dosMode ? renderCp437(buffer) : renderText(buffer)).split("\n");
+    let raw = (dosMode ? renderCp437(buffer) : renderText(buffer)).split("\n");
+    // A buffer that ends with '\n' produces a trailing empty string — drop it
+    // so the viewer doesn't show a phantom blank line at the chunk boundary.
+    if (raw.length > 1 && raw[raw.length - 1] === "") raw.pop();
     const lines: string[] = [];
     const lineNums: (number | null)[] = [];
     // bufferBaseLine = null means we jumped to an unknown position
@@ -212,6 +220,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
 
   const requestChunk = useCallback((off: number, size: number, after: "top" | "bottom" = "top") => {
     afterLoadRef.current = after;
+    loadingRef.current = true;          // synchronous guard for same-cycle callers
     setLoading(true);
     clientRef.current?.sendIntent("ReadFileChunk", undefined, {
       path: curPathRef.current, sourceId: curSourceIdRef.current, offset: off, size,
@@ -254,28 +263,16 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
         const m = msg as FileChunkMessage;
         const bytes = hexDecode(m.data);
 
-        // Compute the 1-based file line number of the first raw line in this chunk.
-        // Use chunkInfoRef (a ref, so always fresh) to compare with previous chunk.
-        const info = chunkInfoRef.current;
-        let newBaseLine: number | null;
-        if (m.offset === 0) {
-          newBaseLine = 1;
-        } else if (m.offset === info.end) {
-          // Sequential load: base advances by the newline count of the previous buffer.
-          newBaseLine = info.baseLine !== null ? info.baseLine + info.newlineCount : null;
-        } else {
-          // Jump to arbitrary byte position — absolute line number is unknown.
-          newBaseLine = null;
-        }
-        let newlineCount = 0;
-        for (const b of bytes) if (b === 10) newlineCount++;
-        chunkInfoRef.current = { end: m.offset + bytes.length, newlineCount, baseLine: newBaseLine };
-        setBufferBaseLine(newBaseLine);
+        bufRangeRef.current = { offset: m.offset, end: m.offset + bytes.length, eof: m.eof };
+        // For small files baseLine is absolute (always starts at offset 0).
+        // For large files the numbers are chunk-relative — the byte offset
+        // shown in the status bar gives the positional context.
+        setBufferBaseLine(1);
 
         if (m.fileSize !== undefined) setFileSize(m.fileSize);
         setBuffer(bytes);
         setBufferOffset(m.offset);
-        setEof(m.eof);
+        loadingRef.current = false;
         setLoading(false);
         setMode(prev => {
           if (prev !== null) return prev;
@@ -300,15 +297,15 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
         setMode(null);
         setBuffer(null);
         setBufferOffset(0);
-        setEof(false);
         setIsSmall(null);
         setTopLine(0);
         setFileSize(null);
         setError(null);
         setNavError(null);
+        loadingRef.current = !direct;
         setLoading(!direct);
         setBufferBaseLine(1);
-        chunkInfoRef.current = { end: 0, newlineCount: 0, baseLine: 1 };
+        bufRangeRef.current = { offset: 0, end: 0, eof: false };
         setBufSeq(0);
         if (!direct) {
           // Request first chunk of new file
@@ -356,23 +353,26 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
   const scrollByLines = useCallback((delta: number) => {
     setTopLine(prev => {
       const next = clamp(prev + delta, 0, maxTopLine);
+      // Read the synchronous buffer range — immune to stale React closures.
+      const br = bufRangeRef.current;
       // Hit bottom edge of buffer — need next chunk?
-      if (next >= maxTopLine && delta > 0 && !eof && !loading && buffer) {
-        const nextOff = bufferOffset + buffer.length;
-        if (fileSize === null || nextOff < fileSize) {
-          requestChunk(nextOff, CHUNK_SIZE, "top");
+      if (next >= maxTopLine && delta > 0 && !br.eof && !loadingRef.current && br.end > br.offset) {
+        if (fileSize === null || br.end < fileSize) {
+          requestChunk(br.end, CHUNK_SIZE, "top");
           return prev; // keep current until new buffer arrives
         }
       }
       // Hit top edge — need previous chunk?
-      if (next <= 0 && delta < 0 && bufferOffset > 0 && !loading) {
-        const prevOff = Math.max(0, bufferOffset - CHUNK_SIZE);
-        requestChunk(prevOff, CHUNK_SIZE, "bottom");
+      if (next <= 0 && delta < 0 && br.offset > 0 && !loadingRef.current) {
+        const prevOff = Math.max(0, br.offset - CHUNK_SIZE);
+        // Request exactly up to the current buffer start so the backend's
+        // newline-aligned truncation keeps sequential continuity.
+        requestChunk(prevOff, br.offset - prevOff, "bottom");
         return prev;
       }
       return next;
     });
-  }, [maxTopLine, eof, loading, buffer, bufferOffset, fileSize, requestChunk]);
+  }, [maxTopLine, fileSize, requestChunk]);
 
   // ── Keyboard ──────────────────────────────────────────────────────────────
 
@@ -424,14 +424,14 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
       if (isSmall === false) {
         if (goStart) {
           e.preventDefault();
-          if (bufferOffset === 0) { setTopLine(0); }
-          else if (!loading) { requestChunk(0, CHUNK_SIZE, "top"); }
+          if (bufRangeRef.current.offset === 0) { setTopLine(0); }
+          else if (!loadingRef.current) { requestChunk(0, CHUNK_SIZE, "top"); }
           return;
         }
         if (goEnd) {
           e.preventDefault();
-          if (eof) { setTopLine(maxTopLine); }
-          else if (!loading && fileSize !== null) {
+          if (bufRangeRef.current.eof) { setTopLine(maxTopLine); }
+          else if (!loadingRef.current && fileSize !== null) {
             const lastOff = Math.max(0, fileSize - CHUNK_SIZE);
             requestChunk(lastOff, CHUNK_SIZE, "bottom");
           }
@@ -449,7 +449,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [isSmall, eof, loading, fileSize, bufferOffset, maxTopLine, vpLines, scrollByLines, requestChunk, windowLabel, effectiveMode, dosMode]);
+  }, [isSmall, fileSize, maxTopLine, vpLines, scrollByLines, requestChunk, windowLabel, effectiveMode, dosMode]);
 
   // ── Mouse wheel for large mode ────────────────────────────────────────────
 
@@ -469,7 +469,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
   // ── Scrollbar drag for large mode ─────────────────────────────────────────
 
   const handleScrollbarMouse = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    if (fileSize === null || fileSize === 0 || loading) return;
+    if (fileSize === null || fileSize === 0 || loadingRef.current) return;
     const track = e.currentTarget;
     const rect = track.getBoundingClientRect();
 
@@ -501,7 +501,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
     };
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
-  }, [fileSize, loading, buffer, bufferOffset, lines.length, maxTopLine, requestChunk]);
+  }, [fileSize, buffer, bufferOffset, lines.length, maxTopLine, requestChunk]);
 
   const pendingJumpRef = useRef<number | null>(null);
 
@@ -566,13 +566,15 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
       visNums = lineNums.slice(start, end);
     }
     const lastKnown = [...visNums].reverse().find(n => n !== null) ?? 1;
-    const w = Math.max(4, (lastKnown as number).toString().length);
+    // Large-file chunks show "+N" (relative to chunk start); small files show absolute "N".
+    const prefix = isSmall === false ? "+" : "";
+    const w = Math.max(4, (prefix + lastKnown).length);
     // Show file line number only on the first display row of each file line
     const gutterEntries = visNums.map((num, i) => {
       const isFirst = i === 0 || visNums[i - 1] !== num;
       if (!isFirst) return " ".repeat(w);
       if (num === null) return "~".repeat(w); // unknown position after a jump
-      return num.toString().padStart(w);
+      return (prefix + num).padStart(w);
     });
     return { gutterText: gutterEntries.join("\n"), textContent: visLines.join("\n") };
   }, [effectiveMode, buffer, isSmall, lines, lineNums, topLine, vpLines]);
