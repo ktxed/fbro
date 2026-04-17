@@ -1786,3 +1786,243 @@ body {
   color: var(--text-dim);
   opacity: 0.6;
 }
+
+/* ── Search modal ──────────────────────────────────────────────────────────── */
+
+.modal--wide {
+  min-width: 480px;
+  max-width: 560px;
+  width: 90vw;
+}
+
+.search-modal__section {
+  margin-bottom: 16px;
+}
+
+.search-modal__section--last {
+  margin-bottom: 0;
+}
+
+.search-modal__section-title {
+  font-weight: bold;
+  font-size: var(--font-size);
+  color: var(--text);
+  margin-bottom: 8px;
+}
+
+.search-modal__section-title--inline {
+  margin-bottom: 0;
+}
+
+/* Path input row */
+
+.search-modal__path-input-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.search-modal__path-input {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border-focus);
+  border-radius: 3px;
+  padding: 4px 8px;
+  font-family: var(--font);
+  font-size: var(--font-size);
+  outline: none;
+}
+
+.search-modal__path-input:focus {
+  border-color: var(--accent);
+}
+
+.search-modal__source-select {
+  width: 130px;
+  flex-shrink: 0;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border-focus);
+  border-radius: 3px;
+  padding: 4px 6px;
+  font-family: var(--font);
+  font-size: var(--font-size);
+  outline: none;
+  cursor: pointer;
+}
+
+.search-modal__source-select:focus {
+  border-color: var(--accent);
+}
+
+.search-modal__add-btn {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+/* Path list */
+
+.search-modal__path-list {
+  list-style: none;
+  margin: 0 0 4px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.search-modal__path-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 3px 6px 3px 8px;
+  font-size: var(--font-size);
+}
+
+.search-modal__path-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-path);
+  font-family: var(--font);
+}
+
+.search-modal__path-remove {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 10px;
+  padding: 1px 4px;
+  line-height: 1;
+  font-family: var(--font);
+  border-radius: 2px;
+}
+
+.search-modal__path-remove:hover {
+  color: var(--text);
+  background: var(--bg-focused);
+}
+
+/* Depth row */
+
+.search-modal__depth-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.search-modal__depth-label {
+  font-size: var(--font-size);
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+
+.search-modal__depth-select {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border-focus);
+  border-radius: 3px;
+  padding: 4px 6px;
+  font-family: var(--font);
+  font-size: var(--font-size);
+  outline: none;
+  cursor: pointer;
+}
+
+.search-modal__depth-select:focus {
+  border-color: var(--accent);
+}
+
+/* File mask */
+
+.search-modal__mask-row {
+  margin-bottom: 6px;
+}
+
+.search-modal__mask-input {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border-focus);
+  border-radius: 3px;
+  padding: 4px 8px;
+  font-family: var(--font);
+  font-size: var(--font-size);
+  outline: none;
+}
+
+.search-modal__mask-input:focus {
+  border-color: var(--accent);
+}
+
+/* Mask mode radio group */
+
+.search-modal__mode-row {
+  display: flex;
+  gap: 16px;
+}
+
+.search-modal__mode-option {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--font-size);
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+}
+
+.search-modal__mode-option input[type="radio"] {
+  cursor: pointer;
+  accent-color: var(--accent);
+}
+
+/* Content section */
+
+.search-modal__section-header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.search-modal__section-header input[type="checkbox"] {
+  cursor: pointer;
+  accent-color: var(--accent);
+  flex-shrink: 0;
+}
+
+.search-modal__content-body {
+  margin-top: 8px;
+}
+
+.search-modal__content-input {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border-focus);
+  border-radius: 3px;
+  padding: 6px 8px;
+  font-family: var(--font);
+  font-size: var(--font-size);
+  outline: none;
+  resize: vertical;
+}
+
+.search-modal__content-input:focus {
+  border-color: var(--accent);
+}

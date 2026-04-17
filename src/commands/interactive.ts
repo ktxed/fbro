@@ -29,6 +29,7 @@ export const COMMAND_PALETTE_COMMAND_ID = "app.command_palette" as const;
 export const GLOBAL_SHORTCUT_COMMAND_IDS = [
   COMMAND_PALETTE_COMMAND_ID,
   "app.open_jobs",
+  "app.search",
   "panel.navigate_source_root",
   "file.info",
   "panel.toggle_hidden",
@@ -448,6 +449,13 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
     case "app.open_jobs":
       context.onOpenJobsView?.();
       return !!context.onOpenJobsView;
+    case "app.search":
+      if (!focused) return false;
+      dispatch({
+        type: "OPEN_SEARCH",
+        search: { sourcePanelPath: focused.panel.path },
+      });
+      return true;
     case "panel.navigate_source_root":
       client.sendIntent("NavigateSourceRoot", focused?.panelId ?? state.focus);
       return true;

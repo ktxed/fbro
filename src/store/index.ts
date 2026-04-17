@@ -122,6 +122,10 @@ export interface PendingInput {
   prompt: string;
 }
 
+export interface PendingSearch {
+  sourcePanelPath: string;
+}
+
 export interface AppState {
   connected: boolean;
   sessionId: string | null;
@@ -148,6 +152,7 @@ export interface AppState {
   pendingOpenWith: PendingOpenWith | null;
   pendingBro: PendingBro | null;
   pendingInput: PendingInput | null;
+  pendingSearch: PendingSearch | null;
   commandPaletteOpen: boolean;
   transientHint: { message: string; token: number } | null;
 }
@@ -178,6 +183,7 @@ const initialState: AppState = {
   pendingOpenWith: null,
   pendingBro: null,
   pendingInput: null,
+  pendingSearch: null,
   commandPaletteOpen: false,
   transientHint: null,
 };
@@ -211,6 +217,8 @@ export type AppAction =
   | { type: "CLOSE_OPEN_WITH" }
   | { type: "OPEN_BRO"; bro: PendingBro }
   | { type: "CLOSE_BRO" }
+  | { type: "OPEN_SEARCH"; search: PendingSearch }
+  | { type: "CLOSE_SEARCH" }
   | { type: "OPEN_COMMAND_PALETTE" }
   | { type: "CLOSE_COMMAND_PALETTE" }
   | { type: "CLOSE_TRANSIENT_HINT" }
@@ -772,6 +780,10 @@ function reducer(state: AppState, action: AppAction): AppState {
       };
     case "CLOSE_INPUT":
       return { ...state, pendingInput: null };
+    case "OPEN_SEARCH":
+      return { ...state, pendingSearch: action.search };
+    case "CLOSE_SEARCH":
+      return { ...state, pendingSearch: null };
   }
 }
 

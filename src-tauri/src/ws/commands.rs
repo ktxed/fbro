@@ -73,6 +73,13 @@ pub(crate) fn build_interactive_commands() -> Vec<InteractiveCommandSchema> {
             None,
         ),
         command(
+            "app.search",
+            "App",
+            "Search",
+            vec![mod_binding("f", false)],
+            None,
+        ),
+        command(
             "app.open_jobs",
             "App",
             "Open Jobs",

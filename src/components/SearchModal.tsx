@@ -1,0 +1,313 @@
+import { useEffect, useRef, useState } from "react";
+import { useAppDispatch } from "../store";
+import type { PendingSearch } from "../store";
+import type { Source } from "../ws/types";
+
+type DepthOption = "unlimited" | "current" | number;
+type MaskMode = "substring" | "wildcard" | "regex";
+
+interface SearchModalProps {
+  search: PendingSearch;
+  sources: Record<string, Source>;
+}
+
+export function SearchModal({ search, sources }: SearchModalProps) {
+  const dispatch = useAppDispatch();
+
+  // Section 1 — Search Locations
+  const [paths, setPaths] = useState<string[]>([search.sourcePanelPath]);
+  const [pathInput, setPathInput] = useState("");
+  const [selectedSourceId, setSelectedSourceId] = useState("");
+  const [depth, setDepth] = useState<DepthOption>("unlimited");
+
+  // Section 2 — File Name
+  const [fileMask, setFileMask] = useState("");
+  const [maskMode, setMaskMode] = useState<MaskMode>("wildcard");
+
+  // Section 3 — Content
+  const [contentEnabled, setContentEnabled] = useState(false);
+  const [contentQuery, setContentQuery] = useState("");
+
+  const pathInputRef = useRef<HTMLInputElement>(null);
+  const contentTextareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    pathInputRef.current?.focus();
+  }, []);
+
+  const mountedSources = Object.values(sources).filter((s) => s.mounted);
+
+  const close = () => dispatch({ type: "CLOSE_SEARCH" });
+
+  const addPath = () => {
+    const trimmed = pathInput.trim();
+    if (!trimmed || paths.includes(trimmed)) return;
+    setPaths((prev) => [...prev, trimmed]);
+    setPathInput("");
+    setSelectedSourceId("");
+  };
+
+  const removePath = (path: string) => {
+    setPaths((prev) => prev.filter((p) => p !== path));
+  };
+
+  const handleSourceSelect = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const sourceId = e.target.value;
+    setSelectedSourceId(sourceId);
+    if (!sourceId) return;
+    const source = sources[sourceId];
+    if (source) setPathInput(source.rootPath);
+  };
+
+  const handlePathInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      addPath();
+    }
+    if (e.key === "Escape") {
+      e.preventDefault();
+      close();
+    }
+  };
+
+  const handleSearch = () => {
+    if (paths.length === 0) return;
+    console.log("[fbro] Search intent:", {
+      paths,
+      depth,
+      fileMask: fileMask || null,
+      maskMode,
+      content: contentEnabled ? contentQuery : null,
+    });
+    close();
+  };
+
+  const handleOverlayKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Tab") {
+      e.preventDefault();
+      return;
+    }
+    if (e.key === "Escape") {
+      e.preventDefault();
+      close();
+      return;
+    }
+    if (e.key === "Enter") {
+      const target = e.target as HTMLElement;
+      const isTextarea = target.tagName === "TEXTAREA";
+      const isPathInput = target === pathInputRef.current;
+      if (!isTextarea && !isPathInput) {
+        e.preventDefault();
+        handleSearch();
+      }
+    }
+  };
+
+  const depthOptions: { value: string; label: string }[] = [
+    { value: "unlimited", label: "Unlimited" },
+    { value: "current", label: "Current folder only" },
+    ...Array.from({ length: 10 }, (_, i) => ({
+      value: String(i + 1),
+      label: `Depth ${i + 1}`,
+    })),
+  ];
+
+  const depthValue =
+    depth === "unlimited" ? "unlimited" : depth === "current" ? "current" : String(depth);
+
+  const handleDepthChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const v = e.target.value;
+    if (v === "unlimited" || v === "current") {
+      setDepth(v);
+    } else {
+      setDepth(Number.parseInt(v, 10));
+    }
+  };
+
+  return (
+    <div
+      className="modal-overlay"
+      tabIndex={-1}
+      onClick={close}
+      onKeyDown={handleOverlayKeyDown}
+    >
+      <div
+        className="modal modal--wide"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="modal__header">Search</div>
+
+        <div className="modal__body">
+
+          {/* ── Section 1: Search Locations ───────────────────────── */}
+          <div className="search-modal__section">
+            <div className="search-modal__section-title">Search in</div>
+
+            <div className="search-modal__path-input-row">
+              <input
+                ref={pathInputRef}
+                type="text"
+                className="search-modal__path-input"
+                value={pathInput}
+                onChange={(e) => setPathInput(e.target.value)}
+                onKeyDown={handlePathInputKeyDown}
+                placeholder="Add a path…"
+                spellCheck={false}
+                autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="off"
+              />
+              {mountedSources.length > 0 && (
+                <select
+                  className="search-modal__source-select"
+                  value={selectedSourceId}
+                  onChange={handleSourceSelect}
+                >
+                  <option value="">Volume…</option>
+                  {mountedSources.map((source) => (
+                    <option key={source.id} value={source.id}>
+                      {source.name}
+                    </option>
+                  ))}
+                </select>
+              )}
+              <button
+                type="button"
+                className="modal__btn search-modal__add-btn"
+                onClick={addPath}
+                disabled={!pathInput.trim() || paths.includes(pathInput.trim())}
+              >
+                Add
+              </button>
+            </div>
+
+            {paths.length > 0 && (
+              <ul className="search-modal__path-list">
+                {paths.map((path) => (
+                  <li key={path} className="search-modal__path-item">
+                    <span className="search-modal__path-text" title={path}>{path}</span>
+                    <button
+                      type="button"
+                      className="search-modal__path-remove"
+                      onClick={() => removePath(path)}
+                      aria-label={`Remove ${path}`}
+                    >
+                      ✕
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            <div className="search-modal__depth-row">
+              <label className="search-modal__depth-label" htmlFor="search-depth">
+                Depth:
+              </label>
+              <select
+                id="search-depth"
+                className="search-modal__depth-select"
+                value={depthValue}
+                onChange={handleDepthChange}
+              >
+                {depthOptions.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* ── Section 2: File Name ──────────────────────────────── */}
+          <div className="search-modal__section">
+            <div className="search-modal__section-title">File name</div>
+
+            <div className="search-modal__mask-row">
+              <input
+                type="text"
+                className="search-modal__mask-input"
+                value={fileMask}
+                onChange={(e) => setFileMask(e.target.value)}
+                placeholder="*.*"
+                spellCheck={false}
+                autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="off"
+              />
+            </div>
+
+            <div className="search-modal__mode-row">
+              {(["substring", "wildcard", "regex"] as MaskMode[]).map((mode) => (
+                <label key={mode} className="search-modal__mode-option">
+                  <input
+                    type="radio"
+                    name="search-mask-mode"
+                    value={mode}
+                    checked={maskMode === mode}
+                    onChange={() => setMaskMode(mode)}
+                  />
+                  {mode === "substring" ? "Substring" : mode === "wildcard" ? "Wildcard (*)" : "Regex"}
+                </label>
+              ))}
+            </div>
+          </div>
+
+          {/* ── Section 3: Content ───────────────────────────────── */}
+          <div className="search-modal__section search-modal__section--last">
+            <div
+              className="search-modal__section-header"
+              onClick={() => {
+                setContentEnabled((v) => {
+                  if (!v) setTimeout(() => contentTextareaRef.current?.focus(), 0);
+                  return !v;
+                });
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={contentEnabled}
+                onChange={() => {}}
+                onClick={(e) => e.stopPropagation()}
+                onFocus={(e) => e.stopPropagation()}
+              />
+              <span className="search-modal__section-title search-modal__section-title--inline">
+                Search file contents
+              </span>
+            </div>
+
+            {contentEnabled && (
+              <div className="search-modal__content-body">
+                <textarea
+                  ref={contentTextareaRef}
+                  className="search-modal__content-input"
+                  value={contentQuery}
+                  onChange={(e) => setContentQuery(e.target.value)}
+                  placeholder="Text to find…"
+                  rows={3}
+                  spellCheck={false}
+                  autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="off"
+                />
+              </div>
+            )}
+          </div>
+
+        </div>
+
+        <div className="modal__actions">
+          <button
+            className="modal__btn modal__btn--primary"
+            onClick={handleSearch}
+            disabled={paths.length === 0}
+          >
+            Search
+          </button>
+          <button className="modal__btn" onClick={close}>
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
