@@ -149,17 +149,31 @@ function currentEntry(panel: PanelState) {
   return entryAt(panel, panel.cursor);
 }
 
-function openInfo(dispatch: Dispatch<AppAction>, panel: PanelState) {
+function openInfo(dispatch: Dispatch<AppAction>, panel: PanelState, state: AppState) {
   const entry = currentEntry(panel);
   if (!entry) return false;
 
-  const dirPath = panel.path.replace(/[/\\]+$/, "");
+  let dirPath = panel.path.replace(/[/\\]+$/, "");
+  let fullPath = entry.name === ".." ? dirPath : `${dirPath}/${entry.name}`;
+
+  // When the panel is on a search results source, resolve the real filesystem
+  // paths from the job's accumulated results.
+  if (panel.sourceId?.startsWith("search:")) {
+    const jobId = panel.sourceId.replace(/^search:/, "");
+    const job = state.jobs[jobId];
+    const result = job?.searchResults?.find((r) => r.name === entry.name);
+    if (result) {
+      fullPath = result.fullPath;
+      dirPath = result.parentPath;
+    }
+  }
+
   dispatch({
     type: "OPEN_INFO",
     info: {
       name: entry.name,
       kind: entry.kind,
-      fullPath: entry.name === ".." ? dirPath : `${dirPath}/${entry.name}`,
+      fullPath,
       dirPath,
       size: entry.size,
       mtime: entry.mtime,
@@ -474,7 +488,7 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
     case "panel.pass_to_bro":
       return focused ? openPassToBro(state, dispatch, client, focused.panel) : false;
     case "file.info":
-      return focused ? openInfo(dispatch, focused.panel) : false;
+      return focused ? openInfo(dispatch, focused.panel, state) : false;
     case "file.rename":
       if (focused?.panel.shadowSource) return false;
       return focused ? openRename(dispatch, focused.panel) : false;
