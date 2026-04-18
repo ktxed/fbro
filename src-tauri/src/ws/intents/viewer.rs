@@ -126,6 +126,16 @@ async fn view_file(args: &Value, ctx: &mut IntentContext<'_>) {
                 .unwrap_or_else(|| parsed.source_id.clone());
             (best_source, format!("{}/{}", parsed.path.trim_end_matches('/'), parsed.filename))
         }
+    } else if parsed.source_id.starts_with("zip:") {
+        let inner_path = {
+            let p = parsed.path.trim_end_matches('/');
+            if p.is_empty() {
+                parsed.filename.clone()
+            } else {
+                format!("{}/{}", p, parsed.filename)
+            }
+        };
+        (parsed.source_id.clone(), inner_path)
     } else {
         (
             parsed.source_id.clone(),
