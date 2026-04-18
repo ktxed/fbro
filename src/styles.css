@@ -2169,3 +2169,13 @@ body {
   padding: 24px 0;
   text-align: center;
 }
+
+.search-modal__cap-warning {
+  font-size: var(--font-size);
+  color: var(--text-dim);
+  background: var(--bg-header);
+  border-top: 1px solid var(--border);
+  padding: 4px 10px;
+  text-align: center;
+  flex-shrink: 0;
+}

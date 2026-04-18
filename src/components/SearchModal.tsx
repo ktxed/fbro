@@ -401,7 +401,7 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
 
               {hasResults ? (
                 <ul className="search-modal__results">
-                  {search.results.map((result) => (
+                  {search.results.slice(0, 500).map((result) => (
                     <li
                       key={result.fullPath}
                       className="search-modal__result-row"
@@ -438,6 +438,13 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
           )}
 
         </div>
+
+        {/* Results cap warning */}
+        {search.activeTab === "results" && resultCount > 500 && (
+          <div className="search-modal__cap-warning">
+            Showing first 500 of {resultCount} results. Use "To Results" to browse all.
+          </div>
+        )}
 
         {/* Action buttons */}
         <div className="modal__actions">
