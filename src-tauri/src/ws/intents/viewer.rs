@@ -226,19 +226,45 @@ async fn viewer_navigate(args: &Value, ctx: &mut IntentContext<'_>) {
     if let Some((new_cursor, source_id, dir_path, entry_info)) = nav_result {
         if let Some((name, kind)) = entry_info {
             if kind == "file" {
-                let full_path = format!("{}/{}", dir_path.trim_end_matches('/'), name);
-                let driver = ctx.state.lock().await.drivers.get(&source_id).cloned();
+                // When the panel is on a search results source, resolve the
+                // real full_path and source_id so the viewer reads the actual
+                // file rather than hitting the stub search driver.
+                let (effective_path, effective_source_id) = {
+                    let state_guard = ctx.state.lock().await;
+                    if source_id.starts_with("search:") {
+                        state_guard
+                            .drivers
+                            .get(&source_id)
+                            .and_then(|drv| {
+                                drv.as_any()
+                                    .downcast_ref::<SearchResultsDriver>()
+                            })
+                            .and_then(|sd| sd.resolve_real_info(&name))
+                            .unwrap_or_else(|| {
+                                (
+                                    format!("{}/{}", dir_path.trim_end_matches('/'), name),
+                                    source_id.clone(),
+                                )
+                            })
+                    } else {
+                        (
+                            format!("{}/{}", dir_path.trim_end_matches('/'), name),
+                            source_id.clone(),
+                        )
+                    }
+                };
+                let driver = ctx.state.lock().await.drivers.get(&effective_source_id).cloned();
                 let (file_size, is_local) = driver
                     .as_ref()
-                    .map(|driver| (driver.file_size(&full_path), driver.is_local()))
+                    .map(|drv| (drv.file_size(&effective_path), drv.is_local()))
                     .unwrap_or((None, false));
                 let _ = ctx
                     .tx
                     .send(ServerMessage::ViewerFileChanged {
                         timestamp: now(),
-                        path: full_path,
+                        path: effective_path,
                         filename: name,
-                        source_id,
+                        source_id: effective_source_id,
                         panel_id: parsed.panel_id.clone(),
                         file_size,
                         is_local,
