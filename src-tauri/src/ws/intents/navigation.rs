@@ -166,10 +166,28 @@ async fn open_entry(scope: &Value, ctx: &mut IntentContext<'_>) {
             ctx.watcher_cmd_tx,
         )
         .await;
-    } else if entry_kind == "file" && entry_name.to_lowercase().ends_with(".zip") && !is_in_shadow {
+    } else if entry_kind == "file" && is_zip_like(&entry_name) && !is_in_shadow {
         // Enter zip archive as a shadow filesystem.
         enter_zip_archive(&panel_id, &new_path, &entry_name, ctx).await;
     }
+}
+
+fn is_zip_like(name: &str) -> bool {
+    let lower = name.to_lowercase();
+    lower.ends_with(".zip")
+        || lower.ends_with(".apk")
+        || lower.ends_with(".jar")
+        || lower.ends_with(".war")
+        || lower.ends_with(".ear")
+        || lower.ends_with(".docx")
+        || lower.ends_with(".xlsx")
+        || lower.ends_with(".pptx")
+        || lower.ends_with(".odt")
+        || lower.ends_with(".ods")
+        || lower.ends_with(".odp")
+        || lower.ends_with(".epub")
+        || lower.ends_with(".xpi")
+        || lower.ends_with(".crx")
 }
 
 /// Create a ZipFsDriver, register a shadow source, and navigate the panel into the archive root.

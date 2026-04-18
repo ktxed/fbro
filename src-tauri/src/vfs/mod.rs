@@ -174,7 +174,9 @@ pub fn color_class_for_entry(name: &str, kind: &VfsKind) -> Option<String> {
     match ext.as_str() {
         // Archives
         "zip" | "tar" | "gz" | "bz2" | "xz" | "zst" | "7z" | "rar" | "deb" | "rpm" | "tgz"
-        | "tbz2" | "txz" | "lz" | "lzma" | "cab" | "iso" | "dmg" => Some("cc-archive".to_string()),
+        | "tbz2" | "txz" | "lz" | "lzma" | "cab" | "iso" | "dmg"
+        | "apk" | "jar" | "war" | "ear" | "docx" | "xlsx" | "pptx"
+        | "odt" | "ods" | "odp" | "epub" | "xpi" | "crx" => Some("cc-archive".to_string()),
         // Executables / scripts
         "sh" | "bash" | "zsh" | "fish" | "exe" | "bin" | "appimage" | "cmd" | "bat" | "ps1" => {
             Some("cc-exec".to_string())

@@ -154,7 +154,7 @@ pub(crate) async fn navigate_to(
         handle.abort();
     }
 
-    let (sort, filter, show_hidden, version, driver, shadow_source_schema) = {
+    let (sort, filter, show_hidden, version, driver, shadow_source_schema, source_id) = {
         let mut state_guard = state.lock().await;
         let (source_id, sort, filter, show_hidden, version, shadow_schema) =
             if let Some(panel) = state_guard.panels.get_mut(panel_id) {
@@ -181,7 +181,7 @@ pub(crate) async fn navigate_to(
                 return;
             };
         let driver = state_guard.drivers.get(&source_id).cloned().unwrap();
-        (sort, filter, show_hidden, version, driver, shadow_schema)
+        (sort, filter, show_hidden, version, driver, shadow_schema, source_id)
     };
 
     let _ = tx
@@ -192,6 +192,7 @@ pub(crate) async fn navigate_to(
             version,
             patch: serde_json::json!({
                 "path": new_path,
+                "sourceId": source_id,
                 "entries": [],
                 "cursor": 0,
                 "selection": [],
