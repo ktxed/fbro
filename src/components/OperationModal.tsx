@@ -3,6 +3,7 @@ import type { WsClient } from "../ws/client";
 import type { PendingOp, Job, ConflictPolicy } from "../ws/types";
 import { useAppDispatch, useAppState } from "../store";
 import type { PendingDryRun } from "../store";
+import { IconCopy } from "@tabler/icons-react";
 
 interface OperationModalProps {
   pending: PendingOp | null;
@@ -166,7 +167,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
                 className="modal__job-param-copy"
                 onClick={() => navigator.clipboard.writeText(pendingDryRun.scriptPath)}
                 title="Copy path"
-              >⧉</button>
+              ><IconCopy size={14} /></button>
             </div>
           </div>
           <div className="modal__actions">
@@ -455,22 +456,22 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
                 <>
                   <span className="modal__job-param-label">Inputs:</span>
                   <span className="modal__job-param-value" title={activeJob.sourcePath}>{activeJob.sourcePath}</span>
-                  <button className="modal__job-param-copy" onClick={() => navigator.clipboard.writeText(activeJob.sourcePath)} title="Copy path">⧉</button>
+                  <button className="modal__job-param-copy" onClick={() => navigator.clipboard.writeText(activeJob.sourcePath)} title="Copy path"><IconCopy size={14} /></button>
                   {activeJob.resultPath && (<>
                     <span className="modal__job-param-label">Result:</span>
                     <span className="modal__job-param-value" title={activeJob.resultPath}>{activeJob.resultPath}</span>
-                    <button className="modal__job-param-copy" onClick={() => navigator.clipboard.writeText(activeJob.resultPath!)} title="Copy path">⧉</button>
+                    <button className="modal__job-param-copy" onClick={() => navigator.clipboard.writeText(activeJob.resultPath!)} title="Copy path"><IconCopy size={14} /></button>
                   </>)}
                 </>
               ) : (
                 <>
                   <span className="modal__job-param-label">From:</span>
                   <span className="modal__job-param-value" title={activeJob.sourcePath}>{activeJob.sourcePath}</span>
-                  <button className="modal__job-param-copy" onClick={() => navigator.clipboard.writeText(activeJob.sourcePath)} title="Copy path">⧉</button>
+                  <button className="modal__job-param-copy" onClick={() => navigator.clipboard.writeText(activeJob.sourcePath)} title="Copy path"><IconCopy size={14} /></button>
                   {activeJob.destPath && (<>
                     <span className="modal__job-param-label">To:</span>
                     <span className="modal__job-param-value" title={activeJob.destPath}>{activeJob.destPath}</span>
-                    <button className="modal__job-param-copy" onClick={() => navigator.clipboard.writeText(activeJob.destPath!)} title="Copy path">⧉</button>
+                    <button className="modal__job-param-copy" onClick={() => navigator.clipboard.writeText(activeJob.destPath!)} title="Copy path"><IconCopy size={14} /></button>
                   </>)}
                 </>
               )}
@@ -585,7 +586,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
                       className="modal__job-param-copy"
                       onClick={() => navigator.clipboard.writeText(activeJob.resultPath!)}
                       title="Copy path"
-                    >⧉</button>
+                    ><IconCopy size={14} /></button>
                   </div>
                 )}
               </>

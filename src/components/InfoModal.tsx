@@ -1,6 +1,7 @@
 import { useRef, useEffect } from "react";
 import { useAppDispatch } from "../store";
 import type { PendingInfo } from "../store";
+import { IconCopy } from "@tabler/icons-react";
 
 interface InfoModalProps {
   info: PendingInfo;
@@ -38,7 +39,7 @@ function CopyButton({ text }: { text: string }) {
       className="modal__job-param-copy"
       onClick={() => navigator.clipboard.writeText(text)}
       title="Copy to clipboard"
-    >⧉</button>
+    ><IconCopy size={14} /></button>
   );
 }
 

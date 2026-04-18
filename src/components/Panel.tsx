@@ -9,6 +9,7 @@ import {
   PANEL_SHORTCUT_COMMAND_IDS,
 } from "../commands/interactive";
 import { useAppDispatch, useAppState } from "../store";
+import { IconChevronDown, IconChevronUp, IconChevronRight, IconChevronLeft, IconArrowUpRight, IconX } from "@tabler/icons-react";
 
 const ROW_HEIGHT = 22;
 const FILTER_DEBOUNCE_MS = 200;
@@ -25,8 +26,8 @@ function SortHeader({ sort, panelId, client }: {
 
   function tri(col: string) {
     const active = sort.by === col;
-    const icon = active && sort.order === "desc" ? "▼" : "▲";
-    return <span className={`panel__sort-tri${active ? " panel__sort-tri--active" : ""}`}>{icon}</span>;
+    const Icon = active && sort.order === "desc" ? IconChevronDown : IconChevronUp;
+    return <span className={`panel__sort-tri${active ? " panel__sort-tri--active" : ""}`}><Icon size={9} /></span>;
   }
 
   return (
@@ -92,7 +93,7 @@ function VolumeHeader({ sources, panel, onNavigateToSource, onMountSource }: {
 
   return (
     <div className="panel__volumes">
-      <button className="panel__volumes-arrow" disabled={!canLeft} tabIndex={-1} onClick={() => scroll(-1)}>‹</button>
+      <button className="panel__volumes-arrow" disabled={!canLeft} tabIndex={-1} onClick={() => scroll(-1)}><IconChevronLeft size={14} /></button>
       <div className="panel__volumes-list" ref={listRef} onScroll={updateArrows} onWheel={onWheel}>
         {Object.values(sources).filter(src => !src.shadow).map(src => (
           <button
@@ -104,7 +105,7 @@ function VolumeHeader({ sources, panel, onNavigateToSource, onMountSource }: {
           >{src.name}</button>
         ))}
       </div>
-      <button className="panel__volumes-arrow" disabled={!canRight} tabIndex={-1} onClick={() => scroll(1)}>›</button>
+      <button className="panel__volumes-arrow" disabled={!canRight} tabIndex={-1} onClick={() => scroll(1)}><IconChevronRight size={14} /></button>
     </div>
   );
 }
@@ -230,12 +231,12 @@ function PathBreadcrumbs({ panelId, path, client, shadowSource }: {
   );
 }
 
-function fallbackIcon(entry: VFSEntry): string {
+function fallbackIcon(entry: VFSEntry): React.ReactNode {
   switch (entry.kind) {
-    case "directory": return "▶";
-    case "symlink":   return "↗";
-    case "file":      return " ";
-    default:          return "?";
+    case "directory": return <IconChevronRight size={14} />;
+    case "symlink":   return <IconArrowUpRight size={14} />;
+    case "file":      return null;
+    default:          return <span>?</span>;
   }
 }
 
@@ -253,7 +254,7 @@ function EntryIcon({ entry }: { entry: VFSEntry }) {
           onError={() => setFailed(true)}
         />
       ) : (
-        <span>{fallbackIcon(entry)}</span>
+        fallbackIcon(entry)
       )}
     </span>
   );
@@ -805,7 +806,7 @@ export function Panel({
               onMouseDown={(e) => e.preventDefault()}
               onClick={handleClearSelection}
             >
-              ×
+              <IconX size={12} />
             </button>
           )}
           <span className="panel__footer-status">{statusText}</span>

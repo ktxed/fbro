@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useAppState, useAppDispatch } from "../store";
 import type { WsClient } from "../ws/client";
+import { IconChevronLeft, IconChevronRight, IconX } from "@tabler/icons-react";
 
 const VISIBLE = 5;
 
@@ -39,7 +40,7 @@ export function JobsBar({ client }: { client: WsClient }) {
         disabled={!canLeft}
         onClick={() => setScrollIndex(clamped - 1)}
       >
-        ‹
+        <IconChevronLeft size={14} />
       </button>
 
       {visible.map((job) => {
@@ -79,9 +80,9 @@ export function JobsBar({ client }: { client: WsClient }) {
                   client.sendIntent("CancelJob", undefined, { jobId: job.jobId });
                 }
               }}
-            >
-              ×
-            </span>
+              >
+                <IconX size={12} />
+              </span>
           </button>
         );
       })}
@@ -91,7 +92,7 @@ export function JobsBar({ client }: { client: WsClient }) {
         disabled={!canRight}
         onClick={() => setScrollIndex(clamped + 1)}
       >
-        ›
+        <IconChevronRight size={14} />
       </button>
     </div>
   );

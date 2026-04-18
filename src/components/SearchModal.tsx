@@ -3,6 +3,7 @@ import { useAppDispatch, useAppState } from "../store";
 import type { PendingSearch } from "../store";
 import type { Source } from "../ws/types";
 import type { WsClient } from "../ws/client";
+import { IconX, IconFolder, IconFile } from "@tabler/icons-react";
 
 function MnemonicLabel({ text, mnemonic }: { text: string; mnemonic: string }) {
   const idx = text.toLowerCase().indexOf(mnemonic.toLowerCase());
@@ -308,7 +309,7 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
                           onClick={() => removePath(path)}
                           aria-label={`Remove ${path}`}
                         >
-                          ✕
+                          <IconX size={10} />
                         </button>
                       </li>
                     ))}
@@ -430,7 +431,7 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
                       title={result.fullPath}
                     >
                       <span className={`search-modal__result-icon ${result.kind === "directory" ? "cc-dir" : ""}`}>
-                        {result.kind === "directory" ? "📁" : "📄"}
+                        {result.kind === "directory" ? <IconFolder size={14} /> : <IconFile size={14} />}
                       </span>
                       <span className="search-modal__result-main">
                         <span className="search-modal__result-name">{result.name}</span>

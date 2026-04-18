@@ -11,6 +11,17 @@ import {
   GLOBAL_SHORTCUT_COMMAND_IDS,
   TOOLBAR_COMMAND_IDS,
 } from "../commands/interactive";
+import {
+  IconPencil,
+  IconEye,
+  IconEdit,
+  IconCopy,
+  IconArrowsMove,
+  IconFolderPlus,
+  IconTrash,
+  IconTerminal,
+  IconLogout,
+} from "@tabler/icons-react";
 
 function isEditableTarget(target: EventTarget | null) {
   if (!(target instanceof HTMLElement)) return false;
@@ -21,16 +32,16 @@ function isEditableTarget(target: EventTarget | null) {
     || target instanceof HTMLSelectElement;
 }
 
-const TOOLBAR_ICONS: Record<(typeof TOOLBAR_COMMAND_IDS)[number], string> = {
-  "file.rename": "✏️",
-  "file.view": "👁️",
-  "file.edit": "🖊️",
-  "file.copy": "📋",
-  "file.move": "✂️",
-  "file.mkdir": "📁",
-  "file.delete": "🗑️",
-  "app.open_terminal": "🖥️",
-  "app.quit": "🚪",
+const TOOLBAR_ICONS: Record<(typeof TOOLBAR_COMMAND_IDS)[number], React.ReactNode> = {
+  "file.rename": <IconPencil size={16} />,
+  "file.view": <IconEye size={16} />,
+  "file.edit": <IconEdit size={16} />,
+  "file.copy": <IconCopy size={16} />,
+  "file.move": <IconArrowsMove size={16} />,
+  "file.mkdir": <IconFolderPlus size={16} />,
+  "file.delete": <IconTrash size={16} />,
+  "app.open_terminal": <IconTerminal size={16} />,
+  "app.quit": <IconLogout size={16} />,
 };
 
 const TOOLBAR_LABELS: Record<(typeof TOOLBAR_COMMAND_IDS)[number], string> = {

@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { useAppState } from "../store";
 import type { DirSizeTask, FileOpProgress, Job } from "../ws/types";
 import type { WsClient } from "../ws/client";
+import { IconPlayerPlay, IconPlayerPause, IconX } from "@tabler/icons-react";
 
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -68,7 +69,7 @@ function JobRow({ job, client }: { job: Job; client: WsClient }) {
                 title="Resume job"
                 onClick={() => client.sendIntent("ResumeJob", undefined, { jobId: job.jobId })}
               >
-                ▶ Resume
+                <IconPlayerPlay size={12} /> Resume
               </button>
             ) : job.supportsPause ? (
               <button
@@ -76,16 +77,16 @@ function JobRow({ job, client }: { job: Job; client: WsClient }) {
                 title="Pause job"
                 onClick={() => client.sendIntent("PauseJob", undefined, { jobId: job.jobId })}
               >
-                ⏸ Pause
+                <IconPlayerPause size={12} /> Pause
               </button>
             ) : null}
-            <button
-              className="jobs-modal__cancel"
-              title="Force cancel"
-              onClick={() => client.sendIntent("CancelJob", undefined, { jobId: job.jobId })}
-            >
-              ✕ Cancel
-            </button>
+              <button
+                className="jobs-modal__cancel"
+                title="Force cancel"
+                onClick={() => client.sendIntent("CancelJob", undefined, { jobId: job.jobId })}
+              >
+                <IconX size={12} /> Cancel
+              </button>
           </>
         )}
       </div>
@@ -139,7 +140,7 @@ function DirSizeTaskRow({ task, client }: { task: DirSizeTask; client: WsClient 
           title="Cancel folder size calculation"
           onClick={() => client.sendIntent("CancelSizeCalculation", task.panelId, { name: task.entryName })}
         >
-          ✕ Cancel
+          <IconX size={12} /> Cancel
         </button>
       </div>
 
@@ -188,7 +189,7 @@ export function JobsModal({ onClose, client }: { onClose: () => void; client: Ws
       <div className="modal jobs-modal" role="dialog" aria-label="Jobs">
         <div className="modal__header">
           <span>Jobs</span>
-          <button className="jobs-modal__close" onClick={onClose}>✕</button>
+          <button className="jobs-modal__close" onClick={onClose}><IconX size={16} /></button>
         </div>
 
         <div className="modal__body jobs-modal__body">

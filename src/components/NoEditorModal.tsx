@@ -1,6 +1,7 @@
 import { useRef, useEffect } from "react";
 import { useAppDispatch } from "../store";
 import type { PendingNoEditor } from "../store";
+import { IconCopy } from "@tabler/icons-react";
 
 interface NoEditorModalProps {
   noEditor: PendingNoEditor;
@@ -34,7 +35,9 @@ export function NoEditorModal({ noEditor }: NoEditorModalProps) {
               className="modal__job-param-copy"
               onClick={() => navigator.clipboard.writeText(noEditor.fullPath)}
               title="Copy path"
-            >⧉</button>
+            >
+              <IconCopy size={14} />
+            </button>
           </div>
           <p className="modal__no-editor-msg">No editor available</p>
         </div>
