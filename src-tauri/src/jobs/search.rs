@@ -1,4 +1,5 @@
 use std::io::Read;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -199,9 +200,15 @@ pub async fn run_search(
     let (work_tx, work_rx) = async_channel::bounded::<WorkItem>(work_tx_cap);
     let (result_tx, mut result_rx) = mpsc::channel::<SearchResultEntry>(1024);
 
+    // Pending counter: tracks work items that have been queued but not yet
+    // fully processed (including their subdirs). When this reaches zero and
+    // the queue is empty the search is done.
+    let pending = Arc::new(AtomicUsize::new(0));
+
     // Seed the work queue with root paths
     for root in &params.paths {
         let source_id = resolve_source_id_for_path_local(&path_source_map, root);
+        pending.fetch_add(1, Ordering::SeqCst);
         let _ = work_tx.try_send(WorkItem {
             dir_path: root.clone(),
             depth: 0,
@@ -227,6 +234,7 @@ pub async fn run_search(
         let mask_fn = Arc::clone(&mask_fn);
         let content_query_lower = Arc::clone(&content_query_lower);
         let path_source_map = Arc::clone(&path_source_map);
+        let pending = Arc::clone(&pending);
         let max_depth = max_depth;
         let cancel_rx = cancel_rx_clone.clone();
 
@@ -238,17 +246,25 @@ pub async fn run_search(
 
                 // Try to receive a work item with a short timeout
                 let item = match tokio::time::timeout(
-                    Duration::from_millis(100),
+                    Duration::from_millis(50),
                     work_rx.recv(),
                 )
                 .await
                 {
                     Ok(Ok(item)) => item,
                     Ok(Err(_)) => break, // channel closed
-                    Err(_) => continue,  // timeout, loop and check cancel
+                    Err(_) => {
+                        // Timeout: if no more work is pending, we're done
+                        if pending.load(Ordering::SeqCst) == 0 {
+                            break;
+                        }
+                        continue;
+                    }
                 };
 
                 if *cancel_rx.borrow() {
+                    // Put pending count back — we're abandoning the item
+                    pending.fetch_sub(1, Ordering::SeqCst);
                     break;
                 }
 
@@ -274,11 +290,15 @@ pub async fn run_search(
 
                 let (matched, subdirs) = match entries {
                     Ok(Some(r)) => r,
-                    _ => continue,
+                    _ => {
+                        pending.fetch_sub(1, Ordering::SeqCst);
+                        continue;
+                    }
                 };
 
                 for entry in matched {
                     if result_tx.send(entry).await.is_err() {
+                        pending.fetch_sub(1, Ordering::SeqCst);
                         return;
                     }
                 }
@@ -286,7 +306,6 @@ pub async fn run_search(
                 // Push subdirs onto work queue if depth allows
                 if max_depth.map_or(true, |max| current_depth < max) {
                     for subdir in subdirs {
-                        // Inherit source_id from parent; re-resolve if needed
                         let sub_source_id =
                             resolve_source_id_for_path_local(&path_source_map, &subdir);
                         let source_id = if sub_source_id.is_empty() {
@@ -294,6 +313,7 @@ pub async fn run_search(
                         } else {
                             sub_source_id
                         };
+                        pending.fetch_add(1, Ordering::SeqCst);
                         let _ = work_tx
                             .send(WorkItem {
                                 dir_path: subdir,
@@ -303,13 +323,16 @@ pub async fn run_search(
                             .await;
                     }
                 }
+
+                // This work item is fully processed
+                pending.fetch_sub(1, Ordering::SeqCst);
             }
         });
 
         worker_handles.push(handle);
     }
 
-    // Drop our sender copies so the channel closes when workers are done
+    // Drop our sender copies so the channel closes once all workers exit
     drop(work_tx);
     drop(result_tx);
 
