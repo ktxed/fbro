@@ -110,11 +110,21 @@ async fn view_file(args: &Value, ctx: &mut IntentContext<'_>) {
         if let Some((real_full_path, real_source_id)) = resolved {
             (real_source_id, real_full_path)
         } else {
-            // Fallback: use path as given (may fail gracefully in viewer)
-            (
-                parsed.source_id.clone(),
-                format!("{}/{}", parsed.path.trim_end_matches('/'), parsed.filename),
-            )
+            let best_source = state_guard
+                .sources
+                .iter()
+                .filter(|(_, s)| !s.shadow && s.mounted)
+                .max_by_key(|(_, s)| {
+                    let candidate = format!("{}/{}", parsed.path.trim_end_matches('/'), parsed.filename);
+                    if candidate.starts_with(&s.root_path) {
+                        s.root_path.len()
+                    } else {
+                        0
+                    }
+                })
+                .map(|(id, _)| id.clone())
+                .unwrap_or_else(|| parsed.source_id.clone());
+            (best_source, format!("{}/{}", parsed.path.trim_end_matches('/'), parsed.filename))
         }
     } else {
         (
@@ -300,37 +310,70 @@ async fn viewer_navigate(args: &Value, ctx: &mut IntentContext<'_>) {
 
 async fn read_file_chunk(args: &Value, ctx: &mut IntentContext<'_>) {
     let parsed = ReadChunkArgs::from_args(args);
+
+    let (effective_source_id, effective_path) = if parsed.source_id.starts_with("search:") {
+        let filename = parsed
+            .path
+            .rsplit_once('/')
+            .map(|(_, name)| name)
+            .unwrap_or(&parsed.path);
+        let state_guard = ctx.state.lock().await;
+        let resolved = state_guard
+            .drivers
+            .get(&parsed.source_id)
+            .and_then(|drv| {
+                drv.as_any()
+                    .downcast_ref::<SearchResultsDriver>()
+                    .and_then(|sd| sd.resolve_real_info(filename))
+            });
+        if let Some((real_path, real_source)) = resolved {
+            (real_source, real_path)
+        } else {
+            let best_source = state_guard
+                .sources
+                .iter()
+                .filter(|(_, s)| !s.shadow && s.mounted)
+                .max_by_key(|(_, s)| {
+                    if parsed.path.starts_with(&s.root_path) {
+                        s.root_path.len()
+                    } else {
+                        0
+                    }
+                })
+                .map(|(id, _)| id.clone())
+                .unwrap_or_else(|| parsed.source_id.clone());
+            (best_source, parsed.path.clone())
+        }
+    } else {
+        (parsed.source_id.clone(), parsed.path.clone())
+    };
+
     let (driver, file_size) = {
         let state_guard = ctx.state.lock().await;
-        let driver = state_guard.drivers.get(&parsed.source_id).cloned();
+        let driver = state_guard.drivers.get(&effective_source_id).cloned();
         let file_size = driver
             .as_ref()
-            .and_then(|driver| driver.file_size(&parsed.path));
+            .and_then(|driver| driver.file_size(&effective_path));
         (driver, file_size)
     };
 
     if let Some(driver) = driver {
-        let path_clone = parsed.path.clone();
+        let path_clone = effective_path.clone();
+        let offset = parsed.offset;
+        let size = parsed.size;
         let result = tokio::task::spawn_blocking(move || {
-            driver.read_chunk(&path_clone, parsed.offset, parsed.size)
+            driver.read_chunk(&path_clone, offset, size)
         })
         .await;
         match result {
             Ok(Ok(mut bytes)) => {
-                let eof = bytes.len() < parsed.size
-                    || file_size.map_or(false, |size| parsed.offset + bytes.len() as u64 >= size);
+                let eof = bytes.len() < size
+                    || file_size.map_or(false, |fs| offset + bytes.len() as u64 >= fs);
 
-                // Align chunk end to newline boundary so the frontend never
-                // receives a buffer that cuts a line in half.
-                // Skip alignment when: at EOF (nothing after), empty, or already
-                // ends on a newline.  Also skip for offset-0 tiny reads so the
-                // initial "is this file small?" probe still works correctly.
                 if !eof && !bytes.is_empty() && bytes[bytes.len() - 1] != b'\n' {
                     if let Some(pos) = bytes.iter().rposition(|&b| b == b'\n') {
-                        bytes.truncate(pos + 1); // keep the '\n'
+                        bytes.truncate(pos + 1);
                     }
-                    // If no newline found at all, send as-is (e.g. one huge line
-                    // or binary content) — the frontend already handles that.
                 }
 
                 let data: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
@@ -338,8 +381,8 @@ async fn read_file_chunk(args: &Value, ctx: &mut IntentContext<'_>) {
                     .tx
                     .send(ServerMessage::FileChunk {
                         timestamp: now(),
-                        path: parsed.path,
-                        offset: parsed.offset,
+                        path: effective_path,
+                        offset,
                         data,
                         eof,
                         file_size,
