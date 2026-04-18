@@ -122,7 +122,7 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
 
   const handleToResults = () => {
     if (!search.jobId) return;
-    client.sendIntent("MountSearchResults", undefined, { jobId: search.jobId });
+    client.sendIntent("MountSearchResults", undefined, { jobId: search.jobId, panelId: state.focus });
     close();
   };
 

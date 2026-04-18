@@ -309,7 +309,11 @@ async fn teardown_shadow_source(
             .values()
             .any(|p| p.panel_id != panel_id && p.source_id == old_source_id);
 
-        if !still_in_use {
+        // Search result sources have their own lifecycle (RemoveSearchSource /
+        // the jobs bar × button) — never auto-remove them on navigate-away.
+        let is_search_source = old_source_id.starts_with("search:");
+
+        if !still_in_use && !is_search_source {
             state_guard.sources.remove(&old_source_id);
             state_guard.drivers.remove(&old_source_id);
         }
