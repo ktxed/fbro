@@ -1,5 +1,6 @@
 use serde_json::Value;
 
+use crate::vfs::search::SearchResultsDriver;
 use crate::ws::intents::{arg_str, arg_u64};
 use crate::ws::protocol::{now, ServerMessage};
 use crate::ws::runtime::{url_encode, IntentContext};
@@ -93,10 +94,38 @@ impl ReadChunkArgs {
 
 async fn view_file(args: &Value, ctx: &mut IntentContext<'_>) {
     let parsed = ViewFileArgs::from_args(args);
-    let full_path = format!("{}/{}", parsed.path.trim_end_matches('/'), parsed.filename);
+
+    // When viewing from a search results source, resolve the real file path
+    // and real source_id so the viewer uses the local filesystem driver.
+    let (effective_source_id, full_path) = if parsed.source_id.starts_with("search:") {
+        let state_guard = ctx.state.lock().await;
+        let resolved = state_guard
+            .drivers
+            .get(&parsed.source_id)
+            .and_then(|drv| {
+                drv.as_any()
+                    .downcast_ref::<SearchResultsDriver>()
+                    .and_then(|sd| sd.resolve_real_info(&parsed.filename))
+            });
+        if let Some((real_full_path, real_source_id)) = resolved {
+            (real_source_id, real_full_path)
+        } else {
+            // Fallback: use path as given (may fail gracefully in viewer)
+            (
+                parsed.source_id.clone(),
+                format!("{}/{}", parsed.path.trim_end_matches('/'), parsed.filename),
+            )
+        }
+    } else {
+        (
+            parsed.source_id.clone(),
+            format!("{}/{}", parsed.path.trim_end_matches('/'), parsed.filename),
+        )
+    };
+
     let (is_local, file_size, file_server_port) = {
         let state_guard = ctx.state.lock().await;
-        let driver = state_guard.drivers.get(&parsed.source_id);
+        let driver = state_guard.drivers.get(&effective_source_id);
         (
             driver.map(|driver| driver.is_local()).unwrap_or(false),
             driver.and_then(|driver| driver.file_size(&full_path)),
@@ -108,7 +137,7 @@ async fn view_file(args: &Value, ctx: &mut IntentContext<'_>) {
     let mut query_string = format!(
         "?viewer=1&path={}&source={}&name={}&label={}&panel={}",
         url_encode(&full_path),
-        url_encode(&parsed.source_id),
+        url_encode(&effective_source_id),
         url_encode(&parsed.filename),
         url_encode(&label),
         url_encode(&parsed.panel_id),

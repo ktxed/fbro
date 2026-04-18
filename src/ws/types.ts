@@ -67,6 +67,7 @@ export interface SearchResult {
   size?: number;
   parentPath: string;
   fullPath: string;
+  sourceId: string;
 }
 
 export interface SearchProgress {

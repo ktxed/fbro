@@ -17,6 +17,18 @@ impl SearchResultsDriver {
     pub fn new(store: Arc<Mutex<SearchResultStore>>) -> Self {
         Self { store }
     }
+
+    /// Returns `(full_path, source_id)` for the named entry in the results,
+    /// or `None` if not found. Used by intent handlers to redirect I/O to
+    /// the real underlying source.
+    pub fn resolve_real_info(&self, name: &str) -> Option<(String, String)> {
+        let store = futures::executor::block_on(self.store.lock());
+        store
+            .results
+            .iter()
+            .find(|r| r.name == name)
+            .map(|r| (r.full_path.clone(), r.source_id.clone()))
+    }
 }
 
 impl VfsDriver for SearchResultsDriver {

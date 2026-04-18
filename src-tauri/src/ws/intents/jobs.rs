@@ -681,24 +681,27 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
                 .unwrap_or_else(|| explicit_paths.first().cloned().unwrap_or_default());
             (driver, representative_source, files)
         } else {
-            let driver = state_guard
+            let panel_driver = state_guard
                 .drivers
                 .get(&source_panel.source_id)
                 .cloned()
                 .ok_or_else(|| "Source panel driver is unavailable.".to_string())?;
-            let files = if parsed.files.is_empty() {
+
+            // Build entries using the panel driver's resolve_child, which for
+            // a SearchResultsDriver already returns the real full_path.
+            let raw_files: Vec<FileOpEntry> = if parsed.files.is_empty() {
                 let indices: Vec<usize> = if source_panel.selection.is_empty() {
                     vec![source_panel.cursor]
                 } else {
                     source_panel.selection.clone()
                 };
-
                 indices
                     .iter()
                     .filter_map(|&index| {
                         source_panel.entries.get(index).map(|entry| FileOpEntry {
                             name: entry.name.clone(),
-                            source_path: driver.resolve_child(&source_panel.path, &entry.name),
+                            source_path: panel_driver
+                                .resolve_child(&source_panel.path, &entry.name),
                             size: entry.size,
                             kind: entry.kind.clone(),
                         })
@@ -710,13 +713,41 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
                     .iter()
                     .map(|file| FileOpEntry {
                         name: file.name.clone(),
-                        source_path: driver.resolve_child(&source_panel.path, &file.name),
+                        source_path: panel_driver
+                            .resolve_child(&source_panel.path, &file.name),
                         size: file.size,
                         kind: file.kind.clone(),
                     })
                     .collect()
             };
-            (driver, source_panel.path.clone(), files)
+
+            // When the source panel is on a search results source, the
+            // resolve_child calls above already return real filesystem paths.
+            // We must resolve the real driver from those paths rather than
+            // using the search driver (which can't do I/O).
+            let (driver, representative_source) =
+                if source_panel.source_id.starts_with("search:") {
+                    let real_paths: Vec<String> =
+                        raw_files.iter().map(|f| f.source_path.clone()).collect();
+                    let (real_source_id, real_driver) =
+                        resolve_common_driver_for_paths(&state_guard, &real_paths)?;
+                    let rep_source = real_paths
+                        .first()
+                        .and_then(|p| Path::new(p).parent())
+                        .map(|p| p.to_string_lossy().to_string())
+                        .unwrap_or_else(|| {
+                            state_guard
+                                .sources
+                                .get(&real_source_id)
+                                .map(|s| s.root_path.clone())
+                                .unwrap_or_default()
+                        });
+                    (real_driver, rep_source)
+                } else {
+                    (panel_driver, source_panel.path.clone())
+                };
+
+            (driver, representative_source, raw_files)
         };
 
         let (dest_path, dst_driver) = if op_type != FileOpType::Delete {
@@ -1378,9 +1409,31 @@ async fn start_search(args: &Value, ctx: &mut IntentContext<'_>) {
         })
         .await;
 
+    // Build path→source_id map for the worker (sorted longest-first so
+    // the most-specific source is matched first).
+    let path_source_map: Arc<Vec<(String, String)>> = {
+        let state = ctx.state.lock().await;
+        let mut map: Vec<(String, String)> = state
+            .sources
+            .values()
+            .filter(|s| !s.shadow && s.mounted && !s.root_path.is_empty())
+            .map(|s| (s.root_path.trim_end_matches('/').to_string(), s.id.clone()))
+            .collect();
+        // Sort longest root_path first so the most-specific match wins
+        map.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
+        Arc::new(map)
+    };
+
     // Spawn the search worker
     let tx = ctx.tx.clone();
-    let handle = tokio::spawn(run_search(job_id.clone(), params, store, tx, cancel_rx));
+    let handle = tokio::spawn(run_search(
+        job_id.clone(),
+        params,
+        path_source_map,
+        store,
+        tx,
+        cancel_rx,
+    ));
 
     // Store the join handle
     {
@@ -1392,13 +1445,20 @@ async fn start_search(args: &Value, ctx: &mut IntentContext<'_>) {
 }
 
 async fn navigate_to_search_result(args: &Value, ctx: &mut IntentContext<'_>) {
-    let panel_id = arg_str(args, "panelId").unwrap_or("").to_string();
+    let panel_id_arg = arg_str(args, "panelId").unwrap_or("").to_string();
     let full_path = arg_str(args, "fullPath").unwrap_or("").to_string();
     let kind = arg_str(args, "kind").unwrap_or("file");
 
-    if panel_id.is_empty() || full_path.is_empty() {
+    if full_path.is_empty() {
         return;
     }
+
+    // Fall back to the currently focused panel when no panelId is supplied.
+    let panel_id = if panel_id_arg.is_empty() {
+        ctx.state.lock().await.focus.clone()
+    } else {
+        panel_id_arg
+    };
 
     // Determine target path and cursor hint
     let (nav_path, cursor_hint) = if kind == "directory" {

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useAppDispatch } from "../store";
+import { useAppDispatch, useAppState } from "../store";
 import type { PendingSearch } from "../store";
 import type { Source } from "../ws/types";
 import type { WsClient } from "../ws/client";
@@ -15,6 +15,7 @@ interface SearchModalProps {
 
 export function SearchModal({ search, sources, client }: SearchModalProps) {
   const dispatch = useAppDispatch();
+  const state = useAppState();
 
   // Section 1 — Search Locations
   const [paths, setPaths] = useState<string[]>([search.sourcePanelPath]);
@@ -113,7 +114,11 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
   };
 
   const handleResultDoubleClick = (fullPath: string, kind: string) => {
-    client.sendIntent("NavigateToSearchResult", undefined, { fullPath, kind });
+    client.sendIntent("NavigateToSearchResult", undefined, {
+      panelId: state.focus,
+      fullPath,
+      kind,
+    });
     close();
   };
 

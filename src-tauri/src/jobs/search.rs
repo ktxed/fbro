@@ -47,6 +47,8 @@ pub struct SearchResultEntry {
     pub size: Option<u64>,
     pub parent_path: String,
     pub full_path: String,
+    /// The real (non-shadow) source that owns this entry's filesystem path.
+    pub source_id: String,
 }
 
 pub struct SearchResultStore {
@@ -149,16 +151,35 @@ fn file_contains_query(path: &str, query_lower: &str) -> bool {
 struct WorkItem {
     dir_path: String,
     depth: u32,
+    /// Inherited source_id for this directory.
+    source_id: String,
 }
 
 // ─── Main worker ─────────────────────────────────────────────────────────────
 
+/// Resolves the best-matching source_id for a filesystem path given a
+/// sorted (longest-first) list of (root_path, source_id) pairs.
+pub fn resolve_source_id_for_path_local(
+    path_source_map: &[(String, String)],
+    path: &str,
+) -> String {
+    for (root, source_id) in path_source_map {
+        if path.starts_with(root.as_str()) {
+            return source_id.clone();
+        }
+    }
+    String::new()
+}
+
 pub async fn run_search(
     job_id: String,
     params: SearchParams,
+    // Sorted longest-first: (root_path, source_id) pairs for resolving
+    // which real source each result belongs to.
+    path_source_map: Arc<Vec<(String, String)>>,
     store: Arc<Mutex<SearchResultStore>>,
     tx: mpsc::Sender<ServerMessage>,
-    mut cancel_rx: watch::Receiver<bool>,
+    cancel_rx: watch::Receiver<bool>,
 ) {
     let mask_fn = compile_mask(params.file_mask.as_deref(), &params.mask_mode);
     let content_query_lower = params
@@ -180,9 +201,11 @@ pub async fn run_search(
 
     // Seed the work queue with root paths
     for root in &params.paths {
+        let source_id = resolve_source_id_for_path_local(&path_source_map, root);
         let _ = work_tx.try_send(WorkItem {
             dir_path: root.clone(),
             depth: 0,
+            source_id,
         });
     }
 
@@ -203,6 +226,7 @@ pub async fn run_search(
         let semaphore = Arc::clone(&semaphore);
         let mask_fn = Arc::clone(&mask_fn);
         let content_query_lower = Arc::clone(&content_query_lower);
+        let path_source_map = Arc::clone(&path_source_map);
         let max_depth = max_depth;
         let cancel_rx = cancel_rx_clone.clone();
 
@@ -232,12 +256,19 @@ pub async fn run_search(
 
                 let dir_path = item.dir_path.clone();
                 let current_depth = item.depth;
+                let item_source_id = item.source_id.clone();
                 let mask_fn = Arc::clone(&mask_fn);
                 let content_query_lower = Arc::clone(&content_query_lower);
                 let cancel_check = cancel_rx.clone();
 
                 let entries = tokio::task::spawn_blocking(move || {
-                    read_dir_entries(&dir_path, mask_fn.as_ref(), &content_query_lower, &cancel_check)
+                    read_dir_entries(
+                        &dir_path,
+                        &item_source_id,
+                        mask_fn.as_ref(),
+                        &content_query_lower,
+                        &cancel_check,
+                    )
                 })
                 .await;
 
@@ -255,10 +286,19 @@ pub async fn run_search(
                 // Push subdirs onto work queue if depth allows
                 if max_depth.map_or(true, |max| current_depth < max) {
                     for subdir in subdirs {
+                        // Inherit source_id from parent; re-resolve if needed
+                        let sub_source_id =
+                            resolve_source_id_for_path_local(&path_source_map, &subdir);
+                        let source_id = if sub_source_id.is_empty() {
+                            item.source_id.clone()
+                        } else {
+                            sub_source_id
+                        };
                         let _ = work_tx
                             .send(WorkItem {
                                 dir_path: subdir,
                                 depth: current_depth + 1,
+                                source_id,
                             })
                             .await;
                     }
@@ -385,6 +425,7 @@ pub async fn run_search(
 /// Returns None if cancelled or unreadable.
 fn read_dir_entries(
     dir_path: &str,
+    source_id: &str,
     mask_fn: &dyn Fn(&str) -> bool,
     content_query_lower: &Option<String>,
     cancel: &watch::Receiver<bool>,
@@ -440,6 +481,7 @@ fn read_dir_entries(
             size,
             parent_path: dir_path.to_string(),
             full_path,
+            source_id: source_id.to_string(),
         });
     }
 
@@ -463,6 +505,7 @@ async fn flush_batch(
             size: e.size,
             parent_path: e.parent_path.clone(),
             full_path: e.full_path.clone(),
+            source_id: e.source_id.clone(),
         })
         .collect();
 

@@ -455,6 +455,7 @@ pub struct SearchResultSchema {
     pub size: Option<u64>,
     pub parent_path: String,
     pub full_path: String,
+    pub source_id: String,
 }
 
 #[derive(Serialize, Clone, Debug)]

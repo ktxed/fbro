@@ -106,7 +106,7 @@ impl RevealArgs {
 
 async fn open_entry(scope: &Value, ctx: &mut IntentContext<'_>) {
     let panel_id = resolve_panel_id(scope, ctx.state).await;
-    let (entry_kind, entry_name, new_path, is_in_shadow) = {
+    let (entry_kind, entry_name, new_path, is_in_shadow, source_id) = {
         let state_guard = ctx.state.lock().await;
         if let Some(panel) = state_guard.panels.get(&panel_id) {
             if let Some(entry) = panel.entries.get(panel.cursor) {
@@ -116,6 +116,7 @@ async fn open_entry(scope: &Value, ctx: &mut IntentContext<'_>) {
                     entry.name.clone(),
                     driver.resolve_child(&panel.path, &entry.name),
                     panel.shadow_source.is_some(),
+                    panel.source_id.clone(),
                 )
             } else {
                 return;
@@ -126,6 +127,34 @@ async fn open_entry(scope: &Value, ctx: &mut IntentContext<'_>) {
     };
 
     if entry_kind == "directory" {
+        // When on a search results source, navigating into a directory result
+        // should exit the search source and enter the real filesystem location.
+        if source_id.starts_with("search:") {
+            // Switch the panel to the real source for this path before navigating.
+            let real_source_id = {
+                let state_guard = ctx.state.lock().await;
+                state_guard
+                    .sources
+                    .iter()
+                    .filter(|(_, s)| !s.shadow && s.mounted)
+                    .max_by_key(|(_, s)| {
+                        if new_path.starts_with(&s.root_path) {
+                            s.root_path.len()
+                        } else {
+                            0
+                        }
+                    })
+                    .map(|(id, _)| id.clone())
+                    .unwrap_or_default()
+            };
+            if !real_source_id.is_empty() {
+                let mut state_guard = ctx.state.lock().await;
+                if let Some(panel) = state_guard.panels.get_mut(&panel_id) {
+                    panel.source_id = real_source_id;
+                    panel.shadow_source = None;
+                }
+            }
+        }
         navigate_to(
             &panel_id,
             &new_path,
@@ -486,7 +515,26 @@ async fn open_file(scope: &Value, ctx: &mut IntentContext<'_>) {
     };
     if let Some(entry) = entry {
         if entry.kind != "directory" {
-            if shadow_source.is_some() {
+            if source_id.starts_with("search:") {
+                // Search results source: resolve_real_info gives the real
+                // full_path, so open it directly via the platform.
+                let real_full_path = {
+                    let state_guard = ctx.state.lock().await;
+                    state_guard
+                        .drivers
+                        .get(&source_id)
+                        .and_then(|drv| {
+                            drv.as_any()
+                                .downcast_ref::<crate::vfs::search::SearchResultsDriver>()
+                        })
+                        .and_then(|sd| sd.resolve_real_info(&entry.name))
+                        .map(|(fp, _)| fp)
+                        .unwrap_or_else(|| {
+                            format!("{}/{}", path.trim_end_matches('/'), entry.name)
+                        })
+                };
+                platform.open_file(&real_full_path);
+            } else if shadow_source.is_some() {
                 // Inside a zip: extract to temp file and open.
                 let inner_path = if path.is_empty() {
                     entry.name.clone()
