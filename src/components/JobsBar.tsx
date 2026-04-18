@@ -10,7 +10,12 @@ export function JobsBar({ client }: { client: WsClient }) {
   const [scrollIndex, setScrollIndex] = useState(0);
 
   const activeJobs = Object.values(state.jobs).filter(
-    (j) => j.state === "Queued" || j.state === "Running" || j.state === "AwaitingDecision"
+    (j) =>
+      j.state === "Queued" ||
+      j.state === "Running" ||
+      j.state === "AwaitingDecision" ||
+      (j.kind === "search" &&
+        (j.state === "Completed" || j.state === "Cancelled" || j.state === "Failed"))
   );
 
   if (activeJobs.length === 0) return null;
@@ -65,10 +70,14 @@ export function JobsBar({ client }: { client: WsClient }) {
             <span
               className="jobs-bar__job-close"
               role="button"
-              title="Cancel job"
+              title={job.kind === "search" && job.state !== "Running" && job.state !== "Queued" ? "Discard results" : "Cancel job"}
               onClick={(e) => {
                 e.stopPropagation();
-                client.sendIntent("CancelJob", undefined, { jobId: job.jobId });
+                if (job.kind === "search" && job.state !== "Running" && job.state !== "Queued") {
+                  client.sendIntent("RemoveSearchSource", undefined, { sourceId: job.searchSourceId });
+                } else {
+                  client.sendIntent("CancelJob", undefined, { jobId: job.jobId });
+                }
               }}
             >
               ×
