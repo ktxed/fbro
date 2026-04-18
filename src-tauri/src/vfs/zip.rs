@@ -69,13 +69,25 @@ impl DirTree {
             ensure_ancestors(&mut children, &mut known_dirs, &parent);
 
             let meta = ZipMeta {
-                name: entry_name,
+                name: entry_name.clone(),
                 is_dir,
                 size,
-                mtime,
+                mtime: mtime.clone(),
             };
 
-            children.entry(parent).or_default().push(meta);
+            children.entry(parent.clone()).or_default();
+            let parent_entries = children.get_mut(&parent).unwrap();
+            if let Some(existing) = parent_entries.iter_mut().find(|e| e.name == entry_name) {
+                // Entry already exists — prefer the one with mtime (explicit zip entry
+                // over an implicit directory created by ensure_ancestors).
+                if mtime.is_some() && existing.mtime.is_none() {
+                    existing.is_dir = is_dir;
+                    existing.size = size;
+                    existing.mtime = mtime;
+                }
+            } else {
+                parent_entries.push(meta);
+            }
 
             if is_dir {
                 known_dirs.insert(clean_name.clone());
@@ -155,7 +167,6 @@ fn ensure_ancestors(
         return;
     }
 
-    // Walk from root toward this directory, creating any missing segments.
     let parts: Vec<&str> = dir_path.split('/').collect();
     let mut current = String::new();
     for (i, part) in parts.iter().enumerate() {
@@ -166,10 +177,11 @@ fn ensure_ancestors(
             current = format!("{}/{}", current, part);
         }
         if known_dirs.insert(current.clone()) {
-            // This directory wasn't known yet — add it as a child of its parent.
             children.entry(current.clone()).or_default();
             let parent_entries = children.entry(parent).or_default();
-            if !parent_entries.iter().any(|e| e.name == *part && e.is_dir) {
+            if let Some(_existing) = parent_entries.iter_mut().find(|e| e.name == *part && e.is_dir) {
+                // Implicit entry already exists, keep it as-is.
+            } else if !parent_entries.iter().any(|e| e.name == *part) {
                 parent_entries.push(ZipMeta {
                     name: part.to_string(),
                     is_dir: true,
@@ -410,17 +422,29 @@ impl VfsDriver for ZipFsDriver {
         let filter_re = build_filter_regex(filter);
         let hide_hidden = !show_hidden;
 
-        let mut result: Vec<VfsEntry> = entries
-            .iter()
-            .filter(|e| {
-                if hide_hidden && e.name.starts_with('.') {
-                    return false;
+        // Deduplicate by name, keeping the entry with mtime (explicit) over
+        // the one without (implicit).
+        let mut seen: std::collections::HashMap<String, &ZipMeta> = std::collections::HashMap::new();
+        for e in entries.iter() {
+            if hide_hidden && e.name.starts_with('.') {
+                continue;
+            }
+            if let Some(ref re) = filter_re {
+                if !re.is_match(&e.name) {
+                    continue;
                 }
-                if let Some(ref re) = filter_re {
-                    return re.is_match(&e.name);
-                }
-                true
-            })
+            }
+            let replace = match seen.get(&e.name) {
+                None => true,
+                Some(existing) => e.mtime.is_some() && existing.mtime.is_none(),
+            };
+            if replace {
+                seen.insert(e.name.clone(), e);
+            }
+        }
+
+        let mut result: Vec<VfsEntry> = seen
+            .into_values()
             .map(|e| {
                 let kind = if e.is_dir {
                     VfsKind::Directory

@@ -428,7 +428,7 @@ body {
   background: #2d2d2d !important;
   color: #274ae7 !important;
 }
-.panel__row--cursor .panel__name { color: #000000 !important; }
+.panel__row--cursor .panel__name { color: #979797 !important; }
 
 .panel--focused .panel__row--cursor {
   background: #2d228a !important;
