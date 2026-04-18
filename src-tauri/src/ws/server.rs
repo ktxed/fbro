@@ -148,8 +148,15 @@ async fn handle_connection(
     for panel_id in &panel_ids {
         let (path, sort, filter, show_hidden, version_base, driver) = {
             let state_guard = state.lock().await;
-            let panel = state_guard.panels.get(panel_id).unwrap();
-            let driver = state_guard.drivers.get(&panel.source_id).cloned().unwrap();
+            let Some(panel) = state_guard.panels.get(panel_id) else {
+                continue;
+            };
+            let Some(driver) = state_guard.drivers.get(&panel.source_id).cloned() else {
+                // Driver missing (e.g. a search source was ejected while
+                // the client was disconnected) — skip the initial scan for
+                // this panel; it will be rescanned when navigated.
+                continue;
+            };
             (
                 panel.path.clone(),
                 panel.sort.clone(),
