@@ -82,7 +82,8 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
     if (paths.length === 0) return;
     const requestId = globalThis.crypto?.randomUUID?.() ?? `search-${Date.now()}`;
 
-    dispatch({ type: "SET_SEARCH_REQUEST_ID", requestId });
+    // Reset accumulated results so the Results tab starts fresh for the new job.
+    dispatch({ type: "RESET_SEARCH_FOR_NEW_JOB", requestId });
 
     client.sendIntent("StartSearch", undefined, {
       requestId,
@@ -420,7 +421,7 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
 
         {/* Action buttons */}
         <div className="modal__actions">
-          {search.status === "idle" && (
+          {(search.status === "idle" || isDone) && (
             <>
               <button
                 className="modal__btn modal__btn--primary"

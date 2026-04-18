@@ -234,6 +234,7 @@ export type AppAction =
   | { type: "CLOSE_SEARCH" }
   | { type: "SET_SEARCH_TAB"; tab: "input" | "results" }
   | { type: "SET_SEARCH_REQUEST_ID"; requestId: string }
+  | { type: "RESET_SEARCH_FOR_NEW_JOB"; requestId: string }
   | { type: "OPEN_COMMAND_PALETTE" }
   | { type: "CLOSE_COMMAND_PALETTE" }
   | { type: "CLOSE_TRANSIENT_HINT" }
@@ -898,6 +899,22 @@ function reducer(state: AppState, action: AppAction): AppState {
     case "SET_SEARCH_REQUEST_ID":
       if (!state.pendingSearch) return state;
       return { ...state, pendingSearch: { ...state.pendingSearch, requestId: action.requestId } };
+    case "RESET_SEARCH_FOR_NEW_JOB":
+      if (!state.pendingSearch) return state;
+      return {
+        ...state,
+        pendingSearch: {
+          ...state.pendingSearch,
+          jobId: null,
+          searchSourceId: null,
+          results: [],
+          scanned: 0,
+          matched: 0,
+          currentPath: "",
+          status: "idle",
+          requestId: action.requestId,
+        },
+      };
   }
 }
 
