@@ -1024,6 +1024,16 @@ async fn cancel_job(args: &Value, ctx: &mut IntentContext<'_>) {
                     job.state = JobState::Cancelled;
                     send_cancelled_event = true;
                 }
+                JobKind::Search(_) => {
+                    // Signal the cancel watch so workers stop gracefully, then
+                    // abort the spawned task immediately for a fast stop.
+                    let _ = job.cancel_tx.send(true);
+                    if let Some(handle) = job.handle.take() {
+                        handle.abort();
+                    }
+                    job.state = JobState::Cancelled;
+                    send_cancelled_event = true;
+                }
                 _ => {
                     let _ = job.cancel_tx.send(true);
                     job.state = JobState::Cancelled;
@@ -1033,6 +1043,18 @@ async fn cancel_job(args: &Value, ctx: &mut IntentContext<'_>) {
     }
     ctx.decision_senders.remove(&parsed.job_id);
     if send_cancelled_event {
+        // For search jobs: mark the store done so the VFS driver knows the
+        // result set is finalised.
+        let search_source_id = format!("search:{}", &parsed.job_id);
+        {
+            let state_guard = ctx.state.lock().await;
+            if let Some(store) = state_guard.search_stores.get(&search_source_id) {
+                let store = store.clone();
+                drop(state_guard);
+                store.lock().await.done = true;
+            }
+        }
+
         let _ = ctx
             .tx
             .send(ServerMessage::JobEvent {
