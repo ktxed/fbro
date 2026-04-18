@@ -432,7 +432,7 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
 
         {/* Action buttons */}
         <div className="modal__actions">
-          {(search.status === "idle" || isDone) && (
+          {(search.status === "idle" || isDone) && !(hasResults && search.activeTab === "results") && (
             <>
               <button
                 className="modal__btn modal__btn--primary"
