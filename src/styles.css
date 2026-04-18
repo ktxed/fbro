@@ -2051,7 +2051,6 @@ body {
   padding: 6px 14px;
   display: flex;
   align-items: center;
-  gap: 6px;
 }
 
 .search-modal__tab:hover {

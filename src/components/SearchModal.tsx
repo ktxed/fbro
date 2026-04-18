@@ -4,6 +4,18 @@ import type { PendingSearch } from "../store";
 import type { Source } from "../ws/types";
 import type { WsClient } from "../ws/client";
 
+function MnemonicLabel({ text, mnemonic }: { text: string; mnemonic: string }) {
+  const idx = text.toLowerCase().indexOf(mnemonic.toLowerCase());
+  if (idx < 0) return <>{text}</>;
+  return (
+    <>
+      {text.slice(0, idx)}
+      <span className="modal__mnemonic">{text[idx]}</span>
+      {text.slice(idx + 1)}
+    </>
+  );
+}
+
 type DepthOption = "unlimited" | "current" | number;
 type MaskMode = "substring" | "wildcard" | "regex";
 
@@ -44,12 +56,13 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
   const [contentQuery, setContentQuery] = useState(p?.contentQuery ?? "");
 
   const pathInputRef = useRef<HTMLInputElement>(null);
+  const fileMaskInputRef = useRef<HTMLInputElement>(null);
   const contentTextareaRef = useRef<HTMLTextAreaElement>(null);
   const modalRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (search.activeTab === "input") {
-      pathInputRef.current?.focus();
+      fileMaskInputRef.current?.focus();
     } else {
       modalRef.current?.focus();
     }
@@ -136,10 +149,6 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
   };
 
   const handleOverlayKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Tab") {
-      e.preventDefault();
-      return;
-    }
     if (e.key === "Escape") {
       e.preventDefault();
       close();
@@ -149,9 +158,31 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
       const target = e.target as HTMLElement;
       const isTextarea = target.tagName === "TEXTAREA";
       const isPathInput = target === pathInputRef.current;
-      if (!isTextarea && !isPathInput && search.activeTab === "input" && search.status === "idle") {
+      const isFileMaskInput = target === fileMaskInputRef.current;
+      if (!isTextarea && !isPathInput && !isFileMaskInput) {
         e.preventDefault();
-        startSearch(false);
+        if (hasResults && search.jobId) {
+          handleToResults();
+        } else if (search.status === "idle") {
+          startSearch(false);
+        }
+      }
+    }
+      }
+    }
+    // Tab shortcuts: s = Search Input, r = Results
+    if (e.key === "s" || e.key === "S") {
+      const target = e.target as HTMLElement;
+      if (target.tagName !== "INPUT" && target.tagName !== "TEXTAREA" && target.tagName !== "SELECT") {
+        e.preventDefault();
+        dispatch({ type: "SET_SEARCH_TAB", tab: "input" });
+      }
+    }
+    if (e.key === "r" || e.key === "R") {
+      const target = e.target as HTMLElement;
+      if (target.tagName !== "INPUT" && target.tagName !== "TEXTAREA" && target.tagName !== "SELECT") {
+        e.preventDefault();
+        dispatch({ type: "SET_SEARCH_TAB", tab: "results" });
       }
     }
   };
@@ -203,14 +234,14 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
             className={`search-modal__tab${search.activeTab === "input" ? " search-modal__tab--active" : ""}`}
             onClick={() => dispatch({ type: "SET_SEARCH_TAB", tab: "input" })}
           >
-            Search Input
+            <MnemonicLabel text="Search Input" mnemonic="s" />
           </button>
           <button
             type="button"
             className={`search-modal__tab${search.activeTab === "results" ? " search-modal__tab--active" : ""}`}
             onClick={() => dispatch({ type: "SET_SEARCH_TAB", tab: "results" })}
           >
-            Results{resultCount > 0 ? ` (${resultCount})` : ""}
+            <MnemonicLabel text={`Results${resultCount > 0 ? ` (${resultCount})` : ""}`} mnemonic="r" />
             {isRunning && <span className="search-modal__tab-spinner" />}
           </button>
         </div>
@@ -311,10 +342,17 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
 
                 <div className="search-modal__mask-row">
                   <input
+                    ref={fileMaskInputRef}
                     type="text"
                     className="search-modal__mask-input"
                     value={fileMask}
                     onChange={(e) => setFileMask(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && search.status === "idle") {
+                        e.preventDefault();
+                        startSearch(false);
+                      }
+                    }}
                     placeholder="*.*"
                     spellCheck={false}
                     autoComplete="off"
@@ -468,7 +506,7 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
                 onClick={() => startSearch(true)}
                 disabled={paths.length === 0}
               >
-                Background
+                <MnemonicLabel text="Background" mnemonic="b" />
               </button>
             </>
           )}
@@ -479,7 +517,7 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
           )}
           {hasResults && (
             <button
-              className="modal__btn"
+              className="modal__btn modal__btn--primary"
               onClick={handleToResults}
               disabled={!search.jobId}
             >
@@ -487,7 +525,7 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
             </button>
           )}
           <button className="modal__btn" onClick={close}>
-            Close
+            <MnemonicLabel text="Close" mnemonic="c" />
           </button>
         </div>
       </div>
