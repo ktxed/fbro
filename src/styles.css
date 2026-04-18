@@ -1793,9 +1793,28 @@ body {
 /* ── Search modal ──────────────────────────────────────────────────────────── */
 
 .modal--wide {
-  min-width: 480px;
-  max-width: 560px;
+  min-width: 520px;
+  max-width: 640px;
   width: 90vw;
+}
+
+.modal--wide .modal__body {
+  max-height: 420px;
+  overflow-y: auto;
+}
+
+.modal--wide .modal__body {
+  max-height: 420px;
+  overflow-y: auto;
+}
+
+.modal--wide .modal__body {
+  height: 420px;
+  overflow-y: auto;
+}
+
+.modal--wide .modal__body {
+  min-height: 420px;
 }
 
 .search-modal__section {
@@ -2082,7 +2101,7 @@ body {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  height: 320px;
+  max-height: 380px;
   overflow: hidden;
 }
 

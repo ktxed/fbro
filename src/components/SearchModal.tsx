@@ -168,8 +168,6 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
         }
       }
     }
-      }
-    }
     // Tab shortcuts: s = Search Input, r = Results
     if (e.key === "s" || e.key === "S") {
       const target = e.target as HTMLElement;
@@ -379,43 +377,22 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
 
               {/* Section 3: Content */}
               <div className="search-modal__section search-modal__section--last">
-                <div
-                  className="search-modal__section-header"
-                  onClick={() => {
-                    setContentEnabled((v) => {
-                      if (!v) setTimeout(() => contentTextareaRef.current?.focus(), 0);
-                      return !v;
-                    });
-                  }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={contentEnabled}
-                    onChange={() => {}}
-                    onClick={(e) => e.stopPropagation()}
-                    onFocus={(e) => e.stopPropagation()}
-                  />
-                  <span className="search-modal__section-title search-modal__section-title--inline">
-                    Search file contents
-                  </span>
-                </div>
+                <div className="search-modal__section-title">Search file contents</div>
 
-                {contentEnabled && (
-                  <div className="search-modal__content-body">
-                    <textarea
-                      ref={contentTextareaRef}
-                      className="search-modal__content-input"
-                      value={contentQuery}
-                      onChange={(e) => setContentQuery(e.target.value)}
-                      placeholder="Text to find…"
-                      rows={3}
-                      spellCheck={false}
-                      autoComplete="off"
-                      autoCorrect="off"
-                      autoCapitalize="off"
-                    />
-                  </div>
-                )}
+                <div className="search-modal__content-body">
+                  <textarea
+                    ref={contentTextareaRef}
+                    className="search-modal__content-input"
+                    value={contentQuery}
+                    onChange={(e) => setContentQuery(e.target.value)}
+                    placeholder="Text to find…"
+                    rows={3}
+                    spellCheck={false}
+                    autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="off"
+                  />
+                </div>
               </div>
             </>
           )}
