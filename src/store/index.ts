@@ -1,6 +1,7 @@
 import { createContext, useContext, useReducer, type Dispatch } from "react";
 import type {
   PanelState,
+  SearchParams,
   SearchResult,
   Source,
   Job,
@@ -136,6 +137,9 @@ export interface PendingSearch {
   activeTab: "input" | "results";
   // Used to correlate the StartSearch intent with the JobStarted message
   requestId: string | null;
+  // The params used for this search — used to pre-fill the Input tab when
+  // re-opening a job from the jobs bar.
+  searchParams: SearchParams | null;
 }
 
 export interface AppState {
@@ -435,6 +439,7 @@ function applyJobStarted(state: AppState, msg: JobStartedMessage): AppState {
     resultPanelId: job.resultPanelId,
     files: job.files,
     searchSourceId: job.searchSourceId,
+    searchParams: job.searchParams,
     searchResults: job.kind === "search" ? [] : undefined,
     searchScanned: job.kind === "search" ? 0 : undefined,
     searchMatched: job.kind === "search" ? 0 : undefined,
@@ -466,6 +471,7 @@ function applyJobStarted(state: AppState, msg: JobStartedMessage): AppState {
         ...state.pendingSearch!,
         jobId: job.jobId,
         searchSourceId: job.searchSourceId ?? null,
+        searchParams: job.searchParams ?? null,
         status: "running",
         activeTab: "results",
       },
@@ -817,6 +823,7 @@ function reducer(state: AppState, action: AppAction): AppState {
             sourcePanelPath: activatedJob.sourcePath,
             jobId: action.jobId,
             searchSourceId: activatedJob.searchSourceId ?? null,
+            searchParams: activatedJob.searchParams ?? null,
             results: activatedJob.searchResults ?? [],
             scanned: activatedJob.searchScanned ?? 0,
             matched: activatedJob.searchMatched ?? 0,
@@ -907,6 +914,7 @@ function reducer(state: AppState, action: AppAction): AppState {
           ...state.pendingSearch,
           jobId: null,
           searchSourceId: null,
+          searchParams: null,
           results: [],
           scanned: 0,
           matched: 0,

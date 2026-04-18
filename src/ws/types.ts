@@ -61,6 +61,14 @@ export interface LayoutDomain {
   panels: string[];
 }
 
+export interface SearchParams {
+  paths: string[];
+  depth: string;
+  fileMask?: string | null;
+  maskMode: string;
+  contentQuery?: string | null;
+}
+
 export interface SearchResult {
   name: string;
   kind: string;
@@ -95,6 +103,7 @@ export interface Job {
   error?: string;
   // Search-specific fields
   searchSourceId?: string;
+  searchParams?: SearchParams;
   searchResults?: SearchResult[];
   searchScanned?: number;
   searchMatched?: number;
@@ -217,6 +226,7 @@ export interface JobStart {
   resultPanelId?: string;
   requestId?: string;
   searchSourceId?: string;
+  searchParams?: SearchParams;
 }
 
 export type FileOpType = "copy" | "move" | "delete";

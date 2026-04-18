@@ -6,6 +6,7 @@ use tokio::sync::{watch, Mutex, mpsc};
 
 use crate::jobs::file_ops::{generate_dry_run_script, run_file_op};
 use crate::jobs::search::{run_search, MaskMode, SearchDepth, SearchParams, SearchResultStore};
+use crate::ws::protocol::SearchParamsSchema;
 use crate::jobs::{
     AppJob, ConflictPolicy, DecisionResponse, FileOpEntry, FileOpJobMeta, FileOpType, JobKind,
     JobState, SearchJobMeta,
@@ -894,6 +895,7 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
                 result_panel_id: None,
                 request_id: None,
                 search_source_id: None,
+                search_params: None,
             },
         })
         .await;
@@ -1336,6 +1338,23 @@ async fn start_search(args: &Value, ctx: &mut IntentContext<'_>) {
         content_query,
     };
 
+    // Capture params as a serialisable schema before params is moved into run_search.
+    let params_schema = SearchParamsSchema {
+        paths: params.paths.clone(),
+        depth: match &params.depth {
+            SearchDepth::Unlimited => "unlimited".to_string(),
+            SearchDepth::Current => "current".to_string(),
+            SearchDepth::Depth(d) => d.to_string(),
+        },
+        file_mask: params.file_mask.clone(),
+        mask_mode: match &params.mask_mode {
+            MaskMode::Substring => "substring".to_string(),
+            MaskMode::Wildcard => "wildcard".to_string(),
+            MaskMode::Regex => "regex".to_string(),
+        },
+        content_query: params.content_query.clone(),
+    };
+
     let (cancel_tx, cancel_rx) = watch::channel(false);
     let store = Arc::new(Mutex::new(SearchResultStore::new()));
     let source_path = paths.first().cloned().unwrap_or_default();
@@ -1427,6 +1446,7 @@ async fn start_search(args: &Value, ctx: &mut IntentContext<'_>) {
                 result_panel_id: None,
                 request_id,
                 search_source_id: Some(source_id),
+                search_params: Some(params_schema),
             },
         })
         .await;

@@ -443,9 +443,21 @@ pub struct JobStartSchema {
     pub request_id: Option<String>,
     #[serde(rename = "searchSourceId", skip_serializing_if = "Option::is_none")]
     pub search_source_id: Option<String>,
+    #[serde(rename = "searchParams", skip_serializing_if = "Option::is_none")]
+    pub search_params: Option<SearchParamsSchema>,
 }
 
 // ─── Search schemas ───────────────────────────────────────────────────────────
+
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchParamsSchema {
+    pub paths: Vec<String>,
+    pub depth: String,
+    pub file_mask: Option<String>,
+    pub mask_mode: String,
+    pub content_query: Option<String>,
+}
 
 #[derive(Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]

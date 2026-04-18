@@ -457,6 +457,7 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
           sourcePanelPath: focused.panel.path,
           jobId: null,
           searchSourceId: null,
+          searchParams: null,
           results: [],
           scanned: 0,
           matched: 0,

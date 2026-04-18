@@ -328,6 +328,7 @@ async fn launch_fp_bro(
                 result_panel_id: request.result_panel_id.clone(),
                 request_id: None,
                 search_source_id: None,
+                search_params: None,
             },
         })
         .await;

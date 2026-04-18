@@ -17,19 +17,31 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
   const dispatch = useAppDispatch();
   const state = useAppState();
 
+  const p = search.searchParams;
+
   // Section 1 — Search Locations
-  const [paths, setPaths] = useState<string[]>([search.sourcePanelPath]);
+  const [paths, setPaths] = useState<string[]>(
+    p?.paths.length ? p.paths : [search.sourcePanelPath]
+  );
   const [pathInput, setPathInput] = useState("");
   const [selectedSourceId, setSelectedSourceId] = useState("");
-  const [depth, setDepth] = useState<DepthOption>("unlimited");
+  const [depth, setDepth] = useState<DepthOption>(() => {
+    if (!p) return "unlimited";
+    if (p.depth === "unlimited") return "unlimited";
+    if (p.depth === "current") return "current";
+    const n = Number.parseInt(p.depth, 10);
+    return Number.isNaN(n) ? "unlimited" : n;
+  });
 
   // Section 2 — File Name
-  const [fileMask, setFileMask] = useState("");
-  const [maskMode, setMaskMode] = useState<MaskMode>("wildcard");
+  const [fileMask, setFileMask] = useState(p?.fileMask ?? "");
+  const [maskMode, setMaskMode] = useState<MaskMode>(
+    (p?.maskMode as MaskMode | undefined) ?? "wildcard"
+  );
 
   // Section 3 — Content
-  const [contentEnabled, setContentEnabled] = useState(false);
-  const [contentQuery, setContentQuery] = useState("");
+  const [contentEnabled, setContentEnabled] = useState(!!p?.contentQuery);
+  const [contentQuery, setContentQuery] = useState(p?.contentQuery ?? "");
 
   const pathInputRef = useRef<HTMLInputElement>(null);
   const contentTextareaRef = useRef<HTMLTextAreaElement>(null);
