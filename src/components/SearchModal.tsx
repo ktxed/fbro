@@ -266,7 +266,13 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
                   <ul className="search-modal__path-list">
                     {paths.map((path) => (
                       <li key={path} className="search-modal__path-item">
-                        <span className="search-modal__path-text" title={path}>{path}</span>
+                        <span
+                          className="search-modal__path-text"
+                          title={path}
+                          onClick={() => setPathInput(path)}
+                        >
+                          {path}
+                        </span>
                         <button
                           type="button"
                           className="search-modal__path-remove"

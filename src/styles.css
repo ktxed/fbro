@@ -1896,6 +1896,7 @@ body {
   white-space: nowrap;
   color: var(--text-path);
   font-family: var(--font);
+  cursor: pointer;
 }
 
 .search-modal__path-remove {
