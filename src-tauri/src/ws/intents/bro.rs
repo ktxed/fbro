@@ -326,6 +326,8 @@ async fn launch_fp_bro(
                 supports_pause: false,
                 result_path: Some(output_path.clone()),
                 result_panel_id: request.result_panel_id.clone(),
+                request_id: None,
+                search_source_id: None,
             },
         })
         .await;
@@ -393,6 +395,7 @@ async fn launch_fp_bro(
                 job_id,
                 event: "DecisionRequired".to_string(),
                 progress: None,
+                search_progress: None,
                 decision: Some(crate::ws::protocol::ConflictDecisionSchema {
                     source: output_path.clone(),
                     destination: output_path,
@@ -501,6 +504,7 @@ pub(crate) async fn handle_fp_bro_job_decision(
                     job_id: job_id.to_string(),
                     event: "Queued".to_string(),
                     progress: None,
+                    search_progress: None,
                     decision: None,
                     error: None,
                     result_path: None,
@@ -515,6 +519,7 @@ pub(crate) async fn handle_fp_bro_job_decision(
                     job_id: job_id.to_string(),
                     event: "Cancelled".to_string(),
                     progress: None,
+                    search_progress: None,
                     decision: None,
                     error: None,
                     result_path: None,

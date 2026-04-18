@@ -2,19 +2,25 @@ use std::path::Path;
 use std::sync::Arc;
 
 use serde_json::Value;
-use tokio::sync::{mpsc, watch};
+use tokio::sync::{watch, Mutex, mpsc};
 
 use crate::jobs::file_ops::{generate_dry_run_script, run_file_op};
+use crate::jobs::search::{run_search, MaskMode, SearchDepth, SearchParams, SearchResultStore};
 use crate::jobs::{
     AppJob, ConflictPolicy, DecisionResponse, FileOpEntry, FileOpJobMeta, FileOpType, JobKind,
-    JobState,
+    JobState, SearchJobMeta,
 };
 use crate::platform::{ExternalClipboardOp, ExternalClipboardPayload};
+use crate::state::{ShadowSource, Source};
+use crate::vfs::search::SearchResultsDriver;
 use crate::ws::intents::{arg_bool, arg_str};
 use crate::ws::protocol::{now, FileOpFileSchema, JobStartSchema, ServerMessage};
-use crate::ws::runtime::{rescan_panel, selected_names_for, IntentContext};
+use crate::ws::runtime::{
+    build_sources_json, navigate_to, rescan_panel, resolve_panel_id, selected_names_for,
+    IntentContext,
+};
 
-pub(crate) async fn handle(name: &str, _scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
+pub(crate) async fn handle(name: &str, scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
     match name {
         "StartFileOp" => start_file_op(args, ctx).await,
         "PasteExternalClipboard" => paste_external_clipboard(args, ctx).await,
@@ -25,6 +31,10 @@ pub(crate) async fn handle(name: &str, _scope: &Value, args: &Value, ctx: &mut I
         "ResumeJob" => resume_job(args, ctx).await,
         "RenameFile" => rename_file(args, ctx).await,
         "MakeDir" => make_dir(args, ctx).await,
+        "StartSearch" => start_search(args, ctx).await,
+        "NavigateToSearchResult" => navigate_to_search_result(args, ctx).await,
+        "MountSearchResults" => mount_search_results(args, ctx).await,
+        "RemoveSearchSource" => remove_search_source(scope, args, ctx).await,
         _ => {}
     }
 }
@@ -851,6 +861,8 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
                 supports_pause: true,
                 result_path: None,
                 result_panel_id: None,
+                request_id: None,
+                search_source_id: None,
             },
         })
         .await;
@@ -908,6 +920,7 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
                 job_id,
                 event: "Paused".to_string(),
                 progress: None,
+                search_progress: None,
                 decision: None,
                 error: None,
                 result_path: None,
@@ -996,6 +1009,7 @@ async fn cancel_job(args: &Value, ctx: &mut IntentContext<'_>) {
                 job_id: parsed.job_id,
                 event: "Cancelled".to_string(),
                 progress: None,
+                search_progress: None,
                 decision: None,
                 error: None,
                 result_path: None,
@@ -1026,6 +1040,7 @@ async fn pause_job(args: &Value, ctx: &mut IntentContext<'_>) {
             job_id: parsed.job_id,
             event: "Paused".to_string(),
             progress: None,
+            search_progress: None,
             decision: None,
             error: None,
             result_path: None,
@@ -1055,6 +1070,7 @@ async fn resume_job(args: &Value, ctx: &mut IntentContext<'_>) {
             job_id: parsed.job_id,
             event: "Resumed".to_string(),
             progress: None,
+            search_progress: None,
             decision: None,
             error: None,
             result_path: None,
@@ -1211,6 +1227,375 @@ async fn make_dir(args: &Value, ctx: &mut IntentContext<'_>) {
             Err(_) => {}
         }
     }
+}
+
+// ─── Search intents ──────────────────────────────────────────────────────────
+
+async fn start_search(args: &Value, ctx: &mut IntentContext<'_>) {
+    let request_id = arg_str(args, "requestId").map(String::from);
+    let background = arg_bool(args, "background", false);
+
+    // Parse search paths
+    let paths: Vec<String> = args
+        .get("paths")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    if paths.is_empty() {
+        return;
+    }
+
+    // Parse depth
+    let depth = match arg_str(args, "depth").unwrap_or("unlimited") {
+        "unlimited" => SearchDepth::Unlimited,
+        "current" => SearchDepth::Current,
+        other => other
+            .parse::<u8>()
+            .map(SearchDepth::Depth)
+            .unwrap_or(SearchDepth::Unlimited),
+    };
+
+    // Parse mask mode
+    let mask_mode = match arg_str(args, "maskMode").unwrap_or("wildcard") {
+        "substring" => MaskMode::Substring,
+        "regex" => MaskMode::Regex,
+        _ => MaskMode::Wildcard,
+    };
+
+    let file_mask = arg_str(args, "fileMask")
+        .filter(|s| !s.is_empty())
+        .map(String::from);
+
+    let content_query = arg_str(args, "contentQuery")
+        .filter(|s| !s.is_empty())
+        .map(String::from);
+
+    let params = SearchParams {
+        paths: paths.clone(),
+        depth,
+        file_mask,
+        mask_mode,
+        content_query,
+    };
+
+    let (cancel_tx, cancel_rx) = watch::channel(false);
+    let store = Arc::new(Mutex::new(SearchResultStore::new()));
+    let source_path = paths.first().cloned().unwrap_or_default();
+
+    let (job_id, source_id) = {
+        let mut state = ctx.state.lock().await;
+        let job_id = state.job_store.next_job_id();
+        let source_id = format!("search:{}", job_id);
+
+        // Register the search result source (shadow)
+        let source = Source {
+            id: source_id.clone(),
+            name: "Search Results".to_string(),
+            kind: "virtual".to_string(),
+            supports: vec![],
+            root_path: "/".to_string(),
+            mounted: true,
+            device_path: None,
+            shadow: true,
+        };
+        state.sources.insert(source_id.clone(), source);
+
+        let driver: Arc<dyn crate::vfs::VfsDriver> =
+            Arc::new(SearchResultsDriver::new(Arc::clone(&store)));
+        state.drivers.insert(source_id.clone(), driver);
+        state.search_stores.insert(source_id.clone(), Arc::clone(&store));
+
+        let job = AppJob {
+            job_id: job_id.clone(),
+            kind: JobKind::Search(SearchJobMeta {
+                params: params.clone(),
+                source_id: source_id.clone(),
+            }),
+            source_panel: String::new(),
+            dest_panel: None,
+            source_path: source_path.clone(),
+            dest_path: None,
+            state: JobState::Running,
+            progress: Default::default(),
+            decision: None,
+            error: None,
+            background,
+            paused: false,
+            handle: None,
+            cancel_tx,
+            pause_tx: watch::channel(false).0,
+        };
+        state.job_store.jobs.insert(job_id.clone(), job);
+
+        (job_id, source_id)
+    };
+
+    // Send sources patch so FE knows about the new shadow source
+    let sources_json = {
+        let state = ctx.state.lock().await;
+        build_sources_json(&state)
+    };
+    let _ = ctx
+        .tx
+        .send(ServerMessage::StatePatch {
+            timestamp: now(),
+            domain: "sources".to_string(),
+            entity_id: None,
+            version: 0,
+            patch: serde_json::json!({ "sources": sources_json }),
+        })
+        .await;
+
+    // Send JobStarted
+    let _ = ctx
+        .tx
+        .send(ServerMessage::JobStarted {
+            timestamp: now(),
+            job: JobStartSchema {
+                job_id: job_id.clone(),
+                kind: "search".to_string(),
+                op_type: "search".to_string(),
+                files: vec![],
+                source_panel: String::new(),
+                source_path: source_path.clone(),
+                dest_panel: None,
+                dest_path: None,
+                initial_state: "Running".to_string(),
+                total_files: 0,
+                total_bytes_total: 0,
+                background,
+                supports_pause: false,
+                result_path: None,
+                result_panel_id: None,
+                request_id,
+                search_source_id: Some(source_id),
+            },
+        })
+        .await;
+
+    // Spawn the search worker
+    let tx = ctx.tx.clone();
+    let handle = tokio::spawn(run_search(job_id.clone(), params, store, tx, cancel_rx));
+
+    // Store the join handle
+    {
+        let mut state = ctx.state.lock().await;
+        if let Some(job) = state.job_store.jobs.get_mut(&job_id) {
+            job.handle = Some(handle);
+        }
+    }
+}
+
+async fn navigate_to_search_result(args: &Value, ctx: &mut IntentContext<'_>) {
+    let panel_id = arg_str(args, "panelId").unwrap_or("").to_string();
+    let full_path = arg_str(args, "fullPath").unwrap_or("").to_string();
+    let kind = arg_str(args, "kind").unwrap_or("file");
+
+    if panel_id.is_empty() || full_path.is_empty() {
+        return;
+    }
+
+    // Determine target path and cursor hint
+    let (nav_path, cursor_hint) = if kind == "directory" {
+        (full_path.clone(), None)
+    } else {
+        // Navigate to the parent directory with cursor on the file
+        let parent = std::path::Path::new(&full_path)
+            .parent()
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "/".to_string());
+        let name = std::path::Path::new(&full_path)
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned());
+        (parent, name)
+    };
+
+    // Tear down the search shadow source from the panel before navigating
+    {
+        let mut state = ctx.state.lock().await;
+        // Find the best real source for the target path (before taking panel mut ref)
+        let real_source_id = state
+            .sources
+            .iter()
+            .filter(|(_, s)| !s.shadow && s.mounted)
+            .max_by_key(|(_, s)| {
+                if nav_path.starts_with(&s.root_path) {
+                    s.root_path.len()
+                } else {
+                    0
+                }
+            })
+            .map(|(id, _)| id.clone())
+            .unwrap_or_default();
+
+        if let Some(panel) = state.panels.get_mut(&panel_id) {
+            if !real_source_id.is_empty() {
+                panel.source_id = real_source_id;
+            }
+            panel.shadow_source = None;
+        }
+    }
+
+    navigate_to(
+        &panel_id,
+        &nav_path,
+        cursor_hint,
+        ctx.state,
+        ctx.tx,
+        ctx.scan_handles,
+        ctx.dir_size_queue,
+        ctx.watcher_cmd_tx,
+    )
+    .await;
+}
+
+async fn mount_search_results(args: &Value, ctx: &mut IntentContext<'_>) {
+    let panel_id_arg = arg_str(args, "panelId").unwrap_or("").to_string();
+    let job_id = arg_str(args, "jobId").unwrap_or("").to_string();
+
+    let panel_id = if panel_id_arg.is_empty() {
+        resolve_panel_id(&serde_json::Value::Null, ctx.state).await
+    } else {
+        panel_id_arg
+    };
+
+    let source_id = format!("search:{}", job_id);
+
+    // Verify the source exists
+    let source_exists = {
+        let state = ctx.state.lock().await;
+        state.sources.contains_key(&source_id)
+    };
+    if !source_exists {
+        return;
+    }
+
+    // Switch the panel to the search results source
+    {
+        let mut state = ctx.state.lock().await;
+        if let Some(panel) = state.panels.get_mut(&panel_id) {
+            panel.shadow_source = Some(ShadowSource {
+                parent_source_id: panel.source_id.clone(),
+                parent_path: panel.path.clone(),
+                archive_path: source_id.clone(),
+                cursor_hint: None,
+            });
+            panel.source_id = source_id.clone();
+            panel.path = "/".to_string();
+        }
+    }
+
+    rescan_panel(
+        &panel_id,
+        ctx.state,
+        ctx.tx,
+        ctx.scan_handles,
+        None,
+        None,
+        ctx.dir_size_queue,
+    )
+    .await;
+}
+
+async fn remove_search_source(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
+    let source_id = arg_str(args, "sourceId")
+        .or_else(|| scope.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    if source_id.is_empty() || !source_id.starts_with("search:") {
+        return;
+    }
+
+    let job_id = source_id.strip_prefix("search:").unwrap_or("").to_string();
+
+    // Cancel running job if any
+    {
+        let state = ctx.state.lock().await;
+        if let Some(job) = state.job_store.jobs.get(&job_id) {
+            let _ = job.cancel_tx.send(true);
+        }
+    }
+
+    // Find panels using this source and navigate them back to parent
+    let panels_to_migrate: Vec<(String, String, String)> = {
+        let state = ctx.state.lock().await;
+        state
+            .panels
+            .iter()
+            .filter(|(_, p)| p.source_id == source_id)
+            .map(|(id, p)| {
+                let (parent_source, parent_path) = p
+                    .shadow_source
+                    .as_ref()
+                    .map(|ss| (ss.parent_source_id.clone(), ss.parent_path.clone()))
+                    .unwrap_or_else(|| {
+                        // Fallback: find any non-shadow mounted source
+                        let fallback = state
+                            .sources
+                            .iter()
+                            .find(|(_, s)| !s.shadow && s.mounted)
+                            .map(|(id, s)| (id.clone(), s.root_path.clone()))
+                            .unwrap_or_default();
+                        fallback
+                    });
+                (id.clone(), parent_source, parent_path)
+            })
+            .collect()
+    };
+
+    for (panel_id, parent_source_id, parent_path) in panels_to_migrate {
+        {
+            let mut state = ctx.state.lock().await;
+            if let Some(panel) = state.panels.get_mut(&panel_id) {
+                panel.source_id = parent_source_id;
+                panel.shadow_source = None;
+                panel.path = parent_path.clone();
+            }
+        }
+        navigate_to(
+            &panel_id,
+            &parent_path,
+            None,
+            ctx.state,
+            ctx.tx,
+            ctx.scan_handles,
+            ctx.dir_size_queue,
+            ctx.watcher_cmd_tx,
+        )
+        .await;
+    }
+
+    // Remove the source, driver, and store
+    {
+        let mut state = ctx.state.lock().await;
+        state.sources.remove(&source_id);
+        state.drivers.remove(&source_id);
+        state.search_stores.remove(&source_id);
+        // Remove the job
+        state.job_store.jobs.remove(&job_id);
+    }
+
+    // Send updated sources patch
+    let sources_json = {
+        let state = ctx.state.lock().await;
+        build_sources_json(&state)
+    };
+    let _ = ctx
+        .tx
+        .send(ServerMessage::StatePatch {
+            timestamp: now(),
+            domain: "sources".to_string(),
+            entity_id: None,
+            version: 0,
+            patch: serde_json::json!({ "sources": sources_json }),
+        })
+        .await;
 }
 
 async fn send_error(

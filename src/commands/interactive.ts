@@ -453,7 +453,18 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
       if (!focused) return false;
       dispatch({
         type: "OPEN_SEARCH",
-        search: { sourcePanelPath: focused.panel.path },
+        search: {
+          sourcePanelPath: focused.panel.path,
+          jobId: null,
+          searchSourceId: null,
+          results: [],
+          scanned: 0,
+          matched: 0,
+          currentPath: "",
+          status: "idle",
+          activeTab: "input",
+          requestId: null,
+        },
       });
       return true;
     case "panel.navigate_source_root":

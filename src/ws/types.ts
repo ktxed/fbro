@@ -61,9 +61,24 @@ export interface LayoutDomain {
   panels: string[];
 }
 
+export interface SearchResult {
+  name: string;
+  kind: string;
+  size?: number;
+  parentPath: string;
+  fullPath: string;
+}
+
+export interface SearchProgress {
+  scanned: number;
+  matched: number;
+  currentPath: string;
+  newResults: SearchResult[];
+}
+
 export interface Job {
   jobId: string;
-  kind: "file-op" | "fp-bro";
+  kind: "file-op" | "fp-bro" | "search";
   type: string;
   state: "Queued" | "Running" | "AwaitingDecision" | "Completed" | "Cancelled" | "Failed";
   paused: boolean;
@@ -77,6 +92,12 @@ export interface Job {
   progress?: FileOpProgress;
   decision?: DecisionRequest;
   error?: string;
+  // Search-specific fields
+  searchSourceId?: string;
+  searchResults?: SearchResult[];
+  searchScanned?: number;
+  searchMatched?: number;
+  searchCurrentPath?: string;
 }
 
 export interface DirSizeTask {
@@ -179,7 +200,7 @@ export interface BroItem {
 
 export interface JobStart {
   jobId: string;
-  kind: "file-op" | "fp-bro";
+  kind: "file-op" | "fp-bro" | "search";
   opType: string;
   files: FileOpFile[];
   sourcePanel: string;
@@ -193,6 +214,8 @@ export interface JobStart {
   supportsPause: boolean;
   resultPath?: string;
   resultPanelId?: string;
+  requestId?: string;
+  searchSourceId?: string;
 }
 
 export type FileOpType = "copy" | "move" | "delete";
@@ -309,6 +332,7 @@ export interface JobEventMessage {
   jobId: string;
   event: "Queued" | "Progress" | "DecisionRequired" | "Completed" | "Failed" | "Cancelled" | "Paused" | "Resumed";
   progress?: FileOpProgress;
+  searchProgress?: SearchProgress;
   decision?: DecisionRequest;
   error?: string;
   resultPath?: string;

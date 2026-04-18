@@ -1,6 +1,7 @@
 import { createContext, useContext, useReducer, type Dispatch } from "react";
 import type {
   PanelState,
+  SearchResult,
   Source,
   Job,
   DirSizeTask,
@@ -124,6 +125,17 @@ export interface PendingInput {
 
 export interface PendingSearch {
   sourcePanelPath: string;
+  // Set once the search job starts
+  jobId: string | null;
+  searchSourceId: string | null;
+  results: SearchResult[];
+  scanned: number;
+  matched: number;
+  currentPath: string;
+  status: "idle" | "running" | "completed" | "cancelled" | "failed";
+  activeTab: "input" | "results";
+  // Used to correlate the StartSearch intent with the JobStarted message
+  requestId: string | null;
 }
 
 export interface AppState {
@@ -185,6 +197,7 @@ const initialState: AppState = {
   pendingInput: null,
   pendingSearch: null,
   commandPaletteOpen: false,
+
   transientHint: null,
 };
 
@@ -219,6 +232,8 @@ export type AppAction =
   | { type: "CLOSE_BRO" }
   | { type: "OPEN_SEARCH"; search: PendingSearch }
   | { type: "CLOSE_SEARCH" }
+  | { type: "SET_SEARCH_TAB"; tab: "input" | "results" }
+  | { type: "SET_SEARCH_REQUEST_ID"; requestId: string }
   | { type: "OPEN_COMMAND_PALETTE" }
   | { type: "CLOSE_COMMAND_PALETTE" }
   | { type: "CLOSE_TRANSIENT_HINT" }
@@ -418,6 +433,10 @@ function applyJobStarted(state: AppState, msg: JobStartedMessage): AppState {
     resultPath: job.resultPath,
     resultPanelId: job.resultPanelId,
     files: job.files,
+    searchSourceId: job.searchSourceId,
+    searchResults: job.kind === "search" ? [] : undefined,
+    searchScanned: job.kind === "search" ? 0 : undefined,
+    searchMatched: job.kind === "search" ? 0 : undefined,
     progress: {
       totalFiles: job.totalFiles,
       completedFiles: 0,
@@ -430,12 +449,29 @@ function applyJobStarted(state: AppState, msg: JobStartedMessage): AppState {
       overallPercent: undefined,
     },
   };
-  return {
+
+  let next = {
     ...state,
     jobs: { ...state.jobs, [job.jobId]: newJob },
-    activeJobId: job.background ? state.activeJobId : (state.activeJobId ?? job.jobId),
+    activeJobId: job.background || job.kind === "search" ? state.activeJobId : (state.activeJobId ?? job.jobId),
     pendingOp: null,
   };
+
+  // Correlate with pending search if requestId matches
+  if (job.kind === "search" && job.requestId && state.pendingSearch?.requestId === job.requestId) {
+    next = {
+      ...next,
+      pendingSearch: {
+        ...state.pendingSearch!,
+        jobId: job.jobId,
+        searchSourceId: job.searchSourceId ?? null,
+        status: "running",
+        activeTab: "results",
+      },
+    };
+  }
+
+  return next;
 }
 
 function applyQuitConfirmRequired(state: AppState, msg: QuitConfirmRequiredMessage): AppState {
@@ -453,7 +489,21 @@ function applyJobEvent(state: AppState, msg: JobEventMessage): AppState {
       updated = { ...job, state: "Queued", paused: false, decision: undefined };
       break;
     case "Progress":
-      updated = { ...job, state: "Running", paused: false, progress: msg.progress ?? job.progress, decision: undefined };
+      if (job.kind === "search" && msg.searchProgress) {
+        // Accumulate search results
+        const sp = msg.searchProgress;
+        updated = {
+          ...job,
+          state: "Running",
+          paused: false,
+          searchResults: [...(job.searchResults ?? []), ...sp.newResults],
+          searchScanned: sp.scanned,
+          searchMatched: sp.matched,
+          searchCurrentPath: sp.currentPath,
+        };
+      } else {
+        updated = { ...job, state: "Running", paused: false, progress: msg.progress ?? job.progress, decision: undefined };
+      }
       break;
     case "DecisionRequired":
       updated = { ...job, state: "AwaitingDecision", decision: msg.decision };
@@ -499,7 +549,41 @@ function applyJobEvent(state: AppState, msg: JobEventMessage): AppState {
       return state;
   }
 
-  return { ...state, jobs: { ...state.jobs, [msg.jobId]: updated } };
+  let next = { ...state, jobs: { ...state.jobs, [msg.jobId]: updated } };
+
+  // Sync search progress/status into pendingSearch if it belongs to this search job
+  if (job.kind === "search" && state.pendingSearch?.jobId === msg.jobId) {
+    if (msg.event === "Progress" && msg.searchProgress) {
+      const sp = msg.searchProgress;
+      next = {
+        ...next,
+        pendingSearch: {
+          ...state.pendingSearch,
+          results: [...state.pendingSearch.results, ...sp.newResults],
+          scanned: sp.scanned,
+          matched: sp.matched,
+          currentPath: sp.currentPath,
+        },
+      };
+    } else if (msg.event === "Completed") {
+      next = {
+        ...next,
+        pendingSearch: { ...state.pendingSearch, status: "completed" },
+      };
+    } else if (msg.event === "Cancelled") {
+      next = {
+        ...next,
+        pendingSearch: { ...state.pendingSearch, status: "cancelled" },
+      };
+    } else if (msg.event === "Failed") {
+      next = {
+        ...next,
+        pendingSearch: { ...state.pendingSearch, status: "failed" },
+      };
+    }
+  }
+
+  return next;
 }
 
 function reducer(state: AppState, action: AppAction): AppState {
@@ -722,8 +806,32 @@ function reducer(state: AppState, action: AppAction): AppState {
       return { ...state, pendingOp: action.op, pendingContextMenu: null };
     case "CLOSE_OPERATION":
       return { ...state, pendingOp: null, activeJobId: null };
-    case "SET_ACTIVE_JOB":
+    case "SET_ACTIVE_JOB": {
+      const activatedJob = state.jobs[action.jobId];
+      // Search jobs open the SearchModal instead of the OperationModal
+      if (activatedJob?.kind === "search") {
+        return {
+          ...state,
+          pendingSearch: {
+            sourcePanelPath: activatedJob.sourcePath,
+            jobId: action.jobId,
+            searchSourceId: activatedJob.searchSourceId ?? null,
+            results: activatedJob.searchResults ?? [],
+            scanned: activatedJob.searchScanned ?? 0,
+            matched: activatedJob.searchMatched ?? 0,
+            currentPath: activatedJob.searchCurrentPath ?? "",
+            status: activatedJob.state === "Running" ? "running"
+              : activatedJob.state === "Completed" ? "completed"
+              : activatedJob.state === "Cancelled" ? "cancelled"
+              : activatedJob.state === "Failed" ? "failed"
+              : "idle",
+            activeTab: "results",
+            requestId: null,
+          },
+        };
+      }
       return { ...state, activeJobId: action.jobId, pendingOp: null };
+    }
     case "CANCEL_QUIT":
       return { ...state, pendingQuit: null };
     case "OPEN_RENAME":
@@ -784,6 +892,12 @@ function reducer(state: AppState, action: AppAction): AppState {
       return { ...state, pendingSearch: action.search };
     case "CLOSE_SEARCH":
       return { ...state, pendingSearch: null };
+    case "SET_SEARCH_TAB":
+      if (!state.pendingSearch) return state;
+      return { ...state, pendingSearch: { ...state.pendingSearch, activeTab: action.tab } };
+    case "SET_SEARCH_REQUEST_ID":
+      if (!state.pendingSearch) return state;
+      return { ...state, pendingSearch: { ...state.pendingSearch, requestId: action.requestId } };
   }
 }
 

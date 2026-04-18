@@ -365,6 +365,7 @@ fn send_progress_sync(
         job_id: job_id.to_string(),
         event: "Progress".to_string(),
         progress: Some(progress),
+        search_progress: None,
         decision: None,
         error: None,
         result_path: None,

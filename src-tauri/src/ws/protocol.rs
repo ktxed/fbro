@@ -36,6 +36,8 @@ pub enum ServerMessage {
         event: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         progress: Option<FileOpProgressSchema>,
+        #[serde(rename = "searchProgress", skip_serializing_if = "Option::is_none")]
+        search_progress: Option<SearchProgressSchema>,
         #[serde(skip_serializing_if = "Option::is_none")]
         decision: Option<ConflictDecisionSchema>,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -437,6 +439,31 @@ pub struct JobStartSchema {
     pub supports_pause: bool,
     pub result_path: Option<String>,
     pub result_panel_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
+    #[serde(rename = "searchSourceId", skip_serializing_if = "Option::is_none")]
+    pub search_source_id: Option<String>,
+}
+
+// ─── Search schemas ───────────────────────────────────────────────────────────
+
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchResultSchema {
+    pub name: String,
+    pub kind: String,
+    pub size: Option<u64>,
+    pub parent_path: String,
+    pub full_path: String,
+}
+
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchProgressSchema {
+    pub scanned: u64,
+    pub matched: u64,
+    pub current_path: String,
+    pub new_results: Vec<SearchResultSchema>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

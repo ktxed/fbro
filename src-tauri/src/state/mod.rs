@@ -4,6 +4,7 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
 
 use crate::bro::{BroInputItem, ResolvedBro};
+use crate::jobs::search::SearchResultStore;
 use crate::jobs::JobStore;
 use crate::platform::{Platform, ResolvedOpenWithApp};
 use crate::vfs::VfsDriver;
@@ -97,6 +98,8 @@ pub struct AppState {
     pub job_store: JobStore,
     pub open_with_requests: HashMap<String, OpenWithRequest>,
     pub bro_requests: HashMap<String, BroRequest>,
+    /// Live search result stores, keyed by source_id ("search:<job_id>").
+    pub search_stores: HashMap<String, Arc<Mutex<SearchResultStore>>>,
     /// Senders for all connected GUI clients — used to broadcast state updates
     /// from non-GUI connections (e.g. viewer windows).
     pub gui_senders: Vec<mpsc::Sender<ServerMessage>>,
@@ -267,6 +270,7 @@ impl AppState {
             job_store: JobStore::new(),
             open_with_requests: HashMap::new(),
             bro_requests: HashMap::new(),
+            search_stores: HashMap::new(),
             gui_senders: Vec::new(),
             file_server_port,
         }

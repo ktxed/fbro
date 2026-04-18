@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 pub mod local;
+pub mod search;
 #[cfg(unix)]
 pub mod spy;
 pub mod zip;

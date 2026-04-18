@@ -45,7 +45,12 @@ export function JobsBar({ client }: { client: WsClient }) {
           : p && p.totalFiles > 0
           ? Math.round((p.completedFiles / p.totalFiles) * 100)
           : null;
-        const typeLabel = job.type.charAt(0).toUpperCase() + job.type.slice(1);
+        const typeLabel = job.kind === "search"
+          ? "Search"
+          : job.type.charAt(0).toUpperCase() + job.type.slice(1);
+        const searchPct = job.kind === "search" && job.searchMatched !== undefined
+          ? `${job.searchMatched} hits`
+          : null;
 
         return (
           <button
@@ -55,7 +60,8 @@ export function JobsBar({ client }: { client: WsClient }) {
           >
             <span className="jobs-bar__job-label">{typeLabel}</span>
             {job.state === "Queued" && <span className="jobs-bar__job-pct">Queued</span>}
-            {pct !== null && <span className="jobs-bar__job-pct">{pct}%</span>}
+            {searchPct !== null && <span className="jobs-bar__job-pct">{searchPct}</span>}
+            {pct !== null && searchPct === null && <span className="jobs-bar__job-pct">{pct}%</span>}
             <span
               className="jobs-bar__job-close"
               role="button"

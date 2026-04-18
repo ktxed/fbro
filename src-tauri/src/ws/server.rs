@@ -383,6 +383,7 @@ async fn apply_job_event_to_state(state: &SharedState, msg: &ServerMessage) {
         job_id,
         event,
         progress,
+        search_progress: _,
         decision,
         error,
         ..
@@ -397,6 +398,13 @@ async fn apply_job_event_to_state(state: &SharedState, msg: &ServerMessage) {
         .jobs
         .get(job_id)
         .map(|job| matches!(job.kind, crate::jobs::JobKind::FpBro(_)))
+        .unwrap_or(false);
+
+    let is_search_job = state_guard
+        .job_store
+        .jobs
+        .get(job_id)
+        .map(|job| matches!(job.kind, crate::jobs::JobKind::Search(_)))
         .unwrap_or(false);
 
     if let Some(job) = state_guard.job_store.jobs.get_mut(job_id) {
@@ -472,5 +480,16 @@ async fn apply_job_event_to_state(state: &SharedState, msg: &ServerMessage) {
             state_guard.job_store.fp_running = None;
         }
         state_guard.job_store.remove_from_fp_queue(job_id);
+    }
+
+    // For search jobs: mark the store as done on terminal events
+    if is_search_job && matches!(event.as_str(), "Completed" | "Failed" | "Cancelled") {
+        let source_id = format!("search:{job_id}");
+        if let Some(store) = state_guard.search_stores.get(&source_id) {
+            let store = store.clone();
+            drop(state_guard);
+            store.lock().await.done = true;
+            return;
+        }
     }
 }

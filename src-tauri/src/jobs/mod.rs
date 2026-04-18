@@ -2,6 +2,7 @@ pub mod dirsize;
 pub mod file_ops;
 pub mod fp_bro;
 pub mod scan;
+pub mod search;
 
 use std::collections::{HashMap, VecDeque};
 use tokio::sync::{mpsc, watch};
@@ -117,6 +118,13 @@ pub struct AppJob {
 pub enum JobKind {
     FileOp(FileOpJobMeta),
     FpBro(FpBroJobMeta),
+    Search(SearchJobMeta),
+}
+
+#[allow(dead_code)]
+pub struct SearchJobMeta {
+    pub params: search::SearchParams,
+    pub source_id: String,
 }
 
 #[allow(dead_code)]

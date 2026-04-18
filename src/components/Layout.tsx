@@ -530,7 +530,7 @@ export function Layout({ client, jobsViewOpen, onCloseJobsView, onOpenJobsView }
         <InputModal input={state.pendingInput} client={client} />
       )}
       {state.pendingSearch && (
-        <SearchModal search={state.pendingSearch} sources={state.sources} />
+        <SearchModal search={state.pendingSearch} sources={state.sources} client={client} />
       )}
       {state.commandPaletteOpen && (
         <CommandPaletteModal client={client} onOpenJobsView={onOpenJobsView} />
