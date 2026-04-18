@@ -171,10 +171,9 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
   const hasResults = resultCount > 0;
 
   return (
-    <div
+      <div
       className="modal-overlay"
       tabIndex={-1}
-      onClick={close}
       onKeyDown={handleOverlayKeyDown}
     >
       <div
