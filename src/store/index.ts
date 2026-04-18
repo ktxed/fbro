@@ -420,6 +420,11 @@ function applyPatch(state: AppState, msg: StatePatchMessage): AppState {
     return { ...state, dirSizeQueue: (msg.patch.tasks as DirSizeTask[]) ?? [] };
   }
 
+  if (msg.domain === "jobs" && msg.patch.removeJobId) {
+    const { [msg.patch.removeJobId as string]: _removed, ...remainingJobs } = state.jobs;
+    return { ...state, jobs: remainingJobs };
+  }
+
   return state;
 }
 

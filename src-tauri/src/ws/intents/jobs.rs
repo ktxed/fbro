@@ -1683,6 +1683,18 @@ async fn remove_search_source(scope: &Value, args: &Value, ctx: &mut IntentConte
         state.job_store.jobs.remove(&job_id);
     }
 
+    // Tell the FE to drop this job from its jobs map
+    let _ = ctx
+        .tx
+        .send(ServerMessage::StatePatch {
+            timestamp: now(),
+            domain: "jobs".to_string(),
+            entity_id: None,
+            version: 0,
+            patch: serde_json::json!({ "removeJobId": job_id }),
+        })
+        .await;
+
     // Send updated sources patch
     let sources_json = {
         let state = ctx.state.lock().await;
