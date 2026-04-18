@@ -415,6 +415,15 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
                         <span className="search-modal__result-name">{result.name}</span>
                         <span className="search-modal__result-path">{result.parentPath}</span>
                       </span>
+                      <button
+                        type="button"
+                        className="modal__job-param-copy"
+                        title="Copy full path"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          navigator.clipboard.writeText(result.fullPath);
+                        }}
+                      >⧉</button>
                     </li>
                   ))}
                 </ul>
