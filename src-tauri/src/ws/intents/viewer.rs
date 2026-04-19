@@ -266,6 +266,16 @@ async fn viewer_navigate(args: &Value, ctx: &mut IntentContext<'_>) {
                                     source_id.clone(),
                                 )
                             })
+                    } else if source_id.starts_with("zip:") {
+                        let inner_path = {
+                            let p = dir_path.trim_end_matches('/');
+                            if p.is_empty() {
+                                name.clone()
+                            } else {
+                                format!("{}/{}", p, name)
+                            }
+                        };
+                        (inner_path, source_id.clone())
                     } else {
                         (
                             format!("{}/{}", dir_path.trim_end_matches('/'), name),
