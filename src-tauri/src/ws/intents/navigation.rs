@@ -159,6 +159,7 @@ async fn open_entry(scope: &Value, ctx: &mut IntentContext<'_>) {
             &panel_id,
             &new_path,
             None,
+            None,
             ctx.state,
             ctx.tx,
             ctx.scan_handles,
@@ -222,16 +223,17 @@ async fn enter_zip_archive(
         let mut state_guard = ctx.state.lock().await;
 
         // Read panel info before mutating.
-        let (parent_source_id, parent_path, prev_shadow) = match state_guard.panels.get(panel_id) {
-            Some(p) => (p.source_id.clone(), p.path.clone(), p.shadow_source.clone()),
+        let (parent_source_id, parent_path, prev_shadow, cursor_pos) = match state_guard.panels.get(panel_id) {
+            Some(p) => (p.source_id.clone(), p.path.clone(), p.shadow_source.clone(), p.cursor),
             None => return,
         };
 
         let shadow = ShadowSource {
-            parent_source_id,
+            parent_source_id: parent_source_id.clone(),
             parent_path,
             archive_path: archive_path.to_string(),
             cursor_hint: Some(archive_name.to_string()),
+            cursor_index: if parent_source_id.starts_with("search:") { Some(cursor_pos) } else { None },
             parent_shadow: prev_shadow.map(Box::new),
         };
 
@@ -303,11 +305,11 @@ async fn enter_zip_archive(
 }
 
 /// Tear down a shadow source for a panel and return to the parent filesystem.
-/// Returns (parent_source_id, parent_path, cursor_hint) if the panel was in a shadow source.
+/// Returns (parent_source_id, parent_path, cursor_hint, cursor_index) if the panel was in a shadow source.
 async fn teardown_shadow_source(
     panel_id: &str,
     ctx: &mut IntentContext<'_>,
-) -> Option<(String, String, Option<String>)> {
+) -> Option<(String, String, Option<String>, Option<usize>)> {
     let shadow_info = {
         let mut state_guard = ctx.state.lock().await;
         let panel = state_guard.panels.get_mut(panel_id)?;
@@ -345,6 +347,7 @@ async fn teardown_shadow_source(
             shadow.parent_source_id,
             shadow.parent_path,
             shadow.cursor_hint,
+            shadow.cursor_index,
         ))
     };
 
@@ -377,6 +380,7 @@ async fn navigate_home(scope: &Value, ctx: &mut IntentContext<'_>) {
     navigate_to(
         &panel_id,
         &home,
+        None,
         None,
         ctx.state,
         ctx.tx,
@@ -415,6 +419,7 @@ async fn navigate_source_root(scope: &Value, ctx: &mut IntentContext<'_>) {
     navigate_to(
         &panel_id,
         &target,
+        None,
         None,
         ctx.state,
         ctx.tx,
@@ -514,6 +519,7 @@ async fn navigate_panel_to(args: &Value, ctx: &mut IntentContext<'_>) {
             &parsed.panel_id,
             &validated_path,
             cursor_hint,
+            None,
             ctx.state,
             ctx.tx,
             ctx.scan_handles,
@@ -942,6 +948,7 @@ async fn navigate_up(scope: &Value, ctx: &mut IntentContext<'_>) {
                     &panel_id,
                     &parent,
                     dir_name,
+                    None,
                     ctx.state,
                     ctx.tx,
                     ctx.scan_handles,
@@ -952,13 +959,14 @@ async fn navigate_up(scope: &Value, ctx: &mut IntentContext<'_>) {
             }
         } else if has_shadow {
             // parent_path is None and we're in a shadow source → exit the archive.
-            if let Some((_parent_source_id, parent_path, cursor_hint)) =
+            if let Some((_parent_source_id, parent_path, cursor_hint, cursor_index)) =
                 teardown_shadow_source(&panel_id, ctx).await
             {
                 navigate_to(
                     &panel_id,
                     &parent_path,
                     cursor_hint,
+                    cursor_index,
                     ctx.state,
                     ctx.tx,
                     ctx.scan_handles,

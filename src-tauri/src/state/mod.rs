@@ -40,6 +40,9 @@ pub struct ShadowSource {
     pub archive_path: String,
     /// Name of the archive file (used as cursor hint when exiting).
     pub cursor_hint: Option<String>,
+    /// Cursor index to restore when exiting (used instead of cursor_hint when
+    /// the parent has duplicate entry names, e.g. search results).
+    pub cursor_index: Option<usize>,
     /// When entering a zip from within another shadow source (e.g. search results),
     /// the previous shadow context is stashed here so it can be restored on exit.
     pub parent_shadow: Option<Box<ShadowSource>>,

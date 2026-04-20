@@ -1547,6 +1547,7 @@ async fn navigate_to_search_result(args: &Value, ctx: &mut IntentContext<'_>) {
         &panel_id,
         &nav_path,
         cursor_hint,
+        None,
         ctx.state,
         ctx.tx,
         ctx.scan_handles,
@@ -1586,6 +1587,7 @@ async fn mount_search_results(args: &Value, ctx: &mut IntentContext<'_>) {
                 parent_path: panel.path.clone(),
                 archive_path: source_id.clone(),
                 cursor_hint: None,
+                cursor_index: None,
                 parent_shadow: None,
             });
             panel.source_id = source_id.clone();
@@ -1664,6 +1666,7 @@ async fn remove_search_source(scope: &Value, args: &Value, ctx: &mut IntentConte
         navigate_to(
             &panel_id,
             &parent_path,
+            None,
             None,
             ctx.state,
             ctx.tx,

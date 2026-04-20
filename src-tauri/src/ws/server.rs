@@ -178,6 +178,7 @@ async fn handle_connection(
                 driver,
                 None,
                 None,
+                None,
                 Arc::clone(&state),
                 Arc::clone(&dir_size_queue),
                 false,

@@ -33,6 +33,7 @@ pub async fn run_scan(
     tx: mpsc::Sender<ServerMessage>,
     driver: Arc<dyn VfsDriver>,
     cursor_hint: Option<String>,
+    cursor_index: Option<usize>,
     selection_names: Option<Vec<String>>,
     state: SharedState,
     dir_size_queue: Arc<DirSizeQueue>,
@@ -95,9 +96,13 @@ pub async fn run_scan(
         .filter_map(|e| e.size)
         .sum();
 
-    let cursor = cursor_hint
-        .as_deref()
-        .and_then(|hint| schema_entries.iter().position(|e| e.name == hint))
+    let cursor = cursor_index
+        .filter(|&i| i < schema_entries.len())
+        .or_else(|| {
+            cursor_hint
+                .as_deref()
+                .and_then(|hint| schema_entries.iter().position(|e| e.name == hint))
+        })
         .unwrap_or(0);
 
     let selection: Vec<usize> = match selection_names {
