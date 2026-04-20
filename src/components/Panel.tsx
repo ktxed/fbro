@@ -638,7 +638,7 @@ export function Panel({
   function renderRow(entry: VFSEntry, absIndex: number) {
     return (
       <div
-        key={entry.name}
+        key={absIndex}
         data-abs-index={absIndex}
         className={[
           "panel__row",
