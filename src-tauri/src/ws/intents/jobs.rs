@@ -1586,6 +1586,7 @@ async fn mount_search_results(args: &Value, ctx: &mut IntentContext<'_>) {
                 parent_path: panel.path.clone(),
                 archive_path: source_id.clone(),
                 cursor_hint: None,
+                parent_shadow: None,
             });
             panel.source_id = source_id.clone();
             panel.path = "/".to_string();

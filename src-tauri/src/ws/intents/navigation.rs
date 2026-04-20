@@ -166,7 +166,7 @@ async fn open_entry(scope: &Value, ctx: &mut IntentContext<'_>) {
             ctx.watcher_cmd_tx,
         )
         .await;
-    } else if entry_kind == "file" && is_zip_like(&entry_name) && !is_in_shadow {
+    } else if entry_kind == "file" && is_zip_like(&entry_name) && (!is_in_shadow || source_id.starts_with("search:")) {
         // Enter zip archive as a shadow filesystem.
         enter_zip_archive(&panel_id, &new_path, &entry_name, ctx).await;
     }
@@ -222,8 +222,8 @@ async fn enter_zip_archive(
         let mut state_guard = ctx.state.lock().await;
 
         // Read panel info before mutating.
-        let (parent_source_id, parent_path) = match state_guard.panels.get(panel_id) {
-            Some(p) => (p.source_id.clone(), p.path.clone()),
+        let (parent_source_id, parent_path, prev_shadow) = match state_guard.panels.get(panel_id) {
+            Some(p) => (p.source_id.clone(), p.path.clone(), p.shadow_source.clone()),
             None => return,
         };
 
@@ -232,6 +232,7 @@ async fn enter_zip_archive(
             parent_path,
             archive_path: archive_path.to_string(),
             cursor_hint: Some(archive_name.to_string()),
+            parent_shadow: prev_shadow.map(Box::new),
         };
 
         // Register source if not already present (another panel might have it open).
@@ -320,6 +321,10 @@ async fn teardown_shadow_source(
         panel.selection.clear();
         panel.filter = None;
         panel.filter_mode_active = false;
+
+        // Restore the stashed shadow (e.g. search results context when exiting
+        // a zip that was opened from within search results).
+        panel.shadow_source = shadow.parent_shadow.map(|b| *b);
 
         // Check if any other panel is still using this shadow source.
         let still_in_use = state_guard
