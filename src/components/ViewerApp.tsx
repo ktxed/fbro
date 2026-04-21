@@ -743,6 +743,25 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
     ? Math.min(100, Math.round((offsetDisplay / fileSize) * 100))
     : isSmall ? 100 : 0;
 
+  // These hooks must live before any early return (Rules of Hooks).
+  const findLineFirstIdx = useMemo(() => {
+    const map = new Map<number, number>();
+    let g = 0;
+    for (const m of findMatches) {
+      if (!map.has(m.line)) map.set(m.line, g);
+      g++;
+    }
+    return map;
+  }, [findMatches]);
+
+  const visStart = isSmall === true ? 0 : clamp(topLine, 0, lines.length);
+
+  const findLabel = findMatches.length === 0
+    ? (findQuery ? "No matches" : "")
+    : isSmall === false
+      ? `${Math.min(findIdx + 1, findMatches.length)}`
+      : `${Math.min(findIdx + 1, findMatches.length)} / ${findMatches.length}`;
+
   if (useDirect) {
     return (
       <div className="viewer">
@@ -790,25 +809,6 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
       </div>
     );
   }
-
-  // Precompute per-line global find match start indices for highlight rendering
-  const findLineFirstIdx = useMemo(() => {
-    const map = new Map<number, number>();
-    let g = 0;
-    for (const m of findMatches) {
-      if (!map.has(m.line)) map.set(m.line, g);
-      g++;
-    }
-    return map;
-  }, [findMatches]);
-
-  const visStart = isSmall === true ? 0 : clamp(topLine, 0, lines.length);
-
-  const findLabel = findMatches.length === 0
-    ? (findQuery ? "No matches" : "")
-    : isSmall === false
-      ? `${Math.min(findIdx + 1, findMatches.length)}`  // omit total: partial buffer only
-      : `${Math.min(findIdx + 1, findMatches.length)} / ${findMatches.length}`;
 
   return (
     <div className={`viewer${dosMode && effectiveMode === "text" ? " viewer--dos" : ""}`}>
