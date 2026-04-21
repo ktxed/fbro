@@ -1810,6 +1810,80 @@ body {
   opacity: 0.6;
 }
 
+/* ── Viewer find bar ───────────────────────────────────────────────────────── */
+
+.viewer__find-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  background: var(--bg-header);
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.viewer__find-input {
+  background: var(--bg-focused, #1e1e1e);
+  border: 1px solid var(--border-focus, #555);
+  color: var(--text);
+  font-family: monospace;
+  font-size: var(--font-size);
+  padding: 2px 6px;
+  border-radius: 2px;
+  width: 200px;
+  outline: none;
+}
+
+.viewer__find-input:focus {
+  border-color: var(--accent);
+}
+
+.viewer__find-count {
+  font-size: var(--font-size);
+  color: var(--text-dim);
+  min-width: 60px;
+  text-align: center;
+}
+
+.viewer__find-nav,
+.viewer__find-close {
+  background: var(--bg-footer);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: var(--font-size);
+  padding: 1px 6px;
+  border-radius: 2px;
+  line-height: 1.4;
+}
+
+.viewer__find-nav:hover,
+.viewer__find-close:hover {
+  background: var(--bg-focused);
+  color: var(--text);
+  border-color: var(--border-focus);
+}
+
+.viewer__find-scope {
+  font-size: var(--font-size);
+  color: var(--text-dim);
+  opacity: 0.6;
+  margin-left: 4px;
+}
+
+/* Match highlights */
+.viewer__find-match {
+  background: rgba(255, 214, 0, 0.25);
+  color: inherit;
+  border-radius: 1px;
+}
+
+.viewer__find-match--active {
+  background: rgba(255, 165, 0, 0.65);
+  color: #000;
+  border-radius: 1px;
+}
+
 /* ── Search modal ──────────────────────────────────────────────────────────── */
 
 .modal--wide {

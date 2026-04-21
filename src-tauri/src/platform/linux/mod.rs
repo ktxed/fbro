@@ -183,11 +183,19 @@ impl Platform for LinuxPlatform {
     }
 
     fn open_in_editor(&self, path: &str) -> Result<String, String> {
+        // Try known editors in preference order. Spawn by command name so the
+        // OS PATH lookup at spawn time is used (more reliable than a pre-check).
+        const PREFERRED: &[&str] = &["code", "codium", "cursor", "zed", "subl"];
+        for &editor in PREFERRED {
+            if Command::new(editor).arg(path).spawn().is_ok() {
+                return Ok(path.to_string());
+            }
+        }
+        // Fall back to xdg-open (system default handler).
         let output = Command::new("xdg-open")
             .arg(path)
             .output()
             .map_err(|e| e.to_string())?;
-
         if output.status.success() {
             Ok(path.to_string())
         } else {

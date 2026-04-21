@@ -140,6 +140,27 @@ impl Platform for WindowsPlatform {
     }
 
     fn open_in_editor(&self, path: &str) -> Result<String, String> {
+        // Try known editors in preference order before falling back to cmd /c start.
+        const PREFERRED: &[&[&str]] = &[
+            &["code.cmd", "code.exe"],
+            &["codium.cmd", "codium.exe"],
+            &["cursor.exe"],
+            &["zed.exe"],
+            &["subl.exe"],
+        ];
+        for candidates in PREFERRED {
+            if let Some(editor) = find_windows_executable(candidates) {
+                // .cmd files must be run via cmd.exe; .exe can be run directly.
+                let spawned = if editor.to_lowercase().ends_with(".cmd") {
+                    Command::new("cmd").args(["/c", &editor, path]).spawn()
+                } else {
+                    Command::new(&editor).arg(path).spawn()
+                };
+                if spawned.is_ok() {
+                    return Ok(path.to_string());
+                }
+            }
+        }
         let output = Command::new("cmd")
             .args(["/c", "start", "", path])
             .output()

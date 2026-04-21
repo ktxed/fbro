@@ -99,6 +99,32 @@ function clamp(v: number, lo: number, hi: number) {
   return Math.max(lo, Math.min(hi, v));
 }
 
+function highlightLine(
+  text: string,
+  matches: { line: number; start: number; end: number }[],
+  lineIdx: number,
+  activeGlobalIdx: number,
+  firstGlobalIdxForLine: number,
+): React.ReactNode {
+  const lineMatches = matches.filter(m => m.line === lineIdx);
+  if (lineMatches.length === 0) return text || "\u00A0";
+  const parts: React.ReactNode[] = [];
+  let pos = 0;
+  for (let i = 0; i < lineMatches.length; i++) {
+    const m = lineMatches[i];
+    if (m.start > pos) parts.push(text.slice(pos, m.start));
+    const isActive = firstGlobalIdxForLine + i === activeGlobalIdx;
+    parts.push(
+      <mark key={m.start} className={`viewer__find-match${isActive ? " viewer__find-match--active" : ""}`}>
+        {text.slice(m.start, m.end)}
+      </mark>
+    );
+    pos = m.end;
+  }
+  if (pos < text.length) parts.push(text.slice(pos));
+  return parts;
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: initFilename, windowLabel, panelId, isLocal, nativeFileSize }: ViewerAppProps) {
@@ -152,6 +178,15 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
   const [dosMode, setDosMode] = useState(false);
   const [wordWrap, setWordWrap] = useState(false);
 
+  // ── Find state ────────────────────────────────────────────────────────────
+  const [findOpen, setFindOpen]   = useState(false);
+  const [findQuery, setFindQuery] = useState("");
+  const [findIdx, setFindIdx]     = useState(0);
+  const findInputRef  = useRef<HTMLInputElement>(null);
+  // Stable refs so the keyboard handler closure doesn't go stale
+  const findOpenRef    = useRef(false);
+  const findMatchesRef = useRef<{ line: number; start: number; end: number }[]>([]);
+
   const [bufferBaseLine, setBufferBaseLine] = useState<number | null>(1);
   // Synchronous mirror of the current buffer's byte range — used by
   // scrollByLines so it always computes the next chunk offset from the
@@ -160,9 +195,10 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
     offset: 0, end: 0, eof: false,
   });
 
-  filenameRef.current  = curFilename;
+  filenameRef.current    = curFilename;
   curPathRef.current     = curPath;
   curSourceIdRef.current = curSourceId;
+  findOpenRef.current    = findOpen;
   const effectiveMode: ViewMode = useDirect ? "image" : (mode ?? "text");
   const isImageMode = effectiveMode === "image";
 
@@ -218,6 +254,24 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
   }, [buffer, bufferOffset, effectiveMode, bufferBaseLine, dosMode, wordWrap]);
 
   const maxTopLine = Math.max(0, lines.length - vpLines);
+
+  // ── Find matches (search across currently loaded lines) ───────────────────
+  const findMatches = useMemo(() => {
+    if (!findOpen || !findQuery) return [] as { line: number; start: number; end: number }[];
+    const q = findQuery.toLowerCase();
+    const result: { line: number; start: number; end: number }[] = [];
+    for (let i = 0; i < lines.length; i++) {
+      const lower = lines[i].toLowerCase();
+      let pos = 0;
+      let idx: number;
+      while ((idx = lower.indexOf(q, pos)) !== -1) {
+        result.push({ line: i, start: idx, end: idx + q.length });
+        pos = idx + q.length;
+      }
+    }
+    return result;
+  }, [findOpen, findQuery, lines]);
+  findMatchesRef.current = findMatches;
 
   // ── Request chunk from BE ─────────────────────────────────────────────────
 
@@ -377,14 +431,99 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
     });
   }, [maxTopLine, fileSize, requestChunk]);
 
+  // ── Find helpers ─────────────────────────────────────────────────────────
+
+  const findNext = useCallback(() => {
+    setFindIdx(prev =>
+      findMatchesRef.current.length === 0 ? 0 :
+      (prev + 1) % findMatchesRef.current.length
+    );
+  }, []);
+
+  const findPrev = useCallback(() => {
+    setFindIdx(prev =>
+      findMatchesRef.current.length === 0 ? 0 :
+      (prev - 1 + findMatchesRef.current.length) % findMatchesRef.current.length
+    );
+  }, []);
+
+  // Clamp findIdx when match count changes
+  useEffect(() => {
+    setFindIdx(prev => findMatches.length === 0 ? 0 : Math.min(prev, findMatches.length - 1));
+  }, [findMatches.length]);
+
+  // Scroll to active match
+  useEffect(() => {
+    if (!findOpen || findMatches.length === 0) return;
+    const match = findMatches[Math.min(findIdx, findMatches.length - 1)];
+    if (!match) return;
+    if (isSmall === false) {
+      // Large file: update the virtual scroll window to include the match
+      setTopLine(clamp(match.line - Math.floor(vpLines / 2), 0, maxTopLine));
+    }
+    // For small files (and after the topLine update re-renders the lines for large
+    // files), scroll the active <mark> into view. requestAnimationFrame ensures the
+    // DOM has been updated with the new active-match class before we query it.
+    requestAnimationFrame(() => {
+      document.querySelector(".viewer__find-match--active")
+        ?.scrollIntoView({ block: "center", inline: "nearest" });
+    });
+  }, [findIdx, findMatches, findOpen, isSmall, vpLines, maxTopLine]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Focus input when find opens, close when switching to non-text mode
+  useEffect(() => {
+    if (findOpen) setTimeout(() => findInputRef.current?.focus(), 0);
+  }, [findOpen]);
+
+  useEffect(() => {
+    if (effectiveMode !== "text") setFindOpen(false);
+  }, [effectiveMode]);
+
   // ── Keyboard ──────────────────────────────────────────────────────────────
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      const ctrl = e.ctrlKey || e.metaKey;
+      const inFind = e.target === findInputRef.current;
+
+      // F — open find (or previous match with Shift+F)
+      if ((e.key === "f" || e.key === "F") && !ctrl && !e.altKey) {
+        e.preventDefault();
+        setFindOpen(true);
+        if (e.shiftKey) findPrev();
+        setTimeout(() => findInputRef.current?.focus(), 0);
+        return;
+      }
+
+      // When typing in the find input, only intercept Escape and Enter
+      if (inFind) {
+        if (e.key === "Escape") { setFindOpen(false); }
+        else if (e.key === "Enter") { e.preventDefault(); e.shiftKey ? findPrev() : findNext(); }
+        return;
+      }
+
+      // F4 / E — open in preferred editor (guarded: must not be in find input or archive)
+      if (e.key === "F4" || (e.key === "e" && !ctrl && !e.shiftKey && !e.altKey)) {
+        if (!curSourceIdRef.current.startsWith("zip:")) {
+          // curPathRef.current is the full file path (e.g. /home/user/docs/file.txt).
+          // edit_file expects path=directory + filename, so strip the filename.
+          const fullFilePath = curPathRef.current;
+          const sep = fullFilePath.lastIndexOf("/");
+          const dirPath = sep > 0 ? fullFilePath.slice(0, sep) : fullFilePath;
+          clientRef.current?.sendIntent("EditFile", undefined, {
+            path: dirPath, filename: filenameRef.current,
+          });
+        }
+        return;
+      }
+
+      // Escape: close find bar first, otherwise close viewer
       if (e.key === "Escape") {
+        if (findOpenRef.current) { setFindOpen(false); return; }
         clientRef.current?.sendIntent("CloseViewerWindow", undefined, { label: windowLabel });
         return;
       }
+
       if (e.key === "1") { switchMode("text"); return; }
       if (e.key === "2") { switchMode("image"); return; }
       if (e.key === "3") { switchMode("hex"); return; }
@@ -453,7 +592,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [isSmall, fileSize, maxTopLine, vpLines, scrollByLines, requestChunk, windowLabel, effectiveMode, dosMode]);
+  }, [isSmall, fileSize, maxTopLine, vpLines, scrollByLines, requestChunk, windowLabel, effectiveMode, dosMode, findNext, findPrev]);
 
   // ── Mouse wheel for large mode ────────────────────────────────────────────
 
@@ -558,7 +697,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
   // Text mode: line-numbered view
   const textView = useMemo(() => {
     if (effectiveMode !== "text" || !buffer) {
-      return { gutterText: "", textContent: "", rows: [] as { gutter: string; content: string }[] };
+      return { gutterText: "", textContent: "", rows: [] as { gutter: string; content: string }[], visLines: [] as string[] };
     }
     let visLines: string[];
     let visNums: (number | null)[];
@@ -588,7 +727,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
     const rows = wordWrap
       ? visLines.map((content, i) => ({ gutter: gutterEntries[i], content }))
       : [];
-    return { gutterText: gutterEntries.join("\n"), textContent: visLines.join("\n"), rows };
+    return { gutterText: gutterEntries.join("\n"), textContent: visLines.join("\n"), rows, visLines };
   }, [effectiveMode, buffer, isSmall, lines, lineNums, topLine, vpLines, wordWrap]);
 
   // ── Status bar info ───────────────────────────────────────────────────────
@@ -651,6 +790,25 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
       </div>
     );
   }
+
+  // Precompute per-line global find match start indices for highlight rendering
+  const findLineFirstIdx = useMemo(() => {
+    const map = new Map<number, number>();
+    let g = 0;
+    for (const m of findMatches) {
+      if (!map.has(m.line)) map.set(m.line, g);
+      g++;
+    }
+    return map;
+  }, [findMatches]);
+
+  const visStart = isSmall === true ? 0 : clamp(topLine, 0, lines.length);
+
+  const findLabel = findMatches.length === 0
+    ? (findQuery ? "No matches" : "")
+    : isSmall === false
+      ? `${Math.min(findIdx + 1, findMatches.length)}`  // omit total: partial buffer only
+      : `${Math.min(findIdx + 1, findMatches.length)} / ${findMatches.length}`;
 
   return (
     <div className={`viewer${dosMode && effectiveMode === "text" ? " viewer--dos" : ""}`}>
@@ -730,7 +888,11 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
                 {textView.rows.map((row, i) => (
                   <div className="viewer__wrap-row" key={i}>
                     <span className="viewer__gutter-cell">{row.gutter}</span>
-                    <span className="viewer__content-cell">{row.content || " "}</span>
+                    <span className="viewer__content-cell">
+                      {(findOpen && findQuery)
+                        ? highlightLine(row.content, findMatches, visStart + i, findIdx, findLineFirstIdx.get(visStart + i) ?? 0)
+                        : (row.content || " ")}
+                    </span>
                   </div>
                 ))}
               </div>
@@ -743,7 +905,14 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
                   {textView.gutterText}
                 </pre>
                 <pre className="viewer__content">
-                  {textView.textContent}
+                  {(findOpen && findQuery)
+                    ? textView.visLines.map((line, i) => (
+                        <React.Fragment key={i}>
+                          {highlightLine(line, findMatches, visStart + i, findIdx, findLineFirstIdx.get(visStart + i) ?? 0)}
+                          {i < textView.visLines.length - 1 ? "\n" : ""}
+                        </React.Fragment>
+                      ))
+                    : textView.textContent}
                 </pre>
               </div>
             )}
@@ -762,17 +931,40 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
         )}
       </div>
 
+      {findOpen && effectiveMode === "text" && (
+        <div className="viewer__find-bar">
+          <input
+            ref={findInputRef}
+            type="text"
+            className="viewer__find-input"
+            placeholder="Find…"
+            value={findQuery}
+            onChange={e => { setFindQuery(e.target.value); setFindIdx(0); }}
+            spellCheck={false}
+          />
+          <span className="viewer__find-count">{findLabel}</span>
+          <button className="viewer__find-nav" onClick={findPrev} title="Previous (Shift+Enter)">↑</button>
+          <button className="viewer__find-nav" onClick={findNext} title="Next (Enter)">↓</button>
+          <button className="viewer__find-close" onClick={() => setFindOpen(false)} title="Close (Esc)">×</button>
+          {isSmall === false && (
+            <span className="viewer__find-scope">searching loaded content</span>
+          )}
+        </div>
+      )}
+
       <div className="viewer__status">
         <span>Offset: 0x{offsetDisplay.toString(16).padStart(8, "0")}</span>
         {fileSize !== null && <span>Size: {formatSize(fileSize)}</span>}
         <span>{pct}%</span>
         {loading && <span style={{ color: "var(--accent)" }}>loading…</span>}
         <span className="viewer__status-nav">
-          {isImageMode
-            ? "z zoom · j/k prev/next file · 1 text · 2 image · 3 hex"
-            : effectiveMode === "text"
-              ? "↑↓ PgDn/PgUp scroll · j/k prev/next · 1 text · 2 image · 3 hex · s dos · w wrap"
-              : "↑↓ PgDn/PgUp scroll · j/k prev/next file · 1 text · 2 image · 3 hex"}
+          {(() => {
+            const canEdit = !curSourceId.startsWith("zip:");
+            const editHint = canEdit ? " · e/F4 edit" : "";
+            if (isImageMode) return `z zoom · j/k prev/next file · 1 text · 2 image · 3 hex${editHint}`;
+            if (effectiveMode === "text") return `↑↓ PgDn/PgUp scroll · j/k prev/next · 1 text · 2 image · 3 hex · s dos · w wrap · f find${editHint}`;
+            return `↑↓ PgDn/PgUp scroll · j/k prev/next file · 1 text · 2 image · 3 hex${editHint}`;
+          })()}
         </span>
       </div>
     </div>

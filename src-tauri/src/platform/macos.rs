@@ -172,11 +172,38 @@ impl Platform for MacOSPlatform {
     }
 
     fn open_in_editor(&self, path: &str) -> Result<String, String> {
+        // Try known editors in preference order before falling back to open.
+        let home = env::var("HOME").unwrap_or_default();
+        let preferred = [
+            "Visual Studio Code.app",
+            "VSCodium.app",
+            "Cursor.app",
+            "Zed.app",
+            "Sublime Text.app",
+        ];
+        for app_name in preferred {
+            let candidates = if home.is_empty() {
+                vec![format!("/Applications/{app_name}")]
+            } else {
+                vec![
+                    format!("/Applications/{app_name}"),
+                    format!("{home}/Applications/{app_name}"),
+                ]
+            };
+            for app_path in &candidates {
+                if std::path::Path::new(app_path).exists() {
+                    return Command::new("open")
+                        .args(["-a", app_path, path])
+                        .spawn()
+                        .map(|_| path.to_string())
+                        .map_err(|e| e.to_string());
+                }
+            }
+        }
         let output = Command::new("open")
             .arg(path)
             .output()
             .map_err(|e| e.to_string())?;
-
         if output.status.success() {
             Ok(path.to_string())
         } else {
