@@ -696,8 +696,9 @@ fn entry_at_abs_index<'a>(
     panel: &'a crate::state::Panel,
     abs_index: usize,
 ) -> Option<&'a crate::ws::protocol::EntrySchema> {
-    let local_index = abs_index.checked_sub(panel.window_start)?;
-    panel.entries.get(local_index)
+    // panel.entries holds the full directory listing on the backend (not just the
+    // scroll window); abs_index is a direct index into that full array.
+    panel.entries.get(abs_index)
 }
 
 fn bro_input_for_entry(
