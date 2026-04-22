@@ -504,7 +504,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
 
       // F4 / E — open in preferred editor (guarded: must not be in find input or archive)
       if (e.key === "F4" || (e.key === "e" && !ctrl && !e.shiftKey && !e.altKey)) {
-        if (!curSourceIdRef.current.startsWith("zip:")) {
+        if (!curSourceIdRef.current.startsWith("zip:") && !curSourceIdRef.current.startsWith("7z:")) {
           // curPathRef.current is the full file path (e.g. /home/user/docs/file.txt).
           // edit_file expects path=directory + filename, so strip the filename.
           const fullFilePath = curPathRef.current;
@@ -959,7 +959,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
         {loading && <span style={{ color: "var(--accent)" }}>loading…</span>}
         <span className="viewer__status-nav">
           {(() => {
-            const canEdit = !curSourceId.startsWith("zip:");
+            const canEdit = !curSourceId.startsWith("zip:") && !curSourceId.startsWith("7z:");
             const editHint = canEdit ? " · e/F4 edit" : "";
             if (isImageMode) return `z zoom · j/k prev/next file · 1 text · 2 image · 3 hex${editHint}`;
             if (effectiveMode === "text") return `↑↓ PgDn/PgUp scroll · j/k prev/next · 1 text · 2 image · 3 hex · s dos · w wrap · f find${editHint}`;

@@ -170,6 +170,9 @@ async fn open_entry(scope: &Value, ctx: &mut IntentContext<'_>) {
     } else if entry_kind == "file" && is_zip_like(&entry_name) && (!is_in_shadow || source_id.starts_with("search:")) {
         // Enter zip archive as a shadow filesystem.
         enter_zip_archive(&panel_id, &new_path, &entry_name, ctx).await;
+    } else if entry_kind == "file" && is_7z_like(&entry_name) && (!is_in_shadow || source_id.starts_with("search:")) {
+        // Enter 7z archive as a shadow filesystem.
+        enter_7z_archive(&panel_id, &new_path, &entry_name, ctx).await;
     }
 }
 
@@ -189,6 +192,116 @@ fn is_zip_like(name: &str) -> bool {
         || lower.ends_with(".epub")
         || lower.ends_with(".xpi")
         || lower.ends_with(".crx")
+}
+
+fn is_7z_like(name: &str) -> bool {
+    name.to_lowercase().ends_with(".7z")
+}
+
+/// Create a SevenZipFsDriver, register a shadow source, and navigate the panel into the archive root.
+async fn enter_7z_archive(
+    panel_id: &str,
+    archive_path: &str,
+    archive_name: &str,
+    ctx: &mut IntentContext<'_>,
+) {
+    let driver = match crate::vfs::seven_zip::SevenZipFsDriver::new(archive_path) {
+        Ok(d) => Arc::new(d),
+        Err(e) => {
+            let _ = ctx
+                .tx
+                .send(ServerMessage::Error {
+                    timestamp: now(),
+                    code: "7Z_OPEN_FAILED".to_string(),
+                    message: format!("Cannot open archive: {e}"),
+                    recoverable: true,
+                    extra: Some(serde_json::json!({ "panelId": panel_id })),
+                })
+                .await;
+            return;
+        }
+    };
+
+    let source_id = format!("7z:{}", archive_path);
+
+    {
+        let mut state_guard = ctx.state.lock().await;
+
+        let (parent_source_id, parent_path, prev_shadow, cursor_pos) = match state_guard.panels.get(panel_id) {
+            Some(p) => (p.source_id.clone(), p.path.clone(), p.shadow_source.clone(), p.cursor),
+            None => return,
+        };
+
+        let shadow = ShadowSource {
+            parent_source_id: parent_source_id.clone(),
+            parent_path,
+            archive_path: archive_path.to_string(),
+            cursor_hint: Some(archive_name.to_string()),
+            cursor_index: if parent_source_id.starts_with("search:") { Some(cursor_pos) } else { None },
+            parent_shadow: prev_shadow.map(Box::new),
+        };
+
+        if !state_guard.sources.contains_key(&source_id) {
+            state_guard.sources.insert(
+                source_id.clone(),
+                Source {
+                    id: source_id.clone(),
+                    name: archive_name.to_string(),
+                    kind: "archive".to_string(),
+                    supports: vec![
+                        "ListEntries".to_string(),
+                        "OpenFolder".to_string(),
+                        "CopySelection".to_string(),
+                    ],
+                    root_path: String::new(),
+                    mounted: true,
+                    device_path: None,
+                    shadow: true,
+                },
+            );
+        }
+        if !state_guard.drivers.contains_key(&source_id) {
+            state_guard
+                .drivers
+                .insert(source_id.clone(), driver as Arc<dyn VfsDriver>);
+        }
+
+        if let Some(panel) = state_guard.panels.get_mut(panel_id) {
+            panel.shadow_source = Some(shadow);
+            panel.source_id = source_id.clone();
+            panel.path = String::new();
+            panel.cursor = 0;
+            panel.selection.clear();
+            panel.filter = None;
+            panel.filter_mode_active = false;
+        }
+    }
+
+    let sources_json = {
+        let state_guard = ctx.state.lock().await;
+        build_sources_json(&state_guard)
+    };
+    let _ = ctx
+        .tx
+        .send(ServerMessage::StatePatch {
+            timestamp: now(),
+            domain: "sources".to_string(),
+            entity_id: None,
+            version: 0,
+            patch: serde_json::json!({ "sources": sources_json }),
+        })
+        .await;
+
+    rescan_panel(
+        panel_id,
+        ctx.state,
+        ctx.tx,
+        ctx.scan_handles,
+        None,
+        None,
+        ctx.dir_size_queue,
+    )
+    .await;
 }
 
 /// Create a ZipFsDriver, register a shadow source, and navigate the panel into the archive root.
@@ -568,7 +681,7 @@ async fn open_file(scope: &Value, ctx: &mut IntentContext<'_>) {
                 };
                 platform.open_file(&real_full_path);
             } else if shadow_source.is_some() {
-                // Inside a zip: extract to temp file and open.
+                // Inside an archive: extract to temp file and open.
                 let inner_path = if path.is_empty() {
                     entry.name.clone()
                 } else {
@@ -576,30 +689,42 @@ async fn open_file(scope: &Value, ctx: &mut IntentContext<'_>) {
                 };
                 let state_guard = ctx.state.lock().await;
                 if let Some(driver) = state_guard.drivers.get(&source_id) {
-                    if let Some(zip_driver) = driver
+                    // Try zip driver first, then 7z driver.
+                    let extract_result = if let Some(zip_driver) = driver
                         .as_ref()
                         .as_any()
                         .downcast_ref::<crate::vfs::zip::ZipFsDriver>()
                     {
-                        match zip_driver.extract_to_temp(&inner_path) {
-                            Ok(temp_path) => {
-                                drop(state_guard);
-                                platform.open_file(&temp_path.to_string_lossy());
-                            }
-                            Err(e) => {
-                                drop(state_guard);
-                                let _ = ctx
-                                    .tx
-                                    .send(ServerMessage::Error {
-                                        timestamp: now(),
-                                        code: "ZIP_EXTRACT_FAILED".to_string(),
-                                        message: format!("Cannot extract file: {e}"),
-                                        recoverable: true,
-                                        extra: None,
-                                    })
-                                    .await;
-                            }
+                        Some(zip_driver.extract_to_temp(&inner_path))
+                    } else if let Some(sz_driver) = driver
+                        .as_ref()
+                        .as_any()
+                        .downcast_ref::<crate::vfs::seven_zip::SevenZipFsDriver>()
+                    {
+                        Some(sz_driver.extract_to_temp(&inner_path))
+                    } else {
+                        None
+                    };
+
+                    match extract_result {
+                        Some(Ok(temp_path)) => {
+                            drop(state_guard);
+                            platform.open_file(&temp_path.to_string_lossy());
                         }
+                        Some(Err(e)) => {
+                            drop(state_guard);
+                            let _ = ctx
+                                .tx
+                                .send(ServerMessage::Error {
+                                    timestamp: now(),
+                                    code: "ARCHIVE_EXTRACT_FAILED".to_string(),
+                                    message: format!("Cannot extract file: {e}"),
+                                    recoverable: true,
+                                    extra: None,
+                                })
+                                .await;
+                        }
+                        None => {}
                     }
                 }
             } else {
@@ -988,7 +1113,6 @@ async fn provide_input(args: &Value, ctx: &mut IntentContext<'_>) {
         return;
     }
 
-    // The requestId encodes "zip-password:<source_id>".
     if let Some(source_id) = request_id.strip_prefix("zip-password:") {
         let state_guard = ctx.state.lock().await;
         if let Some(driver) = state_guard.drivers.get(source_id) {
@@ -998,6 +1122,17 @@ async fn provide_input(args: &Value, ctx: &mut IntentContext<'_>) {
                 .downcast_ref::<crate::vfs::zip::ZipFsDriver>()
             {
                 zip_driver.set_password(&value);
+            }
+        }
+    } else if let Some(source_id) = request_id.strip_prefix("7z-password:") {
+        let state_guard = ctx.state.lock().await;
+        if let Some(driver) = state_guard.drivers.get(source_id) {
+            if let Some(sz_driver) = driver
+                .as_ref()
+                .as_any()
+                .downcast_ref::<crate::vfs::seven_zip::SevenZipFsDriver>()
+            {
+                sz_driver.set_password(&value);
             }
         }
     }

@@ -376,8 +376,9 @@ function toggleSelectedDirectorySizes(client: WsClient, panel: PanelState) {
 function openFocusedEntry(client: WsClient, panel: PanelState) {
   const entry = currentEntry(panel);
   if (entry && entry.kind !== "directory") {
-    // Zip files are navigable — treat Enter the same as navigating into a directory.
-    if (entry.kind === "file" && entry.name.toLowerCase().endsWith(".zip") && !panel.shadowSource) {
+    // Archive files are navigable — treat Enter the same as navigating into a directory.
+    const lname = entry.name.toLowerCase();
+    if (entry.kind === "file" && (lname.endsWith(".zip") || lname.endsWith(".7z")) && !panel.shadowSource) {
       client.sendIntent("OpenEntry", "focused-panel");
     } else {
       client.sendIntent("OpenFile", "focused-panel");

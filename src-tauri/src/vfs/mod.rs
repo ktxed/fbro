@@ -2,6 +2,7 @@
 
 pub mod local;
 pub mod search;
+pub mod seven_zip;
 #[cfg(unix)]
 pub mod spy;
 pub mod zip;

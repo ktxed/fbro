@@ -783,7 +783,7 @@ async fn calculate_size(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>
         }
     };
 
-    // Fast path for zip sources: compute size from the in-memory directory tree.
+    // Fast path for archive sources: compute size from the in-memory directory tree.
     if is_shadow {
         let size = {
             let state_guard = ctx.state.lock().await;
@@ -791,7 +791,13 @@ async fn calculate_size(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>
                 driver
                     .as_any()
                     .downcast_ref::<crate::vfs::zip::ZipFsDriver>()
-                    .map(|zip| zip.dir_size(&full_path))
+                    .map(|d| d.dir_size(&full_path))
+                    .or_else(|| {
+                        driver
+                            .as_any()
+                            .downcast_ref::<crate::vfs::seven_zip::SevenZipFsDriver>()
+                            .map(|d| d.dir_size(&full_path))
+                    })
             })
         };
         if let Some(size) = size {
