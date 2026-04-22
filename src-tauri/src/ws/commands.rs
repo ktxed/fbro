@@ -122,6 +122,17 @@ pub(crate) fn build_interactive_commands() -> Vec<InteractiveCommandSchema> {
             None,
         ),
         command(
+            "panel.viewer.embed",
+            "View",
+            "Toggle Embedded Viewer",
+            vec![if is_macos() {
+                keybinding_with_modifiers("F3", false, false, false, true) // Cmd+F3
+            } else {
+                keybinding_with_modifiers("F3", false, true, false, false) // Ctrl+F3
+            }],
+            None,
+        ),
+        command(
             "file.edit",
             "File",
             "Edit",

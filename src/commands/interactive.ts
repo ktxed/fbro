@@ -30,6 +30,7 @@ export const GLOBAL_SHORTCUT_COMMAND_IDS = [
   COMMAND_PALETTE_COMMAND_ID,
   "app.open_jobs",
   "app.search",
+  "panel.viewer.embed",
   "panel.navigate_source_root",
   "file.info",
   "panel.toggle_hidden",
@@ -464,6 +465,9 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
     case "app.open_jobs":
       context.onOpenJobsView?.();
       return !!context.onOpenJobsView;
+    case "panel.viewer.embed":
+      dispatch({ type: "TOGGLE_EMBEDDED_VIEWER" });
+      return true;
     case "app.search":
       if (!focused) return false;
       dispatch({

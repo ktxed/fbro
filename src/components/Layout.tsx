@@ -19,6 +19,7 @@ import { BroModal } from "./BroModal";
 import { InputModal } from "./InputModal";
 import { SearchModal } from "./SearchModal";
 import { useAppDispatch, useAppState } from "../store";
+import { EmbeddedViewerPanel } from "./EmbeddedViewerPanel";
 import type { FileOpFile, FileOpType, PanelState, VFSEntry } from "../ws/types";
 import type { WsClient } from "../ws/client";
 
@@ -432,6 +433,18 @@ export function Layout({ client, jobsViewOpen, onCloseJobsView, onOpenJobsView }
           const panel = state.panels[id];
           if (!panel) return null;
           const otherPanelId = panelIds.find(p => p !== id) ?? "";
+
+          // In embedded viewer mode, the non-source panel becomes a preview pane.
+          if (state.embeddedViewer && id !== state.embeddedViewer.sourcePanelId) {
+            return (
+              <EmbeddedViewerPanel
+                key={id}
+                sourcePanelId={state.embeddedViewer.sourcePanelId}
+                state={state}
+              />
+            );
+          }
+
           return (
             <Panel
               key={id}

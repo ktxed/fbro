@@ -171,6 +171,7 @@ export interface AppState {
   pendingSearch: PendingSearch | null;
   commandPaletteOpen: boolean;
   transientHint: { message: string; token: number } | null;
+  embeddedViewer: { sourcePanelId: string } | null;
 }
 
 const initialState: AppState = {
@@ -203,6 +204,7 @@ const initialState: AppState = {
   commandPaletteOpen: false,
 
   transientHint: null,
+  embeddedViewer: null,
 };
 
 // ─── Actions ─────────────────────────────────────────────────────────────────
@@ -243,7 +245,8 @@ export type AppAction =
   | { type: "CLOSE_COMMAND_PALETTE" }
   | { type: "CLOSE_TRANSIENT_HINT" }
   | { type: "SHOW_TRANSIENT_HINT"; message: string }
-  | { type: "CLOSE_INPUT" };
+  | { type: "CLOSE_INPUT" }
+  | { type: "TOGGLE_EMBEDDED_VIEWER" };
 
 function pushPanelHistoryEntry(
   panelHistory: Record<string, string[]>,
@@ -901,6 +904,9 @@ function reducer(state: AppState, action: AppAction): AppState {
       };
     case "CLOSE_INPUT":
       return { ...state, pendingInput: null };
+    case "TOGGLE_EMBEDDED_VIEWER":
+      if (state.embeddedViewer) return { ...state, embeddedViewer: null };
+      return { ...state, embeddedViewer: { sourcePanelId: state.focus } };
     case "OPEN_SEARCH":
       return { ...state, pendingSearch: action.search };
     case "CLOSE_SEARCH":
