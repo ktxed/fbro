@@ -132,8 +132,21 @@ export function EmbeddedViewerPanel({ sourcePanelId, state }: Props) {
 
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
-      const entry = panel.entries[panel.cursor];
+      // In windowed (virtual scroll) mode panel.entries is only the loaded
+      // window slice; panel.windowStart holds the absolute offset of that
+      // window. Use the window-relative index to find the current entry.
+      const windowStart = panel.windowStart ?? 0;
+      const localIndex = panel.cursor - windowStart;
+      const entry = localIndex >= 0 && localIndex < panel.entries.length
+        ? panel.entries[localIndex]
+        : undefined;
+
       if (!entry) {
+        // Cursor is outside the currently loaded window (large directory,
+        // fast scroll). Keep the existing preview — the window will catch up
+        // shortly and version will increment, re-triggering this effect.
+        if ((panel.totalCount ?? panel.entries.length) > 0) return;
+        // Genuinely empty directory.
         loadedPathRef.current = null;
         setViewMode({ kind: "empty" });
         return;
