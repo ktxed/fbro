@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { mimeForFile } from "./media";
+import { ZoomableImage } from "./ZoomableImage";
 
 export const IMAGE_LIMIT = 5 * 1024 * 1024; // 5 MiB
 
@@ -18,9 +19,7 @@ function formatSize(n: number): string {
 
 export function ImageViewer({ buffer, fileSize, filename }: ImageViewerProps) {
   const [url, setUrl] = useState<string | null>(null);
-  const [zoom, setZoom] = useState(false);
 
-  // Build blob URL when buffer is available
   useEffect(() => {
     if (!buffer) { setUrl(null); return; }
     if (fileSize !== null && fileSize > IMAGE_LIMIT) { setUrl(null); return; }
@@ -30,16 +29,6 @@ export function ImageViewer({ buffer, fileSize, filename }: ImageViewerProps) {
     setUrl(u);
     return () => URL.revokeObjectURL(u);
   }, [buffer, fileSize, filename]);
-
-  // Keyboard: z toggles zoom
-  const handleKey = useCallback((e: KeyboardEvent) => {
-    if (e.key === "z" || e.key === "Z") setZoom(z => !z);
-  }, []);
-
-  useEffect(() => {
-    window.addEventListener("keydown", handleKey);
-    return () => window.removeEventListener("keydown", handleKey);
-  }, [handleKey]);
 
   if (fileSize !== null && fileSize > IMAGE_LIMIT) {
     return (
@@ -59,15 +48,5 @@ export function ImageViewer({ buffer, fileSize, filename }: ImageViewerProps) {
     );
   }
 
-  return (
-    <div className="viewer__image-container">
-      <img
-        className={`viewer__image${zoom ? " viewer__image--native" : ""}`}
-        src={url}
-        alt={filename}
-        onClick={() => setZoom(z => !z)}
-        draggable={false}
-      />
-    </div>
-  );
+  return <ZoomableImage src={url} alt={filename} />;
 }

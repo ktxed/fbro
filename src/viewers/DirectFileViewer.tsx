@@ -1,4 +1,5 @@
 import { isImageExt, isVideoExt, isPdfExt } from "./media";
+import { ZoomableImage } from "./ZoomableImage";
 
 export const IMAGE_DIRECT_LIMIT = 10 * 1024 * 1024; // 10 MiB
 
@@ -35,9 +36,5 @@ export function DirectFileViewer({ path, filename }: DirectFileViewerProps) {
     );
   }
   // Image
-  return (
-    <div className="viewer__image-container">
-      <img className="viewer__image" src={url} alt={filename} draggable={false} />
-    </div>
-  );
+  return <ZoomableImage src={url} alt={filename} />;
 }
