@@ -762,7 +762,7 @@ export function Panel({
 
       <SortHeader sort={panel.sort} panelId={panelId} client={client} />
 
-      <div className="panel__list" ref={listRef} onScroll={isWindowed ? handleScroll : undefined}>
+      <div className="panel__list" ref={listRef} onScroll={isWindowed ? handleScroll : undefined} style={modalActive ? { overflow: "hidden" } : undefined}>
         {isWindowed ? (
           <div className="panel__virtual-sizer" style={{ height: totalCount * ROW_HEIGHT, position: "relative" }}>
             {panel.entries.map((entry, i) => renderRow(entry, windowStart + i))}
