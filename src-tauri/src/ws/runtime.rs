@@ -112,7 +112,10 @@ pub(crate) fn selected_names_for(state_guard: &AppState, panel_id: &str) -> Opti
         panel
             .selection
             .iter()
-            .filter_map(|&index| panel.entries.get(index).map(|entry| entry.name.clone()))
+            .filter_map(|&index| {
+                let local = index.checked_sub(panel.window_start)?;
+                panel.entries.get(local).map(|entry| entry.name.clone())
+            })
             .collect()
     })
 }
@@ -122,7 +125,8 @@ pub(crate) fn selected_entries_for_panel(panel: &Panel) -> Vec<FileOpFileSchema>
         .selection
         .iter()
         .filter_map(|&index| {
-            panel.entries.get(index).map(|entry| FileOpFileSchema {
+            let local = index.checked_sub(panel.window_start)?;
+            panel.entries.get(local).map(|entry| FileOpFileSchema {
                 name: entry.name.clone(),
                 size: entry.size,
                 kind: entry.kind.clone(),

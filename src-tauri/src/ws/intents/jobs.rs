@@ -334,7 +334,8 @@ fn source_paths_for_external_clipboard(
 
     let mut source_paths = Vec::with_capacity(indices.len());
     for index in indices {
-        let Some(entry) = panel.entries.get(index) else {
+        let local = index.checked_sub(panel.window_start).unwrap_or(usize::MAX);
+        let Some(entry) = panel.entries.get(local) else {
             return Err((
                 "WRITE_EXTERNAL_NO_ELIGIBLE_ITEMS".to_string(),
                 "A selected item is no longer available.".to_string(),
@@ -699,7 +700,8 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
                 indices
                     .iter()
                     .filter_map(|&index| {
-                        source_panel.entries.get(index).map(|entry| FileOpEntry {
+                        let local = index.checked_sub(source_panel.window_start)?;
+                        source_panel.entries.get(local).map(|entry| FileOpEntry {
                             name: entry.name.clone(),
                             source_path: panel_driver
                                 .resolve_child(&source_panel.path, &entry.name),
