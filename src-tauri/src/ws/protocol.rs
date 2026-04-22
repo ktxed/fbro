@@ -119,6 +119,11 @@ pub enum ServerMessage {
         #[serde(rename = "isLocal")]
         is_local: bool,
     },
+    /// Hints for the viewer to preload neighboring files (direct images/video/PDF).
+    ViewerPrefetchHints {
+        timestamp: u64,
+        hints: Vec<ViewerPrefetchHintSchema>,
+    },
     DryRunReady {
         timestamp: u64,
         #[serde(rename = "scriptPath")]
@@ -477,6 +482,16 @@ pub struct SearchProgressSchema {
     pub matched: u64,
     pub current_path: String,
     pub new_results: Vec<SearchResultSchema>,
+}
+
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct ViewerPrefetchHintSchema {
+    pub path: String,
+    pub filename: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_size: Option<u64>,
+    pub is_local: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

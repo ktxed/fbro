@@ -1,8 +1,11 @@
+use std::sync::Arc;
+
 use serde_json::Value;
 
+use crate::jobs::viewer_prefetch::PREFETCH_N;
 use crate::vfs::search::SearchResultsDriver;
 use crate::ws::intents::{arg_str, arg_u64};
-use crate::ws::protocol::{now, ServerMessage};
+use crate::ws::protocol::{now, ServerMessage, ViewerPrefetchHintSchema};
 use crate::ws::runtime::{url_encode, IntentContext};
 
 pub(crate) async fn handle(name: &str, args: &Value, ctx: &mut IntentContext<'_>) {
@@ -183,6 +186,24 @@ async fn view_file(args: &Value, ctx: &mut IntentContext<'_>) {
     .devtools(true)
     .background_color(tauri::webview::Color(13, 13, 13, 255))
     .build();
+
+    // Prime the prefetch cache for files neighboring the one being opened.
+    ctx.viewer_prefetch.clear();
+    let (neighbors, driver) = {
+        let state_guard = ctx.state.lock().await;
+        let driver = state_guard.drivers.get(&effective_source_id).cloned();
+        let panel = state_guard.panels.get(&parsed.panel_id);
+        let neighbors = match (panel, driver.as_ref()) {
+            (Some(panel), Some(drv)) if drv.is_local() => {
+                collect_neighbors(&panel.entries, panel.cursor, &panel.path, &panel.source_id)
+            }
+            _ => vec![],
+        };
+        (neighbors, driver)
+    };
+    if let Some(driver) = driver {
+        ctx.viewer_prefetch.schedule_neighbors(neighbors, effective_source_id, driver);
+    }
 }
 
 async fn edit_file(args: &Value, ctx: &mut IntentContext<'_>) {
@@ -214,6 +235,7 @@ fn close_viewer_window(args: &Value, ctx: &IntentContext<'_>) {
     if let Some(window) = ctx.app_handle.get_webview_window(&parsed.label) {
         let _ = window.close();
     }
+    ctx.viewer_prefetch.clear();
 }
 
 async fn viewer_navigate(args: &Value, ctx: &mut IntentContext<'_>) {
@@ -237,13 +259,14 @@ async fn viewer_navigate(args: &Value, ctx: &mut IntentContext<'_>) {
                 .entries
                 .get(new_cursor)
                 .map(|entry| (entry.name.clone(), entry.kind.clone()));
-            Some((new_cursor, source_id, dir_path, entry_info))
+            let prefetch_neighbors = collect_neighbors(&panel.entries, new_cursor, &dir_path, &source_id);
+            Some((new_cursor, source_id, dir_path, entry_info, prefetch_neighbors))
         } else {
             None
         }
     };
 
-    if let Some((new_cursor, source_id, dir_path, entry_info)) = nav_result {
+    if let Some((new_cursor, source_id, dir_path, entry_info, prefetch_neighbors)) = nav_result {
         if let Some((name, kind)) = entry_info {
             if kind == "file" {
                 // When the panel is on a search results source, resolve the
@@ -294,12 +317,33 @@ async fn viewer_navigate(args: &Value, ctx: &mut IntentContext<'_>) {
                         timestamp: now(),
                         path: effective_path,
                         filename: name,
-                        source_id: effective_source_id,
+                        source_id: effective_source_id.clone(),
                         panel_id: parsed.panel_id.clone(),
                         file_size,
                         is_local,
                     })
                     .await;
+
+                // Schedule BE cache prefetch and send FE image-preload hints.
+                if let Some(ref drv) = driver {
+                    if drv.is_local() {
+                        let hints = build_prefetch_hints(&prefetch_neighbors);
+                        if !hints.is_empty() {
+                            let _ = ctx
+                                .tx
+                                .send(ServerMessage::ViewerPrefetchHints {
+                                    timestamp: now(),
+                                    hints,
+                                })
+                                .await;
+                        }
+                        ctx.viewer_prefetch.schedule_neighbors(
+                            prefetch_neighbors,
+                            effective_source_id,
+                            Arc::clone(drv),
+                        );
+                    }
+                }
             } else {
                 let _ = ctx
                     .tx
@@ -377,6 +421,39 @@ async fn read_file_chunk(args: &Value, ctx: &mut IntentContext<'_>) {
         (driver, file_size)
     };
 
+    // Serve from prefetch cache when this is the initial (offset=0) request.
+    if parsed.offset == 0 {
+        if let Some(cached) = ctx.viewer_prefetch.get_cached(&effective_source_id, &effective_path) {
+            let bytes = cached.content.clone();
+            let cached_file_size = cached.file_size.or(file_size);
+            let size = parsed.size;
+            let eof = bytes.len() < size
+                || cached_file_size.map_or(false, |fs| bytes.len() as u64 >= fs);
+            let bytes = if !eof && !bytes.is_empty() && bytes[bytes.len() - 1] != b'\n' {
+                let mut b = bytes;
+                if let Some(pos) = b.iter().rposition(|&c| c == b'\n') {
+                    b.truncate(pos + 1);
+                }
+                b
+            } else {
+                bytes
+            };
+            let data: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
+            let _ = ctx
+                .tx
+                .send(ServerMessage::FileChunk {
+                    timestamp: now(),
+                    path: effective_path,
+                    offset: 0,
+                    data,
+                    eof,
+                    file_size: cached_file_size,
+                })
+                .await;
+            return;
+        }
+    }
+
     if let Some(driver) = driver {
         let path_clone = effective_path.clone();
         let offset = parsed.offset;
@@ -424,4 +501,67 @@ async fn read_file_chunk(args: &Value, ctx: &mut IntentContext<'_>) {
             Err(_) => {}
         }
     }
+}
+
+// ─── Prefetch helpers ────────────────────────────────────────────────────────
+
+/// Collect the N file entries before and after `cursor` in the panel entry list.
+/// Returns `(full_path, size_hint)` pairs, skipping directories and shadow sources.
+fn collect_neighbors(
+    entries: &[crate::ws::protocol::EntrySchema],
+    cursor: usize,
+    dir_path: &str,
+    source_id: &str,
+) -> Vec<(String, Option<u64>)> {
+    // Only prefetch from local real sources.
+    if source_id.starts_with("zip:")
+        || source_id.starts_with("7z:")
+        || source_id.starts_with("search:")
+    {
+        return vec![];
+    }
+
+    let mut neighbors = Vec::new();
+    let base = dir_path.trim_end_matches('/');
+
+    // N entries before cursor (file entries only).
+    let mut count = 0usize;
+    let mut i = cursor;
+    while count < PREFETCH_N && i > 0 {
+        i -= 1;
+        if entries[i].kind == "file" {
+            neighbors.push((format!("{}/{}", base, entries[i].name), entries[i].size));
+            count += 1;
+        }
+    }
+
+    // N entries after cursor (file entries only).
+    count = 0;
+    i = cursor;
+    while count < PREFETCH_N && i + 1 < entries.len() {
+        i += 1;
+        if entries[i].kind == "file" {
+            neighbors.push((format!("{}/{}", base, entries[i].name), entries[i].size));
+            count += 1;
+        }
+    }
+
+    neighbors
+}
+
+/// Build `ViewerPrefetchHintSchema` entries from the neighbor list.
+/// The FE uses these to preload direct-serving files (images/video/PDF).
+fn build_prefetch_hints(neighbors: &[(String, Option<u64>)]) -> Vec<ViewerPrefetchHintSchema> {
+    neighbors
+        .iter()
+        .map(|(path, size)| {
+            let filename = path.rsplit('/').next().unwrap_or(path.as_str()).to_string();
+            ViewerPrefetchHintSchema {
+                path: path.clone(),
+                filename,
+                file_size: *size,
+                is_local: true,
+            }
+        })
+        .collect()
 }

@@ -372,6 +372,16 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
           });
         }
       }
+      if (msg.type === "ViewerPrefetchHints") {
+        const m = msg as import("../ws/types").ViewerPrefetchHintsMessage;
+        const fsPort = new URLSearchParams(window.location.search).get("fsport") ?? "0";
+        for (const hint of m.hints) {
+          if (canUseDirect(hint.isLocal, hint.filename, hint.fileSize ?? null)) {
+            const img = new Image();
+            img.src = `http://127.0.0.1:${fsPort}${hint.path}`;
+          }
+        }
+      }
       if (msg.type === "Error") {
         const err = msg as { code: string; message: string };
         if (err.code === "NOT_A_FILE") {

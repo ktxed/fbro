@@ -3,6 +3,7 @@ pub mod file_ops;
 pub mod fp_bro;
 pub mod scan;
 pub mod search;
+pub mod viewer_prefetch;
 
 use std::collections::{HashMap, VecDeque};
 use tokio::sync::{mpsc, watch};

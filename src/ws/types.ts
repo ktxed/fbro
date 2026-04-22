@@ -444,6 +444,12 @@ export interface InputRequiredMessage {
   prompt: string;
 }
 
+export interface ViewerPrefetchHintsMessage {
+  type: "ViewerPrefetchHints";
+  timestamp: number;
+  hints: Array<{ path: string; filename: string; fileSize?: number; isLocal: boolean }>;
+}
+
 // ─── Union types ─────────────────────────────────────────────────────────────
 
 export type BEMessage =
@@ -466,6 +472,7 @@ export type BEMessage =
   | OpenWithOptionsFailedMessage
   | BroOptionsReadyMessage
   | BroOptionsFailedMessage
-  | InputRequiredMessage;
+  | InputRequiredMessage
+  | ViewerPrefetchHintsMessage;
 
 export type FEMessage = HelloMessage | IntentMessage;

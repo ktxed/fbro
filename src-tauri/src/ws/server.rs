@@ -9,6 +9,7 @@ use tokio::sync::{mpsc, Notify};
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::jobs::dirsize::DirSizeQueue;
+use crate::jobs::viewer_prefetch::ViewerPrefetchQueue;
 use crate::jobs::{DecisionResponse, JobState, ScanHandle};
 use crate::state::{PanelStatus, SharedState};
 use crate::watcher::{WatcherAction, WatcherCommand};
@@ -33,6 +34,7 @@ pub async fn start(state: SharedState, app_handle: tauri::AppHandle, quit_notify
     eprintln!("[fbro] WebSocket server listening on ws://{WS_ADDR}");
 
     let dir_size_queue = Arc::new(DirSizeQueue::new());
+    let viewer_prefetch = Arc::new(ViewerPrefetchQueue::new());
     let platform = state.lock().await.platform.clone();
     let volume_watcher = crate::platform::create_volume_watcher(platform).await;
 
@@ -43,6 +45,7 @@ pub async fn start(state: SharedState, app_handle: tauri::AppHandle, quit_notify
                 let app_handle = app_handle.clone();
                 let quit_notify = Arc::clone(&quit_notify);
                 let dir_size_queue = Arc::clone(&dir_size_queue);
+                let viewer_prefetch = Arc::clone(&viewer_prefetch);
                 let volume_watcher = Arc::clone(&volume_watcher);
                 tokio::spawn(handle_connection(
                     stream,
@@ -51,6 +54,7 @@ pub async fn start(state: SharedState, app_handle: tauri::AppHandle, quit_notify
                     app_handle,
                     quit_notify,
                     dir_size_queue,
+                    viewer_prefetch,
                     volume_watcher,
                 ));
             }
@@ -66,6 +70,7 @@ async fn handle_connection(
     app_handle: tauri::AppHandle,
     quit_notify: Arc<Notify>,
     dir_size_queue: Arc<DirSizeQueue>,
+    viewer_prefetch: Arc<ViewerPrefetchQueue>,
     volume_watcher: Arc<dyn crate::platform::VolumeWatcher>,
 ) {
     eprintln!("[fbro] Client connected: {addr}");
@@ -333,6 +338,7 @@ async fn handle_connection(
                                     decision_senders: &mut decision_senders,
                                     app_handle: &app_handle,
                                     dir_size_queue: &dir_size_queue,
+                                    viewer_prefetch: &viewer_prefetch,
                                     watcher_cmd_tx: &watcher_cmd_tx,
                                     volume_watcher: &volume_watcher,
                                 };

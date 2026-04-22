@@ -5,6 +5,7 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 
 use crate::jobs::dirsize::{DirSizeQueue, DirSizeTaskSnapshot};
+use crate::jobs::viewer_prefetch::ViewerPrefetchQueue;
 use crate::jobs::scan::run_scan;
 use crate::jobs::{DecisionResponse, JobState, ScanHandle};
 use crate::persistence::{PanelSession, SessionState};
@@ -24,6 +25,7 @@ pub(crate) struct IntentContext<'a> {
     pub decision_senders: &'a mut HashMap<String, mpsc::Sender<DecisionResponse>>,
     pub app_handle: &'a tauri::AppHandle,
     pub dir_size_queue: &'a Arc<DirSizeQueue>,
+    pub viewer_prefetch: &'a Arc<ViewerPrefetchQueue>,
     pub watcher_cmd_tx: &'a mpsc::Sender<WatcherCommand>,
     pub volume_watcher: &'a Arc<dyn crate::platform::VolumeWatcher>,
 }
