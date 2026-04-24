@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { useAppDispatch, useAppState, markHistoryNavPending, type PendingPanelHistory } from "../store";
 import type { WsClient } from "../ws/client";
+import { archiveFilePath, isArchiveSourceId, isSearchSourceId } from "../utils/sourceId";
 
 interface PanelHistoryModalProps {
   client: WsClient;
@@ -9,14 +10,14 @@ interface PanelHistoryModalProps {
 }
 
 function entryLabel(path: string, sourceId: string): { title: string; subtitle: string } {
-  if (sourceId.startsWith("zip:") || sourceId.startsWith("7z:")) {
-    const archivePath = sourceId.startsWith("zip:") ? sourceId.slice(4) : sourceId.slice(3);
-    const archiveName = archivePath.replace(/\\/g, "/").split("/").filter(Boolean).pop() ?? archivePath;
+  if (isArchiveSourceId(sourceId)) {
+    const ap = archiveFilePath(sourceId);
+    const archiveName = ap.replace(/\\/g, "/").split("/").filter(Boolean).pop() ?? ap;
     const subPath = path ? path.replace(/^\//, "") : "";
     const title = subPath ? subPath : archiveName;
     return { title, subtitle: `\u{1F4E6} ${archiveName}` };
   }
-  if (sourceId.startsWith("search:")) {
+  if (isSearchSourceId(sourceId)) {
     return { title: path || "/", subtitle: "\u{1F50D} search results" };
   }
   const leaf = path.replace(/[/\\]+$/, "").split(/[/\\]/).filter(Boolean).pop() ?? path;

@@ -1,4 +1,5 @@
 import { createContext, useContext, useReducer, type Dispatch } from "react";
+import { isSearchSourceId } from "../utils/sourceId";
 import type {
   PanelState,
   SearchParams,
@@ -455,7 +456,7 @@ function applyPatch(state: AppState, msg: StatePatchMessage): AppState {
 
     // Clean up history entries referencing removed search sources.
     const removedSearchIds = Object.keys(state.sources)
-      .filter(id => id.startsWith("search:") && !newSources[id]);
+      .filter(id => isSearchSourceId(id) && !newSources[id]);
 
     if (removedSearchIds.length > 0) {
       let ph = state.panelHistory;

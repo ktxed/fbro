@@ -3,6 +3,7 @@ import type { Dispatch } from "react";
 import { isMac } from "../utils/platform";
 import type { AppAction, AppState } from "../store";
 import { markHistoryNavPending } from "../store";
+import { isSearchSourceId } from "../utils/sourceId";
 import type { WsClient } from "../ws/client";
 import type {
   FileOpFile,
@@ -162,7 +163,7 @@ function openInfo(dispatch: Dispatch<AppAction>, panel: PanelState, state: AppSt
 
   // When the panel is on a search results source, resolve the real filesystem
   // paths from the job's accumulated results.
-  if (panel.sourceId?.startsWith("search:")) {
+  if (panel.sourceId && isSearchSourceId(panel.sourceId)) {
     const jobId = panel.sourceId.replace(/^search:/, "");
     const job = state.jobs[jobId];
     const result = job?.searchResults?.find((r) => r.name === entry.name);

@@ -4,7 +4,7 @@ use serde_json::Value;
 
 use crate::jobs::viewer_prefetch::PREFETCH_N;
 use crate::vfs::search::SearchResultsDriver;
-use crate::ws::intents::{arg_str, arg_u64};
+use crate::ws::intents::{archive_file_path, arg_str, arg_u64, is_archive_source, is_search_source};
 use crate::ws::protocol::{now, ServerMessage, ViewerPrefetchHintSchema};
 use crate::ws::runtime::{url_encode, IntentContext};
 
@@ -100,7 +100,7 @@ async fn view_file(args: &Value, ctx: &mut IntentContext<'_>) {
 
     // When viewing from a search results source, resolve the real file path
     // and real source_id so the viewer uses the local filesystem driver.
-    let (effective_source_id, full_path) = if parsed.source_id.starts_with("search:") {
+    let (effective_source_id, full_path) = if is_search_source(&parsed.source_id) {
         let state_guard = ctx.state.lock().await;
         let resolved = state_guard
             .drivers
@@ -129,7 +129,7 @@ async fn view_file(args: &Value, ctx: &mut IntentContext<'_>) {
                 .unwrap_or_else(|| parsed.source_id.clone());
             (best_source, format!("{}/{}", parsed.path.trim_end_matches('/'), parsed.filename))
         }
-    } else if parsed.source_id.starts_with("zip:") || parsed.source_id.starts_with("7z:") {
+    } else if is_archive_source(&parsed.source_id) {
         let inner_path = {
             let p = parsed.path.trim_end_matches('/');
             if p.is_empty() {
@@ -274,7 +274,7 @@ async fn viewer_navigate(args: &Value, ctx: &mut IntentContext<'_>) {
                 // file rather than hitting the stub search driver.
                 let (effective_path, effective_source_id) = {
                     let state_guard = ctx.state.lock().await;
-                    if source_id.starts_with("search:") {
+                    if is_search_source(&source_id) {
                         state_guard
                             .drivers
                             .get(&source_id)
@@ -289,7 +289,7 @@ async fn viewer_navigate(args: &Value, ctx: &mut IntentContext<'_>) {
                                     source_id.clone(),
                                 )
                             })
-                    } else if source_id.starts_with("zip:") || source_id.starts_with("7z:") {
+                    } else if is_archive_source(&source_id) {
                         let inner_path = {
                             let p = dir_path.trim_end_matches('/');
                             if p.is_empty() {
@@ -375,7 +375,7 @@ async fn viewer_navigate(args: &Value, ctx: &mut IntentContext<'_>) {
 async fn read_file_chunk(args: &Value, ctx: &mut IntentContext<'_>) {
     let parsed = ReadChunkArgs::from_args(args);
 
-    let (effective_source_id, effective_path) = if parsed.source_id.starts_with("search:") {
+    let (effective_source_id, effective_path) = if is_search_source(&parsed.source_id) {
         let filename = parsed
             .path
             .rsplit_once('/')
@@ -514,10 +514,7 @@ fn collect_neighbors(
     source_id: &str,
 ) -> Vec<(String, Option<u64>)> {
     // Only prefetch from local real sources.
-    if source_id.starts_with("zip:")
-        || source_id.starts_with("7z:")
-        || source_id.starts_with("search:")
-    {
+    if is_archive_source(source_id) || is_search_source(source_id) {
         return vec![];
     }
 

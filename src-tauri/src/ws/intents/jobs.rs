@@ -14,7 +14,7 @@ use crate::jobs::{
 use crate::platform::{ExternalClipboardOp, ExternalClipboardPayload};
 use crate::state::{ShadowSource, Source};
 use crate::vfs::search::SearchResultsDriver;
-use crate::ws::intents::{arg_bool, arg_str};
+use crate::ws::intents::{arg_bool, arg_str, is_search_source};
 use crate::ws::protocol::{now, FileOpFileSchema, JobStartSchema, ServerMessage};
 use crate::ws::runtime::{
     build_sources_json, navigate_to, rescan_panel, resolve_panel_id, selected_names_for,
@@ -727,7 +727,7 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
             // We must resolve the real driver from those paths rather than
             // using the search driver (which can't do I/O).
             let (driver, representative_source) =
-                if source_panel.source_id.starts_with("search:") {
+                if is_search_source(&source_panel.source_id) {
                     let real_paths: Vec<String> =
                         raw_files.iter().map(|f| f.source_path.clone()).collect();
                     let (real_source_id, real_driver) =
@@ -1613,7 +1613,7 @@ async fn remove_search_source(scope: &Value, args: &Value, ctx: &mut IntentConte
         .unwrap_or("")
         .to_string();
 
-    if source_id.is_empty() || !source_id.starts_with("search:") {
+    if source_id.is_empty() || !is_search_source(&source_id) {
         return;
     }
 

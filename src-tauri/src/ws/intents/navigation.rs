@@ -7,7 +7,7 @@ use serde_json::Value;
 use crate::state::{ShadowSource, Source};
 use crate::vfs::VfsDriver;
 use crate::watcher::WatcherCommand;
-use crate::ws::intents::arg_str;
+use crate::ws::intents::{archive_file_path, arg_str, is_archive_source, is_search_source};
 use crate::ws::protocol::{now, OpenWithAppSchema, ServerMessage};
 use crate::ws::runtime::{
     build_sources_json, navigate_to, rescan_panel, resolve_panel_id, IntentContext,
@@ -130,7 +130,7 @@ async fn open_entry(scope: &Value, ctx: &mut IntentContext<'_>) {
     if entry_kind == "directory" {
         // When on a search results source, navigating into a directory result
         // should exit the search source and enter the real filesystem location.
-        if source_id.starts_with("search:") {
+        if is_search_source(&source_id) {
             // Switch the panel to the real source for this path before navigating.
             let real_source_id = {
                 let state_guard = ctx.state.lock().await;
@@ -168,10 +168,10 @@ async fn open_entry(scope: &Value, ctx: &mut IntentContext<'_>) {
             ctx.watcher_cmd_tx,
         )
         .await;
-    } else if entry_kind == "file" && is_zip_like(&entry_name) && (!is_in_shadow || source_id.starts_with("search:")) {
+    } else if entry_kind == "file" && is_zip_like(&entry_name) && (!is_in_shadow || is_search_source(&source_id)) {
         // Enter zip archive as a shadow filesystem.
         enter_zip_archive(&panel_id, &new_path, &entry_name, ctx).await;
-    } else if entry_kind == "file" && is_7z_like(&entry_name) && (!is_in_shadow || source_id.starts_with("search:")) {
+    } else if entry_kind == "file" && is_7z_like(&entry_name) && (!is_in_shadow || is_search_source(&source_id)) {
         // Enter 7z archive as a shadow filesystem.
         enter_7z_archive(&panel_id, &new_path, &entry_name, ctx).await;
     }
@@ -238,7 +238,7 @@ async fn enter_7z_archive(
             parent_path,
             archive_path: archive_path.to_string(),
             cursor_hint: Some(archive_name.to_string()),
-            cursor_index: if parent_source_id.starts_with("search:") { Some(cursor_pos) } else { None },
+            cursor_index: if is_search_source(&parent_source_id) { Some(cursor_pos) } else { None },
             parent_shadow: prev_shadow.map(Box::new),
         };
 
@@ -347,7 +347,7 @@ async fn enter_zip_archive(
             parent_path,
             archive_path: archive_path.to_string(),
             cursor_hint: Some(archive_name.to_string()),
-            cursor_index: if parent_source_id.starts_with("search:") { Some(cursor_pos) } else { None },
+            cursor_index: if is_search_source(&parent_source_id) { Some(cursor_pos) } else { None },
             parent_shadow: prev_shadow.map(Box::new),
         };
 
@@ -450,9 +450,7 @@ async fn teardown_shadow_source(
 
         // Search result sources have their own lifecycle (RemoveSearchSource /
         // the jobs bar × button) — never auto-remove them on navigate-away.
-        let is_search_source = old_source_id.starts_with("search:");
-
-        if !still_in_use && !is_search_source {
+        if !still_in_use && !is_search_source(&old_source_id) {
             state_guard.sources.remove(&old_source_id);
             state_guard.drivers.remove(&old_source_id);
         }
@@ -662,7 +660,7 @@ async fn open_file(scope: &Value, ctx: &mut IntentContext<'_>) {
     };
     if let Some(entry) = entry {
         if entry.kind != "directory" {
-            if source_id.starts_with("search:") {
+            if is_search_source(&source_id) {
                 // Search results source: resolve_real_info gives the real
                 // full_path, so open it directly via the platform.
                 let real_full_path = {
@@ -1180,18 +1178,14 @@ async fn navigate_to_history_entry(args: &Value, ctx: &mut IntentContext<'_>) {
         })
     };
 
-    if target_source_id.starts_with("zip:") || target_source_id.starts_with("7z:") {
+    if is_archive_source(&target_source_id) {
         // Archive: driver must still be mounted.
         let driver_exists = ctx.state.lock().await.drivers.contains_key(&target_source_id);
         if !driver_exists {
             let _ = send_unavailable("Archive is no longer available.");
             return;
         }
-        let archive_path = target_source_id
-            .strip_prefix("zip:")
-            .or_else(|| target_source_id.strip_prefix("7z:"))
-            .unwrap_or(&target_source_id)
-            .to_string();
+        let archive_path = archive_file_path(&target_source_id).to_string();
         let (parent_source_id, parent_path) = {
             let guard = ctx.state.lock().await;
             let panel = match guard.panels.get(&panel_id) {
@@ -1228,7 +1222,7 @@ async fn navigate_to_history_entry(args: &Value, ctx: &mut IntentContext<'_>) {
             ctx.watcher_cmd_tx,
         )
         .await;
-    } else if target_source_id.starts_with("search:") {
+    } else if is_search_source(&target_source_id) {
         // Search source: must still be available.
         let driver_exists = ctx.state.lock().await.drivers.contains_key(&target_source_id);
         if !driver_exists {

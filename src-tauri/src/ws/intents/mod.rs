@@ -64,6 +64,22 @@ pub async fn dispatch(name: &str, scope: &Value, args: &Value, ctx: &mut IntentC
     }
 }
 
+pub(crate) fn is_archive_source(source_id: &str) -> bool {
+    source_id.starts_with("zip:") || source_id.starts_with("7z:")
+}
+
+pub(crate) fn is_search_source(source_id: &str) -> bool {
+    source_id.starts_with("search:")
+}
+
+/// Strips the archive prefix ("zip:" or "7z:") and returns the filesystem path.
+pub(crate) fn archive_file_path(source_id: &str) -> &str {
+    source_id
+        .strip_prefix("zip:")
+        .or_else(|| source_id.strip_prefix("7z:"))
+        .unwrap_or(source_id)
+}
+
 fn arg_str<'a>(args: &'a Value, key: &str) -> Option<&'a str> {
     args.get(key).and_then(Value::as_str)
 }

@@ -4,6 +4,7 @@ import type { BEMessage, FileChunkMessage, ViewerFileChangedMessage } from "../w
 import { ImageViewer, IMAGE_LIMIT } from "../viewers/ImageViewer";
 import { detectRenderer, isImageExt } from "../viewers/media";
 import { DirectFileViewer, canUseDirect } from "../viewers/DirectFileViewer";
+import { isArchiveSourceId } from "../utils/sourceId";
 
 const SMALL_LIMIT = 1 * 1024 * 1024;  // 1 MiB — files at or below this are loaded fully
 const CHUNK_SIZE  = 65536;  // 64 KiB — buffer window for large files
@@ -516,7 +517,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
 
       // F4 / E — open in preferred editor (guarded: must not be in find input or archive)
       if (e.key === "F4" || (e.key === "e" && !ctrl && !e.shiftKey && !e.altKey)) {
-        if (!curSourceIdRef.current.startsWith("zip:") && !curSourceIdRef.current.startsWith("7z:")) {
+        if (!isArchiveSourceId(curSourceIdRef.current)) {
           // curPathRef.current is the full file path (e.g. /home/user/docs/file.txt).
           // edit_file expects path=directory + filename, so strip the filename.
           const fullFilePath = curPathRef.current;
@@ -971,7 +972,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
         {loading && <span style={{ color: "var(--accent)" }}>loading…</span>}
         <span className="viewer__status-nav">
           {(() => {
-            const canEdit = !curSourceId.startsWith("zip:") && !curSourceId.startsWith("7z:");
+            const canEdit = !isArchiveSourceId(curSourceId);
             const editHint = canEdit ? " · e/F4 edit" : "";
             if (isImageMode) return `z zoom · j/k prev/next file · 1 text · 2 image · 3 hex${editHint}`;
             if (effectiveMode === "text") return `↑↓ PgDn/PgUp scroll · j/k prev/next · 1 text · 2 image · 3 hex · s dos · w wrap · f find${editHint}`;
