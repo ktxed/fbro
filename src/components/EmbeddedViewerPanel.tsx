@@ -215,7 +215,7 @@ export function EmbeddedViewerPanel({ sourcePanelId, state }: Props) {
   })();
 
   return (
-    <div className="embedded-viewer">
+    <div className="embedded-viewer" onMouseDown={(e) => e.preventDefault()}>
       <div className="embedded-viewer__header">{headerLabel}</div>
       <div className="embedded-viewer__content" style={{ height: "100%" }}>
         {viewMode.kind === "empty" && (
