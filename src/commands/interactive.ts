@@ -2,6 +2,7 @@ import type { Dispatch } from "react";
 
 import { isMac } from "../utils/platform";
 import type { AppAction, AppState } from "../store";
+import { markHistoryNavPending } from "../store";
 import type { WsClient } from "../ws/client";
 import type {
   FileOpFile,
@@ -61,6 +62,8 @@ export const PANEL_SHORTCUT_COMMAND_IDS = [
   "panel.navigate_home",
   "panel.navigate_to_path",
   "panel.history.open",
+  "panel.history.back",
+  "panel.history.forward",
   "panel.pass_to_bro",
   "app.open_terminal",
   "panel.focus.switch",
@@ -617,6 +620,30 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
         },
       });
       return true;
+    case "panel.history.back": {
+      if (!focused) return false;
+      const hb = state.panelHistory[focused.panelId];
+      if (!hb || hb.cursor <= 0) return false;
+      const targetB = hb.entries[hb.cursor - 1];
+      dispatch({ type: "NAV_HISTORY_BACK", panelId: focused.panelId });
+      markHistoryNavPending(focused.panelId);
+      client.sendIntent("NavigateToHistoryEntry", undefined, {
+        panelId: focused.panelId, path: targetB.path, sourceId: targetB.sourceId,
+      });
+      return true;
+    }
+    case "panel.history.forward": {
+      if (!focused) return false;
+      const hf = state.panelHistory[focused.panelId];
+      if (!hf || hf.cursor >= hf.entries.length - 1) return false;
+      const targetF = hf.entries[hf.cursor + 1];
+      dispatch({ type: "NAV_HISTORY_FORWARD", panelId: focused.panelId });
+      markHistoryNavPending(focused.panelId);
+      client.sendIntent("NavigateToHistoryEntry", undefined, {
+        panelId: focused.panelId, path: targetF.path, sourceId: targetF.sourceId,
+      });
+      return true;
+    }
     case "panel.focus.switch": {
       if (!focused) return false;
       const target = getOtherPanelId(state, focused.panelId);

@@ -28,6 +28,7 @@ pub(crate) async fn handle(name: &str, scope: &Value, args: &Value, ctx: &mut In
         "ListOpenWithApps" => list_open_with_apps(args, ctx).await,
         "LaunchOpenWithApp" => launch_open_with_app(args, ctx).await,
         "ProvideInput" => provide_input(args, ctx).await,
+        "NavigateToHistoryEntry" => navigate_to_history_entry(args, ctx).await,
         _ => {}
     }
 }
@@ -1101,6 +1102,203 @@ async fn navigate_up(scope: &Value, ctx: &mut IntentContext<'_>) {
                 .await;
             }
         }
+    }
+}
+
+/// Navigate to a specific (path, sourceId) history entry, handling source switching,
+/// archive re-entry, and search source restoration.
+async fn navigate_to_history_entry(args: &Value, ctx: &mut IntentContext<'_>) {
+    let panel_id = arg_str(args, "panelId").unwrap_or("").to_string();
+    let target_path = arg_str(args, "path").unwrap_or("").to_string();
+    let target_source_id = arg_str(args, "sourceId").unwrap_or("").to_string();
+
+    if panel_id.is_empty() || target_source_id.is_empty() {
+        return;
+    }
+
+    // Read current panel state.
+    let (current_source_id, in_shadow) = {
+        let guard = ctx.state.lock().await;
+        let panel = match guard.panels.get(&panel_id) {
+            Some(p) => p,
+            None => return,
+        };
+        (panel.source_id.clone(), panel.shadow_source.is_some())
+    };
+
+    // If target is the same source, navigate within it directly (works for archives too).
+    if target_source_id == current_source_id {
+        navigate_to(
+            &panel_id,
+            &target_path,
+            None,
+            None,
+            ctx.state,
+            ctx.tx,
+            ctx.scan_handles,
+            ctx.dir_size_queue,
+            ctx.watcher_cmd_tx,
+        )
+        .await;
+        return;
+    }
+
+    // Exit any current shadow context before switching to a different source.
+    if in_shadow {
+        teardown_shadow_source(&panel_id, ctx).await;
+
+        // After teardown, re-check: if we're now on the target source, navigate there.
+        let post_teardown_source = {
+            let guard = ctx.state.lock().await;
+            guard.panels.get(&panel_id).map(|p| p.source_id.clone())
+        };
+        if post_teardown_source.as_deref() == Some(&target_source_id) {
+            navigate_to(
+                &panel_id,
+                &target_path,
+                None,
+                None,
+                ctx.state,
+                ctx.tx,
+                ctx.scan_handles,
+                ctx.dir_size_queue,
+                ctx.watcher_cmd_tx,
+            )
+            .await;
+            return;
+        }
+    }
+
+    // Helper: send "unavailable" error.
+    let send_unavailable = |message: &str| {
+        ctx.tx.try_send(ServerMessage::Error {
+            timestamp: now(),
+            code: "HISTORY_ENTRY_UNAVAILABLE".to_string(),
+            message: message.to_string(),
+            recoverable: true,
+            extra: Some(serde_json::json!({ "panelId": panel_id })),
+        })
+    };
+
+    if target_source_id.starts_with("zip:") || target_source_id.starts_with("7z:") {
+        // Archive: driver must still be mounted.
+        let driver_exists = ctx.state.lock().await.drivers.contains_key(&target_source_id);
+        if !driver_exists {
+            let _ = send_unavailable("Archive is no longer available.");
+            return;
+        }
+        let archive_path = target_source_id
+            .strip_prefix("zip:")
+            .or_else(|| target_source_id.strip_prefix("7z:"))
+            .unwrap_or(&target_source_id)
+            .to_string();
+        let (parent_source_id, parent_path) = {
+            let guard = ctx.state.lock().await;
+            let panel = match guard.panels.get(&panel_id) {
+                Some(p) => p,
+                None => return,
+            };
+            (panel.source_id.clone(), panel.path.clone())
+        };
+        {
+            let mut guard = ctx.state.lock().await;
+            let panel = match guard.panels.get_mut(&panel_id) {
+                Some(p) => p,
+                None => return,
+            };
+            panel.source_id = target_source_id.clone();
+            panel.shadow_source = Some(ShadowSource {
+                parent_source_id,
+                parent_path,
+                archive_path,
+                cursor_hint: None,
+                cursor_index: None,
+                parent_shadow: None,
+            });
+        }
+        navigate_to(
+            &panel_id,
+            &target_path,
+            None,
+            None,
+            ctx.state,
+            ctx.tx,
+            ctx.scan_handles,
+            ctx.dir_size_queue,
+            ctx.watcher_cmd_tx,
+        )
+        .await;
+    } else if target_source_id.starts_with("search:") {
+        // Search source: must still be available.
+        let driver_exists = ctx.state.lock().await.drivers.contains_key(&target_source_id);
+        if !driver_exists {
+            let _ = send_unavailable("Search results are no longer available.");
+            return;
+        }
+        let (parent_source_id, parent_path) = {
+            let guard = ctx.state.lock().await;
+            let panel = match guard.panels.get(&panel_id) {
+                Some(p) => p,
+                None => return,
+            };
+            (panel.source_id.clone(), panel.path.clone())
+        };
+        {
+            let mut guard = ctx.state.lock().await;
+            let panel = match guard.panels.get_mut(&panel_id) {
+                Some(p) => p,
+                None => return,
+            };
+            panel.source_id = target_source_id.clone();
+            panel.shadow_source = Some(ShadowSource {
+                parent_source_id,
+                parent_path,
+                archive_path: target_source_id.clone(),
+                cursor_hint: None,
+                cursor_index: None,
+                parent_shadow: None,
+            });
+        }
+        navigate_to(
+            &panel_id,
+            &target_path,
+            None,
+            None,
+            ctx.state,
+            ctx.tx,
+            ctx.scan_handles,
+            ctx.dir_size_queue,
+            ctx.watcher_cmd_tx,
+        )
+        .await;
+    } else {
+        // Regular source switch.
+        let driver_exists = ctx.state.lock().await.drivers.contains_key(&target_source_id);
+        if !driver_exists {
+            let _ = send_unavailable("Source is no longer available.");
+            return;
+        }
+        {
+            let mut guard = ctx.state.lock().await;
+            let panel = match guard.panels.get_mut(&panel_id) {
+                Some(p) => p,
+                None => return,
+            };
+            panel.source_id = target_source_id.clone();
+            panel.shadow_source = None;
+        }
+        navigate_to(
+            &panel_id,
+            &target_path,
+            None,
+            None,
+            ctx.state,
+            ctx.tx,
+            ctx.scan_handles,
+            ctx.dir_size_queue,
+            ctx.watcher_cmd_tx,
+        )
+        .await;
     }
 }
 

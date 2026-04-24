@@ -29,6 +29,18 @@ import type {
 
 // ─── State ───────────────────────────────────────────────────────────────────
 
+const MAX_HISTORY = 50;
+
+export interface HistoryEntry { path: string; sourceId: string; }
+export interface PanelHistoryState { entries: HistoryEntry[]; cursor: number; }
+
+// Side-channel flag: panels whose next navigation StatePatch must NOT push a
+// new history entry (because the navigation was triggered by back/forward/jump).
+const pendingHistoryNavPanels = new Set<string>();
+export function markHistoryNavPending(panelId: string) {
+  pendingHistoryNavPanels.add(panelId);
+}
+
 export interface PendingRename {
   sourcePanel: string;
   sourcePath: string; // full path of the file being renamed
@@ -148,7 +160,7 @@ export interface AppState {
   fileServerPort: number;
   layout: { panels: string[] };
   panels: Record<string, PanelState>;
-  panelHistory: Record<string, string[]>;
+  panelHistory: Record<string, PanelHistoryState>;
   sources: Record<string, Source>;
   focus: string;
   jobs: Record<string, Job>;
@@ -246,20 +258,10 @@ export type AppAction =
   | { type: "CLOSE_TRANSIENT_HINT" }
   | { type: "SHOW_TRANSIENT_HINT"; message: string }
   | { type: "CLOSE_INPUT" }
-  | { type: "TOGGLE_EMBEDDED_VIEWER" };
-
-function pushPanelHistoryEntry(
-  panelHistory: Record<string, string[]>,
-  panelId: string,
-  previousPath: string,
-  nextPath: string,
-) {
-  if (!previousPath || previousPath === nextPath) return panelHistory;
-
-  const current = panelHistory[panelId] ?? [];
-  const next = [previousPath, ...current.filter((path) => path !== previousPath)].slice(0, 20);
-  return { ...panelHistory, [panelId]: next };
-}
+  | { type: "TOGGLE_EMBEDDED_VIEWER" }
+  | { type: "NAV_HISTORY_BACK";    panelId: string }
+  | { type: "NAV_HISTORY_FORWARD"; panelId: string }
+  | { type: "NAV_HISTORY_JUMP";    panelId: string; entryIndex: number };
 
 // ─── Reducer ─────────────────────────────────────────────────────────────────
 
@@ -285,7 +287,12 @@ function applySnapshot(state: AppState, msg: StateSnapshotMessage): AppState {
     }
     next.panels = panels;
     next.panelHistory = Object.fromEntries(
-      Object.keys(panels).map((panelId) => [panelId, state.panelHistory[panelId] ?? []]),
+      Object.keys(panels).map((panelId) => {
+        const existing = state.panelHistory[panelId];
+        if (existing) return [panelId, existing];
+        const p = panels[panelId];
+        return [panelId, { entries: [{ path: p.path, sourceId: p.sourceId }], cursor: 0 }];
+      }),
     );
   }
   if (domains.jobs) {
@@ -402,11 +409,40 @@ function applyPatch(state: AppState, msg: StatePatchMessage): AppState {
       updated = { ...updated, shadowSource: msg.patch.shadowSource === null ? undefined : msg.patch.shadowSource as PanelState["shadowSource"] };
     }
 
-    const nextHistory = updated.path !== panel.path
-      ? pushPanelHistoryEntry(state.panelHistory, panelId, panel.path, updated.path)
-      : state.panelHistory;
+    const locationChanged = updated.path !== panel.path
+      || (msg.patch.sourceId !== undefined && updated.sourceId !== panel.sourceId);
 
-    return { ...state, panels: { ...state.panels, [panelId]: updated }, panelHistory: nextHistory };
+    if (locationChanged) {
+      if (pendingHistoryNavPanels.has(panelId)) {
+        pendingHistoryNavPanels.delete(panelId);
+        // cursor already moved by the dispatch; just commit the panel state
+        return { ...state, panels: { ...state.panels, [panelId]: updated } };
+      }
+      const newEntry: HistoryEntry = { path: updated.path, sourceId: updated.sourceId };
+      const hist: PanelHistoryState = state.panelHistory[panelId]
+        ?? { entries: [{ path: panel.path, sourceId: panel.sourceId }], cursor: 0 };
+      const nextFwd = hist.entries[hist.cursor + 1];
+      let newHist: PanelHistoryState;
+      if (nextFwd?.path === newEntry.path && nextFwd?.sourceId === newEntry.sourceId) {
+        // Matches next-forward entry → advance cursor, preserve forward history
+        newHist = { ...hist, cursor: hist.cursor + 1 };
+      } else if (newEntry.path !== hist.entries[hist.cursor]?.path
+              || newEntry.sourceId !== hist.entries[hist.cursor]?.sourceId) {
+        // Distinct new location → truncate forward history, push new entry
+        const base = [...hist.entries.slice(0, hist.cursor + 1), newEntry];
+        const capped = base.length > MAX_HISTORY ? base.slice(1) : base;
+        newHist = { entries: capped, cursor: capped.length - 1 };
+      } else {
+        newHist = hist; // same as current position — no change
+      }
+      return {
+        ...state,
+        panels: { ...state.panels, [panelId]: updated },
+        panelHistory: { ...state.panelHistory, [panelId]: newHist },
+      };
+    }
+
+    return { ...state, panels: { ...state.panels, [panelId]: updated } };
   }
 
   if (msg.domain === "focus") {
@@ -414,9 +450,32 @@ function applyPatch(state: AppState, msg: StatePatchMessage): AppState {
   }
 
   if (msg.domain === "sources") {
-    const sources: Record<string, Source> = {};
-    for (const s of msg.patch.sources as Source[]) sources[s.id] = s;
-    return { ...state, sources };
+    const newSources: Record<string, Source> = {};
+    for (const s of msg.patch.sources as Source[]) newSources[s.id] = s;
+
+    // Clean up history entries referencing removed search sources.
+    const removedSearchIds = Object.keys(state.sources)
+      .filter(id => id.startsWith("search:") && !newSources[id]);
+
+    if (removedSearchIds.length > 0) {
+      let ph = state.panelHistory;
+      for (const rid of removedSearchIds) {
+        for (const [pid, hist] of Object.entries(ph)) {
+          const filtered = hist.entries.filter(e => e.sourceId !== rid);
+          if (filtered.length === hist.entries.length) continue;
+          const removedBefore = hist.entries.slice(0, hist.cursor).filter(e => e.sourceId === rid).length;
+          const cursorGone = hist.entries[hist.cursor]?.sourceId === rid;
+          const rawCursor = cursorGone
+            ? Math.max(0, hist.cursor - removedBefore - 1)
+            : hist.cursor - removedBefore;
+          const safeEntries = filtered.length > 0 ? filtered : [hist.entries[hist.cursor]];
+          ph = { ...ph, [pid]: { entries: safeEntries, cursor: Math.min(rawCursor, safeEntries.length - 1) } };
+        }
+      }
+      return { ...state, sources: newSources, panelHistory: ph };
+    }
+
+    return { ...state, sources: newSources };
   }
 
   if (msg.domain === "dirSizeQueue") {
@@ -907,6 +966,22 @@ function reducer(state: AppState, action: AppAction): AppState {
     case "TOGGLE_EMBEDDED_VIEWER":
       if (state.embeddedViewer) return { ...state, embeddedViewer: null };
       return { ...state, embeddedViewer: { sourcePanelId: state.focus } };
+    case "NAV_HISTORY_BACK": {
+      const h = state.panelHistory[action.panelId];
+      if (!h || h.cursor <= 0) return state;
+      return { ...state, panelHistory: { ...state.panelHistory, [action.panelId]: { ...h, cursor: h.cursor - 1 } } };
+    }
+    case "NAV_HISTORY_FORWARD": {
+      const h = state.panelHistory[action.panelId];
+      if (!h || h.cursor >= h.entries.length - 1) return state;
+      return { ...state, panelHistory: { ...state.panelHistory, [action.panelId]: { ...h, cursor: h.cursor + 1 } } };
+    }
+    case "NAV_HISTORY_JUMP": {
+      const h = state.panelHistory[action.panelId];
+      if (!h) return state;
+      const idx = Math.max(0, Math.min(action.entryIndex, h.entries.length - 1));
+      return { ...state, panelHistory: { ...state.panelHistory, [action.panelId]: { ...h, cursor: idx } } };
+    }
     case "OPEN_SEARCH":
       return { ...state, pendingSearch: action.search };
     case "CLOSE_SEARCH":
