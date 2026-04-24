@@ -363,6 +363,8 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
         setLoading(!direct);
         setBufferBaseLine(1);
         bufRangeRef.current = { offset: 0, end: 0, eof: false };
+        afterLoadRef.current = "top";
+        pendingJumpRef.current = null;
         setBufSeq(0);
         if (!direct) {
           // Request first chunk of new file
