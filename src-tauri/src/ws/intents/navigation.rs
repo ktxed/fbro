@@ -1179,20 +1179,73 @@ async fn navigate_to_history_entry(args: &Value, ctx: &mut IntentContext<'_>) {
     };
 
     if is_archive_source(&target_source_id) {
-        // Archive: driver must still be mounted.
-        let driver_exists = ctx.state.lock().await.drivers.contains_key(&target_source_id);
-        if !driver_exists {
-            let _ = send_unavailable("Archive is no longer available.");
+        let archive_path = archive_file_path(&target_source_id).to_string();
+        let archive_name = Path::new(&archive_path)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(&archive_path)
+            .to_string();
+
+        if !Path::new(&archive_path).exists() {
+            let _ = send_unavailable("Archive file no longer exists.");
             return;
         }
-        let archive_path = archive_file_path(&target_source_id).to_string();
+
+        // The driver is removed when the user exits an archive (teardown_shadow_source),
+        // so re-mount it from disk if it is no longer in state.
+        let needs_mount = !ctx.state.lock().await.drivers.contains_key(&target_source_id);
+        if needs_mount {
+            let driver: Arc<dyn VfsDriver> = if target_source_id.starts_with("7z:") {
+                match crate::vfs::seven_zip::SevenZipFsDriver::new(&archive_path) {
+                    Ok(d) => Arc::new(d),
+                    Err(e) => { let _ = send_unavailable(&format!("Cannot open archive: {e}")); return; }
+                }
+            } else {
+                match crate::vfs::zip::ZipFsDriver::new(&archive_path) {
+                    Ok(d) => Arc::new(d),
+                    Err(e) => { let _ = send_unavailable(&format!("Cannot open archive: {e}")); return; }
+                }
+            };
+            let mut guard = ctx.state.lock().await;
+            guard.sources.entry(target_source_id.clone()).or_insert_with(|| Source {
+                id: target_source_id.clone(),
+                name: archive_name.clone(),
+                kind: "archive".to_string(),
+                supports: vec![
+                    "ListEntries".to_string(),
+                    "OpenFolder".to_string(),
+                    "CopySelection".to_string(),
+                ],
+                root_path: String::new(),
+                mounted: true,
+                device_path: None,
+                shadow: true,
+            });
+            guard.drivers.entry(target_source_id.clone()).or_insert(driver);
+        }
+
+        // Notify the FE of the (possibly newly registered) archive source.
+        let sources_json = {
+            let guard = ctx.state.lock().await;
+            build_sources_json(&guard)
+        };
+        let _ = ctx
+            .tx
+            .send(ServerMessage::StatePatch {
+                timestamp: now(),
+                domain: "sources".to_string(),
+                entity_id: None,
+                version: 0,
+                patch: serde_json::json!({ "sources": sources_json }),
+            })
+            .await;
+
         let (parent_source_id, parent_path) = {
             let guard = ctx.state.lock().await;
-            let panel = match guard.panels.get(&panel_id) {
-                Some(p) => p,
+            match guard.panels.get(&panel_id) {
+                Some(p) => (p.source_id.clone(), p.path.clone()),
                 None => return,
-            };
-            (panel.source_id.clone(), panel.path.clone())
+            }
         };
         {
             let mut guard = ctx.state.lock().await;
