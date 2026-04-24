@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import { WsClient } from "../ws/client";
 import type { AppState } from "../store";
-import type { FileChunkMessage } from "../ws/types";
+import type { FileChunkMessage, ViewerPrefetchHintsMessage } from "../ws/types";
 import { canUseDirect, DirectFileViewer } from "../viewers/DirectFileViewer";
 import { ImageViewer, IMAGE_LIMIT } from "../viewers/ImageViewer";
 import { isImageExt } from "../viewers/media";
@@ -69,6 +69,8 @@ export function EmbeddedViewerPanel({ sourcePanelId, state }: Props) {
   const [viewMode, setViewMode] = useState<ViewMode>({ kind: "empty" });
   const clientRef = useRef<WsClient | null>(null);
   const pendingPathRef = useRef<string | null>(null);
+  const fsPortRef = useRef(state.fileServerPort);
+  fsPortRef.current = state.fileServerPort;
   // Tracks the path we have already loaded/are loading — prevents re-requesting
   // the same file when the panel receives unrelated state patches (which increment
   // `version`) while the cursor hasn't actually moved.
@@ -81,22 +83,37 @@ export function EmbeddedViewerPanel({ sourcePanelId, state }: Props) {
     clientRef.current = client;
 
     client.onMessage = (msg) => {
-      if (msg.type !== "FileChunk") return;
-      const m = msg as FileChunkMessage;
-      // Ignore stale chunks (cursor moved while chunk was in flight).
-      if (m.path !== pendingPathRef.current) return;
-      pendingPathRef.current = null;
+      if (msg.type === "FileChunk") {
+        const m = msg as FileChunkMessage;
+        // Ignore stale chunks (cursor moved while chunk was in flight).
+        if (m.path !== pendingPathRef.current) return;
+        pendingPathRef.current = null;
 
-      const bytes = hexDecode(m.data);
-      setViewMode(prev => {
-        if (prev.kind !== "loading") return prev;
-        const { file } = prev;
-        const isBin = detectBinary(bytes);
-        const rendMode = isImageExt(file.filename)
-          ? (file.fileSize !== null && file.fileSize > IMAGE_LIMIT ? "hex" : "image")
-          : isBin ? "hex" : "text";
-        return { kind: "ready", file, buffer: bytes, mode: rendMode };
-      });
+        const bytes = hexDecode(m.data);
+        setViewMode(prev => {
+          if (prev.kind !== "loading") return prev;
+          const { file } = prev;
+          const isBin = detectBinary(bytes);
+          const rendMode = isImageExt(file.filename)
+            ? (file.fileSize !== null && file.fileSize > IMAGE_LIMIT ? "hex" : "image")
+            : isBin ? "hex" : "text";
+          return { kind: "ready", file, buffer: bytes, mode: rendMode };
+        });
+
+        // Schedule BE prefetch for neighboring files and receive FE preload hints.
+        client.sendIntent("PrefetchViewerNeighbors", undefined, { panelId: sourcePanelId });
+        return;
+      }
+
+      if (msg.type === "ViewerPrefetchHints") {
+        const m = msg as ViewerPrefetchHintsMessage;
+        for (const hint of m.hints) {
+          if (canUseDirect(hint.isLocal, hint.filename, hint.fileSize ?? null)) {
+            const img = new Image();
+            img.src = `http://127.0.0.1:${fsPortRef.current}${hint.path}`;
+          }
+        }
+      }
     };
 
     client.connect();
@@ -181,6 +198,7 @@ export function EmbeddedViewerPanel({ sourcePanelId, state }: Props) {
       if (canUseDirect(isLocal, entry.name, fileSize)) {
         pendingPathRef.current = null;
         setViewMode({ kind: "direct", file: info });
+        clientRef.current?.sendIntent("PrefetchViewerNeighbors", undefined, { panelId: sourcePanelId });
         return;
       }
 

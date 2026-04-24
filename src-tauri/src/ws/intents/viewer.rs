@@ -15,6 +15,7 @@ pub(crate) async fn handle(name: &str, args: &Value, ctx: &mut IntentContext<'_>
         "CloseViewerWindow" => close_viewer_window(args, ctx),
         "ViewerNavigate" => viewer_navigate(args, ctx).await,
         "ReadFileChunk" => read_file_chunk(args, ctx).await,
+        "PrefetchViewerNeighbors" => prefetch_viewer_neighbors(args, ctx).await,
         _ => {}
     }
 }
@@ -501,6 +502,52 @@ async fn read_file_chunk(args: &Value, ctx: &mut IntentContext<'_>) {
             Err(_) => {}
         }
     }
+}
+
+/// Schedule BE prefetch for neighbors of the panel's current entry, and send
+/// FE preload hints for directly-served files (images/video/PDF).
+/// Called by the embedded viewer after each successful file load.
+async fn prefetch_viewer_neighbors(args: &Value, ctx: &mut IntentContext<'_>) {
+    let panel_id = arg_str(args, "panelId").unwrap_or("").to_string();
+    if panel_id.is_empty() {
+        return;
+    }
+
+    let (neighbors, source_id, driver) = {
+        let state_guard = ctx.state.lock().await;
+        let panel = match state_guard.panels.get(&panel_id) {
+            Some(p) => p,
+            None => return,
+        };
+        let source_id = panel.source_id.clone();
+        let driver = state_guard.drivers.get(&source_id).cloned();
+        let neighbors = match driver.as_ref() {
+            Some(drv) if drv.is_local() => {
+                collect_neighbors(&panel.entries, panel.cursor, &panel.path, &source_id)
+            }
+            _ => vec![],
+        };
+        (neighbors, source_id, driver)
+    };
+
+    let Some(driver) = driver else { return };
+    if !driver.is_local() || neighbors.is_empty() {
+        return;
+    }
+
+    let hints = build_prefetch_hints(&neighbors);
+    if !hints.is_empty() {
+        let _ = ctx
+            .tx
+            .send(ServerMessage::ViewerPrefetchHints {
+                timestamp: now(),
+                hints,
+            })
+            .await;
+    }
+
+    ctx.viewer_prefetch
+        .schedule_neighbors(neighbors, source_id, driver);
 }
 
 // ─── Prefetch helpers ────────────────────────────────────────────────────────
