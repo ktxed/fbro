@@ -246,15 +246,77 @@ impl DirSizeQueue {
                         panel.calculating_size.remove(&entry_name);
                         panel.version += 1;
                         let calc = calculating_vec(&panel.calculating_size);
+
+                        // When sorted by size and non-windowed, re-sort the directory prefix
+                        // so the newly-computed folder moves to its correct position immediately.
+                        let patch = if panel.sort.by == "size" && !panel.windowed {
+                            let cursor_name =
+                                panel.entries.get(panel.cursor).map(|e| e.name.clone());
+                            let selected_names: Vec<String> = panel
+                                .selection
+                                .iter()
+                                .filter_map(|&i| panel.entries.get(i).map(|e| e.name.clone()))
+                                .collect();
+
+                            let dir_end = panel
+                                .entries
+                                .iter()
+                                .position(|e| e.kind != "directory")
+                                .unwrap_or(panel.entries.len());
+                            let desc = panel.sort.order == "desc";
+                            panel.entries[..dir_end].sort_by(|a, b| {
+                                let ord =
+                                    a.size.unwrap_or(u64::MAX).cmp(&b.size.unwrap_or(u64::MAX));
+                                if desc { ord.reverse() } else { ord }
+                            });
+
+                            if let Some(name) = &cursor_name {
+                                if let Some(idx) =
+                                    panel.entries.iter().position(|e| e.name == *name)
+                                {
+                                    panel.cursor = idx;
+                                }
+                            }
+                            let new_selection: Vec<usize> = selected_names
+                                .iter()
+                                .filter_map(|name| {
+                                    panel.entries.iter().position(|e| e.name == *name)
+                                })
+                                .collect();
+                            panel.selection = new_selection.clone();
+
+                            let selected_entries: Vec<_> = new_selection
+                                .iter()
+                                .filter_map(|&i| panel.entries.get(i))
+                                .map(|e| {
+                                    serde_json::json!({
+                                        "name": e.name,
+                                        "size": e.size,
+                                        "kind": e.kind,
+                                    })
+                                })
+                                .collect();
+
+                            serde_json::json!({
+                                "calculatingSize": calc,
+                                "entries": panel.entries,
+                                "cursor": panel.cursor,
+                                "selection": new_selection,
+                                "selectedEntries": selected_entries,
+                            })
+                        } else {
+                            serde_json::json!({
+                                "calculatingSize": calc,
+                                "updateEntrySize": { "name": entry_name, "size": size }
+                            })
+                        };
+
                         let _ = tx.try_send(ServerMessage::StatePatch {
                             timestamp: now(),
                             domain: "panels".to_string(),
                             entity_id: Some(panel_id),
                             version: panel.version,
-                            patch: serde_json::json!({
-                                "calculatingSize": calc,
-                                "updateEntrySize": { "name": entry_name, "size": size }
-                            }),
+                            patch,
                         });
                     }
                     // Store in cache after releasing the state lock

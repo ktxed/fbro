@@ -41,8 +41,9 @@ pub async fn run_scan(
     show_hidden: bool,
 ) {
     let path_clone = path.clone();
+    let sort_clone = sort.clone();
     let result =
-        tokio::task::spawn_blocking(move || driver.list(&path_clone, &sort, filter.as_ref(), show_hidden)).await;
+        tokio::task::spawn_blocking(move || driver.list(&path_clone, &sort_clone, filter.as_ref(), show_hidden)).await;
 
     let entries = match result {
         Ok(Ok(e)) => e,
@@ -88,6 +89,22 @@ pub async fn run_scan(
                 entry.size = Some(sz);
             }
         }
+    }
+
+    // When sorting by size, re-sort the directory prefix using the now-populated
+    // cached sizes. Directories without a computed size sort last within the group
+    // (u64::MAX so they appear "largest" in ascending, avoiding them crowding the
+    // front where the small/known-size folders should be).
+    if sort.by == "size" {
+        let dir_end = schema_entries
+            .iter()
+            .position(|e| e.kind != "directory")
+            .unwrap_or(schema_entries.len());
+        let desc = sort.order == "desc";
+        schema_entries[..dir_end].sort_by(|a, b| {
+            let ord = a.size.unwrap_or(u64::MAX).cmp(&b.size.unwrap_or(u64::MAX));
+            if desc { ord.reverse() } else { ord }
+        });
     }
 
     // Sum sizes of all file entries (directories excluded — their size is optional/computed separately).
