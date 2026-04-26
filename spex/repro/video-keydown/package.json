@@ -1,0 +1,14 @@
+{
+  "name": "video-keydown-repro",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "setup": "npm i && npx playwright install",
+    "run": "node run.mjs",
+    "run:webkit": "node run.mjs --browser=webkit",
+    "run:headed": "node run.mjs --headed"
+  },
+  "devDependencies": {
+    "playwright": "^1.49.0"
+  }
+}
