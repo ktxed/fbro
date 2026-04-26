@@ -22,6 +22,7 @@ mod drag_out_cmd {
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex as StdMutex};
 
+use jobs::viewer_prefetch::ViewerPrefetchQueue;
 use state::AppState;
 use tokio::sync::Mutex;
 
@@ -129,7 +130,8 @@ fn main() {
     let _ = gtk::init();
 
     let platform = platform::create_platform();
-    let file_server_port = fileserver::start(platform.clone());
+    let viewer_prefetch = Arc::new(ViewerPrefetchQueue::new());
+    let file_server_port = fileserver::start(platform.clone(), Arc::clone(&viewer_prefetch));
     let icon_cache: Arc<StdMutex<HashMap<String, (Vec<u8>, &'static str)>>> =
         Arc::new(StdMutex::new(HashMap::new()));
 
@@ -245,6 +247,7 @@ fn main() {
                     shared_state,
                     app_handle,
                     quit_notify,
+                    viewer_prefetch,
                 ));
                 Ok(())
             }

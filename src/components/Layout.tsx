@@ -155,6 +155,13 @@ export function Layout({ client, jobsViewOpen, onCloseJobsView, onOpenJobsView }
     stateRef.current = state;
   });
 
+  // Notify BE when the embedded viewer opens or closes so it can gate
+  // background prefetch on viewer presence.
+  const embeddedViewerActive = state.embeddedViewer !== null;
+  useEffect(() => {
+    client.sendIntent("SetEmbeddedViewerActive", undefined, { active: embeddedViewerActive });
+  }, [client, embeddedViewerActive]);
+
   useEffect(() => {
     if (!dragCandidate && !activeDrag) return;
 
@@ -223,7 +230,6 @@ export function Layout({ client, jobsViewOpen, onCloseJobsView, onOpenJobsView }
         }
       } else if (dragCandidate) {
         dispatch({ type: "CLOSE_CONTEXT_MENU" });
-        client.sendIntent("SetCursor", dragCandidate.sourcePanelId, { index: dragCandidate.absIndex });
       }
 
       setDragCandidate(null);

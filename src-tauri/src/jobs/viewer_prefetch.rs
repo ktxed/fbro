@@ -3,10 +3,10 @@ use std::sync::{Arc, Mutex};
 
 use crate::vfs::VfsDriver;
 
-pub const PREFETCH_N: usize = 2;
+pub const PREFETCH_N: usize = 5;
 
 // Match the FE's initial request sizes exactly.
-const PREFETCH_IMAGE_CAP: usize = 5 * 1024 * 1024; // 5 MiB — IMAGE_LIMIT
+const PREFETCH_IMAGE_CAP: usize = 10 * 1024 * 1024; // 5 MiB — IMAGE_LIMIT
 const PREFETCH_OTHER_CAP: usize = 1 * 1024 * 1024; // 1 MiB — SMALL_LIMIT
 
 // Keep at most this many entries to bound memory usage.
@@ -139,6 +139,20 @@ impl ViewerPrefetchQueue {
     pub fn get_cached(&self, source_id: &str, path: &str) -> Option<Arc<PrefetchEntry>> {
         let key = Self::cache_key(source_id, path);
         self.cache.lock().unwrap().get(&key)
+    }
+
+    /// Look up cached content by absolute path alone (for the fileserver, which
+    /// has no source_id context).  Cache keys are "{source_id}\0{path}"; null
+    /// bytes never appear in real paths so the suffix match is unambiguous.
+    /// O(n) but n ≤ MAX_CACHE_SIZE so it's negligible.
+    pub fn get_cached_by_path(&self, path: &str) -> Option<Arc<PrefetchEntry>> {
+        let cache = self.cache.lock().unwrap();
+        let suffix = format!("\0{path}");
+        cache
+            .map
+            .iter()
+            .find(|(k, _)| k.ends_with(&suffix))
+            .map(|(_, v)| Arc::clone(v))
     }
 
     /// Clear the entire cache and pending set (call on viewer open/close).

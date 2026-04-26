@@ -1,3 +1,4 @@
+use crate::jobs::viewer_prefetch::ViewerPrefetchQueue;
 use crate::platform::{self, Platform};
 /// Minimal HTTP file server for the viewer and icon serving.
 ///
@@ -14,21 +15,22 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::Arc;
 
-pub fn start(plat: Arc<dyn Platform>) -> u16 {
+pub fn start(plat: Arc<dyn Platform>, prefetch: Arc<ViewerPrefetchQueue>) -> u16 {
     let listener = TcpListener::bind("127.0.0.1:0").expect("file server bind");
     let port = listener.local_addr().expect("file server addr").port();
     std::thread::spawn(move || {
         for stream in listener.incoming().flatten() {
             let plat = plat.clone();
+            let prefetch = Arc::clone(&prefetch);
             std::thread::spawn(move || {
-                let _ = handle(stream, &*plat);
+                let _ = handle(stream, &*plat, &prefetch);
             });
         }
     });
     port
 }
 
-fn handle(mut stream: TcpStream, plat: &dyn Platform) -> std::io::Result<()> {
+fn handle(mut stream: TcpStream, plat: &dyn Platform, prefetch: &ViewerPrefetchQueue) -> std::io::Result<()> {
     let mut buf = [0u8; 8192];
     let n = stream.read(&mut buf)?;
     let req = std::str::from_utf8(&buf[..n]).unwrap_or("");
@@ -101,8 +103,13 @@ fn handle(mut stream: TcpStream, plat: &dyn Platform) -> std::io::Result<()> {
         }
     }
 
-    // Full file (for images or non-range requests)
-    let data = std::fs::read(&path)?;
+    // Full file (for images or non-range requests).
+    // Check the BE prefetch cache first; fall back to disk on miss.
+    let data = if let Some(entry) = prefetch.get_cached_by_path(&path) {
+        entry.content.clone()
+    } else {
+        std::fs::read(&path)?
+    };
     write!(
         stream,
         "HTTP/1.1 200 OK\r\n\

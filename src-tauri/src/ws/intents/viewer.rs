@@ -2,20 +2,19 @@ use std::sync::Arc;
 
 use serde_json::Value;
 
-use crate::jobs::viewer_prefetch::PREFETCH_N;
 use crate::vfs::search::SearchResultsDriver;
-use crate::ws::intents::{archive_file_path, arg_str, arg_u64, is_archive_source, is_search_source};
-use crate::ws::protocol::{now, ServerMessage, ViewerPrefetchHintSchema};
+use crate::ws::intents::{arg_str, arg_u64, is_archive_source, is_search_source};
+use crate::ws::protocol::{now, ServerMessage};
 use crate::ws::runtime::{url_encode, IntentContext};
 
 pub(crate) async fn handle(name: &str, args: &Value, ctx: &mut IntentContext<'_>) {
     match name {
         "ViewFile" => view_file(args, ctx).await,
         "EditFile" => edit_file(args, ctx).await,
-        "CloseViewerWindow" => close_viewer_window(args, ctx),
+        "CloseViewerWindow" => close_viewer_window(args, ctx).await,
         "ViewerNavigate" => viewer_navigate(args, ctx).await,
         "ReadFileChunk" => read_file_chunk(args, ctx).await,
-        "PrefetchViewerNeighbors" => prefetch_viewer_neighbors(args, ctx).await,
+        "SetEmbeddedViewerActive" => set_embedded_viewer_active(args, ctx).await,
         _ => {}
     }
 }
@@ -188,6 +187,10 @@ async fn view_file(args: &Value, ctx: &mut IntentContext<'_>) {
     .background_color(tauri::webview::Color(13, 13, 13, 255))
     .build();
 
+    // Mark a viewer as active so panel cursor moves start warming the prefetch
+    // cache. Decremented in `close_viewer_window`.
+    ctx.state.lock().await.active_viewers += 1;
+
     // Prime the prefetch cache for files neighboring the one being opened.
     ctx.viewer_prefetch.clear();
     let (neighbors, driver) = {
@@ -230,13 +233,39 @@ async fn edit_file(args: &Value, ctx: &mut IntentContext<'_>) {
     }
 }
 
-fn close_viewer_window(args: &Value, ctx: &IntentContext<'_>) {
+async fn close_viewer_window(args: &Value, ctx: &IntentContext<'_>) {
     let parsed = LabelArgs::from_args(args);
     use tauri::Manager;
+    let existed = ctx.app_handle.get_webview_window(&parsed.label).is_some();
     if let Some(window) = ctx.app_handle.get_webview_window(&parsed.label) {
         let _ = window.close();
     }
-    ctx.viewer_prefetch.clear();
+    if existed {
+        let mut state_guard = ctx.state.lock().await;
+        state_guard.active_viewers = state_guard.active_viewers.saturating_sub(1);
+        if state_guard.active_viewers == 0 {
+            ctx.viewer_prefetch.clear();
+        }
+    }
+}
+
+/// Notifies BE that an embedded viewer panel was opened (active=true) or
+/// closed (active=false). Used to gate background prefetch so the cache is
+/// only warmed while a viewer is actually consuming files.
+async fn set_embedded_viewer_active(args: &Value, ctx: &IntentContext<'_>) {
+    let active = arg_str(args, "active")
+        .map(|s| s == "true")
+        .or_else(|| args.get("active").and_then(|v| v.as_bool()))
+        .unwrap_or(false);
+    let mut state_guard = ctx.state.lock().await;
+    if active {
+        state_guard.active_viewers += 1;
+    } else {
+        state_guard.active_viewers = state_guard.active_viewers.saturating_sub(1);
+        if state_guard.active_viewers == 0 {
+            ctx.viewer_prefetch.clear();
+        }
+    }
 }
 
 async fn viewer_navigate(args: &Value, ctx: &mut IntentContext<'_>) {
@@ -325,19 +354,9 @@ async fn viewer_navigate(args: &Value, ctx: &mut IntentContext<'_>) {
                     })
                     .await;
 
-                // Schedule BE cache prefetch and send FE image-preload hints.
+                // Schedule BE cache prefetch for neighboring files.
                 if let Some(ref drv) = driver {
                     if drv.is_local() {
-                        let hints = build_prefetch_hints(&prefetch_neighbors);
-                        if !hints.is_empty() {
-                            let _ = ctx
-                                .tx
-                                .send(ServerMessage::ViewerPrefetchHints {
-                                    timestamp: now(),
-                                    hints,
-                                })
-                                .await;
-                        }
                         ctx.viewer_prefetch.schedule_neighbors(
                             prefetch_neighbors,
                             effective_source_id,
@@ -504,71 +523,18 @@ async fn read_file_chunk(args: &Value, ctx: &mut IntentContext<'_>) {
     }
 }
 
-/// Schedule BE prefetch for neighbors of the panel's current entry, and send
-/// FE preload hints for directly-served files (images/video/PDF).
-/// Called by the embedded viewer after each successful file load.
-async fn prefetch_viewer_neighbors(args: &Value, ctx: &mut IntentContext<'_>) {
-    let panel_id = arg_str(args, "panelId").unwrap_or("").to_string();
-    if panel_id.is_empty() {
-        return;
-    }
-
-    let (neighbors, source_id, driver) = {
-        let state_guard = ctx.state.lock().await;
-        let panel = match state_guard.panels.get(&panel_id) {
-            Some(p) => p,
-            None => return,
-        };
-        let source_id = panel.source_id.clone();
-        let driver = state_guard.drivers.get(&source_id).cloned();
-        let neighbors = match driver.as_ref() {
-            Some(drv) if drv.is_local() => {
-                collect_neighbors(&panel.entries, panel.cursor, &panel.path, &source_id)
-            }
-            _ => vec![],
-        };
-        (neighbors, source_id, driver)
-    };
-
-    let Some(driver) = driver else { return };
-    if !driver.is_local() || neighbors.is_empty() {
-        return;
-    }
-
-    let hints = build_prefetch_hints(&neighbors);
-    if !hints.is_empty() {
-        let _ = ctx
-            .tx
-            .send(ServerMessage::ViewerPrefetchHints {
-                timestamp: now(),
-                hints,
-            })
-            .await;
-    }
-
-    ctx.viewer_prefetch
-        .schedule_neighbors(neighbors, source_id, driver);
-}
-
-// ─── Prefetch helpers ────────────────────────────────────────────────────────
-
-/// Collect the N file entries before and after `cursor` in the panel entry list.
-/// Returns `(full_path, size_hint)` pairs, skipping directories and shadow sources.
 fn collect_neighbors(
     entries: &[crate::ws::protocol::EntrySchema],
     cursor: usize,
     dir_path: &str,
     source_id: &str,
 ) -> Vec<(String, Option<u64>)> {
-    // Only prefetch from local real sources.
+    use crate::jobs::viewer_prefetch::PREFETCH_N;
     if is_archive_source(source_id) || is_search_source(source_id) {
         return vec![];
     }
-
     let mut neighbors = Vec::new();
     let base = dir_path.trim_end_matches('/');
-
-    // N entries before cursor (file entries only).
     let mut count = 0usize;
     let mut i = cursor;
     while count < PREFETCH_N && i > 0 {
@@ -578,8 +544,6 @@ fn collect_neighbors(
             count += 1;
         }
     }
-
-    // N entries after cursor (file entries only).
     count = 0;
     i = cursor;
     while count < PREFETCH_N && i + 1 < entries.len() {
@@ -589,23 +553,5 @@ fn collect_neighbors(
             count += 1;
         }
     }
-
     neighbors
-}
-
-/// Build `ViewerPrefetchHintSchema` entries from the neighbor list.
-/// The FE uses these to preload direct-serving files (images/video/PDF).
-fn build_prefetch_hints(neighbors: &[(String, Option<u64>)]) -> Vec<ViewerPrefetchHintSchema> {
-    neighbors
-        .iter()
-        .map(|(path, size)| {
-            let filename = path.rsplit('/').next().unwrap_or(path.as_str()).to_string();
-            ViewerPrefetchHintSchema {
-                path: path.clone(),
-                filename,
-                file_size: *size,
-                is_local: true,
-            }
-        })
-        .collect()
 }

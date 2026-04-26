@@ -57,7 +57,7 @@ pub async fn dispatch(name: &str, scope: &Value, args: &Value, ctx: &mut IntentC
             jobs::handle(name, scope, args, ctx).await
         }
         "ViewFile" | "EditFile" | "CloseViewerWindow" | "ViewerNavigate" | "ReadFileChunk"
-        | "PrefetchViewerNeighbors" => {
+        | "SetEmbeddedViewerActive" => {
             viewer::handle(name, args, ctx).await
         }
         "Quit" | "ConfirmQuit" => app::handle(name, ctx).await,

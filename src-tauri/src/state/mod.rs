@@ -115,6 +115,10 @@ pub struct AppState {
     pub gui_senders: Vec<mpsc::Sender<ServerMessage>>,
     /// Port of the local HTTP file server used by viewer windows for media streaming.
     pub file_server_port: u16,
+    /// Count of currently active viewers (external viewer windows + embedded
+    /// viewer panels). Used to gate background prefetch on cursor movement so
+    /// plain panel navigation doesn't warm the cache unnecessarily.
+    pub active_viewers: usize,
 }
 
 #[allow(dead_code)]
@@ -285,6 +289,7 @@ impl AppState {
             search_stores: HashMap::new(),
             gui_senders: Vec::new(),
             file_server_port,
+            active_viewers: 0,
         }
     }
 

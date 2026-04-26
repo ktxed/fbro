@@ -23,7 +23,12 @@ use crate::ws::runtime::{
 const WS_ADDR: &str = "127.0.0.1:7878";
 const CHANNEL_CAP: usize = 512;
 
-pub async fn start(state: SharedState, app_handle: tauri::AppHandle, quit_notify: Arc<Notify>) {
+pub async fn start(
+    state: SharedState,
+    app_handle: tauri::AppHandle,
+    quit_notify: Arc<Notify>,
+    viewer_prefetch: Arc<ViewerPrefetchQueue>,
+) {
     let listener = match TcpListener::bind(WS_ADDR).await {
         Ok(listener) => listener,
         Err(error) => {
@@ -34,7 +39,6 @@ pub async fn start(state: SharedState, app_handle: tauri::AppHandle, quit_notify
     eprintln!("[fbro] WebSocket server listening on ws://{WS_ADDR}");
 
     let dir_size_queue = Arc::new(DirSizeQueue::new());
-    let viewer_prefetch = Arc::new(ViewerPrefetchQueue::new());
     let platform = state.lock().await.platform.clone();
     let volume_watcher = crate::platform::create_volume_watcher(platform).await;
 

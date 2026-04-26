@@ -2,7 +2,8 @@ use std::collections::HashSet;
 
 use serde_json::Value;
 
-use crate::ws::intents::{arg_bool, arg_i64, arg_str, arg_u64, arg_usize_vec};
+use crate::jobs::viewer_prefetch::PREFETCH_N;
+use crate::ws::intents::{arg_bool, arg_i64, arg_str, arg_u64, arg_usize_vec, is_archive_source, is_search_source};
 use crate::ws::protocol::{now, ServerMessage};
 use crate::ws::runtime::{
     build_state_snapshot, rescan_panel, resolve_panel_id, selected_entries_for_panel,
@@ -364,6 +365,47 @@ async fn move_cursor(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
         let start = new_cursor.saturating_sub(count / 2);
         send_window(&panel_id, start, count, ctx.state, ctx.tx).await;
     }
+
+    // Kick off background prefetch without blocking the message loop.
+    // Spawning detaches the state-lock acquisition so the select! loop can
+    // immediately process the next intent (and flush the StatePatch above).
+    let state = std::sync::Arc::clone(ctx.state);
+    let prefetch = std::sync::Arc::clone(ctx.viewer_prefetch);
+    tokio::spawn(async move {
+        let prefetch_info = {
+            let state_guard = state.lock().await;
+            // Only warm the prefetch cache while at least one viewer (embedded
+            // or external window) is open — plain panel navigation shouldn't
+            // pay disk I/O for files the user hasn't asked to view.
+            if state_guard.active_viewers == 0 {
+                return;
+            }
+            if let Some(panel) = state_guard.panels.get(&panel_id) {
+                let source_id = panel.source_id.clone();
+                let driver = state_guard.drivers.get(&source_id).cloned();
+                if let Some(drv) = driver {
+                    if drv.is_local() {
+                        let neighbors = neighbors_for_prefetch(
+                            &panel.entries,
+                            new_cursor,
+                            &panel.path,
+                            &source_id,
+                        );
+                        Some((neighbors, source_id, drv))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        };
+        if let Some((neighbors, source_id, driver)) = prefetch_info {
+            prefetch.schedule_neighbors(neighbors, source_id, driver);
+        }
+    });
 }
 
 async fn set_selection(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
@@ -901,6 +943,38 @@ async fn request_state_snapshot(ctx: &mut IntentContext<'_>) {
         .tx
         .send(build_state_snapshot(&state_guard, dir_size_tasks))
         .await;
+}
+
+fn neighbors_for_prefetch(
+    entries: &[crate::ws::protocol::EntrySchema],
+    cursor: usize,
+    dir_path: &str,
+    source_id: &str,
+) -> Vec<(String, Option<u64>)> {
+    if is_archive_source(source_id) || is_search_source(source_id) {
+        return vec![];
+    }
+    let mut neighbors = Vec::new();
+    let base = dir_path.trim_end_matches('/');
+    let mut count = 0usize;
+    let mut i = cursor;
+    while count < PREFETCH_N && i > 0 {
+        i -= 1;
+        if entries[i].kind == "file" {
+            neighbors.push((format!("{}/{}", base, entries[i].name), entries[i].size));
+            count += 1;
+        }
+    }
+    count = 0;
+    i = cursor;
+    while count < PREFETCH_N && i + 1 < entries.len() {
+        i += 1;
+        if entries[i].kind == "file" {
+            neighbors.push((format!("{}/{}", base, entries[i].name), entries[i].size));
+            count += 1;
+        }
+    }
+    neighbors
 }
 
 async fn send_panel_patch(
