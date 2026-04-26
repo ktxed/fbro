@@ -446,7 +446,7 @@ fn write_macos_text_clipboard(text: &str) -> Result<(), String> {
         let _: isize = msg_send0(pasteboard, "clearContents");
         let ns_text = make_nsstring(text)?;
         let ns_type = make_nsstring("public.utf8-plain-text")?;
-        let success = msg_send2::<Boolean, ObjcId, ObjcId>(
+        let success = msg_send2::<ObjcId, ObjcId, Boolean>(
             pasteboard,
             "setString:forType:",
             ns_text,
