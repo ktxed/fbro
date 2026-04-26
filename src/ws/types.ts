@@ -404,6 +404,7 @@ export interface ViewerFileChangedMessage {
   panelId: string;
   fileSize?: number;
   isLocal?: boolean;
+  isBinary?: boolean;
 }
 
 export interface DryRunReadyMessage {

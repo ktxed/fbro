@@ -6,8 +6,10 @@ use crate::vfs::VfsDriver;
 pub const PREFETCH_N: usize = 5;
 
 // Match the FE's initial request sizes exactly.
-const PREFETCH_IMAGE_CAP: usize = 10 * 1024 * 1024; // 5 MiB — IMAGE_LIMIT
+const PREFETCH_IMAGE_CAP: usize = 10 * 1024 * 1024; // 10 MiB — IMAGE_LIMIT
 const PREFETCH_OTHER_CAP: usize = 1 * 1024 * 1024; // 1 MiB — SMALL_LIMIT
+// For large non-image files (> IMAGE_CAP): preload just enough for the initial hex view.
+const PREFETCH_HEX_CAP: usize = 64 * 1024; // 64 KiB — matches FE CHUNK_SIZE
 
 // Keep at most this many entries to bound memory usage.
 const MAX_CACHE_SIZE: usize = PREFETCH_N * 4 + 1; // 9 for N=2
@@ -84,13 +86,24 @@ impl ViewerPrefetchQueue {
         let pending = Arc::clone(&self.pending);
 
         for (path, size_hint) in neighbors {
-            // Skip files above even the image cap — large binaries are virtual-
-            // scrolled and the first chunk alone would be pointless to cache.
-            if let Some(sz) = size_hint {
-                if sz > PREFETCH_IMAGE_CAP as u64 {
-                    continue;
+            // Choose prefetch cap based on file type and size:
+            //   - images ≤ IMAGE_CAP  → IMAGE_CAP (full image for the viewer)
+            //   - images >  IMAGE_CAP → skip (too large to be useful)
+            //   - non-images ≤ OTHER_CAP → OTHER_CAP (full small binary/text)
+            //   - non-images > IMAGE_CAP → HEX_CAP (just enough for the initial hex view)
+            let cap = if is_image_ext(&path) {
+                if let Some(sz) = size_hint {
+                    if sz > PREFETCH_IMAGE_CAP as u64 {
+                        continue;
+                    }
                 }
-            }
+                PREFETCH_IMAGE_CAP
+            } else {
+                match size_hint {
+                    Some(sz) if sz > PREFETCH_IMAGE_CAP as u64 => PREFETCH_HEX_CAP,
+                    _ => PREFETCH_OTHER_CAP,
+                }
+            };
 
             let key = Self::cache_key(&source_id, &path);
 
@@ -106,12 +119,6 @@ impl ViewerPrefetchQueue {
                     continue; // already in flight
                 }
             }
-
-            let cap = if is_image_ext(&path) {
-                PREFETCH_IMAGE_CAP
-            } else {
-                PREFETCH_OTHER_CAP
-            };
 
             let cache2 = Arc::clone(&cache);
             let pending2 = Arc::clone(&pending);

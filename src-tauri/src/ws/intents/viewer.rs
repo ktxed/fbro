@@ -7,6 +7,22 @@ use crate::ws::intents::{arg_str, arg_u64, is_archive_source, is_search_source};
 use crate::ws::protocol::{now, ServerMessage};
 use crate::ws::runtime::{url_encode, IntentContext};
 
+/// Files larger than this (non-image, non-cached) get a 4 KB binary probe during navigation.
+const PREFETCH_OTHER_THRESHOLD: u64 = 1 * 1024 * 1024;
+
+/// Mirrors the FE's `detectBinary()`: a null byte or >30% non-printable chars → binary.
+fn detect_binary(bytes: &[u8]) -> bool {
+    let sample = &bytes[..bytes.len().min(4096)];
+    if sample.contains(&0u8) {
+        return true;
+    }
+    let non_text = sample
+        .iter()
+        .filter(|&&b| b < 9 || (b > 13 && b < 32) || b == 127)
+        .count();
+    !sample.is_empty() && non_text * 10 > sample.len() * 3
+}
+
 pub(crate) async fn handle(name: &str, args: &Value, ctx: &mut IntentContext<'_>) {
     match name {
         "ViewFile" => view_file(args, ctx).await,
@@ -341,6 +357,36 @@ async fn viewer_navigate(args: &Value, ctx: &mut IntentContext<'_>) {
                     .as_ref()
                     .map(|drv| (drv.file_size(&effective_path), drv.is_local()))
                     .unwrap_or((None, false));
+
+                // Determine binary hint so the FE can skip directly to hex mode.
+                // Try prefetch cache first (no I/O), then probe 4 KB for large files.
+                let is_binary: Option<bool> = {
+                    if let Some(entry) =
+                        ctx.viewer_prefetch.get_cached_by_path(&effective_path)
+                    {
+                        Some(detect_binary(&entry.content))
+                    } else if file_size
+                        .map(|sz| sz > PREFETCH_OTHER_THRESHOLD)
+                        .unwrap_or(false)
+                    {
+                        if let Some(drv) = driver.clone() {
+                            let path = effective_path.clone();
+                            tokio::task::spawn_blocking(move || {
+                                drv.read_chunk(&path, 0, 4096)
+                                    .ok()
+                                    .map(|b| detect_binary(&b))
+                            })
+                            .await
+                            .ok()
+                            .flatten()
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                };
+
                 let _ = ctx
                     .tx
                     .send(ServerMessage::ViewerFileChanged {
@@ -351,6 +397,7 @@ async fn viewer_navigate(args: &Value, ctx: &mut IntentContext<'_>) {
                         panel_id: parsed.panel_id.clone(),
                         file_size,
                         is_local,
+                        is_binary,
                     })
                     .await;
 

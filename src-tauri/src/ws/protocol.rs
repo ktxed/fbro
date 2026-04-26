@@ -118,6 +118,8 @@ pub enum ServerMessage {
         file_size: Option<u64>,
         #[serde(rename = "isLocal")]
         is_local: bool,
+        #[serde(rename = "isBinary", skip_serializing_if = "Option::is_none")]
+        is_binary: Option<bool>,
     },
     DryRunReady {
         timestamp: u64,

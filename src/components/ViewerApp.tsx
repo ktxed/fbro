@@ -368,8 +368,14 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
         pendingJumpRef.current = null;
         setBufSeq(0);
         if (!direct) {
-          // Request first chunk of new file
-          const initSize = isImageExt(m.filename) ? IMAGE_LIMIT : SMALL_LIMIT;
+          // If BE signals binary, pre-set hex mode and request only the initial
+          // hex view chunk (64 KiB) rather than the full 1 MiB detection read.
+          if (m.isBinary === true) {
+            setMode("hex");
+          }
+          const initSize = m.isBinary === true
+            ? CHUNK_SIZE
+            : isImageExt(m.filename) ? IMAGE_LIMIT : SMALL_LIMIT;
           clientRef.current?.sendIntent("ReadFileChunk", undefined, {
             path: m.path, sourceId: m.sourceId, offset: 0, size: initSize,
           });
