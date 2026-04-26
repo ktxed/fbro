@@ -429,7 +429,15 @@ export function Panel({
   }, [isWindowed, panelId, client]);
 
   useEffect(() => () => {
-    if (windowRafRef.current) cancelAnimationFrame(windowRafRef.current);
+    if (windowRafRef.current) {
+      cancelAnimationFrame(windowRafRef.current);
+      // Reset the ref too — otherwise (notably under React StrictMode in dev,
+      // which runs every effect mount/cleanup/mount) the cancelled rAF leaves
+      // the ref holding a phantom non-zero handle. The next mount's
+      // handleScroll then sees a "pending" rAF that will never fire and
+      // silently coalesces every scroll forever.
+      windowRafRef.current = 0;
+    }
   }, []);
 
   // Scroll cursor into view and ensure the window covers the scroll position.
