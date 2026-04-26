@@ -54,6 +54,10 @@ export interface PanelState {
   totalCount?: number;
   totalSize?: number;
   windowStart?: number;
+  /** Monotonic counter for window-slice patches. Independent from `version` so
+   *  fast scroll-driven RequestWindow responses can't be dropped by the
+   *  structural-version guard (see store reducer). */
+  windowVersion?: number;
   shadowSource?: ShadowSource;
 }
 
@@ -444,12 +448,6 @@ export interface InputRequiredMessage {
   prompt: string;
 }
 
-export interface ViewerPrefetchHintsMessage {
-  type: "ViewerPrefetchHints";
-  timestamp: number;
-  hints: Array<{ path: string; filename: string; fileSize?: number; isLocal: boolean }>;
-}
-
 // ─── Union types ─────────────────────────────────────────────────────────────
 
 export type BEMessage =
@@ -472,7 +470,6 @@ export type BEMessage =
   | OpenWithOptionsFailedMessage
   | BroOptionsReadyMessage
   | BroOptionsFailedMessage
-  | InputRequiredMessage
-  | ViewerPrefetchHintsMessage;
+  | InputRequiredMessage;
 
 export type FEMessage = HelloMessage | IntentMessage;

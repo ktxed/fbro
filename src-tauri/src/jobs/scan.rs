@@ -121,27 +121,41 @@ pub async fn run_scan(
     if total > WINDOWED_THRESHOLD {
         // ── Mode B: windowed ─────────────────────────────────────────────
         let window_count = INITIAL_WINDOW_SIZE.min(total);
-        let window_start = cursor
-            .saturating_sub(window_count / 2)
-            .min(total.saturating_sub(window_count));
-        let window_json =
-            serde_json::json!(&schema_entries[window_start..window_start + window_count]);
+        let max_start = total.saturating_sub(window_count);
+        let cursor_centered_start = cursor.saturating_sub(window_count / 2).min(max_start);
         let selected_entries = build_selected_entries(&schema_entries, &selection);
 
-        // Store full entries directly in BE state
-        {
+        // Decide window_start AND store entries in one lock block. If the panel
+        // already has a non-zero window_start the user has scrolled away from
+        // the cursor (this is a quiet/background rescan, not a fresh navigation
+        // or sort) — preserve that scroll position so the visible content
+        // doesn't snap back to the top.
+        let (window_start, window_json, window_version) = {
             let mut s = state.lock().await;
             if let Some(panel) = s.panels.get_mut(&panel_id) {
+                let existing_start = panel.window_start;
+                let window_start = if existing_start > 0 && existing_start <= max_start {
+                    existing_start
+                } else {
+                    cursor_centered_start
+                };
+                let window_json = serde_json::json!(
+                    &schema_entries[window_start..window_start + window_count]
+                );
                 panel.entries = schema_entries;
                 panel.cursor = cursor;
                 panel.selection = selection.clone();
                 panel.windowed = true;
                 panel.window_start = window_start;
                 panel.window_count = window_count;
+                panel.window_version += 1;
                 panel.status = crate::state::PanelStatus::Ready;
                 panel.version = version_base + 1;
+                (window_start, window_json, panel.window_version)
+            } else {
+                return;
             }
-        }
+        };
 
         let _ = tx
             .send(ServerMessage::StatePatch {
@@ -155,6 +169,7 @@ pub async fn run_scan(
                     "totalSize": total_file_size,
                     "windowStart": window_start,
                     "windowEntries": window_json,
+                    "windowVersion": window_version,
                     "cursor": cursor,
                     "selection": selection,
                     "selectedEntries": selected_entries,

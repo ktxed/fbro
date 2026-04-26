@@ -316,7 +316,6 @@ export function Panel({
   }>(null);
   const suppressNextContextMenuRef = useRef(false);
   const calcSet = new Set(panel.calculatingSize ?? []);
-  const windowTimerRef = useRef<number>(0);
 
   const isWindowed = panel.totalCount !== undefined && panel.totalCount > panel.entries.length;
   const totalCount = panel.totalCount ?? panel.entries.length;
@@ -405,7 +404,37 @@ export function Panel({
     return () => clearTimeout(filterDebounceRef.current);
   }, [filterInput, panel.filter?.value, panel.filterModeActive, sendFilterValue]);
 
-  // Scroll cursor into view within panel__list.
+  // Window request on scroll — coalesced to one per animation frame so a fast
+  // scrollbar drag doesn't saturate the WS channel with hundreds of intents.
+  // The window-slice patches now ride on their own monotonic windowVersion
+  // (decoupled from the structural version guard), so missing one mid-drag
+  // is harmless — the next frame resends with the latest scrollTop.
+  const windowRafRef = useRef(0);
+  const handleScroll = useCallback(() => {
+    if (!isWindowed) return;
+    if (windowRafRef.current) return;
+    windowRafRef.current = requestAnimationFrame(() => {
+      windowRafRef.current = 0;
+      const list = listRef.current;
+      if (!list) return;
+      const scrollTop = list.scrollTop;
+      const viewportHeight = list.clientHeight;
+      const firstVisible = Math.floor(scrollTop / ROW_HEIGHT);
+      const visibleCount = Math.ceil(viewportHeight / ROW_HEIGHT);
+      const buffer = visibleCount; // 1 screen buffer on each side
+      const start = Math.max(0, firstVisible - buffer);
+      const count = visibleCount + 2 * buffer;
+      client.sendIntent("RequestWindow", panelId, { start, count });
+    });
+  }, [isWindowed, panelId, client]);
+
+  useEffect(() => () => {
+    if (windowRafRef.current) cancelAnimationFrame(windowRafRef.current);
+  }, []);
+
+  // Scroll cursor into view and ensure the window covers the scroll position.
+  // Also fires when isWindowed transitions (e.g. sort/filter completes) so the
+  // correct window is always loaded for whatever scrollTop the list has.
   useEffect(() => {
     const list = listRef.current;
     if (!list) return;
@@ -419,6 +448,9 @@ export function Panel({
       } else if (cursorBottom > list.scrollTop + list.clientHeight) {
         list.scrollTop = cursorBottom - list.clientHeight;
       }
+      // After any cursor/isWindowed change, reload the window for the
+      // (possibly just-scrolled-to) position.
+      handleScroll();
     } else {
       const row = list.children[panel.cursor] as HTMLElement | undefined;
       if (!row) return;
@@ -432,25 +464,8 @@ export function Panel({
         list.scrollTop = rowBottom - list.clientHeight;
       }
     }
-  }, [panel.cursor, isWindowed]);
+  }, [panel.cursor, isWindowed, handleScroll]);
 
-  // Debounced window request on scroll (Mode B only)
-  const handleScroll = useCallback(() => {
-    if (!isWindowed) return;
-    clearTimeout(windowTimerRef.current);
-    windowTimerRef.current = window.setTimeout(() => {
-      const list = listRef.current;
-      if (!list) return;
-      const scrollTop = list.scrollTop;
-      const viewportHeight = list.clientHeight;
-      const firstVisible = Math.floor(scrollTop / ROW_HEIGHT);
-      const visibleCount = Math.ceil(viewportHeight / ROW_HEIGHT);
-      const buffer = visibleCount; // 1 screen buffer on each side
-      const start = Math.max(0, firstVisible - buffer);
-      const count = visibleCount + 2 * buffer;
-      client.sendIntent("RequestWindow", panelId, { start, count });
-    }, 50);
-  }, [isWindowed, panelId, client]);
 
   const openContextMenuForEntry = useCallback((entry: VFSEntry, absIndex: number, rect: DOMRect) => {
     const dirPath = panel.path.replace(/[/\\]+$/, "");
@@ -667,6 +682,7 @@ export function Panel({
           e.preventDefault();
           dispatch({ type: "CLOSE_CONTEXT_MENU" });
           if (!isFocused) client.sendIntent("SwitchFocus", undefined, { to: panelId });
+          client.sendIntent("SetCursor", panelId, { index: absIndex });
           onRowPointerDown({ absIndex, clientX: e.clientX, clientY: e.clientY });
         }}
         onMouseEnter={() => {

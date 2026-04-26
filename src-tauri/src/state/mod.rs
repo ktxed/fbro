@@ -70,6 +70,10 @@ pub struct Panel {
     pub windowed: bool,
     pub window_start: usize,
     pub window_count: usize,
+    /// Monotonic counter for window-slice patches. Decoupled from `version`
+    /// so render-slice updates from `send_window` can't be dropped by the FE
+    /// version guard when interleaved with structural patches.
+    pub window_version: u64,
     /// Last visited path per source — used to restore position when switching back.
     pub source_paths: HashMap<String, String>,
     /// Set when the panel is browsing inside a shadow filesystem (e.g. zip archive).
@@ -196,6 +200,7 @@ impl AppState {
             windowed: false,
             window_start: 0,
             window_count: 0,
+            window_version: 0,
             source_paths: HashMap::new(),
             shadow_source: None,
         };
@@ -217,6 +222,7 @@ impl AppState {
             windowed: false,
             window_start: 0,
             window_count: 0,
+            window_version: 0,
             source_paths: HashMap::new(),
             shadow_source: None,
         };

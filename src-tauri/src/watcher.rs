@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use notify::event::{ModifyKind, EventKind};
 use notify::{RecursiveMode, Watcher};
 use tokio::sync::mpsc;
 use tokio::time::{Duration, Instant};
@@ -138,6 +139,20 @@ async fn watcher_task(
 
             // ── Raw notify events ───────────────────────────────────────
             Some(event) = notify_rx.recv() => {
+                // Filter out events that don't affect directory listing.
+                // Access events (atime) and metadata-only Modify events (atime/mtime
+                // updates from stat-walking the directory) would otherwise cause
+                // phantom rescans every time the panel itself reads the directory.
+                let affects_listing = match event.kind {
+                    EventKind::Access(_) => false,
+                    EventKind::Modify(ModifyKind::Metadata(_)) => false,
+                    EventKind::Modify(ModifyKind::Other) => false,
+                    EventKind::Other => false,
+                    _ => true,
+                };
+                if !affects_listing {
+                    continue;
+                }
                 for event_path in &event.paths {
                     let dir = if path_panels.contains_key(event_path) {
                         event_path.clone()

@@ -329,7 +329,16 @@ function applyPatch(state: AppState, msg: StatePatchMessage): AppState {
       const { name, size } = msg.patch.updateEntrySize as { name: string; size: number };
       preGuardPanel = { ...preGuardPanel, entries: preGuardPanel.entries.map(e => e.name === name ? { ...e, size } : e) };
     }
-    if (msg.patch.cursor !== undefined) {
+    // Only pre-guard cursor for cursor-only patches (MoveCursor/SetCursor).
+    // Scan patches that include entries alongside cursor must not bypass the
+    // version guard — a quiet_rescan completing concurrently with a SetCursor
+    // can have the same version number, and its stale cursor value must not
+    // silently overwrite what the user just clicked.
+    const patchHasEntries =
+      msg.patch.entries !== undefined ||
+      msg.patch.appendEntries !== undefined ||
+      msg.patch.windowEntries !== undefined;
+    if (msg.patch.cursor !== undefined && !patchHasEntries) {
       preGuardPanel = { ...preGuardPanel, cursor: msg.patch.cursor as number };
     }
     if (msg.patch.selection !== undefined) {
@@ -340,6 +349,28 @@ function applyPatch(state: AppState, msg: StatePatchMessage): AppState {
     }
     if (msg.patch.calculatingSize !== undefined) {
       preGuardPanel = { ...preGuardPanel, calculatingSize: msg.patch.calculatingSize as string[] };
+    }
+    // Window-slice fields (windowEntries / windowStart / totalCount) ride on
+    // their own monotonic `windowVersion`, decoupled from the structural
+    // version. They must be applied pre-guard so a fast scroll cannot be
+    // dropped by the structural-version guard during interleaved patches
+    // (e.g. cursor/dirsize/selection updates between two send_window responses).
+    if (msg.patch.windowVersion !== undefined && msg.patch.windowEntries !== undefined) {
+      const incoming = msg.patch.windowVersion as number;
+      const current = preGuardPanel.windowVersion ?? 0;
+      if (incoming > current) {
+        preGuardPanel = {
+          ...preGuardPanel,
+          entries: msg.patch.windowEntries as VFSEntry[],
+          windowStart: msg.patch.windowStart === null || msg.patch.windowStart === undefined
+            ? preGuardPanel.windowStart
+            : msg.patch.windowStart as number,
+          totalCount: msg.patch.totalCount === null || msg.patch.totalCount === undefined
+            ? preGuardPanel.totalCount
+            : msg.patch.totalCount as number,
+          windowVersion: incoming,
+        };
+      }
     }
     if (preGuardPanel !== panel) {
       state = { ...state, panels: { ...state.panels, [panelId]: preGuardPanel } };
@@ -400,11 +431,30 @@ function applyPatch(state: AppState, msg: StatePatchMessage): AppState {
     if (msg.patch.totalSize !== undefined) {
       updated = { ...updated, totalSize: msg.patch.totalSize === null ? undefined : msg.patch.totalSize as number };
     }
-    if (msg.patch.windowStart !== undefined) {
-      updated = { ...updated, windowStart: msg.patch.windowStart === null ? undefined : msg.patch.windowStart as number };
+    // Window-slice fields are gated by their own monotonic windowVersion (see
+    // pre-guard above). For patches that ARE structurally fresh (passed the
+    // version guard) but whose windowVersion is stale relative to the slice
+    // already in state, do NOT overwrite. windowStart=null (sent by rescan to
+    // reset state) is a structural reset and is allowed through unconditionally.
+    if (msg.patch.windowStart === null) {
+      updated = { ...updated, windowStart: undefined };
     }
-    if (msg.patch.windowEntries !== undefined) {
-      updated = { ...updated, entries: msg.patch.windowEntries as VFSEntry[] };
+    if (msg.patch.windowEntries !== undefined && msg.patch.windowEntries !== null) {
+      const incoming = msg.patch.windowVersion as number | undefined;
+      const current = updated.windowVersion ?? 0;
+      if (incoming === undefined || incoming > current) {
+        updated = {
+          ...updated,
+          entries: msg.patch.windowEntries as VFSEntry[],
+          windowStart: msg.patch.windowStart === null || msg.patch.windowStart === undefined
+            ? updated.windowStart
+            : msg.patch.windowStart as number,
+          windowVersion: incoming ?? current,
+        };
+      }
+    } else if (msg.patch.windowStart !== undefined && msg.patch.windowStart !== null) {
+      // windowStart-only patches (rare; current BE always co-emits with entries)
+      updated = { ...updated, windowStart: msg.patch.windowStart as number };
     }
     if (msg.patch.shadowSource !== undefined) {
       updated = { ...updated, shadowSource: msg.patch.shadowSource === null ? undefined : msg.patch.shadowSource as PanelState["shadowSource"] };

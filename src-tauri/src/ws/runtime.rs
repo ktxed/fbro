@@ -556,7 +556,7 @@ pub(crate) async fn send_window(
     state: &SharedState,
     tx: &mpsc::Sender<ServerMessage>,
 ) {
-    let (window_entries, window_start, total, version) = {
+    let (window_entries, window_start, total, version, window_version) = {
         let mut state_guard = state.lock().await;
         let panel = match state_guard.panels.get_mut(panel_id) {
             Some(panel) if panel.windowed => panel,
@@ -570,8 +570,10 @@ pub(crate) async fn send_window(
         let window_entries = serde_json::json!(entries);
         panel.window_start = start;
         panel.window_count = end - start;
-        panel.version += 1;
-        (window_entries, start, total, panel.version)
+        // window_version is independent from `version` so a fast scroll cannot
+        // be dropped by the FE structural-version guard (see store/index.ts).
+        panel.window_version += 1;
+        (window_entries, start, total, panel.version, panel.window_version)
     };
 
     let _ = tx
@@ -584,6 +586,7 @@ pub(crate) async fn send_window(
                 "totalCount": total,
                 "windowStart": window_start,
                 "windowEntries": window_entries,
+                "windowVersion": window_version,
             }),
         })
         .await;
@@ -642,8 +645,25 @@ pub(crate) async fn update_panel_from_patch(
 ) {
     let mut state_guard = state.lock().await;
     if let Some(panel) = state_guard.panels.get_mut(panel_id) {
-        let is_window_patch =
-            patch.get("totalCount").is_some() || patch.get("windowEntries").is_some();
+        // Treat null-valued fields (sent by rescan/navigate to *clear* state) as
+        // "not present" — those patches are structural resets, not window slices.
+        let has_total = patch
+            .get("totalCount")
+            .is_some_and(|v| !v.is_null());
+        let has_window_entries = patch
+            .get("windowEntries")
+            .is_some_and(|v| !v.is_null());
+        let is_window_patch = has_total || has_window_entries;
+        // A "window-only" patch (the kind send_window emits) has no structural
+        // fields — its sole purpose is to update the visible slice and must not
+        // bump the structural version, otherwise it can race with concurrent
+        // structural patches and leave the FE with mismatched windowStart/entries.
+        let is_window_only = has_window_entries
+            && patch.get("status").is_none()
+            && patch.get("cursor").is_none()
+            && patch.get("selection").is_none()
+            && patch.get("entries").is_none()
+            && patch.get("appendEntries").is_none();
 
         if !is_window_patch {
             if let Some(entries) = patch
@@ -696,7 +716,12 @@ pub(crate) async fn update_panel_from_patch(
         if let Some(window_start) = patch.get("windowStart").and_then(|value| value.as_u64()) {
             panel.window_start = window_start as usize;
         }
-        panel.version = version;
+        if let Some(window_version) = patch.get("windowVersion").and_then(|value| value.as_u64()) {
+            panel.window_version = window_version;
+        }
+        if !is_window_only {
+            panel.version = version;
+        }
     }
 }
 
