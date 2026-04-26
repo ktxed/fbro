@@ -160,6 +160,21 @@ impl ViewerPrefetchQueue {
         self.cache.lock().unwrap().clear();
         self.pending.lock().unwrap().clear();
     }
+
+    pub fn stats(&self) -> PrefetchCacheStats {
+        let cache = self.cache.lock().unwrap();
+        PrefetchCacheStats {
+            entry_count: cache.map.len(),
+            total_bytes: cache.map.values().map(|e| e.content.len()).sum(),
+            max_entries: MAX_CACHE_SIZE,
+        }
+    }
+}
+
+pub struct PrefetchCacheStats {
+    pub entry_count: usize,
+    pub total_bytes: usize,
+    pub max_entries: usize,
 }
 
 /// Returns true for file extensions that the FE treats as images (uses IMAGE_LIMIT).

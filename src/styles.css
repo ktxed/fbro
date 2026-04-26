@@ -1413,31 +1413,6 @@ body {
   flex-direction: column;
 }
 
-.jobs-modal .modal__header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.jobs-modal__close {
-  background: none;
-  border: none;
-  color: var(--text-dim);
-  cursor: pointer;
-  padding: 2px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.jobs-modal__close:hover {
-  color: var(--text);
-}
-
-.jobs-modal__close svg {
-  display: block;
-}
-
 .jobs-modal__body {
   overflow-y: auto;
   display: flex;
@@ -1574,6 +1549,91 @@ body {
   font-size: 0.8em;
   color: #e05050;
   margin-top: 2px;
+}
+
+.jobs-modal__tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-header);
+  flex-shrink: 0;
+}
+
+.jobs-modal__tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-family: var(--font);
+  font-size: var(--font-size);
+  padding: 6px 14px;
+  display: flex;
+  align-items: center;
+}
+
+.jobs-modal__tab:hover {
+  color: var(--text);
+}
+
+.jobs-modal__tab--active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+.jobs-modal__cache-body {
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.jobs-modal__cache-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.jobs-modal__cache-item-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.jobs-modal__cache-name {
+  font-weight: 500;
+}
+
+.jobs-modal__cache-stats {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.85em;
+  color: var(--text-dim);
+}
+
+.jobs-modal__cache-clear {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-family: var(--font);
+  font-size: 0.8em;
+  padding: 2px 8px;
+}
+
+.jobs-modal__cache-clear:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--text-dim);
+}
+
+.jobs-modal__cache-clear:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.jobs-modal__cache-loading {
+  font-size: 0.85em;
+  color: var(--text-dim);
 }
 
 /* ── Viewer window ───────────────────────────────────────────────────────── */

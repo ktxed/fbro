@@ -1,6 +1,6 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAppState } from "../store";
-import type { DirSizeTask, FileOpProgress, Job } from "../ws/types";
+import type { DirSizeTask, FileOpProgress, Job, PrefetchCacheStatus } from "../ws/types";
 import type { WsClient } from "../ws/client";
 import { IconPlayerPlay, IconPlayerPause, IconX } from "@tabler/icons-react";
 
@@ -156,9 +156,49 @@ function DirSizeTaskRow({ task, client }: { task: DirSizeTask; client: WsClient 
   );
 }
 
+function CacheEntryRow({ label, status, client, cacheKey }: {
+  label: string;
+  status: PrefetchCacheStatus | null;
+  client: WsClient;
+  cacheKey: string;
+}) {
+  const usedPct = status && status.maxEntries > 0
+    ? Math.round((status.entryCount / status.maxEntries) * 100)
+    : 0;
+
+  return (
+    <div className="jobs-modal__cache-item">
+      <div className="jobs-modal__cache-item-header">
+        <span className="jobs-modal__cache-name">{label}</span>
+        <button
+          className="jobs-modal__cache-clear"
+          disabled={!status || status.entryCount === 0}
+          onClick={() => client.sendIntent("ClearCache", undefined, { cache: cacheKey })}
+        >
+          Clear
+        </button>
+      </div>
+      {status ? (
+        <>
+          <div className="jobs-modal__cache-stats">
+            <span>{status.entryCount} / {status.maxEntries} entries</span>
+            <span>{formatBytes(status.totalBytes)}</span>
+          </div>
+          <div className="jobs-modal__bar">
+            <div className="jobs-modal__bar-fill" style={{ width: `${usedPct}%` }} />
+          </div>
+        </>
+      ) : (
+        <div className="jobs-modal__cache-loading">Loading…</div>
+      )}
+    </div>
+  );
+}
+
 export function JobsModal({ onClose, client }: { onClose: () => void; client: WsClient }) {
   const state = useAppState();
   const overlayRef = useRef<HTMLDivElement>(null);
+  const [activeTab, setActiveTab] = useState<"jobs" | "cache">("jobs");
 
   const byNewest = (a: Job, b: Job) => b.startedAt - a.startedAt;
   const jobs = Object.values(state.jobs).sort(byNewest);
@@ -180,6 +220,12 @@ export function JobsModal({ onClose, client }: { onClose: () => void; client: Ws
     return () => window.removeEventListener("keydown", handler);
   }, [onClose]);
 
+  useEffect(() => {
+    if (activeTab === "cache") {
+      client.sendIntent("QueryCacheStatus", undefined, {});
+    }
+  }, [activeTab, client]);
+
   const onOverlayClick = (e: React.MouseEvent) => {
     if (e.target === overlayRef.current) onClose();
   };
@@ -187,48 +233,75 @@ export function JobsModal({ onClose, client }: { onClose: () => void; client: Ws
   return (
     <div className="modal-overlay" ref={overlayRef} onClick={onOverlayClick}>
       <div className="modal jobs-modal" role="dialog" aria-label="Jobs">
-        <div className="modal__header">
-          <span>Jobs</span>
-          <button className="jobs-modal__close" onClick={onClose}><IconX size={16} /></button>
+        <div className="modal__header">Jobs</div>
+
+        <div className="jobs-modal__tabs">
+          <button
+            className={`jobs-modal__tab${activeTab === "jobs" ? " jobs-modal__tab--active" : ""}`}
+            onClick={() => setActiveTab("jobs")}
+          >
+            Jobs
+          </button>
+          <button
+            className={`jobs-modal__tab${activeTab === "cache" ? " jobs-modal__tab--active" : ""}`}
+            onClick={() => setActiveTab("cache")}
+          >
+            Cache
+          </button>
         </div>
 
         <div className="modal__body jobs-modal__body">
-          {fileJobs.length === 0 && broJobs.length === 0 && dirSizeTasks.length === 0 && (
-            <div className="jobs-modal__empty">No jobs.</div>
+          {activeTab === "jobs" && (
+            <>
+              {fileJobs.length === 0 && broJobs.length === 0 && dirSizeTasks.length === 0 && (
+                <div className="jobs-modal__empty">No jobs.</div>
+              )}
+
+              {activeFileJobs.length > 0 && (
+                <section>
+                  <div className="jobs-modal__section-title">Active File Jobs</div>
+                  {activeFileJobs.map(j => <JobRow key={j.jobId} job={j} client={client} />)}
+                </section>
+              )}
+
+              {broJobs.length > 0 && (
+                <section>
+                  <div className="jobs-modal__section-title">Bro Jobs</div>
+                  {broJobs.map(j => <JobRow key={j.jobId} job={j} client={client} />)}
+                </section>
+              )}
+
+              {dirSizeTasks.length > 0 && (
+                <section>
+                  <div className="jobs-modal__section-title">Folder Size Queue</div>
+                  {dirSizeTasks.map(task => (
+                    <DirSizeTaskRow
+                      key={`${task.panelId}:${task.entryName}:${task.enqueuedAt}`}
+                      task={task}
+                      client={client}
+                    />
+                  ))}
+                </section>
+              )}
+
+              {finishedFileJobs.length > 0 && (
+                <section>
+                  <div className="jobs-modal__section-title">Finished File Jobs</div>
+                  {finishedFileJobs.map(j => <JobRow key={j.jobId} job={j} client={client} />)}
+                </section>
+              )}
+            </>
           )}
 
-          {activeFileJobs.length > 0 && (
-            <section>
-              <div className="jobs-modal__section-title">Active File Jobs</div>
-              {activeFileJobs.map(j => <JobRow key={j.jobId} job={j} client={client} />)}
-            </section>
-          )}
-
-          {broJobs.length > 0 && (
-            <section>
-              <div className="jobs-modal__section-title">Bro Jobs</div>
-              {broJobs.map(j => <JobRow key={j.jobId} job={j} client={client} />)}
-            </section>
-          )}
-
-          {dirSizeTasks.length > 0 && (
-            <section>
-              <div className="jobs-modal__section-title">Folder Size Queue</div>
-              {dirSizeTasks.map(task => (
-                <DirSizeTaskRow
-                  key={`${task.panelId}:${task.entryName}:${task.enqueuedAt}`}
-                  task={task}
-                  client={client}
-                />
-              ))}
-            </section>
-          )}
-
-          {finishedFileJobs.length > 0 && (
-            <section>
-              <div className="jobs-modal__section-title">Finished File Jobs</div>
-              {finishedFileJobs.map(j => <JobRow key={j.jobId} job={j} client={client} />)}
-            </section>
+          {activeTab === "cache" && (
+            <div className="jobs-modal__cache-body">
+              <CacheEntryRow
+                label="Viewer prefetch"
+                status={state.cacheStatus?.prefetchCache ?? null}
+                client={client}
+                cacheKey="prefetch"
+              />
+            </div>
           )}
         </div>
 

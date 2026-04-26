@@ -26,6 +26,8 @@ import type {
   BroOptionsReadyMessage,
   ExternalClipboardReadyMessage,
   ExternalClipboardWrittenMessage,
+  CacheStatusReadyMessage,
+  PrefetchCacheStatus,
 } from "../ws/types";
 
 // ─── State ───────────────────────────────────────────────────────────────────
@@ -185,6 +187,7 @@ export interface AppState {
   commandPaletteOpen: boolean;
   transientHint: { message: string; token: number } | null;
   embeddedViewer: { sourcePanelId: string } | null;
+  cacheStatus: { prefetchCache: PrefetchCacheStatus } | null;
 }
 
 const initialState: AppState = {
@@ -218,6 +221,7 @@ const initialState: AppState = {
 
   transientHint: null,
   embeddedViewer: null,
+  cacheStatus: null,
 };
 
 // ─── Actions ─────────────────────────────────────────────────────────────────
@@ -923,6 +927,8 @@ function reducer(state: AppState, action: AppAction): AppState {
         }
         case "QuitConfirmRequired":
           return applyQuitConfirmRequired(state, msg);
+        case "CacheStatusReady":
+          return { ...state, cacheStatus: { prefetchCache: (msg as CacheStatusReadyMessage).prefetchCache } };
         default:
           return state;
       }

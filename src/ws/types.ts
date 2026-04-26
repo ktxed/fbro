@@ -451,6 +451,18 @@ export interface InputRequiredMessage {
   prompt: string;
 }
 
+export interface PrefetchCacheStatus {
+  entryCount: number;
+  totalBytes: number;
+  maxEntries: number;
+}
+
+export interface CacheStatusReadyMessage {
+  type: "CacheStatusReady";
+  timestamp: number;
+  prefetchCache: PrefetchCacheStatus;
+}
+
 // ─── Union types ─────────────────────────────────────────────────────────────
 
 export type BEMessage =
@@ -473,6 +485,7 @@ export type BEMessage =
   | OpenWithOptionsFailedMessage
   | BroOptionsReadyMessage
   | BroOptionsFailedMessage
-  | InputRequiredMessage;
+  | InputRequiredMessage
+  | CacheStatusReadyMessage;
 
 export type FEMessage = HelloMessage | IntentMessage;

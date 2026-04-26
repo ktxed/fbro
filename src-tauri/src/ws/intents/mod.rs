@@ -1,5 +1,6 @@
 mod app;
 pub(crate) mod bro;
+mod cache;
 mod jobs;
 mod navigation;
 mod panel;
@@ -60,6 +61,7 @@ pub async fn dispatch(name: &str, scope: &Value, args: &Value, ctx: &mut IntentC
         | "SetEmbeddedViewerActive" => {
             viewer::handle(name, args, ctx).await
         }
+        "QueryCacheStatus" | "ClearCache" => cache::handle(name, args, ctx).await,
         "Quit" | "ConfirmQuit" => app::handle(name, ctx).await,
         unknown => eprintln!("[fbro] Unknown intent: {unknown}"),
     }

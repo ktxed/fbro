@@ -162,6 +162,21 @@ pub enum ServerMessage {
         kind: String,
         prompt: String,
     },
+    CacheStatusReady {
+        timestamp: u64,
+        #[serde(rename = "prefetchCache")]
+        prefetch_cache: PrefetchCacheSchema,
+    },
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct PrefetchCacheSchema {
+    #[serde(rename = "entryCount")]
+    pub entry_count: usize,
+    #[serde(rename = "totalBytes")]
+    pub total_bytes: usize,
+    #[serde(rename = "maxEntries")]
+    pub max_entries: usize,
 }
 
 #[derive(Serialize, Clone, Debug)]
