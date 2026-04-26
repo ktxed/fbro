@@ -427,6 +427,7 @@ impl VfsDriver for SevenZipFsDriver {
                     permissions: None,
                     icon_name,
                     cc,
+                source_path: None,
                 }
             })
             .collect();

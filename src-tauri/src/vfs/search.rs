@@ -71,6 +71,7 @@ impl VfsDriver for SearchResultsDriver {
                     } else {
                         crate::vfs::color_class_for_entry(&r.name, &VfsKind::File)
                     },
+                    source_path: Some(r.full_path.clone()),
                 }
             })
             .collect();

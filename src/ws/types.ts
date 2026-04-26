@@ -10,6 +10,9 @@ export interface VFSEntry {
   iconName?: string;
   /** Color class hint — a short CSS class name (e.g. "cc-dir", "cc-archive"). */
   cc?: string;
+  /** Real absolute path when the entry's logical name differs from its filesystem
+   *  path (e.g. search-result entries). Absent for all normal entries. */
+  sourcePath?: string;
 }
 
 export interface Source {

@@ -462,6 +462,7 @@ impl VfsDriver for ZipFsDriver {
                     permissions: None,
                     icon_name,
                     cc,
+                source_path: None,
                 }
             })
             .collect();

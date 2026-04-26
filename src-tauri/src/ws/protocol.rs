@@ -265,6 +265,12 @@ pub struct EntrySchema {
     pub icon_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cc: Option<String>,
+    /// Real absolute path for entries whose logical name differs from the
+    /// filesystem path (e.g. search-result entries). Used by the FE to build
+    /// correct drag-out paths without a BE round-trip.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "sourcePath")]
+    pub source_path: Option<String>,
 }
 
 #[derive(Serialize, Clone, Debug)]

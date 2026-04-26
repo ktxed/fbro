@@ -475,7 +475,7 @@ export function Layout({ client, jobsViewOpen, onCloseJobsView, onOpenJobsView }
 
                 if (!hasSelection) {
                   if (entry.name !== "..") {
-                    files = [{ name: entry.name, size: entry.size, kind: entry.kind }];
+                    files = [{ name: entry.name, size: entry.size, kind: entry.kind, sourcePath: entry.sourcePath }];
                     sourceAbsIndices = [absIndex];
                   }
                 } else if (rowSelected) {

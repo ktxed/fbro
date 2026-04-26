@@ -175,6 +175,7 @@ impl VfsDriver for LocalFsDriver {
                 permissions,
                 icon_name,
                 cc,
+                source_path: None,
             });
         }
 

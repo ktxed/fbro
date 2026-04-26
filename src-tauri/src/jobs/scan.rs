@@ -72,6 +72,7 @@ pub async fn run_scan(
             permissions: e.permissions,
             icon_name: e.icon_name,
             cc: e.cc,
+            source_path: e.source_path,
         })
         .collect();
 

@@ -94,6 +94,9 @@ pub struct VfsEntry {
     /// Color class hint for the FE — a short CSS class name derived from the
     /// entry kind and file extension (e.g. "cc-dir", "cc-archive").
     pub cc: Option<String>,
+    /// Real absolute path when the entry's logical `name` differs from its
+    /// filesystem path (e.g. search results). `None` for all normal entries.
+    pub source_path: Option<String>,
 }
 
 /// Derive a freedesktop icon name from the entry kind and file extension.

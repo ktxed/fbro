@@ -126,7 +126,7 @@ pub(crate) fn selected_entries_for_panel(panel: &Panel) -> Vec<FileOpFileSchema>
                 name: entry.name.clone(),
                 size: entry.size,
                 kind: entry.kind.clone(),
-                source_path: None,
+                source_path: entry.source_path.clone(),
             })
         })
         .collect()
@@ -680,6 +680,7 @@ pub(crate) async fn update_panel_from_patch(
                         permissions: entry["permissions"].as_str().map(String::from),
                         icon_name: entry["iconName"].as_str().map(String::from),
                         cc: entry["cc"].as_str().map(String::from),
+                        source_path: entry["sourcePath"].as_str().map(String::from),
                     });
                 }
             }
