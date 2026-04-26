@@ -143,6 +143,11 @@ pub trait Platform: Send + Sync {
     ) -> Result<(), String> {
         Err("Writing to the host clipboard is not supported on this platform.".to_string())
     }
+
+    /// Writes plain text to the system clipboard.
+    fn write_text_clipboard(&self, _text: &str) -> Result<(), String> {
+        Err("Writing text to clipboard is not supported on this platform.".to_string())
+    }
 }
 
 // ── Embedded fallback icons ─────────────────────────────────────────────────

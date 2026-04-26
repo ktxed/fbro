@@ -98,6 +98,7 @@ pub(crate) enum LaunchRecipe {
     },
     BuiltInSevenZip,
     BuiltInZip,
+    BuiltInCopyPaths,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -181,9 +182,10 @@ impl ResolvedBro {
 
                 Ok((program.clone(), resolved_args, cwd))
             }
-            LaunchRecipe::BuiltInSevenZip | LaunchRecipe::BuiltInZip => Err(
-                "This bro uses an in-process fp runtime and cannot be launched directly"
-                    .to_string(),
+            LaunchRecipe::BuiltInSevenZip
+            | LaunchRecipe::BuiltInZip
+            | LaunchRecipe::BuiltInCopyPaths => Err(
+                "This bro uses a built-in runtime and cannot be launched as a command".to_string(),
             ),
         }
     }

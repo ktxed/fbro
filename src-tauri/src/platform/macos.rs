@@ -279,6 +279,10 @@ impl Platform for MacOSPlatform {
     ) -> Result<(), String> {
         write_external_file_clipboard_native(payload)
     }
+
+    fn write_text_clipboard(&self, text: &str) -> Result<(), String> {
+        write_macos_text_clipboard(text)
+    }
 }
 
 fn disk_image_mount_points() -> std::collections::HashSet<String> {
@@ -423,6 +427,33 @@ fn write_external_file_clipboard_native(payload: &ExternalClipboardPayload) -> R
         let success = msg_send1::<ObjcId, Boolean>(pasteboard, "writeObjects:", urls);
         if success == 0 {
             Err("Failed to publish files to the system pasteboard.".to_string())
+        } else {
+            Ok(())
+        }
+    };
+    unsafe { objc_autoreleasePoolPop(pool) };
+    result
+}
+
+fn write_macos_text_clipboard(text: &str) -> Result<(), String> {
+    let pool = unsafe { objc_autoreleasePoolPush() };
+    let result = unsafe {
+        let pasteboard_class = get_objc_class("NSPasteboard")?;
+        let pasteboard = msg_send0::<ObjcId>(pasteboard_class, "generalPasteboard");
+        if pasteboard.is_null() {
+            return Err("Failed to access the system pasteboard.".to_string());
+        }
+        let _: isize = msg_send0(pasteboard, "clearContents");
+        let ns_text = make_nsstring(text)?;
+        let ns_type = make_nsstring("public.utf8-plain-text")?;
+        let success = msg_send2::<Boolean, ObjcId, ObjcId>(
+            pasteboard,
+            "setString:forType:",
+            ns_text,
+            ns_type,
+        );
+        if success == 0 {
+            Err("Failed to write text to the system pasteboard.".to_string())
         } else {
             Ok(())
         }

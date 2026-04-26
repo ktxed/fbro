@@ -335,6 +335,17 @@ impl Platform for LinuxPlatform {
             .map_err(|_| "Failed to write clipboard data from the GTK main context.".to_string())?
     }
 
+    fn write_text_clipboard(&self, text: &str) -> Result<(), String> {
+        let text = text.to_string();
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        gtk::glib::MainContext::default().invoke(move || {
+            let result = write_linux_text_clipboard(&text);
+            let _ = tx.send(result);
+        });
+        rx.recv()
+            .map_err(|_| "Failed to write text to clipboard from the GTK main context.".to_string())?
+    }
+
     fn home_dir(&self) -> String {
         // Prefer $HOME; fall back to /etc/passwd entry for current uid
         if let Ok(h) = std::env::var("HOME") {
@@ -539,6 +550,16 @@ fn write_linux_external_clipboard(payload: &ExternalClipboardPayload) -> Result<
         return Err("Failed to publish the host clipboard payload.".to_string());
     }
 
+    clipboard.store();
+    Ok(())
+}
+
+fn write_linux_text_clipboard(text: &str) -> Result<(), String> {
+    if !gtk::is_initialized() {
+        gtk::init().map_err(|e| e.to_string())?;
+    }
+    let clipboard = gtk::Clipboard::get(&gdk::SELECTION_CLIPBOARD);
+    clipboard.set_text(text);
     clipboard.store();
     Ok(())
 }

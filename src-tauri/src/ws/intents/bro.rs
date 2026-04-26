@@ -5,7 +5,8 @@ use serde_json::Value;
 use tokio::sync::watch;
 
 use crate::bro::{
-    launch_bro, list_bros, BroInputItem, BroLaunchInputKind, BroProtocol, ResolvedBro,
+    launch_bro, list_bros, BroInputItem, BroLaunchInputKind, BroProtocol, LaunchRecipe,
+    ResolvedBro,
 };
 use crate::jobs::fp_bro::run_fp_bro;
 use crate::jobs::{AppJob, FileOpProgress, FpBroJobMeta, JobKind, JobState};
@@ -224,6 +225,37 @@ async fn launch_selected_bro(args: &Value, ctx: &mut IntentContext<'_>) {
 
     match bro.option.protocol {
         BroProtocol::Fnf => {
+            if matches!(bro.launch, LaunchRecipe::BuiltInCopyPaths) {
+                let text = request
+                    .inputs
+                    .iter()
+                    .map(|i| i.path.as_str())
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                let platform = {
+                    let state_guard = ctx.state.lock().await;
+                    state_guard.platform.clone()
+                };
+                let result = tokio::task::spawn_blocking(move || platform.write_text_clipboard(&text))
+                    .await
+                    .unwrap_or_else(|_| Err("Clipboard task panicked".to_string()));
+                if let Err(message) = result {
+                    let _ = ctx
+                        .tx
+                        .send(ServerMessage::Error {
+                            timestamp: now(),
+                            code: "BRO_LAUNCH_FAILED".to_string(),
+                            message,
+                            recoverable: true,
+                            extra: Some(serde_json::json!({
+                                "requestId": parsed.request_id,
+                                "broId": parsed.bro_id,
+                            })),
+                        })
+                        .await;
+                }
+                return;
+            }
             if let Err(message) = launch_bro(
                 &request.inputs,
                 &bro,

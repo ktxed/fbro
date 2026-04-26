@@ -74,6 +74,7 @@ pub async fn run_fp_bro(
             )
             .await;
         }
+        LaunchRecipe::BuiltInCopyPaths => {}
     }
 }
 
