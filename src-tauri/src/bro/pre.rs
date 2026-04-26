@@ -21,8 +21,12 @@ pub fn rank_bros(inputs: &[BroInputItem], mut bros: Vec<ResolvedBro>) -> Vec<Res
 }
 
 fn evaluate_bro(inputs: &[BroInputItem], bro: &BroOption) -> BroPre {
-    if is_media_bro(bro) {
+    if is_mpv_bro(bro) {
         return evaluate_media_bro(inputs);
+    }
+
+    if is_vlc_bro(bro) {
+        return nerf(evaluate_media_bro(inputs), 15);
     }
 
     if is_seven_zip_bro(bro) {
@@ -43,8 +47,19 @@ fn evaluate_bro(inputs: &[BroInputItem], bro: &BroOption) -> BroPre {
     }
 }
 
-fn is_media_bro(bro: &BroOption) -> bool {
-    bro.name.eq_ignore_ascii_case("mpv") || bro.name.eq_ignore_ascii_case("vlc")
+fn is_mpv_bro(bro: &BroOption) -> bool {
+    bro.name.eq_ignore_ascii_case("mpv")
+}
+
+fn is_vlc_bro(bro: &BroOption) -> bool {
+    bro.name.eq_ignore_ascii_case("vlc")
+}
+
+fn nerf(pre: BroPre, penalty: i32) -> BroPre {
+    BroPre {
+        score: (pre.score - penalty).max(0),
+        reason: pre.reason,
+    }
 }
 
 fn is_tar_bro(bro: &BroOption) -> bool {
