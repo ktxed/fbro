@@ -8,6 +8,7 @@ export class WsClient {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private destroyed = false;
   private clientKind: "gui" | "viewer";
+  private pending: (FEMessage | IntentMessage)[] = [];
 
   constructor(clientKind: "gui" | "viewer" = "gui") {
     this.clientKind = clientKind;
@@ -33,6 +34,9 @@ export class WsClient {
         protocolVersion: "0",
         client: { kind: this.clientKind, name: "fbro-ui", supports: ["jobs", "decisions"] },
       });
+      const queued = this.pending;
+      this.pending = [];
+      for (const msg of queued) this.send(msg);
       this.onConnected();
     };
 
@@ -75,7 +79,11 @@ export class WsClient {
   private send(msg: FEMessage | IntentMessage) {
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(msg));
+      return;
     }
+    if (msg.type === "Hello") return;
+    if (this.pending.length >= 32) this.pending.shift();
+    this.pending.push(msg);
   }
 
   private scheduleReconnect() {
