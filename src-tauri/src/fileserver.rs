@@ -31,18 +31,40 @@ pub fn start(plat: Arc<dyn Platform>, prefetch: Arc<ViewerPrefetchQueue>) -> u16
 }
 
 fn handle(mut stream: TcpStream, plat: &dyn Platform, prefetch: &ViewerPrefetchQueue) -> std::io::Result<()> {
-    let mut buf = [0u8; 8192];
-    let n = stream.read(&mut buf)?;
-    let req = std::str::from_utf8(&buf[..n]).unwrap_or("");
+    // Read until end-of-headers (\r\n\r\n). A single read() may return only
+    // part of the request — TCP can split it arbitrarily — and parsing a
+    // truncated request silently drops headers like Range:, which breaks
+    // <video> seeking and produces a broken-icon error in WebKitGTK.
+    let mut buf = Vec::with_capacity(8192);
+    let mut chunk = [0u8; 4096];
+    loop {
+        let n = stream.read(&mut chunk)?;
+        if n == 0 {
+            break;
+        }
+        buf.extend_from_slice(&chunk[..n]);
+        if buf.windows(4).any(|w| w == b"\r\n\r\n") {
+            break;
+        }
+        if buf.len() > 64 * 1024 {
+            break;
+        }
+    }
+    let req = std::str::from_utf8(&buf).unwrap_or("");
 
     // Parse path from request line: "GET /url-encoded-path HTTP/1.1"
     let url_path = match req.lines().next().and_then(|l| l.split_whitespace().nth(1)) {
-        Some(p) => p.to_string(),
+        Some(p) => p.split('?').next().unwrap_or(p).to_string(),
         None => {
             stream.write_all(b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n")?;
             return Ok(());
         }
     };
+    let range_dbg = req
+        .lines()
+        .find(|l| l.to_ascii_lowercase().starts_with("range:"))
+        .unwrap_or("(no range)");
+    eprintln!("[fbro fs] {} | {}", url_path, range_dbg);
 
     // Icon requests: /__icon__/{name}
     if let Some(icon_name) = url_path.strip_prefix("/__icon__/") {
@@ -96,6 +118,7 @@ fn handle(mut stream: TcpStream, plat: &dyn Platform, prefetch: &ViewerPrefetchQ
                  Content-Range: bytes {start}-{actual_end}/{total}\r\n\
                  Content-Length: {n}\r\n\
                  Accept-Ranges: bytes\r\n\
+                 Cache-Control: no-store\r\n\
                  Connection: close\r\n\r\n"
             )?;
             stream.write_all(&data)?;
@@ -105,10 +128,14 @@ fn handle(mut stream: TcpStream, plat: &dyn Platform, prefetch: &ViewerPrefetchQ
 
     // Full file (for images or non-range requests).
     // Check the BE prefetch cache first; fall back to disk on miss.
-    let data = if let Some(entry) = prefetch.get_cached_by_path(&path) {
-        entry.content.clone()
-    } else {
-        std::fs::read(&path)?
+    // The prefetch only caches a prefix of large files (e.g. videos), so we
+    // must verify the cached content is the complete file before using it —
+    // otherwise we'd serve a truncated MP4 and qtdemux would reject it.
+    let data = match prefetch.get_cached_by_path(&path) {
+        Some(entry) if entry.file_size == Some(entry.content.len() as u64) => {
+            entry.content.clone()
+        }
+        _ => std::fs::read(&path)?,
     };
     write!(
         stream,
@@ -116,6 +143,7 @@ fn handle(mut stream: TcpStream, plat: &dyn Platform, prefetch: &ViewerPrefetchQ
          Content-Type: {mime}\r\n\
          Content-Length: {}\r\n\
          Accept-Ranges: bytes\r\n\
+         Cache-Control: no-store\r\n\
          Connection: close\r\n\r\n",
         data.len()
     )?;
