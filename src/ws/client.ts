@@ -2,10 +2,12 @@ import type { BEMessage, FEMessage, IntentMessage } from "./types";
 
 const WS_URL = "ws://127.0.0.1:7878";
 const RECONNECT_DELAY_MS = 1500;
+const CONNECT_TIMEOUT_MS = 2000;
 
 export class WsClient {
   private ws: WebSocket | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private connectTimer: ReturnType<typeof setTimeout> | null = null;
   private destroyed = false;
   private clientKind: "gui" | "viewer";
   private pending: (FEMessage | IntentMessage)[] = [];
@@ -20,14 +22,27 @@ export class WsClient {
 
   connect() {
     if (this.destroyed) return;
+    console.log("WS CONNECT", this.clientKind, WS_URL);
+    let ws: WebSocket;
     try {
-      this.ws = new WebSocket(WS_URL);
-    } catch {
+      ws = new WebSocket(WS_URL);
+    } catch (e) {
+      console.log("WS CONNECT THROW", this.clientKind, e);
       this.scheduleReconnect();
       return;
     }
+    this.ws = ws;
 
-    this.ws.onopen = () => {
+    // Force-close if the handshake stalls — onclose will fire and trigger reconnect.
+    this.connectTimer = setTimeout(() => {
+      if (ws.readyState !== WebSocket.OPEN) {
+        try { ws.close(); } catch { /* ignore */ }
+      }
+    }, CONNECT_TIMEOUT_MS);
+
+    ws.onopen = () => {
+      console.log("WS OPEN", this.clientKind);
+      if (this.connectTimer) { clearTimeout(this.connectTimer); this.connectTimer = null; }
       this.send({
         type: "Hello",
         timestamp: Date.now(),
@@ -40,7 +55,7 @@ export class WsClient {
       this.onConnected();
     };
 
-    this.ws.onmessage = (event) => {
+    ws.onmessage = (event) => {
       try {
         const msg = JSON.parse(event.data as string) as BEMessage;
         this.onMessage(msg);
@@ -49,12 +64,15 @@ export class WsClient {
       }
     };
 
-    this.ws.onclose = () => {
+    ws.onclose = (e) => {
+      console.log("WS CLOSE", this.clientKind, e.code, e.reason);
+      if (this.connectTimer) { clearTimeout(this.connectTimer); this.connectTimer = null; }
       this.onDisconnected();
       this.scheduleReconnect();
     };
 
-    this.ws.onerror = () => {
+    ws.onerror = () => {
+      console.log("WS ERROR", this.clientKind, "readyState=", this.ws?.readyState);
       // onclose fires after onerror, reconnect is handled there
     };
   }
@@ -82,6 +100,7 @@ export class WsClient {
       return;
     }
     if (msg.type === "Hello") return;
+    console.warn("WS QUEUE", this.clientKind, "readyState=", this.ws?.readyState, msg);
     if (this.pending.length >= 32) this.pending.shift();
     this.pending.push(msg);
   }
@@ -96,6 +115,7 @@ export class WsClient {
   destroy() {
     this.destroyed = true;
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    if (this.connectTimer) clearTimeout(this.connectTimer);
     this.ws?.close();
   }
 }
