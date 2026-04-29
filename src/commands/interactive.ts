@@ -434,6 +434,10 @@ export function bindingMatches(event: KeyboardLikeEvent, binding: KeyBinding) {
     normalizedBindingKey.length === 1
     && /^[a-z]$/i.test(normalizedBindingKey)
     && event.code === `Key${normalizedBindingKey.toUpperCase()}`;
+  const matchesPhysicalDigitKey =
+    normalizedBindingKey.length === 1
+    && /^[0-9]$/.test(normalizedBindingKey)
+    && event.code === `Digit${normalizedBindingKey}`;
   const isShiftProducedSymbol =
     normalizedEventKey === normalizedBindingKey
     && normalizedBindingKey.length === 1
@@ -442,7 +446,7 @@ export function bindingMatches(event: KeyboardLikeEvent, binding: KeyBinding) {
     && !binding.shift
     && event.shiftKey;
 
-  return (normalizedEventKey === normalizedBindingKey || matchesPhysicalLetterKey)
+  return (normalizedEventKey === normalizedBindingKey || matchesPhysicalLetterKey || matchesPhysicalDigitKey)
     && (isShiftProducedSymbol || !!binding.shift === event.shiftKey)
     && !!binding.ctrl === event.ctrlKey
     && !!binding.alt === event.altKey
