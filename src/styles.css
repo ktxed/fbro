@@ -795,6 +795,10 @@ body {
   flex-shrink: 0;
 }
 
+.panel__disk-text {
+  cursor: pointer;
+}
+
 .panel__footer-status {
   min-width: 0;
   overflow: hidden;

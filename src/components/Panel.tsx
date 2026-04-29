@@ -869,7 +869,14 @@ export function Panel({
               H
             </button>
           )}
-          {diskText && <span>{diskText}</span>}
+          {diskText && (
+            <span
+              className="panel__disk-text"
+              onClick={() => client.sendIntent("RequestStateSnapshot", undefined, {})}
+            >
+              {diskText}
+            </span>
+          )}
         </div>
       </div>
       <Tooltip id="hidden-files" delayShow={0} />
