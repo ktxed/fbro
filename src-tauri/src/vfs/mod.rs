@@ -128,7 +128,7 @@ pub fn icon_name_for_entry(name: &str, kind: &VfsKind) -> Option<String> {
             "hs" => "text-x-haskell",
             "r" => "text-x-r",
             // Markup & text
-            "html" | "htm" => "text-html",
+            "html" | "htm" => "fbro-ie-html",
             "css" => "text-css",
             "md" | "markdown" => "text-markdown",
             "txt" | "log" => "text-x-generic",
