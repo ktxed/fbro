@@ -371,7 +371,7 @@ pub(crate) fn build_interactive_commands() -> Vec<InteractiveCommandSchema> {
         command(
             "panel.history.open",
             "Navigation",
-            "Open Panel History",
+            "Browse History",
             vec![keybinding("h")],
             None,
         ),

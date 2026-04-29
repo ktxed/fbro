@@ -488,9 +488,10 @@ function applyPatch(state: AppState, msg: StatePatchMessage): AppState {
       || (msg.patch.sourceId !== undefined && updated.sourceId !== panel.sourceId);
 
     if (locationChanged) {
-      // Bookmarks is a navigation tool, not a real filesystem location —
-      // entering or exiting it must not create a history entry.
-      if (updated.sourceId === "bookmarks" || panel.sourceId === "bookmarks") {
+      // Bookmarks and history are navigation tools, not real filesystem locations —
+      // entering or exiting them must not create a history entry.
+      if (updated.sourceId === "bookmarks" || panel.sourceId === "bookmarks"
+       || updated.sourceId === "history"  || panel.sourceId === "history") {
         return { ...state, panels: { ...state.panels, [panelId]: updated } };
       }
       if (pendingHistoryNavPanels.has(panelId)) {

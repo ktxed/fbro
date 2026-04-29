@@ -2,6 +2,7 @@ mod app;
 mod bookmarks;
 pub(crate) mod bro;
 mod cache;
+mod history;
 mod jobs;
 mod navigation;
 mod panel;
@@ -64,6 +65,7 @@ pub async fn dispatch(name: &str, scope: &Value, args: &Value, ctx: &mut IntentC
         }
         "QueryCacheStatus" | "ClearCache" => cache::handle(name, args, ctx).await,
         "AddBookmark" | "RemoveBookmark" | "EnterBookmarkSource" => bookmarks::handle(name, scope, args, ctx).await,
+        "EnterHistorySource" => history::handle(name, scope, args, ctx).await,
         "Quit" | "ConfirmQuit" => app::handle(name, ctx).await,
         unknown => eprintln!("[fbro] Unknown intent: {unknown}"),
     }
@@ -79,6 +81,10 @@ pub(crate) fn is_search_source(source_id: &str) -> bool {
 
 pub(crate) fn is_bookmarks_source(source_id: &str) -> bool {
     source_id == "bookmarks"
+}
+
+pub(crate) fn is_history_source(source_id: &str) -> bool {
+    source_id == "history"
 }
 
 /// Strips the archive prefix ("zip:" or "7z:") and returns the filesystem path.

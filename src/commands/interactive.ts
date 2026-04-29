@@ -628,16 +628,29 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
         },
       });
       return true;
-    case "panel.history.open":
+    case "panel.history.open": {
       if (!focused) return false;
-      dispatch({
-        type: "OPEN_PANEL_HISTORY",
-        panelHistory: {
-          panelId: focused.panelId,
-          currentPath: focused.panel.path,
-        },
-      });
+      const hist = state.panelHistory[focused.panelId];
+      const entries: string[] = [];
+      const seen = new Set<string>();
+      const rawEntries = hist ? [...hist.entries].reverse() : [];
+      for (const e of rawEntries) {
+        if (
+          !seen.has(e.path) &&
+          e.path &&
+          e.sourceId !== "bookmarks" &&
+          e.sourceId !== "history" &&
+          !isSearchSourceId(e.sourceId) &&
+          !e.sourceId.startsWith("zip:") &&
+          !e.sourceId.startsWith("7z:")
+        ) {
+          seen.add(e.path);
+          entries.push(e.path);
+        }
+      }
+      client.sendIntent("EnterHistorySource", focused.panelId, { entries });
       return true;
+    }
     case "panel.history.back": {
       if (!focused) return false;
       const hb = state.panelHistory[focused.panelId];
