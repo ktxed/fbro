@@ -14,6 +14,7 @@
     "@floating-ui/react": "^0.27.19",
     "@tabler/icons-react": "^3.41.1",
     "@tauri-apps/api": "^2",
+    "marked": "^15.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-tooltip": "^5.30.1"

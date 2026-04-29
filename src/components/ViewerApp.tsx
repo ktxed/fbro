@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import { WsClient } from "../ws/client";
 import type { BEMessage, FileChunkMessage, ViewerFileChangedMessage } from "../ws/types";
 import { ImageViewer, IMAGE_LIMIT } from "../viewers/ImageViewer";
-import { detectRenderer, isImageExt } from "../viewers/media";
+import { detectRenderer, isImageExt, isMdExt } from "../viewers/media";
+import { marked } from "marked";
 import { DirectFileViewer, canUseDirect } from "../viewers/DirectFileViewer";
 import { isArchiveSourceId } from "../utils/sourceId";
 
@@ -178,6 +179,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
   // null = unknown (after a scrollbar jump to an arbitrary byte offset).
   const [dosMode, setDosMode] = useState(false);
   const [wordWrap, setWordWrap] = useState(false);
+  const [markdownMode, setMarkdownMode] = useState(() => isMdExt(initFilename));
 
   // ── Find state ────────────────────────────────────────────────────────────
   const [findOpen, setFindOpen]   = useState(false);
@@ -401,6 +403,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
         const direct = canUseDirect(m.isLocal ?? false, m.filename, m.fileSize ?? null);
         // Reset viewer state for new file
         setDosMode(false);
+        setMarkdownMode(isMdExt(m.filename));
         setCurPath(m.path);
         setCurSourceId(m.sourceId);
         setCurFilename(m.filename);
@@ -542,6 +545,10 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
     if (effectiveMode !== "text") setFindOpen(false);
   }, [effectiveMode]);
 
+  useEffect(() => {
+    if (markdownMode) setFindOpen(false);
+  }, [markdownMode]);
+
   // ── Keyboard ──────────────────────────────────────────────────────────────
 
   useEffect(() => {
@@ -605,6 +612,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
 
       if (e.key === "s" && effectiveMode === "text") { setDosMode(prev => !prev); return; }
       if (e.key === "w" && effectiveMode === "text") { setWordWrap(prev => !prev); return; }
+      if (e.key === "m" && effectiveMode === "text") { setMarkdownMode(prev => !prev); return; }
 
       const goStart = e.key === "Home" || (e.key === "ArrowUp" && e.metaKey);
       const goEnd   = e.key === "End"  || (e.key === "ArrowDown" && e.metaKey);
@@ -793,6 +801,11 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
     return { gutterText: gutterEntries.join("\n"), textContent: visLines.join("\n"), rows, visLines };
   }, [effectiveMode, buffer, isSmall, lines, lineNums, topLine, vpLines, wordWrap]);
 
+  const markdownHtml = useMemo((): string => {
+    if (!markdownMode || !buffer || isSmall !== true) return "";
+    return marked.parse(renderText(buffer)) as string;
+  }, [markdownMode, buffer, isSmall]);
+
   // ── Status bar info ───────────────────────────────────────────────────────
 
   let offsetDisplay = bufferOffset;
@@ -874,7 +887,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
   }
 
   return (
-    <div className={`viewer${dosMode && effectiveMode === "text" ? " viewer--dos" : ""}`}>
+    <div className={`viewer${dosMode && effectiveMode === "text" && !markdownMode ? " viewer--dos" : ""}${markdownMode && effectiveMode === "text" ? " viewer--markdown" : ""}`}>
       <div className="viewer__header">
         <span className="viewer__filename">{curFilename}</span>
         <div className="viewer__mode-btns">
@@ -902,19 +915,30 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
           {effectiveMode === "text" && (
             <>
               <button
-                className={`viewer__mode-btn${dosMode ? " viewer__mode-btn--active" : ""}`}
-                onClick={() => setDosMode(prev => !prev)}
-                title="DOS/CP437 mode (s)"
+                className={`viewer__mode-btn${markdownMode ? " viewer__mode-btn--active" : ""}`}
+                onClick={() => setMarkdownMode(prev => !prev)}
+                title="Markdown preview (m)"
               >
-                S DOS
+                M MD
               </button>
-              <button
-                className={`viewer__mode-btn${wordWrap ? " viewer__mode-btn--active" : ""}`}
-                onClick={() => setWordWrap(prev => !prev)}
-                title="Word wrap (w)"
-              >
-                W Wrap
-              </button>
+              {!markdownMode && (
+                <>
+                  <button
+                    className={`viewer__mode-btn${dosMode ? " viewer__mode-btn--active" : ""}`}
+                    onClick={() => setDosMode(prev => !prev)}
+                    title="DOS/CP437 mode (s)"
+                  >
+                    S DOS
+                  </button>
+                  <button
+                    className={`viewer__mode-btn${wordWrap ? " viewer__mode-btn--active" : ""}`}
+                    onClick={() => setWordWrap(prev => !prev)}
+                    title="Word wrap (w)"
+                  >
+                    W Wrap
+                  </button>
+                </>
+              )}
             </>
           )}
         </div>
@@ -936,7 +960,19 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
         )}
         {!error && buffer && !isImageMode && (
           <>
-            {effectiveMode === "hex" ? (
+            {effectiveMode === "text" && markdownMode ? (
+              isSmall === true ? (
+                <div
+                  className="viewer__markdown"
+                  ref={contentRef as React.RefObject<HTMLDivElement>}
+                  dangerouslySetInnerHTML={{ __html: markdownHtml }}
+                />
+              ) : (
+                <div className="viewer__markdown-unavailable">
+                  Markdown preview not available for files &gt; 1 MiB
+                </div>
+              )
+            ) : effectiveMode === "hex" ? (
               <pre
                 className={`viewer__pre${isSmall === false ? " viewer__pre--virtual" : ""}`}
                 ref={contentRef as React.RefObject<HTMLPreElement>}
@@ -994,7 +1030,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
         )}
       </div>
 
-      {findOpen && effectiveMode === "text" && (
+      {findOpen && effectiveMode === "text" && !markdownMode && (
         <div className="viewer__find-bar">
           <input
             ref={findInputRef}
@@ -1025,7 +1061,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
             const canEdit = !isArchiveSourceId(curSourceId);
             const editHint = canEdit ? " · e/F4 edit" : "";
             if (isImageMode) return `z zoom · j/k prev/next file · 1 text · 2 image · 3 hex${editHint}`;
-            if (effectiveMode === "text") return `↑↓ PgDn/PgUp scroll · j/k prev/next · 1 text · 2 image · 3 hex · s dos · w wrap · f find${editHint}`;
+            if (effectiveMode === "text") return `↑↓ PgDn/PgUp scroll · j/k prev/next · 1 text · 2 image · 3 hex · m md · s dos · w wrap · f find${editHint}`;
             return `↑↓ PgDn/PgUp scroll · j/k prev/next file · 1 text · 2 image · 3 hex${editHint}`;
           })()}
         </span>

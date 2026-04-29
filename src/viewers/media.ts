@@ -28,6 +28,12 @@ export function isPdfExt(filename: string): boolean {
   return PDF_EXTENSIONS.has(extOf(filename));
 }
 
+const MD_EXTENSIONS = new Set(["md", "markdown", "mdown"]);
+
+export function isMdExt(filename: string): boolean {
+  return MD_EXTENSIONS.has(extOf(filename));
+}
+
 export function mimeForFile(filename: string): string {
   return IMAGE_EXTENSIONS[extOf(filename)] ?? "application/octet-stream";
 }
