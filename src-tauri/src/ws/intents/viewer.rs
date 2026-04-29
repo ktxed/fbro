@@ -213,12 +213,19 @@ async fn view_file(args: &Value, ctx: &mut IntentContext<'_>) {
         let state_guard = ctx.state.lock().await;
         let driver = state_guard.drivers.get(&effective_source_id).cloned();
         let panel = state_guard.panels.get(&parsed.panel_id);
-        let neighbors = match (panel, driver.as_ref()) {
+        let mut neighbors = match (panel, driver.as_ref()) {
             (Some(panel), Some(drv)) if drv.is_local() => {
                 collect_neighbors(&panel.entries, panel.cursor, &panel.path, &panel.source_id)
             }
             _ => vec![],
         };
+        // Include the target file itself so it is warm in the cache when the
+        // viewer window finishes loading and sends ReadFileChunk. Without this
+        // the first open always misses the cache and reads from disk, which is
+        // noticeable on macOS where WebKit takes longer to initialise.
+        if driver.as_ref().map_or(false, |d| d.is_local()) {
+            neighbors.push((full_path.clone(), file_size));
+        }
         (neighbors, driver)
     };
     if let Some(driver) = driver {
