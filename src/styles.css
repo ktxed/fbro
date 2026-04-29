@@ -1666,6 +1666,12 @@ body {
   white-space: nowrap;
 }
 
+.jobs-modal__pid {
+  font-size: 0.75em;
+  color: var(--text-dim);
+  opacity: 0.6;
+}
+
 .jobs-modal__progress {
   display: flex;
   flex-direction: column;

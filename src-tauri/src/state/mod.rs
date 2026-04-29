@@ -125,6 +125,15 @@ pub struct AppState {
     /// on reconnection, keeping existing entries visible during the refresh.
     pub has_gui_connected: bool,
     pub bookmarks: Vec<BookmarkEntry>,
+    pub child_processes: HashMap<u32, ChildProcessEntry>,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct ChildProcessEntry {
+    pub pid: u32,
+    pub name: String,
+    pub label: String,
+    pub started_at: u64,
 }
 
 #[allow(dead_code)]
@@ -298,6 +307,7 @@ impl AppState {
             active_viewers: 0,
             has_gui_connected: false,
             bookmarks: crate::bookmarks::load(),
+            child_processes: HashMap::new(),
         }
     }
 

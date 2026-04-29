@@ -307,6 +307,13 @@ export interface BookmarkEntry {
   path: string;
 }
 
+export interface ChildProcess {
+  pid: number;
+  name: string;
+  label: string;
+  started_at: number;
+}
+
 export interface StateSnapshotMessage {
   type: "StateSnapshot";
   timestamp: number;
@@ -325,7 +332,7 @@ export interface StateSnapshotMessage {
 export interface StatePatchMessage {
   type: "StatePatch";
   timestamp: number;
-  domain: "panels" | "layout" | "focus" | "selections" | "jobs" | "sources" | "dirSizeQueue" | "bookmarks";
+  domain: "panels" | "layout" | "focus" | "selections" | "jobs" | "sources" | "dirSizeQueue" | "bookmarks" | "procs";
   entityId?: string;
   version: number;
   patch: {

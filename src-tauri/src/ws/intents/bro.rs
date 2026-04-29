@@ -1,5 +1,9 @@
+#[cfg(unix)]
+extern crate libc;
+
 use std::collections::HashMap;
 use std::path::Path;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
 use tokio::sync::watch;
@@ -10,6 +14,7 @@ use crate::bro::{
 };
 use crate::jobs::fp_bro::run_fp_bro;
 use crate::jobs::{AppJob, FileOpProgress, FpBroJobMeta, JobKind, JobState};
+use crate::state::ChildProcessEntry;
 use crate::ws::intents::arg_str;
 use crate::ws::protocol::{
     now, BroInputSchema, BroOutputSchema, BroParamSchema, BroPreSchema, BroSchema,
@@ -21,6 +26,7 @@ pub(crate) async fn handle(name: &str, scope: &Value, args: &Value, ctx: &mut In
     match name {
         "ListBros" => list_bros_for_request(scope, args, ctx).await,
         "LaunchBro" => launch_selected_bro(args, ctx).await,
+        "KillProcess" => kill_process(args, ctx).await,
         _ => {}
     }
 }
@@ -256,25 +262,69 @@ async fn launch_selected_bro(args: &Value, ctx: &mut IntentContext<'_>) {
                 }
                 return;
             }
-            if let Err(message) = launch_bro(
+            match launch_bro(
                 &request.inputs,
                 &bro,
                 parsed.output.as_deref(),
                 &parsed.params,
             ) {
-                let _ = ctx
-                    .tx
-                    .send(ServerMessage::Error {
-                        timestamp: now(),
-                        code: "BRO_LAUNCH_FAILED".to_string(),
-                        message,
-                        recoverable: true,
-                        extra: Some(serde_json::json!({
-                            "requestId": parsed.request_id,
-                            "broId": parsed.bro_id,
-                        })),
-                    })
-                    .await;
+                Err(message) => {
+                    let _ = ctx
+                        .tx
+                        .send(ServerMessage::Error {
+                            timestamp: now(),
+                            code: "BRO_LAUNCH_FAILED".to_string(),
+                            message,
+                            recoverable: true,
+                            extra: Some(serde_json::json!({
+                                "requestId": parsed.request_id,
+                                "broId": parsed.bro_id,
+                            })),
+                        })
+                        .await;
+                }
+                Ok(child) => {
+                    let pid = child.id();
+                    let name = bro.option.name.clone();
+                    let label = request.inputs.first()
+                        .map(|i| {
+                            std::path::Path::new(&i.path)
+                                .file_name()
+                                .and_then(|n| n.to_str())
+                                .unwrap_or(&i.path)
+                                .to_string()
+                        })
+                        .unwrap_or_default();
+                    let started_at = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0);
+                    let entry = ChildProcessEntry { pid, name, label, started_at };
+
+                    let patch = {
+                        let mut sg = ctx.state.lock().await;
+                        sg.child_processes.insert(pid, entry);
+                        build_procs_patch(&sg.child_processes)
+                    };
+                    let _ = ctx.tx.send(patch).await;
+
+                    // Monitor the child; remove from state when it exits.
+                    let state_clone = ctx.state.clone();
+                    let tx_clone = ctx.tx.clone();
+                    tokio::spawn(async move {
+                        let _ = tokio::task::spawn_blocking(move || {
+                            let mut c = child;
+                            let _ = c.wait();
+                        })
+                        .await;
+                        let patch = {
+                            let mut sg = state_clone.lock().await;
+                            sg.child_processes.remove(&pid);
+                            build_procs_patch(&sg.child_processes)
+                        };
+                        let _ = tx_clone.send(patch).await;
+                    });
+                }
             }
         }
         BroProtocol::Fp => {
@@ -742,5 +792,28 @@ fn bro_input_for_entry(
         path: driver.resolve_child(&panel.path, &entry.name),
         name: entry.name.clone(),
         kind: entry.kind.clone(),
+    }
+}
+
+async fn kill_process(args: &Value, ctx: &mut IntentContext<'_>) {
+    let Some(pid) = args.get("pid").and_then(Value::as_u64).map(|v| v as u32) else { return };
+    let patch = {
+        let mut sg = ctx.state.lock().await;
+        sg.child_processes.remove(&pid);
+        build_procs_patch(&sg.child_processes)
+    };
+    let _ = ctx.tx.send(patch).await;
+    #[cfg(unix)]
+    unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM); }
+}
+
+fn build_procs_patch(procs: &std::collections::HashMap<u32, ChildProcessEntry>) -> ServerMessage {
+    let list: Vec<&ChildProcessEntry> = procs.values().collect();
+    ServerMessage::StatePatch {
+        timestamp: now(),
+        domain: "procs".to_string(),
+        entity_id: None,
+        version: 0,
+        patch: serde_json::json!({ "procs": list }),
     }
 }

@@ -51,7 +51,7 @@ pub async fn dispatch(name: &str, scope: &Value, args: &Value, ctx: &mut IntentC
         | "LaunchOpenWithApp"
         | "ProvideInput"
         | "NavigateToHistoryEntry" => navigation::handle(name, scope, args, ctx).await,
-        "ListBros" | "LaunchBro" => bro::handle(name, scope, args, ctx).await,
+        "ListBros" | "LaunchBro" | "KillProcess" => bro::handle(name, scope, args, ctx).await,
         "StartFileOp" | "PasteExternalClipboard" | "WriteExternalClipboard"
         | "ProvideJobDecision" | "CancelJob"
         | "PauseJob" | "ResumeJob" | "RenameFile" | "MakeDir" | "TouchFile"

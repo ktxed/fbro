@@ -22,7 +22,7 @@ pub fn launch_bro(
     bro: &ResolvedBro,
     output_path: Option<&str>,
     params: &HashMap<String, String>,
-) -> Result<(), String> {
+) -> Result<std::process::Child, String> {
     if inputs.is_empty() {
         return Err("No input entries were resolved for this bro".to_string());
     }
@@ -33,7 +33,7 @@ pub fn launch_bro(
     if let Some(cwd) = cwd {
         cmd.current_dir(cwd);
     }
-    cmd.spawn().map(|_| ()).map_err(|e| e.to_string())
+    cmd.spawn().map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

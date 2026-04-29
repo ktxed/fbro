@@ -29,6 +29,7 @@ import type {
   CacheStatusReadyMessage,
   PrefetchCacheStatus,
   BookmarkEntry,
+  ChildProcess,
 } from "../ws/types";
 
 // ─── State ───────────────────────────────────────────────────────────────────
@@ -198,6 +199,7 @@ export interface AppState {
   cacheStatus: { prefetchCache: PrefetchCacheStatus } | null;
   bookmarks: BookmarkEntry[];
   bookmarksOpen: { panelId: string } | null;
+  childProcesses: Record<number, ChildProcess>;
 }
 
 const initialState: AppState = {
@@ -235,6 +237,7 @@ const initialState: AppState = {
   cacheStatus: null,
   bookmarks: [],
   bookmarksOpen: null,
+  childProcesses: {},
 };
 
 // ─── Actions ─────────────────────────────────────────────────────────────────
@@ -565,6 +568,13 @@ function applyPatch(state: AppState, msg: StatePatchMessage): AppState {
 
   if (msg.domain === "bookmarks") {
     return { ...state, bookmarks: (msg.patch.bookmarks as BookmarkEntry[]) ?? [] };
+  }
+
+  if (msg.domain === "procs") {
+    const list = (msg.patch.procs as ChildProcess[]) ?? [];
+    const map: Record<number, ChildProcess> = {};
+    for (const p of list) map[p.pid] = p;
+    return { ...state, childProcesses: map };
   }
 
   if (msg.domain === "jobs" && msg.patch.removeJobId) {

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useAppState } from "../store";
-import type { DirSizeTask, FileOpProgress, Job, PrefetchCacheStatus } from "../ws/types";
+import type { ChildProcess, DirSizeTask, FileOpProgress, Job, PrefetchCacheStatus } from "../ws/types";
 import type { WsClient } from "../ws/client";
 import { IconPlayerPlay, IconPlayerPause, IconX } from "@tabler/icons-react";
 
@@ -195,10 +195,39 @@ function CacheEntryRow({ label, status, client, cacheKey }: {
   );
 }
 
+function ProcessRow({ proc, client }: { proc: ChildProcess; client: WsClient }) {
+  const elapsed = Math.floor((Date.now() / 1000) - proc.started_at);
+  const timeLabel = elapsed < 60
+    ? `${elapsed}s ago`
+    : elapsed < 3600
+    ? `${Math.floor(elapsed / 60)}m ago`
+    : `${Math.floor(elapsed / 3600)}h ago`;
+
+  return (
+    <div className="jobs-modal__row">
+      <div className="jobs-modal__row-header">
+        <span className="jobs-modal__type">{proc.name}</span>
+        <span className="jobs-modal__time">{timeLabel}</span>
+        <button
+          className="jobs-modal__action"
+          title="Kill process"
+          onClick={() => client.sendIntent("KillProcess", undefined, { pid: proc.pid })}
+        >
+          <IconX size={14} />
+        </button>
+      </div>
+      <div className="jobs-modal__paths">
+        <span className="jobs-modal__path" title={proc.label}>{proc.label}</span>
+        <span className="jobs-modal__pid">PID {proc.pid}</span>
+      </div>
+    </div>
+  );
+}
+
 export function JobsModal({ onClose, client }: { onClose: () => void; client: WsClient }) {
   const state = useAppState();
   const overlayRef = useRef<HTMLDivElement>(null);
-  const [activeTab, setActiveTab] = useState<"jobs" | "cache">("jobs");
+  const [activeTab, setActiveTab] = useState<"jobs" | "procs" | "cache">("jobs");
 
   const byNewest = (a: Job, b: Job) => b.startedAt - a.startedAt;
   const jobs = Object.values(state.jobs).sort(byNewest);
@@ -211,6 +240,7 @@ export function JobsModal({ onClose, client }: { onClose: () => void; client: Ws
     (job) => job.state !== "Queued" && job.state !== "Running" && job.state !== "AwaitingDecision"
   );
   const dirSizeTasks = [...state.dirSizeQueue].sort((a, b) => a.enqueuedAt - b.enqueuedAt);
+  const childProcs = Object.values(state.childProcesses).sort((a, b) => b.started_at - a.started_at);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -241,6 +271,12 @@ export function JobsModal({ onClose, client }: { onClose: () => void; client: Ws
             onClick={() => setActiveTab("jobs")}
           >
             Jobs
+          </button>
+          <button
+            className={`jobs-modal__tab${activeTab === "procs" ? " jobs-modal__tab--active" : ""}`}
+            onClick={() => setActiveTab("procs")}
+          >
+            Processes{childProcs.length > 0 ? ` (${childProcs.length})` : ""}
           </button>
           <button
             className={`jobs-modal__tab${activeTab === "cache" ? " jobs-modal__tab--active" : ""}`}
@@ -288,6 +324,18 @@ export function JobsModal({ onClose, client }: { onClose: () => void; client: Ws
                 <section>
                   <div className="jobs-modal__section-title">Finished File Jobs</div>
                   {finishedFileJobs.map(j => <JobRow key={j.jobId} job={j} client={client} />)}
+                </section>
+              )}
+            </>
+          )}
+
+          {activeTab === "procs" && (
+            <>
+              {childProcs.length === 0 ? (
+                <div className="jobs-modal__empty">No running processes.</div>
+              ) : (
+                <section>
+                  {childProcs.map(p => <ProcessRow key={p.pid} proc={p} client={client} />)}
                 </section>
               )}
             </>
