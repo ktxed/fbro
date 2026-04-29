@@ -10,6 +10,7 @@ import {
 } from "../commands/interactive";
 import { useAppDispatch, useAppState } from "../store";
 import { IconChevronDown, IconChevronUp, IconChevronRight, IconChevronLeft, IconArrowUpRight, IconX } from "@tabler/icons-react";
+import { BookmarksPopover } from "./BookmarksPopover";
 
 const ROW_HEIGHT = 22;
 const FILTER_DEBOUNCE_MS = 200;
@@ -306,6 +307,7 @@ export function Panel({
   const dispatch = useAppDispatch();
   const listRef = useRef<HTMLDivElement>(null);
   const focusDivRef = useRef<HTMLDivElement>(null);
+  const bookmarkBtnRef = useRef<HTMLButtonElement>(null);
   const rightDrag = useRef({ active: false, everMoved: false, startRow: -1, mode: "select" as "select" | "deselect", preSelection: [] as number[] });
   const contextMenuOpenRef = useRef(false);
   const contextMenuHoldStartRef = useRef(0);
@@ -780,6 +782,25 @@ export function Panel({
           title="Navigate to home folder"
           onClick={() => client.sendIntent("NavigateHome", panelId)}
         >~</button>
+        <button
+          ref={bookmarkBtnRef}
+          className={`panel__bookmark-btn${appState.bookmarks.some((b) => b.path === panel.path) ? " panel__bookmark-btn--active" : ""}`}
+          tabIndex={-1}
+          title="Bookmarks (Ctrl+D)"
+          onClick={() => {
+            if (appState.bookmarksOpen?.panelId === panelId) dispatch({ type: "CLOSE_BOOKMARKS" });
+            else dispatch({ type: "OPEN_BOOKMARKS", panelId });
+          }}
+        >★</button>
+        {appState.bookmarksOpen?.panelId === panelId && (
+          <BookmarksPopover
+            anchorEl={bookmarkBtnRef.current}
+            panelId={panelId}
+            currentPath={panel.path}
+            bookmarks={appState.bookmarks}
+            client={client}
+          />
+        )}
       </div>
 
       <VolumeHeader sources={sources} panel={panel} onNavigateToSource={(sourceId) => { shouldFocusFilterRef.current = false; client.sendIntent("NavigateToSource", panelId, { sourceId }); }} onMountSource={(sourceId) => { shouldFocusFilterRef.current = false; client.sendIntent("MountSource", panelId, { sourceId }); }} />

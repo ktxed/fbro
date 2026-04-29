@@ -1,4 +1,5 @@
 mod app;
+mod bookmarks;
 pub(crate) mod bro;
 mod cache;
 mod jobs;
@@ -62,6 +63,7 @@ pub async fn dispatch(name: &str, scope: &Value, args: &Value, ctx: &mut IntentC
             viewer::handle(name, args, ctx).await
         }
         "QueryCacheStatus" | "ClearCache" => cache::handle(name, args, ctx).await,
+        "AddBookmark" | "RemoveBookmark" => bookmarks::handle(name, args, ctx).await,
         "Quit" | "ConfirmQuit" => app::handle(name, ctx).await,
         unknown => eprintln!("[fbro] Unknown intent: {unknown}"),
     }

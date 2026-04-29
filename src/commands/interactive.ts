@@ -74,6 +74,7 @@ export const PANEL_SHORTCUT_COMMAND_IDS = [
   "panel.path.sync",
   "panel.context_menu",
   "panel.toggle_hidden",
+  "panel.bookmarks.open",
 ] as const;
 
 export const COMMAND_PALETTE_COMMAND_IDS = [
@@ -718,6 +719,11 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
     case "panel.toggle_hidden": {
       if (!focused) return false;
       client.sendIntent("ToggleHidden", focused.panelId, {});
+      return true;
+    }
+    case "panel.bookmarks.open": {
+      if (!focused) return false;
+      dispatch({ type: "OPEN_BOOKMARKS", panelId: focused.panelId });
       return true;
     }
     default:

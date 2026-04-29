@@ -28,6 +28,7 @@ import type {
   ExternalClipboardWrittenMessage,
   CacheStatusReadyMessage,
   PrefetchCacheStatus,
+  BookmarkEntry,
 } from "../ws/types";
 
 // ─── State ───────────────────────────────────────────────────────────────────
@@ -195,6 +196,8 @@ export interface AppState {
   transientHint: { message: string; token: number } | null;
   embeddedViewer: { sourcePanelId: string } | null;
   cacheStatus: { prefetchCache: PrefetchCacheStatus } | null;
+  bookmarks: BookmarkEntry[];
+  bookmarksOpen: { panelId: string } | null;
 }
 
 const initialState: AppState = {
@@ -230,6 +233,8 @@ const initialState: AppState = {
   transientHint: null,
   embeddedViewer: null,
   cacheStatus: null,
+  bookmarks: [],
+  bookmarksOpen: null,
 };
 
 // ─── Actions ─────────────────────────────────────────────────────────────────
@@ -276,7 +281,9 @@ export type AppAction =
   | { type: "TOGGLE_EMBEDDED_VIEWER" }
   | { type: "NAV_HISTORY_BACK";    panelId: string }
   | { type: "NAV_HISTORY_FORWARD"; panelId: string }
-  | { type: "NAV_HISTORY_JUMP";    panelId: string; entryIndex: number };
+  | { type: "NAV_HISTORY_JUMP";    panelId: string; entryIndex: number }
+  | { type: "OPEN_BOOKMARKS"; panelId: string }
+  | { type: "CLOSE_BOOKMARKS" };
 
 // ─── Reducer ─────────────────────────────────────────────────────────────────
 
@@ -322,6 +329,9 @@ function applySnapshot(state: AppState, msg: StateSnapshotMessage): AppState {
     const commands: Record<string, InteractiveCommand> = {};
     for (const command of domains.commands) commands[command.id] = command;
     next.commands = commands;
+  }
+  if (domains.bookmarks) {
+    next.bookmarks = domains.bookmarks;
   }
   return next;
 }
@@ -545,6 +555,10 @@ function applyPatch(state: AppState, msg: StatePatchMessage): AppState {
 
   if (msg.domain === "dirSizeQueue") {
     return { ...state, dirSizeQueue: (msg.patch.tasks as DirSizeTask[]) ?? [] };
+  }
+
+  if (msg.domain === "bookmarks") {
+    return { ...state, bookmarks: (msg.patch.bookmarks as BookmarkEntry[]) ?? [] };
   }
 
   if (msg.domain === "jobs" && msg.patch.removeJobId) {
@@ -1014,6 +1028,10 @@ function reducer(state: AppState, action: AppAction): AppState {
       return { ...state, pendingPanelHistory: null };
     case "CLOSE_DRY_RUN":
       return { ...state, pendingDryRun: null };
+    case "OPEN_BOOKMARKS":
+      return { ...state, bookmarksOpen: { panelId: action.panelId } };
+    case "CLOSE_BOOKMARKS":
+      return { ...state, bookmarksOpen: null };
     case "OPEN_CONTEXT_MENU":
       return { ...state, pendingContextMenu: action.menu };
     case "CLOSE_CONTEXT_MENU":

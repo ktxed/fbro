@@ -3,6 +3,7 @@ use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
 
+use crate::bookmarks::BookmarkEntry;
 use crate::bro::{BroInputItem, ResolvedBro};
 use crate::jobs::search::SearchResultStore;
 use crate::jobs::JobStore;
@@ -123,6 +124,7 @@ pub struct AppState {
     /// initial scan. Used by the server to skip the clear-and-rescan cycle
     /// on reconnection, keeping existing entries visible during the refresh.
     pub has_gui_connected: bool,
+    pub bookmarks: Vec<BookmarkEntry>,
 }
 
 #[allow(dead_code)]
@@ -295,6 +297,7 @@ impl AppState {
             file_server_port,
             active_viewers: 0,
             has_gui_connected: false,
+            bookmarks: crate::bookmarks::load(),
         }
     }
 

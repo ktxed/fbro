@@ -196,6 +196,7 @@ pub struct StateDomains {
     #[serde(rename = "dirSizeQueue")]
     pub dir_size_queue: DirSizeQueueSnapshot,
     pub commands: Vec<InteractiveCommandSchema>,
+    pub bookmarks: Vec<crate::bookmarks::BookmarkEntry>,
 }
 
 #[derive(Serialize, Clone, Debug)]

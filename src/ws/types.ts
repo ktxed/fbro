@@ -302,6 +302,11 @@ export interface WelcomeMessage {
   fileServerPort: number;
 }
 
+export interface BookmarkEntry {
+  name: string;
+  path: string;
+}
+
 export interface StateSnapshotMessage {
   type: "StateSnapshot";
   timestamp: number;
@@ -313,13 +318,14 @@ export interface StateSnapshotMessage {
     jobs?: Job[];
     dirSizeQueue?: { tasks: DirSizeTask[] };
     commands?: InteractiveCommand[];
+    bookmarks?: BookmarkEntry[];
   };
 }
 
 export interface StatePatchMessage {
   type: "StatePatch";
   timestamp: number;
-  domain: "panels" | "layout" | "focus" | "selections" | "jobs" | "sources" | "dirSizeQueue";
+  domain: "panels" | "layout" | "focus" | "selections" | "jobs" | "sources" | "dirSizeQueue" | "bookmarks";
   entityId?: string;
   version: number;
   patch: {

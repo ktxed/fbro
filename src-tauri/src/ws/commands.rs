@@ -441,5 +441,12 @@ pub(crate) fn build_interactive_commands() -> Vec<InteractiveCommandSchema> {
             vec![keybinding(".")],
             Some("ToggleHidden"),
         ),
+        command(
+            "panel.bookmarks.open",
+            "Panel",
+            "Bookmarks…",
+            vec![mod_binding("d", false)],
+            None,
+        ),
     ]
 }

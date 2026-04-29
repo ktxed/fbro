@@ -66,6 +66,7 @@ pub(crate) fn build_state_snapshot(
                     .collect(),
             },
             commands: build_interactive_commands(),
+            bookmarks: state.bookmarks.clone(),
         },
     }
 }
