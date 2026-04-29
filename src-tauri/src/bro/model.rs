@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -112,6 +113,9 @@ pub(crate) enum LaunchArg {
     Literal(String),
     TargetPaths,
     TargetNames,
+    /// Writes all target paths to a temp M3U playlist file and passes `<flag><path>` as a
+    /// single argument. Use this instead of TargetPaths for players that accept --playlist=.
+    TargetPlaylistFile { flag: String },
     OutputPath,
     PrefixedParam { id: String, prefix: String },
     OptionalPrefixedParam { id: String, prefix: String },
@@ -153,6 +157,10 @@ impl ResolvedBro {
                             .extend(target_inputs.iter().map(|input| input.path.clone())),
                         LaunchArg::TargetNames => resolved_args
                             .extend(target_inputs.iter().map(|input| input.name.clone())),
+                        LaunchArg::TargetPlaylistFile { flag } => {
+                            let playlist_path = write_m3u_playlist(target_inputs)?;
+                            resolved_args.push(format!("{flag}{playlist_path}"));
+                        }
                         LaunchArg::OutputPath => {
                             let value = output_path
                                 .map(str::trim)
@@ -200,6 +208,17 @@ impl ResolvedBro {
             .ok_or_else(|| missing_output_message_for_label(&output.label))?;
         Ok(Some(value.to_string()))
     }
+}
+
+fn write_m3u_playlist(inputs: &[BroInputItem]) -> Result<String, String> {
+    let path = std::env::temp_dir().join("fbro_playlist.m3u");
+    let mut file = std::fs::File::create(&path).map_err(|e| format!("Failed to create playlist: {e}"))?;
+    for input in inputs {
+        writeln!(file, "{}", input.path).map_err(|e| format!("Failed to write playlist: {e}"))?;
+    }
+    path.to_str()
+        .map(|s| s.to_string())
+        .ok_or_else(|| "Playlist path is not valid UTF-8".to_string())
 }
 
 fn missing_output_message(option: &BroOption) -> String {

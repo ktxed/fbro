@@ -846,6 +846,15 @@ function reducer(state: AppState, action: AppAction): AppState {
               },
             };
           }
+          if (msg.code === "BRO_LAUNCH_FAILED") {
+            return {
+              ...state,
+              transientHint: {
+                message: msg.message,
+                token: msg.timestamp,
+              },
+            };
+          }
           console.error("BE error:", msg.code, msg.message);
           return state;
         case "RenameOk":

@@ -18,7 +18,7 @@ impl BroProvider for LinuxMediaProvider {
                 "mpv",
                 program.clone(),
                 native_version(&program),
-                vec![LaunchArg::Literal("--".to_string()), LaunchArg::TargetPaths],
+                vec![LaunchArg::TargetPlaylistFile { flag: "--playlist=".to_string() }],
             ));
         }
 
@@ -28,16 +28,16 @@ impl BroProvider for LinuxMediaProvider {
                 "VLC",
                 program.clone(),
                 native_version(&program),
-                vec![LaunchArg::TargetPaths],
+                vec![LaunchArg::TargetPlaylistFile { flag: "".to_string() }],
             ));
         }
 
         if flatpak_app_installed("io.mpv.Mpv") {
-            bros.push(flatpak_command_bro("io.mpv.Mpv", "mpv"));
+            bros.push(flatpak_mpv_bro());
         }
 
         if flatpak_app_installed("org.videolan.VLC") {
-            bros.push(flatpak_command_bro("org.videolan.VLC", "VLC"));
+            bros.push(flatpak_media_bro("org.videolan.VLC", "VLC"));
         }
 
         bros
@@ -68,6 +68,32 @@ fn native_command_bro(
         },
         program,
         args,
+    )
+}
+
+fn flatpak_mpv_bro() -> ResolvedBro {
+    flatpak_media_bro("io.mpv.Mpv", "mpv")
+}
+
+fn flatpak_media_bro(app_id: &str, name: &str) -> ResolvedBro {
+    resolved_command_bro(
+        BroOption {
+            id: format!("flatpak:{app_id}"),
+            name: name.to_string(),
+            version: flatpak_version(app_id),
+            source: BroSource::Flatpak,
+            detail: Some(app_id.to_string()),
+            protocol: BroProtocol::Fnf,
+            output: None,
+            params: vec![],
+            pre: BroPre { score: 0, reason: String::new() },
+        },
+        "flatpak".to_string(),
+        vec![
+            LaunchArg::Literal("run".to_string()),
+            LaunchArg::Literal(app_id.to_string()),
+            LaunchArg::TargetPlaylistFile { flag: "--playlist=".to_string() },
+        ],
     )
 }
 

@@ -83,14 +83,14 @@ async fn list_bros_for_request(scope: &Value, args: &Value, ctx: &mut IntentCont
         return;
     }
 
-    let (result, result_panel_id) = {
+    let (ranking_inputs, result_panel_id) = {
         let state_guard = ctx.state.lock().await;
         let result_panel_id =
             Some(other_panel_id(&state_guard, &panel_id).unwrap_or_else(|| panel_id.clone()));
         let result = match state_guard.panels.get(&panel_id) {
             Some(panel) => match state_guard.drivers.get(&panel.source_id) {
                 Some(driver) => {
-                    resolve_inputs(panel, driver.as_ref(), parsed.target_path.as_deref())
+                    resolve_ranking_inputs(panel, driver.as_ref(), parsed.target_path.as_deref())
                 }
                 None => Err("Source driver is not available.".to_string()),
             },
@@ -99,7 +99,7 @@ async fn list_bros_for_request(scope: &Value, args: &Value, ctx: &mut IntentCont
         (result, result_panel_id)
     };
 
-    let inputs = match result {
+    let ranking_inputs = match ranking_inputs {
         Ok(inputs) => inputs,
         Err(message) => {
             let _ = ctx
@@ -114,8 +114,8 @@ async fn list_bros_for_request(scope: &Value, args: &Value, ctx: &mut IntentCont
         }
     };
 
-    let lookup_inputs = inputs.clone();
     let suggested_output_dir = parsed.suggested_output_dir.clone();
+    let lookup_inputs = ranking_inputs.clone();
     let bros = match tokio::task::spawn_blocking(move || {
         list_bros(&lookup_inputs, suggested_output_dir.as_deref())
     })
@@ -134,7 +134,7 @@ async fn list_bros_for_request(scope: &Value, args: &Value, ctx: &mut IntentCont
             return;
         }
     };
-    let input_schemas = inputs
+    let input_schemas = ranking_inputs
         .iter()
         .map(|input| BroInputSchema {
             path: input.path.clone(),
@@ -183,7 +183,7 @@ async fn list_bros_for_request(scope: &Value, args: &Value, ctx: &mut IntentCont
             crate::state::BroRequest {
                 source_panel_id: panel_id,
                 result_panel_id,
-                inputs,
+                target_path: parsed.target_path.clone(),
                 bros,
             },
         );
@@ -217,6 +217,7 @@ async fn launch_selected_bro(args: &Value, ctx: &mut IntentContext<'_>) {
     };
 
     let Some(request) = request else {
+        eprintln!("[bro] no request found for id={}", parsed.request_id);
         return;
     };
 
@@ -226,14 +227,102 @@ async fn launch_selected_bro(args: &Value, ctx: &mut IntentContext<'_>) {
         .find(|bro| bro.option.id == parsed.bro_id)
         .cloned()
     else {
+        eprintln!("[bro] bro id={} not found in request bros={:?}", parsed.bro_id, request.bros.iter().map(|b| &b.option.id).collect::<Vec<_>>());
         return;
+    };
+
+    // Re-resolve the full inputs at launch time. Clone the raw (name, kind) pairs and the
+    // driver Arc under a brief lock, then build the BroInputItems (path resolution) outside
+    // the lock so large selections don't block panel intents.
+    type RawEntry = (String, String); // (name, kind)
+    let raw_inputs: Result<(std::sync::Arc<dyn crate::vfs::VfsDriver>, String, Vec<RawEntry>), String> = {
+        let state_guard = ctx.state.lock().await;
+        match state_guard.panels.get(&request.source_panel_id) {
+            Some(panel) => {
+                match state_guard.drivers.get(&panel.source_id) {
+                    Some(driver) => {
+                        let driver = driver.clone();
+                        let panel_path = panel.path.clone();
+                        let raw: Vec<RawEntry> = if let Some(tp) = request.target_path.as_deref() {
+                            panel.entries.iter()
+                                .find(|e| e.name != ".." && driver.resolve_child(&panel_path, &e.name) == tp)
+                                .map(|e| vec![(e.name.clone(), e.kind.clone())])
+                                .unwrap_or_default()
+                        } else if panel.selection.is_empty() {
+                            panel.entries.get(panel.cursor)
+                                .filter(|e| e.name != "..")
+                                .map(|e| vec![(e.name.clone(), e.kind.clone())])
+                                .unwrap_or_default()
+                        } else {
+                            panel.selection.iter()
+                                .filter_map(|&i| panel.entries.get(i))
+                                .filter(|e| e.name != "..")
+                                .map(|e| (e.name.clone(), e.kind.clone()))
+                                .collect()
+                        };
+                        Ok((driver, panel_path, raw))
+                    }
+                    None => Err(format!("Source driver not available for source_id={}", panel.source_id)),
+                }
+            }
+            None => Err(format!("Panel not found: {}", request.source_panel_id)),
+        }
+    }; // state lock released here — path resolution happens below without the lock
+    let inputs = match raw_inputs {
+        Err(message) => {
+            eprintln!("[bro] input resolution failed: {message}");
+            let _ = ctx
+                .tx
+                .send(ServerMessage::Error {
+                    timestamp: now(),
+                    code: "BRO_LAUNCH_FAILED".to_string(),
+                    message,
+                    recoverable: true,
+                    extra: Some(serde_json::json!({
+                        "requestId": parsed.request_id,
+                        "broId": parsed.bro_id,
+                    })),
+                })
+                .await;
+            return;
+        }
+        Ok((driver, panel_path, raw)) => {
+            if raw.is_empty() {
+                eprintln!("[bro] no valid entries in selection");
+                let _ = ctx
+                    .tx
+                    .send(ServerMessage::Error {
+                        timestamp: now(),
+                        code: "BRO_LAUNCH_FAILED".to_string(),
+                        message: "No valid input entries are selected.".to_string(),
+                        recoverable: true,
+                        extra: Some(serde_json::json!({
+                            "requestId": parsed.request_id,
+                            "broId": parsed.bro_id,
+                        })),
+                    })
+                    .await;
+                return;
+            }
+            let items = tokio::task::spawn_blocking(move || {
+                raw.into_iter()
+                    .map(|(name, kind)| BroInputItem {
+                        path: driver.resolve_child(&panel_path, &name),
+                        name,
+                        kind,
+                    })
+                    .collect::<Vec<BroInputItem>>()
+            })
+            .await
+            .unwrap_or_default();
+            items
+        }
     };
 
     match bro.option.protocol {
         BroProtocol::Fnf => {
             if matches!(bro.launch, LaunchRecipe::BuiltInCopyPaths) {
-                let text = request
-                    .inputs
+                let text = inputs
                     .iter()
                     .map(|i| i.path.as_str())
                     .collect::<Vec<_>>()
@@ -262,13 +351,18 @@ async fn launch_selected_bro(args: &Value, ctx: &mut IntentContext<'_>) {
                 }
                 return;
             }
-            match launch_bro(
-                &request.inputs,
-                &bro,
-                parsed.output.as_deref(),
-                &parsed.params,
-            ) {
+            let bro_name = bro.option.name.clone();
+            let first_path = inputs.first().map(|i| i.path.clone()).unwrap_or_default();
+            let launch_result = {
+                let output = parsed.output.clone();
+                let params = parsed.params.clone();
+                tokio::task::spawn_blocking(move || launch_bro(&inputs, &bro, output.as_deref(), &params))
+                    .await
+                    .unwrap_or_else(|e| Err(format!("Launch task panicked: {e}")))
+            };
+            match launch_result {
                 Err(message) => {
+                    eprintln!("[bro] launch failed: {message}");
                     let _ = ctx
                         .tx
                         .send(ServerMessage::Error {
@@ -285,16 +379,12 @@ async fn launch_selected_bro(args: &Value, ctx: &mut IntentContext<'_>) {
                 }
                 Ok(child) => {
                     let pid = child.id();
-                    let name = bro.option.name.clone();
-                    let label = request.inputs.first()
-                        .map(|i| {
-                            std::path::Path::new(&i.path)
-                                .file_name()
-                                .and_then(|n| n.to_str())
-                                .unwrap_or(&i.path)
-                                .to_string()
-                        })
-                        .unwrap_or_default();
+                    let name = bro_name;
+                    let label = std::path::Path::new(&first_path)
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or(&first_path)
+                        .to_string();
                     let started_at = SystemTime::now()
                         .duration_since(UNIX_EPOCH)
                         .map(|d| d.as_secs())
@@ -329,7 +419,7 @@ async fn launch_selected_bro(args: &Value, ctx: &mut IntentContext<'_>) {
         }
         BroProtocol::Fp => {
             if let Err(message) =
-                launch_fp_bro(request, bro, parsed.output, parsed.params, ctx).await
+                launch_fp_bro(request, inputs, bro, parsed.output, parsed.params, ctx).await
             {
                 let _ = ctx
                     .tx
@@ -351,6 +441,7 @@ async fn launch_selected_bro(args: &Value, ctx: &mut IntentContext<'_>) {
 
 async fn launch_fp_bro(
     request: crate::state::BroRequest,
+    inputs: Vec<BroInputItem>,
     bro: ResolvedBro,
     output: Option<String>,
     launch_params: HashMap<String, String>,
@@ -363,14 +454,13 @@ async fn launch_fp_bro(
     validate_bro_params(&bro, &launch_params)?;
 
     let output_exists = Path::new(&output_path).exists();
-    let source_path = first_input_parent(&request.inputs).unwrap_or_else(|| {
-        request
-            .inputs
+    let source_path = first_input_parent(&inputs).unwrap_or_else(|| {
+        inputs
             .first()
             .map(|input| input.path.clone())
             .unwrap_or_default()
     });
-    let file_schemas = bro_input_files(&request.inputs);
+    let file_schemas = bro_input_files(&inputs);
 
     let job_id = {
         let mut state_guard = ctx.state.lock().await;
@@ -402,7 +492,7 @@ async fn launch_fp_bro(
                 dest_panel: request.result_panel_id.clone(),
                 dest_path: Some(output_path.clone()),
                 initial_state: job_state_wire(&initial_state).to_string(),
-                total_files: request.inputs.len(),
+                total_files: inputs.len(),
                 total_bytes_total: 0,
                 background: false,
                 supports_pause: false,
@@ -428,7 +518,7 @@ async fn launch_fp_bro(
                     bro_id: bro.option.id.clone(),
                     bro_name: bro.option.name.clone(),
                     output_path: output_path.clone(),
-                    inputs: request.inputs.clone(),
+                    inputs: inputs.clone(),
                     params: launch_params,
                     bro,
                 }),
@@ -438,7 +528,7 @@ async fn launch_fp_bro(
                 dest_path: Some(output_path.clone()),
                 state: initial_state.clone(),
                 progress: FileOpProgress {
-                    total_files: request.inputs.len(),
+                    total_files: inputs.len(),
                     completed_files: 0,
                     current_file: None,
                     status_text: None,
@@ -735,6 +825,35 @@ fn bro_input_files(inputs: &[BroInputItem]) -> Vec<FileOpFileSchema> {
         })
         .collect()
 }
+
+fn resolve_ranking_inputs(
+    panel: &crate::state::Panel,
+    driver: &dyn crate::vfs::VfsDriver,
+    target_path: Option<&str>,
+) -> Result<Vec<BroInputItem>, String> {
+    if target_path.is_some() || panel.selection.len() <= RANKING_SAMPLE_LIMIT {
+        return resolve_inputs(panel, driver, target_path);
+    }
+
+    use rand::seq::SliceRandom;
+    let mut rng = rand::thread_rng();
+    let inputs: Vec<BroInputItem> = panel
+        .selection
+        .choose_multiple(&mut rng, RANKING_SAMPLE_LIMIT)
+        .copied()
+        .filter_map(|index| entry_at_abs_index(panel, index))
+        .filter(|entry| entry.name != "..")
+        .map(|entry| bro_input_for_entry(panel, driver, entry))
+        .collect();
+
+    if inputs.is_empty() {
+        Err("No valid input entries are selected.".to_string())
+    } else {
+        Ok(inputs)
+    }
+}
+
+const RANKING_SAMPLE_LIMIT: usize = 100;
 
 fn resolve_inputs(
     panel: &crate::state::Panel,

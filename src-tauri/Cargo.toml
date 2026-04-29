@@ -23,6 +23,7 @@ async-channel = "2"
 futures = "0.3"
 notify = { version = "7", features = ["macos_fsevent"] }
 async-trait = "0.1"
+rand = "0.8"
 sevenz-rust2 = { version = "0.20.2", features = ["compress", "util", "aes256"] }
 zip = "8.5.0"
 

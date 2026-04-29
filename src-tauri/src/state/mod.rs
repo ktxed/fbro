@@ -4,7 +4,7 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
 
 use crate::bookmarks::BookmarkEntry;
-use crate::bro::{BroInputItem, ResolvedBro};
+use crate::bro::ResolvedBro;
 use crate::jobs::search::SearchResultStore;
 use crate::jobs::JobStore;
 use crate::platform::{Platform, ResolvedOpenWithApp};
@@ -146,7 +146,8 @@ pub struct OpenWithRequest {
 pub struct BroRequest {
     pub source_panel_id: String,
     pub result_panel_id: Option<String>,
-    pub inputs: Vec<BroInputItem>,
+    /// Stored so inputs can be re-resolved in full at launch time.
+    pub target_path: Option<String>,
     pub bros: Vec<ResolvedBro>,
 }
 
