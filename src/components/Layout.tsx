@@ -8,6 +8,7 @@ import { QuitModal } from "./QuitModal";
 import { RenameModal } from "./RenameModal";
 import { InfoModal } from "./InfoModal";
 import { MkDirModal } from "./MkDirModal";
+import { TouchModal } from "./TouchModal";
 import { NoEditorModal } from "./NoEditorModal";
 import { GoToPathModal } from "./GoToPathModal";
 import { PanelHistoryModal } from "./PanelHistoryModal";
@@ -420,7 +421,7 @@ export function Layout({ client, jobsViewOpen, onCloseJobsView, onOpenJobsView }
   }
 
   const activeJob = state.activeJobId ? state.jobs[state.activeJobId] ?? null : null;
-  const modalActive = state.pendingOp !== null || state.activeJobId !== null || state.pendingQuit !== null || state.pendingRename !== null || state.pendingInfo !== null || state.pendingMkdir !== null || state.pendingNoEditor !== null || state.pendingGoToPath !== null || state.pendingPanelHistory !== null || state.pendingDryRun !== null || state.pendingContextMenu !== null || state.pendingOpenWith !== null || state.pendingBro !== null || state.pendingInput !== null || state.pendingSearch !== null || state.commandPaletteOpen || jobsViewOpen;
+  const modalActive = state.pendingOp !== null || state.activeJobId !== null || state.pendingQuit !== null || state.pendingRename !== null || state.pendingInfo !== null || state.pendingMkdir !== null || state.pendingTouch !== null || state.pendingNoEditor !== null || state.pendingGoToPath !== null || state.pendingPanelHistory !== null || state.pendingDryRun !== null || state.pendingContextMenu !== null || state.pendingOpenWith !== null || state.pendingBro !== null || state.pendingInput !== null || state.pendingSearch !== null || state.commandPaletteOpen || jobsViewOpen;
 
   const dragCursorClass = dragOutInProgress
     ? "layout--drag-out"
@@ -523,6 +524,9 @@ export function Layout({ client, jobsViewOpen, onCloseJobsView, onOpenJobsView }
       )}
       {state.pendingMkdir && (
         <MkDirModal mkdir={state.pendingMkdir} client={client} />
+      )}
+      {state.pendingTouch && (
+        <TouchModal touch={state.pendingTouch} client={client} />
       )}
       {state.pendingNoEditor && (
         <NoEditorModal noEditor={state.pendingNoEditor} />

@@ -140,6 +140,17 @@ pub(crate) fn build_interactive_commands() -> Vec<InteractiveCommandSchema> {
             None,
         ),
         command(
+            "file.touch",
+            "File",
+            "New File",
+            vec![if is_macos() {
+                keybinding_with_modifiers("4", true, false, false, false) // Shift+4
+            } else {
+                keybinding_with_modifiers("F4", true, false, false, false) // Shift+F4
+            }],
+            None,
+        ),
+        command(
             "file.copy",
             "File Operation",
             "Copy",

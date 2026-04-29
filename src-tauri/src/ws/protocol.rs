@@ -84,6 +84,11 @@ pub enum ServerMessage {
         #[serde(rename = "panelId")]
         panel_id: String,
     },
+    TouchFileOk {
+        timestamp: u64,
+        #[serde(rename = "panelId")]
+        panel_id: String,
+    },
     NavigateOk {
         timestamp: u64,
         #[serde(rename = "panelId")]

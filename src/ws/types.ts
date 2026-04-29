@@ -395,6 +395,12 @@ export interface MkdirOkMessage {
   panelId: string;
 }
 
+export interface TouchFileOkMessage {
+  type: "TouchFileOk";
+  timestamp: number;
+  panelId: string;
+}
+
 export interface ViewerFileChangedMessage {
   type: "ViewerFileChanged";
   timestamp: number;
@@ -477,6 +483,7 @@ export type BEMessage =
   | FileChunkMessage
   | RenameOkMessage
   | MkdirOkMessage
+  | TouchFileOkMessage
   | NavigateOkMessage
   | ExternalClipboardReadyMessage
   | ExternalClipboardWrittenMessage

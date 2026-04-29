@@ -52,7 +52,7 @@ pub async fn dispatch(name: &str, scope: &Value, args: &Value, ctx: &mut IntentC
         "ListBros" | "LaunchBro" => bro::handle(name, scope, args, ctx).await,
         "StartFileOp" | "PasteExternalClipboard" | "WriteExternalClipboard"
         | "ProvideJobDecision" | "CancelJob"
-        | "PauseJob" | "ResumeJob" | "RenameFile" | "MakeDir"
+        | "PauseJob" | "ResumeJob" | "RenameFile" | "MakeDir" | "TouchFile"
         | "StartSearch" | "NavigateToSearchResult" | "MountSearchResults"
         | "RemoveSearchSource" => {
             jobs::handle(name, scope, args, ctx).await

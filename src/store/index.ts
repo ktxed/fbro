@@ -69,6 +69,12 @@ export interface PendingMkdir {
   error?: string;
 }
 
+export interface PendingTouch {
+  sourcePanel: string;
+  dirPath: string;
+  error?: string;
+}
+
 export interface PendingNoEditor {
   filename: string;
   fullPath: string;
@@ -175,6 +181,7 @@ export interface AppState {
   pendingRename: PendingRename | null;
   pendingInfo: PendingInfo | null;
   pendingMkdir: PendingMkdir | null;
+  pendingTouch: PendingTouch | null;
   pendingNoEditor: PendingNoEditor | null;
   pendingGoToPath: PendingGoToPath | null;
   pendingPanelHistory: PendingPanelHistory | null;
@@ -208,6 +215,7 @@ const initialState: AppState = {
   pendingRename: null,
   pendingInfo: null,
   pendingMkdir: null,
+  pendingTouch: null,
   pendingNoEditor: null,
   pendingGoToPath: null,
   pendingPanelHistory: null,
@@ -240,6 +248,8 @@ export type AppAction =
   | { type: "CLOSE_INFO" }
   | { type: "OPEN_MKDIR"; mkdir: PendingMkdir }
   | { type: "CLOSE_MKDIR" }
+  | { type: "OPEN_TOUCH"; touch: PendingTouch }
+  | { type: "CLOSE_TOUCH" }
   | { type: "OPEN_NO_EDITOR"; noEditor: PendingNoEditor }
   | { type: "CLOSE_NO_EDITOR" }
   | { type: "OPEN_GO_TO_PATH"; goToPath: PendingGoToPath }
@@ -741,6 +751,12 @@ function reducer(state: AppState, action: AppAction): AppState {
           if (msg.code === "MKDIR_FAILED" && state.pendingMkdir) {
             return { ...state, pendingMkdir: { ...state.pendingMkdir, error: msg.message } };
           }
+          if (msg.code === "TOUCH_FAILED" && state.pendingTouch) {
+            return { ...state, pendingTouch: { ...state.pendingTouch, error: msg.message } };
+          }
+          if (msg.code === "TOUCH_NOT_SUPPORTED") {
+            return { ...state, pendingTouch: null, transientHint: { message: msg.message, token: msg.timestamp } };
+          }
           if (msg.code === "NO_EDITOR" && msg.extra?.path) {
             const path = msg.extra.path as string;
             const filename = path.replace(/\\/g, "/").split("/").filter(Boolean).pop() || path;
@@ -806,6 +822,8 @@ function reducer(state: AppState, action: AppAction): AppState {
           return { ...state, pendingRename: null };
         case "MkdirOk":
           return { ...state, pendingMkdir: null };
+        case "TouchFileOk":
+          return { ...state, pendingTouch: null };
         case "NavigateOk":
           return {
             ...state,
@@ -978,6 +996,10 @@ function reducer(state: AppState, action: AppAction): AppState {
       return { ...state, pendingMkdir: action.mkdir };
     case "CLOSE_MKDIR":
       return { ...state, pendingMkdir: null };
+    case "OPEN_TOUCH":
+      return { ...state, pendingTouch: action.touch };
+    case "CLOSE_TOUCH":
+      return { ...state, pendingTouch: null };
     case "OPEN_NO_EDITOR":
       return { ...state, pendingNoEditor: action.noEditor };
     case "CLOSE_NO_EDITOR":

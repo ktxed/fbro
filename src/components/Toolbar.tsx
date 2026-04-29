@@ -15,6 +15,7 @@ import {
   IconPencil,
   IconEye,
   IconEdit,
+  IconFilePlus,
   IconCopy,
   IconArrowsMove,
   IconFolderPlus,
@@ -36,6 +37,7 @@ const TOOLBAR_ICONS: Record<(typeof TOOLBAR_COMMAND_IDS)[number], React.ReactNod
   "file.rename": <IconPencil size={16} />,
   "file.view": <IconEye size={16} />,
   "file.edit": <IconEdit size={16} />,
+  "file.touch": <IconFilePlus size={16} />,
   "file.copy": <IconCopy size={16} />,
   "file.move": <IconArrowsMove size={16} />,
   "file.mkdir": <IconFolderPlus size={16} />,
@@ -48,6 +50,7 @@ const TOOLBAR_LABELS: Record<(typeof TOOLBAR_COMMAND_IDS)[number], string> = {
   "file.rename": "Rename",
   "file.view": "View",
   "file.edit": "Edit",
+  "file.touch": "New File",
   "file.copy": "Copy",
   "file.move": "Move",
   "file.mkdir": "MkDir",
@@ -62,7 +65,7 @@ export function Toolbar({ client, jobsViewOpen, onOpenJobsView }: { client: WsCl
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      const blockingModalActive = state.pendingOp || state.activeJobId || state.pendingQuit || state.pendingRename || state.pendingInfo || state.pendingMkdir || state.pendingNoEditor || state.pendingGoToPath || state.pendingPanelHistory || state.pendingDryRun || state.pendingContextMenu || state.pendingOpenWith || state.pendingBro || state.pendingInput || jobsViewOpen;
+      const blockingModalActive = state.pendingOp || state.activeJobId || state.pendingQuit || state.pendingRename || state.pendingInfo || state.pendingMkdir || state.pendingTouch || state.pendingNoEditor || state.pendingGoToPath || state.pendingPanelHistory || state.pendingDryRun || state.pendingContextMenu || state.pendingOpenWith || state.pendingBro || state.pendingInput || jobsViewOpen;
       const paletteCommand = getCommand(state.commands, COMMAND_PALETTE_COMMAND_ID);
       if (!blockingModalActive && paletteCommand && paletteCommand.bindings.some((binding) => bindingMatches(e, binding))) {
         e.preventDefault();
@@ -98,7 +101,7 @@ export function Toolbar({ client, jobsViewOpen, onOpenJobsView }: { client: WsCl
 
   const focusedPanel = state.panels[state.focus];
   const isShadow = !!focusedPanel?.shadowSource;
-  const shadowDisabled = new Set(["file.rename", "file.move", "file.delete", "file.mkdir", "app.open_terminal"]);
+  const shadowDisabled = new Set(["file.rename", "file.move", "file.delete", "file.mkdir", "file.touch", "app.open_terminal"]);
 
   return (
     <div className="toolbar">

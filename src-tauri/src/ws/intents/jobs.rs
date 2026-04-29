@@ -13,7 +13,7 @@ use crate::jobs::{
 };
 use crate::platform::{ExternalClipboardOp, ExternalClipboardPayload};
 use crate::state::{ShadowSource, Source};
-use crate::vfs::search::SearchResultsDriver;
+use crate::vfs::{VfsError, search::SearchResultsDriver};
 use crate::ws::intents::{arg_bool, arg_str, is_search_source};
 use crate::ws::protocol::{now, FileOpFileSchema, JobStartSchema, ServerMessage};
 use crate::ws::runtime::{
@@ -32,6 +32,7 @@ pub(crate) async fn handle(name: &str, scope: &Value, args: &Value, ctx: &mut In
         "ResumeJob" => resume_job(args, ctx).await,
         "RenameFile" => rename_file(args, ctx).await,
         "MakeDir" => make_dir(args, ctx).await,
+        "TouchFile" => touch_file(args, ctx).await,
         "StartSearch" => start_search(args, ctx).await,
         "NavigateToSearchResult" => navigate_to_search_result(args, ctx).await,
         "MountSearchResults" => mount_search_results(args, ctx).await,
@@ -151,6 +152,22 @@ struct MakeDirArgs {
 }
 
 impl MakeDirArgs {
+    fn from_args(args: &Value) -> Self {
+        Self {
+            source_panel: arg_str(args, "sourcePanel").unwrap_or("").to_string(),
+            dir_path: arg_str(args, "dirPath").unwrap_or("").to_string(),
+            name: arg_str(args, "name").unwrap_or("").to_string(),
+        }
+    }
+}
+
+struct TouchFileArgs {
+    source_panel: String,
+    dir_path: String,
+    name: String,
+}
+
+impl TouchFileArgs {
     fn from_args(args: &Value) -> Self {
         Self {
             source_panel: arg_str(args, "sourcePanel").unwrap_or("").to_string(),
@@ -1278,6 +1295,69 @@ async fn make_dir(args: &Value, ctx: &mut IntentContext<'_>) {
             }
             Ok(Err(error)) => {
                 let _ = send_error(ctx, "MKDIR_FAILED", error.to_string()).await;
+            }
+            Err(_) => {}
+        }
+    }
+}
+
+async fn touch_file(args: &Value, ctx: &mut IntentContext<'_>) {
+    let parsed = TouchFileArgs::from_args(args);
+
+    // Block inside shadow sources (zip archives).
+    {
+        let state_guard = ctx.state.lock().await;
+        if let Some(panel) = state_guard.panels.get(&parsed.source_panel) {
+            if panel.shadow_source.is_some() {
+                drop(state_guard);
+                let _ = send_error(ctx, "OP_NOT_SUPPORTED", "Cannot create files inside an archive.".to_string()).await;
+                return;
+            }
+        }
+    }
+
+    let full_path = format!("{}/{}", parsed.dir_path.trim_end_matches('/'), parsed.name);
+
+    let (driver, selection_names) = {
+        let state_guard = ctx.state.lock().await;
+        let driver = state_guard
+            .panels
+            .get(&parsed.source_panel)
+            .and_then(|panel| state_guard.drivers.get(&panel.source_id).cloned());
+        let names = selected_names_for(&state_guard, &parsed.source_panel);
+        (driver, names)
+    };
+
+    if let Some(driver) = driver {
+        let full_path_clone = full_path.clone();
+        let result =
+            tokio::task::spawn_blocking(move || driver.open_write(&full_path_clone)).await;
+        match result {
+            Ok(Ok(_writer)) => {
+                // writer dropped here — file created as zero bytes
+                let _ = ctx
+                    .tx
+                    .send(ServerMessage::TouchFileOk {
+                        timestamp: now(),
+                        panel_id: parsed.source_panel.clone(),
+                    })
+                    .await;
+                rescan_panel(
+                    &parsed.source_panel,
+                    ctx.state,
+                    ctx.tx,
+                    ctx.scan_handles,
+                    Some(parsed.name),
+                    selection_names,
+                    ctx.dir_size_queue,
+                )
+                .await;
+            }
+            Ok(Err(VfsError::NotSupported(msg))) => {
+                let _ = send_error(ctx, "TOUCH_NOT_SUPPORTED", msg).await;
+            }
+            Ok(Err(error)) => {
+                let _ = send_error(ctx, "TOUCH_FAILED", error.to_string()).await;
             }
             Err(_) => {}
         }

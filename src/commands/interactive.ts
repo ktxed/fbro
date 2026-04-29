@@ -18,6 +18,7 @@ export const TOOLBAR_COMMAND_IDS = [
   "file.rename",
   "file.view",
   "file.edit",
+  "file.touch",
   "file.copy",
   "file.move",
   "file.mkdir",
@@ -533,6 +534,17 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
       client.sendIntent("PasteExternalClipboard", undefined, {
         panelId: focused.panelId,
         preferredOp: "move",
+      });
+      return true;
+    case "file.touch":
+      if (!focused) return false;
+      if (focused.panel.shadowSource) {
+        dispatch({ type: "SHOW_TRANSIENT_HINT", message: "Cannot create files inside an archive." });
+        return true;
+      }
+      dispatch({
+        type: "OPEN_TOUCH",
+        touch: { sourcePanel: focused.panelId, dirPath: focused.panel.path },
       });
       return true;
     case "file.mkdir":
