@@ -448,5 +448,12 @@ pub(crate) fn build_interactive_commands() -> Vec<InteractiveCommandSchema> {
             vec![mod_binding("d", false)],
             None,
         ),
+        command(
+            "panel.bookmarks.browse",
+            "Panel",
+            "Browse Bookmarks",
+            vec![mod_binding("d", true)],
+            None,
+        ),
     ]
 }

@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+pub mod bookmarks;
 pub mod local;
 pub mod search;
 pub mod seven_zip;

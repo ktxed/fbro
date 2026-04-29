@@ -488,6 +488,11 @@ function applyPatch(state: AppState, msg: StatePatchMessage): AppState {
       || (msg.patch.sourceId !== undefined && updated.sourceId !== panel.sourceId);
 
     if (locationChanged) {
+      // Bookmarks is a navigation tool, not a real filesystem location —
+      // entering or exiting it must not create a history entry.
+      if (updated.sourceId === "bookmarks" || panel.sourceId === "bookmarks") {
+        return { ...state, panels: { ...state.panels, [panelId]: updated } };
+      }
       if (pendingHistoryNavPanels.has(panelId)) {
         pendingHistoryNavPanels.delete(panelId);
         // cursor already moved by the dispatch; just commit the panel state

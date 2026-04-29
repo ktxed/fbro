@@ -7,7 +7,7 @@ use serde_json::Value;
 use crate::state::{ShadowSource, Source};
 use crate::vfs::VfsDriver;
 use crate::watcher::WatcherCommand;
-use crate::ws::intents::{archive_file_path, arg_str, is_archive_source, is_search_source};
+use crate::ws::intents::{archive_file_path, arg_str, is_archive_source, is_bookmarks_source, is_search_source};
 use crate::ws::protocol::{now, OpenWithAppSchema, ServerMessage};
 use crate::ws::runtime::{
     build_sources_json, navigate_to, rescan_panel, resolve_panel_id, IntentContext,
@@ -128,9 +128,12 @@ async fn open_entry(scope: &Value, ctx: &mut IntentContext<'_>) {
     };
 
     if entry_kind == "directory" {
-        // When on a search results source, navigating into a directory result
-        // should exit the search source and enter the real filesystem location.
-        if is_search_source(&source_id) {
+        // When on a search results source or bookmarks virtual source, navigating
+        // into a directory entry should exit the shadow and enter the real filesystem
+        // location. `new_path` is already the real path for both cases:
+        //   - search: resolve_child returns the full_path from the store
+        //   - bookmarks: resolve_child looks up the bookmark's real path
+        if is_search_source(&source_id) || is_bookmarks_source(&source_id) {
             // Switch the panel to the real source for this path before navigating.
             let real_source_id = {
                 let state_guard = ctx.state.lock().await;
@@ -153,6 +156,17 @@ async fn open_entry(scope: &Value, ctx: &mut IntentContext<'_>) {
                 if let Some(panel) = state_guard.panels.get_mut(&panel_id) {
                     panel.source_id = real_source_id;
                     panel.shadow_source = None;
+                    // Clean up the bookmarks source if no other panel uses it.
+                    if is_bookmarks_source(&source_id) {
+                        let still_in_use = state_guard
+                            .panels
+                            .values()
+                            .any(|p| p.source_id == source_id);
+                        if !still_in_use {
+                            state_guard.sources.remove(&source_id);
+                            state_guard.drivers.remove(&source_id);
+                        }
+                    }
                 }
             }
         }
@@ -420,7 +434,7 @@ async fn enter_zip_archive(
 
 /// Tear down a shadow source for a panel and return to the parent filesystem.
 /// Returns (parent_source_id, parent_path, cursor_hint, cursor_index) if the panel was in a shadow source.
-async fn teardown_shadow_source(
+pub(crate) async fn teardown_shadow_source(
     panel_id: &str,
     ctx: &mut IntentContext<'_>,
 ) -> Option<(String, String, Option<String>, Option<usize>)> {

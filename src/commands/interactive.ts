@@ -75,6 +75,7 @@ export const PANEL_SHORTCUT_COMMAND_IDS = [
   "panel.context_menu",
   "panel.toggle_hidden",
   "panel.bookmarks.open",
+  "panel.bookmarks.browse",
 ] as const;
 
 export const COMMAND_PALETTE_COMMAND_IDS = [
@@ -724,6 +725,11 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
     case "panel.bookmarks.open": {
       if (!focused) return false;
       dispatch({ type: "OPEN_BOOKMARKS", panelId: focused.panelId });
+      return true;
+    }
+    case "panel.bookmarks.browse": {
+      if (!focused) return false;
+      client.sendIntent("EnterBookmarkSource", focused.panelId);
       return true;
     }
     default:

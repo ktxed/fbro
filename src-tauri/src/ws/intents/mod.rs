@@ -63,7 +63,7 @@ pub async fn dispatch(name: &str, scope: &Value, args: &Value, ctx: &mut IntentC
             viewer::handle(name, args, ctx).await
         }
         "QueryCacheStatus" | "ClearCache" => cache::handle(name, args, ctx).await,
-        "AddBookmark" | "RemoveBookmark" => bookmarks::handle(name, args, ctx).await,
+        "AddBookmark" | "RemoveBookmark" | "EnterBookmarkSource" => bookmarks::handle(name, scope, args, ctx).await,
         "Quit" | "ConfirmQuit" => app::handle(name, ctx).await,
         unknown => eprintln!("[fbro] Unknown intent: {unknown}"),
     }
@@ -75,6 +75,10 @@ pub(crate) fn is_archive_source(source_id: &str) -> bool {
 
 pub(crate) fn is_search_source(source_id: &str) -> bool {
     source_id.starts_with("search:")
+}
+
+pub(crate) fn is_bookmarks_source(source_id: &str) -> bool {
+    source_id == "bookmarks"
 }
 
 /// Strips the archive prefix ("zip:" or "7z:") and returns the filesystem path.
