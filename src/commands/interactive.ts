@@ -76,6 +76,7 @@ export const PANEL_SHORTCUT_COMMAND_IDS = [
   "panel.toggle_hidden",
   "panel.bookmarks.open",
   "panel.bookmarks.browse",
+  "file.touch",
 ] as const;
 
 export const COMMAND_PALETTE_COMMAND_IDS = [
