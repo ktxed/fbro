@@ -118,6 +118,7 @@ fn handle(mut stream: TcpStream, plat: &dyn Platform, prefetch: &ViewerPrefetchQ
                  Content-Range: bytes {start}-{actual_end}/{total}\r\n\
                  Content-Length: {n}\r\n\
                  Accept-Ranges: bytes\r\n\
+                 Access-Control-Allow-Origin: *\r\n\
                  Cache-Control: no-store\r\n\
                  Connection: close\r\n\r\n"
             )?;
@@ -143,6 +144,7 @@ fn handle(mut stream: TcpStream, plat: &dyn Platform, prefetch: &ViewerPrefetchQ
          Content-Type: {mime}\r\n\
          Content-Length: {}\r\n\
          Accept-Ranges: bytes\r\n\
+         Access-Control-Allow-Origin: *\r\n\
          Cache-Control: no-store\r\n\
          Connection: close\r\n\r\n",
         data.len()

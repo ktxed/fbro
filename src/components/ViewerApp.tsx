@@ -300,6 +300,59 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
     return () => obs.disconnect();
   }, []);
 
+  // ── Initial load via HTTP file server ────────────────────────────────────
+  //
+  // For small local files we fetch the content directly from the HTTP file
+  // server instead of waiting for the WebSocket handshake. On macOS a freshly
+  // created WKWebView takes ~1s before its outgoing WebSocket connections
+  // succeed, but its HTTP stack is ready immediately — so an `<img src=…>` or
+  // `fetch()` to localhost is instant. The prefetch cache (warmed when the
+  // viewer was opened) means the file server usually serves this from memory.
+
+  const httpInitDoneRef = useRef(false);
+
+  useEffect(() => {
+    if (!isLocal) return;
+    if (canUseDirect(isLocal, initFilename, nativeFileSize)) return;
+    if (nativeFileSize === null || nativeFileSize > SMALL_LIMIT) return;
+
+    const fsPort = Number(new URLSearchParams(window.location.search).get("fsport") ?? "0");
+    if (!fsPort) return;
+
+    const urlPath = initPath.startsWith("/") ? initPath : `/${initPath}`;
+    const url = `http://127.0.0.1:${fsPort}${urlPath}`;
+
+    let cancelled = false;
+    fetch(url).then(async (response) => {
+      if (cancelled || !response.ok) return;
+      const ab = await response.arrayBuffer();
+      if (cancelled) return;
+      const bytes = new Uint8Array(ab);
+
+      httpInitDoneRef.current = true;
+      bufRangeRef.current = { offset: 0, end: bytes.length, eof: true };
+      setBufferBaseLine(1);
+      setFileSize(nativeFileSize);
+      setBuffer(bytes);
+      setBufferOffset(0);
+      loadingRef.current = false;
+      setLoading(false);
+      setMode(prev => {
+        if (prev !== null) return prev;
+        const detected = detectRenderer(filenameRef.current, detectBinary(bytes));
+        if (detected === "image" && nativeFileSize > IMAGE_LIMIT) return "hex";
+        return detected;
+      });
+      setNavError(null);
+      setIsSmall(prev => prev !== null ? prev : bytes.length <= SMALL_LIMIT);
+      setBufSeq(s => s + 1);
+    }).catch(() => {
+      // Fall through to the WS path on any error.
+    });
+
+    return () => { cancelled = true; };
+  }, []); // run once on mount; navigation handles its own loads
+
   // ── WS connection ─────────────────────────────────────────────────────────
 
   useEffect(() => {
@@ -307,6 +360,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
     clientRef.current = client;
 
     client.onConnected = () => {
+      if (httpInitDoneRef.current) return; // already loaded via HTTP
       if (canUseDirect(isLocal, initFilename, nativeFileSize)) {
         setLoading(false);
       } else {

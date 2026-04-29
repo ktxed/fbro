@@ -126,25 +126,31 @@ async fn handle_connection(
     )
     .await;
 
-    let (snapshot, panel_ids) = if is_gui {
-        let panel_ids = {
+    let (snapshot, panel_ids, is_reconnect) = if is_gui {
+        let (panel_ids, is_reconnect) = {
             let mut state_guard = state.lock().await;
-            for panel in state_guard.panels.values_mut() {
-                panel.entries.clear();
-                panel.status = PanelStatus::Loading;
-                panel.calculating_size.clear();
-                panel.version += 1;
+            let reconnect = state_guard.has_gui_connected;
+            if !reconnect {
+                // First ever connection: clear entries so the client starts
+                // from a clean Loading state while the initial scan runs.
+                for panel in state_guard.panels.values_mut() {
+                    panel.entries.clear();
+                    panel.status = PanelStatus::Loading;
+                    panel.calculating_size.clear();
+                    panel.version += 1;
+                }
             }
-            state_guard.panels.keys().cloned().collect::<Vec<_>>()
+            let ids = state_guard.panels.keys().cloned().collect::<Vec<_>>();
+            (ids, reconnect)
         };
         let dir_size_tasks = dir_size_queue.snapshot().await;
         let snapshot = {
             let state_guard = state.lock().await;
             build_state_snapshot(&state_guard, dir_size_tasks)
         };
-        (Some(snapshot), panel_ids)
+        (Some(snapshot), panel_ids, is_reconnect)
     } else {
-        (None, vec![])
+        (None, vec![], false)
     };
 
     if let Some(snapshot) = snapshot {
@@ -154,47 +160,64 @@ async fn handle_connection(
     let mut scan_handles: HashMap<String, ScanHandle> = HashMap::new();
     let mut decision_senders: HashMap<String, mpsc::Sender<DecisionResponse>> = HashMap::new();
 
-    for panel_id in &panel_ids {
-        let (path, sort, filter, show_hidden, version_base, driver) = {
-            let state_guard = state.lock().await;
-            let Some(panel) = state_guard.panels.get(panel_id) else {
-                continue;
-            };
-            let Some(driver) = state_guard.drivers.get(&panel.source_id).cloned() else {
-                // Driver missing (e.g. a search source was ejected while
-                // the client was disconnected) — skip the initial scan for
-                // this panel; it will be rescanned when navigated.
-                continue;
-            };
-            (
-                panel.path.clone(),
-                panel.sort.clone(),
-                panel.filter.clone(),
-                panel.show_hidden,
-                panel.version,
-                driver,
+    if is_reconnect {
+        // Reconnection: keep existing entries visible and refresh quietly
+        // (atomic replace, no Loading flash).
+        for panel_id in &panel_ids {
+            quiet_rescan_panel(
+                panel_id,
+                &state,
+                &tx,
+                &mut scan_handles,
+                None,
+                &dir_size_queue,
             )
-        };
+            .await;
+        }
+    } else {
+        // First connection: incremental scan so entries appear progressively.
+        for panel_id in &panel_ids {
+            let (path, sort, filter, show_hidden, version_base, driver) = {
+                let state_guard = state.lock().await;
+                let Some(panel) = state_guard.panels.get(panel_id) else {
+                    continue;
+                };
+                let Some(driver) = state_guard.drivers.get(&panel.source_id).cloned() else {
+                    // Driver missing (e.g. a search source was ejected while
+                    // the client was disconnected) — skip the initial scan for
+                    // this panel; it will be rescanned when navigated.
+                    continue;
+                };
+                (
+                    panel.path.clone(),
+                    panel.sort.clone(),
+                    panel.filter.clone(),
+                    panel.show_hidden,
+                    panel.version,
+                    driver,
+                )
+            };
 
-        let handle = ScanHandle {
-            handle: tokio::spawn(crate::jobs::scan::run_scan(
-                panel_id.clone(),
-                path,
-                sort,
-                filter,
-                version_base,
-                tx.clone(),
-                driver,
-                None,
-                None,
-                None,
-                Arc::clone(&state),
-                Arc::clone(&dir_size_queue),
-                false,
-                show_hidden,
-            )),
-        };
-        scan_handles.insert(panel_id.clone(), handle);
+            let handle = ScanHandle {
+                handle: tokio::spawn(crate::jobs::scan::run_scan(
+                    panel_id.clone(),
+                    path,
+                    sort,
+                    filter,
+                    version_base,
+                    tx.clone(),
+                    driver,
+                    None,
+                    None,
+                    None,
+                    Arc::clone(&state),
+                    Arc::clone(&dir_size_queue),
+                    false,
+                    show_hidden,
+                )),
+            };
+            scan_handles.insert(panel_id.clone(), handle);
+        }
     }
 
     let (watcher_cmd_tx, watcher_cmd_rx) = mpsc::channel::<WatcherCommand>(64);
@@ -229,6 +252,7 @@ async fn handle_connection(
     if is_gui {
         let mut state_guard = state.lock().await;
         state_guard.gui_senders.push(tx.clone());
+        state_guard.has_gui_connected = true;
     }
 
     loop {

@@ -191,17 +191,26 @@ async fn view_file(args: &Value, ctx: &mut IntentContext<'_>) {
         query_string.push_str(&format!("&fsport={file_server_port}"));
     }
 
-    let _ = tauri::WebviewWindowBuilder::new(
-        ctx.app_handle,
-        label,
-        tauri::WebviewUrl::App(query_string.into()),
-    )
-    .title(format!("{} — fbro viewer", parsed.filename))
-    .inner_size(900.0, 700.0)
-    .resizable(true)
-    .devtools(true)
-    .background_color(tauri::webview::Color(13, 13, 13, 255))
-    .build();
+    // Use spawn_blocking so the macOS dispatch_sync to the Cocoa main thread
+    // runs on the blocking thread pool rather than a Tokio async worker thread.
+    // If an async worker is blocked, the Tokio runtime can't schedule the
+    // viewer's WS handshake task, leaving it in CONNECTING state until the
+    // 2-second connect timeout fires.
+    let app_handle = ctx.app_handle.clone();
+    let window_title = format!("{} — fbro viewer", parsed.filename);
+    tokio::task::spawn_blocking(move || {
+        let _ = tauri::WebviewWindowBuilder::new(
+            &app_handle,
+            label,
+            tauri::WebviewUrl::App(query_string.into()),
+        )
+        .title(window_title)
+        .inner_size(900.0, 700.0)
+        .resizable(true)
+        .devtools(true)
+        .background_color(tauri::webview::Color(13, 13, 13, 255))
+        .build();
+    });
 
     // Mark a viewer as active so panel cursor moves start warming the prefetch
     // cache. Decremented in `close_viewer_window`.

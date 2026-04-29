@@ -2,7 +2,9 @@ import type { BEMessage, FEMessage, IntentMessage } from "./types";
 
 const WS_URL = "ws://127.0.0.1:7878";
 const RECONNECT_DELAY_MS = 1500;
-const CONNECT_TIMEOUT_MS = 2000;
+// Localhost handshakes should complete in <50ms. A short timeout means a
+// failed attempt unwinds quickly so the fast-retry path can kick in.
+const CONNECT_TIMEOUT_MS = 500;
 
 export class WsClient {
   private ws: WebSocket | null = null;
@@ -35,7 +37,7 @@ export class WsClient {
 
     // Force-close if the handshake stalls — onclose will fire and trigger reconnect.
     this.connectTimer = setTimeout(() => {
-      if (ws.readyState !== WebSocket.OPEN) {
+      if (ws.readyState === WebSocket.CONNECTING) {
         try { ws.close(); } catch { /* ignore */ }
       }
     }, CONNECT_TIMEOUT_MS);
@@ -68,7 +70,9 @@ export class WsClient {
       console.log("WS CLOSE", this.clientKind, e.code, e.reason);
       if (this.connectTimer) { clearTimeout(this.connectTimer); this.connectTimer = null; }
       this.onDisconnected();
-      this.scheduleReconnect();
+      // Code 1006 is a transient failure (server busy / handshake not yet ready).
+      // Retry quickly rather than waiting the full reconnect delay.
+      this.scheduleReconnect(e.code === 1006 ? 50 : RECONNECT_DELAY_MS);
     };
 
     ws.onerror = () => {
@@ -105,11 +109,11 @@ export class WsClient {
     this.pending.push(msg);
   }
 
-  private scheduleReconnect() {
+  private scheduleReconnect(delay = RECONNECT_DELAY_MS) {
     if (this.destroyed) return;
     this.reconnectTimer = setTimeout(() => {
       this.connect();
-    }, RECONNECT_DELAY_MS);
+    }, delay);
   }
 
   destroy() {

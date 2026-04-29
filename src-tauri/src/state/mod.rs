@@ -119,6 +119,10 @@ pub struct AppState {
     /// viewer panels). Used to gate background prefetch on cursor movement so
     /// plain panel navigation doesn't warm the cache unnecessarily.
     pub active_viewers: usize,
+    /// Set to true after the first GUI client connects and completes its
+    /// initial scan. Used by the server to skip the clear-and-rescan cycle
+    /// on reconnection, keeping existing entries visible during the refresh.
+    pub has_gui_connected: bool,
 }
 
 #[allow(dead_code)]
@@ -290,6 +294,7 @@ impl AppState {
             gui_senders: Vec::new(),
             file_server_port,
             active_viewers: 0,
+            has_gui_connected: false,
         }
     }
 
