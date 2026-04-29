@@ -98,6 +98,7 @@ export function BookmarksPopover({
         }}
         style={floatingStyles}
         className="bookmarks-popover"
+        onMouseDown={(e) => e.preventDefault()}
       >
         <div className="bookmarks-popover__header">Bookmarks</div>
 
