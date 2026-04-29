@@ -18,7 +18,6 @@ export const TOOLBAR_COMMAND_IDS = [
   "file.rename",
   "file.view",
   "file.edit",
-  "file.touch",
   "file.copy",
   "file.move",
   "file.mkdir",
