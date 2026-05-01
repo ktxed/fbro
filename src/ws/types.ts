@@ -326,13 +326,14 @@ export interface StateSnapshotMessage {
     dirSizeQueue?: { tasks: DirSizeTask[] };
     commands?: InteractiveCommand[];
     bookmarks?: BookmarkEntry[];
+    fontSize?: number;
   };
 }
 
 export interface StatePatchMessage {
   type: "StatePatch";
   timestamp: number;
-  domain: "panels" | "layout" | "focus" | "selections" | "jobs" | "sources" | "dirSizeQueue" | "bookmarks" | "procs";
+  domain: "panels" | "layout" | "focus" | "selections" | "jobs" | "sources" | "dirSizeQueue" | "bookmarks" | "procs" | "settings";
   entityId?: string;
   version: number;
   patch: {

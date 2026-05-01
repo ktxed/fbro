@@ -66,7 +66,7 @@ pub async fn dispatch(name: &str, scope: &Value, args: &Value, ctx: &mut IntentC
         "QueryCacheStatus" | "ClearCache" => cache::handle(name, args, ctx).await,
         "AddBookmark" | "RemoveBookmark" | "EnterBookmarkSource" => bookmarks::handle(name, scope, args, ctx).await,
         "EnterHistorySource" => history::handle(name, scope, args, ctx).await,
-        "Quit" | "ConfirmQuit" => app::handle(name, ctx).await,
+        "Quit" | "ConfirmQuit" | "SetFontSize" => app::handle(name, args, ctx).await,
         unknown => eprintln!("[fbro] Unknown intent: {unknown}"),
     }
 }

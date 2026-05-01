@@ -67,6 +67,7 @@ pub(crate) fn build_state_snapshot(
             },
             commands: build_interactive_commands(),
             bookmarks: state.bookmarks.clone(),
+            font_size: state.font_size,
         },
     }
 }
@@ -607,7 +608,7 @@ pub(crate) async fn save_session(state: &SharedState) {
             )
         })
         .collect();
-    crate::persistence::save(&SessionState { panels });
+    crate::persistence::save(&SessionState { panels, font_size: Some(state_guard.font_size) });
 }
 
 pub(crate) async fn active_job_count(state: &SharedState) -> usize {

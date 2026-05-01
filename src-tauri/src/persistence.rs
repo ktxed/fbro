@@ -8,6 +8,8 @@ use std::path::PathBuf;
 pub struct SessionState {
     #[serde(default)]
     pub panels: HashMap<String, PanelSession>,
+    #[serde(default)]
+    pub font_size: Option<u8>,
 }
 
 #[derive(Serialize, Deserialize)]

@@ -125,6 +125,7 @@ pub struct AppState {
     /// on reconnection, keeping existing entries visible during the refresh.
     pub has_gui_connected: bool,
     pub bookmarks: Vec<BookmarkEntry>,
+    pub font_size: u8,
     pub child_processes: HashMap<u32, ChildProcessEntry>,
 }
 
@@ -308,6 +309,7 @@ impl AppState {
             active_viewers: 0,
             has_gui_connected: false,
             bookmarks: crate::bookmarks::load(),
+            font_size: crate::persistence::load().font_size.unwrap_or(13),
             child_processes: HashMap::new(),
         }
     }

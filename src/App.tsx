@@ -4,14 +4,14 @@ import { WsClient } from "./ws/client";
 import { Layout } from "./components/Layout";
 import { JobsBar } from "./components/JobsBar";
 import { Toolbar } from "./components/Toolbar";
-import { loadZoom } from "./utils/zoom";
+import { applyZoom } from "./utils/zoom";
 
 export function App() {
   const [state, dispatch] = useAppReducer();
   const clientRef = useRef<WsClient | null>(null);
   const [jobsViewOpen, setJobsViewOpen] = useState(false);
 
-  useEffect(() => { loadZoom(); }, []);
+  useEffect(() => { applyZoom(state.fontSize); }, [state.fontSize]);
 
   useEffect(() => {
     const client = new WsClient();

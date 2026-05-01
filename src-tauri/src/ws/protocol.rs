@@ -197,6 +197,8 @@ pub struct StateDomains {
     pub dir_size_queue: DirSizeQueueSnapshot,
     pub commands: Vec<InteractiveCommandSchema>,
     pub bookmarks: Vec<crate::bookmarks::BookmarkEntry>,
+    #[serde(rename = "fontSize")]
+    pub font_size: u8,
 }
 
 #[derive(Serialize, Clone, Debug)]

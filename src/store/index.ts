@@ -200,6 +200,7 @@ export interface AppState {
   bookmarks: BookmarkEntry[];
   bookmarksOpen: { panelId: string } | null;
   childProcesses: Record<number, ChildProcess>;
+  fontSize: number;
 }
 
 const initialState: AppState = {
@@ -238,6 +239,7 @@ const initialState: AppState = {
   bookmarks: [],
   bookmarksOpen: null,
   childProcesses: {},
+  fontSize: 13,
 };
 
 // ─── Actions ─────────────────────────────────────────────────────────────────
@@ -335,6 +337,9 @@ function applySnapshot(state: AppState, msg: StateSnapshotMessage): AppState {
   }
   if (domains.bookmarks) {
     next.bookmarks = domains.bookmarks;
+  }
+  if (domains.fontSize !== undefined) {
+    next.fontSize = domains.fontSize;
   }
   return next;
 }
@@ -568,6 +573,11 @@ function applyPatch(state: AppState, msg: StatePatchMessage): AppState {
 
   if (msg.domain === "bookmarks") {
     return { ...state, bookmarks: (msg.patch.bookmarks as BookmarkEntry[]) ?? [] };
+  }
+
+  if (msg.domain === "settings") {
+    const fontSize = msg.patch.fontSize as number | undefined;
+    return fontSize !== undefined ? { ...state, fontSize } : state;
   }
 
   if (msg.domain === "procs") {

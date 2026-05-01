@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { WsClient } from "../ws/client";
-import type { BEMessage, FileChunkMessage, ViewerFileChangedMessage } from "../ws/types";
+import type { BEMessage, FileChunkMessage, ViewerFileChangedMessage, StateSnapshotMessage, StatePatchMessage } from "../ws/types";
+import { applyZoom, nextZoomSize, DEFAULT_FONT_SIZE } from "../utils/zoom";
 import { ImageViewer, IMAGE_LIMIT } from "../viewers/ImageViewer";
 import { detectRenderer, isImageExt, isMdExt } from "../viewers/media";
 import { marked } from "marked";
@@ -161,7 +162,8 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
   // Incremented each time a new buffer arrives — drives post-load effects
   const [bufSeq, setBufSeq]   = useState(0);
 
-  const clientRef     = useRef<WsClient | null>(null);
+  const clientRef          = useRef<WsClient | null>(null);
+  const currentFontSizeRef = useRef(DEFAULT_FONT_SIZE);
   const bodyRef       = useRef<HTMLDivElement>(null);
   const contentRef    = useRef<HTMLElement>(null);
   // After a large-mode buffer load, what to do with topLine
@@ -373,6 +375,18 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
     };
 
     client.onMessage = (msg: BEMessage) => {
+      if (msg.type === "StateSnapshot") {
+        const fontSize = (msg as StateSnapshotMessage).domains.fontSize;
+        if (fontSize !== undefined) { currentFontSizeRef.current = fontSize; applyZoom(fontSize); }
+      }
+      if (msg.type === "StatePatch") {
+        const patch = msg as StatePatchMessage;
+        if (patch.domain === "settings" && patch.patch.fontSize !== undefined) {
+          const fontSize = patch.patch.fontSize as number;
+          currentFontSizeRef.current = fontSize;
+          applyZoom(fontSize);
+        }
+      }
       if (msg.type === "FileChunk") {
         const m = msg as FileChunkMessage;
         const bytes = hexDecode(m.data);
@@ -555,6 +569,30 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
     const handler = (e: KeyboardEvent) => {
       const ctrl = e.ctrlKey || e.metaKey;
       const inFind = e.target === findInputRef.current;
+
+      if (ctrl && (e.key === "=" || e.key === "+")) {
+        e.preventDefault();
+        const s = nextZoomSize(currentFontSizeRef.current, 1);
+        currentFontSizeRef.current = s;
+        applyZoom(s);
+        clientRef.current?.sendIntent("SetFontSize", undefined, { value: s });
+        return;
+      }
+      if (ctrl && e.key === "-") {
+        e.preventDefault();
+        const s = nextZoomSize(currentFontSizeRef.current, -1);
+        currentFontSizeRef.current = s;
+        applyZoom(s);
+        clientRef.current?.sendIntent("SetFontSize", undefined, { value: s });
+        return;
+      }
+      if (ctrl && e.key === "0") {
+        e.preventDefault();
+        currentFontSizeRef.current = DEFAULT_FONT_SIZE;
+        applyZoom(DEFAULT_FONT_SIZE);
+        clientRef.current?.sendIntent("SetFontSize", undefined, { value: DEFAULT_FONT_SIZE });
+        return;
+      }
 
       // F — open find (or previous match with Shift+F)
       if ((e.key === "f" || e.key === "F") && !ctrl && !e.altKey) {

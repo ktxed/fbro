@@ -155,6 +155,17 @@ async fn handle_connection(
 
     if let Some(snapshot) = snapshot {
         let _ = send_msg(&mut ws_tx, &snapshot).await;
+    } else {
+        // Non-GUI clients (viewers) don't get the full snapshot but still need
+        // the current font size so they render at the correct zoom level.
+        let font_size = state.lock().await.font_size;
+        let _ = send_msg(&mut ws_tx, &ServerMessage::StatePatch {
+            timestamp: now(),
+            domain: "settings".to_string(),
+            entity_id: None,
+            version: 0,
+            patch: serde_json::json!({ "fontSize": font_size }),
+        }).await;
     }
 
     let mut scan_handles: HashMap<String, ScanHandle> = HashMap::new();
