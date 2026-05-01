@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!--
+        Declares that fbro accesses files the user selects (read-only).
+        Required for TCC to surface a proper permission prompt instead of
+        silently blocking read_dir calls inside ~/Library/Containers and
+        other protected directories.
+
+        Note: ~/Library/Containers also falls under Full Disk Access.
+        The user must grant that in System Preferences → Privacy & Security →
+        Full Disk Access once; this entitlement ensures macOS knows to ask.
+    -->
+    <key>com.apple.security.files.user-selected.read-only</key>
+    <true/>
+</dict>
+</plist>

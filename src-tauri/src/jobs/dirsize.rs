@@ -11,6 +11,12 @@ use crate::ws::protocol::{now, ServerMessage};
 
 const MAX_CONCURRENT: usize = 4;
 const CACHE_TTL: Duration = Duration::from_secs(60);
+/// Maximum wall-clock time allowed for a single directory-size walk.
+/// On macOS, `read_dir` can block indefinitely when the OS raises a TCC
+/// (privacy) permission dialog (e.g. ~/Library/Containers).  This timeout
+/// releases the semaphore slot so the rest of the queue stays alive.
+/// The orphaned blocking thread will exit on its own once the OS unblocks it.
+const CALC_TIMEOUT: Duration = Duration::from_secs(60);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum DirSizeTaskStatus {
@@ -227,14 +233,19 @@ impl DirSizeQueue {
 
             let path = full_path.clone();
             let cancel_clone = cancel_rx.clone();
-            let result =
-                tokio::task::spawn_blocking(move || calculate_dir_size(&path, &cancel_clone)).await;
+            let result = tokio::time::timeout(
+                CALC_TIMEOUT,
+                tokio::task::spawn_blocking(move || calculate_dir_size(&path, &cancel_clone)),
+            )
+            .await;
 
             remove_task_if_matches(&tasks, &panel_id, &entry_name, task_id).await;
             emit_queue_patch(&tasks, &tx).await;
 
+            // Flatten: timeout wraps spawn_blocking's JoinHandle, so we get
+            // Ok(Ok(...)) on success, Ok(Err(_)) on panic, Err(_) on timeout.
             match result {
-                Ok(Some(size)) => {
+                Ok(Ok(Some(size))) => {
                     eprintln!(
                         "[dirsize] finished: panel={panel_id} entry={entry_name} size={size}"
                     );
@@ -323,12 +334,16 @@ impl DirSizeQueue {
                     drop(s);
                     cache.lock().await.insert(full_path, size);
                 }
-                Ok(None) => {
+                Ok(Ok(None)) => {
                     eprintln!("[dirsize] cancelled: panel={panel_id} entry={entry_name}");
                     patch_remove_calculating(&state, &tx, &panel_id, &entry_name).await;
                 }
-                Err(_) => {
+                Ok(Err(_)) => {
                     eprintln!("[dirsize] error: panel={panel_id} entry={entry_name}");
+                    patch_remove_calculating(&state, &tx, &panel_id, &entry_name).await;
+                }
+                Err(_elapsed) => {
+                    eprintln!("[dirsize] timeout (possible TCC permission block): panel={panel_id} entry={entry_name}");
                     patch_remove_calculating(&state, &tx, &panel_id, &entry_name).await;
                 }
             }
