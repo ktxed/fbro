@@ -11,6 +11,8 @@ import {
   GLOBAL_SHORTCUT_COMMAND_IDS,
   TOOLBAR_COMMAND_IDS,
 } from "../commands/interactive";
+import { modKey } from "../utils/platform";
+import { stepZoom, resetZoom } from "../utils/zoom";
 import {
   IconPencil,
   IconEye,
@@ -65,6 +67,10 @@ export function Toolbar({ client, jobsViewOpen, onOpenJobsView }: { client: WsCl
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      if (modKey(e) && (e.key === "=" || e.key === "+")) { e.preventDefault(); stepZoom(1); return; }
+      if (modKey(e) && e.key === "-") { e.preventDefault(); stepZoom(-1); return; }
+      if (modKey(e) && e.key === "0") { e.preventDefault(); resetZoom(); return; }
+
       const blockingModalActive = state.pendingOp || state.activeJobId || state.pendingQuit || state.pendingRename || state.pendingInfo || state.pendingMkdir || state.pendingTouch || state.pendingNoEditor || state.pendingGoToPath || state.pendingPanelHistory || state.pendingDryRun || state.pendingContextMenu || state.pendingOpenWith || state.pendingBro || state.pendingInput || jobsViewOpen;
       const paletteCommand = getCommand(state.commands, COMMAND_PALETTE_COMMAND_ID);
       if (!blockingModalActive && paletteCommand && paletteCommand.bindings.some((binding) => bindingMatches(e, binding))) {

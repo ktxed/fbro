@@ -23,6 +23,9 @@
   --font:         "Fragment Mono", "JetBrains Mono", "Fira Code", monospace;
   --font-size:    13px;
   --row-height:   22px;
+  --col-size-w:   70px;
+  --col-date-w:   130px;
+  --col-perms-w:  76px;
 }
 
 html, body, #root {
@@ -594,9 +597,9 @@ body {
 /* mirror the column widths from panel__row exactly */
 .panel__sort-kind  { flex-shrink: 0; width: 24px; display: flex; align-items: center; justify-content: center; }
 .panel__sort-name  { flex: 1; min-width: 0; display: flex; align-items: center; gap: 4px; color: var(--text-dim); font-size: calc(var(--font-size) - 1px); cursor: pointer; }
-.panel__sort-size  { flex-shrink: 0; width: 70px;  text-align: right; display: flex; align-items: center; justify-content: flex-end; gap: 4px; color: var(--text-dim); font-size: calc(var(--font-size) - 1px); padding-left: 8px; cursor: pointer; }
-.panel__sort-date  { flex-shrink: 0; width: 130px; text-align: left; display: flex; align-items: center; justify-content: flex-start; gap: 4px; color: var(--text-dim); font-size: calc(var(--font-size) - 1px); padding-left: 8px; cursor: pointer; }
-.panel__sort-perms { flex-shrink: 0; width: 76px; padding-left: 8px; }
+.panel__sort-size  { flex-shrink: 0; width: var(--col-size-w);  text-align: right; display: flex; align-items: center; justify-content: flex-end; gap: 4px; color: var(--text-dim); font-size: calc(var(--font-size) - 1px); padding-left: 8px; cursor: pointer; }
+.panel__sort-date  { flex-shrink: 0; width: var(--col-date-w);  text-align: left; display: flex; align-items: center; justify-content: flex-start; gap: 4px; color: var(--text-dim); font-size: calc(var(--font-size) - 1px); padding-left: 8px; cursor: pointer; }
+.panel__sort-perms { flex-shrink: 0; width: var(--col-perms-w); padding-left: 8px; }
 
 .panel__sort-tri {
   cursor: pointer;
@@ -709,7 +712,7 @@ body {
 
 .panel__size {
   flex-shrink: 0;
-  width: 70px;
+  width: var(--col-size-w);
   text-align: right;
   color: var(--text-size);
   padding-left: 8px;
@@ -717,7 +720,7 @@ body {
 
 .panel__mtime {
   flex-shrink: 0;
-  width: 130px;
+  width: var(--col-date-w);
   text-align: right;
   color: var(--text-dim);
   padding-left: 8px;
@@ -725,7 +728,7 @@ body {
 
 .panel__perms {
   flex-shrink: 0;
-  width: 76px;
+  width: var(--col-perms-w);
   text-align: right;
   color: var(--text-dim);
   font-family: monospace;
