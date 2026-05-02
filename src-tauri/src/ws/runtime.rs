@@ -14,8 +14,9 @@ use crate::vfs::VfsDriver;
 use crate::watcher::WatcherCommand;
 use crate::ws::commands::build_interactive_commands;
 use crate::ws::protocol::{
-    now, DirSizeQueueSnapshot, DirSizeTaskSchema, FileOpFileSchema, LayoutDomain, PanelSnapshot,
-    ServerMessage, ShadowSourceSchema, SourceCapabilities, SourceSchema, StateDomains,
+    now, DirSizeQueueSnapshot, DirSizeTaskSchema, FileOpFileSchema, GeneralSettingsSchema,
+    LayoutDomain, PanelSnapshot, ServerMessage, SettingsSnapshot, ShadowSourceSchema,
+    SourceCapabilities, SourceSchema, StateDomains,
 };
 
 pub(crate) struct IntentContext<'a> {
@@ -68,6 +69,11 @@ pub(crate) fn build_state_snapshot(
             commands: build_interactive_commands(),
             bookmarks: state.bookmarks.clone(),
             font_size: state.font_size,
+            settings: SettingsSnapshot {
+                general: GeneralSettingsSchema {
+                    show_hidden_default: state.settings.general.show_hidden_default,
+                },
+            },
         },
     }
 }

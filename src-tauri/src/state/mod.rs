@@ -1,3 +1,5 @@
+pub mod settings;
+
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
@@ -126,6 +128,7 @@ pub struct AppState {
     pub has_gui_connected: bool,
     pub bookmarks: Vec<BookmarkEntry>,
     pub font_size: u8,
+    pub settings: settings::Settings,
     pub child_processes: HashMap<u32, ChildProcessEntry>,
 }
 
@@ -159,6 +162,8 @@ impl AppState {
         file_server_port: u16,
     ) -> Self {
         let home = platform.home_dir();
+        let loaded_settings = settings::load();
+        let show_hidden_default = loaded_settings.general.show_hidden_default;
 
         // Validate a saved path; fall back to home if it is no longer a directory.
         let resolve = |id: &str| -> String {
@@ -212,7 +217,7 @@ impl AppState {
             sort: default_sort.clone(),
             filter: None,
             filter_mode_active: false,
-            show_hidden: true,
+            show_hidden: show_hidden_default,
             cursor: 0,
             selection: vec![],
             entries: vec![],
@@ -234,7 +239,7 @@ impl AppState {
             sort: default_sort,
             filter: None,
             filter_mode_active: false,
-            show_hidden: true,
+            show_hidden: show_hidden_default,
             cursor: 0,
             selection: vec![],
             entries: vec![],
@@ -310,6 +315,7 @@ impl AppState {
             has_gui_connected: false,
             bookmarks: crate::bookmarks::load(),
             font_size: crate::persistence::load().font_size.unwrap_or(13),
+            settings: loaded_settings,
             child_processes: HashMap::new(),
         }
     }

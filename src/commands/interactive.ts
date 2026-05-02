@@ -32,6 +32,7 @@ export const GLOBAL_SHORTCUT_COMMAND_IDS = [
   COMMAND_PALETTE_COMMAND_ID,
   "app.open_jobs",
   "app.search",
+  "app.settings",
   "panel.viewer.embed",
   "panel.navigate_source_root",
   "file.info",
@@ -476,6 +477,9 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
     case "app.open_jobs":
       context.onOpenJobsView?.();
       return !!context.onOpenJobsView;
+    case "app.settings":
+      dispatch({ type: "OPEN_SETTINGS", tab: "general" });
+      return true;
     case "panel.viewer.embed":
       dispatch({ type: "TOGGLE_EMBEDDED_VIEWER" });
       return true;

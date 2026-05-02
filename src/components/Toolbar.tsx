@@ -71,7 +71,7 @@ export function Toolbar({ client, jobsViewOpen, onOpenJobsView }: { client: WsCl
       if (modKey(e) && e.key === "-")                    { e.preventDefault(); const s = nextZoomSize(state.fontSize, -1); applyZoom(s); client.sendIntent("SetFontSize", undefined, { value: s }); return; }
       if (modKey(e) && e.key === "0")                    { e.preventDefault(); applyZoom(DEFAULT_FONT_SIZE); client.sendIntent("SetFontSize", undefined, { value: DEFAULT_FONT_SIZE }); return; }
 
-      const blockingModalActive = state.pendingOp || state.activeJobId || state.pendingQuit || state.pendingRename || state.pendingInfo || state.pendingMkdir || state.pendingTouch || state.pendingNoEditor || state.pendingGoToPath || state.pendingPanelHistory || state.pendingDryRun || state.pendingContextMenu || state.pendingOpenWith || state.pendingBro || state.pendingInput || jobsViewOpen;
+      const blockingModalActive = state.pendingOp || state.activeJobId || state.pendingQuit || state.pendingRename || state.pendingInfo || state.pendingMkdir || state.pendingTouch || state.pendingNoEditor || state.pendingGoToPath || state.pendingPanelHistory || state.pendingDryRun || state.pendingContextMenu || state.pendingOpenWith || state.pendingBro || state.pendingInput || state.pendingSettings || jobsViewOpen;
       const paletteCommand = getCommand(state.commands, COMMAND_PALETTE_COMMAND_ID);
       if (!blockingModalActive && paletteCommand && paletteCommand.bindings.some((binding) => bindingMatches(e, binding))) {
         e.preventDefault();

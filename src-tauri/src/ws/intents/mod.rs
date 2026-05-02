@@ -6,6 +6,7 @@ mod history;
 mod jobs;
 mod navigation;
 mod panel;
+mod settings;
 mod viewer;
 
 use serde_json::Value;
@@ -67,6 +68,7 @@ pub async fn dispatch(name: &str, scope: &Value, args: &Value, ctx: &mut IntentC
         "AddBookmark" | "RemoveBookmark" | "EnterBookmarkSource" => bookmarks::handle(name, scope, args, ctx).await,
         "EnterHistorySource" => history::handle(name, scope, args, ctx).await,
         "Quit" | "ConfirmQuit" | "SetFontSize" => app::handle(name, args, ctx).await,
+        "SetGeneralOption" => settings::handle(name, args, ctx).await,
         unknown => eprintln!("[fbro] Unknown intent: {unknown}"),
     }
 }

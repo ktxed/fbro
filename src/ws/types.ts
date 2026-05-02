@@ -307,6 +307,14 @@ export interface BookmarkEntry {
   path: string;
 }
 
+export interface GeneralSettings {
+  showHiddenDefault: boolean;
+}
+
+export interface SettingsState {
+  general: GeneralSettings;
+}
+
 export interface ChildProcess {
   pid: number;
   name: string;
@@ -327,6 +335,7 @@ export interface StateSnapshotMessage {
     commands?: InteractiveCommand[];
     bookmarks?: BookmarkEntry[];
     fontSize?: number;
+    settings?: SettingsState;
   };
 }
 

@@ -30,6 +30,8 @@ import type {
   PrefetchCacheStatus,
   BookmarkEntry,
   ChildProcess,
+  GeneralSettings,
+  SettingsState,
 } from "../ws/types";
 
 // ─── State ───────────────────────────────────────────────────────────────────
@@ -165,6 +167,12 @@ export interface PendingSearch {
   searchParams: SearchParams | null;
 }
 
+export type SettingsTab = "general";
+
+export interface PendingSettings {
+  activeTab: SettingsTab;
+}
+
 export interface AppState {
   connected: boolean;
   sessionId: string | null;
@@ -193,6 +201,7 @@ export interface AppState {
   pendingBro: PendingBro | null;
   pendingInput: PendingInput | null;
   pendingSearch: PendingSearch | null;
+  pendingSettings: PendingSettings | null;
   commandPaletteOpen: boolean;
   transientHint: { message: string; token: number } | null;
   embeddedViewer: { sourcePanelId: string } | null;
@@ -201,6 +210,7 @@ export interface AppState {
   bookmarksOpen: { panelId: string } | null;
   childProcesses: Record<number, ChildProcess>;
   fontSize: number;
+  settings: SettingsState;
 }
 
 const initialState: AppState = {
@@ -231,6 +241,7 @@ const initialState: AppState = {
   pendingBro: null,
   pendingInput: null,
   pendingSearch: null,
+  pendingSettings: null,
   commandPaletteOpen: false,
 
   transientHint: null,
@@ -240,6 +251,9 @@ const initialState: AppState = {
   bookmarksOpen: null,
   childProcesses: {},
   fontSize: 13,
+  settings: {
+    general: { showHiddenDefault: false },
+  },
 };
 
 // ─── Actions ─────────────────────────────────────────────────────────────────
@@ -288,7 +302,9 @@ export type AppAction =
   | { type: "NAV_HISTORY_FORWARD"; panelId: string }
   | { type: "NAV_HISTORY_JUMP";    panelId: string; entryIndex: number }
   | { type: "OPEN_BOOKMARKS"; panelId: string }
-  | { type: "CLOSE_BOOKMARKS" };
+  | { type: "CLOSE_BOOKMARKS" }
+  | { type: "OPEN_SETTINGS"; tab: SettingsTab }
+  | { type: "CLOSE_SETTINGS" };
 
 // ─── Reducer ─────────────────────────────────────────────────────────────────
 
@@ -340,6 +356,9 @@ function applySnapshot(state: AppState, msg: StateSnapshotMessage): AppState {
   }
   if (domains.fontSize !== undefined) {
     next.fontSize = domains.fontSize;
+  }
+  if (domains.settings !== undefined) {
+    next.settings = domains.settings;
   }
   return next;
 }
@@ -577,7 +596,12 @@ function applyPatch(state: AppState, msg: StatePatchMessage): AppState {
 
   if (msg.domain === "settings") {
     const fontSize = msg.patch.fontSize as number | undefined;
-    return fontSize !== undefined ? { ...state, fontSize } : state;
+    const general = msg.patch.general as GeneralSettings | undefined;
+    let next = fontSize !== undefined ? { ...state, fontSize } : state;
+    if (general !== undefined) {
+      next = { ...next, settings: { ...next.settings, general } };
+    }
+    return next;
   }
 
   if (msg.domain === "procs") {
@@ -1067,6 +1091,10 @@ function reducer(state: AppState, action: AppAction): AppState {
       return { ...state, bookmarksOpen: { panelId: action.panelId } };
     case "CLOSE_BOOKMARKS":
       return { ...state, bookmarksOpen: null };
+    case "OPEN_SETTINGS":
+      return { ...state, pendingSettings: { activeTab: action.tab } };
+    case "CLOSE_SETTINGS":
+      return { ...state, pendingSettings: null };
     case "OPEN_CONTEXT_MENU":
       return { ...state, pendingContextMenu: action.menu };
     case "CLOSE_CONTEXT_MENU":

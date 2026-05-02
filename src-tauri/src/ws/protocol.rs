@@ -199,6 +199,18 @@ pub struct StateDomains {
     pub bookmarks: Vec<crate::bookmarks::BookmarkEntry>,
     #[serde(rename = "fontSize")]
     pub font_size: u8,
+    pub settings: SettingsSnapshot,
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct SettingsSnapshot {
+    pub general: GeneralSettingsSchema,
+}
+
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct GeneralSettingsSchema {
+    pub show_hidden_default: bool,
 }
 
 #[derive(Serialize, Clone, Debug)]

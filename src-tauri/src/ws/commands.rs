@@ -455,5 +455,12 @@ pub(crate) fn build_interactive_commands() -> Vec<InteractiveCommandSchema> {
             vec![mod_binding("d", true)],
             None,
         ),
+        command(
+            "app.settings",
+            "App",
+            "Settings…",
+            vec![keybinding_with_modifiers(",", false, !is_macos(), false, is_macos())],
+            None,
+        ),
     ]
 }
