@@ -8,6 +8,49 @@ use crate::vfs::VfsDriver;
 use crate::ws::protocol::{now, ConflictDecisionSchema, FileOpProgressSchema, ServerMessage};
 
 const COPY_BUF_SIZE: usize = 64 * 1024; // 64 KiB
+
+fn apply_file_attrs(dst_path: &str, mtime_secs: Option<u64>, permissions: Option<&str>) {
+    if let Some(secs) = mtime_secs {
+        set_mtime(dst_path, secs);
+    }
+    #[cfg(unix)]
+    if let Some(perms) = permissions {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = perms.chars().enumerate().fold(0u32, |acc, (i, c)| {
+            let bit: u32 = match (i % 3, c) {
+                (0, 'r') => 4,
+                (1, 'w') => 2,
+                (2, 'x') => 1,
+                _ => 0,
+            };
+            let shift = 6u32.saturating_sub((i as u32 / 3) * 3);
+            acc | (bit << shift)
+        });
+        let _ = std::fs::set_permissions(dst_path, std::fs::Permissions::from_mode(mode));
+    }
+}
+
+#[cfg(unix)]
+fn set_mtime(dst_path: &str, secs: u64) {
+    use std::ffi::CString;
+    use libc::{timespec, utimensat, AT_FDCWD, UTIME_OMIT};
+    let Ok(c_path) = CString::new(dst_path) else { return };
+    let times = [
+        timespec { tv_sec: 0, tv_nsec: UTIME_OMIT },
+        timespec { tv_sec: secs as libc::time_t, tv_nsec: 0 },
+    ];
+    unsafe { utimensat(AT_FDCWD, c_path.as_ptr(), times.as_ptr(), 0) };
+}
+
+#[cfg(not(unix))]
+fn set_mtime(dst_path: &str, secs: u64) {
+    use std::time::{Duration, UNIX_EPOCH};
+    let mtime = UNIX_EPOCH + Duration::from_secs(secs);
+    let times = std::fs::FileTimes::new().set_modified(mtime);
+    if let Ok(f) = std::fs::OpenOptions::new().write(true).open(dst_path) {
+        let _ = f.set_times(times);
+    }
+}
 const CANCELLED_ERR: &str = "Cancelled";
 
 /// Run a file operation (copy/move/delete) in a blocking context.
@@ -30,6 +73,7 @@ pub async fn run_file_op(
     mut decision_rx: DecisionRx,
     src_driver: Arc<dyn VfsDriver>,
     dst_driver: Option<Arc<dyn VfsDriver>>,
+    preserve_attributes: bool,
 ) {
     let job_id_clone = job_id.clone();
     let tx_clone = tx.clone();
@@ -46,6 +90,7 @@ pub async fn run_file_op(
             &mut decision_rx,
             &*src_driver,
             dst_driver.as_deref(),
+            preserve_attributes,
         )
     })
     .await;
@@ -92,6 +137,7 @@ fn run_file_op_blocking(
     decision_rx: &mut DecisionRx,
     src_driver: &dyn VfsDriver,
     dst_driver: Option<&dyn VfsDriver>,
+    preserve_attributes: bool,
 ) -> Result<(), String> {
     // Totals grow as directories are discovered (no pre-scan — VFS may be remote)
     let mut total_files = 0usize;
@@ -167,6 +213,7 @@ fn run_file_op_blocking(
                         job_id,
                         src,
                         &dst_str,
+                        entry.mtime,
                         conflict_policy,
                         tx,
                         cancel_rx,
@@ -179,6 +226,7 @@ fn run_file_op_blocking(
                         dst_drv,
                         decision_rx,
                         &mut apply_to_all,
+                        preserve_attributes,
                     )?;
                 } else {
                     // Check conflict
@@ -231,6 +279,10 @@ fn run_file_op_blocking(
                         src_driver,
                         dst_drv,
                     )?;
+
+                                    if preserve_attributes && dst_drv.is_local() {
+                        apply_file_attrs(&dst_str, entry.mtime, entry.permissions.as_deref());
+                    }
 
                     total_bytes_completed += entry.size.unwrap_or(0);
                     completed_files += 1;
@@ -460,6 +512,7 @@ fn copy_dir_recursive(
     job_id: &str,
     src: &str,
     dst: &str,
+    src_mtime: Option<u64>,
     conflict_policy: &ConflictPolicy,
     tx: &mpsc::Sender<ServerMessage>,
     cancel_rx: &watch::Receiver<bool>,
@@ -472,10 +525,15 @@ fn copy_dir_recursive(
     dst_driver: &dyn VfsDriver,
     decision_rx: &mut DecisionRx,
     apply_to_all: &mut Option<ConflictOutcome>,
+    preserve_attributes: bool,
 ) -> Result<(), String> {
     dst_driver
         .create_dir_all(dst)
         .map_err(|e| format!("Cannot create dir {dst}: {e}"))?;
+
+    if preserve_attributes && dst_driver.is_local() {
+        apply_file_attrs(dst, src_mtime, None);
+    }
 
     let children = src_driver
         .read_dir_entries(src)
@@ -502,6 +560,7 @@ fn copy_dir_recursive(
                 job_id,
                 &child_src,
                 &child_dst,
+                child.mtime,
                 conflict_policy,
                 tx,
                 cancel_rx,
@@ -514,6 +573,7 @@ fn copy_dir_recursive(
                 dst_driver,
                 decision_rx,
                 apply_to_all,
+                preserve_attributes,
             )?;
         } else {
             if dst_driver.exists(&child_dst) {
@@ -564,6 +624,10 @@ fn copy_dir_recursive(
                 src_driver,
                 dst_driver,
             )?;
+
+            if preserve_attributes && dst_driver.is_local() {
+                apply_file_attrs(&child_dst, child.mtime, child.permissions.as_deref());
+            }
 
             *completed_files += 1;
             *total_bytes_completed += child.size;

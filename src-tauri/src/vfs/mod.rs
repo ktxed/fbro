@@ -80,6 +80,8 @@ pub struct DirChild {
     pub name: String,
     pub is_dir: bool,
     pub size: u64,
+    pub mtime: Option<u64>,
+    pub permissions: Option<String>,
 }
 
 // ─── Domain types ───────────────────────────────────────────────────────────

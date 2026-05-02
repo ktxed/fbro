@@ -601,6 +601,8 @@ impl VfsDriver for ZipFsDriver {
                 name: e.name.clone(),
                 is_dir: e.is_dir,
                 size: e.size,
+                mtime: e.mtime.as_ref().and_then(|s| s.parse::<u64>().ok()),
+                permissions: None,
             })
             .collect())
     }

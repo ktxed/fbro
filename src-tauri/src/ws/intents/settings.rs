@@ -55,6 +55,14 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
                 general.show_hidden_default = v;
                 show_hidden_changed = Some(v);
             }
+            "preserveAttributes" => {
+                let Some(v) = value.as_bool() else {
+                    drop(state_guard);
+                    bad_setting(ctx.tx, "preserveAttributes must be a boolean").await;
+                    return;
+                };
+                general.preserve_attributes = v;
+            }
             _ => {
                 let msg = format!("Unknown setting key: {key}");
                 drop(state_guard);
@@ -146,6 +154,7 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
             "general": {
                 "showHiddenDefault": general.show_hidden_default,
                 "rememberWindowState": general.remember_window_state,
+                "preserveAttributes": general.preserve_attributes,
             }
         }),
     };

@@ -65,6 +65,8 @@ pub struct FileOpEntry {
     pub source_path: String,
     pub size: Option<u64>,
     pub kind: String,
+    pub mtime: Option<u64>,
+    pub permissions: Option<String>,
 }
 
 /// Rich progress for file operations.

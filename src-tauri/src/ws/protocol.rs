@@ -212,6 +212,7 @@ pub struct SettingsSnapshot {
 pub struct GeneralSettingsSchema {
     pub show_hidden_default: bool,
     pub remember_window_state: bool,
+    pub preserve_attributes: bool,
 }
 
 #[derive(Serialize, Clone, Debug)]

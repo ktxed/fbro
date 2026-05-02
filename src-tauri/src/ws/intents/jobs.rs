@@ -689,6 +689,8 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
                         source_path,
                         size: file.size,
                         kind: file.kind.clone(),
+                        mtime: None,
+                        permissions: None,
                     })
                 })
                 .collect::<Result<Vec<_>, String>>()?;
@@ -716,12 +718,16 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
                 indices
                     .iter()
                     .filter_map(|&index| {
-                        source_panel.entries.get(index).map(|entry| FileOpEntry {
-                            name: entry.name.clone(),
-                            source_path: panel_driver
-                                .resolve_child(&source_panel.path, &entry.name),
-                            size: entry.size,
-                            kind: entry.kind.clone(),
+                        source_panel.entries.get(index).map(|entry| {
+                            FileOpEntry {
+                                name: entry.name.clone(),
+                                source_path: panel_driver
+                                    .resolve_child(&source_panel.path, &entry.name),
+                                size: entry.size,
+                                kind: entry.kind.clone(),
+                                mtime: entry.mtime.as_ref().and_then(|s| s.parse::<u64>().ok()),
+                                permissions: entry.permissions.clone(),
+                            }
                         })
                     })
                     .collect()
@@ -729,12 +735,17 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
                 parsed
                     .files
                     .iter()
-                    .map(|file| FileOpEntry {
-                        name: file.name.clone(),
-                        source_path: panel_driver
-                            .resolve_child(&source_panel.path, &file.name),
-                        size: file.size,
-                        kind: file.kind.clone(),
+                    .map(|file| {
+                        let panel_entry = source_panel.entries.iter().find(|e| e.name == file.name);
+                        FileOpEntry {
+                            name: file.name.clone(),
+                            source_path: panel_driver
+                                .resolve_child(&source_panel.path, &file.name),
+                            size: file.size,
+                            kind: file.kind.clone(),
+                            mtime: panel_entry.and_then(|e| e.mtime.as_ref()).and_then(|s| s.parse::<u64>().ok()),
+                            permissions: panel_entry.and_then(|e| e.permissions.clone()),
+                        }
                     })
                     .collect()
             };
@@ -875,9 +886,11 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
     let (pause_tx, pause_rx) = watch::channel(parsed.start_paused);
     let (decision_tx, decision_rx) = mpsc::channel::<DecisionResponse>(4);
 
-    let job_id = {
+    let (job_id, preserve_attributes) = {
         let mut state_guard = ctx.state.lock().await;
-        state_guard.job_store.next_job_id()
+        let job_id = state_guard.job_store.next_job_id();
+        let preserve = state_guard.settings.general.preserve_attributes;
+        (job_id, preserve)
     };
 
     let file_schemas: Vec<FileOpFileSchema> = files
@@ -931,6 +944,7 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
         decision_rx,
         src_driver,
         dst_driver,
+        preserve_attributes,
     ));
 
     {

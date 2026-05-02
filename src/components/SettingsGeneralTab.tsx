@@ -32,6 +32,17 @@ export function SettingsGeneralTab({ general, client }: SettingsGeneralTabProps)
           <span>Remember window position and size</span>
         </label>
       </div>
+      <div className="settings-tab__section">
+        <h3 className="settings-tab__section-title">File Operations</h3>
+        <label className="settings-tab__option">
+          <input
+            type="checkbox"
+            checked={general.preserveAttributes}
+            onChange={(e) => send("preserveAttributes", e.target.checked)}
+          />
+          <span>Preserve file timestamps and permissions when copying</span>
+        </label>
+      </div>
     </div>
   );
 }

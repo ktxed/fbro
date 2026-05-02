@@ -10,6 +10,12 @@ pub struct Settings {
 pub struct GeneralSettings {
     pub show_hidden_default: bool,
     pub remember_window_state: bool,
+    #[serde(default = "default_true")]
+    pub preserve_attributes: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Default for GeneralSettings {
@@ -17,6 +23,7 @@ impl Default for GeneralSettings {
         Self {
             show_hidden_default: false,
             remember_window_state: true,
+            preserve_attributes: true,
         }
     }
 }

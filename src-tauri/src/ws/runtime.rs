@@ -73,6 +73,7 @@ pub(crate) fn build_state_snapshot(
                 general: GeneralSettingsSchema {
                     show_hidden_default: state.settings.general.show_hidden_default,
                     remember_window_state: state.settings.general.remember_window_state,
+                    preserve_attributes: state.settings.general.preserve_attributes,
                 },
             },
         },
