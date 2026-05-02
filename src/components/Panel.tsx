@@ -311,6 +311,7 @@ export function Panel({
   const bookmarkBtnRef = useRef<HTMLButtonElement>(null);
   const rightDrag = useRef({ active: false, everMoved: false, startRow: -1, mode: "select" as "select" | "deselect", preSelection: [] as number[] });
   const termFocusFnRef = useRef<(() => void) | null>(null);
+  const prevTerminalSessionRef = useRef(panel.terminalSessionId);
   const contextMenuOpenRef = useRef(false);
   const contextMenuHoldStartRef = useRef(0);
   const contextMenuPendingRef = useRef<null | {
@@ -380,6 +381,15 @@ export function Panel({
       focusDivRef.current?.focus();
     }
   }, [isFocused, modalActive, panel.filterModeActive]);
+
+  // Restore focus to the listing when the embedded terminal closes.
+  useEffect(() => {
+    const prev = prevTerminalSessionRef.current;
+    prevTerminalSessionRef.current = panel.terminalSessionId;
+    if (prev !== undefined && panel.terminalSessionId === undefined && isFocused) {
+      focusDivRef.current?.focus();
+    }
+  }, [panel.terminalSessionId, isFocused]);
 
   useEffect(() => {
     if (!panel.filterModeActive) {
