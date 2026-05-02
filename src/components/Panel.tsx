@@ -310,6 +310,7 @@ export function Panel({
   const focusDivRef = useRef<HTMLDivElement>(null);
   const bookmarkBtnRef = useRef<HTMLButtonElement>(null);
   const rightDrag = useRef({ active: false, everMoved: false, startRow: -1, mode: "select" as "select" | "deselect", preSelection: [] as number[] });
+  const termFocusFnRef = useRef<(() => void) | null>(null);
   const contextMenuOpenRef = useRef(false);
   const contextMenuHoldStartRef = useRef(0);
   const contextMenuPendingRef = useRef<null | {
@@ -559,6 +560,17 @@ export function Panel({
       e.stopPropagation();
       openContextMenuAtCursor();
       return;
+    }
+    // When the terminal is open and the listing has focus (after Esc), pressing t
+    // should re-focus the terminal rather than closing it.
+    if (panel.terminalSessionId !== undefined && termFocusFnRef.current) {
+      const toggleCmd = findMatchingCommand(appState.commands, ["panel.toggle_embedded_terminal"], e.nativeEvent);
+      if (toggleCmd) {
+        e.preventDefault();
+        e.stopPropagation();
+        termFocusFnRef.current();
+        return;
+      }
     }
     const command = findMatchingCommand(appState.commands, PANEL_SHORTCUT_COMMAND_IDS, e.nativeEvent);
     if (command) {
@@ -891,6 +903,7 @@ export function Panel({
           client={client}
           panelId={panelId}
           sessionId={panel.terminalSessionId}
+          onFocusRef={(fn) => { termFocusFnRef.current = fn; }}
           onClose={() => client.sendIntent("ClosePanelTerminal", panelId)}
           onBlurToListing={() => focusDivRef.current?.focus()}
         />

@@ -13,6 +13,8 @@ interface PanelTerminalProps {
   onClose: () => void;
   /** Called on Escape inside the terminal — used to move keyboard focus back to the listing. */
   onBlurToListing: () => void;
+  /** Called with a focus function when the terminal is ready, and with null on unmount. */
+  onFocusRef?: (fn: (() => void) | null) => void;
 }
 
 const RESIZE_DEBOUNCE_MS = 50;
@@ -24,6 +26,7 @@ export function PanelTerminal({
   sessionId,
   onClose,
   onBlurToListing,
+  onFocusRef,
 }: PanelTerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
@@ -81,8 +84,9 @@ export function PanelTerminal({
       return true;
     });
 
-    // Auto-focus the terminal on mount.
+    // Auto-focus the terminal on mount, and register focus handle with parent.
     term.focus();
+    onFocusRef?.(() => term.focus());
 
     // Resize observer with debounce.
     const observer = new ResizeObserver(() => {
@@ -108,6 +112,7 @@ export function PanelTerminal({
       if (resizeTimerRef.current) clearTimeout(resizeTimerRef.current);
       dataDisposer.dispose();
       client.unsubscribeTerminalOutput(sessionId);
+      onFocusRef?.(null);
       term.dispose();
       termRef.current = null;
       fitRef.current = null;
