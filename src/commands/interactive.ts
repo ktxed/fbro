@@ -755,13 +755,6 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
       if (!focused) return false;
       const focusedPanel = state.panels[focused.panelId];
       if (!focusedPanel) return false;
-      if (state.embeddedViewer) {
-        dispatch({
-          type: "SHOW_TRANSIENT_HINT",
-          message: "Cannot open terminal while viewer is active",
-        });
-        return true;
-      }
       if (focusedPanel.shadowSource) {
         dispatch({
           type: "SHOW_TRANSIENT_HINT",

@@ -718,6 +718,7 @@ export function Panel({
             contextMenuOpenRef.current = false;
             contextMenuHoldStartRef.current = Date.now();
             contextMenuPendingRef.current = entry.name === ".." ? null : { entry, absIndex, rect };
+            focusDivRef.current?.focus();
             return;
           }
           e.preventDefault();
@@ -725,6 +726,7 @@ export function Panel({
           if (!isFocused) client.sendIntent("SwitchFocus", undefined, { to: panelId });
           client.sendIntent("SetCursor", panelId, { index: absIndex });
           onRowPointerDown({ absIndex, clientX: e.clientX, clientY: e.clientY });
+          focusDivRef.current?.focus();
         }}
         onMouseEnter={() => {
           const drag = rightDrag.current;
@@ -838,7 +840,7 @@ export function Panel({
 
       <SortHeader sort={panel.sort} panelId={panelId} client={client} />
 
-      <div className="panel__list" ref={listRef} onScroll={isWindowed ? handleScroll : undefined} style={modalActive ? { overflow: "hidden" } : undefined}>
+      <div className="panel__list" ref={listRef} onScroll={isWindowed ? handleScroll : undefined} onMouseDown={(e) => { if (e.target === e.currentTarget) focusDivRef.current?.focus(); }} style={modalActive ? { overflow: "hidden" } : undefined}>
         {isWindowed ? (
           <div className="panel__virtual-sizer" style={{ height: totalCount * ROW_HEIGHT, position: "relative" }}>
             {panel.entries.map((entry, i) => renderRow(entry, windowStart + i))}
