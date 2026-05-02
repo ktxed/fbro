@@ -38,6 +38,14 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
         let general = &mut state_guard.settings.general;
 
         match key {
+            "rememberWindowState" => {
+                let Some(v) = value.as_bool() else {
+                    drop(state_guard);
+                    bad_setting(ctx.tx, "rememberWindowState must be a boolean").await;
+                    return;
+                };
+                general.remember_window_state = v;
+            }
             "showHiddenDefault" => {
                 let Some(v) = value.as_bool() else {
                     drop(state_guard);
@@ -137,6 +145,7 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
         patch: serde_json::json!({
             "general": {
                 "showHiddenDefault": general.show_hidden_default,
+                "rememberWindowState": general.remember_window_state,
             }
         }),
     };

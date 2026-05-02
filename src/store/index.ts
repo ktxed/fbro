@@ -252,7 +252,7 @@ const initialState: AppState = {
   childProcesses: {},
   fontSize: 13,
   settings: {
-    general: { showHiddenDefault: false },
+    general: { showHiddenDefault: false, rememberWindowState: true },
   },
 };
 

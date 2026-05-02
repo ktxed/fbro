@@ -211,6 +211,7 @@ pub struct SettingsSnapshot {
 #[serde(rename_all = "camelCase")]
 pub struct GeneralSettingsSchema {
     pub show_hidden_default: bool,
+    pub remember_window_state: bool,
 }
 
 #[derive(Serialize, Clone, Debug)]

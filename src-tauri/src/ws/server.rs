@@ -354,7 +354,7 @@ async fn handle_connection(
             _ = quit_notify.notified(), if is_gui => {
                 let active_jobs = active_job_count(&state).await;
                 if active_jobs == 0 {
-                    save_session(&state).await;
+                    save_session(&state, &app_handle).await;
                     std::process::exit(0);
                 } else {
                     let _ = tx.send(ServerMessage::QuitConfirmRequired {

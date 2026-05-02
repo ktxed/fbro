@@ -15,7 +15,7 @@ pub(crate) async fn handle(name: &str, args: &Value, ctx: &mut IntentContext<'_>
 async fn quit(ctx: &mut IntentContext<'_>) {
     let active_jobs = active_job_count(ctx.state).await;
     if active_jobs == 0 {
-        save_session(ctx.state).await;
+        save_session(ctx.state, ctx.app_handle).await;
         std::process::exit(0);
     } else {
         let _ = ctx
@@ -29,7 +29,7 @@ async fn quit(ctx: &mut IntentContext<'_>) {
 }
 
 async fn confirm_quit(ctx: &mut IntentContext<'_>) {
-    save_session(ctx.state).await;
+    save_session(ctx.state, ctx.app_handle).await;
     std::process::exit(0);
 }
 
@@ -41,7 +41,7 @@ async fn set_font_size(args: &Value, ctx: &mut IntentContext<'_>) {
         state_guard.font_size = font_size;
         state_guard.gui_senders.clone()
     };
-    save_session(ctx.state).await;
+    save_session(ctx.state, ctx.app_handle).await;
     let patch = ServerMessage::StatePatch {
         timestamp: now(),
         domain: "settings".to_string(),

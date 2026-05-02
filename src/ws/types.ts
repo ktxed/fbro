@@ -309,6 +309,7 @@ export interface BookmarkEntry {
 
 export interface GeneralSettings {
   showHiddenDefault: boolean;
+  rememberWindowState: boolean;
 }
 
 export interface SettingsState {

@@ -72,6 +72,7 @@ pub(crate) fn build_state_snapshot(
             settings: SettingsSnapshot {
                 general: GeneralSettingsSchema {
                     show_hidden_default: state.settings.general.show_hidden_default,
+                    remember_window_state: state.settings.general.remember_window_state,
                 },
             },
         },
@@ -600,7 +601,8 @@ pub(crate) async fn send_window(
         .await;
 }
 
-pub(crate) async fn save_session(state: &SharedState) {
+pub(crate) async fn save_session(state: &SharedState, app_handle: &tauri::AppHandle) {
+    use tauri::Manager;
     let state_guard = state.lock().await;
     let panels = state_guard
         .panels
@@ -614,7 +616,29 @@ pub(crate) async fn save_session(state: &SharedState) {
             )
         })
         .collect();
-    crate::persistence::save(&SessionState { panels, font_size: Some(state_guard.font_size) });
+
+    let window_session = if state_guard.settings.general.remember_window_state {
+        app_handle.get_webview_window("main").and_then(|w| {
+            let maximized = w.is_maximized().unwrap_or(false);
+            let pos = w.outer_position().ok()?;
+            let size = w.outer_size().ok()?;
+            Some(crate::persistence::WindowSession {
+                x: pos.x,
+                y: pos.y,
+                width: size.width,
+                height: size.height,
+                maximized,
+            })
+        })
+    } else {
+        None
+    };
+
+    crate::persistence::save(&SessionState {
+        panels,
+        font_size: Some(state_guard.font_size),
+        window: window_session,
+    });
 }
 
 pub(crate) async fn active_job_count(state: &SharedState) -> usize {

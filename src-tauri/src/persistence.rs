@@ -10,11 +10,22 @@ pub struct SessionState {
     pub panels: HashMap<String, PanelSession>,
     #[serde(default)]
     pub font_size: Option<u8>,
+    #[serde(default)]
+    pub window: Option<WindowSession>,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct PanelSession {
     pub path: String,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct WindowSession {
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+    pub maximized: bool,
 }
 
 // ─── Path ─────────────────────────────────────────────────────────────────────

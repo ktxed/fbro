@@ -231,6 +231,19 @@ fn main() {
                     drag_out::init_drag_out(app.handle().clone());
                 }
                 let session = persistence::load();
+                let settings = crate::state::settings::load();
+                if settings.general.remember_window_state {
+                    if let Some(ws) = &session.window {
+                        if let Some(window) = app.get_webview_window("main") {
+                            if ws.maximized {
+                                let _ = window.maximize();
+                            } else {
+                                let _ = window.set_size(tauri::PhysicalSize::new(ws.width, ws.height));
+                                let _ = window.set_position(tauri::PhysicalPosition::new(ws.x, ws.y));
+                            }
+                        }
+                    }
+                }
                 let initial_paths = session
                     .panels
                     .into_iter()

@@ -9,12 +9,14 @@ pub struct Settings {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct GeneralSettings {
     pub show_hidden_default: bool,
+    pub remember_window_state: bool,
 }
 
 impl Default for GeneralSettings {
     fn default() -> Self {
         Self {
             show_hidden_default: false,
+            remember_window_state: true,
         }
     }
 }

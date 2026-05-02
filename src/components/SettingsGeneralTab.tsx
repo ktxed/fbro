@@ -23,6 +23,14 @@ export function SettingsGeneralTab({ general, client }: SettingsGeneralTabProps)
           />
           <span>Show hidden files by default</span>
         </label>
+        <label className="settings-tab__option">
+          <input
+            type="checkbox"
+            checked={general.rememberWindowState}
+            onChange={(e) => send("rememberWindowState", e.target.checked)}
+          />
+          <span>Remember window position and size</span>
+        </label>
       </div>
     </div>
   );
