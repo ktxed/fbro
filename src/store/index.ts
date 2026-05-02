@@ -208,6 +208,7 @@ export interface AppState {
   cacheStatus: { prefetchCache: PrefetchCacheStatus } | null;
   bookmarks: BookmarkEntry[];
   bookmarksOpen: { panelId: string } | null;
+  maximizedTerminalPanelId: string | null;
   childProcesses: Record<number, ChildProcess>;
   fontSize: number;
   settings: SettingsState;
@@ -249,6 +250,7 @@ const initialState: AppState = {
   cacheStatus: null,
   bookmarks: [],
   bookmarksOpen: null,
+  maximizedTerminalPanelId: null,
   childProcesses: {},
   fontSize: 13,
   settings: {
@@ -304,7 +306,8 @@ export type AppAction =
   | { type: "OPEN_BOOKMARKS"; panelId: string }
   | { type: "CLOSE_BOOKMARKS" }
   | { type: "OPEN_SETTINGS"; tab: SettingsTab }
-  | { type: "CLOSE_SETTINGS" };
+  | { type: "CLOSE_SETTINGS" }
+  | { type: "SET_MAXIMIZED_TERMINAL"; panelId: string | null };
 
 // ─── Reducer ─────────────────────────────────────────────────────────────────
 
@@ -1029,8 +1032,13 @@ function reducer(state: AppState, action: AppAction): AppState {
           const panelId = (msg as import("./types").TerminalClosedMessage).panelId;
           if (!panelId || !state.panels[panelId]) return state;
           const panel = state.panels[panelId];
-          if (panel.terminalSessionId === undefined) return state;
-          return { ...state, panels: { ...state.panels, [panelId]: { ...panel, terminalSessionId: undefined } } };
+          if (panel.terminalSessionId === undefined && state.maximizedTerminalPanelId !== panelId) return state;
+          const next: AppState = panel.terminalSessionId !== undefined
+            ? { ...state, panels: { ...state.panels, [panelId]: { ...panel, terminalSessionId: undefined } } }
+            : state;
+          return state.maximizedTerminalPanelId === panelId
+            ? { ...next, maximizedTerminalPanelId: null }
+            : next;
         }
         default:
           return state;
@@ -1103,6 +1111,8 @@ function reducer(state: AppState, action: AppAction): AppState {
       return { ...state, bookmarksOpen: { panelId: action.panelId } };
     case "CLOSE_BOOKMARKS":
       return { ...state, bookmarksOpen: null };
+    case "SET_MAXIMIZED_TERMINAL":
+      return { ...state, maximizedTerminalPanelId: action.panelId };
     case "OPEN_SETTINGS":
       return { ...state, pendingSettings: { activeTab: action.tab } };
     case "CLOSE_SETTINGS":

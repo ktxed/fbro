@@ -386,10 +386,13 @@ export function Panel({
   useEffect(() => {
     const prev = prevTerminalSessionRef.current;
     prevTerminalSessionRef.current = panel.terminalSessionId;
-    if (prev !== undefined && panel.terminalSessionId === undefined && isFocused) {
-      focusDivRef.current?.focus();
+    if (prev !== undefined && panel.terminalSessionId === undefined) {
+      if (isFocused) focusDivRef.current?.focus();
+      if (appState.maximizedTerminalPanelId === panelId) {
+        dispatch({ type: "SET_MAXIMIZED_TERMINAL", panelId: null });
+      }
     }
-  }, [panel.terminalSessionId, isFocused]);
+  }, [panel.terminalSessionId, isFocused, appState.maximizedTerminalPanelId, panelId, dispatch]);
 
   useEffect(() => {
     if (!panel.filterModeActive) {
@@ -914,6 +917,11 @@ export function Panel({
           panelId={panelId}
           sessionId={panel.terminalSessionId}
           fontSize={appState.fontSize}
+          maximized={appState.maximizedTerminalPanelId === panelId}
+          onToggleMaximize={() => dispatch({
+            type: "SET_MAXIMIZED_TERMINAL",
+            panelId: appState.maximizedTerminalPanelId === panelId ? null : panelId,
+          })}
           onFocusRef={(fn) => { termFocusFnRef.current = fn; }}
           onClose={() => client.sendIntent("ClosePanelTerminal", panelId)}
           onBlurToListing={() => focusDivRef.current?.focus()}

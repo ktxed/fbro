@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
+import { IconMaximize, IconMinimize } from "@tabler/icons-react";
 import "@xterm/xterm/css/xterm.css";
 import type { WsClient } from "../ws/client";
 
@@ -16,6 +17,10 @@ interface PanelTerminalProps {
   /** Called with a focus function when the terminal is ready, and with null on unmount. */
   onFocusRef?: (fn: (() => void) | null) => void;
   fontSize?: number;
+  /** When true, terminal is maximized to fill the app viewable area. */
+  maximized?: boolean;
+  /** Toggle maximized/restored state. */
+  onToggleMaximize?: () => void;
 }
 
 const RESIZE_DEBOUNCE_MS = 50;
@@ -29,12 +34,20 @@ export function PanelTerminal({
   onBlurToListing,
   onFocusRef,
   fontSize = 18,
+  maximized = false,
+  onToggleMaximize,
 }: PanelTerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const lastSizeRef = useRef<{ cols: number; rows: number }>({ cols: 0, rows: 0 });
   const resizeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Latest maximized + onToggleMaximize, read from inside the xterm key handler
+  // (which is bound once on mount and would otherwise close over stale values).
+  const maximizedRef = useRef(maximized);
+  const onToggleMaximizeRef = useRef(onToggleMaximize);
+  useEffect(() => { maximizedRef.current = maximized; }, [maximized]);
+  useEffect(() => { onToggleMaximizeRef.current = onToggleMaximize; }, [onToggleMaximize]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -79,10 +92,14 @@ export function PanelTerminal({
       term.write(bytes);
     });
 
-    // Esc → blur terminal, focus listing. Leaves the session alive.
+    // Esc → restore if maximized, otherwise blur to listing. Leaves the session alive.
     term.attachCustomKeyEventHandler((e) => {
       if (e.type === "keydown" && e.key === "Escape") {
-        onBlurToListing();
+        if (maximizedRef.current && onToggleMaximizeRef.current) {
+          onToggleMaximizeRef.current();
+        } else {
+          onBlurToListing();
+        }
         return false;
       }
       return true;
@@ -140,8 +157,40 @@ export function PanelTerminal({
     }
   }, [fontSize]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Re-fit on maximize/restore. ResizeObserver also fires, but kicking fit on
+  // the next frame avoids a brief mis-sized cell grid during the CSS swap.
+  useEffect(() => {
+    const term = termRef.current;
+    const fit = fitRef.current;
+    if (!term || !fit) return;
+    const raf = requestAnimationFrame(() => {
+      try { fit.fit(); } catch { /* ignore */ }
+      const cols = term.cols;
+      const rows = term.rows;
+      if (cols > 0 && rows > 0
+          && (cols !== lastSizeRef.current.cols || rows !== lastSizeRef.current.rows)) {
+        lastSizeRef.current = { cols, rows };
+        client.sendIntent("ResizeTerminal", panelId, { cols, rows });
+      }
+      term.focus();
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [maximized]); // eslint-disable-line react-hooks/exhaustive-deps
+
   return (
-    <div className="panel-terminal">
+    <div className={`panel-terminal${maximized ? " panel-terminal--maximized" : ""}`}>
+      {onToggleMaximize && (
+        <button
+          className="panel-terminal__maximize"
+          title={maximized ? "Restore terminal" : "Maximize terminal"}
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleMaximize();
+          }}
+        >
+          {maximized ? <IconMinimize size={12} /> : <IconMaximize size={12} />}
+        </button>
+      )}
       <button
         className="panel-terminal__close"
         title="Close terminal"

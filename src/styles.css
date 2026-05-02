@@ -2810,3 +2810,34 @@ body {
   background: rgba(255, 255, 255, 0.18);
   color: #fff;
 }
+
+.panel-terminal__maximize {
+  position: absolute;
+  top: 2px;
+  right: 26px;
+  z-index: 2;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  background: rgba(0, 0, 0, 0.4);
+  color: #ccc;
+  cursor: pointer;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.panel-terminal__maximize:hover {
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+}
+
+.panel-terminal--maximized {
+  position: fixed;
+  inset: 0;
+  flex: none;
+  z-index: 900;
+  border-top: none;
+}
