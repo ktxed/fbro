@@ -15,6 +15,7 @@ interface PanelTerminalProps {
   onBlurToListing: () => void;
   /** Called with a focus function when the terminal is ready, and with null on unmount. */
   onFocusRef?: (fn: (() => void) | null) => void;
+  fontSize?: number;
 }
 
 const RESIZE_DEBOUNCE_MS = 50;
@@ -27,6 +28,7 @@ export function PanelTerminal({
   onClose,
   onBlurToListing,
   onFocusRef,
+  fontSize = 18,
 }: PanelTerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
@@ -41,7 +43,9 @@ export function PanelTerminal({
     const term = new Terminal({
       cursorBlink: true,
       fontFamily: "var(--font-mono, monospace)",
-      fontSize: 13,
+      fontSize,
+      lineHeight: 1.5,
+      letterSpacing: 1.5,
       scrollback: 5000,
       theme: {
         background: "#1e1e1e",
@@ -119,6 +123,22 @@ export function PanelTerminal({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId]);
+
+  useEffect(() => {
+    const term = termRef.current;
+    const fit = fitRef.current;
+    if (!term || !fit) return;
+    term.options.fontSize = fontSize;
+    term.options.lineHeight = 1.5;
+    term.options.letterSpacing = 1.5;
+    try { fit.fit(); } catch { /* ignore */ }
+    const cols = term.cols;
+    const rows = term.rows;
+    if (cols > 0 && rows > 0) {
+      lastSizeRef.current = { cols, rows };
+      client.sendIntent("ResizeTerminal", panelId, { cols, rows });
+    }
+  }, [fontSize]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="panel-terminal">

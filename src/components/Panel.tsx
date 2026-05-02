@@ -913,6 +913,7 @@ export function Panel({
           client={client}
           panelId={panelId}
           sessionId={panel.terminalSessionId}
+          fontSize={appState.fontSize}
           onFocusRef={(fn) => { termFocusFnRef.current = fn; }}
           onClose={() => client.sendIntent("ClosePanelTerminal", panelId)}
           onBlurToListing={() => focusDivRef.current?.focus()}
