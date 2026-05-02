@@ -17,6 +17,7 @@ use std::thread;
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
 use tokio::sync::mpsc;
 
+use crate::state::SharedState;
 use crate::ws::protocol::{now, ServerMessage};
 
 /// A single live PTY-backed shell session.
@@ -68,6 +69,8 @@ impl PtyManager {
 
     /// Spawn a shell rooted at `cwd`, return the new session_id.
     /// `tx` is the per-client WS sender used to push terminal output.
+    /// `state` and `self_arc` are used by the wait-for-exit thread to do
+    /// full cleanup (clear panel state, broadcast patch) when the shell exits naturally.
     pub fn open(
         &self,
         panel_id: String,
@@ -75,6 +78,8 @@ impl PtyManager {
         cols: u16,
         rows: u16,
         tx: mpsc::Sender<ServerMessage>,
+        state: SharedState,
+        self_arc: Arc<Self>,
     ) -> Result<u32, PtyError> {
         let pty_system = native_pty_system();
         let pair = pty_system
@@ -120,16 +125,48 @@ impl PtyManager {
         spawn_writer(session_id, writer, writer_rx);
 
         // Wait-for-exit thread: when the child exits naturally (user typed `exit`),
-        // notify the FE so the panel can collapse the split.
+        // do the same full cleanup as an explicit ClosePanelTerminal intent —
+        // remove session, clear panel state, broadcast StatePatch + TerminalClosed.
         let tx_exit = tx.clone();
         let panel_id_exit = panel_id.clone();
         thread::spawn(move || {
             let _ = child.wait();
-            let _ = tx_exit.blocking_send(ServerMessage::TerminalClosed {
+
+            // Remove the dead session from PtyManager so re-opening works.
+            self_arc.close(session_id);
+
+            // Update AppState and collect current GUI senders.
+            let (new_version, gui_senders) = {
+                let mut s = state.blocking_lock();
+                if let Some(panel) = s.panels.get_mut(&panel_id_exit) {
+                    panel.terminal_session = None;
+                    panel.version += 1;
+                }
+                let v = s.panels.get(&panel_id_exit).map(|p| p.version).unwrap_or(0);
+                (v, s.gui_senders.clone())
+            };
+
+            let patch = ServerMessage::StatePatch {
+                timestamp: now(),
+                domain: "panels".to_string(),
+                entity_id: Some(panel_id_exit.clone()),
+                version: new_version,
+                patch: serde_json::json!({ "terminalSessionId": null }),
+            };
+            for sender in &gui_senders {
+                let _ = sender.blocking_send(patch.clone());
+            }
+            let _ = tx_exit.blocking_send(patch);
+
+            let closed = ServerMessage::TerminalClosed {
                 timestamp: now(),
                 session_id,
                 panel_id: panel_id_exit,
-            });
+            };
+            for sender in &gui_senders {
+                let _ = sender.blocking_send(closed.clone());
+            }
+            let _ = tx_exit.blocking_send(closed);
         });
 
         let session = PtySession {

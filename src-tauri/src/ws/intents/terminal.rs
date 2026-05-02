@@ -50,7 +50,7 @@ async fn open(panel_id: &str, args: &Value, ctx: &mut IntentContext<'_>) {
         return;
     }
 
-    let session_id = match pty_manager.open(panel_id.to_string(), &cwd, cols, rows, ctx.tx.clone())
+    let session_id = match pty_manager.open(panel_id.to_string(), &cwd, cols, rows, ctx.tx.clone(), ctx.state.clone(), pty_manager.clone())
     {
         Ok(sid) => sid,
         Err(e) => {

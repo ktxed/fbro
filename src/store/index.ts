@@ -1023,6 +1023,15 @@ function reducer(state: AppState, action: AppAction): AppState {
           return applyQuitConfirmRequired(state, msg);
         case "CacheStatusReady":
           return { ...state, cacheStatus: { prefetchCache: (msg as CacheStatusReadyMessage).prefetchCache } };
+        case "TerminalClosed": {
+          // Belt-and-suspenders: BE also broadcasts a StatePatch clearing terminalSessionId,
+          // but handle it here too in case the patch arrives out of order or is missed.
+          const panelId = (msg as import("./types").TerminalClosedMessage).panelId;
+          if (!panelId || !state.panels[panelId]) return state;
+          const panel = state.panels[panelId];
+          if (panel.terminalSessionId === undefined) return state;
+          return { ...state, panels: { ...state.panels, [panelId]: { ...panel, terminalSessionId: undefined } } };
+        }
         default:
           return state;
       }
