@@ -12,10 +12,18 @@ pub struct GeneralSettings {
     pub remember_window_state: bool,
     #[serde(default = "default_true")]
     pub preserve_attributes: bool,
+    #[serde(default)]
+    pub ludicrous_mode: bool,
+    #[serde(default = "default_max_image_size_mb")]
+    pub max_image_size_mb: u64,
 }
 
 fn default_true() -> bool {
     true
+}
+
+fn default_max_image_size_mb() -> u64 {
+    512
 }
 
 impl Default for GeneralSettings {
@@ -24,6 +32,8 @@ impl Default for GeneralSettings {
             show_hidden_default: false,
             remember_window_state: true,
             preserve_attributes: true,
+            ludicrous_mode: false,
+            max_image_size_mb: 512,
         }
     }
 }

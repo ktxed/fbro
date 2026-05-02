@@ -6,7 +6,7 @@ use crate::vfs::VfsDriver;
 pub const PREFETCH_N: usize = 5;
 
 // Match the FE's initial request sizes exactly.
-const PREFETCH_IMAGE_CAP: usize = 10 * 1024 * 1024; // 10 MiB — IMAGE_LIMIT
+pub const PREFETCH_IMAGE_CAP: usize = 10 * 1024 * 1024; // 10 MiB — IMAGE_LIMIT (baseline)
 const PREFETCH_OTHER_CAP: usize = 1 * 1024 * 1024; // 1 MiB — SMALL_LIMIT
 // For large non-image files (> IMAGE_CAP): preload just enough for the initial hex view.
 const PREFETCH_HEX_CAP: usize = 64 * 1024; // 64 KiB — matches FE CHUNK_SIZE
@@ -81,26 +81,27 @@ impl ViewerPrefetchQueue {
         neighbors: Vec<(String, Option<u64>)>,
         source_id: String,
         driver: Arc<dyn VfsDriver>,
+        image_cap_bytes: usize,
     ) {
         let cache = Arc::clone(&self.cache);
         let pending = Arc::clone(&self.pending);
 
         for (path, size_hint) in neighbors {
             // Choose prefetch cap based on file type and size:
-            //   - images ≤ IMAGE_CAP  → IMAGE_CAP (full image for the viewer)
-            //   - images >  IMAGE_CAP → skip (too large to be useful)
+            //   - images ≤ image_cap_bytes  → image_cap_bytes (full image for the viewer)
+            //   - images >  image_cap_bytes → skip (too large to be useful)
             //   - non-images ≤ OTHER_CAP → OTHER_CAP (full small binary/text)
-            //   - non-images > IMAGE_CAP → HEX_CAP (just enough for the initial hex view)
+            //   - non-images > image_cap_bytes → HEX_CAP (just enough for the initial hex view)
             let cap = if is_image_ext(&path) {
                 if let Some(sz) = size_hint {
-                    if sz > PREFETCH_IMAGE_CAP as u64 {
+                    if sz > image_cap_bytes as u64 {
                         continue;
                     }
                 }
-                PREFETCH_IMAGE_CAP
+                image_cap_bytes
             } else {
                 match size_hint {
-                    Some(sz) if sz > PREFETCH_IMAGE_CAP as u64 => PREFETCH_HEX_CAP,
+                    Some(sz) if sz > image_cap_bytes as u64 => PREFETCH_HEX_CAP,
                     _ => PREFETCH_OTHER_CAP,
                 }
             };

@@ -131,6 +131,16 @@ function highlightLine(
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: initFilename, windowLabel, panelId, isLocal, nativeFileSize }: ViewerAppProps) {
+  // Effective image cap (in bytes) for this viewer window. Passed via the
+  // launch URL by the BE based on the current ludicrousMode + maxImageSizeMb.
+  // Falls back to IMAGE_LIMIT (5 MiB) so old links / missing param keep working.
+  const effectiveImageLimit = (() => {
+    const raw = new URLSearchParams(window.location.search).get("imgcap");
+    if (!raw) return IMAGE_LIMIT;
+    const n = Number(raw);
+    return Number.isFinite(n) && n > 0 ? n : IMAGE_LIMIT;
+  })();
+
   // Current file being viewed (updated on navigation)
   const [curPath, setCurPath]         = useState(initPath);
   const [curSourceId, setCurSourceId] = useState(initSourceId);
@@ -150,10 +160,10 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
   // null = undetermined, true = small file, false = large file
   const [isSmall, setIsSmall] = useState<boolean | null>(null);
 
-  // true = use file:// direct rendering (local images < 10 MiB, video, PDF)
-  const [useDirect, setUseDirect] = useState(() => canUseDirect(isLocal, initFilename, nativeFileSize));
+  // true = use file:// direct rendering (local images < imageLimit, video, PDF)
+  const [useDirect, setUseDirect] = useState(() => canUseDirect(isLocal, initFilename, nativeFileSize, effectiveImageLimit));
   // true = current file supports direct rendering (even if user switched to text/hex)
-  const [canDirect, setCanDirect] = useState(() => canUseDirect(isLocal, initFilename, nativeFileSize));
+  const [canDirect, setCanDirect] = useState(() => canUseDirect(isLocal, initFilename, nativeFileSize, effectiveImageLimit));
 
   // Large-file virtual scroll: line index at the top of viewport
   const [topLine, setTopLine] = useState(0);
@@ -317,7 +327,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
 
   useEffect(() => {
     if (!isLocal) return;
-    if (canUseDirect(isLocal, initFilename, nativeFileSize)) return;
+    if (canUseDirect(isLocal, initFilename, nativeFileSize, effectiveImageLimit)) return;
     if (nativeFileSize === null || nativeFileSize > SMALL_LIMIT) return;
 
     const fsPort = Number(new URLSearchParams(window.location.search).get("fsport") ?? "0");
@@ -344,7 +354,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
       setMode(prev => {
         if (prev !== null) return prev;
         const detected = detectRenderer(filenameRef.current, detectBinary(bytes));
-        if (detected === "image" && nativeFileSize > IMAGE_LIMIT) return "hex";
+        if (detected === "image" && nativeFileSize > effectiveImageLimit) return "hex";
         return detected;
       });
       setNavError(null);
@@ -365,11 +375,11 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
 
     client.onConnected = () => {
       if (httpInitDoneRef.current) return; // already loaded via HTTP
-      if (canUseDirect(isLocal, initFilename, nativeFileSize)) {
+      if (canUseDirect(isLocal, initFilename, nativeFileSize, effectiveImageLimit)) {
         setLoading(false);
       } else {
-        // For known image types, request up to IMAGE_LIMIT in one shot
-        const initSize = isImageExt(initFilename) ? IMAGE_LIMIT : SMALL_LIMIT;
+        // For known image types, request up to the effective image limit in one shot
+        const initSize = isImageExt(initFilename) ? effectiveImageLimit : SMALL_LIMIT;
         requestChunk(0, initSize);
       }
     };
@@ -405,7 +415,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
         setMode(prev => {
           if (prev !== null) return prev;
           const detected = detectRenderer(filenameRef.current, detectBinary(bytes));
-          if (detected === "image" && m.fileSize !== undefined && m.fileSize > IMAGE_LIMIT) return "hex";
+          if (detected === "image" && m.fileSize !== undefined && m.fileSize > effectiveImageLimit) return "hex";
           return detected;
         });
         setNavError(null);
@@ -414,7 +424,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
       }
       if (msg.type === "ViewerFileChanged") {
         const m = msg as ViewerFileChangedMessage;
-        const direct = canUseDirect(m.isLocal ?? false, m.filename, m.fileSize ?? null);
+        const direct = canUseDirect(m.isLocal ?? false, m.filename, m.fileSize ?? null, effectiveImageLimit);
         // Reset viewer state for new file
         setDosMode(false);
         setMarkdownMode(isMdExt(m.filename));
@@ -446,7 +456,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
           }
           const initSize = m.isBinary === true
             ? CHUNK_SIZE
-            : isImageExt(m.filename) ? IMAGE_LIMIT : SMALL_LIMIT;
+            : isImageExt(m.filename) ? effectiveImageLimit : SMALL_LIMIT;
           clientRef.current?.sendIntent("ReadFileChunk", undefined, {
             path: m.path, sourceId: m.sourceId, offset: 0, size: initSize,
           });
@@ -994,7 +1004,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
           </div>
         )}
         {!error && buffer && isImageMode && (
-          <ImageViewer buffer={buffer} fileSize={fileSize} filename={curFilename} />
+          <ImageViewer buffer={buffer} fileSize={fileSize} filename={curFilename} imageLimit={effectiveImageLimit} />
         )}
         {!error && buffer && !isImageMode && (
           <>

@@ -74,6 +74,8 @@ pub(crate) fn build_state_snapshot(
                     show_hidden_default: state.settings.general.show_hidden_default,
                     remember_window_state: state.settings.general.remember_window_state,
                     preserve_attributes: state.settings.general.preserve_attributes,
+                    ludicrous_mode: state.settings.general.ludicrous_mode,
+                    max_image_size_mb: state.settings.general.max_image_size_mb,
                 },
             },
         },

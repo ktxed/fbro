@@ -380,6 +380,12 @@ async fn move_cursor(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
             if state_guard.active_viewers == 0 {
                 return;
             }
+            let general = &state_guard.settings.general;
+            let image_cap = if general.ludicrous_mode {
+                (general.max_image_size_mb as usize).saturating_mul(1024 * 1024)
+            } else {
+                crate::jobs::viewer_prefetch::PREFETCH_IMAGE_CAP
+            };
             if let Some(panel) = state_guard.panels.get(&panel_id) {
                 let source_id = panel.source_id.clone();
                 let driver = state_guard.drivers.get(&source_id).cloned();
@@ -391,7 +397,7 @@ async fn move_cursor(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
                             &panel.path,
                             &source_id,
                         );
-                        Some((neighbors, source_id, drv))
+                        Some((neighbors, source_id, drv, image_cap))
                     } else {
                         None
                     }
@@ -402,8 +408,8 @@ async fn move_cursor(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
                 None
             }
         };
-        if let Some((neighbors, source_id, driver)) = prefetch_info {
-            prefetch.schedule_neighbors(neighbors, source_id, driver);
+        if let Some((neighbors, source_id, driver, image_cap)) = prefetch_info {
+            prefetch.schedule_neighbors(neighbors, source_id, driver, image_cap);
         }
     });
 }

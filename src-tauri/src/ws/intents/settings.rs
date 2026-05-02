@@ -63,6 +63,22 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
                 };
                 general.preserve_attributes = v;
             }
+            "ludicrousMode" => {
+                let Some(v) = value.as_bool() else {
+                    drop(state_guard);
+                    bad_setting(ctx.tx, "ludicrousMode must be a boolean").await;
+                    return;
+                };
+                general.ludicrous_mode = v;
+            }
+            "maxImageSizeMb" => {
+                let Some(v) = value.as_u64() else {
+                    drop(state_guard);
+                    bad_setting(ctx.tx, "maxImageSizeMb must be a positive integer").await;
+                    return;
+                };
+                general.max_image_size_mb = v.clamp(1, 2048);
+            }
             _ => {
                 let msg = format!("Unknown setting key: {key}");
                 drop(state_guard);
@@ -155,6 +171,8 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
                 "showHiddenDefault": general.show_hidden_default,
                 "rememberWindowState": general.remember_window_state,
                 "preserveAttributes": general.preserve_attributes,
+                "ludicrousMode": general.ludicrous_mode,
+                "maxImageSizeMb": general.max_image_size_mb,
             }
         }),
     };

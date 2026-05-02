@@ -1,12 +1,17 @@
 import { isImageExt, isVideoExt, isPdfExt } from "./media";
 import { ZoomableImage } from "./ZoomableImage";
 
-export const IMAGE_DIRECT_LIMIT = 10 * 1024 * 1024; // 10 MiB
+export const IMAGE_DIRECT_LIMIT = 10 * 1024 * 1024; // 10 MiB — baseline when ludicrous mode is off
 
-export function canUseDirect(isLocal: boolean, filename: string, fileSize: number | null): boolean {
+export function canUseDirect(
+  isLocal: boolean,
+  filename: string,
+  fileSize: number | null,
+  imageLimit: number = IMAGE_DIRECT_LIMIT,
+): boolean {
   if (!isLocal) return false;
   if (isPdfExt(filename) || isVideoExt(filename)) return true;
-  if (isImageExt(filename)) return fileSize !== null && fileSize < IMAGE_DIRECT_LIMIT;
+  if (isImageExt(filename)) return fileSize !== null && fileSize < imageLimit;
   return false;
 }
 

@@ -313,6 +313,8 @@ export interface GeneralSettings {
   showHiddenDefault: boolean;
   rememberWindowState: boolean;
   preserveAttributes: boolean;
+  ludicrousMode: boolean;
+  maxImageSizeMb: number;
 }
 
 export interface SettingsState {

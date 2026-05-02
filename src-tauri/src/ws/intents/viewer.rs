@@ -2,10 +2,23 @@ use std::sync::Arc;
 
 use serde_json::Value;
 
+use crate::jobs::viewer_prefetch::PREFETCH_IMAGE_CAP;
+use crate::state::settings::GeneralSettings;
 use crate::vfs::search::SearchResultsDriver;
 use crate::ws::intents::{arg_str, arg_u64, is_archive_source, is_search_source};
 use crate::ws::protocol::{now, ServerMessage};
 use crate::ws::runtime::{url_encode, IntentContext};
+
+/// Effective image cap (in bytes) for the viewer + prefetch.
+/// When ludicrous mode is enabled, scales up to the user-configured `max_image_size_mb`.
+/// Otherwise the conservative 10 MiB baseline (matches FE's IMAGE_LIMIT for prefetch).
+fn effective_image_cap_bytes(general: &GeneralSettings) -> usize {
+    if general.ludicrous_mode {
+        (general.max_image_size_mb as usize).saturating_mul(1024 * 1024)
+    } else {
+        PREFETCH_IMAGE_CAP
+    }
+}
 
 /// Files larger than this (non-image, non-cached) get a 4 KB binary probe during navigation.
 const PREFETCH_OTHER_THRESHOLD: u64 = 1 * 1024 * 1024;
@@ -162,13 +175,14 @@ async fn view_file(args: &Value, ctx: &mut IntentContext<'_>) {
         )
     };
 
-    let (is_local, file_size, file_server_port) = {
+    let (is_local, file_size, file_server_port, image_cap_bytes) = {
         let state_guard = ctx.state.lock().await;
         let driver = state_guard.drivers.get(&effective_source_id);
         (
             driver.map(|driver| driver.is_local()).unwrap_or(false),
             driver.and_then(|driver| driver.file_size(&full_path)),
             state_guard.file_server_port,
+            effective_image_cap_bytes(&state_guard.settings.general),
         )
     };
 
@@ -190,6 +204,7 @@ async fn view_file(args: &Value, ctx: &mut IntentContext<'_>) {
     if file_server_port > 0 {
         query_string.push_str(&format!("&fsport={file_server_port}"));
     }
+    query_string.push_str(&format!("&imgcap={image_cap_bytes}"));
 
     // Use spawn_blocking so the macOS dispatch_sync to the Cocoa main thread
     // runs on the blocking thread pool rather than a Tokio async worker thread.
@@ -218,7 +233,7 @@ async fn view_file(args: &Value, ctx: &mut IntentContext<'_>) {
 
     // Prime the prefetch cache for files neighboring the one being opened.
     ctx.viewer_prefetch.clear();
-    let (neighbors, driver) = {
+    let (neighbors, driver, image_cap) = {
         let state_guard = ctx.state.lock().await;
         let driver = state_guard.drivers.get(&effective_source_id).cloned();
         let panel = state_guard.panels.get(&parsed.panel_id);
@@ -235,10 +250,10 @@ async fn view_file(args: &Value, ctx: &mut IntentContext<'_>) {
         if driver.as_ref().map_or(false, |d| d.is_local()) {
             neighbors.push((full_path.clone(), file_size));
         }
-        (neighbors, driver)
+        (neighbors, driver, effective_image_cap_bytes(&state_guard.settings.general))
     };
     if let Some(driver) = driver {
-        ctx.viewer_prefetch.schedule_neighbors(neighbors, effective_source_id, driver);
+        ctx.viewer_prefetch.schedule_neighbors(neighbors, effective_source_id, driver, image_cap);
     }
 }
 
@@ -420,10 +435,15 @@ async fn viewer_navigate(args: &Value, ctx: &mut IntentContext<'_>) {
                 // Schedule BE cache prefetch for neighboring files.
                 if let Some(ref drv) = driver {
                     if drv.is_local() {
+                        let image_cap = {
+                            let state_guard = ctx.state.lock().await;
+                            effective_image_cap_bytes(&state_guard.settings.general)
+                        };
                         ctx.viewer_prefetch.schedule_neighbors(
                             prefetch_neighbors,
                             effective_source_id,
                             Arc::clone(drv),
+                            image_cap,
                         );
                     }
                 }
