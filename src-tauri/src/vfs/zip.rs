@@ -195,6 +195,18 @@ fn ensure_ancestors(
 
 /// Convert a zip entry's last-modified datetime to a Unix epoch seconds string.
 fn zip_mtime_to_epoch<R: std::io::Read>(entry: &zip::read::ZipFile<'_, R>) -> Option<String> {
+    // Prefer the Unix extended timestamp (0x5455 extra field) — accurate epoch seconds,
+    // always present in zip files created on Linux/macOS.
+    use zip::extra_fields::ExtraField;
+    for field in entry.extra_data_fields() {
+        if let ExtraField::ExtendedTimestamp(ts) = field {
+            if let Some(secs) = ts.mod_time() {
+                return Some((secs as u64).to_string());
+            }
+        }
+    }
+
+    // Fall back to DOS timestamp.
     let dt = entry.last_modified()?;
     // zip::DateTime stores year/month/day/hour/minute/second.
     // Convert to a rough epoch timestamp (no timezone, assume UTC).

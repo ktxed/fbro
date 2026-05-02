@@ -45,6 +45,7 @@ pub(super) fn run_blocking(
             ArchiveItem::Directory {
                 source_path,
                 archive_name,
+                ..
             } => {
                 writer
                     .push_archive_entry::<io::Empty>(
@@ -57,6 +58,7 @@ pub(super) fn run_blocking(
                 source_path,
                 archive_name,
                 size,
+                ..
             } => {
                 let reader = open_progress_reader(
                     source_path,

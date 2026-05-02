@@ -23,11 +23,15 @@ pub(crate) enum ArchiveItem {
     Directory {
         source_path: PathBuf,
         archive_name: String,
+        mtime: Option<u64>,
     },
     File {
         source_path: PathBuf,
         archive_name: String,
         size: u64,
+        mtime: Option<u64>,
+        #[cfg(unix)]
+        unix_mode: Option<u32>,
     },
 }
 
@@ -298,10 +302,17 @@ fn collect_plan_item(
         .map_err(|error| format!("Failed to stat {}: {error}", source_path.display()))?;
     let archive_name = archive_entry_name(root, source_path)?;
 
+    let mtime = metadata
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs());
+
     if metadata.is_dir() {
         items.push(ArchiveItem::Directory {
             source_path: source_path.to_path_buf(),
             archive_name,
+            mtime,
         });
 
         let mut children = source_path
@@ -314,12 +325,20 @@ fn collect_plan_item(
             collect_plan_item(&child.path(), root, items, total_files, total_bytes_total)?;
         }
     } else if metadata.is_file() {
+        #[cfg(unix)]
+        let unix_mode = {
+            use std::os::unix::fs::PermissionsExt;
+            Some(metadata.permissions().mode())
+        };
         *total_files += 1;
         *total_bytes_total += metadata.len();
         items.push(ArchiveItem::File {
             source_path: source_path.to_path_buf(),
             archive_name,
             size: metadata.len(),
+            mtime,
+            #[cfg(unix)]
+            unix_mode,
         });
     }
 
