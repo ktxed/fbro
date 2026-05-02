@@ -2770,3 +2770,43 @@ body {
 .settings-tab__option input[type="checkbox"] {
   cursor: pointer;
 }
+
+/* ── Embedded panel terminal ──────────────────────────────────────────────── */
+
+.panel-terminal {
+  position: relative;
+  flex: 0 0 50%;
+  min-height: 0;
+  background: #1e1e1e;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+}
+
+.panel-terminal__xterm {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.panel-terminal__close {
+  position: absolute;
+  top: 2px;
+  right: 4px;
+  z-index: 2;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  background: rgba(0, 0, 0, 0.4);
+  color: #ccc;
+  font-size: 14px;
+  line-height: 14px;
+  cursor: pointer;
+  border-radius: 3px;
+}
+
+.panel-terminal__close:hover {
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+}

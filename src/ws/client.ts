@@ -6,6 +6,8 @@ const RECONNECT_DELAY_MS = 1500;
 // failed attempt unwinds quickly so the fast-retry path can kick in.
 const CONNECT_TIMEOUT_MS = 500;
 
+type TerminalOutputListener = (bytes: Uint8Array) => void;
+
 export class WsClient {
   private ws: WebSocket | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -13,6 +15,7 @@ export class WsClient {
   private destroyed = false;
   private clientKind: "gui" | "viewer";
   private pending: (FEMessage | IntentMessage)[] = [];
+  private terminalListeners = new Map<number, TerminalOutputListener>();
 
   constructor(clientKind: "gui" | "viewer" = "gui") {
     this.clientKind = clientKind;
@@ -21,6 +24,28 @@ export class WsClient {
   onMessage: (msg: BEMessage) => void = () => {};
   onConnected: () => void = () => {};
   onDisconnected: () => void = () => {};
+
+  subscribeTerminalOutput(sessionId: number, cb: TerminalOutputListener) {
+    this.terminalListeners.set(sessionId, cb);
+  }
+
+  unsubscribeTerminalOutput(sessionId: number) {
+    this.terminalListeners.delete(sessionId);
+  }
+
+  /** Send raw input bytes to a PTY session via a binary WS frame.
+   *  Layout: [tag:u8 = 0x02][session_id:u32-le][payload...] */
+  sendTerminalInput(sessionId: number, bytes: Uint8Array) {
+    if (this.ws?.readyState !== WebSocket.OPEN) return;
+    const frame = new Uint8Array(5 + bytes.length);
+    frame[0] = 0x02;
+    frame[1] = sessionId & 0xff;
+    frame[2] = (sessionId >>> 8) & 0xff;
+    frame[3] = (sessionId >>> 16) & 0xff;
+    frame[4] = (sessionId >>> 24) & 0xff;
+    frame.set(bytes, 5);
+    this.ws.send(frame);
+  }
 
   connect() {
     if (this.destroyed) return;
@@ -34,6 +59,7 @@ export class WsClient {
       return;
     }
     this.ws = ws;
+    ws.binaryType = "arraybuffer";
 
     // Force-close if the handshake stalls — onclose will fire and trigger reconnect.
     this.connectTimer = setTimeout(() => {
@@ -58,6 +84,20 @@ export class WsClient {
     };
 
     ws.onmessage = (event) => {
+      // Binary frames carry terminal output (high-frequency, opaque bytes).
+      // Layout: [tag:u8 = 0x01][session_id:u32-le][payload...]
+      if (event.data instanceof ArrayBuffer) {
+        const view = new Uint8Array(event.data);
+        if (view.length >= 5 && view[0] === 0x01) {
+          const sid = view[1] | (view[2] << 8) | (view[3] << 16) | (view[4] << 24);
+          const listener = this.terminalListeners.get(sid >>> 0);
+          if (listener) {
+            // Pass the payload slice without copying.
+            listener(view.subarray(5));
+          }
+        }
+        return;
+      }
       try {
         const msg = JSON.parse(event.data as string) as BEMessage;
         this.onMessage(msg);

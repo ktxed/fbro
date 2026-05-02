@@ -77,6 +77,7 @@ export const PANEL_SHORTCUT_COMMAND_IDS = [
   "panel.toggle_hidden",
   "panel.bookmarks.open",
   "panel.bookmarks.browse",
+  "panel.toggle_embedded_terminal",
   "file.touch",
 ] as const;
 
@@ -748,6 +749,31 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
     case "panel.bookmarks.browse": {
       if (!focused) return false;
       client.sendIntent("EnterBookmarkSource", focused.panelId);
+      return true;
+    }
+    case "panel.toggle_embedded_terminal": {
+      if (!focused) return false;
+      const focusedPanel = state.panels[focused.panelId];
+      if (!focusedPanel) return false;
+      if (state.embeddedViewer) {
+        dispatch({
+          type: "SHOW_TRANSIENT_HINT",
+          message: "Cannot open terminal while viewer is active",
+        });
+        return true;
+      }
+      if (focusedPanel.shadowSource) {
+        dispatch({
+          type: "SHOW_TRANSIENT_HINT",
+          message: "Terminal not available in archives",
+        });
+        return true;
+      }
+      if (focusedPanel.terminalSessionId !== undefined) {
+        client.sendIntent("ClosePanelTerminal", focused.panelId);
+      } else {
+        client.sendIntent("OpenPanelTerminal", focused.panelId, { cols: 80, rows: 24 });
+      }
       return true;
     }
     default:

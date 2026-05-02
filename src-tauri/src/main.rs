@@ -9,6 +9,7 @@ mod jobs;
 mod persistence;
 mod platform;
 mod state;
+mod terminal;
 mod vfs;
 mod watcher;
 mod ws;

@@ -174,6 +174,27 @@ pub enum ServerMessage {
         #[serde(rename = "prefetchCache")]
         prefetch_cache: PrefetchCacheSchema,
     },
+    TerminalSessionOpened {
+        timestamp: u64,
+        #[serde(rename = "panelId")]
+        panel_id: String,
+        #[serde(rename = "sessionId")]
+        session_id: u32,
+    },
+    TerminalClosed {
+        timestamp: u64,
+        #[serde(rename = "sessionId")]
+        session_id: u32,
+        #[serde(rename = "panelId")]
+        panel_id: String,
+    },
+    /// Marker variant — never serialized as JSON. The WS sink intercepts it
+    /// and emits a binary WebSocket frame: [0x01, sid_le_u32, data...].
+    #[serde(skip)]
+    TerminalOutput {
+        session_id: u32,
+        data: Vec<u8>,
+    },
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -263,6 +284,8 @@ pub struct PanelSnapshot {
     pub window_start: Option<usize>,
     #[serde(rename = "shadowSource", skip_serializing_if = "Option::is_none")]
     pub shadow_source: Option<ShadowSourceSchema>,
+    #[serde(rename = "terminalSessionId", skip_serializing_if = "Option::is_none")]
+    pub terminal_session_id: Option<u32>,
 }
 
 #[derive(Serialize, Clone, Debug)]

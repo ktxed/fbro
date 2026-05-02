@@ -510,6 +510,9 @@ function applyPatch(state: AppState, msg: StatePatchMessage): AppState {
     if (msg.patch.shadowSource !== undefined) {
       updated = { ...updated, shadowSource: msg.patch.shadowSource === null ? undefined : msg.patch.shadowSource as PanelState["shadowSource"] };
     }
+    if (msg.patch.terminalSessionId !== undefined) {
+      updated = { ...updated, terminalSessionId: msg.patch.terminalSessionId === null ? undefined : msg.patch.terminalSessionId as number };
+    }
 
     const locationChanged = updated.path !== panel.path
       || (msg.patch.sourceId !== undefined && updated.sourceId !== panel.sourceId);

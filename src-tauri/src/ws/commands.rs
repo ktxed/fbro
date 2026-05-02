@@ -462,5 +462,12 @@ pub(crate) fn build_interactive_commands() -> Vec<InteractiveCommandSchema> {
             vec![keybinding_with_modifiers(",", false, !is_macos(), false, is_macos())],
             None,
         ),
+        command(
+            "panel.toggle_embedded_terminal",
+            "Panel",
+            "Toggle Embedded Terminal",
+            vec![keybinding("t")],
+            None,
+        ),
     ]
 }

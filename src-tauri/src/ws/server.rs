@@ -390,6 +390,21 @@ async fn handle_connection(
                     Some(Ok(Message::Ping(payload))) => {
                         let _ = ws_tx.send(Message::Pong(payload)).await;
                     }
+                    Some(Ok(Message::Binary(bytes))) => {
+                        // Binary WS frames carry terminal input only.
+                        // Layout: [tag:u8 = 0x02][session_id:u32-le][payload...]
+                        if bytes.len() >= 5 && bytes[0] == 0x02 {
+                            let sid = u32::from_le_bytes([bytes[1], bytes[2], bytes[3], bytes[4]]);
+                            let payload = &bytes[5..];
+                            let pty_manager = {
+                                let guard = state.lock().await;
+                                guard.pty_manager.clone()
+                            };
+                            if let Err(e) = pty_manager.write(sid, payload) {
+                                eprintln!("[fbro] terminal write sid={sid}: {e}");
+                            }
+                        }
+                    }
                     Some(Ok(Message::Close(_))) | None => break,
                     _ => {}
                 }
@@ -417,6 +432,21 @@ where
     S: SinkExt<Message> + Unpin,
     <S as futures_util::Sink<Message>>::Error: std::fmt::Debug,
 {
+    // Terminal output is sent as a raw binary WS frame to bypass JSON+base64 overhead.
+    // Frame layout: [tag:u8 = 0x01][session_id:u32-le][bytes...]
+    if let ServerMessage::TerminalOutput { session_id, data } = msg {
+        let mut frame = Vec::with_capacity(5 + data.len());
+        frame.push(0x01u8);
+        frame.extend_from_slice(&session_id.to_le_bytes());
+        frame.extend_from_slice(data);
+        return ws_tx
+            .send(Message::Binary(frame.into()))
+            .await
+            .map_err(|error| {
+                eprintln!("[fbro] Send error (binary): {error:?}");
+            });
+    }
+
     match serde_json::to_string(msg) {
         Ok(text) => ws_tx
             .send(Message::Text(text.into()))

@@ -81,6 +81,8 @@ pub struct Panel {
     pub source_paths: HashMap<String, String>,
     /// Set when the panel is browsing inside a shadow filesystem (e.g. zip archive).
     pub shadow_source: Option<ShadowSource>,
+    /// Set when the panel hosts an embedded terminal split. Holds the PTY session id.
+    pub terminal_session: Option<u32>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -130,6 +132,7 @@ pub struct AppState {
     pub font_size: u8,
     pub settings: settings::Settings,
     pub child_processes: HashMap<u32, ChildProcessEntry>,
+    pub pty_manager: Arc<crate::terminal::PtyManager>,
 }
 
 #[derive(Clone, Debug, serde::Serialize)]
@@ -229,6 +232,7 @@ impl AppState {
             window_version: 0,
             source_paths: HashMap::new(),
             shadow_source: None,
+            terminal_session: None,
         };
 
         let right = Panel {
@@ -251,6 +255,7 @@ impl AppState {
             window_version: 0,
             source_paths: HashMap::new(),
             shadow_source: None,
+            terminal_session: None,
         };
 
         let mut panels = HashMap::new();
@@ -317,6 +322,7 @@ impl AppState {
             font_size: crate::persistence::load().font_size.unwrap_or(13),
             settings: loaded_settings,
             child_processes: HashMap::new(),
+            pty_manager: Arc::new(crate::terminal::PtyManager::new()),
         }
     }
 

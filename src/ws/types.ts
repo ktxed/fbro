@@ -62,6 +62,8 @@ export interface PanelState {
    *  structural-version guard (see store reducer). */
   windowVersion?: number;
   shadowSource?: ShadowSource;
+  /** When set, this panel is hosting an embedded terminal split with this PTY session id. */
+  terminalSessionId?: number;
 }
 
 export interface LayoutDomain {
@@ -495,6 +497,20 @@ export interface CacheStatusReadyMessage {
   prefetchCache: PrefetchCacheStatus;
 }
 
+export interface TerminalSessionOpenedMessage {
+  type: "TerminalSessionOpened";
+  timestamp: number;
+  panelId: string;
+  sessionId: number;
+}
+
+export interface TerminalClosedMessage {
+  type: "TerminalClosed";
+  timestamp: number;
+  panelId: string;
+  sessionId: number;
+}
+
 // ─── Union types ─────────────────────────────────────────────────────────────
 
 export type BEMessage =
@@ -519,6 +535,8 @@ export type BEMessage =
   | BroOptionsReadyMessage
   | BroOptionsFailedMessage
   | InputRequiredMessage
-  | CacheStatusReadyMessage;
+  | CacheStatusReadyMessage
+  | TerminalSessionOpenedMessage
+  | TerminalClosedMessage;
 
 export type FEMessage = HelloMessage | IntentMessage;

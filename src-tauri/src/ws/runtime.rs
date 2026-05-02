@@ -785,6 +785,7 @@ fn build_panel_snapshot(panel: &Panel) -> PanelSnapshot {
             archive_path: ss.archive_path.clone(),
             cursor_hint: ss.cursor_hint.clone(),
         }),
+        terminal_session_id: panel.terminal_session,
     }
 }
 

@@ -11,6 +11,7 @@ import {
 import { useAppDispatch, useAppState } from "../store";
 import { IconChevronDown, IconChevronUp, IconChevronRight, IconChevronLeft, IconArrowUpRight, IconX } from "@tabler/icons-react";
 import { BookmarksPopover } from "./BookmarksPopover";
+import { PanelTerminal } from "./PanelTerminal";
 
 const ROW_HEIGHT = 22;
 const FILTER_DEBOUNCE_MS = 200;
@@ -542,6 +543,11 @@ export function Panel({
       e.preventDefault();
       return;
     }
+    // Keys typed inside the embedded terminal must not trigger panel shortcuts —
+    // otherwise typing a literal `t` into the shell would close the terminal.
+    if (e.target instanceof Element && e.target.closest(".panel-terminal")) {
+      return;
+    }
     if (panel.filterModeActive && e.key === "Escape") {
       e.preventDefault();
       e.stopPropagation();
@@ -880,6 +886,15 @@ export function Panel({
         </div>
       </div>
       <Tooltip id="hidden-files" delayShow={0} />
+      {panel.terminalSessionId !== undefined && (
+        <PanelTerminal
+          client={client}
+          panelId={panelId}
+          sessionId={panel.terminalSessionId}
+          onClose={() => client.sendIntent("ClosePanelTerminal", panelId)}
+          onBlurToListing={() => focusDivRef.current?.focus()}
+        />
+      )}
     </div>
   );
 }
