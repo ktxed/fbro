@@ -932,20 +932,45 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
 
     ctx.decision_senders.insert(job_id.clone(), decision_tx);
 
-    let handle = tokio::spawn(run_file_op(
-        job_id.clone(),
-        op_type.clone(),
-        files.clone(),
-        dest_path.clone(),
-        conflict_policy.clone(),
-        ctx.tx.clone(),
-        cancel_rx,
-        pause_rx,
-        decision_rx,
-        src_driver,
-        dst_driver,
-        preserve_attributes,
-    ));
+    let state_for_patch = ctx.state.clone();
+    let tx_for_patch = ctx.tx.clone();
+    let job_id_spawn = job_id.clone();
+    let op_type_spawn = op_type.clone();
+    let files_spawn = files.clone();
+    let dest_path_spawn = dest_path.clone();
+    let conflict_policy_spawn = conflict_policy.clone();
+
+    let handle = tokio::spawn(async move {
+        run_file_op(
+            job_id_spawn,
+            op_type_spawn,
+            files_spawn,
+            dest_path_spawn,
+            conflict_policy_spawn,
+            tx_for_patch.clone(),
+            cancel_rx,
+            pause_rx,
+            decision_rx,
+            src_driver,
+            dst_driver,
+            preserve_attributes,
+        )
+        .await;
+
+        let sources_json = {
+            let state = state_for_patch.lock().await;
+            build_sources_json(&state)
+        };
+        let _ = tx_for_patch
+            .send(ServerMessage::StatePatch {
+                timestamp: now(),
+                domain: "sources".to_string(),
+                entity_id: None,
+                version: 0,
+                patch: serde_json::json!({ "sources": sources_json }),
+            })
+            .await;
+    });
 
     {
         let mut state_guard = ctx.state.lock().await;
