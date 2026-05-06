@@ -168,7 +168,10 @@ impl<R: Read> ProgressReader<R> {
 impl<R: Read> Read for ProgressReader<R> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         if self.reporter.is_cancelled() {
-            return Err(io::Error::new(io::ErrorKind::Interrupted, "Cancelled"));
+            // Must NOT use ErrorKind::Interrupted: `io::copy` (and BufReader)
+            // treat that as an EINTR-style transient signal and retry the read,
+            // which produces a tight spin-loop instead of unwinding.
+            return Err(io::Error::new(io::ErrorKind::Other, "Cancelled"));
         }
 
         let n = self.inner.read(buf)?;
