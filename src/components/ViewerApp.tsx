@@ -3,7 +3,7 @@ import { WsClient } from "../ws/client";
 import type { BEMessage, FileChunkMessage, ViewerFileChangedMessage, StateSnapshotMessage, StatePatchMessage } from "../ws/types";
 import { applyZoom, nextZoomSize, DEFAULT_FONT_SIZE } from "../utils/zoom";
 import { ImageViewer, IMAGE_LIMIT } from "../viewers/ImageViewer";
-import { detectRenderer, isImageExt, isMdExt } from "../viewers/media";
+import { detectRenderer, isImageExt, isMdExt, isVideoExt } from "../viewers/media";
 import { marked } from "marked";
 import { DirectFileViewer, canUseDirect } from "../viewers/DirectFileViewer";
 import { isArchiveSourceId } from "../utils/sourceId";
@@ -186,6 +186,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
   const curPathRef      = useRef(initPath);
   const curSourceIdRef  = useRef(initSourceId);
   const filenameRef   = useRef(initFilename);
+  const videoRef      = useRef<HTMLVideoElement | null>(null);
 
   // 1-based file line number of the first raw line in the current buffer.
   // null = unknown (after a scrollbar jump to an arbitrary byte offset).
@@ -645,6 +646,16 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
       if (e.key === "1") { switchMode("text"); return; }
       if (e.key === "2") { switchMode("image"); return; }
       if (e.key === "3") { switchMode("hex"); return; }
+
+      // Space toggles play/pause for the directly-rendered <video>. The
+      // window keydown handler runs before the video gets focus, so the
+      // browser's native space-on-focused-video shortcut never fires.
+      if (e.key === " " && videoRef.current && isVideoExt(filenameRef.current)) {
+        e.preventDefault();
+        const v = videoRef.current;
+        if (v.paused) v.play().catch(() => {}); else v.pause();
+        return;
+      }
       if (e.key === "k") {
         e.preventDefault();
         setNavError(null);
@@ -924,7 +935,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
               </p>
             </div>
           ) : (
-            <DirectFileViewer path={curPath} filename={curFilename} />
+            <DirectFileViewer path={curPath} filename={curFilename} videoRef={videoRef} />
           )}
         </div>
         <div className="viewer__status">

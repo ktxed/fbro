@@ -1,3 +1,4 @@
+import type React from "react";
 import { isImageExt, isVideoExt, isPdfExt } from "./media";
 import { ZoomableImage } from "./ZoomableImage";
 
@@ -20,9 +21,11 @@ interface DirectFileViewerProps {
   filename: string;
   /** Override the file server port (defaults to reading from URL query params). */
   fsPort?: number;
+  /** Forwarded to the underlying <video> element when the file is a video. */
+  videoRef?: React.Ref<HTMLVideoElement>;
 }
 
-export function DirectFileViewer({ path, filename, fsPort: fsPropPort }: DirectFileViewerProps) {
+export function DirectFileViewer({ path, filename, fsPort: fsPropPort, videoRef }: DirectFileViewerProps) {
   // Serve all local files through the HTTP file server.
   // On Windows, paths don't start with / (e.g. C:/...) so we add one for valid URLs.
   // (localfile:// was used for images on Linux/macOS to avoid GStreamer intercepting
@@ -38,7 +41,7 @@ export function DirectFileViewer({ path, filename, fsPort: fsPropPort }: DirectF
   if (isVideoExt(filename)) {
     return (
       <div className="viewer__video-container">
-        <video className="viewer__video" src={url} controls />
+        <video ref={videoRef} className="viewer__video" src={url} controls />
       </div>
     );
   }
