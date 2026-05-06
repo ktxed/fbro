@@ -887,7 +887,7 @@ body {
   justify-content: center;
   gap: 4px;
   background: var(--bg-footer);
-  border: 1px solid var(--border);
+  border: none;
   border-radius: 3px;
   color: var(--text-dim);
   font-family: var(--font);
@@ -901,7 +901,6 @@ body {
 .toolbar__btn:hover {
   background: var(--bg-focused);
   color: var(--text);
-  border-color: var(--border-focus);
 }
 
 .toolbar__key {
