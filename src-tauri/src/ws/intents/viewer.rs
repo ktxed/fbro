@@ -479,19 +479,23 @@ async fn read_file_chunk(args: &Value, ctx: &mut IntentContext<'_>) {
     let parsed = ReadChunkArgs::from_args(args);
 
     let (effective_source_id, effective_path) = if is_search_source(&parsed.source_id) {
+        let state_guard = ctx.state.lock().await;
+        // Prefer matching the request path: callers (e.g. the embedded viewer)
+        // send the real absolute path, which is unambiguous when several search
+        // hits share a filename. Fall back to filename-only lookup for legacy
+        // callers.
         let filename = parsed
             .path
             .rsplit_once('/')
             .map(|(_, name)| name)
             .unwrap_or(&parsed.path);
-        let state_guard = ctx.state.lock().await;
         let resolved = state_guard
             .drivers
             .get(&parsed.source_id)
-            .and_then(|drv| {
-                drv.as_any()
-                    .downcast_ref::<SearchResultsDriver>()
-                    .and_then(|sd| sd.resolve_real_info(filename))
+            .and_then(|drv| drv.as_any().downcast_ref::<SearchResultsDriver>())
+            .and_then(|sd| {
+                sd.resolve_real_info_by_path(&parsed.path)
+                    .or_else(|| sd.resolve_real_info(filename))
             });
         if let Some((real_path, real_source)) = resolved {
             (real_source, real_path)

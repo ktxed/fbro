@@ -1582,6 +1582,18 @@ async fn start_search(args: &Value, ctx: &mut IntentContext<'_>) {
             .collect();
         // Sort longest root_path first so the most-specific match wins
         map.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
+        // macOS exposes the boot volume's contents under /Users, /System, etc.
+        // rather than under any /Volumes/* source root, so those paths won't
+        // match anything in the map above. Add a catch-all (empty root) entry
+        // pointing at any local filesystem source so search hits get a
+        // resolvable source_id for later viewer/copy operations.
+        if !map.iter().any(|(root, _)| root.is_empty()) {
+            if let Some(seed) = paths.first() {
+                if let Some(fallback) = fallback_local_source_id(&state, seed) {
+                    map.push((String::new(), fallback));
+                }
+            }
+        }
         Arc::new(map)
     };
 

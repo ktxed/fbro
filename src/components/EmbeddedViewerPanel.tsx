@@ -159,9 +159,15 @@ export function EmbeddedViewerPanel({ sourcePanelId, state }: Props) {
       }
 
       const source = state.sources[panel.sourceId];
-      const isLocal = source?.kind === "filesystem";
+      // Search-result entries carry the real absolute path on `sourcePath`.
+      // Their panel sits on a virtual `search:N` source rooted at "/", so the
+      // synthetic `panel.path + entry.name` would be a meaningless "/name" —
+      // the BE would resolve the real file by filename and return the real
+      // path, which the FE wouldn't recognise as the one it requested.
+      const isLocal = source?.kind === "filesystem" || !!entry.sourcePath;
       const base = panel.path.endsWith("/") ? panel.path : panel.path + "/";
-      const path = panel.path ? `${base}${entry.name}` : entry.name;
+      const path = entry.sourcePath
+        ?? (panel.path ? `${base}${entry.name}` : entry.name);
 
       // Guard: skip if we're already showing or loading this exact file.
       // This prevents duplicate ReadFileChunk requests when unrelated panel

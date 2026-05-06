@@ -29,6 +29,18 @@ impl SearchResultsDriver {
             .find(|r| r.name == name)
             .map(|r| (r.full_path.clone(), r.source_id.clone()))
     }
+
+    /// Same as `resolve_real_info` but matches by full path. Preferred when
+    /// the caller already knows the exact result entry (avoids ambiguity when
+    /// two hits share a filename).
+    pub fn resolve_real_info_by_path(&self, full_path: &str) -> Option<(String, String)> {
+        let store = futures::executor::block_on(self.store.lock());
+        store
+            .results
+            .iter()
+            .find(|r| r.full_path == full_path)
+            .map(|r| (r.full_path.clone(), r.source_id.clone()))
+    }
 }
 
 impl VfsDriver for SearchResultsDriver {
