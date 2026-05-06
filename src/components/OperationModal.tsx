@@ -3,6 +3,7 @@ import type { WsClient } from "../ws/client";
 import type { PendingOp, Job, ConflictPolicy } from "../ws/types";
 import { useAppDispatch, useAppState } from "../store";
 import type { PendingDryRun } from "../store";
+import { isArchiveSourceId } from "../utils/sourceId";
 import { IconCopy } from "@tabler/icons-react";
 
 interface OperationModalProps {
@@ -182,8 +183,9 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
   if (pending) {
     const fileCount = pending.files.length;
     const isDelete = pending.opType === "delete";
-    const isShadowSource = !!state.panels[pending.sourcePanel]?.shadowSource;
-    const label = isShadowSource && pending.opType === "copy" ? "Extract" : opLabel(pending.opType);
+    const sourcePanelState = state.panels[pending.sourcePanel];
+    const isArchiveSource = !!sourcePanelState?.shadowSource && isArchiveSourceId(sourcePanelState.sourceId);
+    const label = isArchiveSource && pending.opType === "copy" ? "Extract" : opLabel(pending.opType);
     const canStartInBackground = !dryMode;
     const conflictPolicies: ConflictPolicy[] = ["ask", "overwrite", "skip"];
 

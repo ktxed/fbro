@@ -209,7 +209,7 @@ fn resolve_source_id_for_path(state: &crate::state::AppState, source_path: &str)
     state
         .sources
         .values()
-        .filter(|source| source.mounted && state.drivers.contains_key(&source.id))
+        .filter(|source| source.mounted && !source.shadow && state.drivers.contains_key(&source.id))
         .filter(|source| source_root_matches_path(&source.root_path, source_path))
         .max_by_key(|source| source.root_path.len())
         .map(|source| source.id.clone())

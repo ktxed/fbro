@@ -12,6 +12,7 @@ import {
   TOOLBAR_COMMAND_IDS,
 } from "../commands/interactive";
 import { modKey } from "../utils/platform";
+import { isArchiveSourceId } from "../utils/sourceId";
 import { applyZoom, nextZoomSize, DEFAULT_FONT_SIZE } from "../utils/zoom";
 import {
   IconPencil,
@@ -107,6 +108,7 @@ export function Toolbar({ client, jobsViewOpen, onOpenJobsView }: { client: WsCl
 
   const focusedPanel = state.panels[state.focus];
   const isShadow = !!focusedPanel?.shadowSource;
+  const isArchive = isShadow && !!focusedPanel && isArchiveSourceId(focusedPanel.sourceId);
   const shadowDisabled = new Set(["file.rename", "file.move", "file.delete", "file.mkdir", "file.touch", "app.open_terminal"]);
 
   return (
@@ -115,7 +117,7 @@ export function Toolbar({ client, jobsViewOpen, onOpenJobsView }: { client: WsCl
         const command = getCommand(state.commands, commandId);
         const key = formatPrimaryBinding(command);
         const isDisabled = isShadow && shadowDisabled.has(commandId);
-        const label = isShadow && commandId === "file.copy" ? "Extract" : TOOLBAR_LABELS[commandId];
+        const label = isArchive && commandId === "file.copy" ? "Extract" : TOOLBAR_LABELS[commandId];
         const detail = command?.title ?? label;
         const icon = TOOLBAR_ICONS[commandId];
         return (
