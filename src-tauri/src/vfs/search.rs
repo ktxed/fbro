@@ -4,7 +4,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use crate::jobs::search::SearchResultStore;
-use crate::vfs::{DirChild, VfsDriver, VfsEntry, VfsError, VfsKind};
+use crate::vfs::{icon_name_for_entry, DirChild, VfsDriver, VfsEntry, VfsError, VfsKind};
 
 /// A read-only virtual filesystem driver backed by search results.
 /// Presents results as a flat listing at the root path "/".
@@ -72,12 +72,12 @@ impl VfsDriver for SearchResultsDriver {
                 };
                 VfsEntry {
                     name: r.name.clone(),
-                    kind,
+                    kind: kind.clone(),
                     size: r.size,
                     mtime: None,
                     btime: None,
                     permissions: None,
-                    icon_name: None,
+                    icon_name: icon_name_for_entry(&r.name, &kind),
                     cc: if r.kind == "directory" {
                         Some("cc-dir".to_string())
                     } else {
