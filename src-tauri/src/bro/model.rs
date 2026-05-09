@@ -213,8 +213,14 @@ impl ResolvedBro {
 fn write_m3u_playlist(inputs: &[BroInputItem]) -> Result<String, String> {
     let path = std::env::temp_dir().join("fbro_playlist.m3u");
     let mut file = std::fs::File::create(&path).map_err(|e| format!("Failed to create playlist: {e}"))?;
+    writeln!(file, "#EXTM3U").map_err(|e| format!("Failed to write playlist: {e}"))?;
     for input in inputs {
-        writeln!(file, "{}", input.path).map_err(|e| format!("Failed to write playlist: {e}"))?;
+        // Use file:/// URIs so players like VLC don't misparse "C:/..." as a URL scheme.
+        // Paths are already forward-slash normalised; strip any leading slash before
+        // prepending the three-slash prefix so both Unix (/home/…) and Windows (C:/…)
+        // produce valid file:/// URIs.
+        let uri = format!("file:///{}", input.path.trim_start_matches('/'));
+        writeln!(file, "{uri}").map_err(|e| format!("Failed to write playlist: {e}"))?;
     }
     path.to_str()
         .map(|s| s.to_string())
