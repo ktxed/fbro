@@ -631,6 +631,12 @@ body {
   overflow-x: hidden;
   scrollbar-width: thin;
   scrollbar-color: var(--border) transparent;
+  /* Keep the scrollbar gutter reserved even when overflow is forced to
+   * hidden (e.g. while a modal is open). Otherwise the inner width grows
+   * by the scrollbar width, ResizeObserver recomputes gridMetrics, every
+   * card's height ticks up by a couple px, and the grid visibly shifts
+   * down on modal open / back up on close. */
+  scrollbar-gutter: stable;
 }
 
 .panel__list--grid {
@@ -744,18 +750,96 @@ body {
 
 .panel__card-meta {
   display: flex;
-  justify-content: space-between;
-  gap: 6px;
-  font-size: calc(var(--font-size) - 2px);
+  flex-direction: column;
+  gap: 1px;
+  font-size: calc(var(--font-size) - 3px);
   color: var(--text-dim);
-  white-space: nowrap;
-  overflow: hidden;
+  line-height: 1.2;
 }
 
 .panel__card-size,
 .panel__card-date {
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.panel__card--tooltip,
+.panel__card--tooltip:hover {
+  /* Self-pin the background under :hover too — otherwise the more-specific
+   * `.panel__card:hover` rule (translucent) overrides the opaque tooltip
+   * fill when the mouse enters the [i] button (which is pointer-events:
+   * auto inside an otherwise pointer-events: none tooltip). */
+  position: absolute;
+  z-index: 10;
+  pointer-events: none;
+  background: var(--bg-elev, #1e1e1e);
+  border: 1px solid var(--border-strong, #4a4a4a);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+  border-radius: 4px;
+  padding: 4px;
+}
+
+.panel__card--tooltip .panel__card-name {
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.panel__card--tooltip .panel__card-size,
+.panel__card--tooltip .panel__card-date {
+  white-space: nowrap;
+  overflow: visible;
+}
+
+/* Keep the thumbnail at the original card width even though the tooltip
+ * card itself is wider — set --panel-thumb-w inline on the tooltip root.
+ * Center it horizontally inside the wider tooltip. */
+.panel__card--tooltip .panel__thumb {
+  width: var(--panel-thumb-w, 100%);
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.panel__card-name-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.panel__card-name-row .panel__card-name {
+  flex: 1;
+  min-width: 0;
+  margin-top: 0;
+}
+
+.panel__card-info-btn {
+  flex: 0 0 auto;
+  pointer-events: auto;
+  cursor: pointer;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--border-strong, #5a5a5a);
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 11px;
+  font-style: italic;
+  font-weight: 600;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.panel__card-info-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text);
 }
 
 .panel__list::-webkit-scrollbar { width: 6px; }

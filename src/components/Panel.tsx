@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from "react";
 import { Tooltip } from "react-tooltip";
 import type { PanelState, VFSEntry, Source } from "../ws/types";
 import type { WsClient } from "../ws/client";
@@ -26,8 +26,12 @@ function computeGridMetrics(listEl: HTMLElement | null) {
   const inner = Math.max(GRID_CARD_MIN_WIDTH, listEl.clientWidth - GRID_PADDING);
   const cols = Math.max(1, Math.floor((inner + GRID_GAP) / (GRID_CARD_MIN_WIDTH + GRID_GAP)));
   const cardWidth = Math.floor((inner - (cols - 1) * GRID_GAP) / cols);
-  // Card height = thumb (4:3 from card width) + name line + meta line + card padding.
-  const cardHeight = Math.round(cardWidth * 0.75) + 38;
+  // Card height = thumb (4:3 from card width)
+  //               + name (~16px, 1 line)
+  //               + size (~13px) + date (~13px) on separate lines
+  //               + 4px card padding × 2 + a few px slack
+  // Total non-thumb chrome ≈ 52 px.
+  const cardHeight = Math.round(cardWidth * 0.75) + 52;
   const pageRows = Math.max(1, Math.floor(listEl.clientHeight / (cardHeight + GRID_GAP)));
   return { cols, cardWidth, cardHeight, pageRows };
 }
@@ -340,6 +344,15 @@ export function Panel({
   }>(null);
   const suppressNextContextMenuRef = useRef(false);
   const calcSet = new Set(panel.calculatingSize ?? []);
+  const [tooltipCard, setTooltipCard] = useState<{
+    absIndex: number;
+    top: number;
+    left: number;
+    width: number;
+  } | null>(null);
+  const [tooltipNameClipped, setTooltipNameClipped] = useState(false);
+  const tooltipTimerRef = useRef<number | null>(null);
+  const tooltipNameRef = useRef<HTMLDivElement | null>(null);
 
   const isWindowed = panel.totalCount !== undefined && panel.totalCount > panel.entries.length;
   const totalCount = panel.totalCount ?? panel.entries.length;
@@ -409,6 +422,70 @@ export function Panel({
     ro.observe(list);
     return () => ro.disconnect();
   }, []);
+
+  // Cursor-dwell tooltip: in grid mode, after the listing cursor stays on a
+  // card for 2 s and that card has any ellipsed text, render an expanded
+  // clone of the card showing the full content. Hidden the moment the
+  // cursor moves, the panel loses focus, or the panel leaves grid mode.
+  const isGridView = panel.viewMode === "grid" && panel.supportsThumbnails;
+  useEffect(() => {
+    if (tooltipTimerRef.current) {
+      window.clearTimeout(tooltipTimerRef.current);
+      tooltipTimerRef.current = null;
+    }
+    setTooltipCard(null);
+    if (!isGridView || !isFocused) return;
+
+    const TOOLTIP_CARD_SHOW_DELAY = 250;
+    tooltipTimerRef.current = window.setTimeout(() => {
+      const list = listRef.current;
+      if (!list) return;
+      const card = list.querySelector<HTMLElement>(`[data-abs-index="${panel.cursor}"]`);
+      if (!card) return;
+      // Only show when there's actually overflowing content to reveal.
+      const overflowing = Array.from(
+        card.querySelectorAll<HTMLElement>(".panel__card-name, .panel__card-size, .panel__card-date"),
+      ).some((el) => el.scrollWidth > el.clientWidth + 1);
+      if (!overflowing) return;
+
+      const { cols, cardWidth, cardHeight } = gridMetrics;
+      const safeCols = Math.max(1, cols);
+      const row = Math.floor(panel.cursor / safeCols);
+      const col = panel.cursor % safeCols;
+      const innerWidth = Math.max(GRID_CARD_MIN_WIDTH, list.clientWidth - GRID_PADDING);
+      // Tooltip is exactly 2× the card width — but cap at the panel's inner
+      // width so it never overflows the panel.
+      const tooltipWidth = Math.min(cardWidth * 2, innerWidth);
+      const cardLeft = (GRID_PADDING / 2) + col * (cardWidth + GRID_GAP);
+      const cardCenter = cardLeft + cardWidth / 2;
+      const desiredLeft = cardCenter - tooltipWidth / 2;
+      const maxLeft = (GRID_PADDING / 2) + innerWidth - tooltipWidth;
+      const left = Math.max(GRID_PADDING / 2, Math.min(desiredLeft, maxLeft));
+      const top = row * (cardHeight + GRID_GAP);
+      setTooltipCard({ absIndex: panel.cursor, top, left, width: tooltipWidth });
+    }, TOOLTIP_CARD_SHOW_DELAY);
+
+    return () => {
+      if (tooltipTimerRef.current) {
+        window.clearTimeout(tooltipTimerRef.current);
+        tooltipTimerRef.current = null;
+      }
+    };
+  }, [panel.cursor, isGridView, isFocused, gridMetrics, panel.entries]);
+
+  // After the tooltip mounts/updates, check whether the name is *still*
+  // clipped (its 2-line clamp is overflowing). If so, expose an [i] button
+  // that opens the file-info modal — same behaviour as pressing `i`.
+  useLayoutEffect(() => {
+    if (!tooltipCard) {
+      if (tooltipNameClipped) setTooltipNameClipped(false);
+      return;
+    }
+    const el = tooltipNameRef.current;
+    if (!el) return;
+    const clipped = el.scrollHeight > el.clientHeight + 1 || el.scrollWidth > el.clientWidth + 1;
+    if (clipped !== tooltipNameClipped) setTooltipNameClipped(clipped);
+  }, [tooltipCard, tooltipNameClipped]);
 
   // Keep focused panel's div focused so it receives keyboard events.
   // Also re-focus when a modal closes (modalActive transitions to false).
@@ -846,23 +923,89 @@ export function Panel({
     };
   }
 
-  function renderCard(entry: VFSEntry, absIndex: number, pos?: { top: number; left: number; width: number; height: number }) {
-    const handlers = rowEventHandlers(entry, absIndex);
+  function renderCard(
+    entry: VFSEntry,
+    absIndex: number,
+    pos?: { top: number; left: number; width: number; height: number },
+    options?: { tooltip?: boolean; thumbWidth?: number },
+  ) {
+    const isTooltip = options?.tooltip === true;
+    const handlers = isTooltip ? null : rowEventHandlers(entry, absIndex);
+    const baseStyle: React.CSSProperties | undefined = pos
+      ? { position: "absolute", top: pos.top, left: pos.left, width: pos.width, height: pos.height }
+      : undefined;
+    // Pin the thumb to the original card width inside the tooltip so the
+    // wider tooltip card doesn't grow the thumbnail.
+    const style = isTooltip && options?.thumbWidth !== undefined
+      ? { ...(baseStyle ?? {}), ["--panel-thumb-w" as any]: `${options.thumbWidth}px` }
+      : baseStyle;
     return (
       <div
-        key={absIndex}
-        data-abs-index={absIndex}
+        // The tooltip is a parallel render of the same card; give it a
+        // distinct key so React doesn't try to reconcile it against the
+        // underlying card sharing the same absIndex.
+        key={isTooltip ? `tooltip-${absIndex}` : absIndex}
+        data-abs-index={isTooltip ? undefined : absIndex}
         className={[
           "panel__card",
-          absIndex === panel.cursor ? "panel__card--cursor" : "",
-          selectionSet.has(absIndex) ? "panel__card--selected" : "",
-          dragActive && dragDropAllowed && dragHoverAbsIndex === absIndex ? "panel__card--drop-target" : "",
+          isTooltip ? "panel__card--tooltip" : "",
+          !isTooltip && absIndex === panel.cursor ? "panel__card--cursor" : "",
+          !isTooltip && selectionSet.has(absIndex) ? "panel__card--selected" : "",
+          !isTooltip && dragActive && dragDropAllowed && dragHoverAbsIndex === absIndex ? "panel__card--drop-target" : "",
         ].filter(Boolean).join(" ")}
-        style={pos ? { position: "absolute", top: pos.top, left: pos.left, width: pos.width, height: pos.height } : undefined}
-        {...handlers}
+        style={style}
+        {...(handlers ?? {})}
       >
         <EntryThumb entry={entry} hostPath={hostPathFor(entry)} size={GRID_THUMB_SIZE} />
-        <div className={`panel__card-name${entry.cc ? ` ${entry.cc}` : ""}`} title={entry.name}>{entry.name}</div>
+        {isTooltip ? (
+          <div className="panel__card-name-row">
+            <div
+              ref={tooltipNameRef}
+              className={`panel__card-name${entry.cc ? ` ${entry.cc}` : ""}`}
+              title={entry.name}
+            >
+              {entry.name}
+            </div>
+            {tooltipNameClipped && (
+              <button
+                type="button"
+                className="panel__card-info-btn"
+                title="File info (i)"
+                onMouseDown={(e) => {
+                  // Don't let the listing's cursor / focus logic intercept.
+                  e.stopPropagation();
+                  e.preventDefault();
+                }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const dirPath = panel.path.replace(/[/\\]+$/, "");
+                  const fullPath = entry.sourcePath
+                    ? entry.sourcePath
+                    : entry.name === ".."
+                      ? dirPath
+                      : `${dirPath}/${entry.name}`;
+                  dispatch({
+                    type: "OPEN_INFO",
+                    info: {
+                      name: entry.name,
+                      kind: entry.kind,
+                      fullPath,
+                      dirPath,
+                      size: entry.size,
+                      mtime: entry.mtime,
+                      btime: entry.btime,
+                      permissions: entry.permissions,
+                    },
+                  });
+                }}
+              >
+                i
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className={`panel__card-name${entry.cc ? ` ${entry.cc}` : ""}`} title={entry.name}>{entry.name}</div>
+        )}
         <div className="panel__card-meta">
           <span className="panel__card-size">{formatSize(entry, calcSet)}</span>
           <span className="panel__card-date">{formatMtime(entry.mtime)}</span>
@@ -1036,6 +1179,17 @@ export function Panel({
                   const left = (GRID_PADDING / 2) + col * (cardWidth + GRID_GAP);
                   return renderCard(entry, absIndex, { top, left, width: cardWidth, height: cardHeight });
                 })}
+                {tooltipCard && (() => {
+                  const sliceIdx = tooltipCard.absIndex - windowStart;
+                  const entry = sliceIdx >= 0 && sliceIdx < panel.entries.length ? panel.entries[sliceIdx] : null;
+                  if (!entry) return null;
+                  return renderCard(entry, tooltipCard.absIndex, {
+                    top: tooltipCard.top,
+                    left: tooltipCard.left,
+                    width: tooltipCard.width,
+                    height: cardHeight,
+                  }, { tooltip: true, thumbWidth: cardWidth });
+                })()}
                 {panel.status === "loading" && panel.entries.length === 0 && (
                   <div className="panel__loading">Loading…</div>
                 )}
