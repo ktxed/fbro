@@ -255,7 +255,7 @@ const initialState: AppState = {
   childProcesses: {},
   fontSize: 13,
   settings: {
-    general: { showHiddenDefault: false, rememberWindowState: true, preserveAttributes: true, ludicrousMode: false, maxImageSizeMb: 512, sessionPath: "", bookmarksPath: "" },
+    general: { showHiddenDefault: false, rememberWindowState: true, preserveAttributes: true, ludicrousMode: false, maxImageSizeMb: 512, savePanelViewMode: false, sessionPath: "", bookmarksPath: "" },
   },
 };
 

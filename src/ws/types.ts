@@ -323,6 +323,7 @@ export interface GeneralSettings {
   preserveAttributes: boolean;
   ludicrousMode: boolean;
   maxImageSizeMb: number;
+  savePanelViewMode: boolean;
   sessionPath: string;
   bookmarksPath: string;
 }

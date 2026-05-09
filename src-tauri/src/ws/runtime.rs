@@ -83,6 +83,7 @@ pub(crate) fn build_state_snapshot(
                     preserve_attributes: state.settings.general.preserve_attributes,
                     ludicrous_mode: state.settings.general.ludicrous_mode,
                     max_image_size_mb: state.settings.general.max_image_size_mb,
+                    save_panel_view_mode: state.settings.general.save_panel_view_mode,
                     session_path: crate::persistence::session_path()
                         .to_string_lossy()
                         .to_string(),

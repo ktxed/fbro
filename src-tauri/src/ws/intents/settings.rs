@@ -35,7 +35,6 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
 
     let gui_senders = {
         let mut state_guard = ctx.state.lock().await;
-        let general = &mut state_guard.settings.general;
 
         match key {
             "rememberWindowState" => {
@@ -44,7 +43,7 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
                     bad_setting(ctx.tx, "rememberWindowState must be a boolean").await;
                     return;
                 };
-                general.remember_window_state = v;
+                state_guard.settings.general.remember_window_state = v;
             }
             "showHiddenDefault" => {
                 let Some(v) = value.as_bool() else {
@@ -52,7 +51,7 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
                     bad_setting(ctx.tx, "showHiddenDefault must be a boolean").await;
                     return;
                 };
-                general.show_hidden_default = v;
+                state_guard.settings.general.show_hidden_default = v;
                 show_hidden_changed = Some(v);
             }
             "preserveAttributes" => {
@@ -61,7 +60,7 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
                     bad_setting(ctx.tx, "preserveAttributes must be a boolean").await;
                     return;
                 };
-                general.preserve_attributes = v;
+                state_guard.settings.general.preserve_attributes = v;
             }
             "ludicrousMode" => {
                 let Some(v) = value.as_bool() else {
@@ -69,7 +68,7 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
                     bad_setting(ctx.tx, "ludicrousMode must be a boolean").await;
                     return;
                 };
-                general.ludicrous_mode = v;
+                state_guard.settings.general.ludicrous_mode = v;
             }
             "maxImageSizeMb" => {
                 let Some(v) = value.as_u64() else {
@@ -77,7 +76,21 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
                     bad_setting(ctx.tx, "maxImageSizeMb must be a positive integer").await;
                     return;
                 };
-                general.max_image_size_mb = v.clamp(1, 2048);
+                state_guard.settings.general.max_image_size_mb = v.clamp(1, 2048);
+            }
+            "savePanelViewMode" => {
+                let Some(v) = value.as_bool() else {
+                    drop(state_guard);
+                    bad_setting(ctx.tx, "savePanelViewMode must be a boolean").await;
+                    return;
+                };
+                state_guard.settings.general.save_panel_view_mode = v;
+                if !v {
+                    // Clear the persisted view-mode map so disabling the
+                    // option doesn't leave stale entries that would re-apply
+                    // if the user re-enables it later.
+                    state_guard.settings.panel_view_modes.clear();
+                }
             }
             _ => {
                 let msg = format!("Unknown setting key: {key}");
@@ -87,8 +100,10 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
             }
         }
 
-        if let Err(e) = crate::state::settings::save_general(general) {
-            eprintln!("[fbro] Failed to save general settings: {e}");
+        // Save the full Settings struct so the panel_view_modes clear above
+        // (when savePanelViewMode is disabled) actually lands on disk.
+        if let Err(e) = crate::state::settings::save(&state_guard.settings) {
+            eprintln!("[fbro] Failed to save settings: {e}");
         }
 
         state_guard.gui_senders.clone()
@@ -173,6 +188,7 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
                 "preserveAttributes": general.preserve_attributes,
                 "ludicrousMode": general.ludicrous_mode,
                 "maxImageSizeMb": general.max_image_size_mb,
+                "savePanelViewMode": general.save_panel_view_mode,
             }
         }),
     };

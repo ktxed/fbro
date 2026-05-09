@@ -1002,7 +1002,7 @@ async fn set_panel_view_mode(scope: &Value, args: &Value, ctx: &mut IntentContex
         None => return,
     };
 
-    let (version, settings_to_save) = {
+    let (version, persist_payload) = {
         let mut state_guard = ctx.state.lock().await;
         // Validate against source capability for grid mode.
         if target == crate::state::PanelViewMode::Grid {
@@ -1037,16 +1037,23 @@ async fn set_panel_view_mode(scope: &Value, args: &Value, ctx: &mut IntentContex
             panel.view_mode = target;
             panel.version += 1;
             let version = panel.version;
-            state_guard
-                .settings
-                .panel_view_modes
-                .insert(panel_id.clone(), target.as_str().to_string());
-            let settings_clone = state_guard.settings.clone();
             // Refresh thumb-pool visibility — switching to/from grid changes
             // which entries should be considered visible.
             let visible = crate::state::collect_visible_thumb_paths(&state_guard);
             state_guard.thumb_pool.set_visible(visible);
-            (version, settings_clone)
+            // Stage a settings snapshot for disk-write only when persistence
+            // is enabled. Updating the in-memory map is cheap and keeps the
+            // settings file consistent on the next save_general() too.
+            let persist = if state_guard.settings.general.save_panel_view_mode {
+                state_guard
+                    .settings
+                    .panel_view_modes
+                    .insert(panel_id.clone(), target.as_str().to_string());
+                Some(state_guard.settings.clone())
+            } else {
+                None
+            };
+            (version, persist)
         } else {
             return;
         }
@@ -1060,10 +1067,11 @@ async fn set_panel_view_mode(scope: &Value, args: &Value, ctx: &mut IntentContex
     )
     .await;
 
-    // Persist outside the lock — disk I/O is best-effort.
-    let _ = tokio::task::spawn_blocking(move || {
-        let _ = crate::state::settings::save(&settings_to_save);
-    });
+    if let Some(settings) = persist_payload {
+        let _ = tokio::task::spawn_blocking(move || {
+            let _ = crate::state::settings::save(&settings);
+        });
+    }
 }
 
 async fn send_panel_patch(

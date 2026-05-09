@@ -48,6 +48,14 @@ export function SettingsGeneralTab({ general, client }: SettingsGeneralTabProps)
           />
           <span>Remember window position and size</span>
         </label>
+        <label className="settings-tab__option">
+          <input
+            type="checkbox"
+            checked={general.savePanelViewMode}
+            onChange={(e) => send("savePanelViewMode", e.target.checked)}
+          />
+          <span>Save panel listing mode (list / grid) per panel across sessions</span>
+        </label>
       </div>
       <div className="settings-tab__section">
         <h3 className="settings-tab__section-title">File Operations</h3>

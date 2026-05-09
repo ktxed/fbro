@@ -249,15 +249,17 @@ impl AppState {
             order: "asc".to_string(),
         };
 
-        let saved_view_modes = &loaded_settings.panel_view_modes;
-        let left_view_mode = saved_view_modes
-            .get("left")
-            .and_then(|s| PanelViewMode::from_str(s))
-            .unwrap_or_default();
-        let right_view_mode = saved_view_modes
-            .get("right")
-            .and_then(|s| PanelViewMode::from_str(s))
-            .unwrap_or_default();
+        let view_for = |id: &str| -> PanelViewMode {
+            if loaded_settings.general.save_panel_view_mode {
+                loaded_settings
+                    .panel_view_modes
+                    .get(id)
+                    .and_then(|s| PanelViewMode::from_str(s))
+                    .unwrap_or_default()
+            } else {
+                PanelViewMode::default()
+            }
+        };
 
         let left = Panel {
             panel_id: "left".to_string(),
@@ -268,7 +270,7 @@ impl AppState {
             filter: None,
             filter_mode_active: false,
             show_hidden: show_hidden_default,
-            view_mode: left_view_mode,
+            view_mode: view_for("left"),
             cursor: 0,
             selection: vec![],
             entries: vec![],
@@ -292,7 +294,7 @@ impl AppState {
             filter: None,
             filter_mode_active: false,
             show_hidden: show_hidden_default,
-            view_mode: right_view_mode,
+            view_mode: view_for("right"),
             cursor: 0,
             selection: vec![],
             entries: vec![],

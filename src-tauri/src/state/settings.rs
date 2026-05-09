@@ -5,7 +5,8 @@ use std::path::PathBuf;
 #[derive(Serialize, Deserialize, Clone, Default)]
 pub struct Settings {
     pub general: GeneralSettings,
-    /// Per-panel view mode ("list" or "grid"), keyed by panel_id.
+    /// Per-panel view mode ("list" or "grid"), keyed by panel_id. Only
+    /// honoured when `general.save_panel_view_mode` is true.
     #[serde(default)]
     pub panel_view_modes: HashMap<String, String>,
 }
@@ -20,6 +21,10 @@ pub struct GeneralSettings {
     pub ludicrous_mode: bool,
     #[serde(default = "default_max_image_size_mb")]
     pub max_image_size_mb: u64,
+    /// When true, each panel's grid/list mode is persisted across sessions.
+    /// When false (default), every session starts with both panels in list.
+    #[serde(default)]
+    pub save_panel_view_mode: bool,
 }
 
 fn default_true() -> bool {
@@ -38,6 +43,7 @@ impl Default for GeneralSettings {
             preserve_attributes: true,
             ludicrous_mode: false,
             max_image_size_mb: 512,
+            save_panel_view_mode: false,
         }
     }
 }
@@ -67,8 +73,3 @@ pub fn save(settings: &Settings) -> std::io::Result<()> {
     Ok(())
 }
 
-pub fn save_general(general: &GeneralSettings) -> std::io::Result<()> {
-    let mut settings = load();
-    settings.general = general.clone();
-    save(&settings)
-}
