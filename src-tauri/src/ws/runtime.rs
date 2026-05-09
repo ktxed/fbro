@@ -613,22 +613,28 @@ pub(crate) async fn send_window(
 ) {
     let (window_entries, window_start, total, version, window_version) = {
         let mut state_guard = state.lock().await;
-        let panel = match state_guard.panels.get_mut(panel_id) {
-            Some(panel) if panel.windowed => panel,
-            _ => return,
+        let result = {
+            let panel = match state_guard.panels.get_mut(panel_id) {
+                Some(panel) if panel.windowed => panel,
+                _ => return,
+            };
+            let total = panel.entries.len();
+            let start = requested_start.min(total.saturating_sub(1));
+            let end = (start + count).min(total);
+            let entries: Vec<&crate::ws::protocol::EntrySchema> =
+                panel.entries[start..end].iter().collect();
+            let window_entries = serde_json::json!(entries);
+            panel.window_start = start;
+            panel.window_count = end - start;
+            // window_version is independent from `version` so a fast scroll
+            // cannot be dropped by the FE structural-version guard.
+            panel.window_version += 1;
+            (window_entries, start, total, panel.version, panel.window_version)
         };
-        let total = panel.entries.len();
-        let start = requested_start.min(total.saturating_sub(1));
-        let end = (start + count).min(total);
-        let entries: Vec<&crate::ws::protocol::EntrySchema> =
-            panel.entries[start..end].iter().collect();
-        let window_entries = serde_json::json!(entries);
-        panel.window_start = start;
-        panel.window_count = end - start;
-        // window_version is independent from `version` so a fast scroll cannot
-        // be dropped by the FE structural-version guard (see store/index.ts).
-        panel.window_version += 1;
-        (window_entries, start, total, panel.version, panel.window_version)
+        // Window slice changed → refresh thumb-pool visibility while still
+        // holding the lock.
+        refresh_thumb_visibility(&state_guard);
+        result
     };
 
     let _ = tx
@@ -802,6 +808,14 @@ pub(crate) async fn update_panel_from_patch(
             panel.version = version;
         }
     }
+    // Visibility set may have changed (new entries, new window slice, mode
+    // change) — let the thumb pool re-prioritize.
+    refresh_thumb_visibility(&state_guard);
+}
+
+fn refresh_thumb_visibility(state: &crate::state::AppState) {
+    let paths = crate::state::collect_visible_thumb_paths(state);
+    state.thumb_pool.set_visible(paths);
 }
 
 fn build_panel_snapshot(panel: &Panel, supports_thumbnails: bool) -> PanelSnapshot {

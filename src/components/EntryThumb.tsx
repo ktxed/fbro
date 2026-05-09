@@ -44,6 +44,12 @@ export function EntryThumb({ entry, hostPath, size }: EntryThumbProps) {
       {thumbUrl && (
         <img
           className={`panel__thumb-img${thumbLoaded ? " panel__thumb-img--loaded" : ""}`}
+          // Defer the HTTP request until the card is actually in the
+          // viewport. Without this the browser fetches a thumbnail for
+          // every mounted card — including off-screen buffer rows — which
+          // floods the BE worker pool with stale work during fast scrolls.
+          loading="lazy"
+          decoding="async"
           src={thumbUrl}
           alt=""
           draggable={false}

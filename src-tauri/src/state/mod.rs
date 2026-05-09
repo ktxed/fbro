@@ -10,6 +10,7 @@ use crate::bro::ResolvedBro;
 use crate::jobs::search::SearchResultStore;
 use crate::jobs::JobStore;
 use crate::platform::{Platform, ResolvedOpenWithApp};
+use crate::thumb_pool::ThumbPool;
 use crate::vfs::VfsDriver;
 use crate::ws::protocol::{EntrySchema, FilterSpec, ServerMessage, SortSpec};
 
@@ -163,6 +164,11 @@ pub struct AppState {
     pub settings: settings::Settings,
     pub child_processes: HashMap<u32, ChildProcessEntry>,
     pub pty_manager: Arc<crate::terminal::PtyManager>,
+    /// Thumbnail generation worker pool. The fileserver uses it directly to
+    /// service `/__thumb__/` requests; runtime helpers push the
+    /// currently-visible path set to it on entries / window changes so
+    /// workers prioritize cards the user is actually looking at.
+    pub thumb_pool: Arc<ThumbPool>,
 }
 
 #[derive(Clone, Debug, serde::Serialize)]
@@ -193,6 +199,7 @@ impl AppState {
         platform: Arc<dyn Platform>,
         initial_paths: HashMap<String, String>,
         file_server_port: u16,
+        thumb_pool: Arc<ThumbPool>,
     ) -> Self {
         let home = platform.home_dir();
         let loaded_settings = settings::load();
@@ -365,6 +372,7 @@ impl AppState {
             settings: loaded_settings,
             child_processes: HashMap::new(),
             pty_manager: Arc::new(crate::terminal::PtyManager::new()),
+            thumb_pool,
         }
     }
 
@@ -457,3 +465,36 @@ impl AppState {
 }
 
 pub type SharedState = Arc<Mutex<AppState>>;
+
+/// Walk all panels and collect the set of host file paths currently in any
+/// grid-mode panel's visible window. Used to drive thumbnail-generation
+/// priority — only entries the user is actually looking at get the high
+/// queue. Caller holds the AppState lock.
+pub fn collect_visible_thumb_paths(state: &AppState) -> std::collections::HashSet<String> {
+    let mut paths = std::collections::HashSet::new();
+    for panel in state.panels.values() {
+        if panel.view_mode != PanelViewMode::Grid {
+            continue;
+        }
+        let total = panel.entries.len();
+        let (start, end) = if panel.windowed {
+            let s = panel.window_start.min(total);
+            let e = (s + panel.window_count).min(total);
+            (s, e)
+        } else {
+            (0, total)
+        };
+        let dir = panel.path.trim_end_matches(|c| c == '/' || c == '\\');
+        for entry in &panel.entries[start..end] {
+            if entry.kind != "file" {
+                continue;
+            }
+            if let Some(sp) = &entry.source_path {
+                paths.insert(sp.clone());
+            } else {
+                paths.insert(format!("{}/{}", dir, entry.name));
+            }
+        }
+    }
+    paths
+}

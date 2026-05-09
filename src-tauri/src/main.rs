@@ -11,6 +11,7 @@ mod persistence;
 mod platform;
 mod state;
 mod terminal;
+mod thumb_pool;
 mod vfs;
 mod watcher;
 mod ws;
@@ -134,11 +135,20 @@ fn main() {
 
     let platform = platform::create_platform();
     let viewer_prefetch = Arc::new(ViewerPrefetchQueue::new());
-    let thumb_cache = Arc::new(fileserver::ThumbCache::new(256));
+    // 1024 entries × ~20 KB/PNG ≈ 20 MB resident cap. Comfortable for browsing
+    // image-heavy folders (thousands of files) without re-extracting thumbnails
+    // on every scroll-back.
+    let thumb_cache = Arc::new(fileserver::ThumbCache::new(1024));
+    // Worker threads for thumbnail extraction. 8 lets the OS thumbnail
+    // provider keep multiple cores busy when the user lands on a fresh
+    // region of a large image folder. Going higher mostly contends with
+    // the shell's own background thumbnailer.
+    let thumb_pool = thumb_pool::ThumbPool::start(platform.clone(), 8);
     let file_server_port = fileserver::start(
         platform.clone(),
         Arc::clone(&viewer_prefetch),
         Arc::clone(&thumb_cache),
+        Arc::clone(&thumb_pool),
     );
     let icon_cache: Arc<StdMutex<HashMap<String, (Vec<u8>, &'static str)>>> =
         Arc::new(StdMutex::new(HashMap::new()));
@@ -260,6 +270,7 @@ fn main() {
                     platform,
                     initial_paths,
                     file_server_port,
+                    Arc::clone(&thumb_pool),
                 )));
                 let quit_notify = Arc::new(tokio::sync::Notify::new());
                 use tauri::Manager;

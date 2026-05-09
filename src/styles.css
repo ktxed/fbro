@@ -634,12 +634,9 @@ body {
 }
 
 .panel__list--grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(144px, 1fr));
-  grid-auto-rows: max-content;
-  gap: 8px;
-  padding: 8px;
-  align-content: start;
+  /* Grid mode renders absolute-positioned cards inside a virtual sizer;
+     this container only provides scrolling and the relative origin. */
+  position: relative;
 }
 
 .panel__card {

@@ -1042,6 +1042,10 @@ async fn set_panel_view_mode(scope: &Value, args: &Value, ctx: &mut IntentContex
                 .panel_view_modes
                 .insert(panel_id.clone(), target.as_str().to_string());
             let settings_clone = state_guard.settings.clone();
+            // Refresh thumb-pool visibility — switching to/from grid changes
+            // which entries should be considered visible.
+            let visible = crate::state::collect_visible_thumb_paths(&state_guard);
+            state_guard.thumb_pool.set_visible(visible);
             (version, settings_clone)
         } else {
             return;

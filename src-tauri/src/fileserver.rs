@@ -1,5 +1,6 @@
 use crate::jobs::viewer_prefetch::ViewerPrefetchQueue;
 use crate::platform::{self, Platform};
+use crate::thumb_pool::{ThumbJobKey, ThumbPool};
 /// Minimal HTTP file server for the viewer and icon serving.
 ///
 /// On Linux, WebKitGTK hands <video> URLs to GStreamer for playback.
@@ -78,6 +79,7 @@ pub fn start(
     plat: Arc<dyn Platform>,
     prefetch: Arc<ViewerPrefetchQueue>,
     thumb_cache: Arc<ThumbCache>,
+    thumb_pool: Arc<ThumbPool>,
 ) -> u16 {
     let listener = TcpListener::bind("127.0.0.1:0").expect("file server bind");
     let port = listener.local_addr().expect("file server addr").port();
@@ -86,8 +88,9 @@ pub fn start(
             let plat = plat.clone();
             let prefetch = Arc::clone(&prefetch);
             let thumb_cache = Arc::clone(&thumb_cache);
+            let thumb_pool = Arc::clone(&thumb_pool);
             std::thread::spawn(move || {
-                let _ = handle(stream, &*plat, &prefetch, &thumb_cache);
+                let _ = handle(stream, &*plat, &prefetch, &thumb_cache, &thumb_pool);
             });
         }
     });
@@ -99,6 +102,7 @@ fn handle(
     plat: &dyn Platform,
     prefetch: &ViewerPrefetchQueue,
     thumb_cache: &ThumbCache,
+    thumb_pool: &ThumbPool,
 ) -> std::io::Result<()> {
     // Read until end-of-headers (\r\n\r\n). A single read() may return only
     // part of the request — TCP can split it arbitrarily — and parsing a
@@ -150,7 +154,7 @@ fn handle(
 
     // Thumbnail requests: /__thumb__/{size}/{percent-encoded-host-path}
     if let Some(rest) = url_path.strip_prefix("/__thumb__/") {
-        return handle_thumb(stream, plat, thumb_cache, rest);
+        return handle_thumb(stream, thumb_cache, thumb_pool, rest);
     }
 
     let decoded = percent_decode(&url_path);
@@ -229,8 +233,8 @@ fn handle(
 
 fn handle_thumb(
     mut stream: TcpStream,
-    plat: &dyn Platform,
     cache: &ThumbCache,
+    pool: &ThumbPool,
     rest: &str,
 ) -> std::io::Result<()> {
     // Parse {size}/{rest-as-path}
@@ -269,7 +273,16 @@ fn handle_thumb(
         return write_thumb_response(&mut stream, &cached);
     }
 
-    let bytes_opt = plat.get_thumbnail(&path, size).map(|(b, _ct)| b);
+    // Submit to the worker pool. Multiple concurrent requests for the same
+    // (path, size, mtime) dedupe onto a single generation, so refreshing the
+    // panel doesn't multiply work.
+    let rx = pool.request(ThumbJobKey {
+        path: path.clone(),
+        size,
+        mtime,
+    });
+    let bytes_opt = rx.recv().unwrap_or(None);
+
     match bytes_opt {
         Some(bytes) => {
             cache.put(key, bytes.clone());

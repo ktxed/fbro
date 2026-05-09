@@ -229,7 +229,11 @@ async fn view_file(args: &Value, ctx: &mut IntentContext<'_>) {
 
     // Mark a viewer as active so panel cursor moves start warming the prefetch
     // cache. Decremented in `close_viewer_window`.
-    ctx.state.lock().await.active_viewers += 1;
+    {
+        let mut state_guard = ctx.state.lock().await;
+        state_guard.active_viewers += 1;
+        sync_thumb_concurrency(&state_guard);
+    }
 
     // Prime the prefetch cache for files neighboring the one being opened.
     ctx.viewer_prefetch.clear();
@@ -293,7 +297,18 @@ async fn close_viewer_window(args: &Value, ctx: &IntentContext<'_>) {
         if state_guard.active_viewers == 0 {
             ctx.viewer_prefetch.clear();
         }
+        sync_thumb_concurrency(&state_guard);
     }
+}
+
+/// Set thumbnail-pool concurrency based on whether any viewers are open.
+/// Caller holds the AppState lock.
+fn sync_thumb_concurrency(state: &crate::state::AppState) {
+    // Active viewer → throttle thumbs to 2 workers so they don't fight the
+    // viewer for CPU/disk while it's loading a full-resolution image.
+    // Idle → restore to 8.
+    let cap = if state.active_viewers > 0 { 2 } else { 8 };
+    state.thumb_pool.set_max_concurrent(cap);
 }
 
 /// Notifies BE that an embedded viewer panel was opened (active=true) or
@@ -313,6 +328,7 @@ async fn set_embedded_viewer_active(args: &Value, ctx: &IntentContext<'_>) {
             ctx.viewer_prefetch.clear();
         }
     }
+    sync_thumb_concurrency(&state_guard);
 }
 
 async fn viewer_navigate(args: &Value, ctx: &mut IntentContext<'_>) {

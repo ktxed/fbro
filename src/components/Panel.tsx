@@ -22,14 +22,14 @@ const GRID_PADDING = 16; // 8px on each side from .panel__list--grid padding
 const FILTER_DEBOUNCE_MS = 200;
 
 function computeGridMetrics(listEl: HTMLElement | null) {
-  if (!listEl) return { cols: 1, cardHeight: 168, pageRows: 1 };
-  const inner = listEl.clientWidth - GRID_PADDING;
+  if (!listEl) return { cols: 1, cardWidth: GRID_CARD_MIN_WIDTH, cardHeight: 168, pageRows: 1 };
+  const inner = Math.max(GRID_CARD_MIN_WIDTH, listEl.clientWidth - GRID_PADDING);
   const cols = Math.max(1, Math.floor((inner + GRID_GAP) / (GRID_CARD_MIN_WIDTH + GRID_GAP)));
-  // Card height = thumb (4:3 from card width) + name line + meta line + padding.
-  const cardWidth = (inner - (cols - 1) * GRID_GAP) / cols;
-  const cardHeight = Math.round(cardWidth * 0.75) + 38; // thumb + ~2 text lines + padding
-  const visible = Math.max(1, Math.floor(listEl.clientHeight / (cardHeight + GRID_GAP)));
-  return { cols, cardHeight, pageRows: visible };
+  const cardWidth = Math.floor((inner - (cols - 1) * GRID_GAP) / cols);
+  // Card height = thumb (4:3 from card width) + name line + meta line + card padding.
+  const cardHeight = Math.round(cardWidth * 0.75) + 38;
+  const pageRows = Math.max(1, Math.floor(listEl.clientHeight / (cardHeight + GRID_GAP)));
+  return { cols, cardWidth, cardHeight, pageRows };
 }
 
 function SortHeader({ sort, panelId, client }: {
@@ -324,6 +324,7 @@ export function Panel({
 }: PanelProps) {
   const appState = useAppState();
   const dispatch = useAppDispatch();
+  const [gridMetrics, setGridMetrics] = useState<{ cols: number; cardWidth: number; cardHeight: number; pageRows: number }>({ cols: 1, cardWidth: GRID_CARD_MIN_WIDTH, cardHeight: 168, pageRows: 1 });
   const listRef = useRef<HTMLDivElement>(null);
   const focusDivRef = useRef<HTMLDivElement>(null);
   const bookmarkBtnRef = useRef<HTMLButtonElement>(null);
@@ -389,6 +390,26 @@ export function Panel({
     window.setTimeout(() => filterInputRef.current?.focus(), 0);
   }, [client, panelId]);
 
+  // Track grid metrics (cols/cardWidth/cardHeight) as the panel resizes so
+  // absolute card positions, the virtual sizer, and RequestWindow math all
+  // agree on geometry.
+  useEffect(() => {
+    const list = listRef.current;
+    if (!list) return;
+    const update = () => {
+      const m = computeGridMetrics(list);
+      setGridMetrics((prev) =>
+        prev.cols === m.cols && prev.cardWidth === m.cardWidth && prev.cardHeight === m.cardHeight && prev.pageRows === m.pageRows
+          ? prev
+          : m,
+      );
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(list);
+    return () => ro.disconnect();
+  }, []);
+
   // Keep focused panel's div focused so it receives keyboard events.
   // Also re-focus when a modal closes (modalActive transitions to false).
   useEffect(() => {
@@ -445,8 +466,9 @@ export function Panel({
   // (decoupled from the structural version guard), so missing one mid-drag
   // is harmless — the next frame resends with the latest scrollTop.
   const windowRafRef = useRef(0);
+  const isGridMode = panel.viewMode === "grid" && panel.supportsThumbnails;
   const handleScroll = useCallback(() => {
-    if (!isWindowed) return;
+    if (!isWindowed && !isGridMode) return;
     if (windowRafRef.current) return;
     windowRafRef.current = requestAnimationFrame(() => {
       windowRafRef.current = 0;
@@ -454,6 +476,18 @@ export function Panel({
       if (!list) return;
       const scrollTop = list.scrollTop;
       const viewportHeight = list.clientHeight;
+      if (isGridMode) {
+        const { cols, cardHeight } = computeGridMetrics(list);
+        const rowStride = cardHeight + GRID_GAP;
+        const firstVisibleRow = Math.floor(scrollTop / rowStride);
+        const visibleRows = Math.ceil(viewportHeight / rowStride);
+        const bufferRows = visibleRows; // 1 screen on each side
+        const startRow = Math.max(0, firstVisibleRow - bufferRows);
+        const start = startRow * cols;
+        const count = (visibleRows + 2 * bufferRows) * cols;
+        client.sendIntent("RequestWindow", panelId, { start, count });
+        return;
+      }
       const firstVisible = Math.floor(scrollTop / ROW_HEIGHT);
       const visibleCount = Math.ceil(viewportHeight / ROW_HEIGHT);
       const buffer = visibleCount; // 1 screen buffer on each side
@@ -461,7 +495,7 @@ export function Panel({
       const count = visibleCount + 2 * buffer;
       client.sendIntent("RequestWindow", panelId, { start, count });
     });
-  }, [isWindowed, panelId, client]);
+  }, [isWindowed, isGridMode, panelId, client]);
 
   useEffect(() => () => {
     if (windowRafRef.current) {
@@ -485,19 +519,19 @@ export function Panel({
     const isGridView = panel.viewMode === "grid" && panel.supportsThumbnails;
 
     if (isGridView) {
-      // Grid mode: locate the card by data-abs-index. CSS grid wraps so we
-      // can't compute Y from cursor*rowHeight reliably (gap rounding etc.).
-      const card = list.querySelector<HTMLElement>(`[data-abs-index="${panel.cursor}"]`);
-      if (!card) return;
-      const listRect = list.getBoundingClientRect();
-      const cardRect = card.getBoundingClientRect();
-      const cardTop = cardRect.top - listRect.top + list.scrollTop;
-      const cardBottom = cardTop + card.offsetHeight;
+      // Cards are absolute-positioned at row*(cardH+gap), so we can scroll
+      // to any cursor — even one that hasn't been delivered yet — and let
+      // handleScroll() request the window for the new position.
+      const { cols, cardHeight } = gridMetrics;
+      const cardRow = Math.floor(panel.cursor / Math.max(1, cols));
+      const cardTop = cardRow * (cardHeight + GRID_GAP);
+      const cardBottom = cardTop + cardHeight;
       if (cardTop < list.scrollTop) {
         list.scrollTop = cardTop;
       } else if (cardBottom > list.scrollTop + list.clientHeight) {
         list.scrollTop = cardBottom - list.clientHeight;
       }
+      handleScroll();
       return;
     }
 
@@ -526,7 +560,7 @@ export function Panel({
         list.scrollTop = rowBottom - list.clientHeight;
       }
     }
-  }, [panel.cursor, panel.viewMode, panel.supportsThumbnails, isWindowed, handleScroll]);
+  }, [panel.cursor, panel.viewMode, panel.supportsThumbnails, gridMetrics, isWindowed, handleScroll]);
 
 
   const openContextMenuForEntry = useCallback((entry: VFSEntry, absIndex: number, rect: DOMRect) => {
@@ -812,7 +846,7 @@ export function Panel({
     };
   }
 
-  function renderCard(entry: VFSEntry, absIndex: number) {
+  function renderCard(entry: VFSEntry, absIndex: number, pos?: { top: number; left: number; width: number; height: number }) {
     const handlers = rowEventHandlers(entry, absIndex);
     return (
       <div
@@ -824,6 +858,7 @@ export function Panel({
           selectionSet.has(absIndex) ? "panel__card--selected" : "",
           dragActive && dragDropAllowed && dragHoverAbsIndex === absIndex ? "panel__card--drop-target" : "",
         ].filter(Boolean).join(" ")}
+        style={pos ? { position: "absolute", top: pos.top, left: pos.left, width: pos.width, height: pos.height } : undefined}
         {...handlers}
       >
         <EntryThumb entry={entry} hostPath={hostPathFor(entry)} size={GRID_THUMB_SIZE} />
@@ -985,14 +1020,28 @@ export function Panel({
 
       <SortHeader sort={panel.sort} panelId={panelId} client={client} />
 
-      <div className={`panel__list${isGrid ? " panel__list--grid" : ""}`} ref={listRef} onScroll={isWindowed && !isGrid ? handleScroll : undefined} onMouseDown={(e) => { if (e.target === e.currentTarget) focusDivRef.current?.focus(); }} style={modalActive ? { overflow: "hidden" } : undefined}>
+      <div className={`panel__list${isGrid ? " panel__list--grid" : ""}`} ref={listRef} onScroll={isGrid || isWindowed ? handleScroll : undefined} onMouseDown={(e) => { if (e.target === e.currentTarget) focusDivRef.current?.focus(); }} style={modalActive ? { overflow: "hidden" } : undefined}>
         {isGrid ? (
-          <>
-            {panel.entries.map((entry, i) => renderCard(entry, (panel.windowStart ?? 0) + i))}
-            {panel.status === "loading" && panel.entries.length === 0 && (
-              <div className="panel__loading">Loading…</div>
-            )}
-          </>
+          (() => {
+            const { cols, cardWidth, cardHeight } = gridMetrics;
+            const totalRows = Math.ceil(totalCount / Math.max(1, cols));
+            const sizerHeight = totalRows * (cardHeight + GRID_GAP);
+            return (
+              <div className="panel__virtual-sizer" style={{ height: sizerHeight, position: "relative" }}>
+                {panel.entries.map((entry, i) => {
+                  const absIndex = windowStart + i;
+                  const row = Math.floor(absIndex / Math.max(1, cols));
+                  const col = absIndex % Math.max(1, cols);
+                  const top = row * (cardHeight + GRID_GAP);
+                  const left = (GRID_PADDING / 2) + col * (cardWidth + GRID_GAP);
+                  return renderCard(entry, absIndex, { top, left, width: cardWidth, height: cardHeight });
+                })}
+                {panel.status === "loading" && panel.entries.length === 0 && (
+                  <div className="panel__loading">Loading…</div>
+                )}
+              </div>
+            );
+          })()
         ) : isWindowed ? (
           <div className="panel__virtual-sizer" style={{ height: totalCount * ROW_HEIGHT, position: "relative" }}>
             {panel.entries.map((entry, i) => renderRow(entry, windowStart + i))}
