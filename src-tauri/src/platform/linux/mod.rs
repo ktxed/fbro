@@ -1,3 +1,4 @@
+pub mod thumbnail;
 pub mod udisks2;
 pub mod volume_watcher;
 
@@ -23,6 +24,10 @@ enum LinuxLaunchMode {
 impl Platform for LinuxPlatform {
     fn open_file(&self, path: &str) {
         let _ = Command::new("xdg-open").arg(path).spawn();
+    }
+
+    fn get_thumbnail(&self, path: &str, size: u32) -> Option<(Vec<u8>, &'static str)> {
+        thumbnail::generate(path, size)
     }
 
     fn disk_space(&self, path: &str) -> Option<(u64, u64)> {

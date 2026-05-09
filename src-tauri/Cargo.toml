@@ -36,6 +36,16 @@ gio = "0.18.4"
 zbus = { version = "5", default-features = false, features = ["tokio"] }
 gtk = "0.18.2"
 gdk = "0.18.2"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif", "bmp", "tiff"] }
+blake3 = "1"
+ffmpeg-next = { version = "7", optional = true }
+
+[features]
+default = ["linux-video"]
+# Enable Linux video thumbnails. Requires system libav-dev packages and clang/llvm:
+#   sudo apt install libavcodec-dev libavformat-dev libavutil-dev libswscale-dev \
+#                    libavfilter-dev pkg-config clang llvm-dev ffmpeg
+linux-video = ["ffmpeg-next"]
 
 [target.'cfg(not(target_os = "linux"))'.dependencies]
 drag = { version = "2.1.0", features = ["serde"] }
