@@ -47,6 +47,29 @@ impl BroProvider for MacOSMediaProvider {
             ));
         }
 
+        let mut seen_vlc: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+        for bundle_path in macos_vlc_bundle_candidates() {
+            if !macos_app_exists(&bundle_path) {
+                continue;
+            }
+            let Some(program) = macos_app_executable(&bundle_path, "VLC") else {
+                continue;
+            };
+            if !seen_vlc.insert(program.clone()) {
+                continue;
+            }
+            let version = native_version(&program);
+            bros.push(native_command_bro(
+                &format!("native:vlc-bundle:{bundle_path}"),
+                "VLC",
+                program,
+                Some(bundle_path),
+                version,
+                vec![LaunchArg::TargetPlaylistFile { flag: "".to_string() }],
+            ));
+        }
+
         bros
     }
 }
@@ -104,6 +127,16 @@ fn macos_mpv_bundle_candidates() -> Vec<String> {
     if let Ok(home) = std::env::var("HOME") {
         if !home.is_empty() {
             candidates.push(format!("{home}/Applications/mpv.app"));
+        }
+    }
+    candidates
+}
+
+fn macos_vlc_bundle_candidates() -> Vec<String> {
+    let mut candidates = vec!["/Applications/VLC.app".to_string()];
+    if let Ok(home) = std::env::var("HOME") {
+        if !home.is_empty() {
+            candidates.push(format!("{home}/Applications/VLC.app"));
         }
     }
     candidates
