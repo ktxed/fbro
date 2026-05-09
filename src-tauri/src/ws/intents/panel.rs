@@ -633,7 +633,10 @@ async fn invert_selection(scope: &Value, ctx: &mut IntentContext<'_>) {
 
 async fn move_cursor_with_select(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
     let panel_id = resolve_panel_id(scope, ctx.state).await;
-    let parsed = DirectionArgs::from_args(args);
+    // Prefer `delta` (used by grid mode for ±cols / ±1 cell jumps); fall
+    // back to single-step direction.
+    let delta_opt = args.get("delta").and_then(Value::as_i64);
+    let direction = arg_str(args, "direction").unwrap_or("down");
     let (new_cursor, new_selection, version, needs_window, selected_entries) = {
         let mut state_guard = ctx.state.lock().await;
         if let Some(panel) = state_guard.panels.get_mut(&panel_id) {
@@ -641,22 +644,29 @@ async fn move_cursor_with_select(scope: &Value, args: &Value, ctx: &mut IntentCo
             if len == 0 {
                 return;
             }
-            let cursor = match parsed.direction.as_str() {
-                "up" => panel.cursor.saturating_sub(1),
-                _ => (panel.cursor + 1).min(len - 1),
+            let step: i64 = match delta_opt {
+                Some(d) if d != 0 => d,
+                _ => if direction == "up" { -1 } else { 1 },
             };
-            let previous = panel.cursor;
-            panel.cursor = cursor;
-            if panel.selection.contains(&cursor) {
-                panel
-                    .selection
-                    .retain(|&index| index != cursor && index != previous);
-            } else {
-                if !panel.selection.contains(&previous) {
-                    panel.selection.push(previous);
+            let target = (panel.cursor as i64 + step).clamp(0, (len - 1) as i64) as usize;
+            // Apply the single-step toggle for each step between current and target.
+            let dir: i64 = if target as i64 >= panel.cursor as i64 { 1 } else { -1 };
+            while panel.cursor != target {
+                let previous = panel.cursor;
+                let next = (panel.cursor as i64 + dir) as usize;
+                panel.cursor = next;
+                if panel.selection.contains(&next) {
+                    panel
+                        .selection
+                        .retain(|&index| index != next && index != previous);
+                } else {
+                    if !panel.selection.contains(&previous) {
+                        panel.selection.push(previous);
+                    }
+                    panel.selection.push(next);
                 }
-                panel.selection.push(cursor);
             }
+            let cursor = panel.cursor;
             panel.version += 1;
             let needs_window = panel.windowed
                 && (cursor < panel.window_start

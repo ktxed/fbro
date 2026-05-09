@@ -87,7 +87,8 @@ export function Toolbar({ client, jobsViewOpen, onOpenJobsView }: { client: WsCl
       // Don't handle keys while a modal is active
       if (blockingModalActive || state.commandPaletteOpen) return;
       if (isEditableTarget(e.target)) return;
-      const command = findMatchingCommand(state.commands, GLOBAL_SHORTCUT_COMMAND_IDS, e);
+      const focusedMode = state.panels[state.focus]?.viewMode ?? "list";
+      const command = findMatchingCommand(state.commands, GLOBAL_SHORTCUT_COMMAND_IDS, e, focusedMode);
       if (!command) return;
       e.preventDefault();
       executeCommand(command.id, {

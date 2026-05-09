@@ -47,10 +47,14 @@ export const GLOBAL_SHORTCUT_COMMAND_IDS = [
 export const PANEL_SHORTCUT_COMMAND_IDS = [
   "panel.cursor.up",
   "panel.cursor.down",
+  "panel.cursor.left",
+  "panel.cursor.right",
   "panel.cursor.first",
   "panel.cursor.last",
   "panel.selection.extend_up",
   "panel.selection.extend_down",
+  "panel.selection.extend_left",
+  "panel.selection.extend_right",
   "panel.selection.toggle_or_size",
   "panel.selection.calculate_sizes",
   "panel.selection.select_all",
@@ -112,6 +116,11 @@ interface ExecuteCommandContext {
   onOpenFilter?: (initialValue: string) => void;
   onOpenContextMenu?: () => void;
   getPanelPageSize?: () => number;
+  /** Current grid column count (cards per row). Used in grid mode for
+   *  Up/Down/PageUp/PageDown deltas. */
+  getGridCols?: () => number;
+  /** Visible card rows in the grid viewport. Used for PageUp/PageDown. */
+  getGridPageRows?: () => number;
 }
 
 export interface ContextActionTarget {
@@ -432,7 +441,10 @@ export function formatPrimaryBinding(command?: InteractiveCommand) {
   return command?.bindings[0] ? formatBinding(command.bindings[0]) : "";
 }
 
-export function bindingMatches(event: KeyboardLikeEvent, binding: KeyBinding) {
+export function bindingMatches(event: KeyboardLikeEvent, binding: KeyBinding, mode?: "list" | "grid") {
+  if (binding.modes && binding.modes.length > 0) {
+    if (!mode || !binding.modes.includes(mode)) return false;
+  }
   const normalizedEventKey = normalizeKey(event.key);
   const normalizedBindingKey = normalizeKey(binding.key);
   const matchesPhysicalLetterKey =
@@ -462,10 +474,11 @@ export function findMatchingCommand(
   commands: Record<string, InteractiveCommand>,
   commandIds: readonly string[],
   event: KeyboardLikeEvent,
+  mode?: "list" | "grid",
 ) {
   return commandIds
     .map((commandId) => commands[commandId])
-    .find((command) => command && command.bindings.some((binding) => bindingMatches(event, binding)));
+    .find((command) => command && command.bindings.some((binding) => bindingMatches(event, binding, mode)));
 }
 
 export function executeCommand(commandId: string, context: ExecuteCommandContext) {
@@ -576,11 +589,29 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
     case "app.quit":
       client.sendIntent("Quit");
       return true;
-    case "panel.cursor.up":
-      client.sendIntent("MoveCursor", "focused-panel", { direction: "up" });
+    case "panel.cursor.up": {
+      if (focused?.panel.viewMode === "grid") {
+        const cols = context.getGridCols?.() ?? 1;
+        client.sendIntent("MoveCursorBy", "focused-panel", { delta: -cols });
+      } else {
+        client.sendIntent("MoveCursor", "focused-panel", { direction: "up" });
+      }
       return true;
-    case "panel.cursor.down":
-      client.sendIntent("MoveCursor", "focused-panel", { direction: "down" });
+    }
+    case "panel.cursor.down": {
+      if (focused?.panel.viewMode === "grid") {
+        const cols = context.getGridCols?.() ?? 1;
+        client.sendIntent("MoveCursorBy", "focused-panel", { delta: cols });
+      } else {
+        client.sendIntent("MoveCursor", "focused-panel", { direction: "down" });
+      }
+      return true;
+    }
+    case "panel.cursor.left":
+      client.sendIntent("MoveCursorBy", "focused-panel", { delta: -1 });
+      return true;
+    case "panel.cursor.right":
+      client.sendIntent("MoveCursorBy", "focused-panel", { delta: 1 });
       return true;
     case "panel.cursor.first":
       client.sendIntent("MoveCursorToEdge", "focused-panel", { edge: "first" });
@@ -588,11 +619,29 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
     case "panel.cursor.last":
       client.sendIntent("MoveCursorToEdge", "focused-panel", { edge: "last" });
       return true;
-    case "panel.selection.extend_up":
-      client.sendIntent("MoveCursorWithSelect", "focused-panel", { direction: "up" });
+    case "panel.selection.extend_up": {
+      if (focused?.panel.viewMode === "grid") {
+        const cols = context.getGridCols?.() ?? 1;
+        client.sendIntent("MoveCursorWithSelect", "focused-panel", { delta: -cols });
+      } else {
+        client.sendIntent("MoveCursorWithSelect", "focused-panel", { direction: "up" });
+      }
       return true;
-    case "panel.selection.extend_down":
-      client.sendIntent("MoveCursorWithSelect", "focused-panel", { direction: "down" });
+    }
+    case "panel.selection.extend_down": {
+      if (focused?.panel.viewMode === "grid") {
+        const cols = context.getGridCols?.() ?? 1;
+        client.sendIntent("MoveCursorWithSelect", "focused-panel", { delta: cols });
+      } else {
+        client.sendIntent("MoveCursorWithSelect", "focused-panel", { direction: "down" });
+      }
+      return true;
+    }
+    case "panel.selection.extend_left":
+      client.sendIntent("MoveCursorWithSelect", "focused-panel", { delta: -1 });
+      return true;
+    case "panel.selection.extend_right":
+      client.sendIntent("MoveCursorWithSelect", "focused-panel", { delta: 1 });
       return true;
     case "panel.selection.toggle_or_size":
       return focused ? toggleSelectionOrSize(client, focused.panel) : false;
@@ -609,7 +658,14 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
       return true;
     case "panel.cursor.page_up":
     case "panel.cursor.page_down": {
-      const pageSize = context.getPanelPageSize?.() ?? 1;
+      let pageSize: number;
+      if (focused?.panel.viewMode === "grid") {
+        const cols = context.getGridCols?.() ?? 1;
+        const rows = context.getGridPageRows?.() ?? 1;
+        pageSize = Math.max(1, cols * rows);
+      } else {
+        pageSize = context.getPanelPageSize?.() ?? 1;
+      }
       const delta = commandId === "panel.cursor.page_down" ? pageSize : -pageSize;
       client.sendIntent("MoveCursorBy", "focused-panel", { delta });
       return true;

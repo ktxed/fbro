@@ -165,6 +165,9 @@ export interface KeyBinding {
   ctrl?: boolean;
   alt?: boolean;
   meta?: boolean;
+  /** When non-empty, the binding only matches when the focused panel's
+   *  viewMode is in this list. Absent/empty = applies in all modes. */
+  modes?: ("list" | "grid")[];
 }
 
 export interface InteractiveCommand {

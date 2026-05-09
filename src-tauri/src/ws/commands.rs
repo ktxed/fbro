@@ -11,6 +11,7 @@ fn keybinding(key: &str) -> KeyBindingSchema {
         ctrl: false,
         alt: false,
         meta: false,
+        modes: Vec::new(),
     }
 }
 
@@ -27,6 +28,7 @@ fn keybinding_with_modifiers(
         ctrl,
         alt,
         meta,
+        modes: Vec::new(),
     }
 }
 
@@ -44,6 +46,16 @@ fn mod_binding(key: &str, shift: bool) -> KeyBindingSchema {
     } else {
         keybinding_with_modifiers(key, shift, true, false, false)
     }
+}
+
+fn list_only(mut kb: KeyBindingSchema) -> KeyBindingSchema {
+    kb.modes = vec!["list".to_string()];
+    kb
+}
+
+fn grid_only(mut kb: KeyBindingSchema) -> KeyBindingSchema {
+    kb.modes = vec!["grid".to_string()];
+    kb
 }
 
 fn command(
@@ -344,15 +356,43 @@ pub(crate) fn build_interactive_commands() -> Vec<InteractiveCommandSchema> {
             "panel.open_entry",
             "Navigation",
             "Open Entry",
-            vec![keybinding("ArrowRight")],
+            vec![list_only(keybinding("ArrowRight"))],
             Some("OpenEntry"),
         ),
         command(
             "panel.navigate_up",
             "Navigation",
             "Go Up",
-            vec![keybinding("Backspace"), keybinding("ArrowLeft")],
+            vec![keybinding("Backspace"), list_only(keybinding("ArrowLeft"))],
             Some("NavigateUp"),
+        ),
+        command(
+            "panel.cursor.left",
+            "Navigation",
+            "Cursor Left",
+            vec![grid_only(keybinding("ArrowLeft"))],
+            None,
+        ),
+        command(
+            "panel.cursor.right",
+            "Navigation",
+            "Cursor Right",
+            vec![grid_only(keybinding("ArrowRight"))],
+            None,
+        ),
+        command(
+            "panel.selection.extend_left",
+            "Selection",
+            "Extend Selection Left",
+            vec![grid_only(keybinding_with_modifiers("ArrowLeft", true, false, false, false))],
+            None,
+        ),
+        command(
+            "panel.selection.extend_right",
+            "Selection",
+            "Extend Selection Right",
+            vec![grid_only(keybinding_with_modifiers("ArrowRight", true, false, false, false))],
+            None,
         ),
         command(
             "panel.navigate_home",

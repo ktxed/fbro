@@ -16,7 +16,21 @@ import { EntryThumb } from "./EntryThumb";
 
 const ROW_HEIGHT = 22;
 const GRID_THUMB_SIZE = 128;
+const GRID_CARD_MIN_WIDTH = 144;
+const GRID_GAP = 8;
+const GRID_PADDING = 16; // 8px on each side from .panel__list--grid padding
 const FILTER_DEBOUNCE_MS = 200;
+
+function computeGridMetrics(listEl: HTMLElement | null) {
+  if (!listEl) return { cols: 1, cardHeight: 168, pageRows: 1 };
+  const inner = listEl.clientWidth - GRID_PADDING;
+  const cols = Math.max(1, Math.floor((inner + GRID_GAP) / (GRID_CARD_MIN_WIDTH + GRID_GAP)));
+  // Card height = thumb (4:3 from card width) + name line + meta line + padding.
+  const cardWidth = (inner - (cols - 1) * GRID_GAP) / cols;
+  const cardHeight = Math.round(cardWidth * 0.75) + 38; // thumb + ~2 text lines + padding
+  const visible = Math.max(1, Math.floor(listEl.clientHeight / (cardHeight + GRID_GAP)));
+  return { cols, cardHeight, pageRows: visible };
+}
 
 function SortHeader({ sort, panelId, client }: {
   sort: PanelState["sort"];
@@ -468,6 +482,25 @@ export function Panel({
     const list = listRef.current;
     if (!list) return;
 
+    const isGridView = panel.viewMode === "grid" && panel.supportsThumbnails;
+
+    if (isGridView) {
+      // Grid mode: locate the card by data-abs-index. CSS grid wraps so we
+      // can't compute Y from cursor*rowHeight reliably (gap rounding etc.).
+      const card = list.querySelector<HTMLElement>(`[data-abs-index="${panel.cursor}"]`);
+      if (!card) return;
+      const listRect = list.getBoundingClientRect();
+      const cardRect = card.getBoundingClientRect();
+      const cardTop = cardRect.top - listRect.top + list.scrollTop;
+      const cardBottom = cardTop + card.offsetHeight;
+      if (cardTop < list.scrollTop) {
+        list.scrollTop = cardTop;
+      } else if (cardBottom > list.scrollTop + list.clientHeight) {
+        list.scrollTop = cardBottom - list.clientHeight;
+      }
+      return;
+    }
+
     if (isWindowed) {
       // In windowed mode, use absolute cursor position to scroll
       const cursorTop = panel.cursor * ROW_HEIGHT;
@@ -493,7 +526,7 @@ export function Panel({
         list.scrollTop = rowBottom - list.clientHeight;
       }
     }
-  }, [panel.cursor, isWindowed, handleScroll]);
+  }, [panel.cursor, panel.viewMode, panel.supportsThumbnails, isWindowed, handleScroll]);
 
 
   const openContextMenuForEntry = useCallback((entry: VFSEntry, absIndex: number, rect: DOMRect) => {
@@ -581,7 +614,7 @@ export function Panel({
     // When the terminal is open and the listing has focus (after Esc), pressing t
     // should re-focus the terminal rather than closing it.
     if (panel.terminalSessionId !== undefined && termFocusFnRef.current) {
-      const toggleCmd = findMatchingCommand(appState.commands, ["panel.toggle_embedded_terminal"], e.nativeEvent);
+      const toggleCmd = findMatchingCommand(appState.commands, ["panel.toggle_embedded_terminal"], e.nativeEvent, panel.viewMode);
       if (toggleCmd) {
         e.preventDefault();
         e.stopPropagation();
@@ -589,7 +622,7 @@ export function Panel({
         return;
       }
     }
-    const command = findMatchingCommand(appState.commands, PANEL_SHORTCUT_COMMAND_IDS, e.nativeEvent);
+    const command = findMatchingCommand(appState.commands, PANEL_SHORTCUT_COMMAND_IDS, e.nativeEvent, panel.viewMode);
     if (command) {
       e.preventDefault();
       e.stopPropagation();
@@ -611,6 +644,8 @@ export function Panel({
           const list = listRef.current;
           return list ? Math.max(1, Math.floor(list.clientHeight / ROW_HEIGHT)) : 1;
         },
+        getGridCols: () => computeGridMetrics(listRef.current).cols,
+        getGridPageRows: () => computeGridMetrics(listRef.current).pageRows,
       });
       return;
     }
@@ -647,13 +682,13 @@ export function Panel({
       return;
     }
 
-    const matchingPanelCommand = findMatchingCommand(appState.commands, PANEL_SHORTCUT_COMMAND_IDS, e.nativeEvent);
+    const matchingPanelCommand = findMatchingCommand(appState.commands, PANEL_SHORTCUT_COMMAND_IDS, e.nativeEvent, panel.viewMode);
     if (matchingPanelCommand) {
       focusPanel();
       return;
     }
 
-    const matchingGlobalCommand = findMatchingCommand(appState.commands, GLOBAL_SHORTCUT_COMMAND_IDS, e.nativeEvent);
+    const matchingGlobalCommand = findMatchingCommand(appState.commands, GLOBAL_SHORTCUT_COMMAND_IDS, e.nativeEvent, panel.viewMode);
     if (matchingGlobalCommand) {
       return;
     }

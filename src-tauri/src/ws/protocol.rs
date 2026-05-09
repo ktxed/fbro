@@ -383,6 +383,10 @@ pub struct KeyBindingSchema {
     pub alt: bool,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub meta: bool,
+    /// When non-empty, the binding only matches if the focused panel's
+    /// viewMode is in this list. Empty = applies in all modes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub modes: Vec<String>,
 }
 
 #[derive(Serialize, Clone, Debug)]
