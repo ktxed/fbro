@@ -41,6 +41,7 @@ fn multiple_input_archive_name_uses_panel_directory_name() {
     assert_eq!(archive_file_name(&ctx), "source.zip");
 }
 
+#[cfg(unix)]
 #[test]
 fn suggested_output_dir_wins_for_default_output_path() {
     let inputs = single_input();
