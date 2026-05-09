@@ -283,6 +283,10 @@ impl Platform for MacOSPlatform {
     fn write_text_clipboard(&self, text: &str) -> Result<(), String> {
         write_macos_text_clipboard(text)
     }
+
+    fn get_thumbnail(&self, path: &str, size: u32) -> Option<(Vec<u8>, &'static str)> {
+        macos_get_thumbnail(path, size).map(|bytes| (bytes, "image/png"))
+    }
 }
 
 fn disk_image_mount_points() -> std::collections::HashSet<String> {
@@ -671,4 +675,141 @@ fn mac_supplemental_apps() -> Vec<ResolvedOpenWithApp> {
             })
         })
         .collect()
+}
+
+// ── Thumbnail extraction via QuickLook ───────────────────────────────────────
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct CGSize {
+    width: f64,
+    height: f64,
+}
+
+type CGImageRef = *const c_void;
+type CFDataRef = *const c_void;
+type CGImageDestinationRef = *const c_void;
+type CFStringRef = *const c_void;
+type CFDictionaryRef = *const c_void;
+type CFMutableDataRef = *const c_void;
+
+#[link(name = "QuickLook", kind = "framework")]
+extern "C" {
+    fn QLThumbnailImageCreate(
+        allocator: CFAllocatorRef,
+        url: CFURLRef,
+        max_thumbnail_size: CGSize,
+        options: CFDictionaryRef,
+    ) -> CGImageRef;
+}
+
+#[link(name = "CoreGraphics", kind = "framework")]
+extern "C" {
+    fn CGImageRelease(image: CGImageRef);
+}
+
+#[link(name = "ImageIO", kind = "framework")]
+extern "C" {
+    fn CGImageDestinationCreateWithData(
+        data: CFMutableDataRef,
+        ut_type: CFStringRef,
+        count: usize,
+        options: CFDictionaryRef,
+    ) -> CGImageDestinationRef;
+    fn CGImageDestinationAddImage(
+        idst: CGImageDestinationRef,
+        image: CGImageRef,
+        properties: CFDictionaryRef,
+    );
+    fn CGImageDestinationFinalize(idst: CGImageDestinationRef) -> Boolean;
+}
+
+#[link(name = "CoreFoundation", kind = "framework")]
+extern "C" {
+    fn CFDataCreateMutable(allocator: CFAllocatorRef, capacity: CFIndex) -> CFMutableDataRef;
+    fn CFDataGetLength(the_data: CFDataRef) -> CFIndex;
+    fn CFDataGetBytePtr(the_data: CFDataRef) -> *const u8;
+    fn CFStringCreateWithCString(
+        allocator: CFAllocatorRef,
+        c_str: *const c_char,
+        encoding: u32,
+    ) -> CFStringRef;
+}
+
+const K_CF_STRING_ENCODING_UTF8: u32 = 0x08000100;
+
+fn macos_get_thumbnail(path: &str, size: u32) -> Option<Vec<u8>> {
+    let pool = unsafe { objc_autoreleasePoolPush() };
+    let result = (|| -> Option<Vec<u8>> {
+        let url = create_file_url(path, false)?;
+        let cg_image = unsafe {
+            QLThumbnailImageCreate(
+                std::ptr::null(),
+                url,
+                CGSize {
+                    width: size as f64,
+                    height: size as f64,
+                },
+                std::ptr::null(),
+            )
+        };
+        unsafe { CFRelease(url) };
+        if cg_image.is_null() {
+            return None;
+        }
+
+        let png_bytes = unsafe { cg_image_to_png(cg_image) };
+        unsafe { CGImageRelease(cg_image) };
+        png_bytes
+    })();
+    unsafe { objc_autoreleasePoolPop(pool) };
+    result
+}
+
+unsafe fn cg_image_to_png(image: CGImageRef) -> Option<Vec<u8>> {
+    let data = CFDataCreateMutable(std::ptr::null(), 0);
+    if data.is_null() {
+        return None;
+    }
+
+    let png_uti_cstr = CString::new("public.png").ok()?;
+    let png_uti = CFStringCreateWithCString(
+        std::ptr::null(),
+        png_uti_cstr.as_ptr(),
+        K_CF_STRING_ENCODING_UTF8,
+    );
+    if png_uti.is_null() {
+        CFRelease(data);
+        return None;
+    }
+
+    let dest = CGImageDestinationCreateWithData(data, png_uti, 1, std::ptr::null());
+    CFRelease(png_uti);
+    if dest.is_null() {
+        CFRelease(data);
+        return None;
+    }
+
+    CGImageDestinationAddImage(dest, image, std::ptr::null());
+    let ok = CGImageDestinationFinalize(dest);
+    CFRelease(dest);
+
+    if ok == 0 {
+        CFRelease(data);
+        return None;
+    }
+
+    let len = CFDataGetLength(data) as usize;
+    let ptr = CFDataGetBytePtr(data);
+    let bytes = if !ptr.is_null() && len > 0 {
+        std::slice::from_raw_parts(ptr, len).to_vec()
+    } else {
+        Vec::new()
+    };
+    CFRelease(data);
+    if bytes.is_empty() {
+        None
+    } else {
+        Some(bytes)
+    }
 }

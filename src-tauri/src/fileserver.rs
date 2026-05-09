@@ -11,26 +11,95 @@ use crate::platform::{self, Platform};
 ///
 /// Also serves panel icons at /__icon__/{name} so that custom URI schemes
 /// (which are unreliable on WebView2/Windows) are not needed for icons.
+use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::net::{TcpListener, TcpStream};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
-pub fn start(plat: Arc<dyn Platform>, prefetch: Arc<ViewerPrefetchQueue>) -> u16 {
+/// In-memory thumbnail LRU cache, keyed by (path, size, mtime_secs).
+/// Capped by entry count; thumbnails are tens of KB each.
+pub struct ThumbCache {
+    inner: Mutex<ThumbCacheInner>,
+    capacity: usize,
+}
+
+struct ThumbCacheInner {
+    map: HashMap<ThumbKey, (Vec<u8>, u64)>, // value: (bytes, last_used_seq)
+    seq: u64,
+}
+
+#[derive(Clone, Eq, PartialEq, Hash)]
+struct ThumbKey {
+    path: String,
+    size: u32,
+    mtime: u64,
+}
+
+impl ThumbCache {
+    pub fn new(capacity: usize) -> Self {
+        Self {
+            inner: Mutex::new(ThumbCacheInner {
+                map: HashMap::new(),
+                seq: 0,
+            }),
+            capacity,
+        }
+    }
+
+    fn get(&self, key: &ThumbKey) -> Option<Vec<u8>> {
+        let mut inner = self.inner.lock().ok()?;
+        inner.seq += 1;
+        let seq = inner.seq;
+        let entry = inner.map.get_mut(key)?;
+        entry.1 = seq;
+        Some(entry.0.clone())
+    }
+
+    fn put(&self, key: ThumbKey, bytes: Vec<u8>) {
+        let Ok(mut inner) = self.inner.lock() else { return };
+        inner.seq += 1;
+        let seq = inner.seq;
+        inner.map.insert(key, (bytes, seq));
+        if inner.map.len() > self.capacity {
+            // Evict the least-recently-used entry.
+            if let Some((evict_key, _)) = inner
+                .map
+                .iter()
+                .min_by_key(|(_, v)| v.1)
+                .map(|(k, v)| (k.clone(), v.1))
+            {
+                inner.map.remove(&evict_key);
+            }
+        }
+    }
+}
+
+pub fn start(
+    plat: Arc<dyn Platform>,
+    prefetch: Arc<ViewerPrefetchQueue>,
+    thumb_cache: Arc<ThumbCache>,
+) -> u16 {
     let listener = TcpListener::bind("127.0.0.1:0").expect("file server bind");
     let port = listener.local_addr().expect("file server addr").port();
     std::thread::spawn(move || {
         for stream in listener.incoming().flatten() {
             let plat = plat.clone();
             let prefetch = Arc::clone(&prefetch);
+            let thumb_cache = Arc::clone(&thumb_cache);
             std::thread::spawn(move || {
-                let _ = handle(stream, &*plat, &prefetch);
+                let _ = handle(stream, &*plat, &prefetch, &thumb_cache);
             });
         }
     });
     port
 }
 
-fn handle(mut stream: TcpStream, plat: &dyn Platform, prefetch: &ViewerPrefetchQueue) -> std::io::Result<()> {
+fn handle(
+    mut stream: TcpStream,
+    plat: &dyn Platform,
+    prefetch: &ViewerPrefetchQueue,
+    thumb_cache: &ThumbCache,
+) -> std::io::Result<()> {
     // Read until end-of-headers (\r\n\r\n). A single read() may return only
     // part of the request — TCP can split it arbitrarily — and parsing a
     // truncated request silently drops headers like Range:, which breaks
@@ -77,6 +146,11 @@ fn handle(mut stream: TcpStream, plat: &dyn Platform, prefetch: &ViewerPrefetchQ
         )?;
         stream.write_all(&data)?;
         return Ok(());
+    }
+
+    // Thumbnail requests: /__thumb__/{size}/{percent-encoded-host-path}
+    if let Some(rest) = url_path.strip_prefix("/__thumb__/") {
+        return handle_thumb(stream, plat, thumb_cache, rest);
     }
 
     let decoded = percent_decode(&url_path);
@@ -150,6 +224,73 @@ fn handle(mut stream: TcpStream, plat: &dyn Platform, prefetch: &ViewerPrefetchQ
         data.len()
     )?;
     stream.write_all(&data)?;
+    Ok(())
+}
+
+fn handle_thumb(
+    mut stream: TcpStream,
+    plat: &dyn Platform,
+    cache: &ThumbCache,
+    rest: &str,
+) -> std::io::Result<()> {
+    // Parse {size}/{rest-as-path}
+    let (size_str, path_part) = match rest.split_once('/') {
+        Some((a, b)) => (a, b),
+        None => {
+            stream.write_all(b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n")?;
+            return Ok(());
+        }
+    };
+    let size: u32 = size_str.parse().unwrap_or(128).clamp(32, 512);
+
+    let decoded = percent_decode(path_part);
+    #[cfg(windows)]
+    let path = {
+        // On Windows the path includes a leading drive letter; URL might not have leading slash.
+        decoded.trim_start_matches('/').to_string()
+    };
+    #[cfg(not(windows))]
+    let path = if decoded.starts_with('/') { decoded } else { format!("/{decoded}") };
+
+    let mtime = std::fs::metadata(&path)
+        .ok()
+        .and_then(|m| m.modified().ok())
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
+    let key = ThumbKey {
+        path: path.clone(),
+        size,
+        mtime,
+    };
+
+    if let Some(cached) = cache.get(&key) {
+        return write_thumb_response(&mut stream, &cached);
+    }
+
+    let bytes_opt = plat.get_thumbnail(&path, size).map(|(b, _ct)| b);
+    match bytes_opt {
+        Some(bytes) => {
+            cache.put(key, bytes.clone());
+            write_thumb_response(&mut stream, &bytes)
+        }
+        None => {
+            stream.write_all(
+                b"HTTP/1.1 404 Not Found\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            )?;
+            Ok(())
+        }
+    }
+}
+
+fn write_thumb_response(stream: &mut TcpStream, bytes: &[u8]) -> std::io::Result<()> {
+    write!(
+        stream,
+        "HTTP/1.1 200 OK\r\nContent-Type: image/png\r\nContent-Length: {}\r\nCache-Control: public, max-age=3600\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n",
+        bytes.len()
+    )?;
+    stream.write_all(bytes)?;
     Ok(())
 }
 

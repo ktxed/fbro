@@ -998,6 +998,7 @@ dependencies = [
  "http",
  "libc",
  "notify",
+ "png",
  "portable-pty",
  "rand 0.8.5",
  "regex",

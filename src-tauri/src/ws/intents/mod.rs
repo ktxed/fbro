@@ -38,6 +38,7 @@ pub async fn dispatch(name: &str, scope: &Value, args: &Value, ctx: &mut IntentC
         | "CancelSizeCalculation"
         | "RequestWindow"
         | "SwitchFocus"
+        | "SetPanelViewMode"
         | "RequestStateSnapshot" => panel::handle(name, scope, args, ctx).await,
         "OpenEntry"
         | "NavigateHome"

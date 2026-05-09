@@ -72,6 +72,15 @@ pub trait Platform: Send + Sync {
         None
     }
 
+    /// Generate a thumbnail for a real OS file path at the requested size (px,
+    /// longer edge). Returns (PNG bytes, content_type) on success. Default impl
+    /// returns None — platforms override to call native thumbnail providers
+    /// (Windows IShellItemImageFactory, macOS QLThumbnailGenerator).
+    /// MUST be safe to call from any worker thread.
+    fn get_thumbnail(&self, _path: &str, _size: u32) -> Option<(Vec<u8>, &'static str)> {
+        None
+    }
+
     /// Opens a file in the system's default editor.
     /// Returns the full path on success, or an error message if no editor is available.
     fn open_in_editor(&self, path: &str) -> Result<String, String>;

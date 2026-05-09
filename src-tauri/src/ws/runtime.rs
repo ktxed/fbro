@@ -38,7 +38,14 @@ pub(crate) fn build_state_snapshot(
     let panels = state
         .panels
         .iter()
-        .map(|(id, panel)| (id.clone(), build_panel_snapshot(panel)))
+        .map(|(id, panel)| {
+            let supports_thumbs = state
+                .drivers
+                .get(&panel.source_id)
+                .map(|d| d.supports_thumbnails())
+                .unwrap_or(false);
+            (id.clone(), build_panel_snapshot(panel, supports_thumbs))
+        })
         .collect();
 
     let mut sorted_panel_ids: Vec<String> = state.panels.keys().cloned().collect();
@@ -175,7 +182,7 @@ pub(crate) async fn navigate_to(
         handle.abort();
     }
 
-    let (sort, filter, show_hidden, version, driver, shadow_source_schema, source_id) = {
+    let (sort, filter, show_hidden, version, driver, shadow_source_schema, source_id, supports_thumbs, view_mode) = {
         let mut state_guard = state.lock().await;
         let (source_id, sort, filter, show_hidden, version, shadow_schema) =
             if let Some(panel) = state_guard.panels.get_mut(panel_id) {
@@ -202,7 +209,20 @@ pub(crate) async fn navigate_to(
                 return;
             };
         let driver = state_guard.drivers.get(&source_id).cloned().unwrap();
-        (sort, filter, show_hidden, version, driver, shadow_schema, source_id)
+        let supports_thumbs = driver.supports_thumbnails();
+        // Auto-fall-back: if grid is active but new source doesn't support
+        // thumbnails, drop back to list mode.
+        if !supports_thumbs {
+            if let Some(panel) = state_guard.panels.get_mut(panel_id) {
+                panel.view_mode = crate::state::PanelViewMode::List;
+            }
+        }
+        let view_mode = state_guard
+            .panels
+            .get(panel_id)
+            .map(|p| p.view_mode.as_str().to_string())
+            .unwrap_or_else(|| "list".to_string());
+        (sort, filter, show_hidden, version, driver, shadow_schema, source_id, supports_thumbs, view_mode)
     };
 
     let _ = tx
@@ -224,7 +244,9 @@ pub(crate) async fn navigate_to(
                 "totalCount": null,
                 "totalSize": null,
                 "windowStart": null,
-                "shadowSource": shadow_source_schema
+                "shadowSource": shadow_source_schema,
+                "supportsThumbnails": supports_thumbs,
+                "viewMode": view_mode,
             }),
         })
         .await;
@@ -278,7 +300,7 @@ pub(crate) async fn rescan_panel(
         handle.abort();
     }
 
-    let (path, sort, filter, filter_mode_active, show_hidden, version, driver, source_id, shadow_source_schema) = {
+    let (path, sort, filter, filter_mode_active, show_hidden, version, driver, source_id, shadow_source_schema, supports_thumbs, view_mode) = {
         let mut state_guard = state.lock().await;
         let (source_id, path, sort, filter, filter_mode_active, show_hidden, version, shadow_schema) =
             if let Some(panel) = state_guard.panels.get_mut(panel_id) {
@@ -310,6 +332,17 @@ pub(crate) async fn rescan_panel(
                 return;
             };
         let driver = state_guard.drivers.get(&source_id).cloned().unwrap();
+        let supports_thumbs = driver.supports_thumbnails();
+        if !supports_thumbs {
+            if let Some(panel) = state_guard.panels.get_mut(panel_id) {
+                panel.view_mode = crate::state::PanelViewMode::List;
+            }
+        }
+        let view_mode = state_guard
+            .panels
+            .get(panel_id)
+            .map(|p| p.view_mode.as_str().to_string())
+            .unwrap_or_else(|| "list".to_string());
         (
             path,
             sort,
@@ -320,6 +353,8 @@ pub(crate) async fn rescan_panel(
             driver,
             source_id,
             shadow_schema,
+            supports_thumbs,
+            view_mode,
         )
     };
 
@@ -343,7 +378,9 @@ pub(crate) async fn rescan_panel(
                 "showHidden": show_hidden,
                 "totalCount": null,
                 "windowStart": null,
-                "shadowSource": shadow_source_schema
+                "shadowSource": shadow_source_schema,
+                "supportsThumbnails": supports_thumbs,
+                "viewMode": view_mode,
             }),
         })
         .await;
@@ -767,7 +804,7 @@ pub(crate) async fn update_panel_from_patch(
     }
 }
 
-fn build_panel_snapshot(panel: &Panel) -> PanelSnapshot {
+fn build_panel_snapshot(panel: &Panel, supports_thumbnails: bool) -> PanelSnapshot {
     let mut calculating_size: Vec<String> = panel.calculating_size.iter().cloned().collect();
     calculating_size.sort();
     PanelSnapshot {
@@ -779,6 +816,8 @@ fn build_panel_snapshot(panel: &Panel) -> PanelSnapshot {
         filter: panel.filter.clone(),
         filter_mode_active: panel.filter_mode_active,
         show_hidden: panel.show_hidden,
+        view_mode: panel.view_mode.as_str().to_string(),
+        supports_thumbnails,
         cursor: panel.cursor,
         selection: panel.selection.clone(),
         selected_entries: selected_entries_for_panel(panel),

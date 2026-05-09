@@ -102,6 +102,10 @@ impl VfsDriver for SpyFsDriver {
         self.inner.is_local()
     }
 
+    fn supports_thumbnails(&self) -> bool {
+        self.inner.supports_thumbnails()
+    }
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }

@@ -633,6 +633,134 @@ body {
   scrollbar-color: var(--border) transparent;
 }
 
+.panel__list--grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(144px, 1fr));
+  grid-auto-rows: max-content;
+  gap: 8px;
+  padding: 8px;
+  align-content: start;
+}
+
+.panel__card {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 4px;
+  cursor: default;
+  user-select: none;
+  background: transparent;
+  overflow: hidden;
+}
+
+.panel__card:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.panel__card--cursor {
+  border-color: var(--border);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.panel--focused .panel__card--cursor {
+  border-color: #4caf50;
+  background: rgba(76, 175, 80, 0.08);
+}
+
+.panel__card--selected {
+  background: rgba(255, 165, 0, 0.10);
+}
+
+.panel--focused .panel__card--selected {
+  background: rgba(255, 165, 0, 0.18);
+}
+
+.panel__card--cursor.panel__card--selected {
+  border-color: #ff9800;
+}
+
+.panel__card--drop-target {
+  outline: 2px solid #4caf50;
+  outline-offset: -2px;
+}
+
+.panel__thumb {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 3px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.panel__thumb-icon {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 1;
+  transition: opacity 200ms ease;
+}
+
+.panel__thumb-icon img {
+  width: 48px;
+  height: 48px;
+  image-rendering: -webkit-optimize-contrast;
+}
+
+.panel__thumb-icon-fallback {
+  font-size: 32px;
+}
+
+.panel__thumb-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  opacity: 0;
+  transition: opacity 200ms ease;
+}
+
+.panel__thumb-img--loaded {
+  opacity: 1;
+}
+
+.panel__thumb-icon[aria-hidden="true"] {
+  opacity: 0;
+}
+
+.panel__card-name {
+  margin-top: 4px;
+  font-size: var(--font-size);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.3;
+}
+
+.panel__card-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: calc(var(--font-size) - 2px);
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.panel__card-size,
+.panel__card-date {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .panel__list::-webkit-scrollbar { width: 6px; }
 .panel__list::-webkit-scrollbar-track { background: transparent; }
 .panel__list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }

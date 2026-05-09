@@ -134,7 +134,12 @@ fn main() {
 
     let platform = platform::create_platform();
     let viewer_prefetch = Arc::new(ViewerPrefetchQueue::new());
-    let file_server_port = fileserver::start(platform.clone(), Arc::clone(&viewer_prefetch));
+    let thumb_cache = Arc::new(fileserver::ThumbCache::new(256));
+    let file_server_port = fileserver::start(
+        platform.clone(),
+        Arc::clone(&viewer_prefetch),
+        Arc::clone(&thumb_cache),
+    );
     let icon_cache: Arc<StdMutex<HashMap<String, (Vec<u8>, &'static str)>>> =
         Arc::new(StdMutex::new(HashMap::new()));
 

@@ -48,6 +48,11 @@ export interface PanelState {
   filter: null | { mode: string; value: string };
   filterModeActive: boolean;
   showHidden: boolean;
+  viewMode: "list" | "grid";
+  /** True if the underlying source supports OS-native or fbro-managed
+   *  thumbnails (host-path-backed: local FS, search results). When false,
+   *  grid mode is rejected and the toggle command is a no-op. */
+  supportsThumbnails: boolean;
   cursor: number;
   selection: number[];
   selectedEntries: FileOpFile[];

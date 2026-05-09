@@ -61,6 +61,10 @@ impl VfsDriver for LocalFsDriver {
         true
     }
 
+    fn supports_thumbnails(&self) -> bool {
+        true
+    }
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }

@@ -2,10 +2,12 @@ import { useEffect, useRef } from "react";
 import { useAppDispatch, useAppState } from "../store";
 import type { SettingsTab } from "../store";
 import { SettingsGeneralTab } from "./SettingsGeneralTab";
+import { SettingsDisplayTab } from "./SettingsDisplayTab";
 import type { WsClient } from "../ws/client";
 
 const TABS: { id: SettingsTab; label: string }[] = [
   { id: "general", label: "General" },
+  { id: "display", label: "Display" },
 ];
 
 interface SettingsModalProps {
@@ -76,6 +78,7 @@ export function SettingsModal({ client }: SettingsModalProps) {
             {activeTab === "general" && (
               <SettingsGeneralTab general={state.settings.general} client={client} />
             )}
+            {activeTab === "display" && <SettingsDisplayTab />}
           </div>
         </div>
         <div className="modal__actions">

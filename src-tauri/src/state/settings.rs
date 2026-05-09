@@ -1,9 +1,13 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 #[derive(Serialize, Deserialize, Clone, Default)]
 pub struct Settings {
     pub general: GeneralSettings,
+    /// Per-panel view mode ("list" or "grid"), keyed by panel_id.
+    #[serde(default)]
+    pub panel_view_modes: HashMap<String, String>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -50,18 +54,21 @@ pub fn load() -> Settings {
     serde_json::from_str(&content).unwrap_or_default()
 }
 
-pub fn save_general(general: &GeneralSettings) -> std::io::Result<()> {
-    let settings = Settings {
-        general: general.clone(),
-    };
+pub fn save(settings: &Settings) -> std::io::Result<()> {
     let path = settings_path();
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let content = serde_json::to_string_pretty(&settings)
+    let content = serde_json::to_string_pretty(settings)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
     let tmp = path.with_extension("json.tmp");
     std::fs::write(&tmp, content)?;
     std::fs::rename(tmp, path)?;
     Ok(())
+}
+
+pub fn save_general(general: &GeneralSettings) -> std::io::Result<()> {
+    let mut settings = load();
+    settings.general = general.clone();
+    save(&settings)
 }

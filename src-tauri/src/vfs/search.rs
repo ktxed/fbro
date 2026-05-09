@@ -48,6 +48,10 @@ impl VfsDriver for SearchResultsDriver {
         false
     }
 
+    fn supports_thumbnails(&self) -> bool {
+        true
+    }
+
     fn as_any(&self) -> &dyn Any {
         self
     }

@@ -234,6 +234,10 @@ impl Platform for WindowsPlatform {
     ) -> Result<(), String> {
         write_windows_external_clipboard(payload)
     }
+
+    fn get_thumbnail(&self, path: &str, size: u32) -> Option<(Vec<u8>, &'static str)> {
+        windows_get_thumbnail(path, size).map(|bytes| (bytes, "image/png"))
+    }
 }
 
 fn read_windows_external_clipboard() -> Result<Option<ExternalClipboardPayload>, String> {
@@ -531,4 +535,244 @@ fn find_windows_executable(candidates: &[&str]) -> Option<String> {
                 })
             })
         })
+}
+
+// ── Thumbnail extraction via IShellItemImageFactory ──────────────────────────
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct GUID {
+    data1: u32,
+    data2: u16,
+    data3: u16,
+    data4: [u8; 8],
+}
+
+// IID_IShellItemImageFactory: bcc18b79-ba16-442f-80c4-8a59c30c463b
+const IID_ISHELL_ITEM_IMAGE_FACTORY: GUID = GUID {
+    data1: 0xbcc18b79,
+    data2: 0xba16,
+    data3: 0x442f,
+    data4: [0x80, 0xc4, 0x8a, 0x59, 0xc3, 0x0c, 0x46, 0x3b],
+};
+
+#[repr(C)]
+struct SIZE {
+    cx: i32,
+    cy: i32,
+}
+
+const SIIGBF_BIGGERSIZEOK: u32 = 0x01;
+const SIIGBF_THUMBNAILONLY: u32 = 0x08;
+const COINIT_APARTMENTTHREADED: u32 = 0x2;
+const COINIT_DISABLE_OLE1DDE: u32 = 0x4;
+
+const BI_RGB: u32 = 0;
+const DIB_RGB_COLORS: u32 = 0;
+
+#[repr(C)]
+struct BITMAP {
+    bm_type: i32,
+    bm_width: i32,
+    bm_height: i32,
+    bm_width_bytes: i32,
+    bm_planes: u16,
+    bm_bits_pixel: u16,
+    bm_bits: *mut c_void,
+}
+
+#[repr(C)]
+struct BITMAPINFOHEADER {
+    bi_size: u32,
+    bi_width: i32,
+    bi_height: i32,
+    bi_planes: u16,
+    bi_bit_count: u16,
+    bi_compression: u32,
+    bi_size_image: u32,
+    bi_x_pels_per_meter: i32,
+    bi_y_pels_per_meter: i32,
+    bi_clr_used: u32,
+    bi_clr_important: u32,
+}
+
+#[repr(C)]
+struct BITMAPINFO {
+    header: BITMAPINFOHEADER,
+    colors: [u32; 1],
+}
+
+#[link(name = "ole32")]
+extern "system" {
+    fn CoInitializeEx(reserved: *mut c_void, co_init: u32) -> i32;
+    fn CoUninitialize();
+}
+
+#[link(name = "shell32")]
+extern "system" {
+    fn SHCreateItemFromParsingName(
+        psz_path: *const u16,
+        pbc: *mut c_void,
+        riid: *const GUID,
+        ppv: *mut *mut c_void,
+    ) -> i32;
+}
+
+#[link(name = "gdi32")]
+extern "system" {
+    fn GetObjectW(h: *mut c_void, c: i32, pv: *mut c_void) -> i32;
+    fn DeleteObject(h: *mut c_void) -> i32;
+    fn CreateCompatibleDC(hdc: *mut c_void) -> *mut c_void;
+    fn DeleteDC(hdc: *mut c_void) -> i32;
+    fn GetDIBits(
+        hdc: *mut c_void,
+        h_bmp: *mut c_void,
+        u_start_scan: u32,
+        c_scan_lines: u32,
+        lp_v_bits: *mut c_void,
+        lpbmi: *mut BITMAPINFO,
+        usage: u32,
+    ) -> i32;
+}
+
+// IShellItemImageFactory vtable layout: IUnknown (3) + GetImage
+#[repr(C)]
+struct IShellItemImageFactoryVtbl {
+    query_interface: unsafe extern "system" fn(*mut c_void, *const GUID, *mut *mut c_void) -> i32,
+    add_ref: unsafe extern "system" fn(*mut c_void) -> u32,
+    release: unsafe extern "system" fn(*mut c_void) -> u32,
+    get_image: unsafe extern "system" fn(*mut c_void, SIZE, u32, *mut *mut c_void) -> i32,
+}
+
+#[repr(C)]
+struct IShellItemImageFactory {
+    vtbl: *const IShellItemImageFactoryVtbl,
+}
+
+fn windows_get_thumbnail(path: &str, size: u32) -> Option<Vec<u8>> {
+    // Convert forward slashes to backslashes for the shell.
+    let win_path = path.replace('/', "\\");
+    let wide = to_wide(&win_path);
+
+    unsafe {
+        let hr = CoInitializeEx(
+            ptr::null_mut(),
+            COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE,
+        );
+        // S_OK == 0, S_FALSE == 1 (already initialized) — both fine.
+        if hr < 0 {
+            return None;
+        }
+
+        let result = (|| -> Option<Vec<u8>> {
+            let mut factory: *mut c_void = ptr::null_mut();
+            let hr = SHCreateItemFromParsingName(
+                wide.as_ptr(),
+                ptr::null_mut(),
+                &IID_ISHELL_ITEM_IMAGE_FACTORY,
+                &mut factory,
+            );
+            if hr < 0 || factory.is_null() {
+                return None;
+            }
+
+            let factory_ptr = factory as *mut IShellItemImageFactory;
+            let vtbl = (*factory_ptr).vtbl;
+
+            let mut hbitmap: *mut c_void = ptr::null_mut();
+            let hr = ((*vtbl).get_image)(
+                factory,
+                SIZE {
+                    cx: size as i32,
+                    cy: size as i32,
+                },
+                SIIGBF_BIGGERSIZEOK,
+                &mut hbitmap,
+            );
+            ((*vtbl).release)(factory);
+
+            if hr < 0 || hbitmap.is_null() {
+                return None;
+            }
+
+            let png = hbitmap_to_png(hbitmap);
+            DeleteObject(hbitmap);
+            png
+        })();
+
+        // Don't CoUninitialize — leave COM initialized for the worker thread's lifetime.
+        // Calling CoUninitialize after a successful CoInitializeEx that returned S_FALSE
+        // (already-initialized) would balance someone else's init.
+        let _ = hr;
+        result
+    }
+}
+
+unsafe fn hbitmap_to_png(hbitmap: *mut c_void) -> Option<Vec<u8>> {
+    let mut bm: BITMAP = std::mem::zeroed();
+    let n = GetObjectW(
+        hbitmap,
+        std::mem::size_of::<BITMAP>() as i32,
+        &mut bm as *mut _ as *mut c_void,
+    );
+    if n == 0 || bm.bm_width <= 0 || bm.bm_height <= 0 {
+        return None;
+    }
+    let width = bm.bm_width as u32;
+    let height = bm.bm_height as u32;
+
+    let hdc = CreateCompatibleDC(ptr::null_mut());
+    if hdc.is_null() {
+        return None;
+    }
+
+    let mut bmi = BITMAPINFO {
+        header: BITMAPINFOHEADER {
+            bi_size: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+            bi_width: bm.bm_width,
+            // Negative height: top-down rows.
+            bi_height: -bm.bm_height,
+            bi_planes: 1,
+            bi_bit_count: 32,
+            bi_compression: BI_RGB,
+            bi_size_image: 0,
+            bi_x_pels_per_meter: 0,
+            bi_y_pels_per_meter: 0,
+            bi_clr_used: 0,
+            bi_clr_important: 0,
+        },
+        colors: [0],
+    };
+
+    let stride = (width as usize) * 4;
+    let mut pixels = vec![0u8; stride * (height as usize)];
+
+    let lines = GetDIBits(
+        hdc,
+        hbitmap,
+        0,
+        height,
+        pixels.as_mut_ptr() as *mut c_void,
+        &mut bmi,
+        DIB_RGB_COLORS,
+    );
+    DeleteDC(hdc);
+    if lines == 0 {
+        return None;
+    }
+
+    // Pixels arrive as BGRA. Swap to RGBA for PNG.
+    for chunk in pixels.chunks_exact_mut(4) {
+        chunk.swap(0, 2);
+    }
+
+    let mut png_bytes: Vec<u8> = Vec::with_capacity(pixels.len() / 4);
+    {
+        let mut encoder = png::Encoder::new(&mut png_bytes, width, height);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header().ok()?;
+        writer.write_image_data(&pixels).ok()?;
+    }
+    Some(png_bytes)
 }

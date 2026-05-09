@@ -168,7 +168,7 @@ export interface PendingSearch {
   searchParams: SearchParams | null;
 }
 
-export type SettingsTab = "general";
+export type SettingsTab = "general" | "display";
 
 export interface PendingSettings {
   activeTab: SettingsTab;
@@ -330,7 +330,7 @@ function applySnapshot(state: AppState, msg: StateSnapshotMessage): AppState {
   if (domains.panels) {
     const panels: Record<string, PanelState> = {};
     for (const [id, p] of Object.entries(domains.panels)) {
-      panels[id] = { ...p, panelId: id, entries: p.entries ?? [], selection: p.selection ?? [], selectedEntries: p.selectedEntries ?? [], version: p.version ?? 0, calculatingSize: p.calculatingSize ?? [], totalCount: p.totalCount, totalSize: p.totalSize, windowStart: p.windowStart, filterModeActive: p.filterModeActive ?? false, showHidden: p.showHidden ?? false };
+      panels[id] = { ...p, panelId: id, entries: p.entries ?? [], selection: p.selection ?? [], selectedEntries: p.selectedEntries ?? [], version: p.version ?? 0, calculatingSize: p.calculatingSize ?? [], totalCount: p.totalCount, totalSize: p.totalSize, windowStart: p.windowStart, filterModeActive: p.filterModeActive ?? false, showHidden: p.showHidden ?? false, viewMode: p.viewMode ?? "list", supportsThumbnails: p.supportsThumbnails ?? false };
     }
     next.panels = panels;
     next.panelHistory = Object.fromEntries(
@@ -463,6 +463,12 @@ function applyPatch(state: AppState, msg: StatePatchMessage): AppState {
     }
     if (msg.patch.showHidden !== undefined) {
       updated = { ...updated, showHidden: msg.patch.showHidden as boolean };
+    }
+    if (msg.patch.viewMode !== undefined) {
+      updated = { ...updated, viewMode: msg.patch.viewMode as PanelState["viewMode"] };
+    }
+    if (msg.patch.supportsThumbnails !== undefined) {
+      updated = { ...updated, supportsThumbnails: msg.patch.supportsThumbnails as boolean };
     }
     if (msg.patch.selection !== undefined) {
       updated = { ...updated, selection: msg.patch.selection };

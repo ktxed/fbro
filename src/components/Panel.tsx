@@ -12,8 +12,10 @@ import { useAppDispatch, useAppState } from "../store";
 import { IconChevronDown, IconChevronUp, IconChevronRight, IconChevronLeft, IconArrowUpRight, IconX } from "@tabler/icons-react";
 import { BookmarksPopover } from "./BookmarksPopover";
 import { PanelTerminal } from "./PanelTerminal";
+import { EntryThumb } from "./EntryThumb";
 
 const ROW_HEIGHT = 22;
+const GRID_THUMB_SIZE = 128;
 const FILTER_DEBOUNCE_MS = 200;
 
 function SortHeader({ sort, panelId, client }: {
@@ -693,6 +695,112 @@ export function Panel({
     focusDivRef.current?.focus();
   }
 
+  const isGrid = panel.viewMode === "grid" && panel.supportsThumbnails;
+
+  const hostPathFor = (entry: VFSEntry): string | null => {
+    if (entry.sourcePath) return entry.sourcePath;
+    if (entry.name === "..") return null;
+    if (entry.kind !== "file") return null;
+    const dir = panel.path.replace(/[/\\]+$/, "");
+    return `${dir}/${entry.name}`;
+  };
+
+  function rowEventHandlers(entry: VFSEntry, absIndex: number) {
+    return {
+      onMouseDown: (e: React.MouseEvent) => {
+        if (e.button === 2) {
+          const rect = DOMRect.fromRect({
+            x: e.clientX,
+            y: e.clientY,
+            width: 0,
+            height: 0,
+          });
+          if (!isFocused) client.sendIntent("SwitchFocus", undefined, { to: panelId });
+          const mode = selectionSet.has(absIndex) ? "deselect" : "select";
+          rightDrag.current = { active: true, everMoved: false, startRow: absIndex, mode, preSelection: [...panel.selection] };
+          contextMenuOpenRef.current = false;
+          contextMenuHoldStartRef.current = Date.now();
+          contextMenuPendingRef.current = entry.name === ".." ? null : { entry, absIndex, rect };
+          focusDivRef.current?.focus();
+          return;
+        }
+        e.preventDefault();
+        dispatch({ type: "CLOSE_CONTEXT_MENU" });
+        if (!isFocused) client.sendIntent("SwitchFocus", undefined, { to: panelId });
+        client.sendIntent("SetCursor", panelId, { index: absIndex });
+        onRowPointerDown({ absIndex, clientX: e.clientX, clientY: e.clientY });
+        focusDivRef.current?.focus();
+      },
+      onMouseEnter: () => {
+        const drag = rightDrag.current;
+        if (!drag.active) return;
+        drag.everMoved = true;
+        const lo = Math.min(drag.startRow, absIndex);
+        const hi = Math.max(drag.startRow, absIndex);
+        const rangeSet = new Set<number>();
+        for (let r = lo; r <= hi; r++) rangeSet.add(r);
+        let indices: number[];
+        if (drag.mode === "deselect") {
+          indices = drag.preSelection.filter(idx => !rangeSet.has(idx));
+        } else {
+          const merged = new Set(drag.preSelection);
+          rangeSet.forEach(r => merged.add(r));
+          indices = [...merged];
+        }
+        client.sendIntent("SetSelection", panelId, { indices });
+      },
+      onContextMenu: (e: React.MouseEvent) => {
+        e.preventDefault();
+        if (contextMenuOpenRef.current) {
+          window.setTimeout(() => {
+            contextMenuOpenRef.current = false;
+          }, 0);
+          return;
+        }
+        if (suppressNextContextMenuRef.current) {
+          suppressNextContextMenuRef.current = false;
+          return;
+        }
+        if (!rightDrag.current.everMoved) {
+          client.sendIntent("ToggleSelectionAtIndex", panelId, { index: absIndex });
+        }
+      },
+      onDoubleClick: () => {
+        dispatch({ type: "CLOSE_CONTEXT_MENU" });
+        client.sendIntent("SetCursor", "focused-panel", { index: absIndex });
+        if (entry.kind !== "directory") {
+          client.sendIntent("OpenFile", "focused-panel");
+        } else {
+          client.sendIntent("OpenEntry", "focused-panel");
+        }
+      },
+    };
+  }
+
+  function renderCard(entry: VFSEntry, absIndex: number) {
+    const handlers = rowEventHandlers(entry, absIndex);
+    return (
+      <div
+        key={absIndex}
+        data-abs-index={absIndex}
+        className={[
+          "panel__card",
+          absIndex === panel.cursor ? "panel__card--cursor" : "",
+          selectionSet.has(absIndex) ? "panel__card--selected" : "",
+          dragActive && dragDropAllowed && dragHoverAbsIndex === absIndex ? "panel__card--drop-target" : "",
+        ].filter(Boolean).join(" ")}
+        {...handlers}
+      >
+        <EntryThumb entry={entry} hostPath={hostPathFor(entry)} size={GRID_THUMB_SIZE} />
+        <div className={`panel__card-name${entry.cc ? ` ${entry.cc}` : ""}`} title={entry.name}>{entry.name}</div>
+        <div className="panel__card-meta">
+          <span className="panel__card-size">{formatSize(entry, calcSet)}</span>
+          <span className="panel__card-date">{formatMtime(entry.mtime)}</span>
+        </div>
+      </div>
+    );
+  }
+
   function renderRow(entry: VFSEntry, absIndex: number) {
     return (
       <div
@@ -842,8 +950,15 @@ export function Panel({
 
       <SortHeader sort={panel.sort} panelId={panelId} client={client} />
 
-      <div className="panel__list" ref={listRef} onScroll={isWindowed ? handleScroll : undefined} onMouseDown={(e) => { if (e.target === e.currentTarget) focusDivRef.current?.focus(); }} style={modalActive ? { overflow: "hidden" } : undefined}>
-        {isWindowed ? (
+      <div className={`panel__list${isGrid ? " panel__list--grid" : ""}`} ref={listRef} onScroll={isWindowed && !isGrid ? handleScroll : undefined} onMouseDown={(e) => { if (e.target === e.currentTarget) focusDivRef.current?.focus(); }} style={modalActive ? { overflow: "hidden" } : undefined}>
+        {isGrid ? (
+          <>
+            {panel.entries.map((entry, i) => renderCard(entry, (panel.windowStart ?? 0) + i))}
+            {panel.status === "loading" && panel.entries.length === 0 && (
+              <div className="panel__loading">Loading…</div>
+            )}
+          </>
+        ) : isWindowed ? (
           <div className="panel__virtual-sizer" style={{ height: totalCount * ROW_HEIGHT, position: "relative" }}>
             {panel.entries.map((entry, i) => renderRow(entry, windowStart + i))}
           </div>

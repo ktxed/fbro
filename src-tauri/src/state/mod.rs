@@ -53,6 +53,35 @@ pub struct ShadowSource {
 
 // ─── Panel ────────────────────────────────────────────────────────────────────
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PanelViewMode {
+    List,
+    Grid,
+}
+
+impl PanelViewMode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            PanelViewMode::List => "list",
+            PanelViewMode::Grid => "grid",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "list" => Some(PanelViewMode::List),
+            "grid" => Some(PanelViewMode::Grid),
+            _ => None,
+        }
+    }
+}
+
+impl Default for PanelViewMode {
+    fn default() -> Self {
+        PanelViewMode::List
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Panel {
     pub panel_id: String,
@@ -63,6 +92,7 @@ pub struct Panel {
     pub filter: Option<FilterSpec>,
     pub filter_mode_active: bool,
     pub show_hidden: bool,
+    pub view_mode: PanelViewMode,
     pub cursor: usize,
     pub selection: Vec<usize>,
     pub entries: Vec<EntrySchema>,
@@ -212,6 +242,16 @@ impl AppState {
             order: "asc".to_string(),
         };
 
+        let saved_view_modes = &loaded_settings.panel_view_modes;
+        let left_view_mode = saved_view_modes
+            .get("left")
+            .and_then(|s| PanelViewMode::from_str(s))
+            .unwrap_or_default();
+        let right_view_mode = saved_view_modes
+            .get("right")
+            .and_then(|s| PanelViewMode::from_str(s))
+            .unwrap_or_default();
+
         let left = Panel {
             panel_id: "left".to_string(),
             source_id: initial_source_id.clone(),
@@ -221,6 +261,7 @@ impl AppState {
             filter: None,
             filter_mode_active: false,
             show_hidden: show_hidden_default,
+            view_mode: left_view_mode,
             cursor: 0,
             selection: vec![],
             entries: vec![],
@@ -244,6 +285,7 @@ impl AppState {
             filter: None,
             filter_mode_active: false,
             show_hidden: show_hidden_default,
+            view_mode: right_view_mode,
             cursor: 0,
             selection: vec![],
             entries: vec![],

@@ -29,6 +29,14 @@ pub trait VfsDriver: Send + Sync {
         false
     }
 
+    /// Returns true if entries from this driver have real OS file paths
+    /// suitable for OS-native thumbnail providers. LocalFs and search-results
+    /// (which carry `source_path` per entry) qualify; archives, bookmarks,
+    /// and history do not.
+    fn supports_thumbnails(&self) -> bool {
+        false
+    }
+
     /// Downcast helper for runtime type checking (e.g. detecting ZipFsDriver).
     fn as_any(&self) -> &dyn std::any::Any;
 

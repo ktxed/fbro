@@ -75,6 +75,7 @@ export const PANEL_SHORTCUT_COMMAND_IDS = [
   "panel.path.sync",
   "panel.context_menu",
   "panel.toggle_hidden",
+  "panel.toggle_view_mode",
   "panel.bookmarks.open",
   "panel.bookmarks.browse",
   "panel.toggle_embedded_terminal",
@@ -739,6 +740,21 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
     case "panel.toggle_hidden": {
       if (!focused) return false;
       client.sendIntent("ToggleHidden", focused.panelId, {});
+      return true;
+    }
+    case "panel.toggle_view_mode": {
+      if (!focused) return false;
+      const focusedPanel = state.panels[focused.panelId];
+      if (!focusedPanel) return false;
+      const next = focusedPanel.viewMode === "grid" ? "list" : "grid";
+      if (next === "grid" && !focusedPanel.supportsThumbnails) {
+        dispatch({
+          type: "SHOW_TRANSIENT_HINT",
+          message: "Grid view is not available for this source",
+        });
+        return true;
+      }
+      client.sendIntent("SetPanelViewMode", focused.panelId, { mode: next });
       return true;
     }
     case "panel.bookmarks.open": {

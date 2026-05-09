@@ -274,6 +274,10 @@ pub struct PanelSnapshot {
     pub filter_mode_active: bool,
     #[serde(rename = "showHidden")]
     pub show_hidden: bool,
+    #[serde(rename = "viewMode")]
+    pub view_mode: String,
+    #[serde(rename = "supportsThumbnails")]
+    pub supports_thumbnails: bool,
     pub cursor: usize,
     pub selection: Vec<usize>,
     #[serde(rename = "selectedEntries")]

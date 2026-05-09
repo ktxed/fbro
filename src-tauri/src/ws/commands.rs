@@ -442,6 +442,13 @@ pub(crate) fn build_interactive_commands() -> Vec<InteractiveCommandSchema> {
             Some("ToggleHidden"),
         ),
         command(
+            "panel.toggle_view_mode",
+            "Panel",
+            "Toggle Grid View",
+            vec![keybinding_with_modifiers("G", true, false, false, false)],
+            None,
+        ),
+        command(
             "panel.bookmarks.open",
             "Panel",
             "Bookmarks…",

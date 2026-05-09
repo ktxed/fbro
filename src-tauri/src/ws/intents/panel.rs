@@ -34,6 +34,7 @@ pub(crate) async fn handle(name: &str, scope: &Value, args: &Value, ctx: &mut In
         "CancelSizeCalculation" => cancel_size_calculation(scope, args, ctx).await,
         "RequestWindow" => request_window(scope, args, ctx).await,
         "SwitchFocus" => switch_focus(args, ctx).await,
+        "SetPanelViewMode" => set_panel_view_mode(scope, args, ctx).await,
         "RequestStateSnapshot" => request_state_snapshot(ctx).await,
         _ => {}
     }
@@ -981,6 +982,74 @@ fn neighbors_for_prefetch(
         }
     }
     neighbors
+}
+
+async fn set_panel_view_mode(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
+    let panel_id = resolve_panel_id(scope, ctx.state).await;
+    let mode_str = arg_str(args, "mode").unwrap_or("list");
+    let target = match crate::state::PanelViewMode::from_str(mode_str) {
+        Some(m) => m,
+        None => return,
+    };
+
+    let (version, settings_to_save) = {
+        let mut state_guard = ctx.state.lock().await;
+        // Validate against source capability for grid mode.
+        if target == crate::state::PanelViewMode::Grid {
+            let source_id = match state_guard.panels.get(&panel_id) {
+                Some(p) => p.source_id.clone(),
+                None => return,
+            };
+            let supports = state_guard
+                .drivers
+                .get(&source_id)
+                .map(|d| d.supports_thumbnails())
+                .unwrap_or(false);
+            if !supports {
+                let _ = ctx
+                    .tx
+                    .send(ServerMessage::Error {
+                        timestamp: now(),
+                        code: "InvalidIntent".to_string(),
+                        message: "Grid view is not available for this source".to_string(),
+                        recoverable: true,
+                        extra: None,
+                    })
+                    .await;
+                return;
+            }
+        }
+
+        if let Some(panel) = state_guard.panels.get_mut(&panel_id) {
+            if panel.view_mode == target {
+                return;
+            }
+            panel.view_mode = target;
+            panel.version += 1;
+            let version = panel.version;
+            state_guard
+                .settings
+                .panel_view_modes
+                .insert(panel_id.clone(), target.as_str().to_string());
+            let settings_clone = state_guard.settings.clone();
+            (version, settings_clone)
+        } else {
+            return;
+        }
+    };
+
+    send_panel_patch(
+        ctx,
+        panel_id,
+        version,
+        serde_json::json!({ "viewMode": target.as_str() }),
+    )
+    .await;
+
+    // Persist outside the lock — disk I/O is best-effort.
+    let _ = tokio::task::spawn_blocking(move || {
+        let _ = crate::state::settings::save(&settings_to_save);
+    });
 }
 
 async fn send_panel_patch(
