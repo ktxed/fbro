@@ -135,7 +135,9 @@ function buildBreadcrumbs(path: string): Array<{ label: string; path: string }> 
       : currentPath
         ? `${currentPath}/${part}`
         : part;
-    crumbs.push({ label: part, path: currentPath || "/" });
+    // Windows drive root: "C:" alone is relative (CWD on that drive); "C:/" is absolute.
+    const crumbPath = /^[A-Za-z]:$/.test(currentPath) ? `${currentPath}/` : (currentPath || "/");
+    crumbs.push({ label: part, path: crumbPath });
   }
 
   return crumbs;

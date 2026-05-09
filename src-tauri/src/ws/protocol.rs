@@ -236,6 +236,8 @@ pub struct GeneralSettingsSchema {
     pub preserve_attributes: bool,
     pub ludicrous_mode: bool,
     pub max_image_size_mb: u64,
+    pub session_path: String,
+    pub bookmarks_path: String,
 }
 
 #[derive(Serialize, Clone, Debug)]

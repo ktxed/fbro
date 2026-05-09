@@ -8,12 +8,8 @@ pub struct BookmarkEntry {
     pub path: String,
 }
 
-fn bookmarks_path() -> PathBuf {
-    let base = std::env::var("XDG_CONFIG_HOME").unwrap_or_else(|_| {
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/".to_string());
-        format!("{home}/.config")
-    });
-    PathBuf::from(base).join("fbro").join("bookmarks.toml")
+pub fn bookmarks_path() -> PathBuf {
+    crate::config::config_dir().join("bookmarks.toml")
 }
 
 #[derive(Serialize, Deserialize, Default)]

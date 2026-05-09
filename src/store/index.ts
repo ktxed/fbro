@@ -32,6 +32,7 @@ import type {
   ChildProcess,
   GeneralSettings,
   SettingsState,
+  TerminalClosedMessage,
 } from "../ws/types";
 
 // ─── State ───────────────────────────────────────────────────────────────────
@@ -254,7 +255,7 @@ const initialState: AppState = {
   childProcesses: {},
   fontSize: 13,
   settings: {
-    general: { showHiddenDefault: false, rememberWindowState: true, preserveAttributes: true, ludicrousMode: false, maxImageSizeMb: 512 },
+    general: { showHiddenDefault: false, rememberWindowState: true, preserveAttributes: true, ludicrousMode: false, maxImageSizeMb: 512, sessionPath: "", bookmarksPath: "" },
   },
 };
 
@@ -1029,7 +1030,7 @@ function reducer(state: AppState, action: AppAction): AppState {
         case "TerminalClosed": {
           // Belt-and-suspenders: BE also broadcasts a StatePatch clearing terminalSessionId,
           // but handle it here too in case the patch arrives out of order or is missed.
-          const panelId = (msg as import("./types").TerminalClosedMessage).panelId;
+          const panelId = (msg as TerminalClosedMessage).panelId;
           if (!panelId || !state.panels[panelId]) return state;
           const panel = state.panels[panelId];
           if (panel.terminalSessionId === undefined && state.maximizedTerminalPanelId !== panelId) return state;

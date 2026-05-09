@@ -61,6 +61,17 @@ export function SettingsGeneralTab({ general, client }: SettingsGeneralTabProps)
         </label>
       </div>
       <div className="settings-tab__section">
+        <h3 className="settings-tab__section-title">Data files</h3>
+        <div className="settings-tab__path-row">
+          <span className="settings-tab__path-label">Session</span>
+          <code className="settings-tab__path-value">{general.sessionPath}</code>
+        </div>
+        <div className="settings-tab__path-row">
+          <span className="settings-tab__path-label">Bookmarks</span>
+          <code className="settings-tab__path-value">{general.bookmarksPath}</code>
+        </div>
+      </div>
+      <div className="settings-tab__section">
         <h3 className="settings-tab__section-title">Viewer</h3>
         <label className="settings-tab__option">
           <input

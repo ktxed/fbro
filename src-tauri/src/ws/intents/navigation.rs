@@ -583,6 +583,20 @@ async fn navigate_panel_to(args: &Value, ctx: &mut IntentContext<'_>) {
             }
         }
 
+        // On Windows, a bare drive letter like "C:" is a relative path (resolves to CWD
+        // on that drive). Always normalise it to "C:/" so it refers to the drive root.
+        #[cfg(windows)]
+        let raw = parsed.path.trim().to_string();
+        #[cfg(windows)]
+        let requested_path = if raw.len() == 2
+            && raw.as_bytes()[1] == b':'
+            && raw.as_bytes()[0].is_ascii_alphabetic()
+        {
+            format!("{}/", raw)
+        } else {
+            raw
+        };
+        #[cfg(not(windows))]
         let requested_path = parsed.path.trim().to_string();
         let resolved_target = {
             let state_guard = ctx.state.lock().await;

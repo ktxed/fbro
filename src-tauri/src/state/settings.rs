@@ -39,11 +39,7 @@ impl Default for GeneralSettings {
 }
 
 fn settings_path() -> PathBuf {
-    let base = std::env::var("XDG_CONFIG_HOME").unwrap_or_else(|_| {
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/".to_string());
-        format!("{home}/.config")
-    });
-    PathBuf::from(base).join("fbro").join("settings.json")
+    crate::config::config_dir().join("settings.json")
 }
 
 pub fn load() -> Settings {

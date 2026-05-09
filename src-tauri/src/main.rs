@@ -3,6 +3,7 @@
 
 mod bookmarks;
 mod bro;
+mod config;
 mod drag_out;
 mod fileserver;
 mod jobs;

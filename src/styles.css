@@ -2770,6 +2770,27 @@ body {
   cursor: pointer;
 }
 
+.settings-tab__path-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 4px;
+  font-size: var(--font-size);
+}
+
+.settings-tab__path-label {
+  flex-shrink: 0;
+  opacity: 0.6;
+  min-width: 72px;
+}
+
+.settings-tab__path-value {
+  opacity: 0.85;
+  word-break: break-all;
+  font-family: monospace;
+  font-size: calc(var(--font-size) - 1px);
+}
+
 /* ── Embedded panel terminal ──────────────────────────────────────────────── */
 
 .panel-terminal {

@@ -30,12 +30,12 @@ pub struct WindowSession {
 
 // ─── Path ─────────────────────────────────────────────────────────────────────
 
+pub fn session_path() -> PathBuf {
+    crate::config::config_dir().join("session.toml")
+}
+
 fn config_path() -> PathBuf {
-    let base = std::env::var("XDG_CONFIG_HOME").unwrap_or_else(|_| {
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/".to_string());
-        format!("{home}/.config")
-    });
-    PathBuf::from(base).join("fbro").join("session.toml")
+    session_path()
 }
 
 // ─── I/O ──────────────────────────────────────────────────────────────────────

@@ -53,7 +53,7 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
   );
 
   // Section 3 — Content
-  const [contentEnabled, setContentEnabled] = useState(!!p?.contentQuery);
+  const [contentEnabled, _setContentEnabled] = useState(!!p?.contentQuery);
   const [contentQuery, setContentQuery] = useState(p?.contentQuery ?? "");
 
   const pathInputRef = useRef<HTMLInputElement>(null);

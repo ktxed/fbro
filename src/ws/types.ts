@@ -315,6 +315,8 @@ export interface GeneralSettings {
   preserveAttributes: boolean;
   ludicrousMode: boolean;
   maxImageSizeMb: number;
+  sessionPath: string;
+  bookmarksPath: string;
 }
 
 export interface SettingsState {
