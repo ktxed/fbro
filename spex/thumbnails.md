@@ -1,0 +1,357 @@
+# fbro — Thumbnail System
+
+Thumbnails are visible when a panel is in **grid view** (Shift+G). This
+document covers how thumbnails are generated, cached, prioritised, and
+delivered to the FE, plus the build-time requirements for the Linux
+implementation.
+
+---
+
+## 1. Overview
+
+```
+FE grid card                 File server              ThumbPool        Platform
+   │                              │                      │                │
+   │  GET /__thumb__/{size}/{path}│                      │                │
+   │─────────────────────────────►│                      │                │
+   │                              │ L1 hit?              │                │
+   │                              │──────────────────────┤                │
+   │                              │ L1 miss → pool.request(key)           │
+   │                              │─────────────────────►│                │
+   │                              │                      │ dequeue job    │
+   │                              │                      │───────────────►│
+   │                              │                      │ Platform::get_thumbnail()
+   │                              │◄─────────────────────────────────────┤
+   │                              │ write L1; return PNG │                │
+   │◄─────────────────────────────│                      │                │
+```
+
+The FE never calls the BE WebSocket to request a thumbnail. Instead each grid
+card renders an `<img loading="lazy">` pointing at the local HTTP file server
+(`http://127.0.0.1:{fileServerPort}/__thumb__/{size}/{path}`). The browser's
+native lazy-loading suppresses requests for off-screen cards automatically,
+which limits unnecessary work during fast scrolls.
+
+---
+
+## 2. Panel grid mode and `supportsThumbnails`
+
+Grid mode is gated by the `supportsThumbnails` flag on the panel state:
+
+```ts
+// Panel.tsx
+const isGridMode = panel.viewMode === "grid" && panel.supportsThumbnails;
+```
+
+The BE sets this flag per panel based on the VFS driver that backs it:
+
+```rust
+// vfs/local.rs
+fn supports_thumbnails(&self) -> bool { true }
+```
+
+Only `LocalFsDriver` (real host paths) returns `true`. Archive shadow sources,
+search result panels that mix paths across sources, and any virtual panel
+that does not expose host-filesystem paths return `false`. This is important
+because the thumbnailer needs a real host path — it cannot thumbnail entries
+inside a zip file or a remote VFS.
+
+When `supportsThumbnails` is `false`, Shift+G is a no-op and the grid toggle
+command is ignored.
+
+---
+
+## 3. Thumbnail URL structure
+
+```
+http://127.0.0.1:{fileServerPort}/__thumb__/{size}/{percent-encoded-host-path}
+```
+
+| Segment | Details |
+|---------|---------|
+| `fileServerPort` | Ephemeral localhost port chosen at startup; sent to FE in the `Welcome` message |
+| `size` | Requested longer-edge size in pixels; clamped to 32–512 by the file server |
+| `percent-encoded-host-path` | Absolute host filesystem path, percent-encoded (same encoding as `encodeURIComponent`) |
+
+The size in the URL is the card width in pixels. The FE reads this from
+`gridMetrics.cardWidth`, which is measured from the DOM after each resize.
+
+---
+
+## 4. File server (`fileserver.rs`)
+
+The file server is a minimal hand-written HTTP/1.1 server (no async framework)
+running on its own OS thread. It handles three route prefixes:
+
+| Prefix | Purpose |
+|--------|---------|
+| `/__thumb__/{size}/{path}` | Thumbnail delivery |
+| `/__icon__/{name}` | Panel entry icons |
+| `/{abs-path}` | Raw file streaming for the viewer (supports `Range:`) |
+
+For thumbnail requests, the server:
+
+1. Parses `size` and the percent-decoded path.
+2. Reads `mtime` from the filesystem (used as a cache-busting key).
+3. Checks the **L1 in-memory cache** (`ThumbCache`). On hit: respond immediately.
+4. On miss: submits a `ThumbJobKey { path, size, mtime }` to the `ThumbPool`
+   and blocks the handler thread waiting for the result.
+5. On success: inserts into L1 and responds `200 image/png`.
+6. On failure (platform returned nothing): responds `404`.
+
+Multiple concurrent requests for the same `(path, size, mtime)` are
+deduplicated inside the pool — only one generation job runs; all waiters
+receive the same result.
+
+---
+
+## 5. L1 cache — `ThumbCache`
+
+An in-memory LRU cache capped at **1024 entries** (≈ 20 MB at ~20 KB/PNG).
+Implemented as a `HashMap<(path, size, mtime), (bytes, last_used_seq)>` behind
+a `Mutex`. On eviction, the entry with the smallest `last_used_seq` is
+removed.
+
+The cache is held in an `Arc<ThumbCache>` shared between the file server and
+`AppState`. This allows the `ClearThumbnailCache` intent handler to call
+`thumb_cache.clear()` and invalidate L1 without restarting the server.
+
+---
+
+## 6. ThumbPool — visibility-driven prioritisation
+
+`ThumbPool` (`thumb_pool.rs`) manages a fixed worker pool (default: **8
+threads**). Each worker calls `Platform::get_thumbnail()` to produce PNG bytes.
+
+### 6.1 Two-queue priority
+
+Jobs are held in a **high queue** (currently-visible cards) and a **low queue**
+(off-screen cards). Workers always drain the high queue first.
+
+When a job is dequeued, the worker re-checks visibility: if the card has
+scrolled off-screen in the meantime, the job is demoted to the low queue. This
+ensures that after a fast scroll the visible cards always have priority.
+
+### 6.2 Visibility signal
+
+The BE tracks which paths are currently in any grid panel's visible window. On
+every scan, window-slice update, or cursor move the runtime calls:
+
+```rust
+let paths = crate::state::collect_visible_thumb_paths(&state);
+state.thumb_pool.set_visible(paths);
+```
+
+`collect_visible_thumb_paths` iterates all panels in grid mode, considers
+their `windowed`/`window_start`/`window_count` state, and returns the set of
+host paths currently rendered.
+
+### 6.3 Concurrency cap
+
+When an embedded viewer is open the pool's `max_concurrent` is dialled down
+(via `set_max_concurrent`) so thumbnail workers yield CPU to the viewer's
+decode work.
+
+---
+
+## 7. Platform abstraction
+
+`Platform::get_thumbnail` is a trait method with a default no-op
+implementation. Each platform overrides it:
+
+| Platform | Implementation |
+|----------|---------------|
+| Linux | `platform/linux/thumbnail.rs` — custom generator (image + video) |
+| macOS | `QLThumbnailGenerator` via AppKit/QuickLook |
+| Windows | `IShellItemImageFactory` via Win32 COM |
+
+On macOS and Windows the OS thumbnail provider handles all format support
+automatically.
+
+---
+
+## 8. Linux thumbnailer (`platform/linux/thumbnail.rs`)
+
+freedesktop DBus thumbnailers (Tumbler, etc.) are not always installed — for
+example, PopOS Cosmic ships none by default. fbro therefore generates
+thumbnails itself for a curated set of formats rather than depending on an
+external service.
+
+### 8.1 Supported formats
+
+| Kind | Extensions |
+|------|-----------|
+| Image | `png jpg jpeg webp gif bmp tif tiff` |
+| Video | `mp4 mkv webm mov avi m4v` (requires `linux-video` feature) |
+
+Files with any other extension return no thumbnail (the FE falls back to the
+icon).
+
+### 8.2 Two-level cache
+
+| Level | Location | Key | Invalidation |
+|-------|----------|-----|-------------|
+| L1 | In-memory `ThumbCache` | `(path, size, mtime_secs)` | LRU eviction or explicit clear |
+| L2 | `$XDG_CACHE_HOME/fbro/thumbnails/` (or `~/.cache/fbro/thumbnails/`) | `blake3(canonical_path ‖ mtime_ns ‖ size).hex + .png` | `mtime` change or explicit clear |
+
+On a cache hit at L2 the PNG bytes are returned directly without decoding the
+source file. A failed-generation sentinel (`.fail` file alongside the `.png`)
+is honoured for **24 hours** to avoid repeatedly retrying genuinely-broken
+files; after 24 hours the sentinel is removed and generation is retried.
+
+Writes to L2 are **atomic**: content is written to `{key}.png.tmp` then
+renamed over `{key}.png`, so a crash mid-write leaves a stale `.tmp` but the
+last good thumbnail intact.
+
+### 8.3 Image thumbnailing
+
+Uses the `image` crate. Files larger than `thumbnail_max_image_size_mb` (user
+configurable, default 100 MiB) are skipped to avoid memory blowup on raw /
+multi-gigapixel images.
+
+### 8.4 Video thumbnailing (`linux-video` feature)
+
+Uses `ffmpeg-next` (Rust bindings to libav). The generator:
+
+1. Opens the file's best video stream with `ffmpeg::format::input`.
+2. Decodes frames sequentially, discarding the first
+   `thumbnail_video_frame_skip` frames (default: 5) to avoid black or
+   studio-card intros.
+3. Scales the chosen frame to fit within `size × size` using the `BILINEAR`
+   algorithm via `ffmpeg::software::scaling`.
+4. Encodes the result as PNG via the `image` crate and writes to L2.
+
+### 8.5 Cache-directory self-reference guard
+
+If the path being thumbnailed is itself inside the L2 cache directory (e.g.
+the user navigated to `~/.cache/fbro/thumbnails/`), the file is returned
+directly without re-thumbnailing. This prevents recursive thumbnail generation
+and avoids writing new cache entries for files that are already thumbnails.
+
+### 8.6 Runtime-tunable settings
+
+Three atomic values control thumbnailer behaviour at runtime without a restart:
+
+| Atomic | Type | Default | Setting key |
+|--------|------|---------|-------------|
+| `ENABLE_VIDEO_THUMBNAILS` | `AtomicBool` | `true` | `enableVideoThumbnails` |
+| `MAX_IMAGE_BYTES` | `AtomicU64` | 100 MiB | `thumbnailMaxImageSizeMb` |
+| `VIDEO_FRAME_SKIP` | `AtomicU32` | 5 | `thumbnailVideoFrameSkip` |
+
+All three are exposed in **Settings → Display**. Changes take effect
+immediately for new thumbnail requests (in-flight jobs use the value they read
+at the start of generation).
+
+---
+
+## 9. Settings → Display tab
+
+The Display tab (`SettingsDisplayTab.tsx`) exposes the Linux thumbnailer knobs
+and cache management. On non-Linux platforms it shows an informational note
+only (those platforms delegate entirely to the OS).
+
+| Control | Setting key | Intent |
+|---------|-------------|--------|
+| Enable video thumbnails | `enableVideoThumbnails` | `SetGeneralOption` |
+| Skip images larger than N MiB | `thumbnailMaxImageSizeMb` | `SetGeneralOption` |
+| Skip first N video frames | `thumbnailVideoFrameSkip` | `SetGeneralOption` |
+| Clear thumbnail cache | — | `ClearThumbnailCache` |
+
+The **Clear cache** button shows the current L2 cache size (item count and
+total bytes of `.png` files) and is disabled when the cache is empty. After
+clearing, the BE broadcasts a `StatePatch` with zeroed stats so the UI updates
+without a round-trip.
+
+Cache stats (`thumbnailCacheItemCount`, `thumbnailCacheSizeBytes`) and the
+cache directory path (`thumbnailCacheDir`) are read-only fields included in
+the `settings.general` snapshot. Because the `SetGeneralOption` patch only
+carries mutable settings fields, the FE reducer **merges** incoming patches
+into the existing `general` object rather than replacing it, preserving
+derived fields across settings changes.
+
+---
+
+## 10. Building on Linux
+
+### 10.1 Image-only build (no video)
+
+The image thumbnailer requires no additional system packages beyond the Tauri
+prerequisites. Add the following to `Cargo.toml` to enable image thumbnailing:
+
+```toml
+[target.'cfg(target_os = "linux")'.dependencies]
+image  = { version = "0.25", default-features = false,
+           features = ["png", "jpeg", "webp", "gif", "bmp", "tiff"] }
+blake3 = "1"
+```
+
+Disable the default `linux-video` feature to build without ffmpeg:
+
+```sh
+cargo build --no-default-features
+```
+
+### 10.2 Video build (default)
+
+Video thumbnailing requires `ffmpeg-next` (Rust bindings) plus the
+corresponding system libraries. Install the build dependencies:
+
+```sh
+# Debian / Ubuntu / PopOS
+sudo apt install \
+  libavcodec-dev libavformat-dev libavutil-dev \
+  libswscale-dev libavfilter-dev \
+  pkg-config clang llvm-dev ffmpeg
+
+# Fedora / RHEL
+sudo dnf install \
+  ffmpeg-devel clang llvm-devel pkg-config
+
+# Arch
+sudo pacman -S ffmpeg clang llvm pkgconf
+```
+
+Then build normally (the `linux-video` feature is on by default):
+
+```sh
+cargo build
+# or
+cargo tauri dev
+```
+
+`clang` and `llvm-dev` are required because `ffmpeg-next`'s build script
+uses `bindgen` to generate FFI bindings from the system libav headers.
+
+### 10.3 Feature flag summary
+
+| Feature | Default | Effect |
+|---------|---------|--------|
+| `linux-video` | ✓ on | Compiles `generate_video()` and links `ffmpeg-next` |
+| *(none)* | — off | Image-only build; video files produce no thumbnail |
+
+The `linux-video` feature is declared in `src-tauri/Cargo.toml`:
+
+```toml
+[features]
+default = ["linux-video"]
+linux-video = ["ffmpeg-next"]
+```
+
+---
+
+## 11. Key files
+
+| File | Role |
+|------|------|
+| `src-tauri/src/platform/linux/thumbnail.rs` | Linux thumbnailer: classify, L2 cache, image decode, video decode |
+| `src-tauri/src/thumb_pool.rs` | Worker pool: two-queue priority, visibility, concurrency cap |
+| `src-tauri/src/fileserver.rs` | HTTP server: `/__thumb__/` route, L1 `ThumbCache` |
+| `src-tauri/src/state/mod.rs` | `AppState` holds `Arc<ThumbPool>` and `Arc<ThumbCache>` |
+| `src-tauri/src/ws/runtime.rs` | `collect_visible_thumb_paths`, snapshot/patch helpers |
+| `src-tauri/src/ws/intents/settings.rs` | `SetGeneralOption` (knob changes), `ClearThumbnailCache` |
+| `src-tauri/src/state/settings.rs` | `GeneralSettings` — three thumb fields with serde defaults |
+| `src-tauri/src/ws/protocol.rs` | `GeneralSettingsSchema` — snapshot wire type |
+| `src-tauri/src/vfs/local.rs` | `supports_thumbnails() → true` for local FS |
+| `src/components/EntryThumb.tsx` | FE: `<img loading="lazy">` pointing at `/__thumb__/…` |
+| `src/components/Panel.tsx` | FE: grid layout, `isGridMode` guard, visibility reporting |
+| `src/components/SettingsDisplayTab.tsx` | FE: Display tab UI |
