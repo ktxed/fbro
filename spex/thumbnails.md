@@ -9,21 +9,27 @@ implementation.
 
 ## 1. Overview
 
-```
-FE grid card                 File server              ThumbPool        Platform
-   │                              │                      │                │
-   │  GET /__thumb__/{size}/{path}│                      │                │
-   │─────────────────────────────►│                      │                │
-   │                              │ L1 hit?              │                │
-   │                              │──────────────────────┤                │
-   │                              │ L1 miss → pool.request(key)           │
-   │                              │─────────────────────►│                │
-   │                              │                      │ dequeue job    │
-   │                              │                      │───────────────►│
-   │                              │                      │ Platform::get_thumbnail()
-   │                              │◄─────────────────────────────────────┤
-   │                              │ write L1; return PNG │                │
-   │◄─────────────────────────────│                      │                │
+```mermaid
+sequenceDiagram
+    participant FE as FE grid card
+    participant FS as File server
+    participant L1 as ThumbCache (L1)
+    participant Pool as ThumbPool
+    participant Plat as Platform
+
+    FE->>FS: GET /__thumb__/{size}/{path}
+    FS->>L1: lookup(path, size, mtime)
+    alt L1 hit
+        L1-->>FS: PNG bytes
+        FS-->>FE: 200 image/png
+    else L1 miss
+        FS->>Pool: request(ThumbJobKey)
+        Pool->>Plat: get_thumbnail(path, size)
+        Plat-->>Pool: PNG bytes
+        Pool-->>FS: PNG bytes
+        FS->>L1: put(key, bytes)
+        FS-->>FE: 200 image/png
+    end
 ```
 
 The FE never calls the BE WebSocket to request a thumbnail. Instead each grid
