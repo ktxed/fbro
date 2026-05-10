@@ -31,6 +31,7 @@ type ViewMode =
 interface Props {
   sourcePanelId: string;
   state: AppState;
+  onClose: () => void;
 }
 
 function formatSize(n: number): string {
@@ -65,7 +66,7 @@ function HexLines({ bytes }: { bytes: Uint8Array }) {
   return <>{lines}</>;
 }
 
-export function EmbeddedViewerPanel({ sourcePanelId, state }: Props) {
+export function EmbeddedViewerPanel({ sourcePanelId, state, onClose }: Props) {
   const [viewMode, setViewMode] = useState<ViewMode>({ kind: "empty" });
   const clientRef = useRef<WsClient | null>(null);
   const pendingPathRef = useRef<string | null>(null);
@@ -223,7 +224,16 @@ export function EmbeddedViewerPanel({ sourcePanelId, state }: Props) {
 
   return (
     <div className="embedded-viewer" onMouseDown={(e) => e.preventDefault()}>
-      <div className="embedded-viewer__header">{headerLabel}</div>
+      <div className="embedded-viewer__header">
+        <span className="embedded-viewer__header-label">{headerLabel}</span>
+        <button
+          className="embedded-viewer__close"
+          title="Close preview (Q)"
+          onClick={(e) => { e.stopPropagation(); onClose(); }}
+        >
+          ×
+        </button>
+      </div>
       <div className="embedded-viewer__content" style={{ height: "100%" }}>
         {viewMode.kind === "empty" && (
           <div className="embedded-viewer__placeholder">No file selected</div>

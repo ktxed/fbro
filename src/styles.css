@@ -158,14 +158,41 @@ body {
 }
 
 .embedded-viewer__header {
-  padding: 3px 8px;
+  display: flex;
+  align-items: center;
+  padding: 3px 4px 3px 8px;
   font-size: var(--font-size);
   color: var(--text-dim);
   border-bottom: 1px solid var(--border);
-  white-space: nowrap;
+  flex-shrink: 0;
+  gap: 4px;
+}
+
+.embedded-viewer__header-label {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.embedded-viewer__close {
   flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 14px;
+  line-height: 14px;
+  cursor: pointer;
+  border-radius: 3px;
+}
+
+.embedded-viewer__close:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--text);
 }
 
 .embedded-viewer__content {

@@ -449,6 +449,7 @@ export function Layout({ client, jobsViewOpen, onCloseJobsView, onOpenJobsView }
                 key={id}
                 sourcePanelId={state.embeddedViewer.sourcePanelId}
                 state={state}
+                onClose={() => dispatch({ type: "TOGGLE_EMBEDDED_VIEWER" })}
               />
             );
           }
