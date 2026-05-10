@@ -17,6 +17,7 @@
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/xterm": "^5.5.0",
     "marked": "^15.0.0",
+    "mermaid": "^11.14.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-tooltip": "^5.30.1"

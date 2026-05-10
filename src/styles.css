@@ -2259,6 +2259,17 @@ body {
   font-size: var(--font-size);
 }
 
+.viewer__mermaid {
+  margin: 1em 0;
+  overflow-x: auto;
+  text-align: center;
+}
+
+.viewer__mermaid svg {
+  max-width: 100%;
+  height: auto;
+}
+
 .viewer__markdown blockquote {
   border-left: 3px solid var(--accent);
   margin: 0.75em 0;

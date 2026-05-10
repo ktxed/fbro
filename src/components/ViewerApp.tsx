@@ -865,6 +865,38 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
     return marked.parse(renderText(buffer)) as string;
   }, [markdownMode, buffer, isSmall]);
 
+  // Render mermaid diagrams after the markdown HTML lands in the DOM.
+  useEffect(() => {
+    if (!markdownHtml || !contentRef.current) return;
+    const container = contentRef.current;
+    const codeBlocks = Array.from(
+      container.querySelectorAll<HTMLElement>("code.language-mermaid"),
+    );
+    if (codeBlocks.length === 0) return;
+
+    let cancelled = false;
+    import("mermaid").then(({ default: mermaid }) => {
+      if (cancelled) return;
+      mermaid.initialize({ startOnLoad: false, theme: "dark" });
+      codeBlocks.forEach(async (code, i) => {
+        const source = code.textContent ?? "";
+        const pre = code.parentElement;
+        if (!pre) return;
+        try {
+          const { svg } = await mermaid.render(`mermaid-${i}-${Date.now()}`, source);
+          if (cancelled) return;
+          const wrapper = document.createElement("div");
+          wrapper.className = "viewer__mermaid";
+          wrapper.innerHTML = svg;
+          pre.replaceWith(wrapper);
+        } catch {
+          // Leave the raw code block intact on parse failure.
+        }
+      });
+    });
+    return () => { cancelled = true; };
+  }, [markdownHtml]);
+
   // ── Status bar info ───────────────────────────────────────────────────────
 
   let offsetDisplay = bufferOffset;
