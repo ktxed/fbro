@@ -8,6 +8,22 @@ import { marked } from "marked";
 import { DirectFileViewer, canUseDirect } from "../viewers/DirectFileViewer";
 import { isArchiveSourceId } from "../utils/sourceId";
 
+// Mermaid v11 lazily registers diagram modules on the first render() call —
+// initialize() alone is not enough, and the first real render can produce empty
+// output before the registration promise settles. We do a discarded warm-up
+// render here so every render() the viewer issues is on a fully-ready instance.
+let _mermaidReady: Promise<Awaited<typeof import("mermaid")>["default"]> | null = null;
+function getMermaid() {
+  if (!_mermaidReady) {
+    _mermaidReady = import("mermaid").then(async ({ default: m }) => {
+      m.initialize({ startOnLoad: false, theme: "dark" });
+      try { await m.render("mermaid-warmup", "graph TD\n  A-->B"); } catch {}
+      return m;
+    });
+  }
+  return _mermaidReady;
+}
+
 const SMALL_LIMIT = 1 * 1024 * 1024;  // 1 MiB — files at or below this are loaded fully
 const CHUNK_SIZE  = 65536;  // 64 KiB — buffer window for large files
 const LINE_H      = 20;     // px — 13px font × 1.5 line-height (19.5, rounded up)
@@ -865,32 +881,41 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
     return marked.parse(renderText(buffer)) as string;
   }, [markdownMode, buffer, isSmall]);
 
-  // Render mermaid diagrams after the markdown HTML lands in the DOM.
+  // Start loading mermaid as soon as the viewer mounts on a markdown file, so
+  // the async warm-up overlaps with the file fetch instead of running after.
+  useEffect(() => {
+    if (isMdExt(filenameRef.current)) getMermaid();
+  }, []);
+
+  // Inject the markdown HTML manually and render any mermaid diagrams. We
+  // deliberately avoid dangerouslySetInnerHTML: React would rewrite innerHTML
+  // on every re-render (resize, font-size sync, mode detect), wiping the SVG
+  // we replace the <pre> with.
   useEffect(() => {
     if (!markdownHtml || !contentRef.current) return;
     const container = contentRef.current;
+    container.innerHTML = markdownHtml;
     const codeBlocks = Array.from(
       container.querySelectorAll<HTMLElement>("code.language-mermaid"),
     );
     if (codeBlocks.length === 0) return;
 
     let cancelled = false;
-    import("mermaid").then(({ default: mermaid }) => {
+    getMermaid().then(mermaid => {
       if (cancelled) return;
-      mermaid.initialize({ startOnLoad: false, theme: "dark" });
       codeBlocks.forEach(async (code, i) => {
         const source = code.textContent ?? "";
         const pre = code.parentElement;
-        if (!pre) return;
+        if (!pre || !pre.isConnected) return;
         try {
           const { svg } = await mermaid.render(`mermaid-${i}-${Date.now()}`, source);
-          if (cancelled) return;
+          if (cancelled || !pre.isConnected) return;
           const wrapper = document.createElement("div");
           wrapper.className = "viewer__mermaid";
           wrapper.innerHTML = svg;
           pre.replaceWith(wrapper);
-        } catch {
-          // Leave the raw code block intact on parse failure.
+        } catch (err) {
+          console.error("mermaid render failed:", err);
         }
       });
     });
@@ -1056,7 +1081,6 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
                 <div
                   className="viewer__markdown"
                   ref={contentRef as React.RefObject<HTMLDivElement>}
-                  dangerouslySetInnerHTML={{ __html: markdownHtml }}
                 />
               ) : (
                 <div className="viewer__markdown-unavailable">
