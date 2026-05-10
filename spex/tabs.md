@@ -203,7 +203,7 @@ These bindings are **panel-scoped**: they fire only when a panel listing has foc
 | `panel.tab.next` | Shift+K | Activate next tab (wraps) |
 | `panel.tab.prev` | Shift+J | Activate previous tab (wraps) |
 
-Middle-click on a tab chip also closes it.
+Middle-click on a tab chip also closes it. Double-clicking on **empty space** in the tab bar creates a new tab cloned from the leftmost non-terminal tab (falls back to the leftmost tab if all tabs are terminal tabs).
 
 ---
 
