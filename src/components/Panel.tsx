@@ -1185,7 +1185,13 @@ export function Panel({
     >
       {(() => {
         const slot = appState.slots[panel.slotId];
-        if (!slot || slot.tabPanelIds.length <= 1) return null;
+        if (!slot) return null;
+        // Show the tab bar in every panel whenever any panel has >1 tab — keeps
+        // breadcrumb / listing rows aligned across panels.
+        const anyTabbed = Object.values(appState.slots).some(
+          (s) => s.tabPanelIds.length > 1,
+        );
+        if (!anyTabbed) return null;
         return <PanelTabBar slot={slot} panels={appState.panels} client={client} />;
       })()}
 
