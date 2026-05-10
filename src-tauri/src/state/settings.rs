@@ -25,6 +25,20 @@ pub struct GeneralSettings {
     /// When false (default), every session starts with both panels in list.
     #[serde(default)]
     pub save_panel_view_mode: bool,
+    /// Linux fbro-managed thumbnailer: when false, skip video thumbnail
+    /// generation entirely (returns no thumb so the FE falls back to icon).
+    #[serde(default = "default_true")]
+    pub enable_video_thumbnails: bool,
+    /// Linux fbro-managed thumbnailer: skip image files larger than this many
+    /// MiB rather than decoding them — protects against memory blowup on
+    /// raw / multi-gigapixel images.
+    #[serde(default = "default_thumb_max_image_size_mb")]
+    pub thumbnail_max_image_size_mb: u64,
+    /// Linux fbro-managed thumbnailer: number of decoded frames to discard at
+    /// the start of a video before picking the thumbnail frame. Many videos
+    /// open on black or studio cards.
+    #[serde(default = "default_thumb_video_frame_skip")]
+    pub thumbnail_video_frame_skip: u32,
 }
 
 fn default_true() -> bool {
@@ -33,6 +47,14 @@ fn default_true() -> bool {
 
 fn default_max_image_size_mb() -> u64 {
     512
+}
+
+fn default_thumb_max_image_size_mb() -> u64 {
+    100
+}
+
+fn default_thumb_video_frame_skip() -> u32 {
+    5
 }
 
 impl Default for GeneralSettings {
@@ -44,6 +66,9 @@ impl Default for GeneralSettings {
             ludicrous_mode: false,
             max_image_size_mb: 512,
             save_panel_view_mode: false,
+            enable_video_thumbnails: true,
+            thumbnail_max_image_size_mb: 100,
+            thumbnail_video_frame_skip: 5,
         }
     }
 }

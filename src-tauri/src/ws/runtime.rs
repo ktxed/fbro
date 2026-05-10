@@ -31,6 +31,29 @@ pub(crate) struct IntentContext<'a> {
     pub volume_watcher: &'a Arc<dyn crate::platform::VolumeWatcher>,
 }
 
+#[cfg(target_os = "linux")]
+fn thumbnail_cache_dir_string() -> String {
+    crate::platform::linux::thumbnail::cache_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default()
+}
+
+#[cfg(not(target_os = "linux"))]
+fn thumbnail_cache_dir_string() -> String {
+    String::new()
+}
+
+#[cfg(target_os = "linux")]
+fn thumbnail_cache_stats() -> (u64, u64) {
+    let (count, bytes) = crate::platform::linux::thumbnail::cache_stats();
+    (count as u64, bytes)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn thumbnail_cache_stats() -> (u64, u64) {
+    (0, 0)
+}
+
 pub(crate) fn build_state_snapshot(
     state: &AppState,
     dir_size_tasks: Vec<DirSizeTaskSnapshot>,
@@ -84,12 +107,24 @@ pub(crate) fn build_state_snapshot(
                     ludicrous_mode: state.settings.general.ludicrous_mode,
                     max_image_size_mb: state.settings.general.max_image_size_mb,
                     save_panel_view_mode: state.settings.general.save_panel_view_mode,
+                    enable_video_thumbnails: state.settings.general.enable_video_thumbnails,
+                    thumbnail_max_image_size_mb: state
+                        .settings
+                        .general
+                        .thumbnail_max_image_size_mb,
+                    thumbnail_video_frame_skip: state
+                        .settings
+                        .general
+                        .thumbnail_video_frame_skip,
                     session_path: crate::persistence::session_path()
                         .to_string_lossy()
                         .to_string(),
                     bookmarks_path: crate::bookmarks::bookmarks_path()
                         .to_string_lossy()
                         .to_string(),
+                    thumbnail_cache_dir: thumbnail_cache_dir_string(),
+                    thumbnail_cache_item_count: thumbnail_cache_stats().0,
+                    thumbnail_cache_size_bytes: thumbnail_cache_stats().1,
                 },
             },
         },

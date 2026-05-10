@@ -255,7 +255,7 @@ const initialState: AppState = {
   childProcesses: {},
   fontSize: 13,
   settings: {
-    general: { showHiddenDefault: false, rememberWindowState: true, preserveAttributes: true, ludicrousMode: false, maxImageSizeMb: 512, savePanelViewMode: false, sessionPath: "", bookmarksPath: "" },
+    general: { showHiddenDefault: false, rememberWindowState: true, preserveAttributes: true, ludicrousMode: false, maxImageSizeMb: 512, savePanelViewMode: false, enableVideoThumbnails: true, thumbnailMaxImageSizeMb: 100, thumbnailVideoFrameSkip: 5, sessionPath: "", bookmarksPath: "", thumbnailCacheDir: "", thumbnailCacheItemCount: 0, thumbnailCacheSizeBytes: 0 },
   },
 };
 
@@ -612,7 +612,7 @@ function applyPatch(state: AppState, msg: StatePatchMessage): AppState {
     const general = msg.patch.general as GeneralSettings | undefined;
     let next = fontSize !== undefined ? { ...state, fontSize } : state;
     if (general !== undefined) {
-      next = { ...next, settings: { ...next.settings, general } };
+      next = { ...next, settings: { ...next.settings, general: { ...next.settings.general, ...general } } };
     }
     return next;
   }

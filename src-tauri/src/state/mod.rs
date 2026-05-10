@@ -10,6 +10,7 @@ use crate::bro::ResolvedBro;
 use crate::jobs::search::SearchResultStore;
 use crate::jobs::JobStore;
 use crate::platform::{Platform, ResolvedOpenWithApp};
+use crate::fileserver::ThumbCache;
 use crate::thumb_pool::ThumbPool;
 use crate::vfs::VfsDriver;
 use crate::ws::protocol::{EntrySchema, FilterSpec, ServerMessage, SortSpec};
@@ -169,6 +170,9 @@ pub struct AppState {
     /// currently-visible path set to it on entries / window changes so
     /// workers prioritize cards the user is actually looking at.
     pub thumb_pool: Arc<ThumbPool>,
+    /// In-memory L1 thumbnail cache. Held here so the settings handler can
+    /// invalidate it when the user clicks "Clear cache".
+    pub thumb_cache: Arc<ThumbCache>,
 }
 
 #[derive(Clone, Debug, serde::Serialize)]
@@ -200,6 +204,7 @@ impl AppState {
         initial_paths: HashMap<String, String>,
         file_server_port: u16,
         thumb_pool: Arc<ThumbPool>,
+        thumb_cache: Arc<ThumbCache>,
     ) -> Self {
         let home = platform.home_dir();
         let loaded_settings = settings::load();
@@ -375,6 +380,7 @@ impl AppState {
             child_processes: HashMap::new(),
             pty_manager: Arc::new(crate::terminal::PtyManager::new()),
             thumb_pool,
+            thumb_cache,
         }
     }
 

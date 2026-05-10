@@ -56,6 +56,12 @@ impl ThumbCache {
         Some(entry.0.clone())
     }
 
+    pub fn clear(&self) {
+        if let Ok(mut inner) = self.inner.lock() {
+            inner.map.clear();
+        }
+    }
+
     fn put(&self, key: ThumbKey, bytes: Vec<u8>) {
         let Ok(mut inner) = self.inner.lock() else { return };
         inner.seq += 1;

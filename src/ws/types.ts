@@ -324,8 +324,15 @@ export interface GeneralSettings {
   ludicrousMode: boolean;
   maxImageSizeMb: number;
   savePanelViewMode: boolean;
+  enableVideoThumbnails: boolean;
+  thumbnailMaxImageSizeMb: number;
+  thumbnailVideoFrameSkip: number;
   sessionPath: string;
   bookmarksPath: string;
+  /** Empty string on platforms that don't use the fbro-managed thumbnailer. */
+  thumbnailCacheDir: string;
+  thumbnailCacheItemCount: number;
+  thumbnailCacheSizeBytes: number;
 }
 
 export interface SettingsState {

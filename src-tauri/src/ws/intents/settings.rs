@@ -6,6 +6,7 @@ use crate::ws::runtime::{IntentContext, rescan_panel, selected_names_for};
 pub(crate) async fn handle(name: &str, args: &Value, ctx: &mut IntentContext<'_>) {
     match name {
         "SetGeneralOption" => set_general_option(args, ctx).await,
+        "ClearThumbnailCache" => clear_thumbnail_cache(ctx).await,
         _ => {}
     }
 }
@@ -78,6 +79,30 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
                 };
                 state_guard.settings.general.max_image_size_mb = v.clamp(1, 2048);
             }
+            "enableVideoThumbnails" => {
+                let Some(v) = value.as_bool() else {
+                    drop(state_guard);
+                    bad_setting(ctx.tx, "enableVideoThumbnails must be a boolean").await;
+                    return;
+                };
+                state_guard.settings.general.enable_video_thumbnails = v;
+            }
+            "thumbnailMaxImageSizeMb" => {
+                let Some(v) = value.as_u64() else {
+                    drop(state_guard);
+                    bad_setting(ctx.tx, "thumbnailMaxImageSizeMb must be a positive integer").await;
+                    return;
+                };
+                state_guard.settings.general.thumbnail_max_image_size_mb = v.clamp(1, 4096);
+            }
+            "thumbnailVideoFrameSkip" => {
+                let Some(v) = value.as_u64() else {
+                    drop(state_guard);
+                    bad_setting(ctx.tx, "thumbnailVideoFrameSkip must be a non-negative integer").await;
+                    return;
+                };
+                state_guard.settings.general.thumbnail_video_frame_skip = (v.min(60)) as u32;
+            }
             "savePanelViewMode" => {
                 let Some(v) = value.as_bool() else {
                     drop(state_guard);
@@ -105,6 +130,15 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
         if let Err(e) = crate::state::settings::save(&state_guard.settings) {
             eprintln!("[fbro] Failed to save settings: {e}");
         }
+
+        // Push the latest thumbnail knobs into the live atomics so the worker
+        // pool sees changes without a restart.
+        #[cfg(target_os = "linux")]
+        crate::platform::linux::thumbnail::apply_settings(
+            state_guard.settings.general.enable_video_thumbnails,
+            state_guard.settings.general.thumbnail_max_image_size_mb,
+            state_guard.settings.general.thumbnail_video_frame_skip,
+        );
 
         state_guard.gui_senders.clone()
     };
@@ -189,6 +223,47 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
                 "ludicrousMode": general.ludicrous_mode,
                 "maxImageSizeMb": general.max_image_size_mb,
                 "savePanelViewMode": general.save_panel_view_mode,
+                "enableVideoThumbnails": general.enable_video_thumbnails,
+                "thumbnailMaxImageSizeMb": general.thumbnail_max_image_size_mb,
+                "thumbnailVideoFrameSkip": general.thumbnail_video_frame_skip,
+            }
+        }),
+    };
+    for sender in &gui_senders {
+        let _ = sender.send(patch.clone()).await;
+    }
+    let _ = ctx.tx.send(patch).await;
+}
+
+async fn clear_thumbnail_cache(ctx: &mut IntentContext<'_>) {
+    // Drop the in-memory L1 cache regardless of platform.
+    let (cache, gui_senders) = {
+        let state_guard = ctx.state.lock().await;
+        (state_guard.thumb_cache.clone(), state_guard.gui_senders.clone())
+    };
+    cache.clear();
+
+    // Wipe the L2 disk cache on Linux (the only platform that owns one).
+    #[cfg(target_os = "linux")]
+    {
+        let (_removed, errors) = crate::platform::linux::thumbnail::clear_disk_cache();
+        if !errors.is_empty() {
+            let msg = format!("Some thumbnail cache files could not be removed: {}", errors.join("; "));
+            bad_setting(ctx.tx, &msg).await;
+            return;
+        }
+    }
+
+    // Broadcast refreshed stats so the UI reflects the empty cache.
+    let patch = ServerMessage::StatePatch {
+        timestamp: now(),
+        domain: "settings".to_string(),
+        entity_id: None,
+        version: 0,
+        patch: serde_json::json!({
+            "general": {
+                "thumbnailCacheItemCount": 0u64,
+                "thumbnailCacheSizeBytes": 0u64,
             }
         }),
     };

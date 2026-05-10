@@ -78,7 +78,9 @@ export function SettingsModal({ client }: SettingsModalProps) {
             {activeTab === "general" && (
               <SettingsGeneralTab general={state.settings.general} client={client} />
             )}
-            {activeTab === "display" && <SettingsDisplayTab />}
+            {activeTab === "display" && (
+              <SettingsDisplayTab general={state.settings.general} client={client} />
+            )}
           </div>
         </div>
         <div className="modal__actions">

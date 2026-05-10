@@ -249,6 +249,12 @@ fn main() {
                 }
                 let session = persistence::load();
                 let settings = crate::state::settings::load();
+                #[cfg(target_os = "linux")]
+                crate::platform::linux::thumbnail::apply_settings(
+                    settings.general.enable_video_thumbnails,
+                    settings.general.thumbnail_max_image_size_mb,
+                    settings.general.thumbnail_video_frame_skip,
+                );
                 if settings.general.remember_window_state {
                     if let Some(ws) = &session.window {
                         if let Some(window) = app.get_webview_window("main") {
@@ -271,6 +277,7 @@ fn main() {
                     initial_paths,
                     file_server_port,
                     Arc::clone(&thumb_pool),
+                    Arc::clone(&thumb_cache),
                 )));
                 let quit_notify = Arc::new(tokio::sync::Notify::new());
                 use tauri::Manager;

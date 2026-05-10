@@ -237,8 +237,14 @@ pub struct GeneralSettingsSchema {
     pub ludicrous_mode: bool,
     pub max_image_size_mb: u64,
     pub save_panel_view_mode: bool,
+    pub enable_video_thumbnails: bool,
+    pub thumbnail_max_image_size_mb: u64,
+    pub thumbnail_video_frame_skip: u32,
     pub session_path: String,
     pub bookmarks_path: String,
+    pub thumbnail_cache_dir: String,
+    pub thumbnail_cache_item_count: u64,
+    pub thumbnail_cache_size_bytes: u64,
 }
 
 #[derive(Serialize, Clone, Debug)]
