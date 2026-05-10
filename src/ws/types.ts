@@ -39,8 +39,22 @@ export interface ShadowSource {
   cursorHint?: string;
 }
 
+export type TabKind = "listing" | "terminal";
+
+export interface PanelSlot {
+  slotId: string;
+  tabPanelIds: string[];
+  activePanelId: string;
+}
+
 export interface PanelState {
   panelId: string;
+  /** Slot this panel belongs to. Panels sharing a slot are sibling tabs. */
+  slotId: string;
+  /** Tab kind — "listing" for folder view, "terminal" for promoted PTY tab. */
+  tabKind: TabKind;
+  /** User-supplied tab title; when absent, derived from path/cwd. */
+  tabTitle?: string;
   path: string;
   status: "loading" | "ready" | "error";
   sourceId: string;
@@ -72,7 +86,10 @@ export interface PanelState {
 }
 
 export interface LayoutDomain {
+  /** Active panel id per slot (slot order). Kept for back-compat. */
   panels: string[];
+  /** Ordered slot ids — drives the visible layout left-to-right. */
+  slots: string[];
 }
 
 export interface SearchParams {
@@ -352,6 +369,7 @@ export interface StateSnapshotMessage {
   domains: {
     layout?: LayoutDomain;
     panels?: Record<string, PanelState>;
+    slots?: Record<string, PanelSlot>;
     sources?: Source[];
     focus?: string;
     jobs?: Job[];
@@ -366,7 +384,7 @@ export interface StateSnapshotMessage {
 export interface StatePatchMessage {
   type: "StatePatch";
   timestamp: number;
-  domain: "panels" | "layout" | "focus" | "selections" | "jobs" | "sources" | "dirSizeQueue" | "bookmarks" | "procs" | "settings";
+  domain: "panels" | "layout" | "slots" | "focus" | "selections" | "jobs" | "sources" | "dirSizeQueue" | "bookmarks" | "procs" | "settings";
   entityId?: string;
   version: number;
   patch: {

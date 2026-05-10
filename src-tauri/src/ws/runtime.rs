@@ -15,8 +15,8 @@ use crate::watcher::WatcherCommand;
 use crate::ws::commands::build_interactive_commands;
 use crate::ws::protocol::{
     now, DirSizeQueueSnapshot, DirSizeTaskSchema, FileOpFileSchema, GeneralSettingsSchema,
-    LayoutDomain, PanelSnapshot, ServerMessage, SettingsSnapshot, ShadowSourceSchema,
-    SourceCapabilities, SourceSchema, StateDomains,
+    LayoutDomain, PanelSlotSchema, PanelSnapshot, ServerMessage, SettingsSnapshot,
+    ShadowSourceSchema, SourceCapabilities, SourceSchema, StateDomains,
 };
 
 pub(crate) struct IntentContext<'a> {
@@ -71,16 +71,38 @@ pub(crate) fn build_state_snapshot(
         })
         .collect();
 
-    let mut sorted_panel_ids: Vec<String> = state.panels.keys().cloned().collect();
-    sorted_panel_ids.sort();
+    // Layout.panels = active-tab panel id per slot, in slot order
+    // (back-compat shape until FE reads slots directly).
+    let active_panel_ids: Vec<String> = state
+        .layout_slots
+        .iter()
+        .filter_map(|sid| state.slots.get(sid).map(|s| s.active_panel_id.clone()))
+        .collect();
+
+    let slots: HashMap<String, PanelSlotSchema> = state
+        .slots
+        .iter()
+        .map(|(id, slot)| {
+            (
+                id.clone(),
+                PanelSlotSchema {
+                    slot_id: slot.slot_id.clone(),
+                    tab_panel_ids: slot.tab_panel_ids.clone(),
+                    active_panel_id: slot.active_panel_id.clone(),
+                },
+            )
+        })
+        .collect();
 
     ServerMessage::StateSnapshot {
         timestamp: now(),
         domains: StateDomains {
             layout: LayoutDomain {
-                panels: sorted_panel_ids,
+                panels: active_panel_ids,
+                slots: state.layout_slots.clone(),
             },
             panels,
+            slots,
             sources: build_sources(state),
             focus: state.focus.clone(),
             jobs: vec![],
@@ -859,6 +881,9 @@ fn build_panel_snapshot(panel: &Panel, supports_thumbnails: bool) -> PanelSnapsh
     calculating_size.sort();
     PanelSnapshot {
         panel_id: panel.panel_id.clone(),
+        slot_id: panel.slot_id.clone(),
+        tab_kind: panel.tab_kind.as_str().to_string(),
+        tab_title: panel.tab_title_override.clone(),
         path: panel.path.clone(),
         status: panel.status.as_str().to_string(),
         source_id: panel.source_id.clone(),

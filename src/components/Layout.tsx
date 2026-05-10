@@ -442,16 +442,22 @@ export function Layout({ client, jobsViewOpen, onCloseJobsView, onOpenJobsView }
           if (!panel) return null;
           const otherPanelId = panelIds.find(p => p !== id) ?? "";
 
-          // In embedded viewer mode, the non-source panel becomes a preview pane.
-          if (state.embeddedViewer && id !== state.embeddedViewer.sourcePanelId) {
-            return (
-              <EmbeddedViewerPanel
-                key={id}
-                sourcePanelId={state.embeddedViewer.sourcePanelId}
-                state={state}
-                onClose={() => dispatch({ type: "TOGGLE_EMBEDDED_VIEWER" })}
-              />
-            );
+          // In embedded viewer mode, panels in slots other than the source slot
+          // become preview panes. The source panel resolves to whichever tab is
+          // currently active in the source slot.
+          if (state.embeddedViewer && panel.slotId !== state.embeddedViewer.sourceSlotId) {
+            const activeSourcePanelId =
+              state.slots[state.embeddedViewer.sourceSlotId]?.activePanelId;
+            if (activeSourcePanelId) {
+              return (
+                <EmbeddedViewerPanel
+                  key={id}
+                  sourcePanelId={activeSourcePanelId}
+                  state={state}
+                  onClose={() => dispatch({ type: "TOGGLE_EMBEDDED_VIEWER" })}
+                />
+              );
+            }
           }
 
           return (

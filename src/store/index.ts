@@ -2,6 +2,7 @@ import { createContext, useContext, useReducer, type Dispatch } from "react";
 import { isSearchSourceId } from "../utils/sourceId";
 import type {
   PanelState,
+  PanelSlot,
   SearchParams,
   SearchResult,
   Source,
@@ -178,8 +179,9 @@ export interface AppState {
   connected: boolean;
   sessionId: string | null;
   fileServerPort: number;
-  layout: { panels: string[] };
+  layout: { panels: string[]; slots: string[] };
   panels: Record<string, PanelState>;
+  slots: Record<string, PanelSlot>;
   panelHistory: Record<string, PanelHistoryState>;
   sources: Record<string, Source>;
   focus: string;
@@ -205,7 +207,7 @@ export interface AppState {
   pendingSettings: PendingSettings | null;
   commandPaletteOpen: boolean;
   transientHint: { message: string; token: number } | null;
-  embeddedViewer: { sourcePanelId: string } | null;
+  embeddedViewer: { sourceSlotId: string } | null;
   cacheStatus: { prefetchCache: PrefetchCacheStatus } | null;
   bookmarks: BookmarkEntry[];
   bookmarksOpen: { panelId: string } | null;
@@ -219,8 +221,9 @@ const initialState: AppState = {
   connected: false,
   sessionId: null,
   fileServerPort: 0,
-  layout: { panels: [] },
+  layout: { panels: [], slots: [] },
   panels: {},
+  slots: {},
   panelHistory: {},
   sources: {},
   focus: "",
@@ -317,7 +320,13 @@ function applySnapshot(state: AppState, msg: StateSnapshotMessage): AppState {
   let next = { ...state };
 
   if (domains.layout) {
-    next.layout = { panels: domains.layout.panels };
+    next.layout = {
+      panels: domains.layout.panels,
+      slots: domains.layout.slots ?? [],
+    };
+  }
+  if (domains.slots) {
+    next.slots = { ...domains.slots };
   }
   if (domains.focus !== undefined) {
     next.focus = domains.focus;
@@ -568,6 +577,37 @@ function applyPatch(state: AppState, msg: StatePatchMessage): AppState {
 
   if (msg.domain === "focus") {
     return { ...state, focus: msg.patch.focus as string };
+  }
+
+  if (msg.domain === "slots") {
+    const slotId = msg.entityId;
+    const patch = msg.patch as Partial<PanelSlot> & {
+      remove?: boolean;
+      layoutSlots?: string[];
+    };
+    let nextSlots = state.slots;
+    let nextLayout = state.layout;
+
+    if (slotId) {
+      if (patch.remove) {
+        nextSlots = { ...nextSlots };
+        delete nextSlots[slotId];
+      } else {
+        const existing = nextSlots[slotId];
+        const merged: PanelSlot = {
+          slotId,
+          tabPanelIds: patch.tabPanelIds ?? existing?.tabPanelIds ?? [],
+          activePanelId:
+            patch.activePanelId ?? existing?.activePanelId ?? slotId,
+        };
+        nextSlots = { ...nextSlots, [slotId]: merged };
+      }
+    }
+
+    if (patch.layoutSlots) {
+      nextLayout = { ...nextLayout, slots: patch.layoutSlots };
+    }
+    return { ...state, slots: nextSlots, layout: nextLayout };
   }
 
   if (msg.domain === "sources") {
@@ -1152,9 +1192,12 @@ function reducer(state: AppState, action: AppAction): AppState {
       };
     case "CLOSE_INPUT":
       return { ...state, pendingInput: null };
-    case "TOGGLE_EMBEDDED_VIEWER":
+    case "TOGGLE_EMBEDDED_VIEWER": {
       if (state.embeddedViewer) return { ...state, embeddedViewer: null };
-      return { ...state, embeddedViewer: { sourcePanelId: state.focus } };
+      const focusedSlotId = state.panels[state.focus]?.slotId;
+      if (!focusedSlotId) return state;
+      return { ...state, embeddedViewer: { sourceSlotId: focusedSlotId } };
+    }
     case "NAV_HISTORY_BACK": {
       const h = state.panelHistory[action.panelId];
       if (!h || h.cursor <= 0) return state;

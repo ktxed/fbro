@@ -11,6 +11,7 @@ import {
 import { useAppDispatch, useAppState } from "../store";
 import { IconChevronDown, IconChevronUp, IconChevronRight, IconChevronLeft, IconArrowUpRight, IconX, IconAlertTriangle } from "@tabler/icons-react";
 import { BookmarksPopover } from "./BookmarksPopover";
+import { PanelTabBar } from "./PanelTabBar";
 import { PanelTerminal } from "./PanelTerminal";
 import { EntryThumb } from "./EntryThumb";
 
@@ -1182,8 +1183,20 @@ export function Panel({
         }
       }}
     >
+      {(() => {
+        const slot = appState.slots[panel.slotId];
+        if (!slot || slot.tabPanelIds.length <= 1) return null;
+        return <PanelTabBar slot={slot} panels={appState.panels} client={client} />;
+      })()}
+
       <div className="panel__header">
         <PathBreadcrumbs panelId={panelId} path={panel.path} client={client} shadowSource={panel.shadowSource} />
+        <button
+          className="panel__home-btn"
+          tabIndex={-1}
+          title="New tab (Ctrl+T)"
+          onClick={() => client.sendIntent("panel.tab.new", undefined, { slotId: panel.slotId, source: "clone" })}
+        >+</button>
         <button
           className="panel__home-btn"
           tabIndex={-1}

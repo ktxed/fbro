@@ -83,6 +83,10 @@ export const PANEL_SHORTCUT_COMMAND_IDS = [
   "panel.bookmarks.open",
   "panel.bookmarks.browse",
   "panel.toggle_embedded_terminal",
+  "panel.tab.new",
+  "panel.tab.close",
+  "panel.tab.next",
+  "panel.tab.prev",
   "file.touch",
 ] as const;
 
@@ -821,6 +825,37 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
     case "panel.bookmarks.browse": {
       if (!focused) return false;
       client.sendIntent("EnterBookmarkSource", focused.panelId);
+      return true;
+    }
+    case "panel.tab.new": {
+      if (!focused) return false;
+      client.sendIntent("panel.tab.new", undefined, {
+        slotId: focused.panel.slotId,
+        source: "clone",
+      });
+      return true;
+    }
+    case "panel.tab.close": {
+      if (!focused) return false;
+      const slot = state.slots[focused.panel.slotId];
+      if (!slot || slot.tabPanelIds.length <= 1) return false;
+      client.sendIntent("panel.tab.close", undefined, { panelId: focused.panelId });
+      return true;
+    }
+    case "panel.tab.next":
+    case "panel.tab.prev": {
+      if (!focused) return false;
+      const slot = state.slots[focused.panel.slotId];
+      if (!slot || slot.tabPanelIds.length <= 1) return false;
+      const idx = slot.tabPanelIds.indexOf(focused.panelId);
+      if (idx < 0) return false;
+      const dir = commandId === "panel.tab.next" ? 1 : -1;
+      const nextIdx = (idx + dir + slot.tabPanelIds.length) % slot.tabPanelIds.length;
+      const nextId = slot.tabPanelIds[nextIdx];
+      client.sendIntent("panel.tab.switch", undefined, {
+        slotId: slot.slotId,
+        panelId: nextId,
+      });
       return true;
     }
     case "panel.toggle_embedded_terminal": {

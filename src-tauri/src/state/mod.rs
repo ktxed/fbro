@@ -84,9 +84,59 @@ impl Default for PanelViewMode {
     }
 }
 
+// ─── Tabs / Slots ─────────────────────────────────────────────────────────────
+
+/// What kind of content a tab carries. Listing is the default folder view;
+/// Terminal is a promoted PTY session.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TabKind {
+    Listing,
+    Terminal,
+}
+
+impl TabKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            TabKind::Listing => "listing",
+            TabKind::Terminal => "terminal",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "listing" => Some(TabKind::Listing),
+            "terminal" => Some(TabKind::Terminal),
+            _ => None,
+        }
+    }
+}
+
+impl Default for TabKind {
+    fn default() -> Self {
+        TabKind::Listing
+    }
+}
+
+/// A slot in the panel layout. Each slot hosts one or more tabs (panels).
+/// A single-tab slot renders identically to a pre-tabs panel — the FE hides
+/// the tab bar until `tab_panel_ids.len() > 1`.
+#[derive(Clone, Debug)]
+pub struct PanelSlot {
+    pub slot_id: String,
+    pub tab_panel_ids: Vec<String>,
+    pub active_panel_id: String,
+}
+
 #[derive(Clone, Debug)]
 pub struct Panel {
     pub panel_id: String,
+    /// Slot this panel belongs to. Panels (tabs) sharing a slot are siblings.
+    pub slot_id: String,
+    /// Tab kind (listing or terminal). Default Listing.
+    pub tab_kind: TabKind,
+    /// User-supplied tab title. When None, the FE derives the title from
+    /// the folder name (or pty cwd for terminal tabs).
+    pub tab_title_override: Option<String>,
     pub source_id: String,
     pub path: String,
     pub status: PanelStatus,
@@ -138,6 +188,10 @@ impl PanelStatus {
 
 pub struct AppState {
     pub panels: HashMap<String, Panel>,
+    /// Slots in the panel layout. Each slot owns 1+ panels (tabs).
+    pub slots: HashMap<String, PanelSlot>,
+    /// Ordered slot ids — drives the visible layout left-to-right.
+    pub layout_slots: Vec<String>,
     pub sources: HashMap<String, Source>,
     pub drivers: HashMap<String, Arc<dyn VfsDriver>>,
     pub focus: String,
@@ -268,6 +322,9 @@ impl AppState {
 
         let left = Panel {
             panel_id: "left".to_string(),
+            slot_id: "left".to_string(),
+            tab_kind: TabKind::Listing,
+            tab_title_override: None,
             source_id: initial_source_id.clone(),
             path: resolve("left"),
             status: PanelStatus::Loading,
@@ -292,6 +349,9 @@ impl AppState {
 
         let right = Panel {
             panel_id: "right".to_string(),
+            slot_id: "right".to_string(),
+            tab_kind: TabKind::Listing,
+            tab_title_override: None,
             source_id: initial_source_id.clone(),
             path: resolve("right"),
             status: PanelStatus::Loading,
@@ -317,6 +377,27 @@ impl AppState {
         let mut panels = HashMap::new();
         panels.insert("left".to_string(), left);
         panels.insert("right".to_string(), right);
+
+        // Seed one single-tab slot per panel. Slot id mirrors the panel id
+        // so existing single-panel sessions round-trip identically.
+        let mut slots: HashMap<String, PanelSlot> = HashMap::new();
+        slots.insert(
+            "left".to_string(),
+            PanelSlot {
+                slot_id: "left".to_string(),
+                tab_panel_ids: vec!["left".to_string()],
+                active_panel_id: "left".to_string(),
+            },
+        );
+        slots.insert(
+            "right".to_string(),
+            PanelSlot {
+                slot_id: "right".to_string(),
+                tab_panel_ids: vec!["right".to_string()],
+                active_panel_id: "right".to_string(),
+            },
+        );
+        let layout_slots = vec!["left".to_string(), "right".to_string()];
 
         // Build sources and drivers from volumes.
         #[cfg(unix)]
@@ -362,6 +443,8 @@ impl AppState {
 
         AppState {
             panels,
+            slots,
+            layout_slots,
             sources,
             drivers,
             focus: "left".to_string(),

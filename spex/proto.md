@@ -102,10 +102,20 @@ State is divided into **independently versioned domains**:
 ```text
 layout
 panels
+slots
 focus
 selections
 jobs
 ```
+
+The `slots` domain groups panels into **tab groups**. Each slot owns one or more
+panel ids; one tab is active at a time. A single-tab slot renders identically
+to a pre-tabs panel — the tab bar is only surfaced once `tabPanelIds.length > 1`.
+
+`layout.slots` is the ordered list of slot ids that drives the visible layout.
+`layout.panels` is retained as the parallel list of **active panel ids per slot**
+(in slot order) for back-compat — clients new enough to understand slots
+should read `layout.slots` and dereference through `slots[slotId].activePanelId`.
 
 ---
 
@@ -206,6 +216,9 @@ Rules:
 ```json
 {
   "panelId": "left",
+  "slotId": "left",
+  "tabKind": "listing",
+  "tabTitle": null,
   "path": "/home/user",
   "status": "loading | ready | error",
   "sort": {
@@ -217,6 +230,35 @@ Rules:
   "entries": []
 }
 ```
+
+* `slotId` — id of the slot this panel belongs to. Panels sharing a slot are tabs.
+* `tabKind` — `"listing"` (default folder view) or `"terminal"` (promoted PTY).
+* `tabTitle` — user-supplied tab title; omitted means "derive from path/cwd".
+
+### 7.1 Slot Model
+
+```json
+{
+  "slotId": "left",
+  "tabPanelIds": ["left", "left-tab-2"],
+  "activePanelId": "left-tab-2"
+}
+```
+
+Slot patches use `domain: "slots"`. Patch payloads:
+
+* `upsert` fields: `tabPanelIds`, `activePanelId` (any subset may be present).
+* Slot removal: `{ "remove": true }`.
+
+### 7.2 Tab Intents
+
+| Intent | Args | Behavior |
+|---|---|---|
+| `panel.tab.new` | `{ slotId, source: "clone" }` | Creates a new tab in the slot, cloning the active tab's source+path; inserts after the active tab and activates it. |
+| `panel.tab.close` | `{ panelId }` | Closes the tab; activates the tab to its left. No-op when this is the slot's only tab. |
+| `panel.tab.switch` | `{ slotId, panelId }` | Activates `panelId` within `slotId`. |
+| `panel.tab.rename` | `{ panelId, title }` | Sets `tabTitle` override (FUTURE — protocol only). |
+| `panel.terminal.promote` | `{ panelId }` | Detaches the panel's embedded PTY and inserts it as a sibling terminal tab; source panel returns to listing. |
 
 ---
 

@@ -211,6 +211,8 @@ pub struct PrefetchCacheSchema {
 pub struct StateDomains {
     pub layout: LayoutDomain,
     pub panels: HashMap<String, PanelSnapshot>,
+    /// Slots keyed by slotId. Each slot owns one or more panel ids (tabs).
+    pub slots: HashMap<String, PanelSlotSchema>,
     pub sources: Vec<SourceSchema>,
     pub focus: String,
     pub jobs: Vec<serde_json::Value>,
@@ -264,13 +266,31 @@ pub struct DirSizeTaskSchema {
 
 #[derive(Serialize, Clone, Debug)]
 pub struct LayoutDomain {
+    /// Active panel id per slot, in slot order. Maintained for back-compat —
+    /// FE will switch to reading `slots` once tabbed mode lands.
     pub panels: Vec<String>,
+    /// Ordered slot ids — drives the visible layout left-to-right.
+    pub slots: Vec<String>,
+}
+
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct PanelSlotSchema {
+    pub slot_id: String,
+    pub tab_panel_ids: Vec<String>,
+    pub active_panel_id: String,
 }
 
 #[derive(Serialize, Clone, Debug)]
 pub struct PanelSnapshot {
     #[serde(rename = "panelId")]
     pub panel_id: String,
+    #[serde(rename = "slotId")]
+    pub slot_id: String,
+    #[serde(rename = "tabKind")]
+    pub tab_kind: String,
+    #[serde(rename = "tabTitle", skip_serializing_if = "Option::is_none")]
+    pub tab_title: Option<String>,
     pub path: String,
     pub status: String,
     #[serde(rename = "sourceId")]

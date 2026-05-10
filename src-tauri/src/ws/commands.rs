@@ -516,5 +516,33 @@ pub(crate) fn build_interactive_commands() -> Vec<InteractiveCommandSchema> {
             vec![keybinding("t")],
             None,
         ),
+        command(
+            "panel.tab.new",
+            "Panel",
+            "New Tab",
+            vec![mod_binding("t", false)],
+            None,
+        ),
+        command(
+            "panel.tab.close",
+            "Panel",
+            "Close Tab",
+            vec![mod_binding("w", false)],
+            None,
+        ),
+        command(
+            "panel.tab.next",
+            "Panel",
+            "Next Tab",
+            vec![keybinding_with_modifiers("k", true, false, false, false)],
+            None,
+        ),
+        command(
+            "panel.tab.prev",
+            "Panel",
+            "Previous Tab",
+            vec![keybinding_with_modifiers("j", true, false, false, false)],
+            None,
+        ),
     ]
 }

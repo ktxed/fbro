@@ -7,6 +7,7 @@ mod jobs;
 mod navigation;
 mod panel;
 mod settings;
+mod tabs;
 mod terminal;
 mod viewer;
 
@@ -73,6 +74,9 @@ pub async fn dispatch(name: &str, scope: &Value, args: &Value, ctx: &mut IntentC
         "SetGeneralOption" | "ClearThumbnailCache" => settings::handle(name, args, ctx).await,
         "OpenPanelTerminal" | "ResizeTerminal" | "ClosePanelTerminal" => {
             terminal::handle(name, scope, args, ctx).await
+        }
+        "panel.tab.new" | "panel.tab.close" | "panel.tab.switch" => {
+            tabs::handle(name, scope, args, ctx).await
         }
         unknown => eprintln!("[fbro] Unknown intent: {unknown}"),
     }
