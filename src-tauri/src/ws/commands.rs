@@ -405,7 +405,7 @@ pub(crate) fn build_interactive_commands() -> Vec<InteractiveCommandSchema> {
             "panel.navigate_to_path",
             "Navigation",
             "Go To Path",
-            vec![keybinding("g")],
+            vec![mod_binding("g", false)],
             None,
         ),
         command(
@@ -485,7 +485,7 @@ pub(crate) fn build_interactive_commands() -> Vec<InteractiveCommandSchema> {
             "panel.toggle_view_mode",
             "Panel",
             "Toggle Grid View",
-            vec![keybinding_with_modifiers("G", true, false, false, false)],
+            vec![keybinding("g")],
             None,
         ),
         command(
