@@ -47,7 +47,7 @@ fn classify(path: &Path) -> Kind {
     };
     match ext.to_ascii_lowercase().as_str() {
         "png" | "jpg" | "jpeg" | "webp" | "gif" | "bmp" | "tif" | "tiff" => Kind::Image,
-        "mp4" | "mkv" | "webm" | "mov" | "avi" | "m4v" => Kind::Video,
+        "mp4" | "mkv" | "webm" | "mov" | "avi" | "m4v" | "ts" => Kind::Video,
         _ => Kind::Unknown,
     }
 }
