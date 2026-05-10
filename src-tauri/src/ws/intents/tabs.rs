@@ -17,6 +17,7 @@ pub(crate) async fn handle(
         "panel.tab.new" => new_tab(args, ctx).await,
         "panel.tab.close" => close_tab(args, ctx).await,
         "panel.tab.switch" => switch_tab(args, ctx).await,
+        "panel.terminal.promote" => promote_terminal(args, ctx).await,
         _ => {}
     }
 }
@@ -221,6 +222,89 @@ async fn close_tab(args: &Value, ctx: &mut IntentContext<'_>) {
 
     broadcast_snapshot(ctx).await;
     let _ = focus_was_panel; // focus already updated in state; snapshot reflects it
+}
+
+async fn promote_terminal(args: &Value, ctx: &mut IntentContext<'_>) {
+    let source_panel_id = match args.get("panelId").and_then(Value::as_str) {
+        Some(s) => s.to_string(),
+        None => return,
+    };
+
+    // Snapshot what we need from the source panel, decide on the new tab id,
+    // and mutate the AppState atomically.
+    let pty_rebind: Option<(u32, String)> = {
+        let mut state_guard = ctx.state.lock().await;
+        let Some(source) = state_guard.panels.get(&source_panel_id).cloned() else {
+            return;
+        };
+        let Some(sid) = source.terminal_session else {
+            return;
+        };
+        let slot_id = source.slot_id.clone();
+        let Some(slot_snapshot) = state_guard.slots.get(&slot_id).cloned() else {
+            return;
+        };
+
+        let panel_ids: HashSet<String> = state_guard.panels.keys().cloned().collect();
+        let new_panel_id = alloc_panel_id(&slot_id, &panel_ids);
+
+        // Build a terminal-kind tab that carries the PTY session. Listing fields
+        // stay empty — the FE doesn't render the listing for terminal tabs.
+        let new_panel = Panel {
+            panel_id: new_panel_id.clone(),
+            slot_id: slot_id.clone(),
+            tab_kind: TabKind::Terminal,
+            tab_title_override: None,
+            source_id: source.source_id.clone(),
+            path: source.path.clone(),
+            status: PanelStatus::Ready,
+            sort: source.sort.clone(),
+            filter: None,
+            filter_mode_active: false,
+            show_hidden: source.show_hidden,
+            view_mode: PanelViewMode::List,
+            cursor: 0,
+            selection: vec![],
+            entries: vec![],
+            version: 0,
+            calculating_size: Default::default(),
+            windowed: false,
+            window_start: 0,
+            window_count: 0,
+            window_version: 0,
+            source_paths: source.source_paths.clone(),
+            shadow_source: None,
+            terminal_session: Some(sid),
+        };
+
+        // Detach the PTY from the source panel.
+        if let Some(src_mut) = state_guard.panels.get_mut(&source_panel_id) {
+            src_mut.terminal_session = None;
+            src_mut.version += 1;
+        }
+
+        // Insert the new terminal tab into the slot after the source tab.
+        state_guard.panels.insert(new_panel_id.clone(), new_panel);
+        if let Some(slot) = state_guard.slots.get_mut(&slot_id) {
+            let idx = slot
+                .tab_panel_ids
+                .iter()
+                .position(|id| id == &source_panel_id)
+                .unwrap_or(slot_snapshot.tab_panel_ids.len().saturating_sub(1));
+            slot.tab_panel_ids.insert(idx + 1, new_panel_id.clone());
+            slot.active_panel_id = new_panel_id.clone();
+        }
+        state_guard.focus = new_panel_id.clone();
+
+        Some((sid, new_panel_id))
+    };
+
+    if let Some((sid, new_panel_id)) = pty_rebind {
+        let pty_manager = ctx.state.lock().await.pty_manager.clone();
+        pty_manager.rebind_panel(sid, new_panel_id);
+    }
+
+    broadcast_snapshot(ctx).await;
 }
 
 async fn switch_tab(args: &Value, ctx: &mut IntentContext<'_>) {

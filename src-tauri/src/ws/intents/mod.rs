@@ -75,7 +75,7 @@ pub async fn dispatch(name: &str, scope: &Value, args: &Value, ctx: &mut IntentC
         "OpenPanelTerminal" | "ResizeTerminal" | "ClosePanelTerminal" => {
             terminal::handle(name, scope, args, ctx).await
         }
-        "panel.tab.new" | "panel.tab.close" | "panel.tab.switch" => {
+        "panel.tab.new" | "panel.tab.close" | "panel.tab.switch" | "panel.terminal.promote" => {
             tabs::handle(name, scope, args, ctx).await
         }
         unknown => eprintln!("[fbro] Unknown intent: {unknown}"),

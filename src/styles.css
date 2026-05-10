@@ -3227,6 +3227,34 @@ body {
   color: #fff;
 }
 
+.panel-terminal__promote {
+  position: absolute;
+  top: 2px;
+  right: 48px;
+  z-index: 2;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  background: rgba(0, 0, 0, 0.4);
+  color: #ccc;
+  cursor: pointer;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.panel-terminal__promote:hover {
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+}
+
+.panel-terminal--solo {
+  flex: 1;
+  border-top: none;
+}
+
 .panel-terminal--maximized {
   position: fixed;
   inset: 0;

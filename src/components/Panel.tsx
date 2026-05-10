@@ -1189,6 +1189,24 @@ export function Panel({
         return <PanelTabBar slot={slot} panels={appState.panels} client={client} />;
       })()}
 
+      {panel.tabKind === "terminal" && panel.terminalSessionId !== undefined ? (
+        <PanelTerminal
+          client={client}
+          panelId={panelId}
+          sessionId={panel.terminalSessionId}
+          fontSize={appState.fontSize}
+          solo
+          maximized={appState.maximizedTerminalPanelId === panelId}
+          onToggleMaximize={() => dispatch({
+            type: "SET_MAXIMIZED_TERMINAL",
+            panelId: appState.maximizedTerminalPanelId === panelId ? null : panelId,
+          })}
+          onFocusRef={(fn) => { termFocusFnRef.current = fn; }}
+          onClose={() => client.sendIntent("panel.tab.close", undefined, { panelId })}
+          onBlurToListing={() => focusDivRef.current?.focus()}
+        />
+      ) : (
+      <>
       <div className="panel__header">
         <PathBreadcrumbs panelId={panelId} path={panel.path} client={client} shadowSource={panel.shadowSource} />
         <button
@@ -1352,8 +1370,11 @@ export function Panel({
           })}
           onFocusRef={(fn) => { termFocusFnRef.current = fn; }}
           onClose={() => client.sendIntent("ClosePanelTerminal", panelId)}
+          onPromote={() => client.sendIntent("panel.terminal.promote", undefined, { panelId })}
           onBlurToListing={() => focusDivRef.current?.focus()}
         />
+      )}
+      </>
       )}
     </div>
   );

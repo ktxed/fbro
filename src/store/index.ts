@@ -1,5 +1,6 @@
 import { createContext, useContext, useReducer, type Dispatch } from "react";
 import { isSearchSourceId } from "../utils/sourceId";
+import { disposeCachedTerminal } from "../components/PanelTerminal";
 import type {
   PanelState,
   PanelSlot,
@@ -1076,7 +1077,9 @@ function reducer(state: AppState, action: AppAction): AppState {
         case "TerminalClosed": {
           // Belt-and-suspenders: BE also broadcasts a StatePatch clearing terminalSessionId,
           // but handle it here too in case the patch arrives out of order or is missed.
-          const panelId = (msg as TerminalClosedMessage).panelId;
+          const closedMsg = msg as TerminalClosedMessage;
+          disposeCachedTerminal(closedMsg.sessionId);
+          const panelId = closedMsg.panelId;
           if (!panelId || !state.panels[panelId]) return state;
           const panel = state.panels[panelId];
           if (panel.terminalSessionId === undefined && state.maximizedTerminalPanelId !== panelId) return state;

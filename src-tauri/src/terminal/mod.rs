@@ -23,7 +23,10 @@ use crate::ws::protocol::{now, ServerMessage};
 /// A single live PTY-backed shell session.
 pub struct PtySession {
     pub session_id: u32,
-    pub panel_id: String,
+    /// Panel id that currently owns this session. Wrapped in Arc<Mutex> so the
+    /// wait-for-exit thread always sees the up-to-date owner (the session can
+    /// be promoted from an embedded split to a sibling terminal tab).
+    pub panel_id: Arc<Mutex<String>>,
     /// Sender for the writer thread; dropping it terminates the writer thread.
     writer_tx: Option<mpsc::UnboundedSender<Vec<u8>>>,
     /// Master PTY handle — kept so we can resize. Wrapped in Arc/Mutex because
@@ -127,10 +130,15 @@ impl PtyManager {
         // Wait-for-exit thread: when the child exits naturally (user typed `exit`),
         // do the same full cleanup as an explicit ClosePanelTerminal intent —
         // remove session, clear panel state, broadcast StatePatch + TerminalClosed.
+        let panel_id_shared = Arc::new(Mutex::new(panel_id));
         let tx_exit = tx.clone();
-        let panel_id_exit = panel_id.clone();
+        let panel_id_exit = panel_id_shared.clone();
         thread::spawn(move || {
             let _ = child.wait();
+
+            // Re-read owner here — a promote can have moved the session to a
+            // different panel since spawn.
+            let owner = panel_id_exit.lock().unwrap().clone();
 
             // Remove the dead session from PtyManager so re-opening works.
             self_arc.close(session_id);
@@ -138,18 +146,18 @@ impl PtyManager {
             // Update AppState and collect current GUI senders.
             let (new_version, gui_senders) = {
                 let mut s = state.blocking_lock();
-                if let Some(panel) = s.panels.get_mut(&panel_id_exit) {
+                if let Some(panel) = s.panels.get_mut(&owner) {
                     panel.terminal_session = None;
                     panel.version += 1;
                 }
-                let v = s.panels.get(&panel_id_exit).map(|p| p.version).unwrap_or(0);
+                let v = s.panels.get(&owner).map(|p| p.version).unwrap_or(0);
                 (v, s.gui_senders.clone())
             };
 
             let patch = ServerMessage::StatePatch {
                 timestamp: now(),
                 domain: "panels".to_string(),
-                entity_id: Some(panel_id_exit.clone()),
+                entity_id: Some(owner.clone()),
                 version: new_version,
                 patch: serde_json::json!({ "terminalSessionId": null }),
             };
@@ -161,7 +169,7 @@ impl PtyManager {
             let closed = ServerMessage::TerminalClosed {
                 timestamp: now(),
                 session_id,
-                panel_id: panel_id_exit,
+                panel_id: owner,
             };
             for sender in &gui_senders {
                 let _ = sender.blocking_send(closed.clone());
@@ -171,7 +179,7 @@ impl PtyManager {
 
         let session = PtySession {
             session_id,
-            panel_id,
+            panel_id: panel_id_shared,
             writer_tx: Some(writer_tx),
             master,
             killer,
@@ -209,7 +217,18 @@ impl PtyManager {
         // Drop the writer sender first so the writer thread exits cleanly.
         session.writer_tx.take();
         let _ = session.killer.kill();
-        Some(session.panel_id)
+        let pid = session.panel_id.lock().unwrap().clone();
+        Some(pid)
+    }
+
+    /// Re-assign the owning panel of a live session. Used when promoting an
+    /// embedded terminal into its own sibling tab — the PTY stays alive, but
+    /// the panel id that should receive natural-exit cleanup changes.
+    pub fn rebind_panel(&self, sid: u32, new_panel_id: String) {
+        let map = self.sessions.lock().unwrap();
+        if let Some(s) = map.get(&sid) {
+            *s.panel_id.lock().unwrap() = new_panel_id;
+        }
     }
 
     /// Close all sessions belonging to a given panel. Returns their session_ids.
@@ -217,7 +236,7 @@ impl PtyManager {
         let mut map = self.sessions.lock().unwrap();
         let to_remove: Vec<u32> = map
             .iter()
-            .filter(|(_, s)| s.panel_id == panel_id)
+            .filter(|(_, s)| *s.panel_id.lock().unwrap() == panel_id)
             .map(|(k, _)| *k)
             .collect();
         let mut closed = Vec::new();
