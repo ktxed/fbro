@@ -278,9 +278,6 @@ body {
   min-width: 0;
 }
 
-.panel--focused .panel__header {
-  border-bottom-color: var(--border-focus);
-}
 
 .panel__tabs {
   display: flex;
