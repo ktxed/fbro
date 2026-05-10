@@ -3,7 +3,8 @@ import { WsClient } from "../ws/client";
 import type { AppState } from "../store";
 import type { FileChunkMessage } from "../ws/types";
 import { canUseDirect, DirectFileViewer } from "../viewers/DirectFileViewer";
-import { ImageViewer, IMAGE_LIMIT } from "../viewers/ImageViewer";
+import { ImageViewer } from "../viewers/ImageViewer";
+import { IMAGE_DIRECT_LIMIT } from "../viewers/DirectFileViewer";
 import { isImageExt } from "../viewers/media";
 import { hexDecode, detectBinary } from "../viewers/utils";
 
@@ -67,6 +68,14 @@ function HexLines({ bytes }: { bytes: Uint8Array }) {
 }
 
 export function EmbeddedViewerPanel({ sourcePanelId, state, onClose }: Props) {
+  const { ludicrousMode, maxImageSizeMb } = state.settings.general;
+  const imageLimit = ludicrousMode
+    ? maxImageSizeMb * 1024 * 1024
+    : IMAGE_DIRECT_LIMIT;
+
+  const imageLimitRef = useRef(imageLimit);
+  imageLimitRef.current = imageLimit;
+
   const [viewMode, setViewMode] = useState<ViewMode>({ kind: "empty" });
   const clientRef = useRef<WsClient | null>(null);
   const pendingPathRef = useRef<string | null>(null);
@@ -94,7 +103,7 @@ export function EmbeddedViewerPanel({ sourcePanelId, state, onClose }: Props) {
           const { file } = prev;
           const isBin = detectBinary(bytes);
           const rendMode = isImageExt(file.filename)
-            ? (file.fileSize !== null && file.fileSize > IMAGE_LIMIT ? "hex" : "image")
+            ? (file.fileSize !== null && file.fileSize > imageLimitRef.current ? "hex" : "image")
             : isBin ? "hex" : "text";
           return { kind: "ready", file, buffer: bytes, mode: rendMode };
         });
@@ -110,7 +119,7 @@ export function EmbeddedViewerPanel({ sourcePanelId, state, onClose }: Props) {
 
   const loadFile = useCallback((info: FileInfo) => {
     pendingPathRef.current = info.path;
-    const size = isImageExt(info.filename) ? IMAGE_LIMIT : SMALL_LIMIT;
+    const size = isImageExt(info.filename) ? imageLimitRef.current : SMALL_LIMIT;
     clientRef.current?.sendIntent("ReadFileChunk", undefined, {
       path: info.path,
       sourceId: info.sourceId,
@@ -193,7 +202,7 @@ export function EmbeddedViewerPanel({ sourcePanelId, state, onClose }: Props) {
       }
 
       // Skip files that are too large to preview.
-      if (fileSize !== null && fileSize > IMAGE_LIMIT) {
+      if (fileSize !== null && fileSize > imageLimitRef.current) {
         setViewMode({ kind: "too-large", file: info });
         return;
       }
@@ -265,6 +274,7 @@ export function EmbeddedViewerPanel({ sourcePanelId, state, onClose }: Props) {
             buffer={viewMode.buffer}
             fileSize={viewMode.file.fileSize}
             filename={viewMode.file.filename}
+            imageLimit={imageLimit}
           />
         )}
         {viewMode.kind === "ready" && viewMode.mode === "text" && (
