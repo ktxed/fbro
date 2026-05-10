@@ -718,14 +718,23 @@ pub(crate) async fn save_session(state: &SharedState, app_handle: &tauri::AppHan
     let persist_tabs = state_guard.settings.general.persist_panel_tabs;
 
     // Always emit the legacy `panels` map for back-compat with older
-    // builds that may try to load this file: one entry per slot holding
-    // the active tab's path.
+    // builds: one entry per slot holding a listing path. If the live
+    // active tab is a terminal (not persisted), fall back to any
+    // surviving listing tab in the same slot.
     let panels = state_guard
         .layout_slots
         .iter()
         .filter_map(|sid| {
             let slot = state_guard.slots.get(sid)?;
-            let panel = state_guard.panels.get(&slot.active_panel_id)?;
+            let active = state_guard.panels.get(&slot.active_panel_id);
+            let panel = match active {
+                Some(p) if p.tab_kind != crate::state::TabKind::Terminal => Some(p),
+                _ => slot
+                    .tab_panel_ids
+                    .iter()
+                    .filter_map(|pid| state_guard.panels.get(pid))
+                    .find(|p| p.tab_kind != crate::state::TabKind::Terminal),
+            }?;
             Some((
                 slot.slot_id.clone(),
                 PanelSession {
@@ -745,32 +754,57 @@ pub(crate) async fn save_session(state: &SharedState, app_handle: &tauri::AppHan
             } else {
                 vec![&slot.active_panel_id]
             };
-            let tabs: Vec<TabSession> = ids
-                .iter()
-                .filter_map(|pid| {
-                    let panel = state_guard.panels.get(*pid)?;
-                    Some(match panel.tab_kind {
-                        crate::state::TabKind::Terminal => TabSession::Terminal {
-                            cwd: panel.path.clone(),
-                        },
-                        crate::state::TabKind::Listing => TabSession::Listing {
-                            source_id: Some(panel.source_id.clone()),
-                            path: panel.path.clone(),
-                        },
-                    })
-                })
-                .collect();
+            // Build the kept (listing-only) tab list and remember each kept
+            // tab's original panel id so we can find the saved active index
+            // after terminal tabs are dropped.
+            let mut tabs: Vec<TabSession> = Vec::with_capacity(ids.len());
+            let mut kept_ids: Vec<&String> = Vec::with_capacity(ids.len());
+            for pid in &ids {
+                let Some(panel) = state_guard.panels.get(*pid) else {
+                    continue;
+                };
+                // Terminal tabs are intentionally dropped — the PTY can't
+                // survive a process restart and the user shouldn't see
+                // resurrected stand-ins for it.
+                if panel.tab_kind == crate::state::TabKind::Terminal {
+                    continue;
+                }
+                tabs.push(TabSession::Listing {
+                    source_id: Some(panel.source_id.clone()),
+                    path: panel.path.clone(),
+                });
+                kept_ids.push(*pid);
+            }
             if tabs.is_empty() {
                 return None;
             }
-            let active_index = if persist_tabs {
-                slot.tab_panel_ids
-                    .iter()
-                    .position(|id| id == &slot.active_panel_id)
-                    .unwrap_or(0)
-            } else {
-                0
-            };
+            // Map the live active panel id onto an index in the kept list.
+            // If the active tab was a terminal (and thus dropped), fall back
+            // to the nearest surviving sibling.
+            let active_index = kept_ids
+                .iter()
+                .position(|id| *id == &slot.active_panel_id)
+                .or_else(|| {
+                    let active_idx = slot
+                        .tab_panel_ids
+                        .iter()
+                        .position(|id| id == &slot.active_panel_id)?;
+                    // Walk left, then right, for the nearest kept panel id.
+                    for i in (0..active_idx).rev() {
+                        let id = &slot.tab_panel_ids[i];
+                        if let Some(p) = kept_ids.iter().position(|k| *k == id) {
+                            return Some(p);
+                        }
+                    }
+                    for i in (active_idx + 1)..slot.tab_panel_ids.len() {
+                        let id = &slot.tab_panel_ids[i];
+                        if let Some(p) = kept_ids.iter().position(|k| *k == id) {
+                            return Some(p);
+                        }
+                    }
+                    Some(0)
+                })
+                .unwrap_or(0);
             Some(SlotSession {
                 slot_id: slot.slot_id.clone(),
                 active_index,

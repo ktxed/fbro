@@ -6,7 +6,7 @@ use serde_json::Value;
 use crate::jobs::scan::run_scan;
 use crate::state::{Panel, PanelStatus, PanelViewMode, TabKind};
 use crate::ws::protocol::{now, ServerMessage};
-use crate::ws::runtime::{build_state_snapshot, IntentContext};
+use crate::ws::runtime::IntentContext;
 
 pub(crate) async fn handle(
     name: &str,
@@ -36,18 +36,111 @@ fn alloc_panel_id(slot_id: &str, existing: &HashSet<String>) -> String {
     }
 }
 
-async fn broadcast_snapshot(ctx: &IntentContext<'_>) {
-    let dir_size_tasks = ctx.dir_size_queue.snapshot().await;
-    let (snapshot, gui_senders) = {
+/// Emit the targeted patches needed when a slot's membership (and possibly the
+/// set of known panels) changes. Avoids re-serializing every panel's entries
+/// like a full snapshot would.
+async fn broadcast_slot_change(
+    ctx: &IntentContext<'_>,
+    slot_id: &str,
+    new_panel_id: Option<&str>,
+    focus_to: Option<&str>,
+) {
+    let (panel_upsert, slot_patch, layout_patch, focus_patch, gui_senders) = {
         let state_guard = ctx.state.lock().await;
-        (
-            build_state_snapshot(&state_guard, dir_size_tasks),
-            state_guard.gui_senders.clone(),
-        )
+        let slot = state_guard.slots.get(slot_id).cloned();
+        let gui = state_guard.gui_senders.clone();
+
+        // If a brand-new panel was added, send a "create" upsert so the FE
+        // builds its PanelState entry before slot/layout patches reference it.
+        let panel_upsert = new_panel_id.and_then(|pid| {
+            let p = state_guard.panels.get(pid)?;
+            let supports_thumbs = state_guard
+                .drivers
+                .get(&p.source_id)
+                .map(|d| d.supports_thumbnails())
+                .unwrap_or(false);
+            Some(ServerMessage::StatePatch {
+                timestamp: now(),
+                domain: "panels".to_string(),
+                entity_id: Some(pid.to_string()),
+                version: p.version,
+                patch: serde_json::json!({
+                    "create": true,
+                    "slotId": p.slot_id,
+                    "tabKind": p.tab_kind.as_str(),
+                    "tabTitle": p.tab_title_override,
+                    "path": p.path,
+                    "sourceId": p.source_id,
+                    "status": p.status.as_str(),
+                    "sort": p.sort,
+                    "showHidden": p.show_hidden,
+                    "viewMode": p.view_mode.as_str(),
+                    "supportsThumbnails": supports_thumbs,
+                    "terminalSessionId": p.terminal_session,
+                }),
+            })
+        });
+
+        let slot_patch = slot.map(|s| ServerMessage::StatePatch {
+            timestamp: now(),
+            domain: "slots".to_string(),
+            entity_id: Some(s.slot_id.clone()),
+            version: 0,
+            patch: serde_json::json!({
+                "tabPanelIds": s.tab_panel_ids,
+                "activePanelId": s.active_panel_id,
+            }),
+        });
+
+        let active_per_slot: Vec<String> = state_guard
+            .layout_slots
+            .iter()
+            .filter_map(|sid| state_guard.slots.get(sid).map(|s| s.active_panel_id.clone()))
+            .collect();
+        let layout_patch = ServerMessage::StatePatch {
+            timestamp: now(),
+            domain: "layout".to_string(),
+            entity_id: None,
+            version: 0,
+            patch: serde_json::json!({
+                "panels": active_per_slot,
+                "slots": state_guard.layout_slots,
+            }),
+        };
+
+        let focus_patch = focus_to.map(|fid| ServerMessage::StatePatch {
+            timestamp: now(),
+            domain: "focus".to_string(),
+            entity_id: None,
+            version: 0,
+            patch: serde_json::json!({ "focus": fid }),
+        });
+
+        (panel_upsert, slot_patch, layout_patch, focus_patch, gui)
     };
-    let _ = ctx.tx.send(snapshot.clone()).await;
-    for sender in &gui_senders {
-        let _ = sender.send(snapshot.clone()).await;
+
+    // Send panel-upsert FIRST so slot/layout patches reference a known id.
+    if let Some(p) = &panel_upsert {
+        let _ = ctx.tx.send(p.clone()).await;
+        for s in &gui_senders {
+            let _ = s.send(p.clone()).await;
+        }
+    }
+    if let Some(p) = &slot_patch {
+        let _ = ctx.tx.send(p.clone()).await;
+        for s in &gui_senders {
+            let _ = s.send(p.clone()).await;
+        }
+    }
+    let _ = ctx.tx.send(layout_patch.clone()).await;
+    for s in &gui_senders {
+        let _ = s.send(layout_patch.clone()).await;
+    }
+    if let Some(p) = &focus_patch {
+        let _ = ctx.tx.send(p.clone()).await;
+        for s in &gui_senders {
+            let _ = s.send(p.clone()).await;
+        }
     }
 }
 
@@ -136,8 +229,13 @@ async fn new_tab(args: &Value, ctx: &mut IntentContext<'_>) {
         (new_panel, driver, supports_thumbs, sort, filter, show_hidden, version)
     };
 
-    // A full snapshot ensures clients see the new panel + slot membership together.
-    broadcast_snapshot(ctx).await;
+    broadcast_slot_change(
+        ctx,
+        &slot_id,
+        Some(&new_panel.panel_id),
+        Some(&new_panel.panel_id),
+    )
+    .await;
 
     // Kick off the scan for the new tab so its listing populates.
     if let Some(driver) = driver {
@@ -207,7 +305,7 @@ async fn close_tab(args: &Value, ctx: &mut IntentContext<'_>) {
         handle.abort();
     }
 
-    let focus_was_panel = {
+    let focus_followed = {
         let mut state_guard = ctx.state.lock().await;
         let prev_focus = state_guard.focus.clone();
         if let Some(slot) = state_guard.slots.get_mut(&slot_id) {
@@ -217,12 +315,19 @@ async fn close_tab(args: &Value, ctx: &mut IntentContext<'_>) {
         state_guard.panels.remove(&panel_id);
         if prev_focus == panel_id {
             state_guard.focus = new_active.clone();
+            true
+        } else {
+            false
         }
-        prev_focus == panel_id
     };
 
-    broadcast_snapshot(ctx).await;
-    let _ = focus_was_panel; // focus already updated in state; snapshot reflects it
+    broadcast_slot_change(
+        ctx,
+        &slot_id,
+        None,
+        if focus_followed { Some(&new_active) } else { None },
+    )
+    .await;
 }
 
 async fn promote_terminal(args: &Value, ctx: &mut IntentContext<'_>) {
@@ -300,12 +405,43 @@ async fn promote_terminal(args: &Value, ctx: &mut IntentContext<'_>) {
         Some((sid, new_panel_id))
     };
 
-    if let Some((sid, new_panel_id)) = pty_rebind {
+    if let Some((sid, new_panel_id)) = &pty_rebind {
         let pty_manager = ctx.state.lock().await.pty_manager.clone();
-        pty_manager.rebind_panel(sid, new_panel_id);
+        pty_manager.rebind_panel(*sid, new_panel_id.clone());
     }
 
-    broadcast_snapshot(ctx).await;
+    let Some((_, new_panel_id)) = pty_rebind else {
+        return;
+    };
+
+    // Tell the FE the source panel no longer hosts an embedded terminal.
+    let (src_version, gui_senders, slot_id) = {
+        let state_guard = ctx.state.lock().await;
+        let version = state_guard
+            .panels
+            .get(&source_panel_id)
+            .map(|p| p.version)
+            .unwrap_or(0);
+        let slot_id = state_guard
+            .panels
+            .get(&new_panel_id)
+            .map(|p| p.slot_id.clone())
+            .unwrap_or_default();
+        (version, state_guard.gui_senders.clone(), slot_id)
+    };
+    let src_patch = ServerMessage::StatePatch {
+        timestamp: now(),
+        domain: "panels".to_string(),
+        entity_id: Some(source_panel_id.clone()),
+        version: src_version,
+        patch: serde_json::json!({ "terminalSessionId": null }),
+    };
+    let _ = ctx.tx.send(src_patch.clone()).await;
+    for s in &gui_senders {
+        let _ = s.send(src_patch.clone()).await;
+    }
+
+    broadcast_slot_change(ctx, &slot_id, Some(&new_panel_id), Some(&new_panel_id)).await;
 }
 
 async fn switch_tab(args: &Value, ctx: &mut IntentContext<'_>) {

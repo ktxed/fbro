@@ -381,7 +381,45 @@ function applyPatch(state: AppState, msg: StatePatchMessage): AppState {
   if (msg.domain === "panels" && msg.entityId) {
     const panelId = msg.entityId;
     const panel = state.panels[panelId];
-    if (!panel) return state;
+    if (!panel) {
+      // Unknown panel id — accept it iff this patch is a "create" payload
+      // carrying enough fields to seed a PanelState. The BE emits one of
+      // these when a tab is opened so the FE can render the new panel
+      // without paying for a full StateSnapshot.
+      const p = msg.patch as Partial<PanelState> & { create?: boolean };
+      if (!p.create || !p.slotId || !p.sourceId || p.path === undefined) return state;
+      const fresh: PanelState = {
+        panelId,
+        slotId: p.slotId,
+        tabKind: p.tabKind ?? "listing",
+        tabTitle: p.tabTitle,
+        path: p.path,
+        status: p.status ?? "loading",
+        sourceId: p.sourceId,
+        sort: p.sort ?? { by: "name", order: "asc" },
+        filter: null,
+        filterModeActive: false,
+        showHidden: p.showHidden ?? false,
+        viewMode: p.viewMode ?? "list",
+        supportsThumbnails: p.supportsThumbnails ?? false,
+        cursor: 0,
+        selection: [],
+        selectedEntries: [],
+        entries: [],
+        version: msg.version ?? 0,
+        calculatingSize: [],
+        shadowSource: p.shadowSource,
+        terminalSessionId: p.terminalSessionId,
+      };
+      return {
+        ...state,
+        panels: { ...state.panels, [panelId]: fresh },
+        panelHistory: {
+          ...state.panelHistory,
+          [panelId]: { entries: [{ path: fresh.path, sourceId: fresh.sourceId }], cursor: 0 },
+        },
+      };
+    }
 
     // Some fields are applied before the version guard because a dirsize try_send
     // can fire between the BE's state-lock release and its tx.send, putting a
