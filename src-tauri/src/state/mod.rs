@@ -555,6 +555,172 @@ impl AppState {
     }
 }
 
+/// Add restored tabs (beyond the first, which `new_default` already seeded)
+/// to each slot. Drops tabs whose source isn't currently mounted, falling
+/// back to home. Newly-added panels go into AppState.panels in Loading state
+/// — the WS server's initial-scan loop picks them up on first GUI connect.
+pub fn restore_tabs_from_session(
+    state: &mut AppState,
+    session_slots: &[crate::persistence::SlotSession],
+) {
+    use crate::persistence::TabSession;
+
+    if session_slots.is_empty() {
+        return;
+    }
+
+    let home = state.platform.home_dir();
+    let show_hidden_default = state.settings.general.show_hidden_default;
+    let default_sort = crate::ws::protocol::SortSpec {
+        by: "name".to_string(),
+        order: "asc".to_string(),
+    };
+
+    let pick_source = |source_id: &Option<String>| -> Option<String> {
+        if let Some(sid) = source_id {
+            if state.sources.contains_key(sid) && state.drivers.contains_key(sid) {
+                return Some(sid.clone());
+            }
+        }
+        None
+    };
+
+    for slot_session in session_slots {
+        // Only act on slots that already exist (left/right) — sessions written
+        // by future multi-slot builds shouldn't accidentally clobber state.
+        let Some(slot) = state.slots.get(&slot_session.slot_id).cloned() else {
+            continue;
+        };
+        if slot_session.tabs.is_empty() {
+            continue;
+        }
+
+        // The first tab corresponds to the existing seed panel — set its
+        // path/source from the saved tab so the home-fallback case lines up.
+        if let Some(first) = slot_session.tabs.first() {
+            let seed_panel_id = slot.tab_panel_ids[0].clone();
+            if let Some(panel) = state.panels.get_mut(&seed_panel_id) {
+                match first {
+                    TabSession::Listing { source_id, path } => {
+                        let resolved = pick_source(source_id)
+                            .unwrap_or_else(|| panel.source_id.clone());
+                        let resolved_path = if Path::new(path).is_dir() {
+                            path.clone()
+                        } else {
+                            home.clone()
+                        };
+                        panel.source_id = resolved;
+                        panel.path = resolved_path;
+                        panel.tab_kind = TabKind::Listing;
+                    }
+                    TabSession::Terminal { cwd } => {
+                        // Terminal tabs don't restore as live PTYs — fall back
+                        // to a plain listing at the recorded cwd.
+                        let resolved_path = if Path::new(cwd).is_dir() {
+                            cwd.clone()
+                        } else {
+                            home.clone()
+                        };
+                        panel.path = resolved_path;
+                        panel.tab_kind = TabKind::Listing;
+                    }
+                }
+            }
+        }
+
+        // Build the additional tabs (index 1..). Allocate fresh panel ids
+        // inside this slot.
+        let mut added_ids: Vec<String> = Vec::new();
+        for tab in slot_session.tabs.iter().skip(1) {
+            let (path, source_id) = match tab {
+                TabSession::Listing { source_id, path } => {
+                    let path = if Path::new(path).is_dir() {
+                        path.clone()
+                    } else {
+                        home.clone()
+                    };
+                    let source_id = pick_source(source_id).unwrap_or_else(|| {
+                        // Inherit source from the seed panel as a last resort.
+                        state
+                            .panels
+                            .get(&slot.tab_panel_ids[0])
+                            .map(|p| p.source_id.clone())
+                            .unwrap_or_default()
+                    });
+                    (path, source_id)
+                }
+                TabSession::Terminal { cwd } => {
+                    let path = if Path::new(cwd).is_dir() {
+                        cwd.clone()
+                    } else {
+                        home.clone()
+                    };
+                    let source_id = state
+                        .panels
+                        .get(&slot.tab_panel_ids[0])
+                        .map(|p| p.source_id.clone())
+                        .unwrap_or_default();
+                    (path, source_id)
+                }
+            };
+
+            if source_id.is_empty() {
+                continue;
+            }
+
+            // Allocate a panel id within the slot.
+            let mut n = 1u64;
+            let new_panel_id = loop {
+                let candidate = format!("{}-tab-{}", slot.slot_id, n);
+                if !state.panels.contains_key(&candidate) {
+                    break candidate;
+                }
+                n += 1;
+            };
+
+            let new_panel = Panel {
+                panel_id: new_panel_id.clone(),
+                slot_id: slot.slot_id.clone(),
+                tab_kind: TabKind::Listing,
+                tab_title_override: None,
+                source_id,
+                path,
+                status: PanelStatus::Loading,
+                sort: default_sort.clone(),
+                filter: None,
+                filter_mode_active: false,
+                show_hidden: show_hidden_default,
+                view_mode: PanelViewMode::List,
+                cursor: 0,
+                selection: vec![],
+                entries: vec![],
+                version: 0,
+                calculating_size: HashSet::new(),
+                windowed: false,
+                window_start: 0,
+                window_count: 0,
+                window_version: 0,
+                source_paths: HashMap::new(),
+                shadow_source: None,
+                terminal_session: None,
+            };
+            state.panels.insert(new_panel_id.clone(), new_panel);
+            added_ids.push(new_panel_id);
+        }
+
+        // Wire the tabs into the slot, preserving active_index.
+        if let Some(live_slot) = state.slots.get_mut(&slot_session.slot_id) {
+            for id in &added_ids {
+                live_slot.tab_panel_ids.push(id.clone());
+            }
+            let active_index = slot_session
+                .active_index
+                .min(live_slot.tab_panel_ids.len().saturating_sub(1));
+            live_slot.active_panel_id = live_slot.tab_panel_ids[active_index].clone();
+        }
+    }
+}
+
 pub type SharedState = Arc<Mutex<AppState>>;
 
 /// Walk all panels and collect the set of host file paths currently in any

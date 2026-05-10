@@ -103,6 +103,14 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
                 };
                 state_guard.settings.general.thumbnail_video_frame_skip = (v.min(60)) as u32;
             }
+            "persistPanelTabs" => {
+                let Some(v) = value.as_bool() else {
+                    drop(state_guard);
+                    bad_setting(ctx.tx, "persistPanelTabs must be a boolean").await;
+                    return;
+                };
+                state_guard.settings.general.persist_panel_tabs = v;
+            }
             "savePanelViewMode" => {
                 let Some(v) = value.as_bool() else {
                     drop(state_guard);
@@ -226,6 +234,7 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
                 "enableVideoThumbnails": general.enable_video_thumbnails,
                 "thumbnailMaxImageSizeMb": general.thumbnail_max_image_size_mb,
                 "thumbnailVideoFrameSkip": general.thumbnail_video_frame_skip,
+                "persistPanelTabs": general.persist_panel_tabs,
             }
         }),
     };

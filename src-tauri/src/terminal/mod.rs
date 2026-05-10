@@ -143,28 +143,92 @@ impl PtyManager {
             // Remove the dead session from PtyManager so re-opening works.
             self_arc.close(session_id);
 
-            // Update AppState and collect current GUI senders.
-            let (new_version, gui_senders) = {
+            // Update AppState. If the owner is a *terminal tab* (created by
+            // promoting an embedded terminal), remove the tab entirely; the
+            // panel only existed to host this PTY. Otherwise just clear the
+            // embedded-terminal field on the source panel.
+            let (closed_tab, new_version, gui_senders) = {
                 let mut s = state.blocking_lock();
-                if let Some(panel) = s.panels.get_mut(&owner) {
-                    panel.terminal_session = None;
-                    panel.version += 1;
+                let is_terminal_tab = s
+                    .panels
+                    .get(&owner)
+                    .map(|p| p.tab_kind == crate::state::TabKind::Terminal)
+                    .unwrap_or(false);
+
+                if is_terminal_tab {
+                    // Locate the slot and activate the left neighbor.
+                    let slot_id = s.panels.get(&owner).map(|p| p.slot_id.clone());
+                    if let Some(slot_id) = slot_id {
+                        if let Some(slot) = s.slots.get_mut(&slot_id) {
+                            if slot.tab_panel_ids.len() > 1 {
+                                let idx = slot
+                                    .tab_panel_ids
+                                    .iter()
+                                    .position(|id| id == &owner)
+                                    .unwrap_or(0);
+                                let new_active = if idx > 0 {
+                                    slot.tab_panel_ids[idx - 1].clone()
+                                } else {
+                                    slot.tab_panel_ids[idx + 1].clone()
+                                };
+                                slot.tab_panel_ids.retain(|id| id != &owner);
+                                slot.active_panel_id = new_active.clone();
+                                if s.focus == owner {
+                                    s.focus = new_active;
+                                }
+                                s.panels.remove(&owner);
+                                (true, 0u64, s.gui_senders.clone())
+                            } else {
+                                // It's the only tab — leave the panel intact
+                                // and just clear the terminal session.
+                                if let Some(panel) = s.panels.get_mut(&owner) {
+                                    panel.terminal_session = None;
+                                    panel.version += 1;
+                                }
+                                let v = s.panels.get(&owner).map(|p| p.version).unwrap_or(0);
+                                (false, v, s.gui_senders.clone())
+                            }
+                        } else {
+                            (false, 0, s.gui_senders.clone())
+                        }
+                    } else {
+                        (false, 0, s.gui_senders.clone())
+                    }
+                } else {
+                    if let Some(panel) = s.panels.get_mut(&owner) {
+                        panel.terminal_session = None;
+                        panel.version += 1;
+                    }
+                    let v = s.panels.get(&owner).map(|p| p.version).unwrap_or(0);
+                    (false, v, s.gui_senders.clone())
                 }
-                let v = s.panels.get(&owner).map(|p| p.version).unwrap_or(0);
-                (v, s.gui_senders.clone())
             };
 
-            let patch = ServerMessage::StatePatch {
-                timestamp: now(),
-                domain: "panels".to_string(),
-                entity_id: Some(owner.clone()),
-                version: new_version,
-                patch: serde_json::json!({ "terminalSessionId": null }),
-            };
-            for sender in &gui_senders {
-                let _ = sender.blocking_send(patch.clone());
+            if closed_tab {
+                // Tab removal — need a fresh snapshot so the FE picks up the
+                // slot membership change and the gone panel id.
+                let dir_size_tasks = Vec::new();
+                let snapshot = {
+                    let s = state.blocking_lock();
+                    crate::ws::runtime::build_state_snapshot(&s, dir_size_tasks)
+                };
+                for sender in &gui_senders {
+                    let _ = sender.blocking_send(snapshot.clone());
+                }
+                let _ = tx_exit.blocking_send(snapshot);
+            } else {
+                let patch = ServerMessage::StatePatch {
+                    timestamp: now(),
+                    domain: "panels".to_string(),
+                    entity_id: Some(owner.clone()),
+                    version: new_version,
+                    patch: serde_json::json!({ "terminalSessionId": null }),
+                };
+                for sender in &gui_senders {
+                    let _ = sender.blocking_send(patch.clone());
+                }
+                let _ = tx_exit.blocking_send(patch);
             }
-            let _ = tx_exit.blocking_send(patch);
 
             let closed = ServerMessage::TerminalClosed {
                 timestamp: now(),

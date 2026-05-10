@@ -350,6 +350,7 @@ export interface GeneralSettings {
   thumbnailCacheDir: string;
   thumbnailCacheItemCount: number;
   thumbnailCacheSizeBytes: number;
+  persistPanelTabs: boolean;
 }
 
 export interface SettingsState {

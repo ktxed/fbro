@@ -8,7 +8,7 @@ use crate::jobs::dirsize::{DirSizeQueue, DirSizeTaskSnapshot};
 use crate::jobs::viewer_prefetch::ViewerPrefetchQueue;
 use crate::jobs::scan::run_scan;
 use crate::jobs::{DecisionResponse, JobState, ScanHandle};
-use crate::persistence::{PanelSession, SessionState};
+use crate::persistence::{PanelSession, SessionState, SlotSession, TabSession};
 use crate::state::{AppState, Panel, PanelStatus, SharedState};
 use crate::vfs::VfsDriver;
 use crate::watcher::WatcherCommand;
@@ -147,6 +147,7 @@ pub(crate) fn build_state_snapshot(
                     thumbnail_cache_dir: thumbnail_cache_dir_string(),
                     thumbnail_cache_item_count: thumbnail_cache_stats().0,
                     thumbnail_cache_size_bytes: thumbnail_cache_stats().1,
+                    persist_panel_tabs: state.settings.general.persist_panel_tabs,
                 },
             },
         },
@@ -714,16 +715,67 @@ pub(crate) async fn send_window(
 pub(crate) async fn save_session(state: &SharedState, app_handle: &tauri::AppHandle) {
     use tauri::Manager;
     let state_guard = state.lock().await;
+    let persist_tabs = state_guard.settings.general.persist_panel_tabs;
+
+    // Always emit the legacy `panels` map for back-compat with older
+    // builds that may try to load this file: one entry per slot holding
+    // the active tab's path.
     let panels = state_guard
-        .panels
+        .layout_slots
         .iter()
-        .map(|(id, panel)| {
-            (
-                id.clone(),
+        .filter_map(|sid| {
+            let slot = state_guard.slots.get(sid)?;
+            let panel = state_guard.panels.get(&slot.active_panel_id)?;
+            Some((
+                slot.slot_id.clone(),
                 PanelSession {
                     path: panel.path.clone(),
                 },
-            )
+            ))
+        })
+        .collect::<std::collections::HashMap<_, _>>();
+
+    let slots: Vec<SlotSession> = state_guard
+        .layout_slots
+        .iter()
+        .filter_map(|sid| {
+            let slot = state_guard.slots.get(sid)?;
+            let ids: Vec<&String> = if persist_tabs {
+                slot.tab_panel_ids.iter().collect()
+            } else {
+                vec![&slot.active_panel_id]
+            };
+            let tabs: Vec<TabSession> = ids
+                .iter()
+                .filter_map(|pid| {
+                    let panel = state_guard.panels.get(*pid)?;
+                    Some(match panel.tab_kind {
+                        crate::state::TabKind::Terminal => TabSession::Terminal {
+                            cwd: panel.path.clone(),
+                        },
+                        crate::state::TabKind::Listing => TabSession::Listing {
+                            source_id: Some(panel.source_id.clone()),
+                            path: panel.path.clone(),
+                        },
+                    })
+                })
+                .collect();
+            if tabs.is_empty() {
+                return None;
+            }
+            let active_index = if persist_tabs {
+                slot.tab_panel_ids
+                    .iter()
+                    .position(|id| id == &slot.active_panel_id)
+                    .unwrap_or(0)
+            } else {
+                0
+            };
+            Some(SlotSession {
+                slot_id: slot.slot_id.clone(),
+                active_index,
+                tabs,
+            })
         })
         .collect();
 
@@ -746,6 +798,7 @@ pub(crate) async fn save_session(state: &SharedState, app_handle: &tauri::AppHan
 
     crate::persistence::save(&SessionState {
         panels,
+        slots,
         font_size: Some(state_guard.font_size),
         window: window_session,
     });

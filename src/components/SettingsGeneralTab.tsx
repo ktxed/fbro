@@ -56,6 +56,14 @@ export function SettingsGeneralTab({ general, client }: SettingsGeneralTabProps)
           />
           <span>Save panel listing mode (list / grid) per panel across sessions</span>
         </label>
+        <label className="settings-tab__option">
+          <input
+            type="checkbox"
+            checked={general.persistPanelTabs}
+            onChange={(e) => send("persistPanelTabs", e.target.checked)}
+          />
+          <span>Restore all panel tabs across sessions (otherwise only the active tab returns)</span>
+        </label>
       </div>
       <div className="settings-tab__section">
         <h3 className="settings-tab__section-title">File Operations</h3>

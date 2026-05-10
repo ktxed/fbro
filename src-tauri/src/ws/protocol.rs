@@ -247,6 +247,7 @@ pub struct GeneralSettingsSchema {
     pub thumbnail_cache_dir: String,
     pub thumbnail_cache_item_count: u64,
     pub thumbnail_cache_size_bytes: u64,
+    pub persist_panel_tabs: bool,
 }
 
 #[derive(Serialize, Clone, Debug)]

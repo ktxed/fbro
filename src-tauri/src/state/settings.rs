@@ -39,6 +39,11 @@ pub struct GeneralSettings {
     /// open on black or studio cards.
     #[serde(default = "default_thumb_video_frame_skip")]
     pub thumbnail_video_frame_skip: u32,
+    /// When true, every tab in every slot is saved at shutdown and restored on
+    /// startup. When false, only the active tab per slot is persisted (the
+    /// pre-tabs behavior).
+    #[serde(default = "default_true")]
+    pub persist_panel_tabs: bool,
 }
 
 fn default_true() -> bool {
@@ -69,6 +74,7 @@ impl Default for GeneralSettings {
             enable_video_thumbnails: true,
             thumbnail_max_image_size_mb: 100,
             thumbnail_video_frame_skip: 5,
+            persist_panel_tabs: true,
         }
     }
 }

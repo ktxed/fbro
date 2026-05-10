@@ -269,16 +269,20 @@ fn main() {
                 }
                 let initial_paths = session
                     .panels
-                    .into_iter()
-                    .map(|(id, p)| (id, p.path))
+                    .iter()
+                    .map(|(id, p)| (id.clone(), p.path.clone()))
                     .collect();
-                let shared_state = Arc::new(Mutex::new(AppState::new_default(
+                let mut app_state = AppState::new_default(
                     platform,
                     initial_paths,
                     file_server_port,
                     Arc::clone(&thumb_pool),
                     Arc::clone(&thumb_cache),
-                )));
+                );
+                // Restore extra tabs (beyond the seed panel) from the saved
+                // session when the new slot-aware schema is present.
+                crate::state::restore_tabs_from_session(&mut app_state, &session.slots);
+                let shared_state = Arc::new(Mutex::new(app_state));
                 let quit_notify = Arc::new(tokio::sync::Notify::new());
                 use tauri::Manager;
                 app.manage(Arc::clone(&quit_notify));

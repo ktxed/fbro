@@ -259,7 +259,7 @@ const initialState: AppState = {
   childProcesses: {},
   fontSize: 13,
   settings: {
-    general: { showHiddenDefault: false, rememberWindowState: true, preserveAttributes: true, ludicrousMode: false, maxImageSizeMb: 512, savePanelViewMode: false, enableVideoThumbnails: true, thumbnailMaxImageSizeMb: 100, thumbnailVideoFrameSkip: 5, sessionPath: "", bookmarksPath: "", thumbnailCacheDir: "", thumbnailCacheItemCount: 0, thumbnailCacheSizeBytes: 0 },
+    general: { showHiddenDefault: false, rememberWindowState: true, preserveAttributes: true, ludicrousMode: false, maxImageSizeMb: 512, savePanelViewMode: false, enableVideoThumbnails: true, thumbnailMaxImageSizeMb: 100, thumbnailVideoFrameSkip: 5, sessionPath: "", bookmarksPath: "", thumbnailCacheDir: "", thumbnailCacheItemCount: 0, thumbnailCacheSizeBytes: 0, persistPanelTabs: true },
   },
 };
 
@@ -578,6 +578,17 @@ function applyPatch(state: AppState, msg: StatePatchMessage): AppState {
 
   if (msg.domain === "focus") {
     return { ...state, focus: msg.patch.focus as string };
+  }
+
+  if (msg.domain === "layout") {
+    const patch = msg.patch as { panels?: string[]; slots?: string[] };
+    return {
+      ...state,
+      layout: {
+        panels: patch.panels ?? state.layout.panels,
+        slots: patch.slots ?? state.layout.slots,
+      },
+    };
   }
 
   if (msg.domain === "slots") {

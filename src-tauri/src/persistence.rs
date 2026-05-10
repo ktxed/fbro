@@ -6,17 +6,47 @@ use std::path::PathBuf;
 
 #[derive(Serialize, Deserialize, Default)]
 pub struct SessionState {
+    /// Legacy single-panel-per-slot persistence. Kept for back-compat with
+    /// session files written before tabs landed; ignored when `slots` is
+    /// non-empty.
     #[serde(default)]
     pub panels: HashMap<String, PanelSession>,
+    /// New slot-aware persistence. One entry per layout slot, in order.
+    #[serde(default)]
+    pub slots: Vec<SlotSession>,
     #[serde(default)]
     pub font_size: Option<u8>,
     #[serde(default)]
     pub window: Option<WindowSession>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct PanelSession {
     pub path: String,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct SlotSession {
+    pub slot_id: String,
+    #[serde(default)]
+    pub active_index: usize,
+    pub tabs: Vec<TabSession>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum TabSession {
+    Listing {
+        #[serde(default)]
+        source_id: Option<String>,
+        path: String,
+    },
+    /// Terminal tabs aren't restored as a live PTY — on restore we open a
+    /// plain listing at the recorded cwd. The user can re-promote a terminal
+    /// later if desired.
+    Terminal {
+        cwd: String,
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone)]

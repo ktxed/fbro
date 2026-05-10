@@ -5,6 +5,7 @@ use serde_json::Value;
 
 use crate::jobs::scan::run_scan;
 use crate::state::{Panel, PanelStatus, PanelViewMode, TabKind};
+use crate::ws::protocol::{now, ServerMessage};
 use crate::ws::runtime::{build_state_snapshot, IntentContext};
 
 pub(crate) async fn handle(
@@ -317,7 +318,10 @@ async fn switch_tab(args: &Value, ctx: &mut IntentContext<'_>) {
         None => return,
     };
 
-    let focus_should_follow = {
+    // Mutate slot + focus, then emit small targeted patches. Avoid a full
+    // snapshot — those re-serialize every panel's entries and stall when any
+    // tab is sitting on a big directory.
+    let (focus_follow, slot_snapshot, layout_panels, layout_slots, gui_senders) = {
         let mut state_guard = ctx.state.lock().await;
         let Some(slot) = state_guard.slots.get_mut(&slot_id) else {
             return;
@@ -327,17 +331,69 @@ async fn switch_tab(args: &Value, ctx: &mut IntentContext<'_>) {
         }
         let prev_active = slot.active_panel_id.clone();
         slot.active_panel_id = panel_id.clone();
-        // If focus was on the previously active tab of this slot, move it.
-        let follow = state_guard.focus == prev_active;
-        if follow {
+        let snapshot = slot.clone();
+        let focus_follow = state_guard.focus == prev_active;
+        if focus_follow {
             state_guard.focus = panel_id.clone();
         }
-        follow
+        let panels_active: Vec<String> = state_guard
+            .layout_slots
+            .iter()
+            .filter_map(|sid| state_guard.slots.get(sid).map(|s| s.active_panel_id.clone()))
+            .collect();
+        (
+            focus_follow,
+            snapshot,
+            panels_active,
+            state_guard.layout_slots.clone(),
+            state_guard.gui_senders.clone(),
+        )
     };
-    let _ = focus_should_follow;
 
-    // A full snapshot keeps slot/layout/focus/panels coherent in one frame —
-    // the FE has no per-domain handler for layout patches.
-    broadcast_snapshot(ctx).await;
+    // slot.activate patch
+    let slot_patch = ServerMessage::StatePatch {
+        timestamp: now(),
+        domain: "slots".to_string(),
+        entity_id: Some(slot_snapshot.slot_id.clone()),
+        version: 0,
+        patch: serde_json::json!({
+            "tabPanelIds": slot_snapshot.tab_panel_ids,
+            "activePanelId": slot_snapshot.active_panel_id,
+        }),
+    };
+    let _ = ctx.tx.send(slot_patch.clone()).await;
+    for sender in &gui_senders {
+        let _ = sender.send(slot_patch.clone()).await;
+    }
+
+    // layout.panels patch — keeps Layout.tsx rendering the correct active tab.
+    let layout_patch = ServerMessage::StatePatch {
+        timestamp: now(),
+        domain: "layout".to_string(),
+        entity_id: None,
+        version: 0,
+        patch: serde_json::json!({
+            "panels": layout_panels,
+            "slots": layout_slots,
+        }),
+    };
+    let _ = ctx.tx.send(layout_patch.clone()).await;
+    for sender in &gui_senders {
+        let _ = sender.send(layout_patch.clone()).await;
+    }
+
+    if focus_follow {
+        let focus_patch = ServerMessage::StatePatch {
+            timestamp: now(),
+            domain: "focus".to_string(),
+            entity_id: None,
+            version: 0,
+            patch: serde_json::json!({ "focus": panel_id }),
+        };
+        let _ = ctx.tx.send(focus_patch.clone()).await;
+        for sender in &gui_senders {
+            let _ = sender.send(focus_patch.clone()).await;
+        }
+    }
 }
 
