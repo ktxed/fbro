@@ -9,7 +9,7 @@ import {
   PANEL_SHORTCUT_COMMAND_IDS,
 } from "../commands/interactive";
 import { useAppDispatch, useAppState } from "../store";
-import { IconChevronDown, IconChevronUp, IconChevronRight, IconChevronLeft, IconArrowUpRight, IconX } from "@tabler/icons-react";
+import { IconChevronDown, IconChevronUp, IconChevronRight, IconChevronLeft, IconArrowUpRight, IconX, IconAlertTriangle } from "@tabler/icons-react";
 import { BookmarksPopover } from "./BookmarksPopover";
 import { PanelTerminal } from "./PanelTerminal";
 import { EntryThumb } from "./EntryThumb";
@@ -58,7 +58,6 @@ function SortHeader({ sort, panelId, client }: {
       <span className="panel__sort-name" onClick={() => handleSort("name")}>Name {tri("name")}</span>
       <span className="panel__sort-size" onClick={() => handleSort("size")}>Size {tri("size")}</span>
       <span className="panel__sort-date" onClick={() => handleSort("date")}>Date {tri("date")}</span>
-      <span className="panel__sort-perms" />
     </div>
   );
 }
@@ -308,6 +307,25 @@ function formatMtime(mtime: string | undefined): string {
   const d = new Date(secs * 1000);
   const p = (n: number) => n.toString().padStart(2, "0");
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+function splitNameExt(entry: VFSEntry): { base: string; ext: string } {
+  const n = entry.name;
+  if (entry.kind === "directory" || n === ".." || n.startsWith(".")) {
+    return { base: n, ext: "" };
+  }
+  const i = n.lastIndexOf(".");
+  if (i <= 0 || i === n.length - 1) return { base: n, ext: "" };
+  return { base: n.slice(0, i), ext: n.slice(i) };
+}
+
+function isRestricted(entry: VFSEntry): boolean {
+  const p = entry.permissions;
+  if (!p) return false;
+  if (p.startsWith("?")) return true;
+  const tail = p.length >= 9 ? p.slice(-9) : p;
+  if (tail.length === 9 && tail[1] !== "w") return true;
+  return false;
 }
 
 export function Panel({
@@ -1096,10 +1114,50 @@ export function Panel({
         }}
       >
         <EntryIcon entry={entry} />
-        <span className={`panel__name${entry.cc ? ` ${entry.cc}` : ""}`}>{entry.name}</span>
+        {(() => {
+          const { base, ext } = splitNameExt(entry);
+          const restricted = isRestricted(entry);
+          return (
+            <span className={`panel__name${entry.cc ? ` ${entry.cc}` : ""}`}>
+              <span className="panel__name-base">{base}</span>
+              {ext && <span className="panel__name-ext">{ext}</span>}
+              {restricted && (
+                <button
+                  type="button"
+                  className="panel__name-warn"
+                  title={entry.permissions ?? ""}
+                  onMouseDown={(e) => { e.stopPropagation(); e.preventDefault(); }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const dirPath = panel.path.replace(/[/\\]+$/, "");
+                    const fullPath = entry.sourcePath
+                      ? entry.sourcePath
+                      : entry.name === ".."
+                        ? dirPath
+                        : `${dirPath}/${entry.name}`;
+                    dispatch({
+                      type: "OPEN_INFO",
+                      info: {
+                        name: entry.name,
+                        kind: entry.kind,
+                        fullPath,
+                        dirPath,
+                        size: entry.size,
+                        mtime: entry.mtime,
+                        btime: entry.btime,
+                        permissions: entry.permissions,
+                      },
+                    });
+                  }}
+                >
+                  <IconAlertTriangle size={15} />
+                </button>
+              )}
+            </span>
+          );
+        })()}
         <span className="panel__size">{formatSize(entry, calcSet)}</span>
         <span className="panel__mtime">{formatMtime(entry.mtime)}</span>
-        <span className="panel__perms">{entry.permissions ?? ""}</span>
       </div>
     );
   }

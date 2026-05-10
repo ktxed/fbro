@@ -25,7 +25,6 @@
   --row-height:   22px;
   --col-size-w:   70px;
   --col-date-w:   130px;
-  --col-perms-w:  76px;
 }
 
 html, body, #root {
@@ -613,7 +612,7 @@ body {
 .panel__sort-header {
   display: flex;
   align-items: center;
-  padding: 0 6px;
+  padding: 0 14px 0 6px;
   height: var(--row-height);
   flex-shrink: 0;
   border-bottom: 1px solid var(--border);
@@ -626,7 +625,6 @@ body {
 .panel__sort-name  { flex: 1; min-width: 0; display: flex; align-items: center; gap: 4px; color: var(--text-dim); font-size: calc(var(--font-size) - 1px); cursor: pointer; }
 .panel__sort-size  { flex-shrink: 0; width: var(--col-size-w);  text-align: right; display: flex; align-items: center; justify-content: flex-end; gap: 4px; color: var(--text-dim); font-size: calc(var(--font-size) - 1px); padding-left: 8px; cursor: pointer; }
 .panel__sort-date  { flex-shrink: 0; width: var(--col-date-w);  text-align: left; display: flex; align-items: center; justify-content: flex-start; gap: 4px; color: var(--text-dim); font-size: calc(var(--font-size) - 1px); padding-left: 8px; cursor: pointer; }
-.panel__sort-perms { flex-shrink: 0; width: var(--col-perms-w); padding-left: 8px; }
 
 .panel__sort-tri {
   cursor: pointer;
@@ -882,7 +880,7 @@ body {
 .panel__row {
   display: flex;
   align-items: center;
-  padding: 0 6px;
+  padding: 0 14px 0 6px;
   height: var(--row-height);
   cursor: default;
   white-space: nowrap;
@@ -939,10 +937,39 @@ body {
 
 .panel__name {
   flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  overflow: hidden;
+}
+
+.panel__name-base {
+  flex: 0 1 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  min-width: 0;
+  white-space: nowrap;
 }
+
+.panel__name-ext {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.panel__name-warn {
+  flex: 0 0 auto;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  margin-left: 4px;
+  background: transparent;
+  border: 0;
+  padding: 0 2px;
+  cursor: pointer;
+  color: var(--text-dim);
+}
+
+.panel__name-warn:hover { color: #e8c84a; }
 
 /* ── File-type color classes ──────────────────────────────────────────────── */
 .panel__name.cc-dir     { color: var(--text-dir); }
@@ -965,15 +992,6 @@ body {
   width: var(--col-date-w);
   text-align: right;
   color: var(--text-dim);
-  padding-left: 8px;
-}
-
-.panel__perms {
-  flex-shrink: 0;
-  width: var(--col-perms-w);
-  text-align: right;
-  color: var(--text-dim);
-  font-family: monospace;
   padding-left: 8px;
 }
 
