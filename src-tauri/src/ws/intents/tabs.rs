@@ -149,15 +149,19 @@ async fn new_tab(args: &Value, ctx: &mut IntentContext<'_>) {
         Some(s) => s.to_string(),
         None => return,
     };
+    // Optional: caller can supply a specific panel to clone from (e.g. the
+    // leftmost non-terminal tab when double-clicking empty tab-bar space).
+    let base_panel_id = args.get("basePanelId").and_then(Value::as_str).map(str::to_string);
 
-    // Clone the active tab's source/path/view defaults to seed the new panel.
+    // Clone the requested (or active) tab's source/path/view defaults to seed the new panel.
     let (new_panel, driver, supports_thumbs, sort, filter, show_hidden, version) = {
         let mut state_guard = ctx.state.lock().await;
 
         let Some(slot) = state_guard.slots.get(&slot_id).cloned() else {
             return;
         };
-        let Some(source) = state_guard.panels.get(&slot.active_panel_id).cloned() else {
+        let source_id = base_panel_id.unwrap_or_else(|| slot.active_panel_id.clone());
+        let Some(source) = state_guard.panels.get(&source_id).cloned() else {
             return;
         };
 

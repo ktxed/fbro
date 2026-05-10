@@ -70,6 +70,17 @@ export function PanelTabBar({ slot, panels, client }: Props) {
     client.sendIntent("panel.tab.close", undefined, { panelId });
   };
 
+  const newTabFromLeftmost = () => {
+    const basePanelId =
+      slot.tabPanelIds.find((id) => panels[id]?.tabKind !== "terminal") ??
+      slot.tabPanelIds[0];
+    client.sendIntent("panel.tab.new", undefined, {
+      slotId: slot.slotId,
+      source: "clone",
+      basePanelId,
+    });
+  };
+
   return (
     <div className="panel__tabs">
       <button
@@ -85,6 +96,9 @@ export function PanelTabBar({ slot, panels, client }: Props) {
         ref={listRef}
         onScroll={updateArrows}
         onWheel={onWheel}
+        onDoubleClick={(e) => {
+          if (e.target === e.currentTarget) newTabFromLeftmost();
+        }}
       >
         {slot.tabPanelIds.map((panelId) => {
           const panel = panels[panelId];
