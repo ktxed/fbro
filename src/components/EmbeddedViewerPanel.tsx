@@ -195,7 +195,7 @@ export function EmbeddedViewerPanel({ sourcePanelId, state, onClose }: Props) {
       };
 
       // For local images/PDF/video: serve directly, no round trip needed.
-      if (canUseDirect(isLocal, entry.name, fileSize)) {
+      if (canUseDirect(isLocal, entry.name, fileSize, imageLimitRef.current)) {
         pendingPathRef.current = null;
         setViewMode({ kind: "direct", file: info });
         return;
