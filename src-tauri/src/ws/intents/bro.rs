@@ -83,10 +83,11 @@ async fn list_bros_for_request(scope: &Value, args: &Value, ctx: &mut IntentCont
         return;
     }
 
-    let (ranking_inputs, result_panel_id) = {
+    let (ranking_inputs, result_panel_id, panel_source_id) = {
         let state_guard = ctx.state.lock().await;
         let result_panel_id =
             Some(other_panel_id(&state_guard, &panel_id).unwrap_or_else(|| panel_id.clone()));
+        let panel_source_id = state_guard.panels.get(&panel_id).map(|p| p.source_id.clone());
         let result = match state_guard.panels.get(&panel_id) {
             Some(panel) => match state_guard.drivers.get(&panel.source_id) {
                 Some(driver) => {
@@ -96,7 +97,7 @@ async fn list_bros_for_request(scope: &Value, args: &Value, ctx: &mut IntentCont
             },
             None => Err("Panel not found.".to_string()),
         };
-        (result, result_panel_id)
+        (result, result_panel_id, panel_source_id)
     };
 
     let ranking_inputs = match ranking_inputs {
@@ -117,7 +118,7 @@ async fn list_bros_for_request(scope: &Value, args: &Value, ctx: &mut IntentCont
     let suggested_output_dir = parsed.suggested_output_dir.clone();
     let lookup_inputs = ranking_inputs.clone();
     let bros = match tokio::task::spawn_blocking(move || {
-        list_bros(&lookup_inputs, suggested_output_dir.as_deref())
+        list_bros(&lookup_inputs, suggested_output_dir.as_deref(), panel_source_id.as_deref())
     })
     .await
     {
@@ -341,6 +342,43 @@ async fn launch_selected_bro(args: &Value, ctx: &mut IntentContext<'_>) {
                             timestamp: now(),
                             code: "BRO_LAUNCH_FAILED".to_string(),
                             message,
+                            recoverable: true,
+                            extra: Some(serde_json::json!({
+                                "requestId": parsed.request_id,
+                                "broId": parsed.bro_id,
+                            })),
+                        })
+                        .await;
+                }
+                return;
+            }
+            if matches!(bro.launch, LaunchRecipe::BuiltInKillProc) {
+                let result = tokio::task::spawn_blocking(move || {
+                    use sysinfo::{Pid, System};
+                    let mut sys = System::new_all();
+                    sys.refresh_processes();
+                    for input in &inputs {
+                        let pid = input.name.splitn(2, " - ").next()
+                            .and_then(|chain| chain.split(" | ").last())
+                            .and_then(|s| s.trim().parse::<u32>().ok());
+                        if let Some(pid) = pid {
+                            if let Some(proc) = sys.process(Pid::from_u32(pid)) {
+                                #[cfg(unix)]
+                                { let _ = proc.kill_with(sysinfo::Signal::Kill); }
+                                #[cfg(windows)]
+                                { let _ = proc.kill(); }
+                            }
+                        }
+                    }
+                })
+                .await;
+                if result.is_err() {
+                    let _ = ctx
+                        .tx
+                        .send(ServerMessage::Error {
+                            timestamp: now(),
+                            code: "BRO_LAUNCH_FAILED".to_string(),
+                            message: "Kill task panicked".to_string(),
                             recoverable: true,
                             extra: Some(serde_json::json!({
                                 "requestId": parsed.request_id,

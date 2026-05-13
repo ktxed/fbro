@@ -945,13 +945,22 @@ async fn navigate_to_source(scope: &Value, args: &Value, ctx: &mut IntentContext
             }
         };
 
-        let _ = ctx
-            .watcher_cmd_tx
-            .send(WatcherCommand::Watch {
-                panel_id: panel_id.clone(),
-                path: PathBuf::from(&target_path),
-            })
-            .await;
+        if target_path.is_empty() {
+            let _ = ctx
+                .watcher_cmd_tx
+                .send(WatcherCommand::Unwatch {
+                    panel_id: panel_id.clone(),
+                })
+                .await;
+        } else {
+            let _ = ctx
+                .watcher_cmd_tx
+                .send(WatcherCommand::Watch {
+                    panel_id: panel_id.clone(),
+                    path: PathBuf::from(&target_path),
+                })
+                .await;
+        }
 
         rescan_panel(
             &panel_id,

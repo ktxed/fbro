@@ -3,6 +3,7 @@
 pub mod bookmarks;
 pub mod history;
 pub mod local;
+pub mod procs;
 pub mod search;
 pub mod seven_zip;
 #[cfg(unix)]

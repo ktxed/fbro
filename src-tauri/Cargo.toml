@@ -27,6 +27,7 @@ rand = "0.8"
 sevenz-rust2 = { version = "0.20.2", features = ["compress", "util", "aes256"] }
 zip = "8.5.0"
 portable-pty = "0.9"
+sysinfo = "0.30"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 png = "0.17"

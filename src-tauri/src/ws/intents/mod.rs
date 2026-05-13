@@ -6,6 +6,7 @@ mod history;
 mod jobs;
 mod navigation;
 mod panel;
+mod procs;
 mod settings;
 mod tabs;
 mod terminal;
@@ -70,6 +71,7 @@ pub async fn dispatch(name: &str, scope: &Value, args: &Value, ctx: &mut IntentC
         "QueryCacheStatus" | "ClearCache" => cache::handle(name, args, ctx).await,
         "AddBookmark" | "RemoveBookmark" | "EnterBookmarkSource" => bookmarks::handle(name, scope, args, ctx).await,
         "EnterHistorySource" => history::handle(name, scope, args, ctx).await,
+        "EnterProcsSource" => procs::handle(name, scope, args, ctx).await,
         "Quit" | "ConfirmQuit" | "SetFontSize" => app::handle(name, args, ctx).await,
         "SetGeneralOption" | "ClearThumbnailCache" => settings::handle(name, args, ctx).await,
         "OpenPanelTerminal" | "ResizeTerminal" | "ClosePanelTerminal" => {
@@ -96,6 +98,10 @@ pub(crate) fn is_bookmarks_source(source_id: &str) -> bool {
 
 pub(crate) fn is_history_source(source_id: &str) -> bool {
     source_id == "history"
+}
+
+pub(crate) fn is_procs_source(source_id: &str) -> bool {
+    source_id == "procs"
 }
 
 /// Strips the archive prefix ("zip:" or "7z:") and returns the filesystem path.

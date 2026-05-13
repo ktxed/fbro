@@ -5,7 +5,7 @@ use serde_json::Value;
 use crate::jobs::viewer_prefetch::PREFETCH_IMAGE_CAP;
 use crate::state::settings::GeneralSettings;
 use crate::vfs::search::SearchResultsDriver;
-use crate::ws::intents::{arg_str, arg_u64, is_archive_source, is_search_source};
+use crate::ws::intents::{arg_str, arg_u64, is_archive_source, is_procs_source, is_search_source};
 use crate::ws::protocol::{now, ServerMessage};
 use crate::ws::runtime::{url_encode, IntentContext};
 
@@ -158,7 +158,7 @@ async fn view_file(args: &Value, ctx: &mut IntentContext<'_>) {
                 .unwrap_or_else(|| parsed.source_id.clone());
             (best_source, format!("{}/{}", parsed.path.trim_end_matches('/'), parsed.filename))
         }
-    } else if is_archive_source(&parsed.source_id) {
+    } else if is_archive_source(&parsed.source_id) || is_procs_source(&parsed.source_id) {
         let inner_path = {
             let p = parsed.path.trim_end_matches('/');
             if p.is_empty() {
@@ -382,7 +382,7 @@ async fn viewer_navigate(args: &Value, ctx: &mut IntentContext<'_>) {
                                     source_id.clone(),
                                 )
                             })
-                    } else if is_archive_source(&source_id) {
+                    } else if is_archive_source(&source_id) || is_procs_source(&source_id) {
                         let inner_path = {
                             let p = dir_path.trim_end_matches('/');
                             if p.is_empty() {

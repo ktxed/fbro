@@ -105,16 +105,27 @@ export function Toolbar({ client, jobsViewOpen, onOpenJobsView }: { client: WsCl
   }, [client, dispatch, jobsViewOpen, onOpenJobsView, state]);
 
   const focusedPanel = state.panels[state.focus];
-  const isShadow = !!focusedPanel?.shadowSource;
-  const isArchive = isShadow && !!focusedPanel && isArchiveSourceId(focusedPanel.sourceId);
-  const shadowDisabled = new Set(["file.rename", "file.move", "file.delete", "file.mkdir", "file.touch", "app.open_terminal"]);
+  const isArchive = !!focusedPanel?.shadowSource && isArchiveSourceId(focusedPanel.sourceId);
+  const sourceSupports = focusedPanel
+    ? (state.sources[focusedPanel.sourceId]?.supports ?? [])
+    : [];
+  const COMMAND_CAP: Partial<Record<string, string>> = {
+    "file.rename":       "Rename",
+    "file.copy":         "CopySelection",
+    "file.edit":         "Edit",
+    "file.move":         "MoveSelection",
+    "file.mkdir":        "NewFolder",
+    "file.delete":       "DeleteSelection",
+    "app.open_terminal": "OpenShell",
+  };
 
   return (
     <div className="toolbar">
       {TOOLBAR_COMMAND_IDS.map((commandId) => {
         const command = getCommand(state.commands, commandId);
         const key = formatPrimaryBinding(command);
-        const isDisabled = isShadow && shadowDisabled.has(commandId);
+        const cap = COMMAND_CAP[commandId];
+        const isDisabled = cap !== undefined && !sourceSupports.includes(cap);
         const label = isArchive && commandId === "file.copy" ? "Extract" : TOOLBAR_LABELS[commandId];
         const detail = command?.title ?? label;
         const icon = TOOLBAR_ICONS[commandId];

@@ -488,6 +488,8 @@ export function findMatchingCommand(
 export function executeCommand(commandId: string, context: ExecuteCommandContext) {
   const { state, dispatch, client } = context;
   const focused = getFocusedPanel(state, context.panel, context.panelId);
+  const sourceCapability = (cap: string): boolean =>
+    state.sources[focused?.panel.sourceId ?? ""]?.supports.includes(cap) ?? false;
 
   switch (commandId) {
     case COMMAND_PALETTE_COMMAND_ID:
@@ -529,14 +531,16 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
     case "file.info":
       return focused ? openInfo(dispatch, focused.panel, state) : false;
     case "file.rename":
-      if (focused?.panel.shadowSource) return false;
-      return focused ? openRename(dispatch, focused.panel) : false;
+      if (!focused || !sourceCapability("Rename")) return false;
+      return openRename(dispatch, focused.panel);
     case "file.view":
       return focused ? openViewerIntent(client, focused.panel, "ViewFile") : false;
     case "file.edit":
-      return focused ? openViewerIntent(client, focused.panel, "EditFile") : false;
+      if (!focused || !sourceCapability("Edit")) return false;
+      return openViewerIntent(client, focused.panel, "EditFile");
     case "file.copy":
-      return focused ? openFileOp(state, dispatch, focused.panel, "copy") : false;
+      if (!focused || !sourceCapability("CopySelection")) return false;
+      return openFileOp(state, dispatch, focused.panel, "copy");
     case "file.copy_external":
       if (!focused || focused.panel.shadowSource) return false;
       client.sendIntent("WriteExternalClipboard", undefined, {
@@ -545,8 +549,8 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
       });
       return true;
     case "file.move":
-      if (focused?.panel.shadowSource) return false;
-      return focused ? openFileOp(state, dispatch, focused.panel, "move") : false;
+      if (!focused || !sourceCapability("MoveSelection")) return false;
+      return openFileOp(state, dispatch, focused.panel, "move");
     case "file.cut_external":
       if (!focused || focused.panel.shadowSource) return false;
       client.sendIntent("WriteExternalClipboard", undefined, {
@@ -566,29 +570,25 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
       });
       return true;
     case "file.touch":
-      if (!focused) return false;
-      if (focused.panel.shadowSource) {
-        dispatch({ type: "SHOW_TRANSIENT_HINT", message: "Cannot create files inside an archive." });
-        return true;
-      }
+      if (!focused || !sourceCapability("Touch")) return false;
       dispatch({
         type: "OPEN_TOUCH",
         touch: { sourcePanel: focused.panelId, dirPath: focused.panel.path },
       });
       return true;
     case "file.mkdir":
-      if (!focused || focused.panel.shadowSource) return false;
+      if (!focused || !sourceCapability("NewFolder")) return false;
       dispatch({
         type: "OPEN_MKDIR",
         mkdir: { sourcePanel: focused.panelId, dirPath: focused.panel.path },
       });
       return true;
     case "file.delete":
-      if (focused?.panel.shadowSource) return false;
-      return focused ? openFileOp(state, dispatch, focused.panel, "delete") : false;
+      if (!focused || !sourceCapability("DeleteSelection")) return false;
+      return openFileOp(state, dispatch, focused.panel, "delete");
     case "app.open_terminal":
-      if (focused?.panel.shadowSource) return false;
-      client.sendIntent("OpenTerminal", focused?.panelId ?? state.focus);
+      if (!focused || !sourceCapability("OpenShell")) return false;
+      client.sendIntent("OpenTerminal", focused.panelId);
       return true;
     case "app.quit":
       client.sendIntent("Quit");
@@ -859,16 +859,9 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
       return true;
     }
     case "panel.toggle_embedded_terminal": {
-      if (!focused) return false;
+      if (!focused || !sourceCapability("OpenShell")) return false;
       const focusedPanel = state.panels[focused.panelId];
       if (!focusedPanel) return false;
-      if (focusedPanel.shadowSource) {
-        dispatch({
-          type: "SHOW_TRANSIENT_HINT",
-          message: "Terminal not available in archives",
-        });
-        return true;
-      }
       if (focusedPanel.terminalSessionId !== undefined) {
         client.sendIntent("ClosePanelTerminal", focused.panelId);
       } else {

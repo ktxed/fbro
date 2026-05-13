@@ -576,10 +576,11 @@ function applyPatch(state: AppState, msg: StatePatchMessage): AppState {
       || (msg.patch.sourceId !== undefined && updated.sourceId !== panel.sourceId);
 
     if (locationChanged) {
-      // Bookmarks and history are navigation tools, not real filesystem locations —
-      // entering or exiting them must not create a history entry.
+      // Bookmarks, history, and procs are navigation/virtual tools, not real filesystem
+      // locations — entering or exiting them must not create a history entry.
       if (updated.sourceId === "bookmarks" || panel.sourceId === "bookmarks"
-       || updated.sourceId === "history"  || panel.sourceId === "history") {
+       || updated.sourceId === "history"  || panel.sourceId === "history"
+       || updated.sourceId === "procs"    || panel.sourceId === "procs") {
         return { ...state, panels: { ...state.panels, [panelId]: updated } };
       }
       if (pendingHistoryNavPanels.has(panelId)) {

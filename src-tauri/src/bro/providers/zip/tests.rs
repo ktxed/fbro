@@ -16,6 +16,7 @@ fn single_input_archive_name_uses_entry_name() {
     let ctx = BroDiscoveryContext {
         inputs: &inputs,
         suggested_output_dir: Some("/tmp/out"),
+        source_id: None,
     };
     assert_eq!(archive_file_name(&ctx), "movie.mkv.zip");
 }
@@ -37,6 +38,7 @@ fn multiple_input_archive_name_uses_panel_directory_name() {
     let ctx = BroDiscoveryContext {
         inputs: &inputs,
         suggested_output_dir: Some("/tmp/out"),
+        source_id: None,
     };
     assert_eq!(archive_file_name(&ctx), "source.zip");
 }
@@ -48,6 +50,7 @@ fn suggested_output_dir_wins_for_default_output_path() {
     let ctx = BroDiscoveryContext {
         inputs: &inputs,
         suggested_output_dir: Some("/tmp/out"),
+        source_id: None,
     };
     assert_eq!(
         default_output_path(&ctx),

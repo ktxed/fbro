@@ -323,10 +323,10 @@ fn omits_optional_seven_zip_password_when_empty() {
 #[test]
 fn returns_empty_registry_result_on_unsupported_platforms() {
     #[cfg(target_os = "windows")]
-    assert!(list_bros(&sample_inputs(), None).is_empty());
+    assert!(list_bros(&sample_inputs(), None, None).is_empty());
 
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     {
-        let _ = list_bros(&sample_inputs(), None);
+        let _ = list_bros(&sample_inputs(), None, None);
     }
 }

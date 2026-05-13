@@ -280,6 +280,11 @@ impl AppState {
             "MoveSelection".to_string(),
             "DeleteSelection".to_string(),
             "InspectItem".to_string(),
+            "Rename".to_string(),
+            "Edit".to_string(),
+            "Touch".to_string(),
+            "NewFolder".to_string(),
+            "OpenShell".to_string(),
         ];
 
         // Detect volumes from platform; fall back to a single root volume if empty.
@@ -441,6 +446,24 @@ impl AppState {
             sources.insert(vol.id.clone(), source);
         }
 
+        sources.insert(
+            "procs".to_string(),
+            Source {
+                id: "procs".to_string(),
+                name: "procs".to_string(),
+                kind: "virtual".to_string(),
+                supports: vec!["ListEntries".to_string(), "DeleteSelection".to_string()],
+                root_path: String::new(),
+                mounted: true,
+                device_path: None,
+                shadow: false,
+            },
+        );
+        drivers.insert(
+            "procs".to_string(),
+            Arc::new(crate::vfs::procs::ProcsDriver),
+        );
+
         AppState {
             panels,
             slots,
@@ -477,6 +500,11 @@ impl AppState {
             "MoveSelection".to_string(),
             "DeleteSelection".to_string(),
             "InspectItem".to_string(),
+            "Rename".to_string(),
+            "Edit".to_string(),
+            "Touch".to_string(),
+            "NewFolder".to_string(),
+            "OpenShell".to_string(),
         ];
 
         #[cfg(unix)]
