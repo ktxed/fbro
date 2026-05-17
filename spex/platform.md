@@ -1,121 +1,209 @@
 # fbro — Platform Abstraction Layer (PAL)
 
 The Platform Abstraction Layer is a BE-internal subsystem that resolves
-platform-specific environment attributes such as user home directories,
-standard paths, and OS capabilities.
+platform-specific environment attributes and services: home directory, volume
+enumeration, icon lookup, native thumbnailers, "open with" application
+resolution, terminal/file-manager hand-off, and the host clipboard.
+
+Implementations live under `src/platform/{linux,macos,windows}`; all consumers
+go through the shared `dyn Platform` trait so the rest of the BE contains no
+`#[cfg(target_os = ...)]` branches.
 
 ---
 
-## 1. Purpose
-
-Different operating systems expose environment information in different ways.
-The PAL hides these differences behind a uniform trait, so the rest of the BE
-(state initialisation, intent handlers, VFS drivers) can request platform
-attributes without branching on the current OS.
-
----
-
-## 2. Design Principles
+## 1. Design Principles
 
 * **BE-internal** — the FE never queries platform attributes directly.
-* **Injected** — the concrete implementation is wired in `main.rs` and passed
-  to `AppState`; all consumers receive it through shared state.
-* **Single trait, multiple implementations** — one implementation per target
-  platform (e.g. `LinuxPlatform`, `MacOsPlatform`, `WindowsPlatform`).
-* **No filesystem mutations** — the PAL only reads environment data; it never
-  modifies anything.
+* **Injected** — `main.rs` calls `platform::create_platform()` once at startup
+  and passes the resulting `Arc<dyn Platform>` to `AppState`, `ThumbPool`, and
+  the WebSocket runtime.
+* **Trait, multiple implementations** — one impl per target OS
+  (`LinuxPlatform`, `MacOSPlatform`, `WindowsPlatform`), selected by `#[cfg]`
+  inside `create_platform()`.
+* **Default-method opt-in** — every method except `home_dir` and
+  `open_in_editor` has a no-op default, so a partial implementation still
+  compiles. Capabilities a platform lacks simply return `None` / `vec![]` /
+  `Err("not supported")`.
+* **No filesystem mutations through PAL itself** — the PAL queries the host
+  and delegates to it (e.g. `open_file` hands a path to the OS); it never
+  writes through `VFSDriver` interfaces.
 
 ---
 
-## 3. `Platform` Trait
+## 2. `Platform` Trait
+
+Sync trait, `Send + Sync`. Grouped by purpose:
+
+### 2.1 Environment
+
+| Method | Purpose |
+|---|---|
+| `home_dir() -> String` | Current user's home. Used by `NavigateHome`, panel initialisation, and the `~` resolver. |
+| `disk_space(path) -> Option<(free, total)>` | Volume capacity for the FS containing `path`. |
+| `list_volumes() -> Vec<VolumeInfo>` | Mounted (and on Linux, also unmounted) volumes. Synchronous fallback path; the async `VolumeWatcher` (§4) is preferred. |
+
+### 2.2 Icons & thumbnails
+
+| Method | Purpose |
+|---|---|
+| `find_icon(name) -> Option<(bytes, content_type)>` | Look up a freedesktop-style icon name. Default `None`. The free function `resolve_icon` falls back to embedded SVGs. |
+| `get_thumbnail(path, size) -> Option<(bytes, content_type)>` | Native thumbnailer (Windows `IShellItemImageFactory`, macOS `QLThumbnailGenerator`). MUST be safe to call from any worker thread — `ThumbPool` calls it from a thread pool. |
+
+### 2.3 Launching applications
+
+| Method | Purpose |
+|---|---|
+| `open_file(path)` | Fire-and-forget: open with the OS default association. |
+| `open_in_editor(path) -> Result<path, error>` | Open in the user's default text editor. |
+| `open_terminal(path)` | Launch a terminal emulator with `path` as cwd. |
+| `reveal_in_file_manager(path, kind)` | Reveal in the host file manager (Files/Finder/Explorer). |
+| `list_open_with_apps(path, kind) -> Result<Vec<ResolvedOpenWithApp>>` | Enumerate apps that can open `path`. |
+| `launch_open_with(path, &ResolvedOpenWithApp) -> Result<()>` | Invoke a specific result from `list_open_with_apps`. Default impl handles the cross-platform `OpenWithLaunch` variants (`Default`, `Command`, `MacApplication`); platform-specific variants (`LinuxApp`) override. |
+
+`ResolvedOpenWithApp` carries an `OpenWithAppOption` (id, label, detail,
+is_default, source) plus an `OpenWithLaunch` enum that encodes how to invoke
+it. The helper `append_supplemental_apps` merges per-platform lists while
+de-duplicating by normalised (label, detail).
+
+### 2.4 Host clipboard
+
+| Method | Purpose |
+|---|---|
+| `read_external_file_clipboard() -> Result<Option<ExternalClipboardPayload>>` | Read a file-manager copy/move payload from the OS clipboard (Linux: `x-special/gnome-copied-files` etc.). |
+| `write_external_file_clipboard(&payload) -> Result<()>` | Push a file-manager payload onto the OS clipboard. |
+| `write_text_clipboard(text) -> Result<()>` | Plain text into the clipboard. |
+
+`ExternalClipboardPayload { op: Copy | Move, source_paths: Vec<String> }`
+crosses the FE/BE boundary only as the underlying file ops — the FE does not
+see the payload directly.
+
+---
+
+## 3. Implementations
+
+### 3.1 `LinuxPlatform`
+
+Home resolution order:
+
+| Step | Source | Condition |
+|---|---|---|
+| 1 | `$HOME` | Non-empty |
+| 2 | `/proc/self/status` → `Uid:` → `/etc/passwd` | `$HOME` absent or empty |
+| 3 | `/` | All of the above fail |
+
+Other Linux specifics: freedesktop icon theme lookup, MIME/`xdg-mime` for
+default apps and "open with" enumeration, `xdg-open`/`gio open` for fire-and-
+forget launches, `xclip`/`wl-copy` (selected at runtime) for the clipboard,
+`/proc/mounts` for the fallback volume list.
+
+### 3.2 `MacOSPlatform`
+
+Home from `$HOME` (which the OS always sets). Native APIs: `NSWorkspace` for
+default-app launch, `QLThumbnailGenerator` for thumbnails, `LSCopyApplications`
+for "open with", `NSPasteboard` for the clipboard, `open -R` for reveal.
+
+### 3.3 `WindowsPlatform`
+
+Home from `USERPROFILE`. `SHGetKnownFolderPath` for canonical folders,
+`IShellItemImageFactory` for thumbnails, `AssocQueryString` for default apps
+and the "Open with" list, `ShellExecuteEx` for launches, `OleSetClipboard` for
+file clipboard payloads in `CF_HDROP` format.
+
+---
+
+## 4. `VolumeWatcher` (async)
+
+Separate async trait, also under `src/platform/mod.rs`. Provides
+**enumeration, mounting, and change notification** without leaking
+OS-specifics (udisks2 D-Bus, `/proc/mounts` polling, Windows
+`WM_DEVICECHANGE`) into the WS runtime.
 
 ```rust
-pub trait Platform: Send + Sync {
-    /// Absolute path to the current user's home directory.
-    fn home_dir(&self) -> String;
+#[async_trait::async_trait]
+pub trait VolumeWatcher: Send + Sync {
+    async fn list_volumes(&self) -> Vec<VolumeInfo>;
+    async fn mount(&self, device_path: &str) -> Result<String, String>;
+    async fn subscribe(&self) -> mpsc::Receiver<()>;
 }
 ```
 
-Additional methods will be added as needed (e.g. `config_dir`, `cache_dir`,
-`trash_dir`, `os_name`).
+`create_volume_watcher(platform)` picks the best available backend:
 
----
-
-## 4. Implementations
-
-### 4.1 `LinuxPlatform`
-
-Covers Linux (and any POSIX system that follows the same conventions).
-
-| Step | Source | Condition |
-|------|--------|-----------|
-| 1 | `$HOME` environment variable | Non-empty value |
-| 2 | `/proc/self/status` → `Uid:` field → `/etc/passwd` lookup | `$HOME` absent or empty |
-| 3 | `/` | All of the above fail |
-
-Resolution order follows the POSIX convention: the `$HOME` variable is
-authoritative and is always tried first.
-
----
-
-### 4.2 Future platforms
-
-| Platform | Implementation | Notes |
-|----------|---------------|-------|
-| macOS | `MacOsPlatform` | `$HOME` / `NSHomeDirectory` |
-| Windows | `WindowsPlatform` | `USERPROFILE` / `SHGetKnownFolderPath` |
+* Linux + udisks2 reachable → `Udisks2Watcher` (mount unmounted volumes,
+  receive change signals over D-Bus).
+* Linux without udisks2 → `ProcMountsWatcher` (poll `/proc/mounts`, no
+  mounting).
+* Other platforms → `FallbackVolumeWatcher` (wraps `Platform::list_volumes`;
+  `mount` returns `Err`; `subscribe` returns a channel that never fires, and
+  callers fall back to periodic polling).
 
 ---
 
 ## 5. Wiring
 
-`AppState` holds an `Arc<dyn Platform>` field. `AppState::new_default` receives
-the implementation at construction time:
-
 ```rust
 // main.rs
-let platform = Arc::new(LinuxPlatform);
-let shared_state = Arc::new(Mutex::new(AppState::new_default(platform)));
+let platform = platform::create_platform();              // Arc<dyn Platform>
+let thumb_pool = ThumbPool::start(platform.clone(), 8);
+let state = AppState::new_default(platform.clone(), thumb_pool, ...);
+// later, inside the ws server task:
+let volume_watcher = create_volume_watcher(platform).await;
 ```
 
-This means the platform implementation can be swapped in tests or for other
-targets without touching any application logic.
+`AppState.platform: Arc<dyn Platform>` is the canonical handle. Intent
+handlers reach it through `ctx.state.lock().await.platform` (or by cloning the
+`Arc` out of the lock before any blocking call). `ThumbPool` holds its own
+clone to call `get_thumbnail` off the async runtime.
 
 ---
 
-## 6. Intents that consume PAL
+## 6. PAL consumers
 
-| Intent | PAL method used | Effect |
-|--------|----------------|--------|
-| `NavigateHome` | `home_dir()` | Navigates the target panel to the user's home directory |
+Non-exhaustive — grows as new intents are added.
 
-As more platform-aware intents are added (e.g. `NavigateDesktop`,
-`NavigateDownloads`) the table above grows accordingly.
+| Site | PAL surface used |
+|---|---|
+| `state/mod.rs` initial state | `home_dir`, `list_volumes` |
+| `runtime.rs` volumes domain | `disk_space`, `home_dir` (sources sort, `~` expansion) |
+| `ws/intents/navigation.rs` | `home_dir` (NavigateHome), `open_file`, `open_terminal`, `reveal_in_file_manager`, `list_open_with_apps`, `launch_open_with` |
+| `ws/intents/viewer.rs` | `open_in_editor` |
+| `ws/intents/jobs.rs` | `read_external_file_clipboard`, `write_external_file_clipboard` (copy/cut to host clipboard) |
+| `ws/intents/bro.rs` | `write_text_clipboard` |
+| `thumb_pool.rs` | `get_thumbnail` (worker threads) |
+| `platform::resolve_icon` | `find_icon` (icon-serving HTTP route) |
+| `ws/server.rs` startup | `create_volume_watcher` |
 
 ---
 
-## 7. `NavigateHome` intent
-
-Navigates a panel to the platform-resolved home directory.
+## 7. `NavigateHome` intent (canonical example)
 
 ```json
-{
-  "type": "Intent",
-  "name": "NavigateHome",
-  "scope": "<panelId>"
-}
+{ "type": "Intent", "name": "NavigateHome", "scope": "<panelId>" }
 ```
 
 **BE behaviour**
 
-1. Resolve `scope` to a panel ID.
-2. Call `platform.home_dir()`.
+1. Resolve `scope` to a panel id.
+2. Acquire `platform.home_dir()` (cheap — cached values are not used; the
+   trait method is the canonical lookup).
 3. Call `navigate_to(panel_id, home_path)` — identical to any other directory
-   navigation: clears entries and selection, resets cursor, starts a new scan
-   job, sends a `StatePatch`.
+   navigation: clears entries/selection, resets cursor, spawns a scan job,
+   sends a `StatePatch`.
 
-**FE trigger**
+The FE fires this from the `~` button in the panel header (`tabIndex={-1}` so
+focus stays in the panel).
 
-A `~` button in the panel header fires this intent with the panel's own ID as
-scope. The button carries `tabIndex={-1}` so it never steals keyboard focus
-from the panel.
+---
+
+## 8. Adding a new platform method
+
+1. Add the method to the `Platform` trait with a no-op default
+   (`Option::None`, `vec![]`, or `Err("not supported")`) so existing impls
+   keep compiling.
+2. Override in each `*Platform` impl where the host can provide it.
+3. Call it from the consuming intent / subsystem.
+4. Document it in §2 of this file.
+
+If the new surface is async or needs ambient state (signals, subscriptions),
+prefer a separate trait alongside `VolumeWatcher` rather than turning
+`Platform` async.
