@@ -7,17 +7,30 @@ use sysinfo::{Pid, ProcessRefreshKind, RefreshKind, System, MINIMUM_CPU_UPDATE_I
 use crate::vfs::{DirChild, VfsDriver, VfsEntry, VfsError, VfsKind};
 use crate::ws::protocol::{FilterSpec, SortSpec};
 
-pub struct ProcsDriver;
+pub struct ProcsDriver {
+    pub hierarchical: bool,
+}
 
-/// Parses the PID from an entry path of the form `{ppid1} | ... | {pid} - {name}`.
+/// Parses the PID from an entry path.
+///
+/// Flat mode path:    `"{ppid1} | ... | {pid} - {name}"` → identified by ` | ` separators
+/// Hierarchical path: `"{pid} - {name}/{pid2} - {name2}/..."` or bare `"{pid}/{pid2}/..."` →
+///                    extracts the PID from the last `/`-delimited segment
 pub(crate) fn pid_from_path(path: &str) -> Option<u32> {
-    path.splitn(2, " - ")
-        .next()?
-        .split(" | ")
-        .last()?
-        .trim()
-        .parse::<u32>()
-        .ok()
+    if path.contains(" | ") {
+        // Flat mode: "ppid1 | ppid2 | ... | pid - name"
+        path.splitn(2, " - ")
+            .next()?
+            .split(" | ")
+            .last()?
+            .trim()
+            .parse::<u32>()
+            .ok()
+    } else {
+        // Hierarchical mode: last segment may be "pid - name" or bare "pid"
+        let last = path.split('/').last()?.trim();
+        last.splitn(2, " - ").next()?.trim().parse::<u32>().ok()
+    }
 }
 
 /// Walks parent links up to root and returns the full ancestor chain ending with the given PID.
@@ -124,7 +137,7 @@ impl VfsDriver for ProcsDriver {
 
     fn list(
         &self,
-        _path: &str,
+        path: &str,
         sort: &SortSpec,
         filter: Option<&FilterSpec>,
         _show_hidden: bool,
@@ -141,52 +154,11 @@ impl VfsDriver for ProcsDriver {
         let num_cpus = sys.cpus().len().max(1) as f32;
         let filter_lower = filter.map(|f| f.value.to_lowercase());
 
-        let mut entries: Vec<VfsEntry> = sys
-            .processes()
-            .values()
-            .filter_map(|proc| {
-                let pid = proc.pid();
-                let name = proc.name().to_string();
-
-                let chain = build_pid_chain(&sys, pid);
-                let chain_str = chain
-                    .iter()
-                    .map(|p| p.to_string())
-                    .collect::<Vec<_>>()
-                    .join(" | ");
-                let entry_name = format!("{chain_str} - {name}");
-
-                if let Some(ref needle) = filter_lower {
-                    let entry_lower = entry_name.to_lowercase();
-                    if !needle
-                        .split('|')
-                        .any(|part| entry_lower.contains(part.trim()))
-                    {
-                        return None;
-                    }
-                }
-
-                let size = (proc.cpu_usage() / num_cpus * 10.0).clamp(0.0, 1000.0) as u64;
-                let mtime = proc.start_time().to_string();
-
-                let permissions = proc
-                    .user_id()
-                    .map(|uid| format!("uid:{}", **uid))
-                    .or_else(|| Some("unknown".to_string()));
-
-                Some(VfsEntry {
-                    name: entry_name,
-                    kind: VfsKind::File,
-                    size: Some(size),
-                    mtime: Some(mtime.clone()),
-                    btime: Some(mtime),
-                    permissions,
-                    icon_name: Some("system-run".to_string()),
-                    cc: None,
-                    source_path: None,
-                })
-            })
-            .collect();
+        let mut entries: Vec<VfsEntry> = if self.hierarchical {
+            self.list_hierarchical(&sys, path, num_cpus, filter_lower.as_deref())
+        } else {
+            self.list_flat(&sys, num_cpus, filter_lower.as_deref())
+        };
 
         match (sort.by.as_str(), sort.order.as_str()) {
             ("size", "desc") => entries.sort_by(|a, b| b.size.cmp(&a.size)),
@@ -202,12 +174,30 @@ impl VfsDriver for ProcsDriver {
         Ok(entries)
     }
 
-    fn resolve_child(&self, _base: &str, name: &str) -> String {
-        name.to_string()
+    fn resolve_child(&self, base: &str, name: &str) -> String {
+        if !self.hierarchical {
+            return name.to_string();
+        }
+        // Store the full "pid - name" as the path segment so that navigate_up
+        // can use the segment directly as a cursor hint to restore focus.
+        if base.is_empty() {
+            name.to_string()
+        } else {
+            format!("{base}/{name}")
+        }
     }
 
-    fn parent_path(&self, _path: &str) -> Option<String> {
-        None
+    fn parent_path(&self, path: &str) -> Option<String> {
+        if !self.hierarchical {
+            return None;
+        }
+        if path.is_empty() {
+            None // at tree root — exit procs entirely
+        } else if let Some(slash) = path.rfind('/') {
+            Some(path[..slash].to_string())
+        } else {
+            Some(String::new()) // one level deep → go back to tree root
+        }
     }
 
     fn open_read(&self, path: &str) -> Result<Box<dyn Read + Send>, VfsError> {
@@ -285,5 +275,146 @@ impl VfsDriver for ProcsDriver {
 
     fn try_rename(&self, _src: &str, _dst: &str) -> Result<bool, VfsError> {
         Err(VfsError::NotSupported("Cannot rename processes".into()))
+    }
+}
+
+impl ProcsDriver {
+    fn list_flat(
+        &self,
+        sys: &System,
+        num_cpus: f32,
+        filter_lower: Option<&str>,
+    ) -> Vec<VfsEntry> {
+        sys.processes()
+            .values()
+            .filter_map(|proc| {
+                let pid = proc.pid();
+                let name = proc.name().to_string();
+
+                let chain = build_pid_chain(sys, pid);
+                let chain_str = chain
+                    .iter()
+                    .map(|p| p.to_string())
+                    .collect::<Vec<_>>()
+                    .join(" | ");
+                let entry_name = format!("{chain_str} - {name}");
+
+                if let Some(needle) = filter_lower {
+                    let entry_lower = entry_name.to_lowercase();
+                    if !needle
+                        .split('|')
+                        .any(|part| entry_lower.contains(part.trim()))
+                    {
+                        return None;
+                    }
+                }
+
+                let size = (proc.cpu_usage() / num_cpus * 10.0).clamp(0.0, 1000.0) as u64;
+                let mtime = proc.start_time().to_string();
+                let permissions = proc
+                    .user_id()
+                    .map(|uid| format!("uid:{}", **uid))
+                    .or_else(|| Some("unknown".to_string()));
+
+                Some(VfsEntry {
+                    name: entry_name,
+                    kind: VfsKind::File,
+                    size: Some(size),
+                    mtime: Some(mtime.clone()),
+                    btime: Some(mtime),
+                    permissions,
+                    icon_name: Some("system-run".to_string()),
+                    cc: None,
+                    source_path: None,
+                })
+            })
+            .collect()
+    }
+
+    fn list_hierarchical(
+        &self,
+        sys: &System,
+        path: &str,
+        num_cpus: f32,
+        filter_lower: Option<&str>,
+    ) -> Vec<VfsEntry> {
+        // Normalise parent: processes whose parent PID is absent from the
+        // running process list are treated as roots (listed at path "").
+        let all_pids: HashSet<Pid> = sys.processes().keys().cloned().collect();
+
+        // Target parent PID: None = root level, Some(pid) = children of that pid.
+        // Path segments may be bare "pid" or full "pid - name"; extract the numeric PID.
+        let target_parent: Option<Pid> = if path.is_empty() {
+            None
+        } else {
+            path.split('/').last()
+                .and_then(|s| s.trim().splitn(2, " - ").next()?.trim().parse::<u32>().ok())
+                .map(Pid::from_u32)
+        };
+        eprintln!(
+            "[procs-dbg] list_hierarchical: path={path:?} target_parent={target_parent:?} total_pids={}",
+            all_pids.len()
+        );
+
+        // Build a set of PIDs that have at least one child (for Directory kind)
+        let parent_pids: HashSet<Pid> = sys
+            .processes()
+            .values()
+            .filter_map(|p| p.parent().filter(|pp| all_pids.contains(pp)))
+            .collect();
+
+        let result: Vec<VfsEntry> = sys.processes()
+            .values()
+            .filter_map(|proc| {
+                // Normalise the process's effective parent
+                let effective_parent = proc.parent().filter(|pp| all_pids.contains(pp));
+                if effective_parent != target_parent {
+                    return None;
+                }
+
+                let pid = proc.pid();
+                let name = proc.name().to_string();
+                let entry_name = format!("{} - {name}", pid.as_u32());
+
+                if let Some(needle) = filter_lower {
+                    let entry_lower = entry_name.to_lowercase();
+                    if !needle
+                        .split('|')
+                        .any(|part| entry_lower.contains(part.trim()))
+                    {
+                        return None;
+                    }
+                }
+
+                let is_parent = parent_pids.contains(&pid);
+                let kind = if is_parent { VfsKind::Directory } else { VfsKind::File };
+                let icon_name = if is_parent { "folder" } else { "system-run" };
+                let cc = if is_parent { Some("cc-dir".to_string()) } else { None };
+                let size = (proc.cpu_usage() / num_cpus * 10.0).clamp(0.0, 1000.0) as u64;
+                let mtime = proc.start_time().to_string();
+                let permissions = proc
+                    .user_id()
+                    .map(|uid| format!("uid:{}", **uid))
+                    .or_else(|| Some("unknown".to_string()));
+
+                Some(VfsEntry {
+                    name: entry_name,
+                    kind,
+                    size: Some(size),
+                    mtime: Some(mtime.clone()),
+                    btime: Some(mtime),
+                    permissions,
+                    icon_name: Some(icon_name.to_string()),
+                    cc,
+                    source_path: None,
+                })
+            })
+            .collect();
+        eprintln!(
+            "[procs-dbg] list_hierarchical: path={path:?} returning {} entries (sample: {:?})",
+            result.len(),
+            result.iter().take(5).map(|e| (&e.name, e.kind.as_str())).collect::<Vec<_>>()
+        );
+        result
     }
 }

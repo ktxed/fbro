@@ -236,8 +236,11 @@ function PathBreadcrumbs({ panelId, path, client, shadowSource }: {
                   if (isArchiveSegment && !isArchiveFile) {
                     // Clicking a host-path crumb while in archive: navigate up and out.
                     client.sendIntent("NavigateHome", "focused-panel");
+                  } else if (isArchiveFile && !isLast) {
+                    // Clicking the archive root crumb while inside: navigate to archive root.
+                    client.sendIntent("NavigatePanelTo", panelId, { panelId, path: "" });
                   } else if (isInner || (shadowSource && isLast && index >= archiveBoundary)) {
-                    // Navigate within the archive — use OpenEntry-style navigation.
+                    // Navigate within the archive.
                     client.sendIntent("NavigatePanelTo", panelId, { panelId, path: crumb.path });
                   } else if (!shadowSource) {
                     client.sendIntent("NavigatePanelTo", panelId, { panelId, path: crumb.path });

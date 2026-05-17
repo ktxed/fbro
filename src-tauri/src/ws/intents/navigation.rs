@@ -107,7 +107,7 @@ impl RevealArgs {
 
 async fn open_entry(scope: &Value, ctx: &mut IntentContext<'_>) {
     let panel_id = resolve_panel_id(scope, ctx.state).await;
-    let (entry_kind, entry_name, new_path, is_in_shadow, source_id) = {
+    let (entry_kind, entry_name, new_path, is_in_shadow, source_id, panel_path, panel_cursor, panel_entries_len) = {
         let state_guard = ctx.state.lock().await;
         if let Some(panel) = state_guard.panels.get(&panel_id) {
             if let Some(entry) = panel.entries.get(panel.cursor) {
@@ -118,14 +118,22 @@ async fn open_entry(scope: &Value, ctx: &mut IntentContext<'_>) {
                     driver.resolve_child(&panel.path, &entry.name),
                     panel.shadow_source.is_some(),
                     panel.source_id.clone(),
+                    panel.path.clone(),
+                    panel.cursor,
+                    panel.entries.len(),
                 )
             } else {
+                eprintln!("[procs-dbg] open_entry: cursor out of bounds panel_id={panel_id}");
                 return;
             }
         } else {
             return;
         }
     };
+
+    eprintln!(
+        "[procs-dbg] open_entry: panel_id={panel_id} source_id={source_id} panel_path={panel_path:?} cursor={panel_cursor} entries_len={panel_entries_len} entry_kind={entry_kind} entry_name={entry_name:?} resolved_new_path={new_path:?} is_in_shadow={is_in_shadow}"
+    );
 
     if entry_kind == "directory" {
         // Virtual sources (kind="virtual") hold entries whose paths point to real
@@ -136,6 +144,7 @@ async fn open_entry(scope: &Value, ctx: &mut IntentContext<'_>) {
             let state_guard = ctx.state.lock().await;
             state_guard.sources.get(&source_id).map_or(false, |s| s.kind == "virtual")
         };
+        eprintln!("[procs-dbg] open_entry: directory branch is_virtual_nav={is_virtual_nav} (source kind decides)");
         if is_virtual_nav {
             // Switch the panel to the real source for this path before navigating.
             let real_source_id = {
@@ -174,6 +183,7 @@ async fn open_entry(scope: &Value, ctx: &mut IntentContext<'_>) {
                 }
             }
         }
+        eprintln!("[procs-dbg] open_entry: about to call navigate_to panel_id={panel_id} new_path={new_path:?}");
         navigate_to(
             &panel_id,
             &new_path,
@@ -186,6 +196,7 @@ async fn open_entry(scope: &Value, ctx: &mut IntentContext<'_>) {
             ctx.watcher_cmd_tx,
         )
         .await;
+        eprintln!("[procs-dbg] open_entry: navigate_to returned panel_id={panel_id}");
     } else if entry_kind == "file" && is_zip_like(&entry_name) && (!is_in_shadow || is_search_source(&source_id)) {
         // Enter zip archive as a shadow filesystem.
         enter_zip_archive(&panel_id, &new_path, &entry_name, ctx).await;
@@ -562,8 +573,61 @@ async fn navigate_source_root(scope: &Value, ctx: &mut IntentContext<'_>) {
 
 async fn navigate_panel_to(args: &Value, ctx: &mut IntentContext<'_>) {
     let parsed = NavigatePanelArgs::from_args(args);
+    if parsed.panel_id.is_empty() {
+        return;
+    }
+
+    // For archive-type shadow sources (zip, procs-tree), navigate directly within
+    // the current driver — this enables breadcrumb navigation inside archives and
+    // the procs tree without going through the real-filesystem path-resolution below.
+    let archive_nav_path: Option<String> = {
+        let state_guard = ctx.state.lock().await;
+        if let Some(panel) = state_guard.panels.get(&parsed.panel_id) {
+            if panel.shadow_source.is_some() {
+                let is_archive = state_guard
+                    .sources
+                    .get(&panel.source_id)
+                    .map(|s| s.kind == "archive")
+                    .unwrap_or(false);
+                if is_archive {
+                    Some(parsed.path.trim().to_string())
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    };
+
+    if let Some(path) = archive_nav_path {
+        let _ = ctx
+            .tx
+            .send(ServerMessage::NavigateOk {
+                timestamp: now(),
+                panel_id: parsed.panel_id.clone(),
+            })
+            .await;
+        navigate_to(
+            &parsed.panel_id,
+            &path,
+            parsed.cursor_hint,
+            None,
+            ctx.state,
+            ctx.tx,
+            ctx.scan_handles,
+            ctx.dir_size_queue,
+            ctx.watcher_cmd_tx,
+        )
+        .await;
+        return;
+    }
+
     if !parsed.panel_id.is_empty() && !parsed.path.is_empty() {
-        // Block navigation when inside a shadow source (zip archive).
+        // Block navigation for non-archive shadow sources (virtual sources like
+        // history, bookmarks whose entries don't map to navigable sub-paths).
         {
             let state_guard = ctx.state.lock().await;
             if let Some(panel) = state_guard.panels.get(&parsed.panel_id) {

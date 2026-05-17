@@ -451,7 +451,11 @@ impl AppState {
             Source {
                 id: "procs".to_string(),
                 name: "procs".to_string(),
-                kind: "virtual".to_string(),
+                // In hierarchical mode the procs source behaves like an archive:
+                // directory entries are internal tree nodes navigated within the
+                // same driver. In flat mode all entries are leaves, so "virtual"
+                // is fine (the open_entry virtual-switch path is unreachable).
+                kind: if loaded_settings.general.proc_tree_mode { "archive" } else { "virtual" }.to_string(),
                 supports: vec!["ListEntries".to_string(), "DeleteSelection".to_string()],
                 root_path: String::new(),
                 mounted: true,
@@ -461,7 +465,7 @@ impl AppState {
         );
         drivers.insert(
             "procs".to_string(),
-            Arc::new(crate::vfs::procs::ProcsDriver),
+            Arc::new(crate::vfs::procs::ProcsDriver { hierarchical: loaded_settings.general.proc_tree_mode }),
         );
 
         AppState {

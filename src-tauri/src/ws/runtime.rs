@@ -148,6 +148,7 @@ pub(crate) fn build_state_snapshot(
                     thumbnail_cache_item_count: thumbnail_cache_stats().0,
                     thumbnail_cache_size_bytes: thumbnail_cache_stats().1,
                     persist_panel_tabs: state.settings.general.persist_panel_tabs,
+                proc_tree_mode: state.settings.general.proc_tree_mode,
                 },
             },
         },
@@ -237,7 +238,11 @@ pub(crate) async fn navigate_to(
     dir_size_queue: &Arc<DirSizeQueue>,
     watcher_cmd_tx: &mpsc::Sender<WatcherCommand>,
 ) {
+    eprintln!(
+        "[procs-dbg] navigate_to: panel_id={panel_id} new_path={new_path:?} cursor_hint={cursor_hint:?} cursor_index={cursor_index:?}"
+    );
     if let Some(handle) = scan_handles.remove(panel_id) {
+        eprintln!("[procs-dbg] navigate_to: aborted previous scan for panel_id={panel_id}");
         handle.abort();
     }
 
@@ -284,6 +289,11 @@ pub(crate) async fn navigate_to(
         (sort, filter, show_hidden, version, driver, shadow_schema, source_id, supports_thumbs, view_mode)
     };
 
+    eprintln!(
+        "[procs-dbg] navigate_to: bumped version={version} source_id={source_id} driver.is_local={} sending loading StatePatch",
+        driver.is_local()
+    );
+
     let _ = tx
         .send(ServerMessage::StatePatch {
             timestamp: now(),
@@ -310,24 +320,27 @@ pub(crate) async fn navigate_to(
         })
         .await;
 
-    // Skip file watching for shadow sources (zip archives) — their contents don't change.
-    let is_shadow = {
-        let state_guard = state.lock().await;
-        state_guard
-            .panels
-            .get(panel_id)
-            .and_then(|p| p.shadow_source.as_ref())
-            .is_some()
-    };
-    if !is_shadow {
+    // Only watch real local filesystem paths; virtual/archive drivers don't
+    // have paths the OS watcher can monitor.
+    if driver.is_local() {
         let _ = watcher_cmd_tx
             .send(WatcherCommand::Watch {
                 panel_id: panel_id.to_string(),
                 path: PathBuf::from(new_path),
             })
             .await;
+    } else {
+        // Entering a virtual/archive source — stop watching any previous real path.
+        let _ = watcher_cmd_tx
+            .send(WatcherCommand::Unwatch {
+                panel_id: panel_id.to_string(),
+            })
+            .await;
     }
 
+    eprintln!(
+        "[procs-dbg] navigate_to: spawning scan panel_id={panel_id} new_path={new_path:?} version_base={version}"
+    );
     let handle = spawn_scan(
         panel_id.to_string(),
         new_path.to_string(),
@@ -642,13 +655,22 @@ pub(crate) async fn handle_volumes_changed(
             dir_size_queue,
         )
         .await;
-        let path = state
-            .lock()
-            .await
-            .panels
-            .get(&panel_id)
-            .map(|panel| panel.path.clone());
-        if let Some(path) = path {
+        let path_if_local = {
+            let guard = state.lock().await;
+            guard.panels.get(&panel_id).and_then(|panel| {
+                let is_local = guard
+                    .drivers
+                    .get(&panel.source_id)
+                    .map(|d| d.is_local())
+                    .unwrap_or(false);
+                if is_local {
+                    Some(panel.path.clone())
+                } else {
+                    None
+                }
+            })
+        };
+        if let Some(path) = path_if_local {
             let _ = watcher_cmd_tx
                 .send(WatcherCommand::Watch {
                     panel_id,
@@ -874,6 +896,10 @@ pub(crate) async fn update_panel_from_patch(
 ) {
     let mut state_guard = state.lock().await;
     if let Some(panel) = state_guard.panels.get_mut(panel_id) {
+        eprintln!(
+            "[procs-dbg] update_panel_from_patch: panel_id={panel_id} incoming_version={version} panel.version={} path={:?} entries_before={}",
+            panel.version, panel.path, panel.entries.len()
+        );
         // Treat null-valued fields (sent by rescan/navigate to *clear* state) as
         // "not present" — those patches are structural resets, not window slices.
         let has_total = patch

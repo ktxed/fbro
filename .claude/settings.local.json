@@ -8,7 +8,8 @@
       "Bash(cargo check:*)",
       "Bash(npx tsc:*)",
       "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(git -C /home/ktx/work/fbro diff HEAD -- src-tauri/src/ws/intents/procs.rs src-tauri/src/ws/intents/navigation.rs)"
     ]
   }
 }

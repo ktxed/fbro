@@ -44,6 +44,11 @@ pub struct GeneralSettings {
     /// pre-tabs behavior).
     #[serde(default = "default_true")]
     pub persist_panel_tabs: bool,
+    /// When true, the process VFS lists processes as a navigable tree (enter a
+    /// process to see its direct children). When false (default), all processes
+    /// are shown in a single flat list with the full ancestor chain in the name.
+    #[serde(default)]
+    pub proc_tree_mode: bool,
 }
 
 fn default_true() -> bool {
@@ -75,6 +80,7 @@ impl Default for GeneralSettings {
             thumbnail_max_image_size_mb: 100,
             thumbnail_video_frame_skip: 5,
             persist_panel_tabs: true,
+            proc_tree_mode: false,
         }
     }
 }

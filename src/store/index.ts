@@ -259,7 +259,7 @@ const initialState: AppState = {
   childProcesses: {},
   fontSize: 13,
   settings: {
-    general: { showHiddenDefault: false, rememberWindowState: true, preserveAttributes: true, ludicrousMode: false, maxImageSizeMb: 512, savePanelViewMode: false, enableVideoThumbnails: true, thumbnailMaxImageSizeMb: 100, thumbnailVideoFrameSkip: 5, sessionPath: "", bookmarksPath: "", thumbnailCacheDir: "", thumbnailCacheItemCount: 0, thumbnailCacheSizeBytes: 0, persistPanelTabs: true },
+    general: { showHiddenDefault: false, rememberWindowState: true, preserveAttributes: true, ludicrousMode: false, maxImageSizeMb: 512, savePanelViewMode: false, enableVideoThumbnails: true, thumbnailMaxImageSizeMb: 100, thumbnailVideoFrameSkip: 5, sessionPath: "", bookmarksPath: "", thumbnailCacheDir: "", thumbnailCacheItemCount: 0, thumbnailCacheSizeBytes: 0, persistPanelTabs: true, procTreeMode: false },
   },
 };
 
@@ -481,7 +481,21 @@ function applyPatch(state: AppState, msg: StatePatchMessage): AppState {
 
     // Version guard — drop structurally stale patches (old scan data arriving
     // after a newer scan has already produced results).
-    if (msg.version <= panel.version && msg.version !== 0) return state;
+    if (msg.version <= panel.version && msg.version !== 0) {
+      const appendLen = Array.isArray(msg.patch.appendEntries) ? msg.patch.appendEntries.length : 0;
+      const keys = Object.keys(msg.patch);
+      console.warn(
+        `[procs-dbg] FE store: DROPPING stale patch panel_id=${panelId} msg.version=${msg.version} panel.version=${panel.version} keys=${JSON.stringify(keys)} appendEntries_len=${appendLen}`,
+      );
+      return state;
+    }
+    {
+      const appendLen = Array.isArray(msg.patch.appendEntries) ? msg.patch.appendEntries.length : 0;
+      const keys = Object.keys(msg.patch);
+      console.log(
+        `[procs-dbg] FE store: APPLYING patch panel_id=${panelId} msg.version=${msg.version} panel.version_was=${panel.version} keys=${JSON.stringify(keys)} appendEntries_len=${appendLen} path=${msg.patch.path ?? "(unchanged)"}`,
+      );
+    }
 
     let updated = { ...panel, version: msg.version };
 

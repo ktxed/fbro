@@ -1,5 +1,8 @@
+use std::sync::Arc;
+
 use serde_json::Value;
 
+use crate::vfs::VfsDriver;
 use crate::ws::protocol::{now, ServerMessage};
 use crate::ws::runtime::{IntentContext, rescan_panel, selected_names_for};
 
@@ -33,6 +36,8 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
 
     // Track whether show_hidden changed so we can propagate to panels.
     let mut show_hidden_changed: Option<bool> = None;
+    // Track whether proc_tree_mode changed so we can reload the procs driver.
+    let mut proc_tree_mode_changed: Option<bool> = None;
 
     let gui_senders = {
         let mut state_guard = ctx.state.lock().await;
@@ -110,6 +115,27 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
                     return;
                 };
                 state_guard.settings.general.persist_panel_tabs = v;
+            }
+            "procTreeMode" => {
+                let Some(v) = value.as_bool() else {
+                    drop(state_guard);
+                    bad_setting(ctx.tx, "procTreeMode must be a boolean").await;
+                    return;
+                };
+                state_guard.settings.general.proc_tree_mode = v;
+                // Replace the procs driver and update the source kind so any
+                // active procs panel switches mode on the next rescan.
+                if state_guard.drivers.contains_key("procs") {
+                    state_guard.drivers.insert(
+                        "procs".to_string(),
+                        Arc::new(crate::vfs::procs::ProcsDriver { hierarchical: v })
+                            as Arc<dyn VfsDriver>,
+                    );
+                    if let Some(src) = state_guard.sources.get_mut("procs") {
+                        src.kind = if v { "archive" } else { "virtual" }.to_string();
+                    }
+                }
+                proc_tree_mode_changed = Some(v);
             }
             "savePanelViewMode" => {
                 let Some(v) = value.as_bool() else {
@@ -213,6 +239,31 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
         }
     }
 
+    // Rescan any panels currently showing the procs source.
+    if proc_tree_mode_changed.is_some() {
+        let procs_panel_ids: Vec<String> = {
+            let state_guard = ctx.state.lock().await;
+            state_guard
+                .panels
+                .iter()
+                .filter(|(_, p)| p.source_id == "procs")
+                .map(|(id, _)| id.clone())
+                .collect()
+        };
+        for panel_id in &procs_panel_ids {
+            rescan_panel(
+                panel_id,
+                ctx.state,
+                ctx.tx,
+                ctx.scan_handles,
+                None,
+                None,
+                ctx.dir_size_queue,
+            )
+            .await;
+        }
+    }
+
     let general = {
         let state_guard = ctx.state.lock().await;
         state_guard.settings.general.clone()
@@ -235,6 +286,7 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
                 "thumbnailMaxImageSizeMb": general.thumbnail_max_image_size_mb,
                 "thumbnailVideoFrameSkip": general.thumbnail_video_frame_skip,
                 "persistPanelTabs": general.persist_panel_tabs,
+                "procTreeMode": general.proc_tree_mode,
             }
         }),
     };

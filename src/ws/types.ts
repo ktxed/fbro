@@ -351,6 +351,7 @@ export interface GeneralSettings {
   thumbnailCacheItemCount: number;
   thumbnailCacheSizeBytes: number;
   persistPanelTabs: boolean;
+  procTreeMode: boolean;
 }
 
 export interface SettingsState {

@@ -236,13 +236,20 @@ async fn handle_connection(
 
     let watcher_handle = if is_gui {
         for panel_id in &panel_ids {
-            let path = state
-                .lock()
-                .await
-                .panels
-                .get(panel_id)
-                .map(|panel| panel.path.clone());
-            if let Some(path) = path {
+            let watch_path = {
+                let state_guard = state.lock().await;
+                if let Some(panel) = state_guard.panels.get(panel_id) {
+                    let is_local = state_guard
+                        .drivers
+                        .get(&panel.source_id)
+                        .map(|d| d.is_local())
+                        .unwrap_or(false);
+                    if is_local { Some(panel.path.clone()) } else { None }
+                } else {
+                    None
+                }
+            };
+            if let Some(path) = watch_path {
                 let _ = watcher_cmd_tx
                     .send(WatcherCommand::Watch {
                         panel_id: panel_id.clone(),
@@ -272,6 +279,18 @@ async fn handle_connection(
                 if let ServerMessage::StatePatch { ref domain, ref entity_id, ref patch, version, .. } = msg {
                     if domain == "panels" {
                         if let Some(panel_id) = entity_id {
+                            let keys: Vec<&str> = patch
+                                .as_object()
+                                .map(|o| o.keys().map(|k| k.as_str()).collect())
+                                .unwrap_or_default();
+                            let append_len = patch
+                                .get("appendEntries")
+                                .and_then(|v| v.as_array())
+                                .map(|a| a.len())
+                                .unwrap_or(0);
+                            eprintln!(
+                                "[procs-dbg] server: forwarding panels StatePatch panel_id={panel_id} version={version} keys={keys:?} appendEntries_len={append_len}"
+                            );
                             update_panel_from_patch(&state, panel_id, patch, version).await;
                         }
                     }

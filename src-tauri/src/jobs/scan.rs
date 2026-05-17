@@ -42,12 +42,16 @@ pub async fn run_scan(
 ) {
     let path_clone = path.clone();
     let sort_clone = sort.clone();
+    eprintln!(
+        "[procs-dbg] run_scan: starting panel_id={panel_id} path={path:?} version_base={version_base} atomic={atomic}"
+    );
     let result =
         tokio::task::spawn_blocking(move || driver.list(&path_clone, &sort_clone, filter.as_ref(), show_hidden)).await;
 
     let entries = match result {
         Ok(Ok(e)) => e,
         Ok(Err(err)) => {
+            eprintln!("[procs-dbg] run_scan: driver.list ERROR panel_id={panel_id} path={path:?} err={err}");
             let _ = tx
                 .send(ServerMessage::StatePatch {
                     timestamp: crate::ws::protocol::now(),
@@ -78,6 +82,9 @@ pub async fn run_scan(
         .collect();
 
     let total = schema_entries.len();
+    eprintln!(
+        "[procs-dbg] run_scan: panel_id={panel_id} path={path:?} got {total} entries from driver"
+    );
 
     // Apply cached directory sizes so returning to a folder restores previously
     // computed sizes without requiring another Shift+Space.
@@ -231,9 +238,16 @@ pub async fn run_scan(
     } else {
         // ── Mode A: full list (streamed) ─────────────────────────────────
         let mut version = version_base;
+        eprintln!(
+            "[procs-dbg] run_scan: streaming mode panel_id={panel_id} total={total} version_base={version_base}"
+        );
 
         for (batch_idx, chunk) in schema_entries.chunks(BATCH_SIZE).enumerate() {
             version += 1;
+            eprintln!(
+                "[procs-dbg] run_scan: appendEntries batch={batch_idx} version={version} chunk_len={}",
+                chunk.len()
+            );
             let patch = serde_json::json!({ "appendEntries": chunk });
             if tx
                 .send(ServerMessage::StatePatch {
@@ -255,6 +269,9 @@ pub async fn run_scan(
         }
 
         version += 1;
+        eprintln!(
+            "[procs-dbg] run_scan: final ready patch version={version} total={total} cursor={cursor}"
+        );
         let selected_entries = build_selected_entries(&schema_entries, &selection);
         let _ = tx
             .send(ServerMessage::StatePatch {

@@ -4,6 +4,7 @@ use serde_json::Value;
 
 use crate::state::{ShadowSource, Source};
 use crate::vfs::VfsDriver;
+use crate::watcher::WatcherCommand;
 use crate::ws::intents::navigation::teardown_shadow_source;
 use crate::ws::protocol::{now, ServerMessage};
 use crate::ws::runtime::{
@@ -64,13 +65,19 @@ async fn enter_procs_source(scope: &Value, ctx: &mut IntentContext<'_>) {
             parent_shadow: prev_shadow.map(Box::new),
         };
 
-        let driver = Arc::new(crate::vfs::procs::ProcsDriver);
+        let hierarchical = state_guard.settings.general.proc_tree_mode;
+        let driver = Arc::new(crate::vfs::procs::ProcsDriver { hierarchical });
+        // In hierarchical mode the source behaves like an archive: Directory
+        // entries are internal tree nodes that navigate within the same driver,
+        // not real filesystem paths. Using kind="virtual" would make open_entry
+        // switch to the local FS driver when the user enters a Directory entry.
+        let source_kind = if hierarchical { "archive" } else { "virtual" };
         state_guard.sources.insert(
             source_id.clone(),
             Source {
                 id: source_id.clone(),
                 name: "Processes".to_string(),
-                kind: "virtual".to_string(),
+                kind: source_kind.to_string(),
                 supports: vec!["ListEntries".to_string()],
                 root_path: String::new(),
                 mounted: true,
@@ -105,6 +112,14 @@ async fn enter_procs_source(scope: &Value, ctx: &mut IntentContext<'_>) {
             entity_id: None,
             version: 0,
             patch: serde_json::json!({ "sources": sources_json }),
+        })
+        .await;
+
+    // Stop watching any real-FS path — procs is not a watchable filesystem.
+    let _ = ctx
+        .watcher_cmd_tx
+        .send(WatcherCommand::Unwatch {
+            panel_id: panel_id.clone(),
         })
         .await;
 

@@ -66,6 +66,17 @@ export function SettingsGeneralTab({ general, client }: SettingsGeneralTabProps)
         </label>
       </div>
       <div className="settings-tab__section">
+        <h3 className="settings-tab__section-title">Process panel</h3>
+        <label className="settings-tab__option">
+          <input
+            type="checkbox"
+            checked={general.procTreeMode}
+            onChange={(e) => send("procTreeMode", e.target.checked)}
+          />
+          <span>Process tree view (navigate into a process to see its children)</span>
+        </label>
+      </div>
+      <div className="settings-tab__section">
         <h3 className="settings-tab__section-title">File Operations</h3>
         <label className="settings-tab__option">
           <input
