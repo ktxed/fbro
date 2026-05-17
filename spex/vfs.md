@@ -49,22 +49,55 @@ Below is a **minimal but sufficient** interface.
 interface VFSDriver {
   id: string
   name: string
-  capabilities: VFSCapabilities
+  supports: string[]   // capability flags — see §2.2
 }
 ```
+
+A driver is exposed to panels through a `Source`:
 
 ```ts
-interface VFSCapabilities {
-  read: boolean
-  write: boolean
-  delete: boolean
-  move: boolean
-  streamListing: boolean
-  randomRead: boolean
+interface Source {
+  id: string
+  name: string
+  kind: "filesystem" | "virtual"
+  supports: string[]
+  shadow: boolean
 }
 ```
 
-This maps directly to `source.supports`.
+`kind` answers a single question: **is this a real OS filesystem?**
+
+* `"filesystem"` — local mounted volume. Real paths, watchable, eligible as a copy/move endpoint.
+* `"virtual"` — anything else: bookmarks, history, search results, processes, zip/7z archives. Paths are driver-defined opaque strings.
+
+Anything more granular (archive vs flat listing, intra-driver navigation vs handoff) is expressed by **capability flags in `supports`**, not by further kinds.
+
+### 2.2 Capability flags
+
+Capabilities are free-form strings the driver advertises. The BE consults them at decision points; absent capabilities mean the operation is not offered.
+
+Currently defined:
+
+| flag                  | meaning |
+|-----------------------|---------|
+| `ListEntries`         | Driver can enumerate a directory. |
+| `OpenFolder`          | A `directory` entry is a navigable container. |
+| `CopySelection`       | Entries can be read as a copy source. |
+| `MoveSelection`       | Entries can be moved within the driver. |
+| `DeleteSelection`     | Entries can be deleted. |
+| `InspectItem`         | Driver provides per-entry metadata beyond `list()`. |
+| `InternalNavigation`  | Opening a `directory` entry stays in the same driver (intra-driver tree node) instead of handing off to the local FS driver. Set by archive drivers and procs-hierarchical. |
+
+The flag list is open-ended; new drivers add new flags as needed and gate UI surfaces on their presence.
+
+### 2.3 Shadow overlays
+
+Two related-but-orthogonal "transient" concepts exist alongside `kind`:
+
+* `Source.shadow: bool` — the source itself is transient (not a volume; do not show in the volume bar). Used by zip/7z mounts, procs, and per-job virtual lists.
+* `Panel.shadow_source: Option<ShadowSource>` — the panel is currently *inside* an overlay and carries the context needed to exit (parent source id, parent path, optional nested previous shadow). Set when entering an archive or procs; cleared on teardown.
+
+Both are independent of `kind` and of `InternalNavigation`. Search results, for example, are `kind: "virtual"` + `shadow: true` on the source + `shadow_source: Some(...)` on the panel, but *do not* advertise `InternalNavigation` — opening a directory entry hands off to the local FS just like bookmarks.
 
 ---
 
