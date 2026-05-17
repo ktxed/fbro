@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@floating-ui/react": "^0.27.19",
+    "@fontsource/jetbrains-mono": "^5.2.8",
     "@tabler/icons-react": "^3.41.1",
     "@tauri-apps/api": "^2",
     "@xterm/addon-fit": "^0.10.0",

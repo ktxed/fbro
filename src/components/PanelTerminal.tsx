@@ -4,6 +4,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { IconMaximize, IconMinimize, IconExternalLink } from "@tabler/icons-react";
 import "@xterm/xterm/css/xterm.css";
 import type { WsClient } from "../ws/client";
+import { DEFAULT_FONT_SIZE } from "../utils/zoom";
 
 interface PanelTerminalProps {
   client: WsClient;
@@ -93,10 +94,10 @@ export function PanelTerminal({
     } else {
       const term = new Terminal({
         cursorBlink: true,
-        fontFamily: "var(--font-mono, monospace)",
+        fontFamily: '"JetBrains Mono", monospace',
         fontSize,
-        lineHeight: 1.5,
-        letterSpacing: 1.5,
+        lineHeight: 1.1,
+        letterSpacing: 0.9 * (fontSize / DEFAULT_FONT_SIZE),
         scrollback: 5000,
         theme: {
           background: "#1e1e1e",
@@ -195,8 +196,8 @@ export function PanelTerminal({
     const fit = fitRef.current;
     if (!term || !fit) return;
     term.options.fontSize = fontSize;
-    term.options.lineHeight = 1.5;
-    term.options.letterSpacing = 1.5;
+    term.options.lineHeight = 1.1;
+    term.options.letterSpacing = 0.9 * (fontSize / DEFAULT_FONT_SIZE);
     try { fit.fit(); } catch { /* ignore */ }
     const cols = term.cols;
     const rows = term.rows;
