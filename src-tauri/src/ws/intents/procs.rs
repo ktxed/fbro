@@ -67,18 +67,19 @@ async fn enter_procs_source(scope: &Value, ctx: &mut IntentContext<'_>) {
 
         let hierarchical = state_guard.settings.general.proc_tree_mode;
         let driver = Arc::new(crate::vfs::procs::ProcsDriver { hierarchical });
-        // In hierarchical mode the source behaves like an archive: Directory
-        // entries are internal tree nodes that navigate within the same driver,
-        // not real filesystem paths. Using kind="virtual" would make open_entry
-        // switch to the local FS driver when the user enters a Directory entry.
-        let source_kind = if hierarchical { "archive" } else { "virtual" };
+        // Hierarchical mode → directory entries are intra-driver tree nodes;
+        // advertise InternalNavigation so open_entry doesn't hand off to local FS.
+        let mut supports = vec!["ListEntries".to_string()];
+        if hierarchical {
+            supports.push(crate::ws::intents::CAP_INTERNAL_NAV.to_string());
+        }
         state_guard.sources.insert(
             source_id.clone(),
             Source {
                 id: source_id.clone(),
                 name: "Processes".to_string(),
-                kind: source_kind.to_string(),
-                supports: vec!["ListEntries".to_string()],
+                kind: "virtual".to_string(),
+                supports,
                 root_path: String::new(),
                 mounted: true,
                 device_path: None,

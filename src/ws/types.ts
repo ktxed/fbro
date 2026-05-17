@@ -18,7 +18,7 @@ export interface VFSEntry {
 export interface Source {
   id: string;
   name: string;
-  kind: "filesystem" | "virtual" | "archive";
+  kind: "filesystem" | "virtual";
   supports: string[];
   capabilities: {
     readOnly: boolean;

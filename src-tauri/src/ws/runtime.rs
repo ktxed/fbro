@@ -238,11 +238,7 @@ pub(crate) async fn navigate_to(
     dir_size_queue: &Arc<DirSizeQueue>,
     watcher_cmd_tx: &mpsc::Sender<WatcherCommand>,
 ) {
-    eprintln!(
-        "[procs-dbg] navigate_to: panel_id={panel_id} new_path={new_path:?} cursor_hint={cursor_hint:?} cursor_index={cursor_index:?}"
-    );
     if let Some(handle) = scan_handles.remove(panel_id) {
-        eprintln!("[procs-dbg] navigate_to: aborted previous scan for panel_id={panel_id}");
         handle.abort();
     }
 
@@ -289,11 +285,6 @@ pub(crate) async fn navigate_to(
         (sort, filter, show_hidden, version, driver, shadow_schema, source_id, supports_thumbs, view_mode)
     };
 
-    eprintln!(
-        "[procs-dbg] navigate_to: bumped version={version} source_id={source_id} driver.is_local={} sending loading StatePatch",
-        driver.is_local()
-    );
-
     let _ = tx
         .send(ServerMessage::StatePatch {
             timestamp: now(),
@@ -338,9 +329,6 @@ pub(crate) async fn navigate_to(
             .await;
     }
 
-    eprintln!(
-        "[procs-dbg] navigate_to: spawning scan panel_id={panel_id} new_path={new_path:?} version_base={version}"
-    );
     let handle = spawn_scan(
         panel_id.to_string(),
         new_path.to_string(),
@@ -896,10 +884,6 @@ pub(crate) async fn update_panel_from_patch(
 ) {
     let mut state_guard = state.lock().await;
     if let Some(panel) = state_guard.panels.get_mut(panel_id) {
-        eprintln!(
-            "[procs-dbg] update_panel_from_patch: panel_id={panel_id} incoming_version={version} panel.version={} path={:?} entries_before={}",
-            panel.version, panel.path, panel.entries.len()
-        );
         // Treat null-valued fields (sent by rescan/navigate to *clear* state) as
         // "not present" — those patches are structural resets, not window slices.
         let has_total = patch

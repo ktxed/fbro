@@ -123,8 +123,9 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
                     return;
                 };
                 state_guard.settings.general.proc_tree_mode = v;
-                // Replace the procs driver and update the source kind so any
-                // active procs panel switches mode on the next rescan.
+                // Replace the procs driver and toggle the InternalNavigation
+                // capability so any active procs panel switches mode on the
+                // next rescan.
                 if state_guard.drivers.contains_key("procs") {
                     state_guard.drivers.insert(
                         "procs".to_string(),
@@ -132,7 +133,11 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
                             as Arc<dyn VfsDriver>,
                     );
                     if let Some(src) = state_guard.sources.get_mut("procs") {
-                        src.kind = if v { "archive" } else { "virtual" }.to_string();
+                        let cap = crate::ws::intents::CAP_INTERNAL_NAV.to_string();
+                        src.supports.retain(|c| c != &cap);
+                        if v {
+                            src.supports.push(cap);
+                        }
                     }
                 }
                 proc_tree_mode_changed = Some(v);

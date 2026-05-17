@@ -88,6 +88,12 @@ pub(crate) fn is_archive_source(source_id: &str) -> bool {
     source_id.starts_with("zip:") || source_id.starts_with("7z:")
 }
 
+/// Capability flag that marks a source whose `directory` entries are intra-driver
+/// tree nodes (zip/7z archives, hierarchical procs) rather than pointers into a
+/// real local filesystem. When absent, `OpenEntry` on a directory hands off to
+/// the local FS driver. See proto.md for the full list of capabilities.
+pub(crate) const CAP_INTERNAL_NAV: &str = "InternalNavigation";
+
 pub(crate) fn is_search_source(source_id: &str) -> bool {
     source_id.starts_with("search:")
 }

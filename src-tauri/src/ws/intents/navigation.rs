@@ -107,7 +107,7 @@ impl RevealArgs {
 
 async fn open_entry(scope: &Value, ctx: &mut IntentContext<'_>) {
     let panel_id = resolve_panel_id(scope, ctx.state).await;
-    let (entry_kind, entry_name, new_path, is_in_shadow, source_id, panel_path, panel_cursor, panel_entries_len) = {
+    let (entry_kind, entry_name, new_path, is_in_shadow, source_id) = {
         let state_guard = ctx.state.lock().await;
         if let Some(panel) = state_guard.panels.get(&panel_id) {
             if let Some(entry) = panel.entries.get(panel.cursor) {
@@ -118,12 +118,8 @@ async fn open_entry(scope: &Value, ctx: &mut IntentContext<'_>) {
                     driver.resolve_child(&panel.path, &entry.name),
                     panel.shadow_source.is_some(),
                     panel.source_id.clone(),
-                    panel.path.clone(),
-                    panel.cursor,
-                    panel.entries.len(),
                 )
             } else {
-                eprintln!("[procs-dbg] open_entry: cursor out of bounds panel_id={panel_id}");
                 return;
             }
         } else {
@@ -131,20 +127,18 @@ async fn open_entry(scope: &Value, ctx: &mut IntentContext<'_>) {
         }
     };
 
-    eprintln!(
-        "[procs-dbg] open_entry: panel_id={panel_id} source_id={source_id} panel_path={panel_path:?} cursor={panel_cursor} entries_len={panel_entries_len} entry_kind={entry_kind} entry_name={entry_name:?} resolved_new_path={new_path:?} is_in_shadow={is_in_shadow}"
-    );
-
     if entry_kind == "directory" {
-        // Virtual sources (kind="virtual") hold entries whose paths point to real
-        // filesystem locations. Navigating into one must exit the virtual view and
-        // land on the real filesystem. Archives (kind="archive") are excluded — their
-        // directory entries stay within the same driver.
+        // Virtual sources whose entries point to real filesystem paths must
+        // hand off to the local FS driver on directory open. Sources that
+        // advertise InternalNavigation (archives, procs-hierarchical) keep
+        // directory navigation within the same driver.
         let is_virtual_nav = {
             let state_guard = ctx.state.lock().await;
-            state_guard.sources.get(&source_id).map_or(false, |s| s.kind == "virtual")
+            state_guard.sources.get(&source_id).map_or(false, |s| {
+                s.kind == "virtual"
+                    && !s.supports.iter().any(|c| c == crate::ws::intents::CAP_INTERNAL_NAV)
+            })
         };
-        eprintln!("[procs-dbg] open_entry: directory branch is_virtual_nav={is_virtual_nav} (source kind decides)");
         if is_virtual_nav {
             // Switch the panel to the real source for this path before navigating.
             let real_source_id = {
@@ -183,7 +177,6 @@ async fn open_entry(scope: &Value, ctx: &mut IntentContext<'_>) {
                 }
             }
         }
-        eprintln!("[procs-dbg] open_entry: about to call navigate_to panel_id={panel_id} new_path={new_path:?}");
         navigate_to(
             &panel_id,
             &new_path,
@@ -196,7 +189,6 @@ async fn open_entry(scope: &Value, ctx: &mut IntentContext<'_>) {
             ctx.watcher_cmd_tx,
         )
         .await;
-        eprintln!("[procs-dbg] open_entry: navigate_to returned panel_id={panel_id}");
     } else if entry_kind == "file" && is_zip_like(&entry_name) && (!is_in_shadow || is_search_source(&source_id)) {
         // Enter zip archive as a shadow filesystem.
         enter_zip_archive(&panel_id, &new_path, &entry_name, ctx).await;
@@ -277,11 +269,12 @@ async fn enter_7z_archive(
                 Source {
                     id: source_id.clone(),
                     name: archive_name.to_string(),
-                    kind: "archive".to_string(),
+                    kind: "virtual".to_string(),
                     supports: vec![
                         "ListEntries".to_string(),
                         "OpenFolder".to_string(),
                         "CopySelection".to_string(),
+                        crate::ws::intents::CAP_INTERNAL_NAV.to_string(),
                     ],
                     root_path: String::new(),
                     mounted: true,
@@ -387,11 +380,12 @@ async fn enter_zip_archive(
                 Source {
                     id: source_id.clone(),
                     name: archive_name.to_string(),
-                    kind: "archive".to_string(),
+                    kind: "virtual".to_string(),
                     supports: vec![
                         "ListEntries".to_string(),
                         "OpenFolder".to_string(),
                         "CopySelection".to_string(),
+                        crate::ws::intents::CAP_INTERNAL_NAV.to_string(),
                     ],
                     root_path: String::new(), // root inside the archive is ""
                     mounted: true,
@@ -577,9 +571,10 @@ async fn navigate_panel_to(args: &Value, ctx: &mut IntentContext<'_>) {
         return;
     }
 
-    // For archive-type shadow sources (zip, procs-tree), navigate directly within
-    // the current driver — this enables breadcrumb navigation inside archives and
-    // the procs tree without going through the real-filesystem path-resolution below.
+    // For sources with intra-driver navigation (zip, 7z, procs-hierarchical),
+    // navigate directly within the current driver — this enables breadcrumb
+    // navigation inside archives and the procs tree without going through the
+    // real-filesystem path-resolution below.
     let archive_nav_path: Option<String> = {
         let state_guard = ctx.state.lock().await;
         if let Some(panel) = state_guard.panels.get(&parsed.panel_id) {
@@ -587,7 +582,7 @@ async fn navigate_panel_to(args: &Value, ctx: &mut IntentContext<'_>) {
                 let is_archive = state_guard
                     .sources
                     .get(&panel.source_id)
-                    .map(|s| s.kind == "archive")
+                    .map(|s| s.supports.iter().any(|c| c == crate::ws::intents::CAP_INTERNAL_NAV))
                     .unwrap_or(false);
                 if is_archive {
                     Some(parsed.path.trim().to_string())
@@ -1315,11 +1310,12 @@ async fn navigate_to_history_entry(args: &Value, ctx: &mut IntentContext<'_>) {
             guard.sources.entry(target_source_id.clone()).or_insert_with(|| Source {
                 id: target_source_id.clone(),
                 name: archive_name.clone(),
-                kind: "archive".to_string(),
+                kind: "virtual".to_string(),
                 supports: vec![
                     "ListEntries".to_string(),
                     "OpenFolder".to_string(),
                     "CopySelection".to_string(),
+                    crate::ws::intents::CAP_INTERNAL_NAV.to_string(),
                 ],
                 root_path: String::new(),
                 mounted: true,

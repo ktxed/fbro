@@ -451,12 +451,17 @@ impl AppState {
             Source {
                 id: "procs".to_string(),
                 name: "procs".to_string(),
-                // In hierarchical mode the procs source behaves like an archive:
-                // directory entries are internal tree nodes navigated within the
-                // same driver. In flat mode all entries are leaves, so "virtual"
-                // is fine (the open_entry virtual-switch path is unreachable).
-                kind: if loaded_settings.general.proc_tree_mode { "archive" } else { "virtual" }.to_string(),
-                supports: vec!["ListEntries".to_string(), "DeleteSelection".to_string()],
+                kind: "virtual".to_string(),
+                // In hierarchical mode directory entries are intra-driver tree
+                // nodes — advertise InternalNavigation so open_entry does not
+                // try to hand off to the local FS driver.
+                supports: {
+                    let mut caps = vec!["ListEntries".to_string(), "DeleteSelection".to_string()];
+                    if loaded_settings.general.proc_tree_mode {
+                        caps.push(crate::ws::intents::CAP_INTERNAL_NAV.to_string());
+                    }
+                    caps
+                },
                 root_path: String::new(),
                 mounted: true,
                 device_path: None,

@@ -279,18 +279,6 @@ async fn handle_connection(
                 if let ServerMessage::StatePatch { ref domain, ref entity_id, ref patch, version, .. } = msg {
                     if domain == "panels" {
                         if let Some(panel_id) = entity_id {
-                            let keys: Vec<&str> = patch
-                                .as_object()
-                                .map(|o| o.keys().map(|k| k.as_str()).collect())
-                                .unwrap_or_default();
-                            let append_len = patch
-                                .get("appendEntries")
-                                .and_then(|v| v.as_array())
-                                .map(|a| a.len())
-                                .unwrap_or(0);
-                            eprintln!(
-                                "[procs-dbg] server: forwarding panels StatePatch panel_id={panel_id} version={version} keys={keys:?} appendEntries_len={append_len}"
-                            );
                             update_panel_from_patch(&state, panel_id, patch, version).await;
                         }
                     }

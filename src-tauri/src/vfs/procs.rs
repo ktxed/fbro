@@ -351,10 +351,6 @@ impl ProcsDriver {
                 .and_then(|s| s.trim().splitn(2, " - ").next()?.trim().parse::<u32>().ok())
                 .map(Pid::from_u32)
         };
-        eprintln!(
-            "[procs-dbg] list_hierarchical: path={path:?} target_parent={target_parent:?} total_pids={}",
-            all_pids.len()
-        );
 
         // Build a set of PIDs that have at least one child (for Directory kind)
         let parent_pids: HashSet<Pid> = sys
@@ -410,11 +406,6 @@ impl ProcsDriver {
                 })
             })
             .collect();
-        eprintln!(
-            "[procs-dbg] list_hierarchical: path={path:?} returning {} entries (sample: {:?})",
-            result.len(),
-            result.iter().take(5).map(|e| (&e.name, e.kind.as_str())).collect::<Vec<_>>()
-        );
         result
     }
 }
