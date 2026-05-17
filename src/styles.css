@@ -458,6 +458,25 @@ body {
   opacity: 0.8;
 }
 
+.panel__volume-btn--icon-only {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1px 4px;
+}
+
+.panel__volume-btn--virtual {
+  color: #4dd0e1;
+}
+.panel__volume-btn--virtual:hover {
+  color: #80deea;
+}
+.panel__volume-btn--virtual.panel__volume-btn--active {
+  color: #80deea;
+  border-color: #4dd0e1;
+  background: rgba(77, 208, 225, 0.15);
+}
+
 .panel__path {
   color: var(--text-path);
   font-size: var(--font-size);

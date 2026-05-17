@@ -1493,6 +1493,8 @@ async fn start_search(args: &Value, ctx: &mut IntentContext<'_>) {
             mounted: true,
             device_path: None,
             shadow: true,
+            icon_name: None,
+            sort_priority: 100,
         };
         state.sources.insert(source_id.clone(), source);
 

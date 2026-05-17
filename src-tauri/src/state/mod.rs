@@ -29,6 +29,13 @@ pub struct Source {
     /// Shadow sources are transient per-panel sources (e.g. browsing inside a zip archive).
     /// They are not volumes and must not appear in the volume/source bar.
     pub shadow: bool,
+    /// Optional icon hint for the source bar (FE maps name → component).
+    /// When `Some`, the FE renders the icon in place of the textual label.
+    pub icon_name: Option<String>,
+    /// Order key for the source bar. Lower = earlier. Filesystem volumes use
+    /// the default `100`; non-volume virtual sources (e.g. procs) use a lower
+    /// value to sort first.
+    pub sort_priority: i32,
 }
 
 // ─── Shadow source ────────────────────────────────────────────────────────────
@@ -428,6 +435,8 @@ impl AppState {
                 mounted: vol.mounted,
                 device_path: vol.device_path,
                 shadow: false,
+                icon_name: None,
+                sort_priority: 100,
             };
             if vol.mounted {
                 let driver: Arc<dyn VfsDriver> = {
@@ -466,6 +475,8 @@ impl AppState {
                 mounted: true,
                 device_path: None,
                 shadow: false,
+                icon_name: Some("activity".to_string()),
+                sort_priority: 0,
             },
         );
         drivers.insert(
@@ -523,14 +534,18 @@ impl AppState {
             std::env::var("FBRO_SPY_SOCK").unwrap_or_else(|_| "/tmp/fbro-spy.sock".to_string());
 
         let new_ids: HashSet<String> = volumes.iter().map(|v| v.id.clone()).collect();
+        // Only consider filesystem-kind sources for removal. Virtual sources
+        // (procs, bookmarks, history, archives, search) have their own
+        // lifecycle and are not in the volume watcher's purview — leaving
+        // them in `old_ids` would let `rebuild_sources` silently delete them
+        // any time volumes change.
         let old_ids: HashSet<String> = self
             .sources
             .iter()
-            .filter(|(_, src)| !src.shadow)
+            .filter(|(_, src)| !src.shadow && src.kind == "filesystem")
             .map(|(id, _)| id.clone())
             .collect();
 
-        // Remove stale sources/drivers (never touch shadow sources — they have their own lifecycle)
         let removed: Vec<String> = old_ids.difference(&new_ids).cloned().collect();
         for id in &removed {
             self.sources.remove(id);
@@ -580,6 +595,8 @@ impl AppState {
                     mounted: vol.mounted,
                     device_path: vol.device_path,
                     shadow: false,
+                    icon_name: None,
+                    sort_priority: 100,
                 };
                 if vol.mounted {
                     self.drivers.insert(vol.id.clone(), make_driver());

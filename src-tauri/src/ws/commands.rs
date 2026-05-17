@@ -106,6 +106,13 @@ pub(crate) fn build_interactive_commands() -> Vec<InteractiveCommandSchema> {
             Some("NavigateSourceRoot"),
         ),
         command(
+            "panel.refresh",
+            "Navigation",
+            "Refresh",
+            vec![list_only(keybinding("r"))],
+            Some("Refresh"),
+        ),
+        command(
             "file.info",
             "File",
             "Inspect Item",

@@ -388,6 +388,8 @@ pub struct SourceSchema {
     pub total_bytes: Option<u64>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub shadow: bool,
+    #[serde(rename = "iconName", skip_serializing_if = "Option::is_none")]
+    pub icon_name: Option<String>,
 }
 
 #[derive(Serialize, Clone, Debug)]

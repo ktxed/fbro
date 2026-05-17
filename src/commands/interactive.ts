@@ -67,6 +67,7 @@ export const PANEL_SHORTCUT_COMMAND_IDS = [
   "panel.navigate_up",
   "panel.navigate_home",
   "panel.navigate_to_path",
+  "panel.refresh",
   "panel.history.open",
   "panel.history.back",
   "panel.history.forward",
@@ -525,6 +526,10 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
       return true;
     case "panel.navigate_source_root":
       client.sendIntent("NavigateSourceRoot", focused?.panelId ?? state.focus);
+      return true;
+    case "panel.refresh":
+      if (!focused) return false;
+      client.sendIntent("Refresh", focused.panelId);
       return true;
     case "panel.pass_to_bro":
       return focused ? openPassToBro(state, dispatch, client, focused.panel) : false;

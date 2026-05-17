@@ -6,13 +6,14 @@ use crate::jobs::viewer_prefetch::PREFETCH_N;
 use crate::ws::intents::{arg_bool, arg_i64, arg_str, arg_u64, arg_usize_vec, is_archive_source, is_search_source};
 use crate::ws::protocol::{now, ServerMessage};
 use crate::ws::runtime::{
-    build_state_snapshot, rescan_panel, resolve_panel_id, selected_entries_for_panel,
-    selected_names_for, send_window, IntentContext,
+    build_state_snapshot, handle_volumes_changed, rescan_panel, resolve_panel_id,
+    selected_entries_for_panel, selected_names_for, send_window, IntentContext,
 };
 
 pub(crate) async fn handle(name: &str, scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
     match name {
         "RefreshPanels" => refresh_panels(ctx).await,
+        "Refresh" => refresh(scope, ctx).await,
         "SetSort" => set_sort(scope, args, ctx).await,
         "SetFilter" => set_filter(scope, args, ctx).await,
         "SetFilterMode" => set_filter_mode(scope, args, ctx).await,
@@ -174,6 +175,42 @@ impl FocusArgs {
             to: arg_str(args, "to").map(String::from),
         }
     }
+}
+
+/// Refresh the focused panel's listing and re-query mounted volumes / free
+/// space. Triggered by the `panel.refresh` command (default key `r`).
+async fn refresh(scope: &Value, ctx: &mut IntentContext<'_>) {
+    let panel_id = resolve_panel_id(scope, ctx.state).await;
+    let (cursor_hint, selection_names) = {
+        let state_guard = ctx.state.lock().await;
+        let names = selected_names_for(&state_guard, &panel_id);
+        let hint = state_guard
+            .panels
+            .get(&panel_id)
+            .and_then(|panel| panel.entries.get(panel.cursor).map(|e| e.name.clone()));
+        (hint, names)
+    };
+    rescan_panel(
+        &panel_id,
+        ctx.state,
+        ctx.tx,
+        ctx.scan_handles,
+        cursor_hint,
+        selection_names,
+        ctx.dir_size_queue,
+    )
+    .await;
+
+    let volumes = ctx.volume_watcher.list_volumes().await;
+    handle_volumes_changed(
+        volumes,
+        ctx.state,
+        ctx.tx,
+        ctx.scan_handles,
+        ctx.watcher_cmd_tx,
+        ctx.dir_size_queue,
+    )
+    .await;
 }
 
 async fn refresh_panels(ctx: &mut IntentContext<'_>) {

@@ -84,6 +84,8 @@ async fn enter_history_source(scope: &Value, args: &Value, ctx: &mut IntentConte
                 mounted: true,
                 device_path: None,
                 shadow: true,
+                icon_name: None,
+                sort_priority: 100,
             },
         );
         state_guard

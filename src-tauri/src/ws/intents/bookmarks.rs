@@ -107,6 +107,8 @@ async fn enter_bookmark_source(scope: &Value, ctx: &mut IntentContext<'_>) {
                 mounted: true,
                 device_path: None,
                 shadow: true,
+                icon_name: None,
+                sort_priority: 100,
             },
         );
         state_guard

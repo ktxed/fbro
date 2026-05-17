@@ -30,6 +30,7 @@ export interface Source {
   freeBytes?: number;
   totalBytes?: number;
   shadow?: boolean;
+  iconName?: string;
 }
 
 export interface ShadowSource {

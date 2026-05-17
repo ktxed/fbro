@@ -9,7 +9,14 @@ import {
   PANEL_SHORTCUT_COMMAND_IDS,
 } from "../commands/interactive";
 import { useAppDispatch, useAppState } from "../store";
-import { IconChevronDown, IconChevronUp, IconChevronRight, IconChevronLeft, IconArrowUpRight, IconX, IconAlertTriangle } from "@tabler/icons-react";
+import { IconChevronDown, IconChevronUp, IconChevronRight, IconChevronLeft, IconArrowUpRight, IconX, IconAlertTriangle, IconActivity } from "@tabler/icons-react";
+
+// Maps Source.iconName (BE-provided) to a Tabler icon component for rendering
+// in the volume bar. Sources with an iconName render the icon in place of
+// their text label; unknown names fall back to the text label.
+const SOURCE_ICONS: Record<string, React.ComponentType<{ size?: number }>> = {
+  activity: IconActivity,
+};
 import { BookmarksPopover } from "./BookmarksPopover";
 import { PanelTabBar } from "./PanelTabBar";
 import { PanelTerminal } from "./PanelTerminal";
@@ -117,15 +124,26 @@ function VolumeHeader({ sources, panel, onNavigateToSource, onMountSource }: {
     <div className="panel__volumes">
       <button className="panel__volumes-arrow" disabled={!canLeft} tabIndex={-1} onClick={() => scroll(-1)}><IconChevronLeft size={14} /></button>
       <div className="panel__volumes-list" ref={listRef} onScroll={updateArrows} onWheel={onWheel}>
-        {Object.values(sources).filter(src => !src.shadow).map(src => (
-          <button
-            key={src.id}
-            className={`panel__volume-btn${src.id === panel.sourceId ? " panel__volume-btn--active" : ""}${!src.mounted ? " panel__volume-btn--unmounted" : ""}`}
-            tabIndex={-1}
-            onClick={() => src.mounted ? onNavigateToSource(src.id) : onMountSource(src.id)}
-            title={src.mounted ? src.rootPath : `${src.name} (unmounted — click to mount)`}
-          >{src.name}</button>
-        ))}
+        {Object.values(sources).filter(src => !src.shadow).map(src => {
+          const Icon = src.iconName ? SOURCE_ICONS[src.iconName] : undefined;
+          const isVirtual = src.kind === "virtual";
+          const classes = [
+            "panel__volume-btn",
+            src.id === panel.sourceId ? "panel__volume-btn--active" : "",
+            !src.mounted ? "panel__volume-btn--unmounted" : "",
+            Icon ? "panel__volume-btn--icon-only" : "",
+            isVirtual ? "panel__volume-btn--virtual" : "",
+          ].filter(Boolean).join(" ");
+          return (
+            <button
+              key={src.id}
+              className={classes}
+              tabIndex={-1}
+              onClick={() => src.mounted ? onNavigateToSource(src.id) : onMountSource(src.id)}
+              title={src.mounted ? (Icon ? src.name : src.rootPath) : `${src.name} (unmounted — click to mount)`}
+            >{Icon ? <Icon size={14} /> : src.name}</button>
+          );
+        })}
       </div>
       <button className="panel__volumes-arrow" disabled={!canRight} tabIndex={-1} onClick={() => scroll(1)}><IconChevronRight size={14} /></button>
     </div>

@@ -156,9 +156,14 @@ pub(crate) fn build_state_snapshot(
 }
 
 pub(crate) fn build_sources(state: &AppState) -> Vec<SourceSchema> {
-    state
-        .sources
-        .values()
+    let mut sources: Vec<&crate::state::Source> = state.sources.values().collect();
+    sources.sort_by(|a, b| {
+        a.sort_priority
+            .cmp(&b.sort_priority)
+            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+    });
+    sources
+        .into_iter()
         .map(|src| {
             let space = if src.mounted && !src.shadow {
                 state.platform.disk_space(&src.root_path)
@@ -180,6 +185,7 @@ pub(crate) fn build_sources(state: &AppState) -> Vec<SourceSchema> {
                 free_bytes: space.map(|(free, _)| free),
                 total_bytes: space.map(|(_, total)| total),
                 shadow: src.shadow,
+                icon_name: src.icon_name.clone(),
             }
         })
         .collect()

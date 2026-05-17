@@ -84,6 +84,8 @@ async fn enter_procs_source(scope: &Value, ctx: &mut IntentContext<'_>) {
                 mounted: true,
                 device_path: None,
                 shadow: true,
+                icon_name: Some("activity".to_string()),
+                sort_priority: 0,
             },
         );
         state_guard

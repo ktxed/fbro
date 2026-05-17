@@ -280,6 +280,8 @@ async fn enter_7z_archive(
                     mounted: true,
                     device_path: None,
                     shadow: true,
+                    icon_name: None,
+                    sort_priority: 100,
                 },
             );
         }
@@ -391,6 +393,8 @@ async fn enter_zip_archive(
                     mounted: true,
                     device_path: None,
                     shadow: true,
+                    icon_name: None,
+                    sort_priority: 100,
                 },
             );
         }
@@ -1321,6 +1325,8 @@ async fn navigate_to_history_entry(args: &Value, ctx: &mut IntentContext<'_>) {
                 mounted: true,
                 device_path: None,
                 shadow: true,
+                icon_name: None,
+                sort_priority: 100,
             });
             guard.drivers.entry(target_source_id.clone()).or_insert(driver);
         }

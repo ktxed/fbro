@@ -19,6 +19,7 @@ use crate::ws::runtime::IntentContext;
 pub async fn dispatch(name: &str, scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
     match name {
         "RefreshPanels"
+        | "Refresh"
         | "SetSort"
         | "SetFilter"
         | "SetFilterMode"
