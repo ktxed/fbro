@@ -95,6 +95,7 @@ impl PtyManager {
             .map_err(|e| PtyError::Spawn(e.to_string()))?;
 
         let mut cmd = CommandBuilder::new(default_shell());
+        cmd.arg("-l");
         cmd.cwd(cwd);
         cmd.env("TERM", "xterm-256color");
 

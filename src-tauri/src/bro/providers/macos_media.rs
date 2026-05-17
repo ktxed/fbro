@@ -1,10 +1,11 @@
 use crate::bro::model::{
     BroOption, BroPre, BroProtocol, BroSource, LaunchArg, LaunchRecipe, ResolvedBro,
 };
-use crate::bro::probe::{macos_app_executable, macos_app_exists};
+use crate::bro::probe::{
+    find_binary_on_path, macos_app_executable, macos_app_exists, macos_common_cli_candidates,
+};
 use crate::bro::providers::{BroDiscoveryContext, BroProvider};
 use crate::bro::version::native_version;
-use std::process::Command;
 
 pub struct MacOSMediaProvider;
 
@@ -14,12 +15,13 @@ impl BroProvider for MacOSMediaProvider {
         let mut bros = Vec::new();
         let mut seen_programs = std::collections::HashSet::new();
 
-        if let Some(version) = probe_mpv_on_path() {
-            seen_programs.insert("mpv".to_string());
+        if let Some(program) = find_mpv_program() {
+            let version = native_version(&program);
+            seen_programs.insert(program.clone());
             bros.push(native_command_bro(
                 "native:mpv",
                 "mpv",
-                "mpv".to_string(),
+                program,
                 Some("mpv".to_string()),
                 version,
                 vec![LaunchArg::TargetPlaylistFile { flag: "--playlist=".to_string() }],
@@ -74,21 +76,12 @@ impl BroProvider for MacOSMediaProvider {
     }
 }
 
-fn probe_mpv_on_path() -> Option<String> {
-    Command::new("mpv")
-        .arg("-version")
-        .output()
-        .ok()
-        .and_then(|output| {
-            if !output.status.success() {
-                return None;
-            }
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            stdout
-                .lines()
-                .find(|line| !line.trim().is_empty())
-                .map(|line| line.trim().to_string())
-        })
+fn find_mpv_program() -> Option<String> {
+    find_binary_on_path(&["mpv"]).or_else(|| {
+        macos_common_cli_candidates(&["mpv"])
+            .into_iter()
+            .find(|p| std::path::Path::new(p).is_file())
+    })
 }
 
 fn native_command_bro(
