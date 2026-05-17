@@ -353,6 +353,9 @@ body {
 }
 
 .panel__tab-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

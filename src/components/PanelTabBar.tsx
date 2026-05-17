@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { IconChevronLeft, IconChevronRight, IconX } from "@tabler/icons-react";
+import { IconChevronLeft, IconChevronRight, IconTerminal2, IconX } from "@tabler/icons-react";
 import type { PanelSlot, PanelState } from "../ws/types";
 import type { WsClient } from "../ws/client";
 
@@ -10,7 +10,7 @@ function tabTitle(panel: PanelState | undefined): string {
   if (panel.tabTitle) return panel.tabTitle;
   if (panel.tabKind === "terminal") {
     const base = basename(panel.path) || "~";
-    return `$ ${base}`;
+    return base;
   }
   return basename(panel.path) || "/";
 }
@@ -123,7 +123,10 @@ export function PanelTabBar({ slot, panels, client }: Props) {
                 // Rename hook lands here in a future iteration.
               }}
             >
-              <span className="panel__tab-label">{displayed}</span>
+              <span className="panel__tab-label">
+                {panel?.tabKind === "terminal" && <IconTerminal2 size={16} />}
+                {displayed}
+              </span>
               {slot.tabPanelIds.length > 1 && (
                 <button
                   className="panel__tab-close"
