@@ -274,7 +274,11 @@ pub(crate) async fn navigate_to(
             } else {
                 return;
             };
-        let driver = state_guard.drivers.get(&source_id).cloned().unwrap();
+        let Some(driver) = state_guard.drivers.get(&source_id).cloned() else {
+            // Source has no live driver (e.g. its volume was just unmounted).
+            // Silently skip rather than panic.
+            return;
+        };
         let supports_thumbs = driver.supports_thumbnails();
         // Auto-fall-back: if grid is active but new source doesn't support
         // thumbnails, drop back to list mode.
@@ -397,7 +401,9 @@ pub(crate) async fn rescan_panel(
             } else {
                 return;
             };
-        let driver = state_guard.drivers.get(&source_id).cloned().unwrap();
+        let Some(driver) = state_guard.drivers.get(&source_id).cloned() else {
+            return;
+        };
         let supports_thumbs = driver.supports_thumbnails();
         if !supports_thumbs {
             if let Some(panel) = state_guard.panels.get_mut(panel_id) {
@@ -497,7 +503,9 @@ pub(crate) async fn quiet_rescan_panel(
             } else {
                 return;
             };
-        let driver = state_guard.drivers.get(&source_id).cloned().unwrap();
+        let Some(driver) = state_guard.drivers.get(&source_id).cloned() else {
+            return;
+        };
         (path, sort, filter, show_hidden, version, driver)
     };
 
