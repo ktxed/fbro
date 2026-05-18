@@ -61,6 +61,7 @@ pub async fn dispatch(name: &str, scope: &Value, args: &Value, ctx: &mut IntentC
         "StartFileOp" | "PasteExternalClipboard" | "WriteExternalClipboard"
         | "ProvideJobDecision" | "CancelJob"
         | "PauseJob" | "ResumeJob" | "RenameFile" | "MakeDir" | "TouchFile"
+        | "SetPermissions"
         | "StartSearch" | "NavigateToSearchResult" | "MountSearchResults"
         | "RemoveSearchSource" => {
             jobs::handle(name, scope, args, ctx).await

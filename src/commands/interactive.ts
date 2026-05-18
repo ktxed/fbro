@@ -12,6 +12,7 @@ import type {
   KeyBinding,
   PanelState,
   Source,
+  VFSEntry,
 } from "../ws/types";
 
 export const TOOLBAR_COMMAND_IDS = [
@@ -36,6 +37,7 @@ export const GLOBAL_SHORTCUT_COMMAND_IDS = [
   "panel.viewer.embed",
   "panel.navigate_source_root",
   "file.info",
+  "file.set_permissions",
   "panel.toggle_hidden",
   "file.copy_external",
   "file.cut_external",
@@ -204,6 +206,44 @@ function openInfo(dispatch: Dispatch<AppAction>, panel: PanelState, state: AppSt
       mtime: entry.mtime,
       btime: entry.btime,
       permissions: entry.permissions,
+    },
+  });
+  return true;
+}
+
+function openAttributes(dispatch: Dispatch<AppAction>, panel: PanelState, state: AppState) {
+  const indices = panel.selection.length > 0 ? panel.selection : [panel.cursor];
+  const entries = indices
+    .map((i) => entryAt(panel, i))
+    .filter((e) => !!e && e.name !== "..") as VFSEntry[];
+
+  if (entries.length === 0) return false;
+
+  let dirPath = panel.path.replace(/[/\\]+$/, "");
+  const paths: string[] = [];
+  const names: string[] = [];
+
+  for (const entry of entries) {
+    let fullPath = `${dirPath}/${entry.name}`;
+    if (panel.sourceId && isSearchSourceId(panel.sourceId)) {
+      const jobId = panel.sourceId.replace(/^search:/, "");
+      const job = state.jobs[jobId];
+      const result = job?.searchResults?.find((r) => r.name === entry.name);
+      if (result) {
+        fullPath = result.fullPath;
+      }
+    }
+    paths.push(fullPath);
+    names.push(entry.name);
+  }
+
+  dispatch({
+    type: "OPEN_ATTRIBUTES",
+    attributes: {
+      panelId: panel.panelId,
+      paths,
+      names,
+      currentMode: entries[0].permissions ?? "rwxrwxrwx",
     },
   });
   return true;
@@ -581,6 +621,12 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
         touch: { sourcePanel: focused.panelId, dirPath: focused.panel.path },
       });
       return true;
+    case "file.set_permissions":
+      if (!focused) return false;
+      if (focused.panel.shadowSource) return false;
+      const attrsSource = state.sources[focused.panel.sourceId];
+      if (!attrsSource || attrsSource.kind !== "filesystem") return false;
+      return openAttributes(dispatch, focused.panel, state);
     case "file.mkdir":
       if (!focused || !sourceCapability("NewFolder")) return false;
       dispatch({

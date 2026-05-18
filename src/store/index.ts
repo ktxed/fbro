@@ -172,6 +172,14 @@ export interface PendingSearch {
 
 export type SettingsTab = "general" | "display";
 
+export interface PendingAttributes {
+  panelId: string;
+  paths: string[];
+  names: string[];
+  currentMode: string;   // e.g. "rwxr-xr-x"
+  error?: string;
+}
+
 export interface PendingSettings {
   activeTab: SettingsTab;
 }
@@ -205,6 +213,7 @@ export interface AppState {
   pendingBro: PendingBro | null;
   pendingInput: PendingInput | null;
   pendingSearch: PendingSearch | null;
+  pendingAttributes: PendingAttributes | null;
   pendingSettings: PendingSettings | null;
   commandPaletteOpen: boolean;
   transientHint: { message: string; token: number } | null;
@@ -247,6 +256,7 @@ const initialState: AppState = {
   pendingBro: null,
   pendingInput: null,
   pendingSearch: null,
+  pendingAttributes: null,
   pendingSettings: null,
   commandPaletteOpen: false,
 
@@ -310,6 +320,8 @@ export type AppAction =
   | { type: "NAV_HISTORY_JUMP";    panelId: string; entryIndex: number }
   | { type: "OPEN_BOOKMARKS"; panelId: string }
   | { type: "CLOSE_BOOKMARKS" }
+  | { type: "OPEN_ATTRIBUTES"; attributes: PendingAttributes }
+  | { type: "CLOSE_ATTRIBUTES" }
   | { type: "OPEN_SETTINGS"; tab: SettingsTab }
   | { type: "CLOSE_SETTINGS" }
   | { type: "SET_MAXIMIZED_TERMINAL"; panelId: string | null };
@@ -922,6 +934,9 @@ function reducer(state: AppState, action: AppAction): AppState {
           if (msg.code === "TOUCH_FAILED" && state.pendingTouch) {
             return { ...state, pendingTouch: { ...state.pendingTouch, error: msg.message } };
           }
+          if (msg.code === "SET_PERMISSIONS_FAILED" && state.pendingAttributes) {
+            return { ...state, pendingAttributes: { ...state.pendingAttributes, error: msg.message } };
+          }
           if (msg.code === "TOUCH_NOT_SUPPORTED") {
             return { ...state, pendingTouch: null, transientHint: { message: msg.message, token: msg.timestamp } };
           }
@@ -1207,16 +1222,10 @@ function reducer(state: AppState, action: AppAction): AppState {
       return { ...state, pendingPanelHistory: null };
     case "CLOSE_DRY_RUN":
       return { ...state, pendingDryRun: null };
-    case "OPEN_BOOKMARKS":
-      return { ...state, bookmarksOpen: { panelId: action.panelId } };
-    case "CLOSE_BOOKMARKS":
-      return { ...state, bookmarksOpen: null };
-    case "SET_MAXIMIZED_TERMINAL":
-      return { ...state, maximizedTerminalPanelId: action.panelId };
-    case "OPEN_SETTINGS":
-      return { ...state, pendingSettings: { activeTab: action.tab } };
-    case "CLOSE_SETTINGS":
-      return { ...state, pendingSettings: null };
+    case "OPEN_ATTRIBUTES":
+      return { ...state, pendingAttributes: action.attributes, pendingContextMenu: null };
+    case "CLOSE_ATTRIBUTES":
+      return { ...state, pendingAttributes: null };
     case "OPEN_CONTEXT_MENU":
       return { ...state, pendingContextMenu: action.menu };
     case "CLOSE_CONTEXT_MENU":
@@ -1294,6 +1303,8 @@ function reducer(state: AppState, action: AppAction): AppState {
           requestId: action.requestId,
         },
       };
+    default:
+      return state;
   }
 }
 

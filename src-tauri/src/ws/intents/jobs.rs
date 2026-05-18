@@ -33,6 +33,7 @@ pub(crate) async fn handle(name: &str, scope: &Value, args: &Value, ctx: &mut In
         "RenameFile" => rename_file(args, ctx).await,
         "MakeDir" => make_dir(args, ctx).await,
         "TouchFile" => touch_file(args, ctx).await,
+        "SetPermissions" => set_permissions(args, ctx).await,
         "StartSearch" => start_search(args, ctx).await,
         "NavigateToSearchResult" => navigate_to_search_result(args, ctx).await,
         "MountSearchResults" => mount_search_results(args, ctx).await,
@@ -1400,6 +1401,114 @@ async fn touch_file(args: &Value, ctx: &mut IntentContext<'_>) {
             }
             Err(_) => {}
         }
+    }
+}
+
+// ─── Set permissions (chmod) ────────────────────────────────────────────────
+
+async fn set_permissions(args: &Value, ctx: &mut IntentContext<'_>) {
+    let panel_id = arg_str(args, "panelId").unwrap_or("").to_string();
+    let paths: Vec<String> = args
+        .get("paths")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+    let mode = args.get("mode").and_then(Value::as_u64).unwrap_or(0) as u32;
+
+    if panel_id.is_empty() || paths.is_empty() || mode == 0 {
+        let _ = send_error(
+            ctx,
+            "SET_PERMISSIONS_FAILED",
+            "Invalid arguments for SetPermissions.".to_string(),
+        )
+        .await;
+        return;
+    }
+
+    // Block inside shadow sources (archives).
+    {
+        let state_guard = ctx.state.lock().await;
+        if let Some(panel) = state_guard.panels.get(&panel_id) {
+            if panel.shadow_source.is_some() {
+                drop(state_guard);
+                let _ = send_error(
+                    ctx,
+                    "SET_PERMISSIONS_FAILED",
+                    "Cannot change permissions inside an archive.".to_string(),
+                )
+                .await;
+                return;
+            }
+        }
+    }
+
+    let (driver, selection_names) = {
+        let state_guard = ctx.state.lock().await;
+        let driver = state_guard
+            .panels
+            .get(&panel_id)
+            .and_then(|panel| state_guard.drivers.get(&panel.source_id).cloned());
+        let names = selected_names_for(&state_guard, &panel_id);
+        (driver, names)
+    };
+
+    let Some(driver) = driver else {
+        let _ = send_error(
+            ctx,
+            "SET_PERMISSIONS_FAILED",
+            "Panel driver is unavailable.".to_string(),
+        )
+        .await;
+        return;
+    };
+
+    // Only local filesystem sources support permissions changes.
+    if !driver.is_local() {
+        let _ = send_error(
+            ctx,
+            "SET_PERMISSIONS_FAILED",
+            "Cannot change permissions on a non-local source.".to_string(),
+        )
+        .await;
+        return;
+    }
+
+    let mut last_error = None;
+    for path in &paths {
+        let path = path.clone();
+        let driver_ref = Arc::clone(&driver);
+        let result =
+            tokio::task::spawn_blocking(move || driver_ref.set_permissions(&path, mode)).await;
+        match result {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => {
+                last_error = Some(e.to_string());
+                break;
+            }
+            Err(e) => {
+                last_error = Some(e.to_string());
+                break;
+            }
+        }
+    }
+
+    if let Some(error) = last_error {
+        let _ = send_error(ctx, "SET_PERMISSIONS_FAILED", error).await;
+    } else {
+        rescan_panel(
+            &panel_id,
+            ctx.state,
+            ctx.tx,
+            ctx.scan_handles,
+            None,
+            selection_names,
+            ctx.dir_size_queue,
+        )
+        .await;
     }
 }
 

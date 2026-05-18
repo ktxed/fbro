@@ -234,6 +234,13 @@ pub(crate) fn build_interactive_commands() -> Vec<InteractiveCommandSchema> {
             None,
         ),
         command(
+            "file.set_permissions",
+            "File",
+            "Set Permissions…",
+            vec![],
+            None,
+        ),
+        command(
             "app.open_terminal",
             "App",
             "Open Terminal",

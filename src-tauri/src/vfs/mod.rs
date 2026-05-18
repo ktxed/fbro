@@ -80,6 +80,14 @@ pub trait VfsDriver: Send + Sync {
     fn try_rename(&self, _src: &str, _dst: &str) -> Result<bool, VfsError> {
         Ok(false) // default: no fast path
     }
+
+    /// Set Unix permissions (mode bits) on the file at `path`.
+    /// Returns `NotSupported` by default — only `LocalFsDriver` implements this.
+    fn set_permissions(&self, _path: &str, _mode: u32) -> Result<(), VfsError> {
+        Err(VfsError::NotSupported(
+            "set_permissions is not supported by this driver".to_string(),
+        ))
+    }
 }
 
 // ─── Helper types ───────────────────────────────────────────────────────────

@@ -6,6 +6,7 @@ import { Panel } from "./Panel";
 import { OperationModal } from "./OperationModal";
 import { QuitModal } from "./QuitModal";
 import { RenameModal } from "./RenameModal";
+import { AttributesModal } from "./AttributesModal";
 import { InfoModal } from "./InfoModal";
 import { MkDirModal } from "./MkDirModal";
 import { TouchModal } from "./TouchModal";
@@ -422,7 +423,7 @@ export function Layout({ client, jobsViewOpen, onCloseJobsView, onOpenJobsView }
   }
 
   const activeJob = state.activeJobId ? state.jobs[state.activeJobId] ?? null : null;
-  const modalActive = state.pendingOp !== null || state.activeJobId !== null || state.pendingQuit !== null || state.pendingRename !== null || state.pendingInfo !== null || state.pendingMkdir !== null || state.pendingTouch !== null || state.pendingNoEditor !== null || state.pendingGoToPath !== null || state.pendingPanelHistory !== null || state.pendingDryRun !== null || state.pendingContextMenu !== null || state.pendingOpenWith !== null || state.pendingBro !== null || state.pendingInput !== null || state.pendingSearch !== null || state.pendingSettings !== null || state.commandPaletteOpen || jobsViewOpen;
+  const modalActive = state.pendingOp !== null || state.activeJobId !== null || state.pendingQuit !== null || state.pendingRename !== null || state.pendingAttributes !== null || state.pendingInfo !== null || state.pendingMkdir !== null || state.pendingTouch !== null || state.pendingNoEditor !== null || state.pendingGoToPath !== null || state.pendingPanelHistory !== null || state.pendingDryRun !== null || state.pendingContextMenu !== null || state.pendingOpenWith !== null || state.pendingBro !== null || state.pendingInput !== null || state.pendingSearch !== null || state.pendingSettings !== null || state.commandPaletteOpen || jobsViewOpen;
 
   const dragCursorClass = dragOutInProgress
     ? "layout--drag-out"
@@ -529,6 +530,9 @@ export function Layout({ client, jobsViewOpen, onCloseJobsView, onOpenJobsView }
       )}
       {state.pendingInfo && (
         <InfoModal info={state.pendingInfo} />
+      )}
+      {state.pendingAttributes && (
+        <AttributesModal attributes={state.pendingAttributes} client={client} />
       )}
       {state.pendingMkdir && (
         <MkDirModal mkdir={state.pendingMkdir} client={client} />

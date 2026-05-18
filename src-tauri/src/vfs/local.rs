@@ -314,4 +314,22 @@ impl VfsDriver for LocalFsDriver {
             }
         }
     }
+
+    // ── Permissions ─────────────────────────────────────────────────────────
+
+    fn set_permissions(&self, path: &str, mode: u32) -> Result<(), VfsError> {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
+                .map_err(|e| map_io_err(path, e))
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = mode;
+            Err(VfsError::NotSupported(
+                "set_permissions is only supported on Unix".to_string(),
+            ))
+        }
+    }
 }

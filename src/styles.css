@@ -1544,6 +1544,85 @@ body {
   margin: 1px 0;
 }
 
+/* ─── Attributes modal (chmod) ───────────────────────────────────── */
+
+.attrs-grid {
+  display: grid;
+  grid-template-columns: 80px 48px 48px 48px;
+  gap: 4px 0;
+  margin: 12px 0 8px;
+}
+
+.attrs-grid__header {
+  display: contents;
+}
+
+.attrs-grid__header span,
+.attrs-grid__label {
+  font-size: var(--font-size);
+  color: var(--text-dim);
+  padding: 2px 0;
+}
+
+.attrs-grid__col {
+  text-align: center;
+}
+
+.attrs-grid__row {
+  display: contents;
+}
+
+.attrs-grid__checkbox {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.attrs-grid__checkbox input {
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+  accent-color: var(--accent, #3366ff);
+}
+
+.attrs-octal {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.attrs-octal__label {
+  font-size: var(--font-size);
+  color: var(--text-dim);
+}
+
+.attrs-octal__input {
+  width: 56px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 2px 6px;
+  font-family: var(--font-mono, var(--font));
+  font-size: var(--font-size);
+  text-align: center;
+}
+
+.attrs-octal__input:focus {
+  border-color: var(--accent, #3366ff);
+  outline: none;
+}
+
+.attrs-octal__preview {
+  font-family: var(--font-mono, var(--font));
+  font-size: var(--font-size);
+  color: var(--text);
+}
+
+/* ─────────────────────────────────────────────────────────────────── */
+
 .modal__option {
   display: flex;
   align-items: center;
