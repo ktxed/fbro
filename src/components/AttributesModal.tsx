@@ -22,9 +22,9 @@ function parseMode(modeStr: string): number {
 
 function formatMode(mode: number): string {
   const bits = (i: number) => [
-    mode & (1 << (8 - i * 3 + 2)) ? "r" : "-",
-    mode & (1 << (8 - i * 3 + 1)) ? "w" : "-",
-    mode & (1 << (8 - i * 3)) ? "x" : "-",
+    mode & (1 << (8 - i * 3)) ? "r" : "-",
+    mode & (1 << (7 - i * 3)) ? "w" : "-",
+    mode & (1 << (6 - i * 3)) ? "x" : "-",
   ].join("");
   return `${bits(0)}${bits(1)}${bits(2)}`;
 }
@@ -33,9 +33,9 @@ function modeToOct(mode: number): string {
   return ((mode >> 6) & 7).toString() + ((mode >> 3) & 7).toString() + (mode & 7).toString();
 }
 
-function octToMode(oct: string): number {
-  const val = parseInt(oct, 8);
-  return isNaN(val) ? 0 : val;
+function parseOctMode(oct: string): number | null {
+  if (!/^[0-7]{1,3}$/.test(oct)) return null;
+  return parseInt(oct, 8);
 }
 
 const ROWS = [
@@ -83,8 +83,8 @@ export function AttributesModal({ attributes, client }: AttributesModalProps) {
   const handleOctChange = useCallback(
     (value: string) => {
       setOctInput(value);
-      const m = octToMode(value);
-      if (m > 0 && m <= 0o777) {
+      const m = parseOctMode(value);
+      if (m !== null) {
         setMode(m);
         setError(null);
       }
@@ -93,7 +93,7 @@ export function AttributesModal({ attributes, client }: AttributesModalProps) {
   );
 
   const submit = useCallback(() => {
-    if (submitting || mode === 0) return;
+    if (submitting || parseOctMode(octInput) === null) return;
     setSubmitting(true);
     setError(null);
     client.sendIntent("SetPermissions", undefined, {
@@ -101,7 +101,7 @@ export function AttributesModal({ attributes, client }: AttributesModalProps) {
       paths: attributes.paths,
       mode,
     });
-  }, [submitting, mode, client, attributes.panelId, attributes.paths]);
+  }, [submitting, octInput, mode, client, attributes.panelId, attributes.paths]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -114,6 +114,7 @@ export function AttributesModal({ attributes, client }: AttributesModalProps) {
 
   const singleFile = attributes.names.length === 1;
   const symStr = formatMode(mode);
+  const canSubmit = !submitting && parseOctMode(octInput) !== null;
 
   return (
     <div className="modal-overlay" ref={overlayRef} tabIndex={-1} onClick={close} onKeyDown={handleKeyDown}>
@@ -181,7 +182,7 @@ export function AttributesModal({ attributes, client }: AttributesModalProps) {
         <div className="modal__actions">
           <button
             className="modal__btn modal__btn--primary"
-            disabled={submitting || mode === 0}
+            disabled={!canSubmit}
             onClick={submit}
           >
             {submitting ? "Applying…" : "Apply"}

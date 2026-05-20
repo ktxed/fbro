@@ -1016,6 +1016,8 @@ function reducer(state: AppState, action: AppAction): AppState {
           return { ...state, pendingMkdir: null };
         case "TouchFileOk":
           return { ...state, pendingTouch: null };
+        case "SetPermissionsOk":
+          return { ...state, pendingAttributes: null };
         case "NavigateOk":
           return {
             ...state,

@@ -17,8 +17,8 @@ use crate::vfs::{VfsError, search::SearchResultsDriver};
 use crate::ws::intents::{arg_bool, arg_str, is_search_source};
 use crate::ws::protocol::{now, FileOpFileSchema, JobStartSchema, ServerMessage};
 use crate::ws::runtime::{
-    build_sources_json, navigate_to, rescan_panel, resolve_panel_id, selected_names_for,
-    IntentContext,
+    build_sources_json, navigate_to, quiet_rescan_panel, rescan_panel, resolve_panel_id,
+    selected_names_for, IntentContext,
 };
 
 pub(crate) async fn handle(name: &str, scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
@@ -1417,9 +1417,9 @@ async fn set_permissions(args: &Value, ctx: &mut IntentContext<'_>) {
                 .collect()
         })
         .unwrap_or_default();
-    let mode = args.get("mode").and_then(Value::as_u64).unwrap_or(0) as u32;
+    let raw_mode = args.get("mode").and_then(Value::as_u64);
 
-    if panel_id.is_empty() || paths.is_empty() || mode == 0 {
+    if panel_id.is_empty() || paths.is_empty() || raw_mode.is_none_or(|mode| mode > 0o777) {
         let _ = send_error(
             ctx,
             "SET_PERMISSIONS_FAILED",
@@ -1428,6 +1428,7 @@ async fn set_permissions(args: &Value, ctx: &mut IntentContext<'_>) {
         .await;
         return;
     }
+    let mode = raw_mode.unwrap() as u32;
 
     // Block inside shadow sources (archives).
     {
@@ -1499,12 +1500,18 @@ async fn set_permissions(args: &Value, ctx: &mut IntentContext<'_>) {
     if let Some(error) = last_error {
         let _ = send_error(ctx, "SET_PERMISSIONS_FAILED", error).await;
     } else {
-        rescan_panel(
+        let _ = ctx
+            .tx
+            .send(ServerMessage::SetPermissionsOk {
+                timestamp: now(),
+                panel_id: panel_id.clone(),
+            })
+            .await;
+        quiet_rescan_panel(
             &panel_id,
             ctx.state,
             ctx.tx,
             ctx.scan_handles,
-            None,
             selection_names,
             ctx.dir_size_queue,
         )

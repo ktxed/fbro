@@ -469,6 +469,12 @@ export interface TouchFileOkMessage {
   panelId: string;
 }
 
+export interface SetPermissionsOkMessage {
+  type: "SetPermissionsOk";
+  timestamp: number;
+  panelId: string;
+}
+
 export interface ViewerFileChangedMessage {
   type: "ViewerFileChanged";
   timestamp: number;
@@ -566,6 +572,7 @@ export type BEMessage =
   | RenameOkMessage
   | MkdirOkMessage
   | TouchFileOkMessage
+  | SetPermissionsOkMessage
   | NavigateOkMessage
   | ExternalClipboardReadyMessage
   | ExternalClipboardWrittenMessage
