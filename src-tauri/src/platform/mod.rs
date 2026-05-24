@@ -2,9 +2,12 @@
 pub mod linux;
 #[cfg(target_os = "macos")]
 pub mod macos;
+#[cfg(unix)]
+mod shell_command;
 #[cfg(target_os = "windows")]
 pub mod windows;
 
+use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
@@ -59,6 +62,29 @@ pub enum ExternalClipboardOp {
 pub struct ExternalClipboardPayload {
     pub op: ExternalClipboardOp,
     pub source_paths: Vec<String>,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShellCommandInstallResult {
+    pub path: String,
+    pub command: String,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShellCommandStatus {
+    pub command: String,
+    pub path: Option<String>,
+    pub installed: bool,
+    pub managed: bool,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShellCommandRemoveResult {
+    pub path: String,
+    pub command: String,
 }
 
 /// Abstraction over platform-specific environment queries and services.
@@ -156,6 +182,26 @@ pub trait Platform: Send + Sync {
     /// Writes plain text to the system clipboard.
     fn write_text_clipboard(&self, _text: &str) -> Result<(), String> {
         Err("Writing text to clipboard is not supported on this platform.".to_string())
+    }
+
+    /// Probes whether the terminal command used to launch fbro is available.
+    fn probe_fbro_command(&self) -> Result<ShellCommandStatus, String> {
+        Ok(ShellCommandStatus {
+            command: "fbro".to_string(),
+            path: None,
+            installed: false,
+            managed: false,
+        })
+    }
+
+    /// Installs the terminal command used to launch fbro.
+    fn install_fbro_command(&self, _exe: &Path) -> Result<ShellCommandInstallResult, String> {
+        Err("Installing the fbro command is currently supported on Unix-like systems.".to_string())
+    }
+
+    /// Removes the fbro-managed terminal command.
+    fn remove_fbro_command(&self) -> Result<ShellCommandRemoveResult, String> {
+        Err("Removing the fbro command is currently supported on Unix-like systems.".to_string())
     }
 }
 

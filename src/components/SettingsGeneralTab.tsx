@@ -8,19 +8,45 @@ interface SettingsGeneralTabProps {
   client: WsClient;
 }
 
+interface ShellCommandStatus {
+  command: string;
+  path: string | null;
+  installed: boolean;
+  managed: boolean;
+}
+
 export function SettingsGeneralTab({ general, client }: SettingsGeneralTabProps) {
   const send = (key: string, value: boolean | number) => {
     client.sendIntent("SetGeneralOption", undefined, { key, value });
   };
 
   const [maxImageDraft, setMaxImageDraft] = useState(general.maxImageSizeMb);
+  const [shellCommand, setShellCommand] = useState<ShellCommandStatus | null>(null);
   const [commandStatus, setCommandStatus] = useState<string | null>(null);
-  const [installingCommand, setInstallingCommand] = useState(false);
+  const [commandBusy, setCommandBusy] = useState(false);
+  const [commandProbing, setCommandProbing] = useState(true);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     setMaxImageDraft(general.maxImageSizeMb);
   }, [general.maxImageSizeMb]);
+
+  const probeCommand = async () => {
+    setCommandProbing(true);
+    try {
+      const result = await invoke<ShellCommandStatus>("probe_fbro_command");
+      setShellCommand(result);
+    } catch (error) {
+      setCommandStatus(error instanceof Error ? error.message : String(error));
+      setShellCommand(null);
+    } finally {
+      setCommandProbing(false);
+    }
+  };
+
+  useEffect(() => {
+    void probeCommand();
+  }, []);
 
   const onMaxImageChange = (raw: string) => {
     const n = parseInt(raw, 10);
@@ -32,17 +58,50 @@ export function SettingsGeneralTab({ general, client }: SettingsGeneralTabProps)
   };
 
   const installCommand = async () => {
-    setInstallingCommand(true);
+    setCommandBusy(true);
     setCommandStatus(null);
     try {
       const result = await invoke<{ path: string; command: string }>("install_fbro_command");
       setCommandStatus(`Installed ${result.command} at ${result.path}`);
+      await probeCommand();
     } catch (error) {
       setCommandStatus(error instanceof Error ? error.message : String(error));
     } finally {
-      setInstallingCommand(false);
+      setCommandBusy(false);
     }
   };
+
+  const removeCommand = async () => {
+    setCommandBusy(true);
+    setCommandStatus(null);
+    try {
+      const result = await invoke<{ path: string; command: string }>("remove_fbro_command");
+      setCommandStatus(`Removed ${result.command} from ${result.path}`);
+      await probeCommand();
+    } catch (error) {
+      setCommandStatus(error instanceof Error ? error.message : String(error));
+    } finally {
+      setCommandBusy(false);
+    }
+  };
+
+  const commandHint = shellCommand?.installed
+    ? shellCommand.managed
+      ? `Installed at ${shellCommand.path}`
+      : `Detected at ${shellCommand.path}; removal is only available for the fbro-managed command.`
+    : "Not installed";
+  const commandAction = shellCommand?.installed && shellCommand.managed ? "remove" : "install";
+  const commandButtonLabel = commandBusy
+    ? commandAction === "remove"
+      ? "Removing..."
+      : "Installing..."
+    : commandProbing
+      ? "Checking..."
+      : commandAction === "remove"
+        ? "Remove fbro command"
+        : shellCommand?.installed
+          ? "Install managed fbro command"
+          : "Install fbro command";
 
   return (
     <div className="settings-tab">
@@ -50,14 +109,17 @@ export function SettingsGeneralTab({ general, client }: SettingsGeneralTabProps)
         <h3 className="settings-tab__section-title">Shell command</h3>
         <div className="settings-tab__option">
           <button
-            className="settings-button settings-button--primary"
+            className={`settings-button ${commandAction === "remove" ? "settings-button--danger" : "settings-button--primary"}`}
             type="button"
-            onClick={installCommand}
-            disabled={installingCommand}
+            onClick={commandAction === "remove" ? removeCommand : installCommand}
+            disabled={commandBusy || commandProbing}
           >
-            {installingCommand ? "Installing..." : "Install fbro command"}
+            {commandButtonLabel}
           </button>
           <span>Use <code>fbro .</code> or <code>fbro ~/my_folder</code> from a terminal</span>
+        </div>
+        <div className="settings-tab__hint">
+          {commandProbing ? "Checking fbro command..." : commandHint}
         </div>
         {commandStatus && (
           <div className="settings-tab__hint">

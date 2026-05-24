@@ -25,7 +25,7 @@ mod drag_out_cmd {
 }
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex as StdMutex};
 
 use futures_util::SinkExt;
@@ -156,60 +156,20 @@ fn try_forward_cli_open(request: &CliOpenRequest) -> bool {
     })
 }
 
-fn shell_single_quote(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "'\"'\"'"))
-}
-
-#[derive(serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ShellCommandInstallResult {
-    path: String,
-    command: String,
+#[tauri::command]
+fn probe_fbro_command() -> Result<platform::ShellCommandStatus, String> {
+    platform::create_platform().probe_fbro_command()
 }
 
 #[tauri::command]
-fn install_fbro_command() -> Result<ShellCommandInstallResult, String> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
+fn install_fbro_command() -> Result<platform::ShellCommandInstallResult, String> {
+    let exe = std::env::current_exe().map_err(|e| format!("Cannot locate fbro: {e}"))?;
+    platform::create_platform().install_fbro_command(&exe)
+}
 
-        let home = std::env::var("HOME").map_err(|_| "HOME is not set.".to_string())?;
-        let bin_dir = Path::new(&home).join(".local").join("bin");
-        std::fs::create_dir_all(&bin_dir)
-            .map_err(|e| format!("Cannot create {}: {e}", bin_dir.display()))?;
-
-        let exe = std::env::current_exe().map_err(|e| format!("Cannot locate fbro: {e}"))?;
-        let script_path = bin_dir.join("fbro");
-        let exe_quoted = shell_single_quote(&exe.to_string_lossy());
-        let script = format!(
-            "#!/bin/sh\n\
-             FBRO_BIN={exe_quoted}\n\
-             if [ \"$#\" -gt 0 ]; then\n\
-             \t\"$FBRO_BIN\" --fbro-open \"$1\" >/dev/null 2>&1 &\n\
-             else\n\
-             \t\"$FBRO_BIN\" >/dev/null 2>&1 &\n\
-             fi\n\
-             exit 0\n"
-        );
-        std::fs::write(&script_path, script)
-            .map_err(|e| format!("Cannot write {}: {e}", script_path.display()))?;
-        let mut permissions = std::fs::metadata(&script_path)
-            .map_err(|e| format!("Cannot stat {}: {e}", script_path.display()))?
-            .permissions();
-        permissions.set_mode(0o755);
-        std::fs::set_permissions(&script_path, permissions)
-            .map_err(|e| format!("Cannot chmod {}: {e}", script_path.display()))?;
-
-        Ok(ShellCommandInstallResult {
-            path: script_path.to_string_lossy().to_string(),
-            command: "fbro".to_string(),
-        })
-    }
-
-    #[cfg(not(unix))]
-    {
-        Err("Installing the fbro command is currently supported on Unix-like systems.".to_string())
-    }
+#[tauri::command]
+fn remove_fbro_command() -> Result<platform::ShellCommandRemoveResult, String> {
+    platform::create_platform().remove_fbro_command()
 }
 
 #[derive(serde::Serialize)]
@@ -373,7 +333,9 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             get_path_info,
+            probe_fbro_command,
             install_fbro_command,
+            remove_fbro_command,
             crate::drag_out_cmd::start_drag_out
         ])
         .setup({

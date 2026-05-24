@@ -4,7 +4,8 @@ pub mod volume_watcher;
 
 use super::{
     append_supplemental_apps, ExternalClipboardOp, ExternalClipboardPayload, OpenWithAppOption,
-    OpenWithLaunch, Platform, ResolvedOpenWithApp, VolumeInfo,
+    OpenWithLaunch, Platform, ResolvedOpenWithApp, ShellCommandInstallResult,
+    ShellCommandRemoveResult, ShellCommandStatus, VolumeInfo,
 };
 use gio::prelude::*;
 use libc;
@@ -389,6 +390,18 @@ impl Platform for LinuxPlatform {
         }
 
         "/".to_string()
+    }
+
+    fn probe_fbro_command(&self) -> Result<ShellCommandStatus, String> {
+        super::shell_command::probe_fbro_command()
+    }
+
+    fn install_fbro_command(&self, exe: &Path) -> Result<ShellCommandInstallResult, String> {
+        super::shell_command::install_fbro_command(exe)
+    }
+
+    fn remove_fbro_command(&self) -> Result<ShellCommandRemoveResult, String> {
+        super::shell_command::remove_fbro_command()
     }
 }
 
