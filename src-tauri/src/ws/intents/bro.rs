@@ -9,8 +9,7 @@ use serde_json::Value;
 use tokio::sync::watch;
 
 use crate::bro::{
-    launch_bro, list_bros, BroInputItem, BroLaunchInputKind, BroProtocol, LaunchRecipe,
-    ResolvedBro,
+    launch_bro, list_bros, BroInputItem, BroLaunchInputKind, BroProtocol, LaunchRecipe, ResolvedBro,
 };
 use crate::jobs::fp_bro::run_fp_bro;
 use crate::jobs::{AppJob, FileOpProgress, FpBroJobMeta, JobKind, JobState};
@@ -87,7 +86,10 @@ async fn list_bros_for_request(scope: &Value, args: &Value, ctx: &mut IntentCont
         let state_guard = ctx.state.lock().await;
         let result_panel_id =
             Some(other_panel_id(&state_guard, &panel_id).unwrap_or_else(|| panel_id.clone()));
-        let panel_source_id = state_guard.panels.get(&panel_id).map(|p| p.source_id.clone());
+        let panel_source_id = state_guard
+            .panels
+            .get(&panel_id)
+            .map(|p| p.source_id.clone());
         let result = match state_guard.panels.get(&panel_id) {
             Some(panel) => match state_guard.drivers.get(&panel.source_id) {
                 Some(driver) => {
@@ -118,7 +120,11 @@ async fn list_bros_for_request(scope: &Value, args: &Value, ctx: &mut IntentCont
     let suggested_output_dir = parsed.suggested_output_dir.clone();
     let lookup_inputs = ranking_inputs.clone();
     let bros = match tokio::task::spawn_blocking(move || {
-        list_bros(&lookup_inputs, suggested_output_dir.as_deref(), panel_source_id.as_deref())
+        list_bros(
+            &lookup_inputs,
+            suggested_output_dir.as_deref(),
+            panel_source_id.as_deref(),
+        )
     })
     .await
     {
@@ -228,7 +234,15 @@ async fn launch_selected_bro(args: &Value, ctx: &mut IntentContext<'_>) {
         .find(|bro| bro.option.id == parsed.bro_id)
         .cloned()
     else {
-        eprintln!("[bro] bro id={} not found in request bros={:?}", parsed.bro_id, request.bros.iter().map(|b| &b.option.id).collect::<Vec<_>>());
+        eprintln!(
+            "[bro] bro id={} not found in request bros={:?}",
+            parsed.bro_id,
+            request
+                .bros
+                .iter()
+                .map(|b| &b.option.id)
+                .collect::<Vec<_>>()
+        );
         return;
     };
 
@@ -236,36 +250,52 @@ async fn launch_selected_bro(args: &Value, ctx: &mut IntentContext<'_>) {
     // driver Arc under a brief lock, then build the BroInputItems (path resolution) outside
     // the lock so large selections don't block panel intents.
     type RawEntry = (String, String); // (name, kind)
-    let raw_inputs: Result<(std::sync::Arc<dyn crate::vfs::VfsDriver>, String, Vec<RawEntry>), String> = {
+    let raw_inputs: Result<
+        (
+            std::sync::Arc<dyn crate::vfs::VfsDriver>,
+            String,
+            Vec<RawEntry>,
+        ),
+        String,
+    > = {
         let state_guard = ctx.state.lock().await;
         match state_guard.panels.get(&request.source_panel_id) {
-            Some(panel) => {
-                match state_guard.drivers.get(&panel.source_id) {
-                    Some(driver) => {
-                        let driver = driver.clone();
-                        let panel_path = panel.path.clone();
-                        let raw: Vec<RawEntry> = if let Some(tp) = request.target_path.as_deref() {
-                            panel.entries.iter()
-                                .find(|e| e.name != ".." && driver.resolve_child(&panel_path, &e.name) == tp)
-                                .map(|e| vec![(e.name.clone(), e.kind.clone())])
-                                .unwrap_or_default()
-                        } else if panel.selection.is_empty() {
-                            panel.entries.get(panel.cursor)
-                                .filter(|e| e.name != "..")
-                                .map(|e| vec![(e.name.clone(), e.kind.clone())])
-                                .unwrap_or_default()
-                        } else {
-                            panel.selection.iter()
-                                .filter_map(|&i| panel.entries.get(i))
-                                .filter(|e| e.name != "..")
-                                .map(|e| (e.name.clone(), e.kind.clone()))
-                                .collect()
-                        };
-                        Ok((driver, panel_path, raw))
-                    }
-                    None => Err(format!("Source driver not available for source_id={}", panel.source_id)),
+            Some(panel) => match state_guard.drivers.get(&panel.source_id) {
+                Some(driver) => {
+                    let driver = driver.clone();
+                    let panel_path = panel.path.clone();
+                    let raw: Vec<RawEntry> = if let Some(tp) = request.target_path.as_deref() {
+                        panel
+                            .entries
+                            .iter()
+                            .find(|e| {
+                                e.name != ".." && driver.resolve_child(&panel_path, &e.name) == tp
+                            })
+                            .map(|e| vec![(e.name.clone(), e.kind.clone())])
+                            .unwrap_or_default()
+                    } else if panel.selection.is_empty() {
+                        panel
+                            .entries
+                            .get(panel.cursor)
+                            .filter(|e| e.name != "..")
+                            .map(|e| vec![(e.name.clone(), e.kind.clone())])
+                            .unwrap_or_default()
+                    } else {
+                        panel
+                            .selection
+                            .iter()
+                            .filter_map(|&i| panel.entries.get(i))
+                            .filter(|e| e.name != "..")
+                            .map(|e| (e.name.clone(), e.kind.clone()))
+                            .collect()
+                    };
+                    Ok((driver, panel_path, raw))
                 }
-            }
+                None => Err(format!(
+                    "Source driver not available for source_id={}",
+                    panel.source_id
+                )),
+            },
             None => Err(format!("Panel not found: {}", request.source_panel_id)),
         }
     }; // state lock released here — path resolution happens below without the lock
@@ -332,9 +362,10 @@ async fn launch_selected_bro(args: &Value, ctx: &mut IntentContext<'_>) {
                     let state_guard = ctx.state.lock().await;
                     state_guard.platform.clone()
                 };
-                let result = tokio::task::spawn_blocking(move || platform.write_text_clipboard(&text))
-                    .await
-                    .unwrap_or_else(|_| Err("Clipboard task panicked".to_string()));
+                let result =
+                    tokio::task::spawn_blocking(move || platform.write_text_clipboard(&text))
+                        .await
+                        .unwrap_or_else(|_| Err("Clipboard task panicked".to_string()));
                 if let Err(message) = result {
                     let _ = ctx
                         .tx
@@ -358,15 +389,22 @@ async fn launch_selected_bro(args: &Value, ctx: &mut IntentContext<'_>) {
                     let mut sys = System::new_all();
                     sys.refresh_processes();
                     for input in &inputs {
-                        let pid = input.name.splitn(2, " - ").next()
+                        let pid = input
+                            .name
+                            .splitn(2, " - ")
+                            .next()
                             .and_then(|chain| chain.split(" | ").last())
                             .and_then(|s| s.trim().parse::<u32>().ok());
                         if let Some(pid) = pid {
                             if let Some(proc) = sys.process(Pid::from_u32(pid)) {
                                 #[cfg(unix)]
-                                { let _ = proc.kill_with(sysinfo::Signal::Kill); }
+                                {
+                                    let _ = proc.kill_with(sysinfo::Signal::Kill);
+                                }
                                 #[cfg(windows)]
-                                { let _ = proc.kill(); }
+                                {
+                                    let _ = proc.kill();
+                                }
                             }
                         }
                     }
@@ -394,9 +432,11 @@ async fn launch_selected_bro(args: &Value, ctx: &mut IntentContext<'_>) {
             let launch_result = {
                 let output = parsed.output.clone();
                 let params = parsed.params.clone();
-                tokio::task::spawn_blocking(move || launch_bro(&inputs, &bro, output.as_deref(), &params))
-                    .await
-                    .unwrap_or_else(|e| Err(format!("Launch task panicked: {e}")))
+                tokio::task::spawn_blocking(move || {
+                    launch_bro(&inputs, &bro, output.as_deref(), &params)
+                })
+                .await
+                .unwrap_or_else(|e| Err(format!("Launch task panicked: {e}")))
             };
             match launch_result {
                 Err(message) => {
@@ -427,7 +467,12 @@ async fn launch_selected_bro(args: &Value, ctx: &mut IntentContext<'_>) {
                         .duration_since(UNIX_EPOCH)
                         .map(|d| d.as_secs())
                         .unwrap_or(0);
-                    let entry = ChildProcessEntry { pid, name, label, started_at };
+                    let entry = ChildProcessEntry {
+                        pid,
+                        name,
+                        label,
+                        started_at,
+                    };
 
                     let patch = {
                         let mut sg = ctx.state.lock().await;
@@ -605,11 +650,14 @@ async fn launch_fp_bro(
                 timestamp: now(),
                 job_id,
                 event: "DecisionRequired".to_string(),
+                files: None,
                 progress: None,
                 search_progress: None,
                 decision: Some(crate::ws::protocol::ConflictDecisionSchema {
+                    kind: Some("conflict".to_string()),
                     source: output_path.clone(),
                     destination: output_path,
+                    message: None,
                     options: vec!["overwrite".to_string(), "skip".to_string()],
                     supports_apply_to_all: false,
                 }),
@@ -714,6 +762,7 @@ pub(crate) async fn handle_fp_bro_job_decision(
                     timestamp: now(),
                     job_id: job_id.to_string(),
                     event: "Queued".to_string(),
+                    files: None,
                     progress: None,
                     search_progress: None,
                     decision: None,
@@ -729,6 +778,7 @@ pub(crate) async fn handle_fp_bro_job_decision(
                     timestamp: now(),
                     job_id: job_id.to_string(),
                     event: "Cancelled".to_string(),
+                    files: None,
                     progress: None,
                     search_progress: None,
                     decision: None,
@@ -953,7 +1003,9 @@ fn bro_input_for_entry(
 }
 
 async fn kill_process(args: &Value, ctx: &mut IntentContext<'_>) {
-    let Some(pid) = args.get("pid").and_then(Value::as_u64).map(|v| v as u32) else { return };
+    let Some(pid) = args.get("pid").and_then(Value::as_u64).map(|v| v as u32) else {
+        return;
+    };
     let patch = {
         let mut sg = ctx.state.lock().await;
         sg.child_processes.remove(&pid);
@@ -961,7 +1013,9 @@ async fn kill_process(args: &Value, ctx: &mut IntentContext<'_>) {
     };
     let _ = ctx.tx.send(patch).await;
     #[cfg(unix)]
-    unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM); }
+    unsafe {
+        libc::kill(pid as libc::pid_t, libc::SIGTERM);
+    }
 }
 
 fn build_procs_patch(procs: &std::collections::HashMap<u32, ChildProcessEntry>) -> ServerMessage {

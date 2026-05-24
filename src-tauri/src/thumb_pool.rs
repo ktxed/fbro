@@ -183,7 +183,10 @@ impl ThumbPool {
 
     fn worker_loop(self: Arc<Self>) {
         while let Some(key) = self.dequeue() {
-            let result = self.platform.get_thumbnail(&key.path, key.size).map(|(b, _ct)| b);
+            let result = self
+                .platform
+                .get_thumbnail(&key.path, key.size)
+                .map(|(b, _ct)| b);
             let waiters = {
                 let mut g = self.state.lock().unwrap();
                 g.waiters.remove(&key).unwrap_or_default()

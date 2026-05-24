@@ -2,19 +2,19 @@ use std::path::Path;
 use std::sync::Arc;
 
 use serde_json::Value;
-use tokio::sync::{watch, Mutex, mpsc};
+use tokio::sync::{mpsc, watch, Mutex};
 
 use crate::jobs::file_ops::{generate_dry_run_script, run_file_op};
 use crate::jobs::search::{run_search, MaskMode, SearchDepth, SearchParams, SearchResultStore};
-use crate::ws::protocol::SearchParamsSchema;
 use crate::jobs::{
     AppJob, ConflictPolicy, DecisionResponse, FileOpEntry, FileOpJobMeta, FileOpType, JobKind,
-    JobState, SearchJobMeta,
+    JobState, SearchJobMeta, VerificationPolicy,
 };
 use crate::platform::{ExternalClipboardOp, ExternalClipboardPayload};
 use crate::state::{ShadowSource, Source};
-use crate::vfs::{VfsError, search::SearchResultsDriver};
+use crate::vfs::{search::SearchResultsDriver, VfsError};
 use crate::ws::intents::{arg_bool, arg_str, is_search_source};
+use crate::ws::protocol::SearchParamsSchema;
 use crate::ws::protocol::{now, FileOpFileSchema, JobStartSchema, ServerMessage};
 use crate::ws::runtime::{
     build_sources_json, navigate_to, quiet_rescan_panel, rescan_panel, resolve_panel_id,
@@ -48,6 +48,8 @@ struct StartFileOpArgs {
     dest_path: Option<String>,
     op_type: String,
     conflict_policy: String,
+    verification_policy: String,
+    save_digest_file: bool,
     background: bool,
     start_paused: bool,
     dry_mode: bool,
@@ -72,6 +74,10 @@ impl StartFileOpArgs {
             dest_path: arg_str(args, "destPath").map(String::from),
             op_type: arg_str(args, "opType").unwrap_or("copy").to_string(),
             conflict_policy: arg_str(args, "conflictPolicy").unwrap_or("ask").to_string(),
+            verification_policy: arg_str(args, "verificationPolicy")
+                .unwrap_or("fail")
+                .to_string(),
+            save_digest_file: arg_bool(args, "saveDigestFile", true),
             background: arg_bool(args, "background", false),
             start_paused: arg_bool(args, "startPaused", false),
             dry_mode: arg_bool(args, "dryMode", false),
@@ -362,8 +368,7 @@ fn source_paths_for_external_clipboard(
         if entry.name == ".." {
             return Err((
                 "WRITE_EXTERNAL_PARENT_ENTRY".to_string(),
-                "The parent directory entry cannot be exported to the host clipboard."
-                    .to_string(),
+                "The parent directory entry cannot be exported to the host clipboard.".to_string(),
             ));
         }
 
@@ -402,7 +407,12 @@ async fn write_external_clipboard(args: &Value, ctx: &mut IntentContext<'_>) {
         if let Some(panel) = state_guard.panels.get(&parsed.panel_id) {
             if panel.shadow_source.is_some() {
                 drop(state_guard);
-                let _ = send_error(ctx, "OP_NOT_SUPPORTED", "Cannot copy archive entries to the system clipboard.".to_string()).await;
+                let _ = send_error(
+                    ctx,
+                    "OP_NOT_SUPPORTED",
+                    "Cannot copy archive entries to the system clipboard.".to_string(),
+                )
+                .await;
                 return;
             }
         }
@@ -437,10 +447,8 @@ async fn write_external_clipboard(args: &Value, ctx: &mut IntentContext<'_>) {
     payload.op = requested_op.clone();
     let item_count = payload.source_paths.len();
 
-    let write_result = tokio::task::spawn_blocking(move || {
-        platform.write_external_file_clipboard(&payload)
-    })
-    .await;
+    let write_result =
+        tokio::task::spawn_blocking(move || platform.write_external_file_clipboard(&payload)).await;
 
     match write_result {
         Ok(Ok(())) => {
@@ -480,7 +488,12 @@ async fn paste_external_clipboard(args: &Value, ctx: &mut IntentContext<'_>) {
         if let Some(panel) = state_guard.panels.get(&parsed.panel_id) {
             if panel.shadow_source.is_some() {
                 drop(state_guard);
-                let _ = send_error(ctx, "OP_NOT_SUPPORTED", "Cannot paste into an archive.".to_string()).await;
+                let _ = send_error(
+                    ctx,
+                    "OP_NOT_SUPPORTED",
+                    "Cannot paste into an archive.".to_string(),
+                )
+                .await;
                 return;
             }
         }
@@ -616,6 +629,10 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
         "overwrite" => ConflictPolicy::Overwrite,
         _ => ConflictPolicy::Ask,
     };
+    let verification_policy = match parsed.verification_policy.as_str() {
+        "prompt" => VerificationPolicy::Prompt,
+        _ => VerificationPolicy::Fail,
+    };
 
     // Block unsupported operations on shadow (archive) sources.
     {
@@ -719,16 +736,14 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
                 indices
                     .iter()
                     .filter_map(|&index| {
-                        source_panel.entries.get(index).map(|entry| {
-                            FileOpEntry {
-                                name: entry.name.clone(),
-                                source_path: panel_driver
-                                    .resolve_child(&source_panel.path, &entry.name),
-                                size: entry.size,
-                                kind: entry.kind.clone(),
-                                mtime: entry.mtime.as_ref().and_then(|s| s.parse::<u64>().ok()),
-                                permissions: entry.permissions.clone(),
-                            }
+                        source_panel.entries.get(index).map(|entry| FileOpEntry {
+                            name: entry.name.clone(),
+                            source_path: panel_driver
+                                .resolve_child(&source_panel.path, &entry.name),
+                            size: entry.size,
+                            kind: entry.kind.clone(),
+                            mtime: entry.mtime.as_ref().and_then(|s| s.parse::<u64>().ok()),
+                            permissions: entry.permissions.clone(),
                         })
                     })
                     .collect()
@@ -740,11 +755,12 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
                         let panel_entry = source_panel.entries.iter().find(|e| e.name == file.name);
                         FileOpEntry {
                             name: file.name.clone(),
-                            source_path: panel_driver
-                                .resolve_child(&source_panel.path, &file.name),
+                            source_path: panel_driver.resolve_child(&source_panel.path, &file.name),
                             size: file.size,
                             kind: file.kind.clone(),
-                            mtime: panel_entry.and_then(|e| e.mtime.as_ref()).and_then(|s| s.parse::<u64>().ok()),
+                            mtime: panel_entry
+                                .and_then(|e| e.mtime.as_ref())
+                                .and_then(|s| s.parse::<u64>().ok()),
                             permissions: panel_entry.and_then(|e| e.permissions.clone()),
                         }
                     })
@@ -755,27 +771,26 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
             // resolve_child calls above already return real filesystem paths.
             // We must resolve the real driver from those paths rather than
             // using the search driver (which can't do I/O).
-            let (driver, representative_source) =
-                if is_search_source(&source_panel.source_id) {
-                    let real_paths: Vec<String> =
-                        raw_files.iter().map(|f| f.source_path.clone()).collect();
-                    let (real_source_id, real_driver) =
-                        resolve_common_driver_for_paths(&state_guard, &real_paths)?;
-                    let rep_source = real_paths
-                        .first()
-                        .and_then(|p| Path::new(p).parent())
-                        .map(|p| p.to_string_lossy().to_string())
-                        .unwrap_or_else(|| {
-                            state_guard
-                                .sources
-                                .get(&real_source_id)
-                                .map(|s| s.root_path.clone())
-                                .unwrap_or_default()
-                        });
-                    (real_driver, rep_source)
-                } else {
-                    (panel_driver, source_panel.path.clone())
-                };
+            let (driver, representative_source) = if is_search_source(&source_panel.source_id) {
+                let real_paths: Vec<String> =
+                    raw_files.iter().map(|f| f.source_path.clone()).collect();
+                let (real_source_id, real_driver) =
+                    resolve_common_driver_for_paths(&state_guard, &real_paths)?;
+                let rep_source = real_paths
+                    .first()
+                    .and_then(|p| Path::new(p).parent())
+                    .map(|p| p.to_string_lossy().to_string())
+                    .unwrap_or_else(|| {
+                        state_guard
+                            .sources
+                            .get(&real_source_id)
+                            .map(|s| s.root_path.clone())
+                            .unwrap_or_default()
+                    });
+                (real_driver, rep_source)
+            } else {
+                (panel_driver, source_panel.path.clone())
+            };
 
             (driver, representative_source, raw_files)
         };
@@ -940,6 +955,8 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
     let files_spawn = files.clone();
     let dest_path_spawn = dest_path.clone();
     let conflict_policy_spawn = conflict_policy.clone();
+    let verification_policy_spawn = verification_policy.clone();
+    let save_digest_file_spawn = parsed.save_digest_file;
 
     let handle = tokio::spawn(async move {
         run_file_op(
@@ -955,6 +972,8 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
             src_driver,
             dst_driver,
             preserve_attributes,
+            verification_policy_spawn,
+            save_digest_file_spawn,
         )
         .await;
 
@@ -1009,6 +1028,7 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
                 timestamp: now(),
                 job_id,
                 event: "Paused".to_string(),
+                files: None,
                 progress: None,
                 search_progress: None,
                 decision: None,
@@ -1093,6 +1113,12 @@ async fn cancel_job(args: &Value, ctx: &mut IntentContext<'_>) {
                     job.state = JobState::Cancelled;
                     send_cancelled_event = true;
                 }
+                JobKind::OutgoingTransfer(meta) => {
+                    let _ = &meta.peer_fp;
+                    let _ = job.cancel_tx.send(true);
+                    job.state = JobState::Cancelled;
+                    send_cancelled_event = true;
+                }
                 _ => {
                     let _ = job.cancel_tx.send(true);
                     job.state = JobState::Cancelled;
@@ -1120,6 +1146,7 @@ async fn cancel_job(args: &Value, ctx: &mut IntentContext<'_>) {
                 timestamp: now(),
                 job_id: parsed.job_id,
                 event: "Cancelled".to_string(),
+                files: None,
                 progress: None,
                 search_progress: None,
                 decision: None,
@@ -1151,6 +1178,7 @@ async fn pause_job(args: &Value, ctx: &mut IntentContext<'_>) {
             timestamp: now(),
             job_id: parsed.job_id,
             event: "Paused".to_string(),
+            files: None,
             progress: None,
             search_progress: None,
             decision: None,
@@ -1181,6 +1209,7 @@ async fn resume_job(args: &Value, ctx: &mut IntentContext<'_>) {
             timestamp: now(),
             job_id: parsed.job_id,
             event: "Resumed".to_string(),
+            files: None,
             progress: None,
             search_progress: None,
             decision: None,
@@ -1200,7 +1229,12 @@ async fn rename_file(args: &Value, ctx: &mut IntentContext<'_>) {
         if let Some(panel) = state_guard.panels.get(&parsed.source_panel) {
             if panel.shadow_source.is_some() {
                 drop(state_guard);
-                let _ = send_error(ctx, "OP_NOT_SUPPORTED", "Cannot rename inside an archive.".to_string()).await;
+                let _ = send_error(
+                    ctx,
+                    "OP_NOT_SUPPORTED",
+                    "Cannot rename inside an archive.".to_string(),
+                )
+                .await;
                 return;
             }
         }
@@ -1291,7 +1325,12 @@ async fn make_dir(args: &Value, ctx: &mut IntentContext<'_>) {
         if let Some(panel) = state_guard.panels.get(&parsed.source_panel) {
             if panel.shadow_source.is_some() {
                 drop(state_guard);
-                let _ = send_error(ctx, "OP_NOT_SUPPORTED", "Cannot create directories inside an archive.".to_string()).await;
+                let _ = send_error(
+                    ctx,
+                    "OP_NOT_SUPPORTED",
+                    "Cannot create directories inside an archive.".to_string(),
+                )
+                .await;
                 return;
             }
         }
@@ -1350,7 +1389,12 @@ async fn touch_file(args: &Value, ctx: &mut IntentContext<'_>) {
         if let Some(panel) = state_guard.panels.get(&parsed.source_panel) {
             if panel.shadow_source.is_some() {
                 drop(state_guard);
-                let _ = send_error(ctx, "OP_NOT_SUPPORTED", "Cannot create files inside an archive.".to_string()).await;
+                let _ = send_error(
+                    ctx,
+                    "OP_NOT_SUPPORTED",
+                    "Cannot create files inside an archive.".to_string(),
+                )
+                .await;
                 return;
             }
         }
@@ -1370,8 +1414,7 @@ async fn touch_file(args: &Value, ctx: &mut IntentContext<'_>) {
 
     if let Some(driver) = driver {
         let full_path_clone = full_path.clone();
-        let result =
-            tokio::task::spawn_blocking(move || driver.open_write(&full_path_clone)).await;
+        let result = tokio::task::spawn_blocking(move || driver.open_write(&full_path_clone)).await;
         match result {
             Ok(Ok(_writer)) => {
                 // writer dropped here — file created as zero bytes
@@ -1611,13 +1654,17 @@ async fn start_search(args: &Value, ctx: &mut IntentContext<'_>) {
             shadow: true,
             icon_name: None,
             sort_priority: 100,
+            read_only: false,
+            peer_id: None,
         };
         state.sources.insert(source_id.clone(), source);
 
         let driver: Arc<dyn crate::vfs::VfsDriver> =
             Arc::new(SearchResultsDriver::new(Arc::clone(&store)));
         state.drivers.insert(source_id.clone(), driver);
-        state.search_stores.insert(source_id.clone(), Arc::clone(&store));
+        state
+            .search_stores
+            .insert(source_id.clone(), Arc::clone(&store));
 
         let job = AppJob {
             job_id: job_id.clone(),

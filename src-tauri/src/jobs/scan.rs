@@ -42,8 +42,10 @@ pub async fn run_scan(
 ) {
     let path_clone = path.clone();
     let sort_clone = sort.clone();
-    let result =
-        tokio::task::spawn_blocking(move || driver.list(&path_clone, &sort_clone, filter.as_ref(), show_hidden)).await;
+    let result = tokio::task::spawn_blocking(move || {
+        driver.list(&path_clone, &sort_clone, filter.as_ref(), show_hidden)
+    })
+    .await;
 
     let entries = match result {
         Ok(Ok(e)) => e,
@@ -103,7 +105,11 @@ pub async fn run_scan(
         let desc = sort.order == "desc";
         schema_entries[..dir_end].sort_by(|a, b| {
             let ord = a.size.unwrap_or(u64::MAX).cmp(&b.size.unwrap_or(u64::MAX));
-            if desc { ord.reverse() } else { ord }
+            if desc {
+                ord.reverse()
+            } else {
+                ord
+            }
         });
     }
 
@@ -157,9 +163,8 @@ pub async fn run_scan(
                 } else {
                     cursor_centered_start
                 };
-                let window_json = serde_json::json!(
-                    &schema_entries[window_start..window_start + window_count]
-                );
+                let window_json =
+                    serde_json::json!(&schema_entries[window_start..window_start + window_count]);
                 panel.entries = schema_entries;
                 panel.cursor = cursor;
                 panel.selection = selection.clone();

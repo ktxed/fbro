@@ -34,7 +34,9 @@ async fn confirm_quit(ctx: &mut IntentContext<'_>) {
 }
 
 async fn set_font_size(args: &Value, ctx: &mut IntentContext<'_>) {
-    let Some(value) = args.get("value").and_then(Value::as_u64) else { return };
+    let Some(value) = args.get("value").and_then(Value::as_u64) else {
+        return;
+    };
     let font_size = value.clamp(8, 24) as u8;
     let gui_senders = {
         let mut state_guard = ctx.state.lock().await;

@@ -45,9 +45,8 @@ fn pe_file_version(path: &str) -> Option<String> {
         return None;
     }
     let mut buf = vec![0u8; size as usize];
-    let ok = unsafe {
-        GetFileVersionInfoW(wide.as_ptr(), 0, size, buf.as_mut_ptr() as *mut c_void)
-    };
+    let ok =
+        unsafe { GetFileVersionInfoW(wide.as_ptr(), 0, size, buf.as_mut_ptr() as *mut c_void) };
     if ok == 0 {
         return None;
     }
@@ -89,7 +88,9 @@ impl BroProvider for WindowsMediaProvider {
                     "mpv",
                     program,
                     version,
-                    vec![LaunchArg::TargetPlaylistFile { flag: "--playlist=".to_string() }],
+                    vec![LaunchArg::TargetPlaylistFile {
+                        flag: "--playlist=".to_string(),
+                    }],
                 ));
             }
         }
@@ -98,14 +99,15 @@ impl BroProvider for WindowsMediaProvider {
             if seen.insert(program.clone()) {
                 // VLC is a GUI-subsystem app: running vlc --version opens a window.
                 // Read the version from the PE VERSIONINFO resource instead.
-                let version = pe_file_version(&program)
-                    .unwrap_or_else(|| "installed".to_string());
+                let version = pe_file_version(&program).unwrap_or_else(|| "installed".to_string());
                 bros.push(media_bro(
                     &format!("native:vlc:{program}"),
                     "VLC",
                     program,
                     version,
-                    vec![LaunchArg::TargetPlaylistFile { flag: "".to_string() }],
+                    vec![LaunchArg::TargetPlaylistFile {
+                        flag: "".to_string(),
+                    }],
                 ));
             }
         }
@@ -114,7 +116,13 @@ impl BroProvider for WindowsMediaProvider {
     }
 }
 
-fn media_bro(id: &str, name: &str, program: String, version: String, args: Vec<LaunchArg>) -> ResolvedBro {
+fn media_bro(
+    id: &str,
+    name: &str,
+    program: String,
+    version: String,
+    args: Vec<LaunchArg>,
+) -> ResolvedBro {
     ResolvedBro {
         option: BroOption {
             id: id.to_string(),
@@ -125,7 +133,10 @@ fn media_bro(id: &str, name: &str, program: String, version: String, args: Vec<L
             protocol: BroProtocol::Fnf,
             output: None,
             params: vec![],
-            pre: BroPre { score: 0, reason: String::new() },
+            pre: BroPre {
+                score: 0,
+                reason: String::new(),
+            },
         },
         launch: LaunchRecipe::Command {
             program,
@@ -164,7 +175,12 @@ fn mpv_install_candidates() -> Vec<PathBuf> {
         }
     }
     if let Some(local) = env::var_os("LOCALAPPDATA") {
-        c.push(PathBuf::from(local).join("Programs").join("mpv").join("mpv.exe"));
+        c.push(
+            PathBuf::from(local)
+                .join("Programs")
+                .join("mpv")
+                .join("mpv.exe"),
+        );
     }
     // Scoop
     if let Some(home) = env::var_os("USERPROFILE") {
@@ -186,7 +202,12 @@ fn vlc_install_candidates() -> Vec<PathBuf> {
 
     for env_var in &["ProgramFiles", "ProgramFiles(x86)"] {
         if let Some(pf) = env::var_os(env_var) {
-            c.push(PathBuf::from(pf).join("VideoLAN").join("VLC").join("vlc.exe"));
+            c.push(
+                PathBuf::from(pf)
+                    .join("VideoLAN")
+                    .join("VLC")
+                    .join("vlc.exe"),
+            );
         }
     }
     if let Some(local) = env::var_os("LOCALAPPDATA") {

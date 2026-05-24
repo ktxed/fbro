@@ -133,11 +133,7 @@ fn file_contains_query(path: &str, query_lower: &str) -> bool {
         let total = prev_tail.len() + n;
         if total >= carry {
             let tail_start = total - carry;
-            let combined: Vec<u8> = prev_tail
-                .iter()
-                .chain(buf[..n].iter())
-                .cloned()
-                .collect();
+            let combined: Vec<u8> = prev_tail.iter().chain(buf[..n].iter()).cloned().collect();
             prev_tail = combined[tail_start..].to_vec();
         } else {
             prev_tail.extend_from_slice(&buf[..n]);
@@ -245,22 +241,18 @@ pub async fn run_search(
                 }
 
                 // Try to receive a work item with a short timeout
-                let item = match tokio::time::timeout(
-                    Duration::from_millis(50),
-                    work_rx.recv(),
-                )
-                .await
-                {
-                    Ok(Ok(item)) => item,
-                    Ok(Err(_)) => break, // channel closed
-                    Err(_) => {
-                        // Timeout: if no more work is pending, we're done
-                        if pending.load(Ordering::SeqCst) == 0 {
-                            break;
+                let item =
+                    match tokio::time::timeout(Duration::from_millis(50), work_rx.recv()).await {
+                        Ok(Ok(item)) => item,
+                        Ok(Err(_)) => break, // channel closed
+                        Err(_) => {
+                            // Timeout: if no more work is pending, we're done
+                            if pending.load(Ordering::SeqCst) == 0 {
+                                break;
+                            }
+                            continue;
                         }
-                        continue;
-                    }
-                };
+                    };
 
                 if *cancel_rx.borrow() {
                     // Put pending count back — we're abandoning the item
@@ -432,6 +424,7 @@ pub async fn run_search(
             timestamp: now(),
             job_id,
             event: event.to_string(),
+            files: None,
             progress: None,
             search_progress: None,
             decision: None,
@@ -542,6 +535,7 @@ async fn flush_batch(
             timestamp: now(),
             job_id: job_id.to_string(),
             event: "Progress".to_string(),
+            files: None,
             progress: None,
             search_progress: Some(SearchProgressSchema {
                 scanned,

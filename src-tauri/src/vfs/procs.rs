@@ -279,12 +279,7 @@ impl VfsDriver for ProcsDriver {
 }
 
 impl ProcsDriver {
-    fn list_flat(
-        &self,
-        sys: &System,
-        num_cpus: f32,
-        filter_lower: Option<&str>,
-    ) -> Vec<VfsEntry> {
+    fn list_flat(&self, sys: &System, num_cpus: f32, filter_lower: Option<&str>) -> Vec<VfsEntry> {
         sys.processes()
             .values()
             .filter_map(|proc| {
@@ -347,7 +342,8 @@ impl ProcsDriver {
         let target_parent: Option<Pid> = if path.is_empty() {
             None
         } else {
-            path.split('/').last()
+            path.split('/')
+                .last()
                 .and_then(|s| s.trim().splitn(2, " - ").next()?.trim().parse::<u32>().ok())
                 .map(Pid::from_u32)
         };
@@ -359,7 +355,8 @@ impl ProcsDriver {
             .filter_map(|p| p.parent().filter(|pp| all_pids.contains(pp)))
             .collect();
 
-        let result: Vec<VfsEntry> = sys.processes()
+        let result: Vec<VfsEntry> = sys
+            .processes()
             .values()
             .filter_map(|proc| {
                 // Normalise the process's effective parent
@@ -383,9 +380,17 @@ impl ProcsDriver {
                 }
 
                 let is_parent = parent_pids.contains(&pid);
-                let kind = if is_parent { VfsKind::Directory } else { VfsKind::File };
+                let kind = if is_parent {
+                    VfsKind::Directory
+                } else {
+                    VfsKind::File
+                };
                 let icon_name = if is_parent { "folder" } else { "system-run" };
-                let cc = if is_parent { Some("cc-dir".to_string()) } else { None };
+                let cc = if is_parent {
+                    Some("cc-dir".to_string())
+                } else {
+                    None
+                };
                 let size = (proc.cpu_usage() / num_cpus * 10.0).clamp(0.0, 1000.0) as u64;
                 let mtime = proc.start_time().to_string();
                 let permissions = proc

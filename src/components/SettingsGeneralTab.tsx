@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import type { GeneralSettings } from "../ws/types";
 import type { WsClient } from "../ws/client";
 
@@ -13,6 +14,8 @@ export function SettingsGeneralTab({ general, client }: SettingsGeneralTabProps)
   };
 
   const [maxImageDraft, setMaxImageDraft] = useState(general.maxImageSizeMb);
+  const [commandStatus, setCommandStatus] = useState<string | null>(null);
+  const [installingCommand, setInstallingCommand] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -28,8 +31,40 @@ export function SettingsGeneralTab({ general, client }: SettingsGeneralTabProps)
     debounceRef.current = setTimeout(() => send("maxImageSizeMb", clamped), 250);
   };
 
+  const installCommand = async () => {
+    setInstallingCommand(true);
+    setCommandStatus(null);
+    try {
+      const result = await invoke<{ path: string; command: string }>("install_fbro_command");
+      setCommandStatus(`Installed ${result.command} at ${result.path}`);
+    } catch (error) {
+      setCommandStatus(error instanceof Error ? error.message : String(error));
+    } finally {
+      setInstallingCommand(false);
+    }
+  };
+
   return (
     <div className="settings-tab">
+      <div className="settings-tab__section">
+        <h3 className="settings-tab__section-title">Shell command</h3>
+        <div className="settings-tab__option">
+          <button
+            className="settings-button settings-button--primary"
+            type="button"
+            onClick={installCommand}
+            disabled={installingCommand}
+          >
+            {installingCommand ? "Installing..." : "Install fbro command"}
+          </button>
+          <span>Use <code>fbro .</code> or <code>fbro ~/my_folder</code> from a terminal</span>
+        </div>
+        {commandStatus && (
+          <div className="settings-tab__hint">
+            {commandStatus}
+          </div>
+        )}
+      </div>
       <div className="settings-tab__section">
         <h3 className="settings-tab__section-title">Files</h3>
         <label className="settings-tab__option">

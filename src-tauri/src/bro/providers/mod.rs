@@ -6,11 +6,11 @@ pub mod kill_proc;
 pub mod linux_media;
 #[cfg(target_os = "macos")]
 pub mod macos_media;
-#[cfg(target_os = "windows")]
-pub mod windows_media;
 pub mod seven_zip;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub mod tar;
+#[cfg(target_os = "windows")]
+pub mod windows_media;
 pub mod zip;
 
 pub struct BroDiscoveryContext<'a> {

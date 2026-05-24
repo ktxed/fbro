@@ -1,4 +1,5 @@
 import type { Dispatch } from "react";
+import { invoke } from "@tauri-apps/api/core";
 
 import { isMac } from "../utils/platform";
 import type { AppAction, AppState } from "../store";
@@ -34,6 +35,7 @@ export const GLOBAL_SHORTCUT_COMMAND_IDS = [
   "app.open_jobs",
   "app.search",
   "app.settings",
+  "app.install_fbro_command",
   "panel.viewer.embed",
   "panel.navigate_source_root",
   "file.info",
@@ -438,12 +440,19 @@ function toggleSelectedDirectorySizes(client: WsClient, panel: PanelState) {
   return true;
 }
 
-function openFocusedEntry(client: WsClient, panel: PanelState) {
+function openFocusedEntry(client: WsClient, panel: PanelState, sources: Record<string, Source>) {
   const entry = currentEntry(panel);
   if (entry && entry.kind !== "directory") {
     // Archive files are navigable — treat Enter the same as navigating into a directory.
     const lname = entry.name.toLowerCase();
-    if (entry.kind === "file" && (lname.endsWith(".zip") || lname.endsWith(".7z")) && !panel.shadowSource) {
+    if (sources[panel.sourceId]?.kind === "remote") {
+      client.sendIntent("ViewFile", undefined, {
+        panelId: panel.panelId,
+        path: panel.path,
+        sourceId: panel.sourceId,
+        filename: entry.name,
+      });
+    } else if (entry.kind === "file" && (lname.endsWith(".zip") || lname.endsWith(".7z")) && !panel.shadowSource) {
       client.sendIntent("OpenEntry", "focused-panel");
     } else {
       client.sendIntent("OpenFile", "focused-panel");
@@ -541,6 +550,21 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
       return !!context.onOpenJobsView;
     case "app.settings":
       dispatch({ type: "OPEN_SETTINGS", tab: "general" });
+      return true;
+    case "app.install_fbro_command":
+      void invoke<{ path: string; command: string }>("install_fbro_command")
+        .then((result) => {
+          dispatch({
+            type: "SHOW_TRANSIENT_HINT",
+            message: `Installed ${result.command} at ${result.path}`,
+          });
+        })
+        .catch((error) => {
+          dispatch({
+            type: "SHOW_TRANSIENT_HINT",
+            message: error instanceof Error ? error.message : String(error),
+          });
+        });
       return true;
     case "panel.viewer.embed":
       dispatch({ type: "TOGGLE_EMBEDDED_VIEWER" });
@@ -726,7 +750,7 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
       return true;
     }
     case "panel.open":
-      return focused ? openFocusedEntry(client, focused.panel) : false;
+      return focused ? openFocusedEntry(client, focused.panel, state.sources) : false;
     case "panel.open_entry":
       client.sendIntent("OpenEntry", "focused-panel");
       return true;

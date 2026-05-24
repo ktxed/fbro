@@ -11,6 +11,10 @@ function formatBytes(n: number): string {
   return `${(n / (1024 * 1024 * 1024)).toFixed(1)} GiB`;
 }
 
+function jobShortId(jobId: string) {
+  return jobId.replace(/^job-/, "#");
+}
+
 function ProgressBar({ p }: { p: FileOpProgress }) {
   const totalPct = p.totalBytesTotal > 0
     ? Math.round((p.totalBytesCopied / p.totalBytesTotal) * 100)
@@ -19,7 +23,7 @@ function ProgressBar({ p }: { p: FileOpProgress }) {
         ? Math.round((p.completedFiles / p.totalFiles) * 100)
         : 0
     );
-  const currentLabel = p.currentFile?.split("/").pop() || p.statusText || "⏳";
+  const currentLabel = p.statusText || p.currentFile?.split("/").pop() || "Waiting";
 
   return (
     <div className="jobs-modal__progress">
@@ -33,7 +37,7 @@ function ProgressBar({ p }: { p: FileOpProgress }) {
       <div className="jobs-modal__bar">
         <div className="jobs-modal__bar-fill" style={{ width: `${totalPct}%` }} />
       </div>
-      <div className="jobs-modal__current-file" title={p.currentFile ?? p.statusText}>
+      <div className="jobs-modal__current-file" title={p.statusText ?? p.currentFile}>
         {currentLabel}
       </div>
     </div>
@@ -42,7 +46,9 @@ function ProgressBar({ p }: { p: FileOpProgress }) {
 
 function JobRow({ job, client }: { job: Job; client: WsClient }) {
   const isActive = job.state === "Queued" || job.state === "Running" || job.state === "AwaitingDecision";
-  const typeLabel = job.type.charAt(0).toUpperCase() + job.type.slice(1);
+  const typeLabel = job.kind === "outgoing-transfer"
+    ? `Outgoing ${jobShortId(job.jobId)}`
+    : job.type.charAt(0).toUpperCase() + job.type.slice(1);
 
   const stateLabel: Record<string, string> = {
     Queued: "Queued",
@@ -92,7 +98,16 @@ function JobRow({ job, client }: { job: Job; client: WsClient }) {
       </div>
 
       <div className="jobs-modal__paths">
-        {job.kind === "fp-bro" ? (
+        {job.kind === "outgoing-transfer" ? (
+          <>
+            <span className="jobs-modal__path" title={job.sourcePath}>
+              Local shared files: {job.sourcePath}
+            </span>
+            <span className="jobs-modal__path">
+              External destination is on the remote fbro.
+            </span>
+          </>
+        ) : job.kind === "fp-bro" ? (
           <>
             <span className="jobs-modal__path" title={job.sourcePath}>
               Inputs: {job.sourcePath}
@@ -232,6 +247,7 @@ export function JobsModal({ onClose, client }: { onClose: () => void; client: Ws
   const byNewest = (a: Job, b: Job) => b.startedAt - a.startedAt;
   const jobs = Object.values(state.jobs).sort(byNewest);
   const fileJobs = jobs.filter((job) => job.kind === "file-op");
+  const outgoingJobs = jobs.filter((job) => job.kind === "outgoing-transfer");
   const broJobs = jobs.filter((job) => job.kind === "fp-bro");
   const activeFileJobs = fileJobs.filter(
     (job) => job.state === "Queued" || job.state === "Running" || job.state === "AwaitingDecision"
@@ -289,7 +305,7 @@ export function JobsModal({ onClose, client }: { onClose: () => void; client: Ws
         <div className="modal__body jobs-modal__body">
           {activeTab === "jobs" && (
             <>
-              {fileJobs.length === 0 && broJobs.length === 0 && dirSizeTasks.length === 0 && (
+              {fileJobs.length === 0 && outgoingJobs.length === 0 && broJobs.length === 0 && dirSizeTasks.length === 0 && (
                 <div className="jobs-modal__empty">No jobs.</div>
               )}
 
@@ -304,6 +320,13 @@ export function JobsModal({ onClose, client }: { onClose: () => void; client: Ws
                 <section>
                   <div className="jobs-modal__section-title">Bro Jobs</div>
                   {broJobs.map(j => <JobRow key={j.jobId} job={j} client={client} />)}
+                </section>
+              )}
+
+              {outgoingJobs.length > 0 && (
+                <section>
+                  <div className="jobs-modal__section-title">Outgoing Transfers</div>
+                  {outgoingJobs.map(j => <JobRow key={j.jobId} job={j} client={client} />)}
                 </section>
               )}
 

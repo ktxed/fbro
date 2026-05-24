@@ -44,9 +44,7 @@ pub enum TabSession {
     /// Terminal tabs aren't restored as a live PTY — on restore we open a
     /// plain listing at the recorded cwd. The user can re-promote a terminal
     /// later if desired.
-    Terminal {
-        cwd: String,
-    },
+    Terminal { cwd: String },
 }
 
 #[derive(Serialize, Deserialize, Clone)]

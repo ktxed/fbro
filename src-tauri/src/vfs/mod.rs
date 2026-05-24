@@ -6,6 +6,7 @@ pub mod local;
 pub mod procs;
 pub mod search;
 pub mod seven_zip;
+pub mod sftp;
 #[cfg(unix)]
 pub mod spy;
 pub mod zip;
@@ -14,6 +15,13 @@ use std::io::{Read, Write};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::ws::protocol::{FilterSpec, SortSpec};
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct VfsTransferDigest {
+    pub algorithm: String,
+    pub size: u64,
+    pub hash: String,
+}
 
 // ─── VFS trait ──────────────────────────────────────────────────────────────
 
@@ -40,6 +48,13 @@ pub trait VfsDriver: Send + Sync {
 
     /// Downcast helper for runtime type checking (e.g. detecting ZipFsDriver).
     fn as_any(&self) -> &dyn std::any::Any;
+
+    /// Optional hook for drivers that need to scope backend resources to a
+    /// file-operation job. Most VFS drivers do not need this.
+    fn begin_file_op(&self, _job_id: &str) {}
+
+    /// Complements `begin_file_op`.
+    fn end_file_op(&self, _job_id: &str) {}
 
     // ── Listing & navigation ────────────────────────────────────────────────
 
@@ -72,6 +87,16 @@ pub trait VfsDriver: Send + Sync {
     /// Read up to `size` bytes from `path` starting at `offset`.
     /// Returns fewer bytes than requested only at EOF.
     fn read_chunk(&self, path: &str, offset: u64, size: usize) -> Result<Vec<u8>, VfsError>;
+
+    /// Return a transfer-scoped digest after a file-operation read. Drivers
+    /// that do not participate in fbro remote-integrity checks return `None`.
+    fn transfer_digest(
+        &self,
+        _job_id: &str,
+        _path: &str,
+    ) -> Result<Option<VfsTransferDigest>, VfsError> {
+        Ok(None)
+    }
 
     /// Try an O(1) filesystem-level rename/move.
     /// Returns `Ok(true)` if the rename succeeded (e.g. same-filesystem move).
@@ -199,9 +224,10 @@ pub fn color_class_for_entry(name: &str, kind: &VfsKind) -> Option<String> {
     match ext.as_str() {
         // Archives
         "zip" | "tar" | "gz" | "bz2" | "xz" | "zst" | "7z" | "rar" | "deb" | "rpm" | "tgz"
-        | "tbz2" | "txz" | "lz" | "lzma" | "cab" | "iso" | "dmg"
-        | "apk" | "jar" | "war" | "ear" | "docx" | "xlsx" | "pptx"
-        | "odt" | "ods" | "odp" | "epub" | "xpi" | "crx" => Some("cc-archive".to_string()),
+        | "tbz2" | "txz" | "lz" | "lzma" | "cab" | "iso" | "dmg" | "apk" | "jar" | "war"
+        | "ear" | "docx" | "xlsx" | "pptx" | "odt" | "ods" | "odp" | "epub" | "xpi" | "crx" => {
+            Some("cc-archive".to_string())
+        }
         // Executables / scripts
         "sh" | "bash" | "zsh" | "fish" | "exe" | "bin" | "appimage" | "cmd" | "bat" | "ps1" => {
             Some("cc-exec".to_string())

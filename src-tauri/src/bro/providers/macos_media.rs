@@ -24,7 +24,9 @@ impl BroProvider for MacOSMediaProvider {
                 program,
                 Some("mpv".to_string()),
                 version,
-                vec![LaunchArg::TargetPlaylistFile { flag: "--playlist=".to_string() }],
+                vec![LaunchArg::TargetPlaylistFile {
+                    flag: "--playlist=".to_string(),
+                }],
             ));
         }
 
@@ -45,7 +47,9 @@ impl BroProvider for MacOSMediaProvider {
                 program,
                 Some(bundle_path),
                 version,
-                vec![LaunchArg::TargetPlaylistFile { flag: "--playlist=".to_string() }],
+                vec![LaunchArg::TargetPlaylistFile {
+                    flag: "--playlist=".to_string(),
+                }],
             ));
         }
 
@@ -68,7 +72,9 @@ impl BroProvider for MacOSMediaProvider {
                 program,
                 Some(bundle_path),
                 version,
-                vec![LaunchArg::TargetPlaylistFile { flag: "".to_string() }],
+                vec![LaunchArg::TargetPlaylistFile {
+                    flag: "".to_string(),
+                }],
             ));
         }
 

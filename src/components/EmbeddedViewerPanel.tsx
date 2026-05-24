@@ -201,8 +201,10 @@ export function EmbeddedViewerPanel({ sourcePanelId, state, onClose }: Props) {
         return;
       }
 
-      // Skip files that are too large to preview.
-      if (fileSize !== null && fileSize > imageLimitRef.current) {
+      // Direct rendering is local-only. For remote images we still need the
+      // whole image in memory, so keep the image cap; remote non-images can
+      // still show a chunked text/hex preview.
+      if (isImageExt(entry.name) && fileSize !== null && fileSize > imageLimitRef.current) {
         setViewMode({ kind: "too-large", file: info });
         return;
       }

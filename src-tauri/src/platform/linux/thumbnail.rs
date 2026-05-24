@@ -54,7 +54,9 @@ fn classify(path: &Path) -> Kind {
 
 /// Read L2 disk cache stats: (item_count, total_bytes).
 pub fn cache_stats() -> (usize, u64) {
-    let Some(dir) = cache_dir() else { return (0, 0) };
+    let Some(dir) = cache_dir() else {
+        return (0, 0);
+    };
     let entries = match fs::read_dir(&dir) {
         Ok(it) => it,
         Err(_) => return (0, 0),

@@ -45,7 +45,11 @@ pub(super) fn run_blocking(
         }
 
         match item {
-            ArchiveItem::Directory { archive_name, mtime, .. } => {
+            ArchiveItem::Directory {
+                archive_name,
+                mtime,
+                ..
+            } => {
                 let mut opts = SimpleFileOptions::default();
                 if let Some(secs) = mtime {
                     if let Some(dt) = epoch_to_zip_datetime(*secs) {
@@ -130,7 +134,16 @@ fn epoch_to_zip_datetime(secs: u64) -> Option<zip::DateTime> {
     let month_days = [
         31u8,
         if is_leap(year) { 29 } else { 28 },
-        31, 30, 31, 30, 31, 31, 30, 31, 30, 31,
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
     ];
     let mut month = 1u8;
     for &d in &month_days {

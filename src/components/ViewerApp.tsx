@@ -6,7 +6,7 @@ import { ImageViewer, IMAGE_LIMIT } from "../viewers/ImageViewer";
 import { detectRenderer, isImageExt, isMdExt, isVideoExt } from "../viewers/media";
 import { marked } from "marked";
 import { DirectFileViewer, canUseDirect } from "../viewers/DirectFileViewer";
-import { isArchiveSourceId } from "../utils/sourceId";
+import { isArchiveSourceId, isRemoteSourceId } from "../utils/sourceId";
 
 // Mermaid v11 lazily registers diagram modules on the first render() call —
 // initialize() alone is not enough, and the first real render can produce empty
@@ -161,6 +161,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
   const [curPath, setCurPath]         = useState(initPath);
   const [curSourceId, setCurSourceId] = useState(initSourceId);
   const [curFilename, setCurFilename] = useState(initFilename);
+  const [curIsLocal, setCurIsLocal]   = useState(isLocal);
 
   const [mode, setMode]           = useState<ViewMode | null>(null);
   const [fileSize, setFileSize]   = useState<number | null>(null);
@@ -202,6 +203,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
   const curPathRef      = useRef(initPath);
   const curSourceIdRef  = useRef(initSourceId);
   const filenameRef   = useRef(initFilename);
+  const curIsLocalRef = useRef(isLocal);
   const videoRef      = useRef<HTMLVideoElement | null>(null);
 
   // 1-based file line number of the first raw line in the current buffer.
@@ -230,6 +232,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
   filenameRef.current    = curFilename;
   curPathRef.current     = curPath;
   curSourceIdRef.current = curSourceId;
+  curIsLocalRef.current  = curIsLocal;
   findOpenRef.current    = findOpen;
   const effectiveMode: ViewMode = useDirect ? "image" : (mode ?? "text");
   const isImageMode = effectiveMode === "image";
@@ -448,6 +451,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
         setCurPath(m.path);
         setCurSourceId(m.sourceId);
         setCurFilename(m.filename);
+        setCurIsLocal(m.isLocal ?? false);
         setUseDirect(direct);
         setCanDirect(direct);
         setMode(null);
@@ -637,9 +641,9 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
         return;
       }
 
-      // F4 / E — open in preferred editor (guarded: must not be in find input or archive)
+      // F4 / E — open in preferred editor only for real local files.
       if (e.key === "F4" || (e.key === "e" && !ctrl && !e.shiftKey && !e.altKey)) {
-        if (!isArchiveSourceId(curSourceIdRef.current)) {
+        if (curIsLocalRef.current && !isArchiveSourceId(curSourceIdRef.current) && !isRemoteSourceId(curSourceIdRef.current)) {
           // curPathRef.current is the full file path (e.g. /home/user/docs/file.txt).
           // edit_file expects path=directory + filename, so strip the filename.
           const fullFilePath = curPathRef.current;
@@ -1173,7 +1177,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
         {loading && <span style={{ color: "var(--accent)" }}>loading…</span>}
         <span className="viewer__status-nav">
           {(() => {
-            const canEdit = !isArchiveSourceId(curSourceId);
+            const canEdit = curIsLocal && !isArchiveSourceId(curSourceId) && !isRemoteSourceId(curSourceId);
             const editHint = canEdit ? " · e/F4 edit" : "";
             if (isImageMode) return `z zoom · j/k prev/next file · 1 text · 2 image · 3 hex${editHint}`;
             if (effectiveMode === "text") return `↑↓ PgDn/PgUp scroll · j/k prev/next · 1 text · 2 image · 3 hex · m md · s dos · w wrap · f find${editHint}`;

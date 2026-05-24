@@ -5,13 +5,13 @@ use std::sync::Arc;
 
 use futures_util::{SinkExt, StreamExt};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{mpsc, Notify};
+use tokio::sync::{broadcast, mpsc, Notify};
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::jobs::dirsize::DirSizeQueue;
 use crate::jobs::viewer_prefetch::ViewerPrefetchQueue;
 use crate::jobs::{DecisionResponse, JobState, ScanHandle};
-use crate::state::{PanelStatus, SharedState};
+use crate::state::{CliOpenRequest, PanelStatus, SharedState};
 use crate::watcher::{WatcherAction, WatcherCommand};
 use crate::ws::protocol::{now, ClientMessage, ServerMessage};
 use crate::ws::runtime::{
@@ -41,6 +41,7 @@ pub async fn start(
     let dir_size_queue = Arc::new(DirSizeQueue::new());
     let platform = state.lock().await.platform.clone();
     let volume_watcher = crate::platform::create_volume_watcher(platform).await;
+    let (cli_open_notify_tx, _) = broadcast::channel::<()>(16);
 
     loop {
         match listener.accept().await {
@@ -51,6 +52,8 @@ pub async fn start(
                 let dir_size_queue = Arc::clone(&dir_size_queue);
                 let viewer_prefetch = Arc::clone(&viewer_prefetch);
                 let volume_watcher = Arc::clone(&volume_watcher);
+                let cli_open_notify_tx = cli_open_notify_tx.clone();
+                let cli_open_notify_rx = cli_open_notify_tx.subscribe();
                 tokio::spawn(handle_connection(
                     stream,
                     addr,
@@ -60,6 +63,8 @@ pub async fn start(
                     dir_size_queue,
                     viewer_prefetch,
                     volume_watcher,
+                    cli_open_notify_tx,
+                    cli_open_notify_rx,
                 ));
             }
             Err(error) => eprintln!("[fbro] Accept error: {error}"),
@@ -76,6 +81,8 @@ async fn handle_connection(
     dir_size_queue: Arc<DirSizeQueue>,
     viewer_prefetch: Arc<ViewerPrefetchQueue>,
     volume_watcher: Arc<dyn crate::platform::VolumeWatcher>,
+    cli_open_notify_tx: broadcast::Sender<()>,
+    mut cli_open_notify_rx: broadcast::Receiver<()>,
 ) {
     eprintln!("[fbro] Client connected: {addr}");
 
@@ -159,13 +166,17 @@ async fn handle_connection(
         // Non-GUI clients (viewers) don't get the full snapshot but still need
         // the current font size so they render at the correct zoom level.
         let font_size = state.lock().await.font_size;
-        let _ = send_msg(&mut ws_tx, &ServerMessage::StatePatch {
-            timestamp: now(),
-            domain: "settings".to_string(),
-            entity_id: None,
-            version: 0,
-            patch: serde_json::json!({ "fontSize": font_size }),
-        }).await;
+        let _ = send_msg(
+            &mut ws_tx,
+            &ServerMessage::StatePatch {
+                timestamp: now(),
+                domain: "settings".to_string(),
+                entity_id: None,
+                version: 0,
+                patch: serde_json::json!({ "fontSize": font_size }),
+            },
+        )
+        .await;
     }
 
     let mut scan_handles: HashMap<String, ScanHandle> = HashMap::new();
@@ -244,7 +255,11 @@ async fn handle_connection(
                         .get(&panel.source_id)
                         .map(|d| d.is_local())
                         .unwrap_or(false);
-                    if is_local { Some(panel.path.clone()) } else { None }
+                    if is_local {
+                        Some(panel.path.clone())
+                    } else {
+                        None
+                    }
                 } else {
                     None
                 }
@@ -271,6 +286,21 @@ async fn handle_connection(
         let mut state_guard = state.lock().await;
         state_guard.gui_senders.push(tx.clone());
         state_guard.has_gui_connected = true;
+    }
+
+    if is_gui {
+        drain_cli_open_requests(
+            &state,
+            &tx,
+            &mut scan_handles,
+            &mut decision_senders,
+            &app_handle,
+            &dir_size_queue,
+            &viewer_prefetch,
+            &watcher_cmd_tx,
+            &volume_watcher,
+        )
+        .await;
     }
 
     loop {
@@ -371,12 +401,35 @@ async fn handle_connection(
                 }
             }
 
+            Ok(_) = cli_open_notify_rx.recv(), if is_gui => {
+                drain_cli_open_requests(
+                    &state,
+                    &tx,
+                    &mut scan_handles,
+                    &mut decision_senders,
+                    &app_handle,
+                    &dir_size_queue,
+                    &viewer_prefetch,
+                    &watcher_cmd_tx,
+                    &volume_watcher,
+                ).await;
+            }
+
             msg = ws_rx.next() => {
                 match msg {
                     Some(Ok(Message::Text(text))) => {
                         match serde_json::from_str::<ClientMessage>(&text) {
                             Ok(ClientMessage::Intent { name, scope, args, .. }) => {
                                 eprintln!("[fbro] intent: {name} scope={scope} args={args}");
+                                if !is_gui && name == "OpenPathInRightPanel" {
+                                    queue_cli_open_request(
+                                        &state,
+                                        &cli_open_notify_tx,
+                                        cli_open_request_from_args(&args),
+                                    )
+                                    .await;
+                                    continue;
+                                }
                                 let mut ctx = IntentContext {
                                     state: &state,
                                     tx: &tx,
@@ -434,6 +487,79 @@ async fn handle_connection(
     }
 }
 
+fn cli_open_request_from_args(args: &serde_json::Value) -> CliOpenRequest {
+    CliOpenRequest {
+        path: args
+            .get("path")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or(".")
+            .to_string(),
+        cwd: args
+            .get("cwd")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("")
+            .to_string(),
+        create_tab: args
+            .get("createTab")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(true),
+    }
+}
+
+async fn queue_cli_open_request(
+    state: &SharedState,
+    notify: &broadcast::Sender<()>,
+    request: CliOpenRequest,
+) {
+    {
+        let mut state_guard = state.lock().await;
+        state_guard.pending_cli_opens.push(request);
+    }
+    let _ = notify.send(());
+}
+
+async fn drain_cli_open_requests(
+    state: &SharedState,
+    tx: &mpsc::Sender<ServerMessage>,
+    scan_handles: &mut HashMap<String, ScanHandle>,
+    decision_senders: &mut HashMap<String, mpsc::Sender<DecisionResponse>>,
+    app_handle: &tauri::AppHandle,
+    dir_size_queue: &Arc<DirSizeQueue>,
+    viewer_prefetch: &Arc<ViewerPrefetchQueue>,
+    watcher_cmd_tx: &mpsc::Sender<WatcherCommand>,
+    volume_watcher: &Arc<dyn crate::platform::VolumeWatcher>,
+) {
+    let requests = {
+        let mut state_guard = state.lock().await;
+        std::mem::take(&mut state_guard.pending_cli_opens)
+    };
+
+    for request in requests {
+        let mut ctx = IntentContext {
+            state,
+            tx,
+            scan_handles,
+            decision_senders,
+            app_handle,
+            dir_size_queue,
+            viewer_prefetch,
+            watcher_cmd_tx,
+            volume_watcher,
+        };
+        crate::ws::intents::dispatch(
+            "OpenPathInRightPanel",
+            &serde_json::Value::Null,
+            &serde_json::json!({
+                "path": request.path,
+                "cwd": request.cwd,
+                "createTab": request.create_tab,
+            }),
+            &mut ctx,
+        )
+        .await;
+    }
+}
+
 async fn send_msg<S>(ws_tx: &mut S, msg: &ServerMessage) -> Result<(), ()>
 where
     S: SinkExt<Message> + Unpin,
@@ -472,6 +598,7 @@ async fn apply_job_event_to_state(state: &SharedState, msg: &ServerMessage) {
     let ServerMessage::JobEvent {
         job_id,
         event,
+        files,
         progress,
         search_progress: _,
         decision,
@@ -498,6 +625,25 @@ async fn apply_job_event_to_state(state: &SharedState, msg: &ServerMessage) {
         .unwrap_or(false);
 
     if let Some(job) = state_guard.job_store.jobs.get_mut(job_id) {
+        if let Some(files) = files {
+            match &mut job.kind {
+                crate::jobs::JobKind::FileOp(meta) => {
+                    meta.files = files
+                        .iter()
+                        .map(|file| crate::jobs::FileOpEntry {
+                            name: file.name.clone(),
+                            source_path: file.source_path.clone().unwrap_or_default(),
+                            size: file.size,
+                            kind: file.kind.clone(),
+                            mtime: None,
+                            permissions: None,
+                        })
+                        .collect();
+                }
+                crate::jobs::JobKind::OutgoingTransfer(_) => {}
+                _ => {}
+            }
+        }
         match event.as_str() {
             "Queued" => {
                 job.state = JobState::Queued;
@@ -528,8 +674,10 @@ async fn apply_job_event_to_state(state: &SharedState, msg: &ServerMessage) {
                 job.decision = decision
                     .as_ref()
                     .map(|decision| crate::jobs::ConflictDecision {
+                        kind: decision.kind.clone(),
                         source: decision.source.clone(),
                         destination: decision.destination.clone(),
+                        message: decision.message.clone(),
                         options: decision.options.clone(),
                         supports_apply_to_all: decision.supports_apply_to_all,
                     });

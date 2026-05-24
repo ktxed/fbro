@@ -63,7 +63,9 @@ impl ThumbCache {
     }
 
     fn put(&self, key: ThumbKey, bytes: Vec<u8>) {
-        let Ok(mut inner) = self.inner.lock() else { return };
+        let Ok(mut inner) = self.inner.lock() else {
+            return;
+        };
         inner.seq += 1;
         let seq = inner.seq;
         inner.map.insert(key, (bytes, seq));
@@ -217,9 +219,7 @@ fn handle(
     // must verify the cached content is the complete file before using it —
     // otherwise we'd serve a truncated MP4 and qtdemux would reject it.
     let data = match prefetch.get_cached_by_path(&path) {
-        Some(entry) if entry.file_size == Some(entry.content.len() as u64) => {
-            entry.content.clone()
-        }
+        Some(entry) if entry.file_size == Some(entry.content.len() as u64) => entry.content.clone(),
         _ => std::fs::read(&path)?,
     };
     write!(
@@ -260,7 +260,11 @@ fn handle_thumb(
         decoded.trim_start_matches('/').to_string()
     };
     #[cfg(not(windows))]
-    let path = if decoded.starts_with('/') { decoded } else { format!("/{decoded}") };
+    let path = if decoded.starts_with('/') {
+        decoded
+    } else {
+        format!("/{decoded}")
+    };
 
     let mtime = std::fs::metadata(&path)
         .ok()

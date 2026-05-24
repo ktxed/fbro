@@ -9,6 +9,7 @@ mod fileserver;
 mod jobs;
 mod persistence;
 mod platform;
+mod remote;
 mod state;
 mod terminal;
 mod thumb_pool;
@@ -24,11 +25,14 @@ mod drag_out_cmd {
 }
 
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex as StdMutex};
 
+use futures_util::SinkExt;
 use jobs::viewer_prefetch::ViewerPrefetchQueue;
-use state::AppState;
+use state::{AppState, CliOpenRequest};
 use tokio::sync::Mutex;
+use tokio_tungstenite::tungstenite::Message;
 
 fn percent_decode(s: &str) -> String {
     let bytes = s.as_bytes();
@@ -75,6 +79,139 @@ fn read_file_range(path: &str, start: u64, length: usize) -> std::io::Result<Vec
     Ok(buf)
 }
 
+fn parse_cli_open_request() -> Option<CliOpenRequest> {
+    let mut args = std::env::args().skip(1);
+    while let Some(arg) = args.next() {
+        if arg == "--fbro-open" {
+            let path = args.next().unwrap_or_else(|| ".".to_string());
+            let cwd = std::env::current_dir()
+                .unwrap_or_else(|_| PathBuf::from("."))
+                .to_string_lossy()
+                .to_string();
+            return Some(CliOpenRequest {
+                path,
+                cwd,
+                create_tab: true,
+            });
+        }
+    }
+    None
+}
+
+fn try_forward_cli_open(request: &CliOpenRequest) -> bool {
+    let request = request.clone();
+    let runtime = match tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(runtime) => runtime,
+        Err(_) => return false,
+    };
+
+    runtime.block_on(async move {
+        let connect = tokio::time::timeout(
+            std::time::Duration::from_millis(350),
+            tokio_tungstenite::connect_async("ws://127.0.0.1:7878"),
+        )
+        .await;
+        let Ok(Ok((mut stream, _))) = connect else {
+            return false;
+        };
+
+        let hello = serde_json::json!({
+            "type": "Hello",
+            "timestamp": crate::ws::protocol::now(),
+            "protocolVersion": "0",
+            "client": { "kind": "cli", "name": "fbro-cli", "supports": [] },
+        });
+        let intent = serde_json::json!({
+            "type": "Intent",
+            "timestamp": crate::ws::protocol::now(),
+            "name": "OpenPathInRightPanel",
+            "scope": null,
+            "args": {
+                "path": request.path,
+                "cwd": request.cwd,
+                "createTab": true,
+            },
+            "options": {},
+        });
+
+        if stream
+            .send(Message::Text(hello.to_string().into()))
+            .await
+            .is_err()
+        {
+            return false;
+        }
+        if stream
+            .send(Message::Text(intent.to_string().into()))
+            .await
+            .is_err()
+        {
+            return false;
+        }
+        let _ = stream.close(None).await;
+        true
+    })
+}
+
+fn shell_single_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\"'\"'"))
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ShellCommandInstallResult {
+    path: String,
+    command: String,
+}
+
+#[tauri::command]
+fn install_fbro_command() -> Result<ShellCommandInstallResult, String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        let home = std::env::var("HOME").map_err(|_| "HOME is not set.".to_string())?;
+        let bin_dir = Path::new(&home).join(".local").join("bin");
+        std::fs::create_dir_all(&bin_dir)
+            .map_err(|e| format!("Cannot create {}: {e}", bin_dir.display()))?;
+
+        let exe = std::env::current_exe().map_err(|e| format!("Cannot locate fbro: {e}"))?;
+        let script_path = bin_dir.join("fbro");
+        let exe_quoted = shell_single_quote(&exe.to_string_lossy());
+        let script = format!(
+            "#!/bin/sh\n\
+             FBRO_BIN={exe_quoted}\n\
+             if [ \"$#\" -gt 0 ]; then\n\
+             \t\"$FBRO_BIN\" --fbro-open \"$1\" >/dev/null 2>&1 &\n\
+             else\n\
+             \t\"$FBRO_BIN\" >/dev/null 2>&1 &\n\
+             fi\n\
+             exit 0\n"
+        );
+        std::fs::write(&script_path, script)
+            .map_err(|e| format!("Cannot write {}: {e}", script_path.display()))?;
+        let mut permissions = std::fs::metadata(&script_path)
+            .map_err(|e| format!("Cannot stat {}: {e}", script_path.display()))?
+            .permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&script_path, permissions)
+            .map_err(|e| format!("Cannot chmod {}: {e}", script_path.display()))?;
+
+        Ok(ShellCommandInstallResult {
+            path: script_path.to_string_lossy().to_string(),
+            command: "fbro".to_string(),
+        })
+    }
+
+    #[cfg(not(unix))]
+    {
+        Err("Installing the fbro command is currently supported on Unix-like systems.".to_string())
+    }
+}
+
 #[derive(serde::Serialize)]
 struct PathInfo {
     kind: String,
@@ -83,8 +220,8 @@ struct PathInfo {
 
 #[tauri::command]
 fn get_path_info(path: &str) -> Result<PathInfo, String> {
-    let metadata = std::fs::symlink_metadata(path)
-        .map_err(|e| format!("Cannot stat {}: {e}", path))?;
+    let metadata =
+        std::fs::symlink_metadata(path).map_err(|e| format!("Cannot stat {}: {e}", path))?;
     let file_type = metadata.file_type();
     let kind = if file_type.is_symlink() {
         "symlink"
@@ -100,7 +237,10 @@ fn get_path_info(path: &str) -> Result<PathInfo, String> {
     } else {
         None
     };
-    Ok(PathInfo { kind: kind.to_string(), size })
+    Ok(PathInfo {
+        kind: kind.to_string(),
+        size,
+    })
 }
 
 fn mime_for_path(path: &str) -> &'static str {
@@ -125,6 +265,13 @@ fn mime_for_path(path: &str) -> &'static str {
 }
 
 fn main() {
+    let cli_open_request = parse_cli_open_request();
+    if let Some(request) = &cli_open_request {
+        if try_forward_cli_open(request) {
+            return;
+        }
+    }
+
     #[cfg(target_os = "linux")]
     if std::env::var("WAYLAND_DISPLAY").is_ok() {
         std::env::set_var("GDK_BACKEND", "wayland");
@@ -224,7 +371,11 @@ fn main() {
                     .unwrap()
             }
         })
-        .invoke_handler(tauri::generate_handler![get_path_info, crate::drag_out_cmd::start_drag_out])
+        .invoke_handler(tauri::generate_handler![
+            get_path_info,
+            install_fbro_command,
+            crate::drag_out_cmd::start_drag_out
+        ])
         .setup({
             let platform = platform.clone();
             move |app| {
@@ -261,8 +412,10 @@ fn main() {
                             if ws.maximized {
                                 let _ = window.maximize();
                             } else {
-                                let _ = window.set_size(tauri::PhysicalSize::new(ws.width, ws.height));
-                                let _ = window.set_position(tauri::PhysicalPosition::new(ws.x, ws.y));
+                                let _ =
+                                    window.set_size(tauri::PhysicalSize::new(ws.width, ws.height));
+                                let _ =
+                                    window.set_position(tauri::PhysicalPosition::new(ws.x, ws.y));
                             }
                         }
                     }
@@ -282,7 +435,35 @@ fn main() {
                 // Restore extra tabs (beyond the seed panel) from the saved
                 // session when the new slot-aware schema is present.
                 crate::state::restore_tabs_from_session(&mut app_state, &session.slots);
+                if let Some(mut request) = cli_open_request.clone() {
+                    request.create_tab = false;
+                    app_state.pending_cli_opens.push(request);
+                }
                 let shared_state = Arc::new(Mutex::new(app_state));
+
+                // If the user previously enabled sharing, restart the russh +
+                // pair listeners, start discovery, and re-advertise. This is
+                // what makes the "pair once, restart fbro, still works"
+                // workflow viable without browsing the LAN while remote
+                // access is disabled.
+                {
+                    let st = Arc::clone(&shared_state);
+                    let was_enabled = tauri::async_runtime::block_on(async {
+                        st.lock().await.share_config.enabled
+                    });
+                    if was_enabled {
+                        tauri::async_runtime::spawn(async move {
+                            if let Err(e) =
+                                ws::intents::sharing::start_sharing_server_for(&st).await
+                            {
+                                eprintln!("[fbro] auto-restart sharing failed: {e}");
+                            } else {
+                                eprintln!("[fbro] sharing auto-restored from share.json");
+                            }
+                        });
+                    }
+                }
+
                 let quit_notify = Arc::new(tokio::sync::Notify::new());
                 use tauri::Manager;
                 app.manage(Arc::clone(&quit_notify));

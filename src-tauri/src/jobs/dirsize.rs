@@ -278,7 +278,11 @@ impl DirSizeQueue {
                             panel.entries[..dir_end].sort_by(|a, b| {
                                 let ord =
                                     a.size.unwrap_or(u64::MAX).cmp(&b.size.unwrap_or(u64::MAX));
-                                if desc { ord.reverse() } else { ord }
+                                if desc {
+                                    ord.reverse()
+                                } else {
+                                    ord
+                                }
                             });
 
                             if let Some(name) = &cursor_name {

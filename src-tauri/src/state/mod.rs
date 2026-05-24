@@ -7,10 +7,10 @@ use tokio::sync::{mpsc, Mutex};
 
 use crate::bookmarks::BookmarkEntry;
 use crate::bro::ResolvedBro;
+use crate::fileserver::ThumbCache;
 use crate::jobs::search::SearchResultStore;
 use crate::jobs::JobStore;
 use crate::platform::{Platform, ResolvedOpenWithApp};
-use crate::fileserver::ThumbCache;
 use crate::thumb_pool::ThumbPool;
 use crate::vfs::VfsDriver;
 use crate::ws::protocol::{EntrySchema, FilterSpec, ServerMessage, SortSpec};
@@ -36,6 +36,61 @@ pub struct Source {
     /// the default `100`; non-volume virtual sources (e.g. procs) use a lower
     /// value to sort first.
     pub sort_priority: i32,
+    /// Source is read-only at the BE level — disables write-capable jobs and
+    /// surfaces a lock badge in the FE. Distinct from `shadow`, which is for
+    /// transient per-panel overlays. Remote sources set this to `true`.
+    pub read_only: bool,
+    /// For `kind == "remote"` sources: stable id of the paired peer that
+    /// owns this source. `None` for filesystem / virtual sources.
+    pub peer_id: Option<String>,
+}
+
+// ─── Remote: discovery & pairing ──────────────────────────────────────────────
+
+/// An mDNS-discovered fbro peer (or candidate). Volatile — never persisted.
+/// `pubkey_fp` is populated when the TXT record carries `fp=...`; once a peer
+/// is paired, its id is `"fbro:<pubkey_fp>"`, otherwise `"mdns:<host>:<port>"`.
+#[derive(Clone, Debug)]
+pub struct DiscoveredPeer {
+    pub id: String,
+    pub name: String,
+    pub host: String,
+    pub port: u16,
+    pub os: Option<String>,
+    pub pubkey_fp: Option<String>,
+    pub last_seen: std::time::SystemTime,
+}
+
+/// A peer we've successfully paired with. Persisted to
+/// `~/.config/fbro/peers.json`. The fingerprint is the SHA256 of the peer's
+/// Ed25519 public key, base64-encoded — used as the stable key for routing
+/// remote sources and revoking trust.
+#[derive(Clone, Debug)]
+pub struct PairedPeer {
+    pub fingerprint: String,
+    pub pubkey: Vec<u8>,
+    pub name: String,
+    pub os: Option<String>,
+    pub paired_at: std::time::SystemTime,
+    pub last_seen: Option<std::time::SystemTime>,
+    /// Last known SFTP endpoint for this peer, learned from mDNS or a
+    /// successful connection. Used for manual retry when mDNS is quiet.
+    pub last_host: Option<String>,
+    pub last_sftp_port: Option<u16>,
+    pub last_pair_port: Option<u16>,
+    pub last_endpoint_seen_at: Option<std::time::SystemTime>,
+}
+
+/// In-process configuration controlling whether this fbro shares any of its
+/// sources on the LAN and which peers are trusted. In v1, `enabled` and
+/// `shared_source_ids` are volatile (reset on restart); only `paired_peers`
+/// is persisted via `~/.config/fbro/peers.json`.
+#[derive(Clone, Debug, Default)]
+pub struct ShareConfig {
+    pub enabled: bool,
+    pub allow_ipv6: bool,
+    pub shared_source_ids: HashSet<String>,
+    pub paired_peers: HashMap<String, PairedPeer>,
 }
 
 // ─── Shadow source ────────────────────────────────────────────────────────────
@@ -234,6 +289,38 @@ pub struct AppState {
     /// In-memory L1 thumbnail cache. Held here so the settings handler can
     /// invalidate it when the user clicks "Clear cache".
     pub thumb_cache: Arc<ThumbCache>,
+    /// mDNS-discovered fbro peers on the LAN, keyed by peer id.
+    /// Volatile — never persisted.
+    pub discovered_peers: HashMap<String, DiscoveredPeer>,
+    /// Sharing toggle, shared sources, and paired-peer trust list.
+    pub share_config: ShareConfig,
+    /// Lazily initialized Ed25519 identity for the embedded SSH server and
+    /// outbound SFTP client. `None` until the first sharing / remote intent
+    /// loads it from `~/.config/fbro/id_ed25519`.
+    pub identity: Option<Arc<crate::remote::keys::Identity>>,
+    /// Tokio handle for the running russh listener, when sharing is enabled.
+    pub remote_server_handle: Option<tokio::task::JoinHandle<()>>,
+    /// Handle for the running mDNS discovery task. Spawned once at startup;
+    /// `None` only on early boot before wiring.
+    pub discovery_handle: Option<crate::remote::discovery::DiscoveryHandle>,
+    /// Tokio handle for the pairing TCP listener (port 7880). Started by
+    /// `EnableSharing` so peers can initiate handshakes against us.
+    pub pair_listener_handle: Option<tokio::task::JoinHandle<()>>,
+    /// In-flight pairing handshakes, keyed by handshake id. The
+    /// oneshot::Sender feeds the user's Confirm/Cancel into the protocol
+    /// driver task; the task removes itself when it completes (success,
+    /// rejection, or timeout).
+    pub active_handshakes: HashMap<String, tokio::sync::oneshot::Sender<bool>>,
+    /// Requests from short-lived CLI invocations. They are drained by the
+    /// active GUI connection so scans/watchers stay owned by that connection.
+    pub pending_cli_opens: Vec<CliOpenRequest>,
+}
+
+#[derive(Clone, Debug)]
+pub struct CliOpenRequest {
+    pub path: String,
+    pub cwd: String,
+    pub create_tab: bool,
 }
 
 #[derive(Clone, Debug, serde::Serialize)]
@@ -437,6 +524,8 @@ impl AppState {
                 shadow: false,
                 icon_name: None,
                 sort_priority: 100,
+                read_only: false,
+                peer_id: None,
             };
             if vol.mounted {
                 let driver: Arc<dyn VfsDriver> = {
@@ -477,11 +566,15 @@ impl AppState {
                 shadow: false,
                 icon_name: Some("activity".to_string()),
                 sort_priority: 0,
+                read_only: false,
+                peer_id: None,
             },
         );
         drivers.insert(
             "procs".to_string(),
-            Arc::new(crate::vfs::procs::ProcsDriver { hierarchical: loaded_settings.general.proc_tree_mode }),
+            Arc::new(crate::vfs::procs::ProcsDriver {
+                hierarchical: loaded_settings.general.proc_tree_mode,
+            }),
         );
 
         AppState {
@@ -507,6 +600,34 @@ impl AppState {
             pty_manager: Arc::new(crate::terminal::PtyManager::new()),
             thumb_pool,
             thumb_cache,
+            discovered_peers: HashMap::new(),
+            share_config: {
+                // Best-effort load from `~/.config/fbro/peers.json`. A missing
+                // or malformed file yields an empty map — pairing still works,
+                // the user just has nobody trusted yet.
+                let paired_peers = crate::remote::pairing::load_peers(
+                    &crate::remote::pairing::default_peers_path(),
+                )
+                .unwrap_or_default();
+                // Restore the user's last sharing toggle + source picks. Same
+                // tolerance: missing/corrupt file → defaults (off, empty set).
+                let saved = crate::remote::share_state::load(
+                    &crate::remote::share_state::default_share_path(),
+                )
+                .unwrap_or_default();
+                ShareConfig {
+                    enabled: saved.enabled,
+                    allow_ipv6: saved.allow_ipv6,
+                    shared_source_ids: saved.shared_source_ids,
+                    paired_peers,
+                }
+            },
+            identity: None,
+            remote_server_handle: None,
+            discovery_handle: None,
+            pair_listener_handle: None,
+            active_handshakes: HashMap::new(),
+            pending_cli_opens: Vec::new(),
         }
     }
 
@@ -597,6 +718,8 @@ impl AppState {
                     shadow: false,
                     icon_name: None,
                     sort_priority: 100,
+                    read_only: false,
+                    peer_id: None,
                 };
                 if vol.mounted {
                     self.drivers.insert(vol.id.clone(), make_driver());
@@ -656,8 +779,8 @@ pub fn restore_tabs_from_session(
             if let Some(panel) = state.panels.get_mut(&seed_panel_id) {
                 match first {
                     TabSession::Listing { source_id, path } => {
-                        let resolved = pick_source(source_id)
-                            .unwrap_or_else(|| panel.source_id.clone());
+                        let resolved =
+                            pick_source(source_id).unwrap_or_else(|| panel.source_id.clone());
                         let resolved_path = if Path::new(path).is_dir() {
                             path.clone()
                         } else {

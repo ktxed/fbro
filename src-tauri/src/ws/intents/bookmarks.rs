@@ -5,9 +5,11 @@ use serde_json::Value;
 use crate::bookmarks::BookmarkEntry;
 use crate::state::{ShadowSource, Source};
 use crate::vfs::VfsDriver;
-use crate::ws::protocol::{now, ServerMessage};
 use crate::ws::intents::navigation::teardown_shadow_source;
-use crate::ws::runtime::{build_sources_json, navigate_to, rescan_panel, resolve_panel_id, IntentContext};
+use crate::ws::protocol::{now, ServerMessage};
+use crate::ws::runtime::{
+    build_sources_json, navigate_to, rescan_panel, resolve_panel_id, IntentContext,
+};
 
 use super::arg_str;
 
@@ -21,7 +23,9 @@ pub async fn handle(name: &str, scope: &Value, args: &Value, ctx: &mut IntentCon
 }
 
 async fn add_bookmark(args: &Value, ctx: &mut IntentContext<'_>) {
-    let Some(path) = arg_str(args, "path").map(str::to_string) else { return };
+    let Some(path) = arg_str(args, "path").map(str::to_string) else {
+        return;
+    };
     let name = arg_str(args, "name")
         .map(|s| s.to_string())
         .unwrap_or_else(|| default_name(&path));
@@ -36,7 +40,9 @@ async fn add_bookmark(args: &Value, ctx: &mut IntentContext<'_>) {
 }
 
 async fn remove_bookmark(args: &Value, ctx: &mut IntentContext<'_>) {
-    let Some(path) = arg_str(args, "path").map(str::to_string) else { return };
+    let Some(path) = arg_str(args, "path").map(str::to_string) else {
+        return;
+    };
 
     let mut state_guard = ctx.state.lock().await;
     state_guard.bookmarks.retain(|b| b.path != path);
@@ -109,6 +115,8 @@ async fn enter_bookmark_source(scope: &Value, ctx: &mut IntentContext<'_>) {
                 shadow: true,
                 icon_name: None,
                 sort_priority: 100,
+                read_only: false,
+                peer_id: None,
             },
         );
         state_guard

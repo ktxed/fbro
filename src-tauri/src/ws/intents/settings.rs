@@ -4,7 +4,7 @@ use serde_json::Value;
 
 use crate::vfs::VfsDriver;
 use crate::ws::protocol::{now, ServerMessage};
-use crate::ws::runtime::{IntentContext, rescan_panel, selected_names_for};
+use crate::ws::runtime::{rescan_panel, selected_names_for, IntentContext};
 
 pub(crate) async fn handle(name: &str, args: &Value, ctx: &mut IntentContext<'_>) {
     match name {
@@ -103,7 +103,11 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
             "thumbnailVideoFrameSkip" => {
                 let Some(v) = value.as_u64() else {
                     drop(state_guard);
-                    bad_setting(ctx.tx, "thumbnailVideoFrameSkip must be a non-negative integer").await;
+                    bad_setting(
+                        ctx.tx,
+                        "thumbnailVideoFrameSkip must be a non-negative integer",
+                    )
+                    .await;
                     return;
                 };
                 state_guard.settings.general.thumbnail_video_frame_skip = (v.min(60)) as u32;
@@ -204,13 +208,18 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
         for panel_id in &panel_ids {
             let (version, selection_names) = {
                 let state_guard = ctx.state.lock().await;
-                let version = state_guard.panels.get(panel_id).map(|p| p.version).unwrap_or(0);
+                let version = state_guard
+                    .panels
+                    .get(panel_id)
+                    .map(|p| p.version)
+                    .unwrap_or(0);
                 let names = selected_names_for(&state_guard, panel_id);
                 (version, names)
             };
 
             // Notify FE of the show_hidden change before the rescan patch arrives.
-            let _ = ctx.tx
+            let _ = ctx
+                .tx
                 .send(ServerMessage::StatePatch {
                     timestamp: now(),
                     domain: "panels".to_string(),
@@ -305,7 +314,10 @@ async fn clear_thumbnail_cache(ctx: &mut IntentContext<'_>) {
     // Drop the in-memory L1 cache regardless of platform.
     let (cache, gui_senders) = {
         let state_guard = ctx.state.lock().await;
-        (state_guard.thumb_cache.clone(), state_guard.gui_senders.clone())
+        (
+            state_guard.thumb_cache.clone(),
+            state_guard.gui_senders.clone(),
+        )
     };
     cache.clear();
 
@@ -314,7 +326,10 @@ async fn clear_thumbnail_cache(ctx: &mut IntentContext<'_>) {
     {
         let (_removed, errors) = crate::platform::linux::thumbnail::clear_disk_cache();
         if !errors.is_empty() {
-            let msg = format!("Some thumbnail cache files could not be removed: {}", errors.join("; "));
+            let msg = format!(
+                "Some thumbnail cache files could not be removed: {}",
+                errors.join("; ")
+            );
             bad_setting(ctx.tx, &msg).await;
             return;
         }

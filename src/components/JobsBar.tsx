@@ -5,6 +5,10 @@ import { IconChevronLeft, IconChevronRight, IconX } from "@tabler/icons-react";
 
 const VISIBLE = 5;
 
+function jobShortId(jobId: string) {
+  return jobId.replace(/^job-/, "#");
+}
+
 export function JobsBar({ client }: { client: WsClient }) {
   const state = useAppState();
   const dispatch = useAppDispatch();
@@ -53,6 +57,8 @@ export function JobsBar({ client }: { client: WsClient }) {
           : null;
         const typeLabel = job.kind === "search"
           ? "Search"
+          : job.kind === "outgoing-transfer"
+          ? `Outgoing ${jobShortId(job.jobId)}`
           : job.type.charAt(0).toUpperCase() + job.type.slice(1);
         const searchPct = job.kind === "search" && job.searchMatched !== undefined
           ? `${job.searchMatched} hits`

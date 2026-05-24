@@ -277,12 +277,19 @@ impl VfsDriver for LocalFsDriver {
             let meta = entry.metadata().ok();
             let is_dir = meta.as_ref().map(|m| m.is_dir()).unwrap_or(false);
             let size = meta.as_ref().map(|m| m.len()).unwrap_or(0);
-            let mtime = meta.as_ref()
+            let mtime = meta
+                .as_ref()
                 .and_then(|m| m.modified().ok())
                 .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                 .map(|d| d.as_secs());
             let permissions = meta.as_ref().and_then(format_permissions);
-            children.push(DirChild { name, is_dir, size, mtime, permissions });
+            children.push(DirChild {
+                name,
+                is_dir,
+                size,
+                mtime,
+                permissions,
+            });
         }
         Ok(children)
     }

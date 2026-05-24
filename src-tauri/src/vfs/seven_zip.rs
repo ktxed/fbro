@@ -25,16 +25,14 @@ struct DirTree {
 
 impl DirTree {
     fn build(archive_path: &str, password: Password) -> Result<Self, VfsError> {
-        let reader = ArchiveReader::open(archive_path, password).map_err(|e| {
-            match e {
-                sevenz_rust2::Error::PasswordRequired => {
-                    VfsError::PermissionDenied("encrypted".to_string())
-                }
-                sevenz_rust2::Error::MaybeBadPassword(_) => {
-                    VfsError::PermissionDenied("encrypted:bad_password".to_string())
-                }
-                other => VfsError::IOError(format!("Cannot open archive: {other}")),
+        let reader = ArchiveReader::open(archive_path, password).map_err(|e| match e {
+            sevenz_rust2::Error::PasswordRequired => {
+                VfsError::PermissionDenied("encrypted".to_string())
             }
+            sevenz_rust2::Error::MaybeBadPassword(_) => {
+                VfsError::PermissionDenied("encrypted:bad_password".to_string())
+            }
+            other => VfsError::IOError(format!("Cannot open archive: {other}")),
         })?;
 
         let mut children: HashMap<String, Vec<SevenZipMeta>> = HashMap::new();
@@ -213,15 +211,15 @@ fn build_filter_regex(filter: Option<&FilterSpec>) -> Option<regex::Regex> {
         .map(|part| {
             let part = part.trim();
             if part.contains('*') {
-                let escaped: String = part
-                    .chars()
-                    .map(|ch| match ch {
-                        '*' => ".*".to_string(),
-                        '.' | '+' | '?' | '(' | ')' | '[' | ']' | '{' | '}' | '^' | '$'
-                        | '\\' => format!("\\{ch}"),
-                        _ => ch.to_string(),
-                    })
-                    .collect();
+                let escaped: String =
+                    part.chars()
+                        .map(|ch| match ch {
+                            '*' => ".*".to_string(),
+                            '.' | '+' | '?' | '(' | ')' | '[' | ']' | '{' | '}' | '^' | '$'
+                            | '\\' => format!("\\{ch}"),
+                            _ => ch.to_string(),
+                        })
+                        .collect();
                 format!("^{escaped}$")
             } else {
                 part.chars()
@@ -304,8 +302,8 @@ impl SevenZipFsDriver {
             .map(|p| Password::from(p.as_str()))
             .unwrap_or_else(Password::empty);
 
-        let mut reader = ArchiveReader::open(&self.archive_path, password).map_err(|e| {
-            match &e {
+        let mut reader =
+            ArchiveReader::open(&self.archive_path, password).map_err(|e| match &e {
                 sevenz_rust2::Error::PasswordRequired => {
                     VfsError::PermissionDenied("encrypted".to_string())
                 }
@@ -313,10 +311,12 @@ impl SevenZipFsDriver {
                     VfsError::PermissionDenied("encrypted:bad_password".to_string())
                 }
                 _ => VfsError::IOError(format!("Cannot open archive: {e}")),
-            }
-        })?;
+            })?;
 
-        let normalized = inner_path.replace('\\', "/").trim_end_matches('/').to_string();
+        let normalized = inner_path
+            .replace('\\', "/")
+            .trim_end_matches('/')
+            .to_string();
         let temp_path_ref = temp_path.clone();
         let mut found = false;
 
@@ -325,14 +325,17 @@ impl SevenZipFsDriver {
                 if entry.is_directory() {
                     return Ok(true);
                 }
-                let entry_name =
-                    entry.name().replace('\\', "/").trim_end_matches('/').to_string();
+                let entry_name = entry
+                    .name()
+                    .replace('\\', "/")
+                    .trim_end_matches('/')
+                    .to_string();
                 if entry_name != normalized {
                     return Ok(true);
                 }
                 found = true;
-                let mut file = std::fs::File::create(&temp_path_ref)
-                    .map_err(sevenz_rust2::Error::from)?;
+                let mut file =
+                    std::fs::File::create(&temp_path_ref).map_err(sevenz_rust2::Error::from)?;
                 std::io::copy(reader, &mut file).map_err(sevenz_rust2::Error::from)?;
                 Ok(false)
             })
@@ -427,7 +430,7 @@ impl VfsDriver for SevenZipFsDriver {
                     permissions: None,
                     icon_name,
                     cc,
-                source_path: None,
+                    source_path: None,
                 }
             })
             .collect();

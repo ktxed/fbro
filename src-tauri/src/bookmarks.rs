@@ -33,7 +33,9 @@ pub fn save(entries: &[BookmarkEntry]) -> io::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let file = BookmarksFile { bookmarks: entries.to_vec() };
+    let file = BookmarksFile {
+        bookmarks: entries.to_vec(),
+    };
     let content = toml::to_string(&file).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
     // Atomic write: write to temp file then rename.
     let tmp = path.with_extension("toml.tmp");

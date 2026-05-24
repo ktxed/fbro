@@ -1,10 +1,11 @@
+use std::collections::HashSet;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use serde_json::Value;
 
-use crate::state::{ShadowSource, Source};
+use crate::state::{Panel, PanelStatus, PanelViewMode, ShadowSource, Source, TabKind};
 use crate::vfs::VfsDriver;
 use crate::watcher::WatcherCommand;
 use crate::ws::intents::{archive_file_path, arg_str, is_archive_source, is_search_source};
@@ -23,6 +24,7 @@ pub(crate) async fn handle(name: &str, scope: &Value, args: &Value, ctx: &mut In
         "OpenTerminal" => open_terminal(scope, ctx).await,
         "NavigateToSource" => navigate_to_source(scope, args, ctx).await,
         "MountSource" => mount_source(scope, args, ctx).await,
+        "OpenPathInRightPanel" => open_path_in_right_panel(args, ctx).await,
         "NavigateUp" => navigate_up(scope, ctx).await,
         "RevealInFileManager" => reveal_in_file_manager(args, ctx).await,
         "ListOpenWithApps" => list_open_with_apps(args, ctx).await,
@@ -49,8 +51,188 @@ impl NavigatePanelArgs {
     }
 }
 
+struct OpenPathArgs {
+    path: String,
+    cwd: String,
+    create_tab: bool,
+}
+
+impl OpenPathArgs {
+    fn from_args(args: &Value) -> Self {
+        Self {
+            path: arg_str(args, "path").unwrap_or(".").to_string(),
+            cwd: arg_str(args, "cwd").unwrap_or("").to_string(),
+            create_tab: args
+                .get("createTab")
+                .and_then(Value::as_bool)
+                .unwrap_or(true),
+        }
+    }
+}
+
 struct SourceArgs {
     source_id: String,
+}
+
+fn expand_tilde(path: &str, home: &str) -> String {
+    if path == "~" {
+        return home.to_string();
+    }
+    if let Some(rest) = path.strip_prefix("~/") {
+        return Path::new(home).join(rest).to_string_lossy().to_string();
+    }
+    path.to_string()
+}
+
+fn normalize_requested_path(raw_path: &str, cwd: &str, home: &str) -> PathBuf {
+    let raw = raw_path.trim();
+    let raw = if raw.is_empty() { "." } else { raw };
+    let expanded = expand_tilde(raw, home);
+    let path = PathBuf::from(&expanded);
+    if path.is_absolute() {
+        path
+    } else if cwd.is_empty() {
+        std::env::current_dir()
+            .unwrap_or_else(|_| PathBuf::from(home))
+            .join(path)
+    } else {
+        PathBuf::from(cwd).join(path)
+    }
+}
+
+fn path_starts_with(path: &str, root: &str) -> bool {
+    let root_path = Path::new(root);
+    !root.is_empty() && Path::new(path).starts_with(root_path)
+}
+
+fn source_for_local_path(state: &crate::state::AppState, path: &str) -> Option<String> {
+    state
+        .sources
+        .iter()
+        .filter(|(id, source)| {
+            source.kind == "filesystem"
+                && source.mounted
+                && !source.shadow
+                && path_starts_with(path, &source.root_path)
+                && state
+                    .drivers
+                    .get(*id)
+                    .map(|driver| driver.is_local())
+                    .unwrap_or(false)
+        })
+        .max_by_key(|(_, source)| source.root_path.len())
+        .map(|(id, _)| id.clone())
+}
+
+async fn emit_cli_open_error(message: impl Into<String>, ctx: &IntentContext<'_>) {
+    let _ = ctx
+        .tx
+        .send(ServerMessage::Error {
+            timestamp: now(),
+            code: "CLI_OPEN_FAILED".to_string(),
+            message: message.into(),
+            recoverable: true,
+            extra: None,
+        })
+        .await;
+}
+
+async fn broadcast_slot_change(
+    ctx: &IntentContext<'_>,
+    slot_id: &str,
+    new_panel_id: Option<&str>,
+    focus_to: Option<&str>,
+) {
+    let (panel_upsert, slot_patch, layout_patch, focus_patch, gui_senders) = {
+        let state_guard = ctx.state.lock().await;
+        let slot = state_guard.slots.get(slot_id).cloned();
+        let gui = state_guard.gui_senders.clone();
+
+        let panel_upsert = new_panel_id.and_then(|pid| {
+            let p = state_guard.panels.get(pid)?;
+            let supports_thumbs = state_guard
+                .drivers
+                .get(&p.source_id)
+                .map(|d| d.supports_thumbnails())
+                .unwrap_or(false);
+            Some(ServerMessage::StatePatch {
+                timestamp: now(),
+                domain: "panels".to_string(),
+                entity_id: Some(pid.to_string()),
+                version: p.version,
+                patch: serde_json::json!({
+                    "create": true,
+                    "slotId": p.slot_id,
+                    "tabKind": p.tab_kind.as_str(),
+                    "tabTitle": p.tab_title_override,
+                    "path": p.path,
+                    "sourceId": p.source_id,
+                    "status": p.status.as_str(),
+                    "sort": p.sort,
+                    "showHidden": p.show_hidden,
+                    "viewMode": p.view_mode.as_str(),
+                    "supportsThumbnails": supports_thumbs,
+                    "terminalSessionId": p.terminal_session,
+                    "entries": [],
+                    "cursor": 0,
+                    "selection": [],
+                    "selectedEntries": [],
+                }),
+            })
+        });
+
+        let slot_patch = slot.map(|s| ServerMessage::StatePatch {
+            timestamp: now(),
+            domain: "slots".to_string(),
+            entity_id: Some(s.slot_id.clone()),
+            version: 0,
+            patch: serde_json::json!({
+                "tabPanelIds": s.tab_panel_ids,
+                "activePanelId": s.active_panel_id,
+            }),
+        });
+
+        let active_per_slot: Vec<String> = state_guard
+            .layout_slots
+            .iter()
+            .filter_map(|sid| {
+                state_guard
+                    .slots
+                    .get(sid)
+                    .map(|s| s.active_panel_id.clone())
+            })
+            .collect();
+        let layout_patch = ServerMessage::StatePatch {
+            timestamp: now(),
+            domain: "layout".to_string(),
+            entity_id: None,
+            version: 0,
+            patch: serde_json::json!({
+                "panels": active_per_slot,
+                "slots": state_guard.layout_slots,
+            }),
+        };
+
+        let focus_patch = focus_to.map(|fid| ServerMessage::StatePatch {
+            timestamp: now(),
+            domain: "focus".to_string(),
+            entity_id: None,
+            version: 0,
+            patch: serde_json::json!({ "focus": fid }),
+        });
+
+        (panel_upsert, slot_patch, layout_patch, focus_patch, gui)
+    };
+
+    for patch in [panel_upsert, slot_patch, Some(layout_patch), focus_patch]
+        .into_iter()
+        .flatten()
+    {
+        let _ = ctx.tx.send(patch.clone()).await;
+        for sender in &gui_senders {
+            let _ = sender.send(patch.clone()).await;
+        }
+    }
 }
 
 impl SourceArgs {
@@ -136,7 +318,10 @@ async fn open_entry(scope: &Value, ctx: &mut IntentContext<'_>) {
             let state_guard = ctx.state.lock().await;
             state_guard.sources.get(&source_id).map_or(false, |s| {
                 s.kind == "virtual"
-                    && !s.supports.iter().any(|c| c == crate::ws::intents::CAP_INTERNAL_NAV)
+                    && !s
+                        .supports
+                        .iter()
+                        .any(|c| c == crate::ws::intents::CAP_INTERNAL_NAV)
             })
         };
         if is_virtual_nav {
@@ -189,10 +374,16 @@ async fn open_entry(scope: &Value, ctx: &mut IntentContext<'_>) {
             ctx.watcher_cmd_tx,
         )
         .await;
-    } else if entry_kind == "file" && is_zip_like(&entry_name) && (!is_in_shadow || is_search_source(&source_id)) {
+    } else if entry_kind == "file"
+        && is_zip_like(&entry_name)
+        && (!is_in_shadow || is_search_source(&source_id))
+    {
         // Enter zip archive as a shadow filesystem.
         enter_zip_archive(&panel_id, &new_path, &entry_name, ctx).await;
-    } else if entry_kind == "file" && is_7z_like(&entry_name) && (!is_in_shadow || is_search_source(&source_id)) {
+    } else if entry_kind == "file"
+        && is_7z_like(&entry_name)
+        && (!is_in_shadow || is_search_source(&source_id))
+    {
         // Enter 7z archive as a shadow filesystem.
         enter_7z_archive(&panel_id, &new_path, &entry_name, ctx).await;
     }
@@ -249,17 +440,27 @@ async fn enter_7z_archive(
     {
         let mut state_guard = ctx.state.lock().await;
 
-        let (parent_source_id, parent_path, prev_shadow, cursor_pos) = match state_guard.panels.get(panel_id) {
-            Some(p) => (p.source_id.clone(), p.path.clone(), p.shadow_source.clone(), p.cursor),
-            None => return,
-        };
+        let (parent_source_id, parent_path, prev_shadow, cursor_pos) =
+            match state_guard.panels.get(panel_id) {
+                Some(p) => (
+                    p.source_id.clone(),
+                    p.path.clone(),
+                    p.shadow_source.clone(),
+                    p.cursor,
+                ),
+                None => return,
+            };
 
         let shadow = ShadowSource {
             parent_source_id: parent_source_id.clone(),
             parent_path,
             archive_path: archive_path.to_string(),
             cursor_hint: Some(archive_name.to_string()),
-            cursor_index: if is_search_source(&parent_source_id) { Some(cursor_pos) } else { None },
+            cursor_index: if is_search_source(&parent_source_id) {
+                Some(cursor_pos)
+            } else {
+                None
+            },
             parent_shadow: prev_shadow.map(Box::new),
         };
 
@@ -282,6 +483,8 @@ async fn enter_7z_archive(
                     shadow: true,
                     icon_name: None,
                     sort_priority: 100,
+                    read_only: false,
+                    peer_id: None,
                 },
             );
         }
@@ -361,17 +564,27 @@ async fn enter_zip_archive(
         let mut state_guard = ctx.state.lock().await;
 
         // Read panel info before mutating.
-        let (parent_source_id, parent_path, prev_shadow, cursor_pos) = match state_guard.panels.get(panel_id) {
-            Some(p) => (p.source_id.clone(), p.path.clone(), p.shadow_source.clone(), p.cursor),
-            None => return,
-        };
+        let (parent_source_id, parent_path, prev_shadow, cursor_pos) =
+            match state_guard.panels.get(panel_id) {
+                Some(p) => (
+                    p.source_id.clone(),
+                    p.path.clone(),
+                    p.shadow_source.clone(),
+                    p.cursor,
+                ),
+                None => return,
+            };
 
         let shadow = ShadowSource {
             parent_source_id: parent_source_id.clone(),
             parent_path,
             archive_path: archive_path.to_string(),
             cursor_hint: Some(archive_name.to_string()),
-            cursor_index: if is_search_source(&parent_source_id) { Some(cursor_pos) } else { None },
+            cursor_index: if is_search_source(&parent_source_id) {
+                Some(cursor_pos)
+            } else {
+                None
+            },
             parent_shadow: prev_shadow.map(Box::new),
         };
 
@@ -395,6 +608,8 @@ async fn enter_zip_archive(
                     shadow: true,
                     icon_name: None,
                     sort_priority: 100,
+                    read_only: false,
+                    peer_id: None,
                 },
             );
         }
@@ -569,6 +784,259 @@ async fn navigate_source_root(scope: &Value, ctx: &mut IntentContext<'_>) {
     .await;
 }
 
+async fn open_path_in_right_panel(args: &Value, ctx: &mut IntentContext<'_>) {
+    use tauri::Manager;
+
+    let parsed = OpenPathArgs::from_args(args);
+    let requested = {
+        let state_guard = ctx.state.lock().await;
+        normalize_requested_path(&parsed.path, &parsed.cwd, &state_guard.platform.home_dir())
+    };
+
+    let metadata = match std::fs::metadata(&requested) {
+        Ok(metadata) => metadata,
+        Err(_) => {
+            emit_cli_open_error(
+                format!("Path does not exist: {}", requested.to_string_lossy()),
+                ctx,
+            )
+            .await;
+            return;
+        }
+    };
+
+    let (target_dir, cursor_hint) = if metadata.is_dir() {
+        (requested, None)
+    } else if metadata.is_file() {
+        let Some(parent) = requested
+            .parent()
+            .filter(|path| !path.as_os_str().is_empty())
+        else {
+            emit_cli_open_error("File has no parent directory.", ctx).await;
+            return;
+        };
+        (
+            parent.to_path_buf(),
+            requested
+                .file_name()
+                .map(|name| name.to_string_lossy().to_string()),
+        )
+    } else {
+        emit_cli_open_error("Path is not a directory or file.", ctx).await;
+        return;
+    };
+
+    let target_dir = std::fs::canonicalize(&target_dir).unwrap_or(target_dir);
+    let target_path = target_dir.to_string_lossy().to_string();
+
+    let (slot_id, source_id) = {
+        let state_guard = ctx.state.lock().await;
+        let source_id = match source_for_local_path(&state_guard, &target_path) {
+            Some(source_id) => source_id,
+            None => {
+                drop(state_guard);
+                emit_cli_open_error(
+                    format!("No mounted local source contains: {target_path}"),
+                    ctx,
+                )
+                .await;
+                return;
+            }
+        };
+        let slot_id = if state_guard.slots.contains_key("right") {
+            "right".to_string()
+        } else {
+            state_guard
+                .layout_slots
+                .last()
+                .cloned()
+                .unwrap_or_else(|| "right".to_string())
+        };
+        (slot_id, source_id)
+    };
+
+    let _ = ctx.app_handle.get_webview_window("main").map(|window| {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    });
+
+    let target_panel_id = if parsed.create_tab {
+        match create_right_listing_tab(&slot_id, &source_id, &target_path, ctx).await {
+            Some(panel_id) => panel_id,
+            None => {
+                emit_cli_open_error("Could not create a right-panel tab.", ctx).await;
+                return;
+            }
+        }
+    } else {
+        match reuse_right_listing_panel(&slot_id, &source_id, ctx).await {
+            Some(panel_id) => panel_id,
+            None => {
+                emit_cli_open_error("Could not find a right panel to open the path.", ctx).await;
+                return;
+            }
+        }
+    };
+
+    let _ = ctx
+        .tx
+        .send(ServerMessage::NavigateOk {
+            timestamp: now(),
+            panel_id: target_panel_id.clone(),
+        })
+        .await;
+
+    navigate_to(
+        &target_panel_id,
+        &target_path,
+        cursor_hint,
+        None,
+        ctx.state,
+        ctx.tx,
+        ctx.scan_handles,
+        ctx.dir_size_queue,
+        ctx.watcher_cmd_tx,
+    )
+    .await;
+}
+
+async fn reuse_right_listing_panel(
+    slot_id: &str,
+    source_id: &str,
+    ctx: &mut IntentContext<'_>,
+) -> Option<String> {
+    let panel_id = {
+        let mut state_guard = ctx.state.lock().await;
+        let slot = state_guard.slots.get(slot_id)?.clone();
+        let panel_id = slot
+            .tab_panel_ids
+            .iter()
+            .find(|id| {
+                state_guard
+                    .panels
+                    .get(*id)
+                    .map(|panel| panel.tab_kind == TabKind::Listing)
+                    .unwrap_or(false)
+            })
+            .cloned()
+            .unwrap_or(slot.active_panel_id);
+        if let Some(slot) = state_guard.slots.get_mut(slot_id) {
+            slot.active_panel_id = panel_id.clone();
+        }
+        if let Some(panel) = state_guard.panels.get_mut(&panel_id) {
+            panel
+                .source_paths
+                .insert(panel.source_id.clone(), panel.path.clone());
+            panel.source_id = source_id.to_string();
+            panel.shadow_source = None;
+            panel.tab_kind = TabKind::Listing;
+            panel.terminal_session = None;
+        }
+        state_guard.focus = panel_id.clone();
+        panel_id
+    };
+
+    broadcast_slot_change(ctx, slot_id, None, Some(&panel_id)).await;
+    Some(panel_id)
+}
+
+async fn create_right_listing_tab(
+    slot_id: &str,
+    source_id: &str,
+    path: &str,
+    ctx: &mut IntentContext<'_>,
+) -> Option<String> {
+    let (panel_id, driver_is_local) = {
+        let mut state_guard = ctx.state.lock().await;
+        let slot = state_guard.slots.get(slot_id)?.clone();
+        let panel_ids: HashSet<String> = state_guard.panels.keys().cloned().collect();
+        let mut n = 1u64;
+        let panel_id = loop {
+            let candidate = format!("{slot_id}-tab-{n}");
+            if !panel_ids.contains(&candidate) {
+                break candidate;
+            }
+            n += 1;
+        };
+
+        let base = state_guard.panels.get(&slot.active_panel_id).cloned();
+        let driver = state_guard.drivers.get(source_id).cloned()?;
+        let supports_thumbs = driver.supports_thumbnails();
+        let default_sort = crate::ws::protocol::SortSpec {
+            by: "name".to_string(),
+            order: "asc".to_string(),
+        };
+        let view_mode = if supports_thumbs {
+            base.as_ref()
+                .map(|panel| panel.view_mode)
+                .unwrap_or(PanelViewMode::List)
+        } else {
+            PanelViewMode::List
+        };
+        let panel = Panel {
+            panel_id: panel_id.clone(),
+            slot_id: slot_id.to_string(),
+            tab_kind: TabKind::Listing,
+            tab_title_override: None,
+            source_id: source_id.to_string(),
+            path: path.to_string(),
+            status: PanelStatus::Loading,
+            sort: base
+                .as_ref()
+                .map(|panel| panel.sort.clone())
+                .unwrap_or(default_sort),
+            filter: None,
+            filter_mode_active: false,
+            show_hidden: base
+                .as_ref()
+                .map(|panel| panel.show_hidden)
+                .unwrap_or(state_guard.settings.general.show_hidden_default),
+            view_mode,
+            cursor: 0,
+            selection: vec![],
+            entries: vec![],
+            version: 0,
+            calculating_size: Default::default(),
+            windowed: false,
+            window_start: 0,
+            window_count: 0,
+            window_version: 0,
+            source_paths: base
+                .as_ref()
+                .map(|panel| panel.source_paths.clone())
+                .unwrap_or_default(),
+            shadow_source: None,
+            terminal_session: None,
+        };
+
+        state_guard.panels.insert(panel_id.clone(), panel);
+        if let Some(slot) = state_guard.slots.get_mut(slot_id) {
+            let active_idx = slot
+                .tab_panel_ids
+                .iter()
+                .position(|id| id == &slot.active_panel_id)
+                .unwrap_or(slot.tab_panel_ids.len().saturating_sub(1));
+            slot.tab_panel_ids.insert(active_idx + 1, panel_id.clone());
+            slot.active_panel_id = panel_id.clone();
+        }
+        state_guard.focus = panel_id.clone();
+        (panel_id, driver.is_local())
+    };
+
+    broadcast_slot_change(ctx, slot_id, Some(&panel_id), Some(&panel_id)).await;
+    if driver_is_local {
+        let _ = ctx
+            .watcher_cmd_tx
+            .send(WatcherCommand::Watch {
+                panel_id: panel_id.clone(),
+                path: PathBuf::from(path),
+            })
+            .await;
+    }
+    Some(panel_id)
+}
+
 async fn navigate_panel_to(args: &Value, ctx: &mut IntentContext<'_>) {
     let parsed = NavigatePanelArgs::from_args(args);
     if parsed.panel_id.is_empty() {
@@ -586,7 +1054,11 @@ async fn navigate_panel_to(args: &Value, ctx: &mut IntentContext<'_>) {
                 let is_archive = state_guard
                     .sources
                     .get(&panel.source_id)
-                    .map(|s| s.supports.iter().any(|c| c == crate::ws::intents::CAP_INTERNAL_NAV))
+                    .map(|s| {
+                        s.supports
+                            .iter()
+                            .any(|c| c == crate::ws::intents::CAP_INTERNAL_NAV)
+                    })
                     .unwrap_or(false);
                 if is_archive {
                     Some(parsed.path.trim().to_string())
@@ -636,7 +1108,8 @@ async fn navigate_panel_to(args: &Value, ctx: &mut IntentContext<'_>) {
                         .send(ServerMessage::Error {
                             timestamp: now(),
                             code: "NAVIGATE_FAILED".to_string(),
-                            message: "Cannot navigate to a path while browsing an archive.".to_string(),
+                            message: "Cannot navigate to a path while browsing an archive."
+                                .to_string(),
                             recoverable: true,
                             extra: Some(serde_json::json!({ "panelId": parsed.panel_id })),
                         })
@@ -739,18 +1212,24 @@ async fn navigate_panel_to(args: &Value, ctx: &mut IntentContext<'_>) {
 
 async fn open_file(scope: &Value, ctx: &mut IntentContext<'_>) {
     let panel_id = resolve_panel_id(scope, ctx.state).await;
-    let (path, entry, platform, shadow_source, source_id) = {
+    let (path, entry, platform, shadow_source, source_id, source_kind) = {
         let state_guard = ctx.state.lock().await;
         let panel = match state_guard.panels.get(&panel_id) {
             Some(panel) => panel,
             None => return,
         };
+        let source_kind = state_guard
+            .sources
+            .get(&panel.source_id)
+            .map(|source| source.kind.clone())
+            .unwrap_or_default();
         (
             panel.path.clone(),
             panel.entries.get(panel.cursor).cloned(),
             Arc::clone(&state_guard.platform),
             panel.shadow_source.clone(),
             panel.source_id.clone(),
+            source_kind,
         )
     };
     if let Some(entry) = entry {
@@ -769,11 +1248,20 @@ async fn open_file(scope: &Value, ctx: &mut IntentContext<'_>) {
                         })
                         .and_then(|sd| sd.resolve_real_info(&entry.name))
                         .map(|(fp, _)| fp)
-                        .unwrap_or_else(|| {
-                            format!("{}/{}", path.trim_end_matches('/'), entry.name)
-                        })
+                        .unwrap_or_else(|| format!("{}/{}", path.trim_end_matches('/'), entry.name))
                 };
                 platform.open_file(&real_full_path);
+            } else if source_kind == "remote" {
+                let _ = ctx
+                    .tx
+                    .send(ServerMessage::Error {
+                        timestamp: now(),
+                        code: "REMOTE_OPEN_UNSUPPORTED".to_string(),
+                        message: "Remote files can be viewed in fbro, but cannot be opened by the OS directly".to_string(),
+                        recoverable: true,
+                        extra: None,
+                    })
+                    .await;
             } else if shadow_source.is_some() {
                 // Inside an archive: extract to temp file and open.
                 let inner_path = if path.is_empty() {
@@ -787,14 +1275,14 @@ async fn open_file(scope: &Value, ctx: &mut IntentContext<'_>) {
                     let extract_result = if let Some(zip_driver) = driver
                         .as_ref()
                         .as_any()
-                        .downcast_ref::<crate::vfs::zip::ZipFsDriver>()
-                    {
+                        .downcast_ref::<crate::vfs::zip::ZipFsDriver>(
+                    ) {
                         Some(zip_driver.extract_to_temp(&inner_path))
                     } else if let Some(sz_driver) = driver
                         .as_ref()
                         .as_any()
-                        .downcast_ref::<crate::vfs::seven_zip::SevenZipFsDriver>()
-                    {
+                        .downcast_ref::<crate::vfs::seven_zip::SevenZipFsDriver>(
+                    ) {
                         Some(sz_driver.extract_to_temp(&inner_path))
                     } else {
                         None
@@ -1297,38 +1785,57 @@ async fn navigate_to_history_entry(args: &Value, ctx: &mut IntentContext<'_>) {
 
         // The driver is removed when the user exits an archive (teardown_shadow_source),
         // so re-mount it from disk if it is no longer in state.
-        let needs_mount = !ctx.state.lock().await.drivers.contains_key(&target_source_id);
+        let needs_mount = !ctx
+            .state
+            .lock()
+            .await
+            .drivers
+            .contains_key(&target_source_id);
         if needs_mount {
             let driver: Arc<dyn VfsDriver> = if target_source_id.starts_with("7z:") {
                 match crate::vfs::seven_zip::SevenZipFsDriver::new(&archive_path) {
                     Ok(d) => Arc::new(d),
-                    Err(e) => { let _ = send_unavailable(&format!("Cannot open archive: {e}")); return; }
+                    Err(e) => {
+                        let _ = send_unavailable(&format!("Cannot open archive: {e}"));
+                        return;
+                    }
                 }
             } else {
                 match crate::vfs::zip::ZipFsDriver::new(&archive_path) {
                     Ok(d) => Arc::new(d),
-                    Err(e) => { let _ = send_unavailable(&format!("Cannot open archive: {e}")); return; }
+                    Err(e) => {
+                        let _ = send_unavailable(&format!("Cannot open archive: {e}"));
+                        return;
+                    }
                 }
             };
             let mut guard = ctx.state.lock().await;
-            guard.sources.entry(target_source_id.clone()).or_insert_with(|| Source {
-                id: target_source_id.clone(),
-                name: archive_name.clone(),
-                kind: "virtual".to_string(),
-                supports: vec![
-                    "ListEntries".to_string(),
-                    "OpenFolder".to_string(),
-                    "CopySelection".to_string(),
-                    crate::ws::intents::CAP_INTERNAL_NAV.to_string(),
-                ],
-                root_path: String::new(),
-                mounted: true,
-                device_path: None,
-                shadow: true,
-                icon_name: None,
-                sort_priority: 100,
-            });
-            guard.drivers.entry(target_source_id.clone()).or_insert(driver);
+            guard
+                .sources
+                .entry(target_source_id.clone())
+                .or_insert_with(|| Source {
+                    id: target_source_id.clone(),
+                    name: archive_name.clone(),
+                    kind: "virtual".to_string(),
+                    supports: vec![
+                        "ListEntries".to_string(),
+                        "OpenFolder".to_string(),
+                        "CopySelection".to_string(),
+                        crate::ws::intents::CAP_INTERNAL_NAV.to_string(),
+                    ],
+                    root_path: String::new(),
+                    mounted: true,
+                    device_path: None,
+                    shadow: true,
+                    icon_name: None,
+                    sort_priority: 100,
+                    read_only: false,
+                    peer_id: None,
+                });
+            guard
+                .drivers
+                .entry(target_source_id.clone())
+                .or_insert(driver);
         }
 
         // Notify the FE of the (possibly newly registered) archive source.
@@ -1384,7 +1891,12 @@ async fn navigate_to_history_entry(args: &Value, ctx: &mut IntentContext<'_>) {
         .await;
     } else if is_search_source(&target_source_id) {
         // Search source: must still be available.
-        let driver_exists = ctx.state.lock().await.drivers.contains_key(&target_source_id);
+        let driver_exists = ctx
+            .state
+            .lock()
+            .await
+            .drivers
+            .contains_key(&target_source_id);
         if !driver_exists {
             let _ = send_unavailable("Search results are no longer available.");
             return;
@@ -1427,7 +1939,12 @@ async fn navigate_to_history_entry(args: &Value, ctx: &mut IntentContext<'_>) {
         .await;
     } else {
         // Regular source switch.
-        let driver_exists = ctx.state.lock().await.drivers.contains_key(&target_source_id);
+        let driver_exists = ctx
+            .state
+            .lock()
+            .await
+            .drivers
+            .contains_key(&target_source_id);
         if !driver_exists {
             let _ = send_unavailable("Source is no longer available.");
             return;

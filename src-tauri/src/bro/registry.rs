@@ -5,7 +5,11 @@ use crate::bro::model::{BroInputItem, ResolvedBro};
 use crate::bro::pre::rank_bros;
 use crate::bro::providers::{builtin_providers, BroDiscoveryContext};
 
-pub fn list_bros(inputs: &[BroInputItem], suggested_output_dir: Option<&str>, source_id: Option<&str>) -> Vec<ResolvedBro> {
+pub fn list_bros(
+    inputs: &[BroInputItem],
+    suggested_output_dir: Option<&str>,
+    source_id: Option<&str>,
+) -> Vec<ResolvedBro> {
     let ctx = BroDiscoveryContext {
         inputs,
         suggested_output_dir,

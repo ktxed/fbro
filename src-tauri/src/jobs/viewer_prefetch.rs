@@ -8,7 +8,7 @@ pub const PREFETCH_N: usize = 5;
 // Match the FE's initial request sizes exactly.
 pub const PREFETCH_IMAGE_CAP: usize = 10 * 1024 * 1024; // 10 MiB — IMAGE_LIMIT (baseline)
 const PREFETCH_OTHER_CAP: usize = 1 * 1024 * 1024; // 1 MiB — SMALL_LIMIT
-// For large non-image files (> IMAGE_CAP): preload just enough for the initial hex view.
+                                                   // For large non-image files (> IMAGE_CAP): preload just enough for the initial hex view.
 const PREFETCH_HEX_CAP: usize = 64 * 1024; // 64 KiB — matches FE CHUNK_SIZE
 
 // Keep at most this many entries to bound memory usage.

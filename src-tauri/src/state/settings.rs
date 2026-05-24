@@ -109,4 +109,3 @@ pub fn save(settings: &Settings) -> std::io::Result<()> {
     std::fs::rename(tmp, path)?;
     Ok(())
 }
-

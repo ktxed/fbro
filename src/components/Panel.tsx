@@ -9,7 +9,7 @@ import {
   PANEL_SHORTCUT_COMMAND_IDS,
 } from "../commands/interactive";
 import { useAppDispatch, useAppState } from "../store";
-import { IconChevronDown, IconChevronUp, IconChevronRight, IconChevronLeft, IconArrowUpRight, IconX, IconAlertTriangle, IconActivity } from "@tabler/icons-react";
+import { IconChevronDown, IconChevronUp, IconChevronRight, IconChevronLeft, IconArrowUpRight, IconX, IconAlertTriangle, IconActivity, IconLock, IconNetwork } from "@tabler/icons-react";
 
 // Maps Source.iconName (BE-provided) to a Tabler icon component for rendering
 // in the volume bar. Sources with an iconName render the icon in place of
@@ -87,15 +87,19 @@ interface PanelProps {
   externalDragHovered: boolean;
 }
 
-function VolumeHeader({ sources, panel, onNavigateToSource, onMountSource }: {
+function VolumeHeader({ sources, panel, onNavigateToSource, onMountSource, client }: {
   sources: Record<string, Source>;
   panel: PanelState;
   onNavigateToSource: (sourceId: string) => void;
   onMountSource: (sourceId: string) => void;
+  client: WsClient;
 }) {
+  const remoteStatus = useAppState().remoteSourceStatus;
   const listRef = useRef<HTMLDivElement>(null);
   const [canLeft, setCanLeft] = useState(false);
   const [canRight, setCanRight] = useState(false);
+  const [expandedRemoteIds, setExpandedRemoteIds] = useState<Set<string>>(() => new Set());
+  const [overflowingRemoteIds, setOverflowingRemoteIds] = useState<Set<string>>(() => new Set());
 
   const updateArrows = () => {
     const el = listRef.current;
@@ -108,6 +112,37 @@ function VolumeHeader({ sources, panel, onNavigateToSource, onMountSource }: {
     const id = setTimeout(updateArrows, 0);
     return () => clearTimeout(id);
   }, [sources]);
+
+  const updateRemoteOverflow = useCallback(() => {
+    const el = listRef.current;
+    if (!el) return;
+    setOverflowingRemoteIds((current) => {
+      const next = new Set<string>();
+      el.querySelectorAll<HTMLElement>(".panel__remote-volume").forEach((node) => {
+        const sourceId = node.dataset.sourceId;
+        const label = node.querySelector<HTMLElement>(".panel__volume-btn-label");
+        if (!sourceId || !label) return;
+        if (expandedRemoteIds.has(sourceId)) {
+          if (current.has(sourceId)) next.add(sourceId);
+          return;
+        }
+        if (label.scrollWidth > label.clientWidth + 1) {
+          next.add(sourceId);
+        }
+      });
+      if (next.size === current.size && [...next].every((id) => current.has(id))) {
+        return current;
+      }
+      return next;
+    });
+  }, [expandedRemoteIds]);
+
+  useLayoutEffect(() => {
+    updateRemoteOverflow();
+    const onResize = () => updateRemoteOverflow();
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [sources, expandedRemoteIds, updateRemoteOverflow]);
 
   const scroll = (dir: number) => {
     listRef.current?.scrollBy({ left: dir * 80, behavior: "smooth" });
@@ -127,21 +162,92 @@ function VolumeHeader({ sources, panel, onNavigateToSource, onMountSource }: {
         {Object.values(sources).filter(src => !src.shadow).map(src => {
           const Icon = src.iconName ? SOURCE_ICONS[src.iconName] : undefined;
           const isVirtual = src.kind === "virtual";
+          const isRemote = src.kind === "remote";
+          const status = isRemote ? remoteStatus[src.id] : undefined;
+          // The reducer drops the entry when "connected" — anything we
+          // see here means the supervisor is unhappy.
+          const isDegraded = !!status;
           const classes = [
             "panel__volume-btn",
             src.id === panel.sourceId ? "panel__volume-btn--active" : "",
             !src.mounted ? "panel__volume-btn--unmounted" : "",
             Icon ? "panel__volume-btn--icon-only" : "",
             isVirtual ? "panel__volume-btn--virtual" : "",
+            isRemote ? "panel__volume-btn--remote" : "",
+            isDegraded ? `panel__volume-btn--${status!.status}` : "",
           ].filter(Boolean).join(" ");
+          const baseTitle = src.mounted
+            ? isRemote && src.peer
+              ? `Remote source:\n\t${src.name}\nPeer: \n\t${src.peer.name}${src.peer.os ? ` (${src.peer.os})` : ""}\nAccess: read-only`
+              : (Icon ? src.name : src.rootPath)
+            : `${src.name} (unmounted — click to mount)`;
+          const title = isDegraded
+            ? `${baseTitle}\n${status!.status}${status!.message ? `: ${status!.message}` : ""}\nClick to reconnect now.`
+            : baseTitle;
+          const onClick = () => {
+            if (isDegraded) {
+              client.sendIntent("ReconnectRemoteSource", undefined, { sourceId: src.id });
+              return;
+            }
+            if (src.mounted) onNavigateToSource(src.id);
+            else onMountSource(src.id);
+          };
+          if (isRemote) {
+            const expanded = expandedRemoteIds.has(src.id);
+            const canExpand = overflowingRemoteIds.has(src.id);
+            const toggleExpanded = () => {
+              setExpandedRemoteIds((current) => {
+                const next = new Set(current);
+                if (next.has(src.id)) next.delete(src.id);
+                else next.add(src.id);
+                return next;
+              });
+            };
+            return (
+              <span
+                key={src.id}
+                data-source-id={src.id}
+                className={`panel__remote-volume${src.id === panel.sourceId ? " panel__remote-volume--active" : ""}${canExpand ? " panel__remote-volume--expandable" : ""}${expanded ? " panel__remote-volume--expanded" : ""}${isDegraded ? ` panel__remote-volume--${status!.status}` : ""}`}
+                title={title}
+              >
+                <button
+                  className={classes}
+                  tabIndex={-1}
+                  onClick={onClick}
+                  title={title}
+                >
+                  <IconNetwork size={13} className="panel__volume-btn-net" aria-hidden />
+                  {!isDegraded && <IconLock size={12} className="panel__volume-btn-lock" aria-hidden />}
+                  <span className="panel__volume-btn-label">{src.name}</span>
+                  {isDegraded && (
+                    <span className="panel__volume-btn-spinner" aria-hidden title="Reconnecting — click to retry">
+                      ⟳
+                    </span>
+                  )}
+                </button>
+                {canExpand && (
+                  <button
+                    className="panel__remote-volume-toggle"
+                    tabIndex={-1}
+                    onClick={toggleExpanded}
+                    title={expanded ? "Collapse remote volume label" : "Expand remote volume label"}
+                  >
+                    {expanded ? "<<" : ">>"}
+                  </button>
+                )}
+              </span>
+            );
+          }
           return (
             <button
               key={src.id}
               className={classes}
               tabIndex={-1}
-              onClick={() => src.mounted ? onNavigateToSource(src.id) : onMountSource(src.id)}
-              title={src.mounted ? (Icon ? src.name : src.rootPath) : `${src.name} (unmounted — click to mount)`}
-            >{Icon ? <Icon size={14} /> : src.name}</button>
+              onClick={onClick}
+              title={title}
+            >
+              {Icon ? <Icon size={14} /> : src.name}
+            </button>
           );
         })}
       </div>
@@ -891,6 +997,25 @@ export function Panel({
     return `${dir}/${entry.name}`;
   };
 
+  const openEntry = (entry: VFSEntry, absIndex: number) => {
+    dispatch({ type: "CLOSE_CONTEXT_MENU" });
+    client.sendIntent("SetCursor", "focused-panel", { index: absIndex });
+    if (entry.kind === "directory") {
+      client.sendIntent("OpenEntry", "focused-panel");
+      return;
+    }
+    if (source?.kind === "remote") {
+      client.sendIntent("ViewFile", undefined, {
+        panelId,
+        path: panel.path,
+        sourceId: panel.sourceId,
+        filename: entry.name,
+      });
+      return;
+    }
+    client.sendIntent("OpenFile", "focused-panel");
+  };
+
   function rowEventHandlers(entry: VFSEntry, absIndex: number) {
     return {
       onMouseDown: (e: React.MouseEvent) => {
@@ -952,13 +1077,7 @@ export function Panel({
         }
       },
       onDoubleClick: () => {
-        dispatch({ type: "CLOSE_CONTEXT_MENU" });
-        client.sendIntent("SetCursor", "focused-panel", { index: absIndex });
-        if (entry.kind !== "directory") {
-          client.sendIntent("OpenFile", "focused-panel");
-        } else {
-          client.sendIntent("OpenEntry", "focused-panel");
-        }
+        openEntry(entry, absIndex);
       },
     };
   }
@@ -1126,13 +1245,7 @@ export function Panel({
           }
         }}
         onDoubleClick={() => {
-          dispatch({ type: "CLOSE_CONTEXT_MENU" });
-          client.sendIntent("SetCursor", "focused-panel", { index: absIndex });
-          if (entry.kind !== "directory") {
-            client.sendIntent("OpenFile", "focused-panel");
-          } else {
-            client.sendIntent("OpenEntry", "focused-panel");
-          }
+          openEntry(entry, absIndex);
         }}
       >
         <EntryIcon entry={entry} />
@@ -1275,7 +1388,7 @@ export function Panel({
         )}
       </div>
 
-      <VolumeHeader sources={sources} panel={panel} onNavigateToSource={(sourceId) => { shouldFocusFilterRef.current = false; client.sendIntent("NavigateToSource", panelId, { sourceId }); }} onMountSource={(sourceId) => { shouldFocusFilterRef.current = false; client.sendIntent("MountSource", panelId, { sourceId }); }} />
+      <VolumeHeader sources={sources} panel={panel} client={client} onNavigateToSource={(sourceId) => { shouldFocusFilterRef.current = false; client.sendIntent("NavigateToSource", panelId, { sourceId }); }} onMountSource={(sourceId) => { shouldFocusFilterRef.current = false; client.sendIntent("MountSource", panelId, { sourceId }); }} />
 
       <SortHeader sort={panel.sort} panelId={panelId} client={client} />
 

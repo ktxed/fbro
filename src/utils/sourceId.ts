@@ -6,6 +6,10 @@ export function isSearchSourceId(sourceId: string): boolean {
   return sourceId.startsWith("search:");
 }
 
+export function isRemoteSourceId(sourceId: string): boolean {
+  return sourceId.startsWith("remote:");
+}
+
 /** Strips the "zip:" or "7z:" prefix and returns the filesystem path to the archive. */
 export function archiveFilePath(sourceId: string): string {
   if (sourceId.startsWith("zip:")) return sourceId.slice(4);

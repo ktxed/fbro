@@ -4,9 +4,11 @@ use serde_json::Value;
 
 use crate::state::{ShadowSource, Source};
 use crate::vfs::VfsDriver;
-use crate::ws::protocol::now;
 use crate::ws::intents::navigation::teardown_shadow_source;
-use crate::ws::runtime::{build_sources_json, navigate_to, rescan_panel, resolve_panel_id, IntentContext};
+use crate::ws::protocol::now;
+use crate::ws::runtime::{
+    build_sources_json, navigate_to, rescan_panel, resolve_panel_id, IntentContext,
+};
 
 pub async fn handle(name: &str, scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
     match name {
@@ -86,6 +88,8 @@ async fn enter_history_source(scope: &Value, args: &Value, ctx: &mut IntentConte
                 shadow: true,
                 icon_name: None,
                 sort_priority: 100,
+                read_only: false,
+                peer_id: None,
             },
         );
         state_guard

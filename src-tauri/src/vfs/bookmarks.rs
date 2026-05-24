@@ -62,7 +62,9 @@ impl VfsDriver for BookmarksDriver {
 
         // Sort by name
         match (sort.by.as_str(), sort.order.as_str()) {
-            ("name", "desc") => entries.sort_by(|a, b| b.name.to_lowercase().cmp(&a.name.to_lowercase())),
+            ("name", "desc") => {
+                entries.sort_by(|a, b| b.name.to_lowercase().cmp(&a.name.to_lowercase()))
+            }
             _ => entries.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase())),
         }
 
@@ -85,23 +87,33 @@ impl VfsDriver for BookmarksDriver {
     }
 
     fn open_read(&self, _path: &str) -> Result<Box<dyn Read + Send>, VfsError> {
-        Err(VfsError::NotSupported("bookmarks source is read-only".into()))
+        Err(VfsError::NotSupported(
+            "bookmarks source is read-only".into(),
+        ))
     }
 
     fn open_write(&self, _path: &str) -> Result<Box<dyn Write + Send>, VfsError> {
-        Err(VfsError::NotSupported("bookmarks source is read-only".into()))
+        Err(VfsError::NotSupported(
+            "bookmarks source is read-only".into(),
+        ))
     }
 
     fn create_dir_all(&self, _path: &str) -> Result<(), VfsError> {
-        Err(VfsError::NotSupported("bookmarks source is read-only".into()))
+        Err(VfsError::NotSupported(
+            "bookmarks source is read-only".into(),
+        ))
     }
 
     fn remove_file(&self, _path: &str) -> Result<(), VfsError> {
-        Err(VfsError::NotSupported("bookmarks source is read-only".into()))
+        Err(VfsError::NotSupported(
+            "bookmarks source is read-only".into(),
+        ))
     }
 
     fn remove_dir_all(&self, _path: &str) -> Result<(), VfsError> {
-        Err(VfsError::NotSupported("bookmarks source is read-only".into()))
+        Err(VfsError::NotSupported(
+            "bookmarks source is read-only".into(),
+        ))
     }
 
     fn exists(&self, _path: &str) -> bool {
@@ -117,6 +129,8 @@ impl VfsDriver for BookmarksDriver {
     }
 
     fn read_chunk(&self, _path: &str, _offset: u64, _size: usize) -> Result<Vec<u8>, VfsError> {
-        Err(VfsError::NotSupported("bookmarks source is read-only".into()))
+        Err(VfsError::NotSupported(
+            "bookmarks source is read-only".into(),
+        ))
     }
 }

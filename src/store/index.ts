@@ -35,6 +35,10 @@ import type {
   GeneralSettings,
   SettingsState,
   TerminalClosedMessage,
+  DiscoveredPeer,
+  ShareConfig,
+  PendingPairing,
+  RemoteSourceStatus,
 } from "../ws/types";
 
 // ─── State ───────────────────────────────────────────────────────────────────
@@ -170,7 +174,7 @@ export interface PendingSearch {
   searchParams: SearchParams | null;
 }
 
-export type SettingsTab = "general" | "display";
+export type SettingsTab = "general" | "display" | "sharing";
 
 export interface PendingAttributes {
   panelId: string;
@@ -216,6 +220,19 @@ export interface AppState {
   pendingAttributes: PendingAttributes | null;
   pendingSettings: PendingSettings | null;
   commandPaletteOpen: boolean;
+  /** mDNS-discovered fbro peers on the LAN. Updated via
+   *  `StatePatch { domain: "discoveredPeers" }`. */
+  discoveredPeers: DiscoveredPeer[];
+  /** Sharing toggle, shared sources, paired-peer list. Updated via
+   *  `StatePatch { domain: "shareConfig" }`. */
+  shareConfig: ShareConfig;
+  /** Active pairing handshake awaiting user confirmation. Set on
+   *  `PairingRequested`, cleared on `PairingResolved`. */
+  pendingPairing: PendingPairing | null;
+  /** Live connection status per mounted remote source. Updated by
+   *  `RemoteSourceStatus` events from the BE's SFTP supervisor.
+   *  Missing keys are implicitly "connected" / unknown. */
+  remoteSourceStatus: Record<string, RemoteSourceStatus>;
   transientHint: { message: string; token: number } | null;
   embeddedViewer: { sourceSlotId: string } | null;
   cacheStatus: { prefetchCache: PrefetchCacheStatus } | null;
@@ -259,6 +276,10 @@ const initialState: AppState = {
   pendingAttributes: null,
   pendingSettings: null,
   commandPaletteOpen: false,
+  discoveredPeers: [],
+  shareConfig: { enabled: false, allowIpv6: false, sharedSourceIds: [], pairedPeers: [] },
+  pendingPairing: null,
+  remoteSourceStatus: {},
 
   transientHint: null,
   embeddedViewer: null,
@@ -385,6 +406,12 @@ function applySnapshot(state: AppState, msg: StateSnapshotMessage): AppState {
   }
   if (domains.settings !== undefined) {
     next.settings = domains.settings;
+  }
+  if (domains.discoveredPeers !== undefined) {
+    next.discoveredPeers = domains.discoveredPeers;
+  }
+  if (domains.shareConfig !== undefined) {
+    next.shareConfig = domains.shareConfig;
   }
   return next;
 }
@@ -720,6 +747,29 @@ function applyPatch(state: AppState, msg: StatePatchMessage): AppState {
     return next;
   }
 
+  if (msg.domain === "discoveredPeers") {
+    const peers = (msg.patch.peers as DiscoveredPeer[]) ?? [];
+    return { ...state, discoveredPeers: peers };
+  }
+
+  if (msg.domain === "shareConfig") {
+    const enabled = msg.patch.enabled as boolean | undefined;
+    const allowIpv6 = msg.patch.allowIpv6 as boolean | undefined;
+    const sharedSourceIds = msg.patch.sharedSourceIds as string[] | undefined;
+    const pairedPeers = msg.patch.pairedPeers as ShareConfig["pairedPeers"] | undefined;
+    const fingerprint = msg.patch.fingerprint as string | undefined;
+    return {
+      ...state,
+      shareConfig: {
+        enabled: enabled ?? state.shareConfig.enabled,
+        allowIpv6: allowIpv6 ?? state.shareConfig.allowIpv6,
+        sharedSourceIds: sharedSourceIds ?? state.shareConfig.sharedSourceIds,
+        pairedPeers: pairedPeers ?? state.shareConfig.pairedPeers,
+        fingerprint: fingerprint ?? state.shareConfig.fingerprint,
+      },
+    };
+  }
+
   if (msg.domain === "procs") {
     const list = (msg.patch.procs as ChildProcess[]) ?? [];
     const map: Record<number, ChildProcess> = {};
@@ -800,12 +850,13 @@ function applyQuitConfirmRequired(state: AppState, msg: QuitConfirmRequiredMessa
 function applyJobEvent(state: AppState, msg: JobEventMessage): AppState {
   const job = state.jobs[msg.jobId];
   if (!job) return state;
+  const files = msg.files ?? job.files;
 
   let updated: Job;
 
   switch (msg.event) {
     case "Queued":
-      updated = { ...job, state: "Queued", paused: false, decision: undefined };
+      updated = { ...job, files, state: "Queued", paused: false, decision: undefined };
       break;
     case "Progress":
       if (job.kind === "search" && msg.searchProgress) {
@@ -813,6 +864,7 @@ function applyJobEvent(state: AppState, msg: JobEventMessage): AppState {
         const sp = msg.searchProgress;
         updated = {
           ...job,
+          files,
           state: "Running",
           paused: false,
           searchResults: [...(job.searchResults ?? []), ...sp.newResults],
@@ -821,24 +873,42 @@ function applyJobEvent(state: AppState, msg: JobEventMessage): AppState {
           searchCurrentPath: sp.currentPath,
         };
       } else {
-        updated = { ...job, state: "Running", paused: false, progress: msg.progress ?? job.progress, decision: undefined };
+        updated = { ...job, files, state: "Running", paused: false, progress: msg.progress ?? job.progress, decision: undefined };
       }
       break;
     case "DecisionRequired":
-      updated = { ...job, state: "AwaitingDecision", decision: msg.decision };
+      updated = { ...job, files, state: "AwaitingDecision", decision: msg.decision };
       break;
     case "Paused":
-      updated = { ...job, paused: true };
+      updated = { ...job, files, paused: true };
       break;
     case "Resumed":
-      updated = { ...job, paused: false };
+      updated = { ...job, files, paused: false };
       break;
     case "Completed":
+      const completedProgress = job.progress
+        ? {
+            ...job.progress,
+            completedFiles: job.progress.totalFiles || job.progress.completedFiles,
+            currentFile: undefined,
+            statusText: job.kind === "outgoing-transfer"
+              ? "Outgoing transfer completed"
+              : job.kind === "fp-bro"
+                ? "Bro completed successfully"
+                : "Operation completed successfully",
+            currentFileBytesCopied: job.progress.currentFileBytesTotal || job.progress.currentFileBytesCopied,
+            totalBytesCopied: job.progress.totalBytesTotal || job.progress.totalBytesCopied,
+            currentFilePercent: 100,
+            overallPercent: 100,
+          }
+        : job.progress;
       updated = {
         ...job,
+        files,
         state: "Completed",
         paused: false,
         decision: undefined,
+        progress: completedProgress,
         resultPath: msg.resultPath ?? job.resultPath,
         resultPanelId: msg.resultPanelId ?? job.resultPanelId,
       };
@@ -846,6 +916,7 @@ function applyJobEvent(state: AppState, msg: JobEventMessage): AppState {
     case "Failed":
       updated = {
         ...job,
+        files,
         state: "Failed",
         paused: false,
         error: msg.error,
@@ -857,6 +928,7 @@ function applyJobEvent(state: AppState, msg: JobEventMessage): AppState {
     case "Cancelled":
       updated = {
         ...job,
+        files,
         state: "Cancelled",
         paused: false,
         decision: undefined,
@@ -1000,6 +1072,18 @@ function reducer(state: AppState, action: AppAction): AppState {
             };
           }
           if (msg.code === "BRO_LAUNCH_FAILED") {
+            return {
+              ...state,
+              transientHint: {
+                message: msg.message,
+                token: msg.timestamp,
+              },
+            };
+          }
+          // Surface remote / sharing errors as toasts. Without this they
+          // disappear silently and the user can't tell why Connect or
+          // Pair didn't do anything.
+          if (msg.code.startsWith("remote.") || msg.code.startsWith("sharing.")) {
             return {
               ...state,
               transientHint: {
@@ -1156,6 +1240,50 @@ function reducer(state: AppState, action: AppAction): AppState {
           return state.maximizedTerminalPanelId === panelId
             ? { ...next, maximizedTerminalPanelId: null }
             : next;
+        }
+        case "PairingRequested":
+          return {
+            ...state,
+            pendingPairing: {
+              handshakeId: msg.handshakeId,
+              code: msg.code,
+              name: msg.name,
+              os: msg.os,
+              pubkeyAlgo: msg.pubkeyAlgo,
+              expiresAt: msg.expiresAt,
+            },
+          };
+        case "PairingResolved":
+          // Only close the modal if it's the same handshake — a stale
+          // resolution for an earlier handshake mustn't dismiss a fresh one.
+          if (state.pendingPairing?.handshakeId !== msg.handshakeId) return state;
+          return { ...state, pendingPairing: null };
+        case "RemoteSessionStarted":
+        case "RemoteSessionEnded":
+          // No store mutation today — surface in a future "active connections"
+          // indicator. Drop intentionally to keep the reducer total.
+          return state;
+        case "RemoteSourceStatus": {
+          // Drop the entry when the source is healthy — that way the
+          // FE's "is it reconnecting?" check is a single map lookup
+          // returning undefined for the common case.
+          if (msg.status === "connected") {
+            if (!state.remoteSourceStatus[msg.sourceId]) return state;
+            const next = { ...state.remoteSourceStatus };
+            delete next[msg.sourceId];
+            return { ...state, remoteSourceStatus: next };
+          }
+          return {
+            ...state,
+            remoteSourceStatus: {
+              ...state.remoteSourceStatus,
+              [msg.sourceId]: {
+                status: msg.status,
+                message: msg.message,
+                nextRetryAt: msg.nextRetryAt,
+              },
+            },
+          };
         }
         default:
           return state;

@@ -1,5 +1,5 @@
-use crate::bro::model::{BroOption, BroPre, BroProtocol, BroSource, LaunchRecipe, ResolvedBro};
 use super::{BroDiscoveryContext, BroProvider};
+use crate::bro::model::{BroOption, BroPre, BroProtocol, BroSource, LaunchRecipe, ResolvedBro};
 
 pub struct CopyPathsProvider;
 

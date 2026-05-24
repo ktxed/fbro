@@ -116,10 +116,18 @@ pub(crate) enum LaunchArg {
     TargetNames,
     /// Writes all target paths to a temp M3U playlist file and passes `<flag><path>` as a
     /// single argument. Use this instead of TargetPaths for players that accept --playlist=.
-    TargetPlaylistFile { flag: String },
+    TargetPlaylistFile {
+        flag: String,
+    },
     OutputPath,
-    PrefixedParam { id: String, prefix: String },
-    OptionalPrefixedParam { id: String, prefix: String },
+    PrefixedParam {
+        id: String,
+        prefix: String,
+    },
+    OptionalPrefixedParam {
+        id: String,
+        prefix: String,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -214,7 +222,8 @@ impl ResolvedBro {
 
 fn write_m3u_playlist(inputs: &[BroInputItem]) -> Result<String, String> {
     let path = std::env::temp_dir().join("fbro_playlist.m3u");
-    let mut file = std::fs::File::create(&path).map_err(|e| format!("Failed to create playlist: {e}"))?;
+    let mut file =
+        std::fs::File::create(&path).map_err(|e| format!("Failed to create playlist: {e}"))?;
     writeln!(file, "#EXTM3U").map_err(|e| format!("Failed to write playlist: {e}"))?;
     for input in inputs {
         // Use file:/// URIs so players like VLC don't misparse "C:/..." as a URL scheme.

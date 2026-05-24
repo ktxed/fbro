@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use notify::event::{ModifyKind, EventKind};
+use notify::event::{EventKind, ModifyKind};
 use notify::{RecursiveMode, Watcher};
 use tokio::sync::mpsc;
 use tokio::time::{Duration, Instant};

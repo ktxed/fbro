@@ -18,7 +18,9 @@ impl BroProvider for LinuxMediaProvider {
                 "mpv",
                 program.clone(),
                 native_version(&program),
-                vec![LaunchArg::TargetPlaylistFile { flag: "--playlist=".to_string() }],
+                vec![LaunchArg::TargetPlaylistFile {
+                    flag: "--playlist=".to_string(),
+                }],
             ));
         }
 
@@ -28,7 +30,9 @@ impl BroProvider for LinuxMediaProvider {
                 "VLC",
                 program.clone(),
                 native_version(&program),
-                vec![LaunchArg::TargetPlaylistFile { flag: "".to_string() }],
+                vec![LaunchArg::TargetPlaylistFile {
+                    flag: "".to_string(),
+                }],
             ));
         }
 
@@ -86,13 +90,18 @@ fn flatpak_media_bro(app_id: &str, name: &str) -> ResolvedBro {
             protocol: BroProtocol::Fnf,
             output: None,
             params: vec![],
-            pre: BroPre { score: 0, reason: String::new() },
+            pre: BroPre {
+                score: 0,
+                reason: String::new(),
+            },
         },
         "flatpak".to_string(),
         vec![
             LaunchArg::Literal("run".to_string()),
             LaunchArg::Literal(app_id.to_string()),
-            LaunchArg::TargetPlaylistFile { flag: "--playlist=".to_string() },
+            LaunchArg::TargetPlaylistFile {
+                flag: "--playlist=".to_string(),
+            },
         ],
     )
 }

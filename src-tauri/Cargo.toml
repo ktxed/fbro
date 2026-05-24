@@ -28,6 +28,16 @@ sevenz-rust2 = { version = "0.20.2", features = ["compress", "util", "aes256"] }
 zip = "8.5.0"
 portable-pty = "0.9"
 sysinfo = "0.30"
+# Remote-fbro identity & pairing
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+sha2 = "0.10"
+hkdf = "0.12"
+base64 = "0.22"
+mdns-sd = "0.11"
+russh = "0.54"
+russh-sftp = "2.1"
+bytes = "1"
+blake3 = "1"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 png = "0.17"
@@ -38,7 +48,6 @@ zbus = { version = "5", default-features = false, features = ["tokio"] }
 gtk = "0.18.2"
 gdk = "0.18.2"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif", "bmp", "tiff"] }
-blake3 = "1"
 ffmpeg-next = { version = "7", optional = true }
 
 [features]

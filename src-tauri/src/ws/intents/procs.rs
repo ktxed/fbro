@@ -86,6 +86,8 @@ async fn enter_procs_source(scope: &Value, ctx: &mut IntentContext<'_>) {
                 shadow: true,
                 icon_name: Some("activity".to_string()),
                 sort_priority: 0,
+                read_only: false,
+                peer_id: None,
             },
         );
         state_guard

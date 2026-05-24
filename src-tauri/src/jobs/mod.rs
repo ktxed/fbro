@@ -41,6 +41,13 @@ pub enum ConflictPolicy {
     Overwrite,
 }
 
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum VerificationPolicy {
+    Fail,
+    Prompt,
+}
+
 #[derive(Clone, Debug)]
 pub struct DecisionResponse {
     pub decision: String,
@@ -92,8 +99,10 @@ pub struct FileOpProgress {
 #[derive(Clone, Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConflictDecision {
+    pub kind: Option<String>,
     pub source: String,
     pub destination: String,
+    pub message: Option<String>,
     pub options: Vec<String>,
     pub supports_apply_to_all: bool,
 }
@@ -122,6 +131,7 @@ pub enum JobKind {
     FileOp(FileOpJobMeta),
     FpBro(FpBroJobMeta),
     Search(SearchJobMeta),
+    OutgoingTransfer(OutgoingTransferJobMeta),
 }
 
 #[allow(dead_code)]
@@ -146,6 +156,12 @@ pub struct FpBroJobMeta {
     pub inputs: Vec<BroInputItem>,
     pub params: HashMap<String, String>,
     pub bro: ResolvedBro,
+}
+
+#[allow(dead_code)]
+pub struct OutgoingTransferJobMeta {
+    pub peer_fp: String,
+    pub completion_generation: u64,
 }
 
 /// Container for all active jobs in AppState.

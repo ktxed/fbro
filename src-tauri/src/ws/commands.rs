@@ -99,6 +99,13 @@ pub(crate) fn build_interactive_commands() -> Vec<InteractiveCommandSchema> {
             None,
         ),
         command(
+            "app.install_fbro_command",
+            "App",
+            "Install fbro Shell Command",
+            vec![],
+            None,
+        ),
+        command(
             "panel.navigate_source_root",
             "Navigation",
             "Go To Source Root",
@@ -398,14 +405,26 @@ pub(crate) fn build_interactive_commands() -> Vec<InteractiveCommandSchema> {
             "panel.selection.extend_left",
             "Selection",
             "Extend Selection Left",
-            vec![grid_only(keybinding_with_modifiers("ArrowLeft", true, false, false, false))],
+            vec![grid_only(keybinding_with_modifiers(
+                "ArrowLeft",
+                true,
+                false,
+                false,
+                false,
+            ))],
             None,
         ),
         command(
             "panel.selection.extend_right",
             "Selection",
             "Extend Selection Right",
-            vec![grid_only(keybinding_with_modifiers("ArrowRight", true, false, false, false))],
+            vec![grid_only(keybinding_with_modifiers(
+                "ArrowRight",
+                true,
+                false,
+                false,
+                false,
+            ))],
             None,
         ),
         command(
@@ -520,7 +539,13 @@ pub(crate) fn build_interactive_commands() -> Vec<InteractiveCommandSchema> {
             "app.settings",
             "App",
             "Settings…",
-            vec![keybinding_with_modifiers(",", false, !is_macos(), false, is_macos())],
+            vec![keybinding_with_modifiers(
+                ",",
+                false,
+                !is_macos(),
+                false,
+                is_macos(),
+            )],
             None,
         ),
         command(

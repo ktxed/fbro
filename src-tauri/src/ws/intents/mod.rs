@@ -7,7 +7,9 @@ mod jobs;
 mod navigation;
 mod panel;
 mod procs;
+mod remote;
 mod settings;
+pub(crate) mod sharing;
 mod tabs;
 mod terminal;
 mod viewer;
@@ -51,6 +53,7 @@ pub async fn dispatch(name: &str, scope: &Value, args: &Value, ctx: &mut IntentC
         | "OpenTerminal"
         | "NavigateToSource"
         | "MountSource"
+        | "OpenPathInRightPanel"
         | "NavigateUp"
         | "RevealInFileManager"
         | "ListOpenWithApps"
@@ -58,20 +61,31 @@ pub async fn dispatch(name: &str, scope: &Value, args: &Value, ctx: &mut IntentC
         | "ProvideInput"
         | "NavigateToHistoryEntry" => navigation::handle(name, scope, args, ctx).await,
         "ListBros" | "LaunchBro" | "KillProcess" => bro::handle(name, scope, args, ctx).await,
-        "StartFileOp" | "PasteExternalClipboard" | "WriteExternalClipboard"
-        | "ProvideJobDecision" | "CancelJob"
-        | "PauseJob" | "ResumeJob" | "RenameFile" | "MakeDir" | "TouchFile"
+        "StartFileOp"
+        | "PasteExternalClipboard"
+        | "WriteExternalClipboard"
+        | "ProvideJobDecision"
+        | "CancelJob"
+        | "PauseJob"
+        | "ResumeJob"
+        | "RenameFile"
+        | "MakeDir"
+        | "TouchFile"
         | "SetPermissions"
-        | "StartSearch" | "NavigateToSearchResult" | "MountSearchResults"
-        | "RemoveSearchSource" => {
-            jobs::handle(name, scope, args, ctx).await
-        }
-        "ViewFile" | "EditFile" | "CloseViewerWindow" | "ViewerNavigate" | "ReadFileChunk"
-        | "SetEmbeddedViewerActive" => {
-            viewer::handle(name, args, ctx).await
-        }
+        | "StartSearch"
+        | "NavigateToSearchResult"
+        | "MountSearchResults"
+        | "RemoveSearchSource" => jobs::handle(name, scope, args, ctx).await,
+        "ViewFile"
+        | "EditFile"
+        | "CloseViewerWindow"
+        | "ViewerNavigate"
+        | "ReadFileChunk"
+        | "SetEmbeddedViewerActive" => viewer::handle(name, args, ctx).await,
         "QueryCacheStatus" | "ClearCache" => cache::handle(name, args, ctx).await,
-        "AddBookmark" | "RemoveBookmark" | "EnterBookmarkSource" => bookmarks::handle(name, scope, args, ctx).await,
+        "AddBookmark" | "RemoveBookmark" | "EnterBookmarkSource" => {
+            bookmarks::handle(name, scope, args, ctx).await
+        }
         "EnterHistorySource" => history::handle(name, scope, args, ctx).await,
         "EnterProcsSource" => procs::handle(name, scope, args, ctx).await,
         "Quit" | "ConfirmQuit" | "SetFontSize" => app::handle(name, args, ctx).await,
@@ -82,6 +96,17 @@ pub async fn dispatch(name: &str, scope: &Value, args: &Value, ctx: &mut IntentC
         "panel.tab.new" | "panel.tab.close" | "panel.tab.switch" | "panel.terminal.promote" => {
             tabs::handle(name, scope, args, ctx).await
         }
+        "EnableSharing"
+        | "SetSharedSources"
+        | "SetSharingIpv6"
+        | "StartPairing"
+        | "ConfirmPairing"
+        | "RevokePairing"
+        | "RefreshDiscoveredPeers" => sharing::handle(name, args, ctx).await,
+        "ConnectRemotePeer"
+        | "DisconnectRemotePeer"
+        | "ReconnectRemoteSource"
+        | "RetryLastPeer" => remote::handle(name, args, ctx).await,
         unknown => eprintln!("[fbro] Unknown intent: {unknown}"),
     }
 }

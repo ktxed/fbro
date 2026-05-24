@@ -4,7 +4,7 @@ use serde_json::Value;
 
 use crate::jobs::viewer_prefetch::PREFETCH_IMAGE_CAP;
 use crate::state::settings::GeneralSettings;
-use crate::vfs::search::SearchResultsDriver;
+use crate::vfs::{search::SearchResultsDriver, VfsDriver};
 use crate::ws::intents::{arg_str, arg_u64, is_archive_source, is_procs_source, is_search_source};
 use crate::ws::protocol::{now, ServerMessage};
 use crate::ws::runtime::{url_encode, IntentContext};
@@ -34,6 +34,14 @@ fn detect_binary(bytes: &[u8]) -> bool {
         .filter(|&&b| b < 9 || (b > 13 && b < 32) || b == 127)
         .count();
     !sample.is_empty() && non_text * 10 > sample.len() * 3
+}
+
+async fn driver_file_size(driver: Option<Arc<dyn VfsDriver>>, path: String) -> Option<u64> {
+    let driver = driver?;
+    tokio::task::spawn_blocking(move || driver.file_size(&path))
+        .await
+        .ok()
+        .flatten()
 }
 
 pub(crate) async fn handle(name: &str, args: &Value, ctx: &mut IntentContext<'_>) {
@@ -131,14 +139,11 @@ async fn view_file(args: &Value, ctx: &mut IntentContext<'_>) {
     // and real source_id so the viewer uses the local filesystem driver.
     let (effective_source_id, full_path) = if is_search_source(&parsed.source_id) {
         let state_guard = ctx.state.lock().await;
-        let resolved = state_guard
-            .drivers
-            .get(&parsed.source_id)
-            .and_then(|drv| {
-                drv.as_any()
-                    .downcast_ref::<SearchResultsDriver>()
-                    .and_then(|sd| sd.resolve_real_info(&parsed.filename))
-            });
+        let resolved = state_guard.drivers.get(&parsed.source_id).and_then(|drv| {
+            drv.as_any()
+                .downcast_ref::<SearchResultsDriver>()
+                .and_then(|sd| sd.resolve_real_info(&parsed.filename))
+        });
         if let Some((real_full_path, real_source_id)) = resolved {
             (real_source_id, real_full_path)
         } else {
@@ -147,7 +152,8 @@ async fn view_file(args: &Value, ctx: &mut IntentContext<'_>) {
                 .iter()
                 .filter(|(_, s)| !s.shadow && s.mounted)
                 .max_by_key(|(_, s)| {
-                    let candidate = format!("{}/{}", parsed.path.trim_end_matches('/'), parsed.filename);
+                    let candidate =
+                        format!("{}/{}", parsed.path.trim_end_matches('/'), parsed.filename);
                     if candidate.starts_with(&s.root_path) {
                         s.root_path.len()
                     } else {
@@ -156,7 +162,10 @@ async fn view_file(args: &Value, ctx: &mut IntentContext<'_>) {
                 })
                 .map(|(id, _)| id.clone())
                 .unwrap_or_else(|| parsed.source_id.clone());
-            (best_source, format!("{}/{}", parsed.path.trim_end_matches('/'), parsed.filename))
+            (
+                best_source,
+                format!("{}/{}", parsed.path.trim_end_matches('/'), parsed.filename),
+            )
         }
     } else if is_archive_source(&parsed.source_id) || is_procs_source(&parsed.source_id) {
         let inner_path = {
@@ -175,16 +184,20 @@ async fn view_file(args: &Value, ctx: &mut IntentContext<'_>) {
         )
     };
 
-    let (is_local, file_size, file_server_port, image_cap_bytes) = {
+    let (is_local, driver, file_server_port, image_cap_bytes) = {
         let state_guard = ctx.state.lock().await;
-        let driver = state_guard.drivers.get(&effective_source_id);
+        let driver = state_guard.drivers.get(&effective_source_id).cloned();
         (
-            driver.map(|driver| driver.is_local()).unwrap_or(false),
-            driver.and_then(|driver| driver.file_size(&full_path)),
+            driver
+                .as_ref()
+                .map(|driver| driver.is_local())
+                .unwrap_or(false),
+            driver,
             state_guard.file_server_port,
             effective_image_cap_bytes(&state_guard.settings.general),
         )
     };
+    let file_size = driver_file_size(driver.clone(), full_path.clone()).await;
 
     let label = format!("viewer-{}", uuid::Uuid::new_v4());
     let mut query_string = format!(
@@ -239,7 +252,6 @@ async fn view_file(args: &Value, ctx: &mut IntentContext<'_>) {
     ctx.viewer_prefetch.clear();
     let (neighbors, driver, image_cap) = {
         let state_guard = ctx.state.lock().await;
-        let driver = state_guard.drivers.get(&effective_source_id).cloned();
         let panel = state_guard.panels.get(&parsed.panel_id);
         let mut neighbors = match (panel, driver.as_ref()) {
             (Some(panel), Some(drv)) if drv.is_local() => {
@@ -254,10 +266,15 @@ async fn view_file(args: &Value, ctx: &mut IntentContext<'_>) {
         if driver.as_ref().map_or(false, |d| d.is_local()) {
             neighbors.push((full_path.clone(), file_size));
         }
-        (neighbors, driver, effective_image_cap_bytes(&state_guard.settings.general))
+        (
+            neighbors,
+            driver,
+            effective_image_cap_bytes(&state_guard.settings.general),
+        )
     };
     if let Some(driver) = driver {
-        ctx.viewer_prefetch.schedule_neighbors(neighbors, effective_source_id, driver, image_cap);
+        ctx.viewer_prefetch
+            .schedule_neighbors(neighbors, effective_source_id, driver, image_cap);
     }
 }
 
@@ -352,8 +369,15 @@ async fn viewer_navigate(args: &Value, ctx: &mut IntentContext<'_>) {
                 .entries
                 .get(new_cursor)
                 .map(|entry| (entry.name.clone(), entry.kind.clone()));
-            let prefetch_neighbors = collect_neighbors(&panel.entries, new_cursor, &dir_path, &source_id);
-            Some((new_cursor, source_id, dir_path, entry_info, prefetch_neighbors))
+            let prefetch_neighbors =
+                collect_neighbors(&panel.entries, new_cursor, &dir_path, &source_id);
+            Some((
+                new_cursor,
+                source_id,
+                dir_path,
+                entry_info,
+                prefetch_neighbors,
+            ))
         } else {
             None
         }
@@ -371,10 +395,7 @@ async fn viewer_navigate(args: &Value, ctx: &mut IntentContext<'_>) {
                         state_guard
                             .drivers
                             .get(&source_id)
-                            .and_then(|drv| {
-                                drv.as_any()
-                                    .downcast_ref::<SearchResultsDriver>()
-                            })
+                            .and_then(|drv| drv.as_any().downcast_ref::<SearchResultsDriver>())
                             .and_then(|sd| sd.resolve_real_info(&name))
                             .unwrap_or_else(|| {
                                 (
@@ -399,18 +420,20 @@ async fn viewer_navigate(args: &Value, ctx: &mut IntentContext<'_>) {
                         )
                     }
                 };
-                let driver = ctx.state.lock().await.drivers.get(&effective_source_id).cloned();
-                let (file_size, is_local) = driver
-                    .as_ref()
-                    .map(|drv| (drv.file_size(&effective_path), drv.is_local()))
-                    .unwrap_or((None, false));
+                let driver = ctx
+                    .state
+                    .lock()
+                    .await
+                    .drivers
+                    .get(&effective_source_id)
+                    .cloned();
+                let is_local = driver.as_ref().map(|drv| drv.is_local()).unwrap_or(false);
+                let file_size = driver_file_size(driver.clone(), effective_path.clone()).await;
 
                 // Determine binary hint so the FE can skip directly to hex mode.
                 // Try prefetch cache first (no I/O), then probe 4 KB for large files.
                 let is_binary: Option<bool> = {
-                    if let Some(entry) =
-                        ctx.viewer_prefetch.get_cached_by_path(&effective_path)
-                    {
+                    if let Some(entry) = ctx.viewer_prefetch.get_cached_by_path(&effective_path) {
                         Some(detect_binary(&entry.content))
                     } else if file_size
                         .map(|sz| sz > PREFETCH_OTHER_THRESHOLD)
@@ -535,23 +558,23 @@ async fn read_file_chunk(args: &Value, ctx: &mut IntentContext<'_>) {
         (parsed.source_id.clone(), parsed.path.clone())
     };
 
-    let (driver, file_size) = {
+    let driver = {
         let state_guard = ctx.state.lock().await;
-        let driver = state_guard.drivers.get(&effective_source_id).cloned();
-        let file_size = driver
-            .as_ref()
-            .and_then(|driver| driver.file_size(&effective_path));
-        (driver, file_size)
+        state_guard.drivers.get(&effective_source_id).cloned()
     };
+    let file_size = driver_file_size(driver.clone(), effective_path.clone()).await;
 
     // Serve from prefetch cache when this is the initial (offset=0) request.
     if parsed.offset == 0 {
-        if let Some(cached) = ctx.viewer_prefetch.get_cached(&effective_source_id, &effective_path) {
+        if let Some(cached) = ctx
+            .viewer_prefetch
+            .get_cached(&effective_source_id, &effective_path)
+        {
             let bytes = cached.content.clone();
             let cached_file_size = cached.file_size.or(file_size);
             let size = parsed.size;
-            let eof = bytes.len() < size
-                || cached_file_size.map_or(false, |fs| bytes.len() as u64 >= fs);
+            let eof =
+                bytes.len() < size || cached_file_size.map_or(false, |fs| bytes.len() as u64 >= fs);
             let bytes = if !eof && !bytes.is_empty() && bytes[bytes.len() - 1] != b'\n' {
                 let mut b = bytes;
                 if let Some(pos) = b.iter().rposition(|&c| c == b'\n') {
@@ -581,10 +604,8 @@ async fn read_file_chunk(args: &Value, ctx: &mut IntentContext<'_>) {
         let path_clone = effective_path.clone();
         let offset = parsed.offset;
         let size = parsed.size;
-        let result = tokio::task::spawn_blocking(move || {
-            driver.read_chunk(&path_clone, offset, size)
-        })
-        .await;
+        let result =
+            tokio::task::spawn_blocking(move || driver.read_chunk(&path_clone, offset, size)).await;
         match result {
             Ok(Ok(mut bytes)) => {
                 let eof = bytes.len() < size

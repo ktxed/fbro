@@ -3,12 +3,7 @@ use serde_json::Value;
 use crate::ws::protocol::{now, ServerMessage};
 use crate::ws::runtime::IntentContext;
 
-pub(crate) async fn handle(
-    name: &str,
-    scope: &Value,
-    args: &Value,
-    ctx: &mut IntentContext<'_>,
-) {
+pub(crate) async fn handle(name: &str, scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
     let Some(panel_id) = scope.as_str() else {
         eprintln!("[fbro] terminal intent {name} missing panel_id scope");
         return;
@@ -50,8 +45,15 @@ async fn open(panel_id: &str, args: &Value, ctx: &mut IntentContext<'_>) {
         return;
     }
 
-    let session_id = match pty_manager.open(panel_id.to_string(), &cwd, cols, rows, ctx.tx.clone(), ctx.state.clone(), pty_manager.clone())
-    {
+    let session_id = match pty_manager.open(
+        panel_id.to_string(),
+        &cwd,
+        cols,
+        rows,
+        ctx.tx.clone(),
+        ctx.state.clone(),
+        pty_manager.clone(),
+    ) {
         Ok(sid) => sid,
         Err(e) => {
             eprintln!("[fbro] terminal open failed: {e}");

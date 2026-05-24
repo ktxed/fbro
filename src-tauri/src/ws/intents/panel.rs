@@ -3,7 +3,9 @@ use std::collections::HashSet;
 use serde_json::Value;
 
 use crate::jobs::viewer_prefetch::PREFETCH_N;
-use crate::ws::intents::{arg_bool, arg_i64, arg_str, arg_u64, arg_usize_vec, is_archive_source, is_search_source};
+use crate::ws::intents::{
+    arg_bool, arg_i64, arg_str, arg_u64, arg_usize_vec, is_archive_source, is_search_source,
+};
 use crate::ws::protocol::{now, ServerMessage};
 use crate::ws::runtime::{
     build_state_snapshot, handle_volumes_changed, rescan_panel, resolve_panel_id,
@@ -683,11 +685,21 @@ async fn move_cursor_with_select(scope: &Value, args: &Value, ctx: &mut IntentCo
             }
             let step: i64 = match delta_opt {
                 Some(d) if d != 0 => d,
-                _ => if direction == "up" { -1 } else { 1 },
+                _ => {
+                    if direction == "up" {
+                        -1
+                    } else {
+                        1
+                    }
+                }
             };
             let target = (panel.cursor as i64 + step).clamp(0, (len - 1) as i64) as usize;
             // Apply the single-step toggle for each step between current and target.
-            let dir: i64 = if target as i64 >= panel.cursor as i64 { 1 } else { -1 };
+            let dir: i64 = if target as i64 >= panel.cursor as i64 {
+                1
+            } else {
+                -1
+            };
             while panel.cursor != target {
                 let previous = panel.cursor;
                 let next = (panel.cursor as i64 + dir) as usize;
@@ -871,7 +883,11 @@ async fn calculate_size(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>
                     } else {
                         format!("{}/{}", panel.path.trim_end_matches('/'), parsed.name)
                     };
-                    (dir_path, panel.shadow_source.is_some(), panel.source_id.clone())
+                    (
+                        dir_path,
+                        panel.shadow_source.is_some(),
+                        panel.source_id.clone(),
+                    )
                 })
         }) {
             Some(v) => v,

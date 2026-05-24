@@ -9,7 +9,9 @@
       "Bash(npx tsc:*)",
       "Bash(git add:*)",
       "Bash(git commit:*)",
-      "Bash(git -C /home/ktx/work/fbro diff HEAD -- src-tauri/src/ws/intents/procs.rs src-tauri/src/ws/intents/navigation.rs)"
+      "Bash(git -C /home/ktx/work/fbro diff HEAD -- src-tauri/src/ws/intents/procs.rs src-tauri/src/ws/intents/navigation.rs)",
+      "Bash(cargo test *)",
+      "Bash(npx --no-install tsc --noEmit)"
     ]
   }
 }

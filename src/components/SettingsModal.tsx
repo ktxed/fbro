@@ -3,11 +3,13 @@ import { useAppDispatch, useAppState } from "../store";
 import type { SettingsTab } from "../store";
 import { SettingsGeneralTab } from "./SettingsGeneralTab";
 import { SettingsDisplayTab } from "./SettingsDisplayTab";
+import { SettingsSharingTab } from "./SettingsSharingTab";
 import type { WsClient } from "../ws/client";
 
 const TABS: { id: SettingsTab; label: string }[] = [
   { id: "general", label: "General" },
   { id: "display", label: "Display" },
+  { id: "sharing", label: "Sharing" },
 ];
 
 interface SettingsModalProps {
@@ -81,6 +83,7 @@ export function SettingsModal({ client }: SettingsModalProps) {
             {activeTab === "display" && (
               <SettingsDisplayTab general={state.settings.general} client={client} />
             )}
+            {activeTab === "sharing" && <SettingsSharingTab client={client} />}
           </div>
         </div>
         <div className="modal__actions">

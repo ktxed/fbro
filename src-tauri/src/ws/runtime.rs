@@ -5,8 +5,8 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 
 use crate::jobs::dirsize::{DirSizeQueue, DirSizeTaskSnapshot};
-use crate::jobs::viewer_prefetch::ViewerPrefetchQueue;
 use crate::jobs::scan::run_scan;
+use crate::jobs::viewer_prefetch::ViewerPrefetchQueue;
 use crate::jobs::{DecisionResponse, JobState, ScanHandle};
 use crate::persistence::{PanelSession, SessionState, SlotSession, TabSession};
 use crate::state::{AppState, Panel, PanelStatus, SharedState};
@@ -16,7 +16,7 @@ use crate::ws::commands::build_interactive_commands;
 use crate::ws::protocol::{
     now, DirSizeQueueSnapshot, DirSizeTaskSchema, FileOpFileSchema, GeneralSettingsSchema,
     LayoutDomain, PanelSlotSchema, PanelSnapshot, ServerMessage, SettingsSnapshot,
-    ShadowSourceSchema, SourceCapabilities, SourceSchema, StateDomains,
+    ShadowSourceSchema, SourceCapabilities, SourcePeerSchema, SourceSchema, StateDomains,
 };
 
 pub(crate) struct IntentContext<'a> {
@@ -130,14 +130,8 @@ pub(crate) fn build_state_snapshot(
                     max_image_size_mb: state.settings.general.max_image_size_mb,
                     save_panel_view_mode: state.settings.general.save_panel_view_mode,
                     enable_video_thumbnails: state.settings.general.enable_video_thumbnails,
-                    thumbnail_max_image_size_mb: state
-                        .settings
-                        .general
-                        .thumbnail_max_image_size_mb,
-                    thumbnail_video_frame_skip: state
-                        .settings
-                        .general
-                        .thumbnail_video_frame_skip,
+                    thumbnail_max_image_size_mb: state.settings.general.thumbnail_max_image_size_mb,
+                    thumbnail_video_frame_skip: state.settings.general.thumbnail_video_frame_skip,
                     session_path: crate::persistence::session_path()
                         .to_string_lossy()
                         .to_string(),
@@ -148,11 +142,88 @@ pub(crate) fn build_state_snapshot(
                     thumbnail_cache_item_count: thumbnail_cache_stats().0,
                     thumbnail_cache_size_bytes: thumbnail_cache_stats().1,
                     persist_panel_tabs: state.settings.general.persist_panel_tabs,
-                proc_tree_mode: state.settings.general.proc_tree_mode,
+                    proc_tree_mode: state.settings.general.proc_tree_mode,
                 },
             },
+            discovered_peers: build_discovered_peers(state),
+            share_config: build_share_config(state),
         },
     }
+}
+
+fn build_discovered_peers(state: &AppState) -> Vec<crate::remote::discovery::DiscoveredPeerSchema> {
+    let paired_fps: std::collections::HashSet<&str> = state
+        .share_config
+        .paired_peers
+        .values()
+        .map(|p| p.fingerprint.as_str())
+        .collect();
+    let mut out: Vec<crate::remote::discovery::DiscoveredPeerSchema> = state
+        .discovered_peers
+        .values()
+        .map(|p| crate::remote::discovery::DiscoveredPeerSchema {
+            id: p.id.clone(),
+            name: p.name.clone(),
+            host: p.host.clone(),
+            port: p.port,
+            os: p.os.clone(),
+            pubkey_fp: p.pubkey_fp.clone(),
+            paired: p
+                .pubkey_fp
+                .as_deref()
+                .map(|fp| paired_fps.contains(fp))
+                .unwrap_or(false),
+            last_seen: p
+                .last_seen
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0),
+        })
+        .collect();
+    out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    out
+}
+
+fn build_share_config(state: &AppState) -> serde_json::Value {
+    let paired: Vec<serde_json::Value> = state
+        .share_config
+        .paired_peers
+        .values()
+        .map(|p| {
+            serde_json::json!({
+                "fingerprint": p.fingerprint,
+                "name": p.name,
+                "os": p.os,
+                "pairedAt": p
+                    .paired_at
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0),
+                "lastSeen": p
+                    .last_seen
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs()),
+                "lastHost": p.last_host.clone(),
+                "lastSftpPort": p.last_sftp_port,
+                "lastPairPort": p.last_pair_port,
+                "lastEndpointSeenAt": p
+                    .last_endpoint_seen_at
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs()),
+            })
+        })
+        .collect();
+    serde_json::json!({
+        "enabled": state.share_config.enabled,
+        "allowIpv6": state.share_config.allow_ipv6,
+        "sharedSourceIds": state
+            .share_config
+            .shared_source_ids
+            .iter()
+            .collect::<Vec<_>>(),
+        "pairedPeers": paired,
+        "fingerprint": state.identity.as_ref().map(|i| i.fingerprint.clone()),
+    })
 }
 
 pub(crate) fn build_sources(state: &AppState) -> Vec<SourceSchema> {
@@ -170,15 +241,26 @@ pub(crate) fn build_sources(state: &AppState) -> Vec<SourceSchema> {
             } else {
                 None
             };
+            let peer = src.peer_id.as_ref().and_then(|pid| {
+                state
+                    .share_config
+                    .paired_peers
+                    .get(pid)
+                    .map(|p| SourcePeerSchema {
+                        name: p.name.clone(),
+                        fingerprint: p.fingerprint.clone(),
+                        os: p.os.clone(),
+                    })
+            });
             SourceSchema {
                 id: src.id.clone(),
                 name: src.name.clone(),
                 kind: src.kind.clone(),
                 supports: src.supports.clone(),
                 capabilities: SourceCapabilities {
-                    read_only: src.shadow,
+                    read_only: src.shadow || src.read_only,
                     supports_streaming: true,
-                    supports_jobs: !src.shadow,
+                    supports_jobs: !src.shadow && !src.read_only,
                 },
                 root_path: src.root_path.clone(),
                 mounted: src.mounted,
@@ -186,6 +268,7 @@ pub(crate) fn build_sources(state: &AppState) -> Vec<SourceSchema> {
                 total_bytes: space.map(|(_, total)| total),
                 shadow: src.shadow,
                 icon_name: src.icon_name.clone(),
+                peer,
             }
         })
         .collect()
@@ -248,7 +331,17 @@ pub(crate) async fn navigate_to(
         handle.abort();
     }
 
-    let (sort, filter, show_hidden, version, driver, shadow_source_schema, source_id, supports_thumbs, view_mode) = {
+    let (
+        sort,
+        filter,
+        show_hidden,
+        version,
+        driver,
+        shadow_source_schema,
+        source_id,
+        supports_thumbs,
+        view_mode,
+    ) = {
         let mut state_guard = state.lock().await;
         let (source_id, sort, filter, show_hidden, version, shadow_schema) =
             if let Some(panel) = state_guard.panels.get_mut(panel_id) {
@@ -270,7 +363,14 @@ pub(crate) async fn navigate_to(
                     archive_path: ss.archive_path.clone(),
                     cursor_hint: ss.cursor_hint.clone(),
                 });
-                (source_id, panel.sort.clone(), panel.filter.clone(), panel.show_hidden, panel.version, shadow_schema)
+                (
+                    source_id,
+                    panel.sort.clone(),
+                    panel.filter.clone(),
+                    panel.show_hidden,
+                    panel.version,
+                    shadow_schema,
+                )
             } else {
                 return;
             };
@@ -292,7 +392,17 @@ pub(crate) async fn navigate_to(
             .get(panel_id)
             .map(|p| p.view_mode.as_str().to_string())
             .unwrap_or_else(|| "list".to_string());
-        (sort, filter, show_hidden, version, driver, shadow_schema, source_id, supports_thumbs, view_mode)
+        (
+            sort,
+            filter,
+            show_hidden,
+            version,
+            driver,
+            shadow_schema,
+            source_id,
+            supports_thumbs,
+            view_mode,
+        )
     };
 
     let _ = tx
@@ -370,37 +480,57 @@ pub(crate) async fn rescan_panel(
         handle.abort();
     }
 
-    let (path, sort, filter, filter_mode_active, show_hidden, version, driver, source_id, shadow_source_schema, supports_thumbs, view_mode) = {
+    let (
+        path,
+        sort,
+        filter,
+        filter_mode_active,
+        show_hidden,
+        version,
+        driver,
+        source_id,
+        shadow_source_schema,
+        supports_thumbs,
+        view_mode,
+    ) = {
         let mut state_guard = state.lock().await;
-        let (source_id, path, sort, filter, filter_mode_active, show_hidden, version, shadow_schema) =
-            if let Some(panel) = state_guard.panels.get_mut(panel_id) {
-                let source_id = panel.source_id.clone();
-                panel.entries.clear();
-                panel.selection.clear();
-                panel.status = PanelStatus::Loading;
-                panel.windowed = false;
-                panel.window_start = 0;
-                panel.window_count = 0;
-                panel.version += 1;
-                let shadow_schema = panel.shadow_source.as_ref().map(|ss| ShadowSourceSchema {
-                    parent_source_id: ss.parent_source_id.clone(),
-                    parent_path: ss.parent_path.clone(),
-                    archive_path: ss.archive_path.clone(),
-                    cursor_hint: ss.cursor_hint.clone(),
-                });
-                (
-                    source_id,
-                    panel.path.clone(),
-                    panel.sort.clone(),
-                    panel.filter.clone(),
-                    panel.filter_mode_active,
-                    panel.show_hidden,
-                    panel.version,
-                    shadow_schema,
-                )
-            } else {
-                return;
-            };
+        let (
+            source_id,
+            path,
+            sort,
+            filter,
+            filter_mode_active,
+            show_hidden,
+            version,
+            shadow_schema,
+        ) = if let Some(panel) = state_guard.panels.get_mut(panel_id) {
+            let source_id = panel.source_id.clone();
+            panel.entries.clear();
+            panel.selection.clear();
+            panel.status = PanelStatus::Loading;
+            panel.windowed = false;
+            panel.window_start = 0;
+            panel.window_count = 0;
+            panel.version += 1;
+            let shadow_schema = panel.shadow_source.as_ref().map(|ss| ShadowSourceSchema {
+                parent_source_id: ss.parent_source_id.clone(),
+                parent_path: ss.parent_path.clone(),
+                archive_path: ss.archive_path.clone(),
+                cursor_hint: ss.cursor_hint.clone(),
+            });
+            (
+                source_id,
+                panel.path.clone(),
+                panel.sort.clone(),
+                panel.filter.clone(),
+                panel.filter_mode_active,
+                panel.show_hidden,
+                panel.version,
+                shadow_schema,
+            )
+        } else {
+            return;
+        };
         let Some(driver) = state_guard.drivers.get(&source_id).cloned() else {
             return;
         };
@@ -712,7 +842,13 @@ pub(crate) async fn send_window(
             // window_version is independent from `version` so a fast scroll
             // cannot be dropped by the FE structural-version guard.
             panel.window_version += 1;
-            (window_entries, start, total, panel.version, panel.window_version)
+            (
+                window_entries,
+                start,
+                total,
+                panel.version,
+                panel.window_version,
+            )
         };
         // Window slice changed → refresh thumb-pool visibility while still
         // holding the lock.
@@ -900,12 +1036,8 @@ pub(crate) async fn update_panel_from_patch(
     if let Some(panel) = state_guard.panels.get_mut(panel_id) {
         // Treat null-valued fields (sent by rescan/navigate to *clear* state) as
         // "not present" — those patches are structural resets, not window slices.
-        let has_total = patch
-            .get("totalCount")
-            .is_some_and(|v| !v.is_null());
-        let has_window_entries = patch
-            .get("windowEntries")
-            .is_some_and(|v| !v.is_null());
+        let has_total = patch.get("totalCount").is_some_and(|v| !v.is_null());
+        let has_window_entries = patch.get("windowEntries").is_some_and(|v| !v.is_null());
         let is_window_patch = has_total || has_window_entries;
         // A "window-only" patch (the kind send_window emits) has no structural
         // fields — its sole purpose is to update the visible slice and must not

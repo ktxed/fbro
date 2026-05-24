@@ -265,7 +265,8 @@ fn read_windows_external_clipboard() -> Result<Option<ExternalClipboardPayload>,
                 continue;
             }
             let mut buffer = vec![0u16; len as usize + 1];
-            let written = unsafe { DragQueryFileW(hdrop, index, buffer.as_mut_ptr(), buffer.len() as u32) };
+            let written =
+                unsafe { DragQueryFileW(hdrop, index, buffer.as_mut_ptr(), buffer.len() as u32) };
             if written == 0 {
                 continue;
             }

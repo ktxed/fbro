@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!--
+        macOS 14+ silently blocks mDNS/multicast on the Local Network
+        unless an app declares its intent here AND the user grants
+        permission via System Settings → Privacy & Security → Local Network.
+
+        Without these keys:
+          - browse() and register() on `_fbro-remote._tcp.local.` either
+            return empty or only see the initial announcement burst once.
+          - The user never sees a permission prompt and may not realize
+            access is being blocked.
+
+        With these keys + permission granted, mdns-sd on macOS works
+        exactly like it does on Linux.
+    -->
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>fbro uses your local network to discover and connect to other fbro instances for shared file browsing.</string>
+
+    <!--
+        Whitelist the specific service types we browse and advertise.
+        Required on macOS 14+ — apps can't query arbitrary service types
+        without listing them here.
+    -->
+    <key>NSBonjourServices</key>
+    <array>
+        <string>_fbro-remote._tcp</string>
+    </array>
+</dict>
+</plist>

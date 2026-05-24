@@ -322,8 +322,9 @@ impl Platform for LinuxPlatform {
             let result = read_linux_external_clipboard();
             let _ = tx.send(result);
         });
-        rx.recv()
-            .map_err(|_| "Failed to receive clipboard data from the GTK main context.".to_string())?
+        rx.recv().map_err(|_| {
+            "Failed to receive clipboard data from the GTK main context.".to_string()
+        })?
     }
 
     fn write_external_file_clipboard(
@@ -347,8 +348,9 @@ impl Platform for LinuxPlatform {
             let result = write_linux_text_clipboard(&text);
             let _ = tx.send(result);
         });
-        rx.recv()
-            .map_err(|_| "Failed to write text to clipboard from the GTK main context.".to_string())?
+        rx.recv().map_err(|_| {
+            "Failed to write text to clipboard from the GTK main context.".to_string()
+        })?
     }
 
     fn home_dir(&self) -> String {
@@ -533,23 +535,25 @@ fn write_linux_external_clipboard(payload: &ExternalClipboardPayload) -> Result<
         ),
     ];
 
-    let success = clipboard.set_with_data(&targets, move |_clipboard, selection_data, info| {
-        match info {
-            GNOME_INFO => {
-                let atom = gdk::Atom::intern("x-special/gnome-copied-files");
-                selection_data.set(&atom, 8, gnome_payload.as_bytes());
-            }
-            URI_INFO => {
-                let uris = uri_strings.iter().map(String::as_str).collect::<Vec<_>>();
-                let _ = selection_data.set_uris(&uris);
-            }
-            KDE_INFO => {
-                let atom = gdk::Atom::intern("application/x-kde-cutselection");
-                selection_data.set(&atom, 8, &kde_payload);
-            }
-            _ => {}
-        }
-    });
+    let success =
+        clipboard.set_with_data(
+            &targets,
+            move |_clipboard, selection_data, info| match info {
+                GNOME_INFO => {
+                    let atom = gdk::Atom::intern("x-special/gnome-copied-files");
+                    selection_data.set(&atom, 8, gnome_payload.as_bytes());
+                }
+                URI_INFO => {
+                    let uris = uri_strings.iter().map(String::as_str).collect::<Vec<_>>();
+                    let _ = selection_data.set_uris(&uris);
+                }
+                KDE_INFO => {
+                    let atom = gdk::Atom::intern("application/x-kde-cutselection");
+                    selection_data.set(&atom, 8, &kde_payload);
+                }
+                _ => {}
+            },
+        );
 
     if !success {
         return Err("Failed to publish the host clipboard payload.".to_string());

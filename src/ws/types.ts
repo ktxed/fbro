@@ -18,7 +18,7 @@ export interface VFSEntry {
 export interface Source {
   id: string;
   name: string;
-  kind: "filesystem" | "virtual";
+  kind: "filesystem" | "virtual" | "remote";
   supports: string[];
   capabilities: {
     readOnly: boolean;
@@ -31,6 +31,62 @@ export interface Source {
   totalBytes?: number;
   shadow?: boolean;
   iconName?: string;
+  /** Set on remote sources — peer that owns it. Drives the volume-bar
+   *  label suffix and the read-only badge tooltip. */
+  peer?: SourcePeer;
+}
+
+export interface SourcePeer {
+  name: string;
+  fingerprint: string;
+  os?: string;
+}
+
+// ─── Remote-fbro: discovery / pairing / sharing ──────────────────────────────
+
+export interface DiscoveredPeer {
+  id: string;
+  name: string;
+  host: string;
+  port: number;
+  os?: string;
+  pubkeyFp?: string;
+  paired: boolean;
+  /** Unix millis of last `ServiceResolved`. The FE dims rows whose
+   *  lastSeen is older than a short threshold. */
+  lastSeen: number;
+}
+
+export interface PairedPeer {
+  fingerprint: string;
+  name: string;
+  os?: string;
+  pairedAt: number;
+  lastSeen?: number;
+  lastHost?: string;
+  lastSftpPort?: number;
+  lastPairPort?: number;
+  /** Unix seconds when the last endpoint was learned from mDNS or connect. */
+  lastEndpointSeenAt?: number;
+}
+
+export interface ShareConfig {
+  enabled: boolean;
+  allowIpv6: boolean;
+  sharedSourceIds: string[];
+  pairedPeers: PairedPeer[];
+  /** Our own Ed25519 fingerprint. Surfaced so the user can compare it
+   *  against what a peer sees during pairing. */
+  fingerprint?: string;
+}
+
+export interface PendingPairing {
+  handshakeId: string;
+  code: string;
+  name: string;
+  os?: string;
+  pubkeyAlgo: string;
+  expiresAt: number;
 }
 
 export interface ShadowSource {
@@ -119,7 +175,7 @@ export interface SearchProgress {
 
 export interface Job {
   jobId: string;
-  kind: "file-op" | "fp-bro" | "search";
+  kind: "file-op" | "fp-bro" | "search" | "outgoing-transfer";
   type: string;
   state: "Queued" | "Running" | "AwaitingDecision" | "Completed" | "Cancelled" | "Failed";
   paused: boolean;
@@ -164,8 +220,10 @@ export interface FileOpProgress {
 }
 
 export interface DecisionRequest {
+  kind?: "conflict" | "verification" | "bro-output" | string;
   source: string;
   destination: string;
+  message?: string;
   options: string[];
   supportsApplyToAll: boolean;
 }
@@ -245,7 +303,7 @@ export interface BroItem {
 
 export interface JobStart {
   jobId: string;
-  kind: "file-op" | "fp-bro" | "search";
+  kind: "file-op" | "fp-bro" | "search" | "outgoing-transfer";
   opType: string;
   files: FileOpFile[];
   sourcePanel: string;
@@ -266,6 +324,7 @@ export interface JobStart {
 
 export type FileOpType = "copy" | "move" | "delete";
 export type ConflictPolicy = "ask" | "skip" | "overwrite";
+export type VerificationPolicy = "fail" | "prompt";
 
 export interface PendingOp {
   opType: FileOpType;
@@ -381,13 +440,15 @@ export interface StateSnapshotMessage {
     bookmarks?: BookmarkEntry[];
     fontSize?: number;
     settings?: SettingsState;
+    discoveredPeers?: DiscoveredPeer[];
+    shareConfig?: ShareConfig;
   };
 }
 
 export interface StatePatchMessage {
   type: "StatePatch";
   timestamp: number;
-  domain: "panels" | "layout" | "slots" | "focus" | "selections" | "jobs" | "sources" | "dirSizeQueue" | "bookmarks" | "procs" | "settings";
+  domain: "panels" | "layout" | "slots" | "focus" | "selections" | "jobs" | "sources" | "dirSizeQueue" | "bookmarks" | "procs" | "settings" | "discoveredPeers" | "shareConfig";
   entityId?: string;
   version: number;
   patch: {
@@ -417,6 +478,7 @@ export interface JobEventMessage {
   timestamp: number;
   jobId: string;
   event: "Queued" | "Progress" | "DecisionRequired" | "Completed" | "Failed" | "Cancelled" | "Paused" | "Resumed";
+  files?: FileOpFile[];
   progress?: FileOpProgress;
   searchProgress?: SearchProgress;
   decision?: DecisionRequest;
@@ -558,6 +620,67 @@ export interface TerminalClosedMessage {
   sessionId: number;
 }
 
+// ─── Remote / pairing events ─────────────────────────────────────────────────
+
+export interface PairingRequestedMessage {
+  type: "PairingRequested";
+  timestamp: number;
+  handshakeId: string;
+  /** Zero-padded 6-digit string. */
+  code: string;
+  /** Self-reported machine name of the other side. */
+  name: string;
+  os?: string;
+  pubkeyAlgo: string;
+  /** Unix millis when the handshake auto-aborts. */
+  expiresAt: number;
+}
+
+export interface PairingResolvedMessage {
+  type: "PairingResolved";
+  timestamp: number;
+  handshakeId: string;
+  outcome: "paired" | "rejected" | "timeout";
+  fingerprint?: string;
+}
+
+export interface RemoteSessionStartedMessage {
+  type: "RemoteSessionStarted";
+  timestamp: number;
+  fingerprint: string;
+  sourceId: string;
+}
+
+export interface RemoteSessionEndedMessage {
+  type: "RemoteSessionEnded";
+  timestamp: number;
+  fingerprint: string;
+  sourceId: string;
+}
+
+export type RemoteSourceStatusValue =
+  | "connected"
+  | "reconnecting"
+  | "disconnected"
+  | "dead";
+
+export interface RemoteSourceStatusMessage {
+  type: "RemoteSourceStatus";
+  timestamp: number;
+  sourceId: string;
+  status: RemoteSourceStatusValue;
+  message?: string;
+  /** Unix millis of the next scheduled reconnect attempt. */
+  nextRetryAt?: number;
+}
+
+/** Per-source status as stored in the FE state, indexed by sourceId. */
+export interface RemoteSourceStatus {
+  status: RemoteSourceStatusValue;
+  message?: string;
+  nextRetryAt?: number;
+}
+
 // ─── Union types ─────────────────────────────────────────────────────────────
 
 export type BEMessage =
@@ -585,6 +708,11 @@ export type BEMessage =
   | InputRequiredMessage
   | CacheStatusReadyMessage
   | TerminalSessionOpenedMessage
-  | TerminalClosedMessage;
+  | TerminalClosedMessage
+  | PairingRequestedMessage
+  | PairingResolvedMessage
+  | RemoteSessionStartedMessage
+  | RemoteSessionEndedMessage
+  | RemoteSourceStatusMessage;
 
 export type FEMessage = HelloMessage | IntentMessage;

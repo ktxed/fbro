@@ -8,12 +8,7 @@ use crate::state::{Panel, PanelStatus, PanelViewMode, TabKind};
 use crate::ws::protocol::{now, ServerMessage};
 use crate::ws::runtime::IntentContext;
 
-pub(crate) async fn handle(
-    name: &str,
-    _scope: &Value,
-    args: &Value,
-    ctx: &mut IntentContext<'_>,
-) {
+pub(crate) async fn handle(name: &str, _scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
     match name {
         "panel.tab.new" => new_tab(args, ctx).await,
         "panel.tab.close" => close_tab(args, ctx).await,
@@ -95,7 +90,12 @@ async fn broadcast_slot_change(
         let active_per_slot: Vec<String> = state_guard
             .layout_slots
             .iter()
-            .filter_map(|sid| state_guard.slots.get(sid).map(|s| s.active_panel_id.clone()))
+            .filter_map(|sid| {
+                state_guard
+                    .slots
+                    .get(sid)
+                    .map(|s| s.active_panel_id.clone())
+            })
             .collect();
         let layout_patch = ServerMessage::StatePatch {
             timestamp: now(),
@@ -151,7 +151,10 @@ async fn new_tab(args: &Value, ctx: &mut IntentContext<'_>) {
     };
     // Optional: caller can supply a specific panel to clone from (e.g. the
     // leftmost non-terminal tab when double-clicking empty tab-bar space).
-    let base_panel_id = args.get("basePanelId").and_then(Value::as_str).map(str::to_string);
+    let base_panel_id = args
+        .get("basePanelId")
+        .and_then(Value::as_str)
+        .map(str::to_string);
 
     // Clone the requested (or active) tab's source/path/view defaults to seed the new panel.
     let (new_panel, driver, supports_thumbs, sort, filter, show_hidden, version) = {
@@ -223,14 +226,23 @@ async fn new_tab(args: &Value, ctx: &mut IntentContext<'_>) {
                 .iter()
                 .position(|id| id == &slot.active_panel_id)
                 .unwrap_or(slot.tab_panel_ids.len().saturating_sub(1));
-            slot.tab_panel_ids.insert(active_idx + 1, new_panel_id.clone());
+            slot.tab_panel_ids
+                .insert(active_idx + 1, new_panel_id.clone());
             slot.active_panel_id = new_panel_id.clone();
         }
         // Move focus to the newly created tab.
         state_guard.focus = new_panel_id.clone();
 
         let _ = path; // path captured inside `new_panel.path` already
-        (new_panel, driver, supports_thumbs, sort, filter, show_hidden, version)
+        (
+            new_panel,
+            driver,
+            supports_thumbs,
+            sort,
+            filter,
+            show_hidden,
+            version,
+        )
     };
 
     broadcast_slot_change(
@@ -260,8 +272,10 @@ async fn new_tab(args: &Value, ctx: &mut IntentContext<'_>) {
             false,
             show_hidden,
         ));
-        ctx.scan_handles
-            .insert(new_panel.panel_id.clone(), crate::jobs::ScanHandle { handle });
+        ctx.scan_handles.insert(
+            new_panel.panel_id.clone(),
+            crate::jobs::ScanHandle { handle },
+        );
     }
 }
 
@@ -329,7 +343,11 @@ async fn close_tab(args: &Value, ctx: &mut IntentContext<'_>) {
         ctx,
         &slot_id,
         None,
-        if focus_followed { Some(&new_active) } else { None },
+        if focus_followed {
+            Some(&new_active)
+        } else {
+            None
+        },
     )
     .await;
 }
@@ -479,7 +497,12 @@ async fn switch_tab(args: &Value, ctx: &mut IntentContext<'_>) {
         let panels_active: Vec<String> = state_guard
             .layout_slots
             .iter()
-            .filter_map(|sid| state_guard.slots.get(sid).map(|s| s.active_panel_id.clone()))
+            .filter_map(|sid| {
+                state_guard
+                    .slots
+                    .get(sid)
+                    .map(|s| s.active_panel_id.clone())
+            })
             .collect();
         (
             focus_follow,
@@ -536,4 +559,3 @@ async fn switch_tab(args: &Value, ctx: &mut IntentContext<'_>) {
         }
     }
 }
-

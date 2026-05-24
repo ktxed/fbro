@@ -35,6 +35,8 @@ pub enum ServerMessage {
         job_id: String,
         event: String,
         #[serde(skip_serializing_if = "Option::is_none")]
+        files: Option<Vec<FileOpFileSchema>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
         progress: Option<FileOpProgressSchema>,
         #[serde(rename = "searchProgress", skip_serializing_if = "Option::is_none")]
         search_progress: Option<SearchProgressSchema>,
@@ -200,6 +202,72 @@ pub enum ServerMessage {
         session_id: u32,
         data: Vec<u8>,
     },
+    /// A paired-handshake is in progress and needs the user to compare the
+    /// 6-digit `code` against the other device. Fires on both peers
+    /// simultaneously. The FE shows a modal; the user clicks Confirm/Cancel,
+    /// driving a `ConfirmPairing` intent.
+    PairingRequested {
+        timestamp: u64,
+        #[serde(rename = "handshakeId")]
+        handshake_id: String,
+        /// Zero-padded 6-digit string (e.g. "047392").
+        code: String,
+        /// Self-reported machine name of the other side.
+        name: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        os: Option<String>,
+        #[serde(rename = "pubkeyAlgo")]
+        pubkey_algo: String,
+        /// Unix millis when the handshake auto-aborts if not confirmed.
+        #[serde(rename = "expiresAt")]
+        expires_at: u64,
+    },
+    /// A pairing handshake has terminated. Closes the modal on both sides.
+    PairingResolved {
+        timestamp: u64,
+        #[serde(rename = "handshakeId")]
+        handshake_id: String,
+        /// One of: `"paired"`, `"rejected"`, `"timeout"`.
+        outcome: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        fingerprint: Option<String>,
+    },
+    /// A remote SFTP session was established. Used by the FE to render an
+    /// "active connections" indicator in Settings → Sharing.
+    RemoteSessionStarted {
+        timestamp: u64,
+        fingerprint: String,
+        #[serde(rename = "sourceId")]
+        source_id: String,
+    },
+    /// A remote SFTP session ended (clean disconnect, revoke, or error).
+    RemoteSessionEnded {
+        timestamp: u64,
+        fingerprint: String,
+        #[serde(rename = "sourceId")]
+        source_id: String,
+    },
+    /// Live status of a mounted remote source. Emitted by the SFTP driver
+    /// supervisor on every transition (initial connect, heartbeat
+    /// failure, reconnect attempt, success). The FE uses this to render
+    /// a "Reconnecting…" spinner on the volume-bar button and a panel
+    /// overlay banner.
+    RemoteSourceStatus {
+        timestamp: u64,
+        #[serde(rename = "sourceId")]
+        source_id: String,
+        /// One of: `"connected"`, `"reconnecting"`, `"disconnected"`,
+        /// `"dead"`.
+        status: String,
+        /// Human-readable reason. Set when `status != "connected"`.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        message: Option<String>,
+        /// Unix millis of the next scheduled reconnect attempt. Set
+        /// while `status == "reconnecting"` so the FE can show a
+        /// countdown.
+        #[serde(rename = "nextRetryAt", skip_serializing_if = "Option::is_none")]
+        next_retry_at: Option<u64>,
+    },
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -228,6 +296,10 @@ pub struct StateDomains {
     #[serde(rename = "fontSize")]
     pub font_size: u8,
     pub settings: SettingsSnapshot,
+    #[serde(rename = "discoveredPeers")]
+    pub discovered_peers: Vec<crate::remote::discovery::DiscoveredPeerSchema>,
+    #[serde(rename = "shareConfig")]
+    pub share_config: serde_json::Value,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -395,6 +467,19 @@ pub struct SourceSchema {
     pub shadow: bool,
     #[serde(rename = "iconName", skip_serializing_if = "Option::is_none")]
     pub icon_name: Option<String>,
+    /// Only set for `kind == "remote"` sources: name/fingerprint of the
+    /// paired peer that owns this source. Drives the volume-bar label and
+    /// the read-only badge tooltip.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub peer: Option<SourcePeerSchema>,
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct SourcePeerSchema {
+    pub name: String,
+    pub fingerprint: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub os: Option<String>,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -530,8 +615,12 @@ pub struct FileOpProgressSchema {
 #[derive(Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct ConflictDecisionSchema {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
     pub source: String,
     pub destination: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
     pub options: Vec<String>,
     pub supports_apply_to_all: bool,
 }

@@ -1,13 +1,17 @@
 use std::io::{Read, Write};
 use std::path::Path;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, watch};
 
-use crate::jobs::{ConflictPolicy, DecisionResponse, DecisionRx, FileOpEntry, FileOpType};
-use crate::vfs::VfsDriver;
+use crate::jobs::{
+    ConflictPolicy, DecisionResponse, DecisionRx, FileOpEntry, FileOpType, VerificationPolicy,
+};
+use crate::vfs::{VfsDriver, VfsTransferDigest};
 use crate::ws::protocol::{now, ConflictDecisionSchema, FileOpProgressSchema, ServerMessage};
 
-const COPY_BUF_SIZE: usize = 64 * 1024; // 64 KiB
+const COPY_BUF_SIZE: usize = 256 * 1024; // 256 KiB
+const COPY_PROGRESS_INTERVAL: Duration = Duration::from_millis(80);
 
 fn apply_file_attrs(dst_path: &str, mtime_secs: Option<u64>, permissions: Option<&str>) {
     if let Some(secs) = mtime_secs {
@@ -32,12 +36,20 @@ fn apply_file_attrs(dst_path: &str, mtime_secs: Option<u64>, permissions: Option
 
 #[cfg(unix)]
 fn set_mtime(dst_path: &str, secs: u64) {
-    use std::ffi::CString;
     use libc::{timespec, utimensat, AT_FDCWD, UTIME_OMIT};
-    let Ok(c_path) = CString::new(dst_path) else { return };
+    use std::ffi::CString;
+    let Ok(c_path) = CString::new(dst_path) else {
+        return;
+    };
     let times = [
-        timespec { tv_sec: 0, tv_nsec: UTIME_OMIT },
-        timespec { tv_sec: secs as libc::time_t, tv_nsec: 0 },
+        timespec {
+            tv_sec: 0,
+            tv_nsec: UTIME_OMIT,
+        },
+        timespec {
+            tv_sec: secs as libc::time_t,
+            tv_nsec: 0,
+        },
     ];
     unsafe { utimensat(AT_FDCWD, c_path.as_ptr(), times.as_ptr(), 0) };
 }
@@ -74,10 +86,13 @@ pub async fn run_file_op(
     src_driver: Arc<dyn VfsDriver>,
     dst_driver: Option<Arc<dyn VfsDriver>>,
     preserve_attributes: bool,
+    verification_policy: VerificationPolicy,
+    save_digest_file: bool,
 ) {
     let job_id_clone = job_id.clone();
     let tx_clone = tx.clone();
     let result = tokio::task::spawn_blocking(move || {
+        let _ctx = FileOpDriverContext::new(&*src_driver, &job_id_clone);
         run_file_op_blocking(
             &job_id_clone,
             &op_type,
@@ -91,6 +106,8 @@ pub async fn run_file_op(
             &*src_driver,
             dst_driver.as_deref(),
             preserve_attributes,
+            &verification_policy,
+            save_digest_file,
         )
     })
     .await;
@@ -109,6 +126,24 @@ pub async fn run_file_op(
         Err(_) => {
             let _ = tx_event(&tx, &job_id, "Cancelled", None, None, None).await;
         }
+    }
+}
+
+struct FileOpDriverContext<'a> {
+    driver: &'a dyn VfsDriver,
+    job_id: &'a str,
+}
+
+impl<'a> FileOpDriverContext<'a> {
+    fn new(driver: &'a dyn VfsDriver, job_id: &'a str) -> Self {
+        driver.begin_file_op(job_id);
+        Self { driver, job_id }
+    }
+}
+
+impl Drop for FileOpDriverContext<'_> {
+    fn drop(&mut self) {
+        self.driver.end_file_op(self.job_id);
     }
 }
 
@@ -138,6 +173,8 @@ fn run_file_op_blocking(
     src_driver: &dyn VfsDriver,
     dst_driver: Option<&dyn VfsDriver>,
     preserve_attributes: bool,
+    verification_policy: &VerificationPolicy,
+    save_digest_file: bool,
 ) -> Result<(), String> {
     // Totals grow as directories are discovered (no pre-scan — VFS may be remote)
     let mut total_files = 0usize;
@@ -227,6 +264,8 @@ fn run_file_op_blocking(
                         decision_rx,
                         &mut apply_to_all,
                         preserve_attributes,
+                        verification_policy,
+                        save_digest_file,
                     )?;
                 } else {
                     // Check conflict
@@ -264,7 +303,7 @@ fn run_file_op_blocking(
                         }
                     }
 
-                    copy_file_with_progress(
+                    let copied = copy_file_with_progress(
                         job_id,
                         src,
                         &dst_str,
@@ -278,9 +317,12 @@ fn run_file_op_blocking(
                         total_bytes_completed,
                         src_driver,
                         dst_drv,
+                        decision_rx,
+                        verification_policy,
+                        save_digest_file,
                     )?;
 
-                                    if preserve_attributes && dst_drv.is_local() {
+                    if copied && preserve_attributes && dst_drv.is_local() {
                         apply_file_attrs(&dst_str, entry.mtime, entry.permissions.as_deref());
                     }
 
@@ -392,8 +434,10 @@ fn resolve_conflict(
                 "DecisionRequired",
                 None,
                 Some(ConflictDecisionSchema {
+                    kind: Some("conflict".to_string()),
                     source: src.to_string(),
                     destination: dst.to_string(),
+                    message: None,
                     options: vec![
                         "overwrite".to_string(),
                         "skip".to_string(),
@@ -448,10 +492,88 @@ fn copy_file_with_progress(
     total_bytes_completed: u64,
     src_driver: &dyn VfsDriver,
     dst_driver: &dyn VfsDriver,
-) -> Result<(), String> {
+    decision_rx: &mut DecisionRx,
+    verification_policy: &VerificationPolicy,
+    save_digest_file: bool,
+) -> Result<bool, String> {
+    let src_name = Path::new(src)
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+
+    loop {
+        match copy_file_once_with_progress(
+            job_id,
+            src,
+            dst,
+            total_bytes,
+            tx,
+            cancel_rx,
+            pause_rx,
+            total_files,
+            completed_files,
+            total_bytes_total,
+            total_bytes_completed,
+            src_driver,
+            dst_driver,
+            &src_name,
+            save_digest_file,
+        ) {
+            Ok(()) => return Ok(true),
+            Err(CopyFileError::Fatal(e)) => return Err(e),
+            Err(CopyFileError::Verification(e)) => {
+                if *verification_policy == VerificationPolicy::Fail {
+                    return Err(e);
+                }
+                match resolve_verification_mismatch(src, dst, &e, tx, job_id, decision_rx)? {
+                    VerificationOutcome::Retry => {
+                        send_progress_sync_with_status(
+                            tx,
+                            job_id,
+                            total_files,
+                            completed_files,
+                            Some(src_name.clone()),
+                            total_bytes,
+                            0,
+                            total_bytes_total,
+                            total_bytes_completed,
+                            Some("Retrying transfer".to_string()),
+                        );
+                        continue;
+                    }
+                    VerificationOutcome::Skip => return Ok(false),
+                    VerificationOutcome::Abort => return Err(e),
+                }
+            }
+        }
+    }
+}
+
+enum CopyFileError {
+    Fatal(String),
+    Verification(String),
+}
+
+fn copy_file_once_with_progress(
+    job_id: &str,
+    src: &str,
+    dst: &str,
+    total_bytes: u64,
+    tx: &mpsc::Sender<ServerMessage>,
+    cancel_rx: &watch::Receiver<bool>,
+    pause_rx: &watch::Receiver<bool>,
+    total_files: usize,
+    completed_files: usize,
+    total_bytes_total: u64,
+    total_bytes_completed: u64,
+    src_driver: &dyn VfsDriver,
+    dst_driver: &dyn VfsDriver,
+    src_name: &str,
+    save_digest_file: bool,
+) -> Result<(), CopyFileError> {
     let mut reader = src_driver
         .open_read(src)
-        .map_err(|e| format!("Cannot open {src}: {e}"))?;
+        .map_err(|e| CopyFileError::Fatal(format!("Cannot open {src}: {e}")))?;
 
     let file_size = if total_bytes > 0 {
         total_bytes
@@ -461,50 +583,204 @@ fn copy_file_with_progress(
 
     let mut writer = dst_driver
         .open_write(dst)
-        .map_err(|e| format!("Cannot create {dst}: {e}"))?;
+        .map_err(|e| CopyFileError::Fatal(format!("Cannot create {dst}: {e}")))?;
 
     let mut buf = vec![0u8; COPY_BUF_SIZE];
     let mut copied: u64 = 0;
-    let src_name = Path::new(src)
-        .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_default();
-
+    let mut stream_hasher = blake3::Hasher::new();
+    let mut last_progress_at = Instant::now();
     loop {
         if wait_if_paused(pause_rx, cancel_rx) {
             drop(writer);
             let _ = dst_driver.remove_file(dst);
-            return Err(CANCELLED_ERR.to_string());
+            return Err(CopyFileError::Fatal(CANCELLED_ERR.to_string()));
         }
 
         let n = reader
             .read(&mut buf)
-            .map_err(|e| format!("Read error on {src}: {e}"))?;
+            .map_err(|e| CopyFileError::Fatal(format!("Read error on {src}: {e}")))?;
         if n == 0 {
             break;
         }
 
         writer
             .write_all(&buf[..n])
-            .map_err(|e| format!("Write error on {dst}: {e}"))?;
+            .map_err(|e| CopyFileError::Fatal(format!("Write error on {dst}: {e}")))?;
 
+        stream_hasher.update(&buf[..n]);
         copied += n as u64;
 
-        if copied % (256 * 1024) < COPY_BUF_SIZE as u64 || copied == file_size {
+        if copied == file_size || last_progress_at.elapsed() >= COPY_PROGRESS_INTERVAL {
             send_progress_sync(
                 tx,
                 job_id,
                 total_files,
                 completed_files,
-                Some(src_name.clone()),
+                Some(src_name.to_string()),
                 file_size,
                 copied,
                 total_bytes_total,
                 total_bytes_completed + copied,
             );
+            last_progress_at = Instant::now();
         }
     }
 
+    writer
+        .flush()
+        .map_err(|e| CopyFileError::Fatal(format!("Flush error on {dst}: {e}")))?;
+    drop(writer);
+
+    if let Some(remote_digest) = src_driver
+        .transfer_digest(job_id, src)
+        .map_err(|e| CopyFileError::Verification(format!("Verification failed for {src}: {e}")))?
+    {
+        send_progress_sync_with_status(
+            tx,
+            job_id,
+            total_files,
+            completed_files,
+            Some(src_name.to_string()),
+            file_size,
+            copied,
+            total_bytes_total,
+            total_bytes_completed + copied,
+            Some("Verifying transfer".to_string()),
+        );
+        let stream_digest = VfsTransferDigest {
+            algorithm: "blake3".to_string(),
+            size: copied,
+            hash: stream_hasher.finalize().to_hex().to_string(),
+        };
+        let dest_digest = digest_driver_file(dst_driver, dst).map_err(|e| {
+            CopyFileError::Verification(format!("Verification failed for {dst}: {e}"))
+        })?;
+        compare_transfer_digests(src, dst, &remote_digest, &stream_digest, &dest_digest)
+            .map_err(CopyFileError::Verification)?;
+    }
+
+    if save_digest_file {
+        let digest = stream_hasher.finalize().to_hex().to_string();
+        write_digest_sidecar(dst_driver, dst, src_name, &digest).map_err(CopyFileError::Fatal)?;
+    }
+
+    Ok(())
+}
+
+enum VerificationOutcome {
+    Retry,
+    Skip,
+    Abort,
+}
+
+fn resolve_verification_mismatch(
+    src: &str,
+    dst: &str,
+    message: &str,
+    tx: &mpsc::Sender<ServerMessage>,
+    job_id: &str,
+    decision_rx: &mut DecisionRx,
+) -> Result<VerificationOutcome, String> {
+    send_event_sync(
+        tx,
+        job_id,
+        "DecisionRequired",
+        None,
+        Some(ConflictDecisionSchema {
+            kind: Some("verification".to_string()),
+            source: src.to_string(),
+            destination: dst.to_string(),
+            message: Some(message.to_string()),
+            options: vec!["retry".to_string(), "abort".to_string(), "skip".to_string()],
+            supports_apply_to_all: false,
+        }),
+        Some(message.to_string()),
+    );
+    match decision_rx.blocking_recv() {
+        Some(DecisionResponse { decision, .. }) => match decision.as_str() {
+            "retry" => Ok(VerificationOutcome::Retry),
+            "skip" => Ok(VerificationOutcome::Skip),
+            _ => Ok(VerificationOutcome::Abort),
+        },
+        None => Ok(VerificationOutcome::Abort),
+    }
+}
+
+fn digest_driver_file(driver: &dyn VfsDriver, path: &str) -> Result<VfsTransferDigest, String> {
+    let mut reader = driver
+        .open_read(path)
+        .map_err(|e| format!("Cannot open for verification: {e}"))?;
+    let mut hasher = blake3::Hasher::new();
+    let mut buf = vec![0u8; COPY_BUF_SIZE];
+    let mut size = 0u64;
+    loop {
+        let n = reader
+            .read(&mut buf)
+            .map_err(|e| format!("Read error during verification: {e}"))?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+        size = size.saturating_add(n as u64);
+    }
+    Ok(VfsTransferDigest {
+        algorithm: "blake3".to_string(),
+        size,
+        hash: hasher.finalize().to_hex().to_string(),
+    })
+}
+
+fn write_digest_sidecar(
+    driver: &dyn VfsDriver,
+    dst: &str,
+    file_name: &str,
+    hash: &str,
+) -> Result<(), String> {
+    let sidecar_path = format!("{dst}.b3");
+    let digest_name = if file_name.is_empty() {
+        dst.rsplit(['/', '\\'])
+            .next()
+            .filter(|name| !name.is_empty())
+            .unwrap_or(dst)
+    } else {
+        file_name
+    };
+    let body = format!("{hash}  {digest_name}\n");
+    let mut writer = driver
+        .open_write(&sidecar_path)
+        .map_err(|e| format!("Cannot create digest file {sidecar_path}: {e}"))?;
+    writer
+        .write_all(body.as_bytes())
+        .map_err(|e| format!("Write error on digest file {sidecar_path}: {e}"))?;
+    writer
+        .flush()
+        .map_err(|e| format!("Flush error on digest file {sidecar_path}: {e}"))?;
+    Ok(())
+}
+
+fn compare_transfer_digests(
+    src: &str,
+    dst: &str,
+    remote: &VfsTransferDigest,
+    stream: &VfsTransferDigest,
+    dest: &VfsTransferDigest,
+) -> Result<(), String> {
+    if remote.algorithm != "blake3" || stream.algorithm != "blake3" || dest.algorithm != "blake3" {
+        return Err(format!(
+            "Verification failed for {src}: unsupported digest algorithm"
+        ));
+    }
+    if remote.size != stream.size || stream.size != dest.size {
+        return Err(format!(
+            "Verification failed for {src} -> {dst}: byte count mismatch (remote={}, streamed={}, destination={})",
+            remote.size, stream.size, dest.size
+        ));
+    }
+    if remote.hash != stream.hash || stream.hash != dest.hash {
+        return Err(format!(
+            "Verification failed for {src} -> {dst}: digest mismatch"
+        ));
+    }
     Ok(())
 }
 
@@ -526,6 +802,8 @@ fn copy_dir_recursive(
     decision_rx: &mut DecisionRx,
     apply_to_all: &mut Option<ConflictOutcome>,
     preserve_attributes: bool,
+    verification_policy: &VerificationPolicy,
+    save_digest_file: bool,
 ) -> Result<(), String> {
     dst_driver
         .create_dir_all(dst)
@@ -574,6 +852,8 @@ fn copy_dir_recursive(
                 decision_rx,
                 apply_to_all,
                 preserve_attributes,
+                verification_policy,
+                save_digest_file,
             )?;
         } else {
             if dst_driver.exists(&child_dst) {
@@ -609,7 +889,7 @@ fn copy_dir_recursive(
                 }
             }
 
-            copy_file_with_progress(
+            let copied = copy_file_with_progress(
                 job_id,
                 &child_src,
                 &child_dst,
@@ -623,9 +903,12 @@ fn copy_dir_recursive(
                 *total_bytes_completed,
                 src_driver,
                 dst_driver,
+                decision_rx,
+                verification_policy,
+                save_digest_file,
             )?;
 
-            if preserve_attributes && dst_driver.is_local() {
+            if copied && preserve_attributes && dst_driver.is_local() {
                 apply_file_attrs(&child_dst, child.mtime, child.permissions.as_deref());
             }
 
@@ -776,11 +1059,37 @@ fn send_progress_sync(
     total_bytes_total: u64,
     total_bytes_copied: u64,
 ) {
+    send_progress_sync_with_status(
+        tx,
+        job_id,
+        total_files,
+        completed_files,
+        current_file,
+        current_file_bytes_total,
+        current_file_bytes_copied,
+        total_bytes_total,
+        total_bytes_copied,
+        None,
+    );
+}
+
+fn send_progress_sync_with_status(
+    tx: &mpsc::Sender<ServerMessage>,
+    job_id: &str,
+    total_files: usize,
+    completed_files: usize,
+    current_file: Option<String>,
+    current_file_bytes_total: u64,
+    current_file_bytes_copied: u64,
+    total_bytes_total: u64,
+    total_bytes_copied: u64,
+    status_text: Option<String>,
+) {
     let progress = FileOpProgressSchema {
         total_files,
         completed_files,
         current_file,
-        status_text: None,
+        status_text,
         current_file_bytes_total,
         current_file_bytes_copied,
         total_bytes_total,
@@ -792,6 +1101,7 @@ fn send_progress_sync(
         timestamp: now(),
         job_id: job_id.to_string(),
         event: "Progress".to_string(),
+        files: None,
         progress: Some(progress),
         search_progress: None,
         decision: None,
@@ -814,6 +1124,7 @@ fn send_event_sync(
         timestamp: now(),
         job_id: job_id.to_string(),
         event: event.to_string(),
+        files: None,
         progress,
         search_progress: None,
         decision,
@@ -836,6 +1147,7 @@ async fn tx_event(
         timestamp: now(),
         job_id: job_id.to_string(),
         event: event.to_string(),
+        files: None,
         progress,
         search_progress: None,
         decision,

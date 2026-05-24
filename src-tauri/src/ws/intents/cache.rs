@@ -9,7 +9,10 @@ pub(crate) async fn handle(name: &str, args: &Value, ctx: &mut IntentContext<'_>
             send_cache_status(ctx).await;
         }
         "ClearCache" => {
-            let cache_name = args.get("cache").and_then(Value::as_str).unwrap_or("prefetch");
+            let cache_name = args
+                .get("cache")
+                .and_then(Value::as_str)
+                .unwrap_or("prefetch");
             if cache_name == "prefetch" {
                 ctx.viewer_prefetch.clear();
                 send_cache_status(ctx).await;

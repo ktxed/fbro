@@ -386,6 +386,7 @@ fn send_progress_sync(
         timestamp: now(),
         job_id: job_id.to_string(),
         event: "Progress".to_string(),
+        files: None,
         progress: Some(progress),
         search_progress: None,
         decision: None,

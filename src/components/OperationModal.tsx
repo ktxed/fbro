@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import type { WsClient } from "../ws/client";
-import type { PendingOp, Job, ConflictPolicy } from "../ws/types";
+import type { PendingOp, Job, ConflictPolicy, VerificationPolicy } from "../ws/types";
 import { useAppDispatch, useAppState } from "../store";
 import type { PendingDryRun } from "../store";
 import { isArchiveSourceId } from "../utils/sourceId";
@@ -32,8 +32,13 @@ function opLabel(t: string) {
     case "copy": return "Copy";
     case "move": return "Move";
     case "delete": return "Delete";
+    case "outgoing": return "Outgoing transfer";
     default: return t;
   }
+}
+
+function jobShortId(jobId: string) {
+  return jobId.replace(/^job-/, "#");
 }
 
 function splitParentAndName(fullPath: string): { parent: string; name: string } {
@@ -72,17 +77,21 @@ function formatEta(remainingBytes: number, bytesPerSec: number): string {
 const LARGE_FILE_THRESHOLD = 1024 * 1024; // 1 MiB — show speed only above this
 
 function useTransferSpeed(currentFile: string | undefined, bytesCopied: number) {
-  const sampleRef = useRef<{ file: string; bytes: number; time: number } | null>(null);
+  const sampleRef = useRef<{ file: string; bytes: number; time: number; speed: number | null } | null>(null);
   const [speed, setSpeed] = useState<number | null>(null);
 
   useEffect(() => {
-    if (!currentFile) { setSpeed(null); return; }
+    if (!currentFile) {
+      sampleRef.current = null;
+      setSpeed(null);
+      return;
+    }
 
     const now = Date.now();
     const prev = sampleRef.current;
 
     if (!prev || prev.file !== currentFile) {
-      sampleRef.current = { file: currentFile, bytes: bytesCopied, time: now };
+      sampleRef.current = { file: currentFile, bytes: bytesCopied, time: now, speed: null };
       setSpeed(null);
       return;
     }
@@ -91,8 +100,12 @@ function useTransferSpeed(currentFile: string | undefined, bytesCopied: number) 
     const deltaSec = (now - prev.time) / 1000;
 
     if (deltaSec >= 0.5 && deltaBytes > 0) {
-      setSpeed(deltaBytes / deltaSec);
-      sampleRef.current = { file: currentFile, bytes: bytesCopied, time: now };
+      const instantSpeed = deltaBytes / deltaSec;
+      const smoothedSpeed = prev.speed == null
+        ? instantSpeed
+        : (prev.speed * 0.7) + (instantSpeed * 0.3);
+      setSpeed(smoothedSpeed);
+      sampleRef.current = { file: currentFile, bytes: bytesCopied, time: now, speed: smoothedSpeed };
     }
   }, [bytesCopied, currentFile]);
 
@@ -103,6 +116,8 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
   const state = useAppState();
   const dispatch = useAppDispatch();
   const [conflictPolicy, setConflictPolicy] = useState<ConflictPolicy>("ask");
+  const [verificationPolicy, setVerificationPolicy] = useState<VerificationPolicy>("fail");
+  const [saveDigestFile, setSaveDigestFile] = useState(true);
   const [submitted, setSubmitted] = useState(false);
   const [dryMode, setDryMode] = useState(false);
   const [startPaused, setStartPaused] = useState(true);
@@ -199,6 +214,8 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
         destPanel: pending.destPanel,
         destPath: pending.destPath,
         conflictPolicy,
+        verificationPolicy,
+        saveDigestFile,
         background,
         ...(background && startPaused ? { startPaused: true } : {}),
         ...(dryMode ? { dryMode: true } : {}),
@@ -278,17 +295,39 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
             )}
 
             {!isDelete && (
-              <div className="modal__option">
-                <label><MnemonicLabel text="Action if file exists:" mnemonic="a" /></label>
-                <select
-                  value={conflictPolicy}
-                  onChange={(e) => setConflictPolicy(e.target.value as ConflictPolicy)}
-                >
-                  <option value="ask">Ask</option>
-                  <option value="overwrite">Overwrite</option>
-                  <option value="skip">Skip</option>
-                </select>
-              </div>
+              <>
+                <div className="modal__option">
+                  <label><MnemonicLabel text="Action if file exists:" mnemonic="a" /></label>
+                  <select
+                    value={conflictPolicy}
+                    onChange={(e) => setConflictPolicy(e.target.value as ConflictPolicy)}
+                  >
+                    <option value="ask">Ask</option>
+                    <option value="overwrite">Overwrite</option>
+                    <option value="skip">Skip</option>
+                  </select>
+                </div>
+                <div className="modal__option">
+                  <label>Action if verification fails:</label>
+                  <select
+                    value={verificationPolicy}
+                    onChange={(e) => setVerificationPolicy(e.target.value as VerificationPolicy)}
+                  >
+                    <option value="fail">Fail</option>
+                    <option value="prompt">Ask</option>
+                  </select>
+                </div>
+                <div className="modal__option">
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={saveDigestFile}
+                      onChange={(e) => setSaveDigestFile(e.target.checked)}
+                    />
+                    {" "}Save BLAKE3 digest file
+                  </label>
+                </div>
+              </>
             )}
             <div className="modal__option">
               <label>
@@ -338,9 +377,15 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
     const isQueued = activeJob.state === "Queued";
     const isProgress = activeJob.state === "Running";
     const isFpBro = activeJob.kind === "fp-bro";
-    const label = opLabel(activeJob.type);
+    const isOutgoing = activeJob.kind === "outgoing-transfer";
+    const label = isOutgoing && activeJobId
+      ? `Outgoing ${jobShortId(activeJobId)}`
+      : opLabel(activeJob.type);
     const decisionOptions = activeJob.decision?.options ?? [];
-    const primaryDecision = decisionOptions.includes("overwrite")
+    const isVerificationDecision = activeJob.decision?.kind === "verification";
+    const primaryDecision = decisionOptions.includes("retry")
+      ? "retry"
+      : decisionOptions.includes("overwrite")
       ? "overwrite"
       : decisionOptions[0];
     const skipDecision = decisionOptions.find((opt) => opt === "skip");
@@ -355,7 +400,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
           ? Math.round((p.completedFiles / p.totalFiles) * 100)
           : 0
       );
-    const currentProgressLabel = p?.currentFile ?? p?.statusText ?? "⏳";
+    const currentProgressLabel = p?.statusText ?? p?.currentFile ?? "Waiting";
 
     const submitDecision = (decision: string) => {
       if (!activeJobId) return;
@@ -454,7 +499,14 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
           <div className="modal__header">{label} — {activeJob.state}</div>
           <div className="modal__body">
             <div className="modal__job-params">
-              {isFpBro ? (
+              {isOutgoing ? (
+                <>
+                  <span className="modal__job-param-label">From:</span>
+                  <span className="modal__job-param-value" title={activeJob.sourcePath}>{activeJob.sourcePath}</span>
+                  <span className="modal__job-param-label">To:</span>
+                  <span className="modal__job-param-value">Remote fbro destination unavailable</span>
+                </>
+              ) : isFpBro ? (
                 <>
                   <span className="modal__job-param-label">Inputs:</span>
                   <span className="modal__job-param-value" title={activeJob.sourcePath}>{activeJob.sourcePath}</span>
@@ -478,11 +530,19 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
                 </>
               )}
             </div>
+            {isOutgoing && (
+              <p className="modal__summary">
+                The external destination is controlled by the remote fbro and is not available here.
+              </p>
+            )}
             {/* Decision required */}
             {isDecision && activeJob.decision && (
               <div className="modal__decision">
-                <p>File already exists:</p>
+                <p>{isVerificationDecision ? "Transfer verification failed:" : "File already exists:"}</p>
                 <p className="modal__conflict-path">{activeJob.decision.destination}</p>
+                {activeJob.decision.message && (
+                  <p className="modal__summary">{activeJob.decision.message}</p>
+                )}
                 {activeJob.decision.supportsApplyToAll && (
                   <div className="modal__option">
                     <label>
@@ -568,13 +628,32 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
               </div>
             )}
 
+            {isOutgoing && activeJob.files.length > 0 && (
+              <div className="modal__transfer-files">
+                {activeJob.files.map((file) => {
+                  const path = file.sourcePath ?? file.name;
+                  const isCurrent = p?.currentFile === path;
+                  return (
+                    <div
+                      key={path}
+                      className={`modal__transfer-file${isCurrent ? " modal__transfer-file--current" : ""}`}
+                      title={path}
+                    >
+                      <span>{file.name}</span>
+                      {file.size !== undefined && <span>{formatBytes(file.size)}</span>}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
             {/* Terminal state */}
             {isTerminal && (
               <>
                 <p className="modal__terminal">
-                  {activeJob.state === "Completed" && (isFpBro ? "Bro completed successfully." : "Operation completed successfully.")}
-                  {activeJob.state === "Cancelled" && (isFpBro ? "Bro job was cancelled." : "Operation was cancelled.")}
-                  {activeJob.state === "Failed" && (isFpBro ? `Bro failed: ${activeJob.error ?? "unknown error"}` : `Operation failed: ${activeJob.error ?? "unknown error"}`)}
+                  {activeJob.state === "Completed" && (isOutgoing ? "Outgoing transfer completed." : isFpBro ? "Bro completed successfully." : "Operation completed successfully.")}
+                  {activeJob.state === "Cancelled" && (isOutgoing ? "Outgoing transfer was cancelled." : isFpBro ? "Bro job was cancelled." : "Operation was cancelled.")}
+                  {activeJob.state === "Failed" && (isOutgoing ? `Outgoing transfer failed: ${activeJob.error ?? "unknown error"}` : isFpBro ? `Bro failed: ${activeJob.error ?? "unknown error"}` : `Operation failed: ${activeJob.error ?? "unknown error"}`)}
                 </p>
                 {isFpBro && activeJob.state === "Completed" && activeJob.resultPath && (
                   <div className="modal__job-params">

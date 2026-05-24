@@ -110,6 +110,14 @@ impl VfsDriver for SpyFsDriver {
         self
     }
 
+    fn begin_file_op(&self, job_id: &str) {
+        self.inner.begin_file_op(job_id);
+    }
+
+    fn end_file_op(&self, job_id: &str) {
+        self.inner.end_file_op(job_id);
+    }
+
     // ── Pass-through (non-mutating) ──────────────────────────────────────────
 
     fn list(

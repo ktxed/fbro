@@ -179,7 +179,10 @@ fn ensure_ancestors(
         if known_dirs.insert(current.clone()) {
             children.entry(current.clone()).or_default();
             let parent_entries = children.entry(parent).or_default();
-            if let Some(_existing) = parent_entries.iter_mut().find(|e| e.name == *part && e.is_dir) {
+            if let Some(_existing) = parent_entries
+                .iter_mut()
+                .find(|e| e.name == *part && e.is_dir)
+            {
                 // Implicit entry already exists, keep it as-is.
             } else if !parent_entries.iter().any(|e| e.name == *part) {
                 parent_entries.push(ZipMeta {
@@ -436,7 +439,8 @@ impl VfsDriver for ZipFsDriver {
 
         // Deduplicate by name, keeping the entry with mtime (explicit) over
         // the one without (implicit).
-        let mut seen: std::collections::HashMap<String, &ZipMeta> = std::collections::HashMap::new();
+        let mut seen: std::collections::HashMap<String, &ZipMeta> =
+            std::collections::HashMap::new();
         for e in entries.iter() {
             if hide_hidden && e.name.starts_with('.') {
                 continue;
@@ -474,7 +478,7 @@ impl VfsDriver for ZipFsDriver {
                     permissions: None,
                     icon_name,
                     cc,
-                source_path: None,
+                    source_path: None,
                 }
             })
             .collect();
