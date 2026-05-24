@@ -1410,6 +1410,10 @@ function reducer(state: AppState, action: AppAction): AppState {
       const idx = Math.max(0, Math.min(action.entryIndex, h.entries.length - 1));
       return { ...state, panelHistory: { ...state.panelHistory, [action.panelId]: { ...h, cursor: idx } } };
     }
+    case "OPEN_BOOKMARKS":
+      return { ...state, bookmarksOpen: { panelId: action.panelId }, pendingContextMenu: null };
+    case "CLOSE_BOOKMARKS":
+      return { ...state, bookmarksOpen: null };
     case "OPEN_SEARCH":
       return { ...state, pendingSearch: action.search };
     case "CLOSE_SEARCH":
