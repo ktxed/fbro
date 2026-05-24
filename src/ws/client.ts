@@ -1,6 +1,7 @@
 import type { BEMessage, FEMessage, IntentMessage } from "./types";
+import { invoke } from "@tauri-apps/api/core";
 
-const WS_URL = "ws://127.0.0.1:7878";
+const DEFAULT_WS_URL = "ws://127.0.0.1:7878";
 const RECONNECT_DELAY_MS = 1500;
 // Localhost handshakes should complete in <50ms. A short timeout means a
 // failed attempt unwinds quickly so the fast-retry path can kick in.
@@ -8,17 +9,39 @@ const CONNECT_TIMEOUT_MS = 500;
 
 type TerminalOutputListener = (bytes: Uint8Array) => void;
 
+type FrontendConfig = {
+  wsUrl?: string | null;
+};
+
+export async function resolveWsUrl() {
+  try {
+    const config = await invoke<FrontendConfig>("frontend_config");
+    if (config.wsUrl) return config.wsUrl;
+  } catch {
+    // Browser-only/unit-test contexts do not have Tauri invoke.
+  }
+  try {
+    const stored = window.localStorage.getItem("fbro.wsUrl");
+    if (stored) return stored;
+  } catch {
+    // Ignore storage access failures.
+  }
+  return DEFAULT_WS_URL;
+}
+
 export class WsClient {
   private ws: WebSocket | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private connectTimer: ReturnType<typeof setTimeout> | null = null;
   private destroyed = false;
   private clientKind: "gui" | "viewer";
+  private wsUrl: string;
   private pending: (FEMessage | IntentMessage)[] = [];
   private terminalListeners = new Map<number, TerminalOutputListener>();
 
-  constructor(clientKind: "gui" | "viewer" = "gui") {
+  constructor(clientKind: "gui" | "viewer" = "gui", wsUrl = DEFAULT_WS_URL) {
     this.clientKind = clientKind;
+    this.wsUrl = wsUrl;
   }
 
   onMessage: (msg: BEMessage) => void = () => {};
@@ -49,10 +72,10 @@ export class WsClient {
 
   connect() {
     if (this.destroyed) return;
-    console.log("WS CONNECT", this.clientKind, WS_URL);
+    console.log("WS CONNECT", this.clientKind, this.wsUrl);
     let ws: WebSocket;
     try {
-      ws = new WebSocket(WS_URL);
+      ws = new WebSocket(this.wsUrl);
     } catch (e) {
       console.log("WS CONNECT THROW", this.clientKind, e);
       this.scheduleReconnect();

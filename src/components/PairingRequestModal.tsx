@@ -36,7 +36,7 @@ export function PairingRequestModal({ client }: PairingRequestModalProps) {
 
   return (
     <div className="modal-overlay" role="dialog" aria-modal="true">
-      <div className="modal modal--pairing">
+      <div className="modal modal--pairing" data-testid="pairing-dialog">
         <div className="modal__header">Pair with {pp.name}</div>
         <div className="modal__body">
           <p>
@@ -53,11 +53,12 @@ export function PairingRequestModal({ client }: PairingRequestModalProps) {
           </p>
         </div>
         <div className="modal__footer">
-          <button className="settings-button" onClick={() => respond(false)}>
+          <button className="settings-button" data-command-id="pairing.cancel" onClick={() => respond(false)}>
             Cancel
           </button>
           <button
             className="settings-button settings-button--primary"
+            data-command-id="pairing.confirm"
             onClick={() => respond(true)}
             autoFocus
           >

@@ -220,6 +220,9 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
       <div
         ref={modalRef}
         className="modal modal--wide"
+        role="dialog"
+        aria-label="Search"
+        data-testid="search-dialog"
         tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
       >
@@ -258,6 +261,8 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
                     ref={pathInputRef}
                     type="text"
                     className="search-modal__path-input"
+                    aria-label="Search path"
+                    data-testid="search-path-input"
                     value={pathInput}
                     onChange={(e) => setPathInput(e.target.value)}
                     onKeyDown={handlePathInputKeyDown}
@@ -284,6 +289,7 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
                   <button
                     type="button"
                     className="modal__btn search-modal__add-btn"
+                    data-command-id="search.path.add"
                     onClick={addPath}
                     disabled={!pathInput.trim() || paths.includes(pathInput.trim())}
                   >
@@ -322,6 +328,7 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
                   <select
                     id="search-depth"
                     className="search-modal__depth-select"
+                    aria-label="Depth"
                     value={depthValue}
                     onChange={handleDepthChange}
                   >
@@ -343,6 +350,8 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
                     ref={fileMaskInputRef}
                     type="text"
                     className="search-modal__mask-input"
+                    aria-label="File name"
+                    data-testid="search-file-mask-input"
                     value={fileMask}
                     onChange={(e) => setFileMask(e.target.value)}
                     onKeyDown={(e) => {
@@ -383,6 +392,8 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
                   <textarea
                     ref={contentTextareaRef}
                     className="search-modal__content-input"
+                    aria-label="Text to find"
+                    data-testid="search-content-input"
                     value={contentQuery}
                     onChange={(e) => setContentQuery(e.target.value)}
                     placeholder="Text to find…"
@@ -473,6 +484,7 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
             <>
               <button
                 className="modal__btn modal__btn--primary"
+                data-command-id="search.start"
                 onClick={() => startSearch(false)}
                 disabled={paths.length === 0}
               >
@@ -480,6 +492,7 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
               </button>
               <button
                 className="modal__btn"
+                data-command-id="search.background"
                 onClick={() => startSearch(true)}
                 disabled={paths.length === 0}
               >
@@ -488,20 +501,21 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
             </>
           )}
           {isRunning && (
-            <button className="modal__btn" onClick={handleCancel}>
+            <button className="modal__btn" data-command-id="search.cancel" onClick={handleCancel}>
               Cancel Search
             </button>
           )}
           {hasResults && (
             <button
               className="modal__btn modal__btn--primary"
+              data-command-id="search.to-results"
               onClick={handleToResults}
               disabled={!search.jobId}
             >
               To Results
             </button>
           )}
-          <button className="modal__btn" onClick={close}>
+          <button className="modal__btn" data-command-id="search.close" onClick={close}>
             <MnemonicLabel text="Close" mnemonic="c" />
           </button>
         </div>

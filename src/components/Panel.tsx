@@ -1104,7 +1104,11 @@ export function Panel({
         // distinct key so React doesn't try to reconcile it against the
         // underlying card sharing the same absIndex.
         key={isTooltip ? `tooltip-${absIndex}` : absIndex}
+        role={isTooltip ? undefined : "row"}
+        data-testid={isTooltip ? undefined : "panel-entry"}
         data-abs-index={isTooltip ? undefined : absIndex}
+        data-entry-name={isTooltip ? undefined : entry.name}
+        data-entry-kind={isTooltip ? undefined : entry.kind}
         className={[
           "panel__card",
           isTooltip ? "panel__card--tooltip" : "",
@@ -1177,7 +1181,11 @@ export function Panel({
     return (
       <div
         key={absIndex}
+        role="row"
+        data-testid="panel-entry"
         data-abs-index={absIndex}
+        data-entry-name={entry.name}
+        data-entry-kind={entry.kind}
         className={[
           "panel__row",
           absIndex % 2 === 1 ? "panel__row--alt" : "",
@@ -1307,6 +1315,7 @@ export function Panel({
         dragActive && dragDropAllowed ? "panel--drag-hover-valid" : "",
         externalDragHovered ? "panel--external-drag-hover" : "",
       ].filter(Boolean).join(" ")}
+      data-testid={`panel-${panelId}`}
       data-panel-id={panelId}
       ref={focusDivRef}
       tabIndex={0}

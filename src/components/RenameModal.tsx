@@ -54,7 +54,7 @@ export function RenameModal({ rename, client }: RenameModalProps) {
       if (e.key === "Enter") { e.preventDefault(); submit(); return; }
       if (e.key === "Escape") { e.preventDefault(); close(); }
     }}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+      <div className="modal" role="dialog" aria-label="Rename" data-testid="rename-dialog" onClick={(e) => e.stopPropagation()}>
         <div className="modal__header">Rename</div>
         <div className="modal__body">
           <p className="modal__summary">
@@ -68,6 +68,8 @@ export function RenameModal({ rename, client }: RenameModalProps) {
             <input
               ref={inputRef}
               className="modal__rename-input"
+              aria-label="To"
+              data-testid="rename-to-input"
               value={value}
               onChange={(e) => { setValue(e.target.value); setLocalError(null); }}
               onKeyDown={handleKeyDown}
@@ -82,12 +84,13 @@ export function RenameModal({ rename, client }: RenameModalProps) {
         <div className="modal__actions">
           <button
             className="modal__btn modal__btn--primary"
+            data-command-id="file.rename.confirm"
             disabled={submitting}
             onClick={submit}
           >
             {submitting ? "Renaming…" : "Rename"}
           </button>
-          <button className="modal__btn" onClick={close}>
+          <button className="modal__btn" data-command-id="file.rename.cancel" onClick={close}>
             Cancel
           </button>
         </div>

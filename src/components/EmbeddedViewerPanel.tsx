@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
-import { WsClient } from "../ws/client";
+import { resolveWsUrl, WsClient } from "../ws/client";
 import type { AppState } from "../store";
 import type { FileChunkMessage } from "../ws/types";
 import { canUseDirect, DirectFileViewer } from "../viewers/DirectFileViewer";
@@ -87,32 +87,37 @@ export function EmbeddedViewerPanel({ sourcePanelId, state, onClose }: Props) {
 
   // Create own WsClient for ReadFileChunk isolation.
   useEffect(() => {
-    const client = new WsClient("viewer");
-    clientRef.current = client;
+    let cancelled = false;
+    resolveWsUrl().then((wsUrl) => {
+      if (cancelled) return;
+      const client = new WsClient("viewer", wsUrl);
+      clientRef.current = client;
 
-    client.onMessage = (msg) => {
-      if (msg.type === "FileChunk") {
-        const m = msg as FileChunkMessage;
-        // Ignore stale chunks (cursor moved while chunk was in flight).
-        if (m.path !== pendingPathRef.current) return;
-        pendingPathRef.current = null;
+      client.onMessage = (msg) => {
+        if (msg.type === "FileChunk") {
+          const m = msg as FileChunkMessage;
+          // Ignore stale chunks (cursor moved while chunk was in flight).
+          if (m.path !== pendingPathRef.current) return;
+          pendingPathRef.current = null;
 
-        const bytes = hexDecode(m.data);
-        setViewMode(prev => {
-          if (prev.kind !== "loading") return prev;
-          const { file } = prev;
-          const isBin = detectBinary(bytes);
-          const rendMode = isImageExt(file.filename)
-            ? (file.fileSize !== null && file.fileSize > imageLimitRef.current ? "hex" : "image")
-            : isBin ? "hex" : "text";
-          return { kind: "ready", file, buffer: bytes, mode: rendMode };
-        });
-      }
-    };
+          const bytes = hexDecode(m.data);
+          setViewMode(prev => {
+            if (prev.kind !== "loading") return prev;
+            const { file } = prev;
+            const isBin = detectBinary(bytes);
+            const rendMode = isImageExt(file.filename)
+              ? (file.fileSize !== null && file.fileSize > imageLimitRef.current ? "hex" : "image")
+              : isBin ? "hex" : "text";
+            return { kind: "ready", file, buffer: bytes, mode: rendMode };
+          });
+        }
+      };
 
-    client.connect();
+      client.connect();
+    });
     return () => {
-      client.destroy();
+      cancelled = true;
+      clientRef.current?.destroy();
       clientRef.current = null;
     };
   }, []);

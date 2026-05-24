@@ -25,3 +25,4 @@ Thumbs.db
 # Local Codex / session artifacts
 /.codex
 /chat-dump.jsonl
+/artifacts/

@@ -8,7 +8,10 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "spy": "FBRO_SPY=1 tauri dev"
+    "spy": "FBRO_SPY=1 tauri dev",
+    "e2e:smoke": "npm run e2e:smoke:local",
+    "e2e:smoke:local": "FBRO_E2E_LOCAL=1 node tests/e2e/smoke.mjs",
+    "e2e:smoke:runner": "node tests/e2e/smoke.mjs"
   },
   "dependencies": {
     "@floating-ui/react": "^0.27.19",
@@ -29,6 +32,8 @@
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.4",
     "typescript": "^5.6.2",
-    "vite": "^5.4.8"
+    "vite": "^5.4.8",
+    "webdriverio": "^9.20.0",
+    "ws": "^8.18.3"
   }
 }

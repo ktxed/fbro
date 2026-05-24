@@ -133,6 +133,7 @@ export function Toolbar({ client, jobsViewOpen, onOpenJobsView }: { client: WsCl
           <button
             key={commandId}
             className={`toolbar__btn${isDisabled ? " toolbar__btn--disabled" : ""}`}
+            data-command-id={commandId}
             tabIndex={-1}
             disabled={isDisabled}
             title={key ? `${key} — ${detail}` : detail}

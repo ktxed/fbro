@@ -173,6 +173,19 @@ fn remove_fbro_command() -> Result<platform::ShellCommandRemoveResult, String> {
 }
 
 #[derive(serde::Serialize)]
+struct FrontendConfig {
+    #[serde(rename = "wsUrl")]
+    ws_url: Option<String>,
+}
+
+#[tauri::command]
+fn frontend_config() -> FrontendConfig {
+    FrontendConfig {
+        ws_url: std::env::var("FBRO_WS_URL").ok().filter(|v| !v.is_empty()),
+    }
+}
+
+#[derive(serde::Serialize)]
 struct PathInfo {
     kind: String,
     size: Option<u64>,
@@ -224,6 +237,13 @@ fn mime_for_path(path: &str) -> &'static str {
     }
 }
 
+fn frontend_only() -> bool {
+    matches!(
+        std::env::var("FBRO_FRONTEND_ONLY").as_deref(),
+        Ok("1") | Ok("true") | Ok("TRUE") | Ok("yes") | Ok("YES")
+    )
+}
+
 fn main() {
     let cli_open_request = parse_cli_open_request();
     if let Some(request) = &cli_open_request {
@@ -240,6 +260,7 @@ fn main() {
     #[cfg(target_os = "linux")]
     let _ = gtk::init();
 
+    let is_frontend_only = frontend_only();
     let platform = platform::create_platform();
     let viewer_prefetch = Arc::new(ViewerPrefetchQueue::new());
     // 1024 entries × ~20 KB/PNG ≈ 20 MB resident cap. Comfortable for browsing
@@ -251,12 +272,16 @@ fn main() {
     // region of a large image folder. Going higher mostly contends with
     // the shell's own background thumbnailer.
     let thumb_pool = thumb_pool::ThumbPool::start(platform.clone(), 8);
-    let file_server_port = fileserver::start(
-        platform.clone(),
-        Arc::clone(&viewer_prefetch),
-        Arc::clone(&thumb_cache),
-        Arc::clone(&thumb_pool),
-    );
+    let file_server_port = if is_frontend_only {
+        0
+    } else {
+        fileserver::start(
+            platform.clone(),
+            Arc::clone(&viewer_prefetch),
+            Arc::clone(&thumb_cache),
+            Arc::clone(&thumb_pool),
+        )
+    };
     let icon_cache: Arc<StdMutex<HashMap<String, (Vec<u8>, &'static str)>>> =
         Arc::new(StdMutex::new(HashMap::new()));
 
@@ -333,6 +358,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             get_path_info,
+            frontend_config,
             probe_fbro_command,
             install_fbro_command,
             remove_fbro_command,
@@ -359,6 +385,10 @@ fn main() {
                 #[cfg(not(target_os = "linux"))]
                 {
                     drag_out::init_drag_out(app.handle().clone());
+                }
+                if is_frontend_only {
+                    eprintln!("[fbro] frontend-only mode enabled; embedded backend is disabled");
+                    return Ok(());
                 }
                 let session = persistence::load();
                 let settings = crate::state::settings::load();
@@ -439,7 +469,7 @@ fn main() {
             }
         })
         .on_window_event(|window, event| {
-            if window.label() == "main" {
+            if !frontend_only() && window.label() == "main" {
                 if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                     api.prevent_close();
                     use tauri::Manager;

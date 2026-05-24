@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { WsClient } from "../ws/client";
+import { resolveWsUrl, WsClient } from "../ws/client";
 import type { BEMessage, FileChunkMessage, ViewerFileChangedMessage, StateSnapshotMessage, StatePatchMessage } from "../ws/types";
 import { applyZoom, nextZoomSize, DEFAULT_FONT_SIZE } from "../utils/zoom";
 import { ImageViewer, IMAGE_LIMIT } from "../viewers/ImageViewer";
@@ -390,36 +390,39 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
   // ── WS connection ─────────────────────────────────────────────────────────
 
   useEffect(() => {
-    const client = new WsClient("viewer");
-    clientRef.current = client;
+    let cancelled = false;
+    resolveWsUrl().then((wsUrl) => {
+      if (cancelled) return;
+      const client = new WsClient("viewer", wsUrl);
+      clientRef.current = client;
 
-    client.onConnected = () => {
-      if (httpInitDoneRef.current) return; // already loaded via HTTP
-      if (canUseDirect(isLocal, initFilename, nativeFileSize, effectiveImageLimit)) {
-        setLoading(false);
-      } else {
-        // For known image types, request up to the effective image limit in one shot
-        const initSize = isImageExt(initFilename) ? effectiveImageLimit : SMALL_LIMIT;
-        requestChunk(0, initSize);
-      }
-    };
-
-    client.onMessage = (msg: BEMessage) => {
-      if (msg.type === "StateSnapshot") {
-        const fontSize = (msg as StateSnapshotMessage).domains.fontSize;
-        if (fontSize !== undefined) { currentFontSizeRef.current = fontSize; applyZoom(fontSize); }
-      }
-      if (msg.type === "StatePatch") {
-        const patch = msg as StatePatchMessage;
-        if (patch.domain === "settings" && patch.patch.fontSize !== undefined) {
-          const fontSize = patch.patch.fontSize as number;
-          currentFontSizeRef.current = fontSize;
-          applyZoom(fontSize);
+      client.onConnected = () => {
+        if (httpInitDoneRef.current) return; // already loaded via HTTP
+        if (canUseDirect(isLocal, initFilename, nativeFileSize, effectiveImageLimit)) {
+          setLoading(false);
+        } else {
+          // For known image types, request up to the effective image limit in one shot
+          const initSize = isImageExt(initFilename) ? effectiveImageLimit : SMALL_LIMIT;
+          requestChunk(0, initSize);
         }
-      }
-      if (msg.type === "FileChunk") {
-        const m = msg as FileChunkMessage;
-        const bytes = hexDecode(m.data);
+      };
+
+      client.onMessage = (msg: BEMessage) => {
+        if (msg.type === "StateSnapshot") {
+          const fontSize = (msg as StateSnapshotMessage).domains.fontSize;
+          if (fontSize !== undefined) { currentFontSizeRef.current = fontSize; applyZoom(fontSize); }
+        }
+        if (msg.type === "StatePatch") {
+          const patch = msg as StatePatchMessage;
+          if (patch.domain === "settings" && patch.patch.fontSize !== undefined) {
+            const fontSize = patch.patch.fontSize as number;
+            currentFontSizeRef.current = fontSize;
+            applyZoom(fontSize);
+          }
+        }
+        if (msg.type === "FileChunk") {
+          const m = msg as FileChunkMessage;
+          const bytes = hexDecode(m.data);
 
         bufRangeRef.current = { offset: m.offset, end: m.offset + bytes.length, eof: m.eof };
         // For small files baseLine is absolute (always starts at offset 0).
@@ -441,9 +444,9 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
         setNavError(null);
         setIsSmall(prev => prev !== null ? prev : (m.eof && bytes.length <= SMALL_LIMIT));
         setBufSeq(s => s + 1);
-      }
-      if (msg.type === "ViewerFileChanged") {
-        const m = msg as ViewerFileChangedMessage;
+        }
+        if (msg.type === "ViewerFileChanged") {
+          const m = msg as ViewerFileChangedMessage;
         const direct = canUseDirect(m.isLocal ?? false, m.filename, m.fileSize ?? null, effectiveImageLimit);
         // Reset viewer state for new file
         setDosMode(false);
@@ -482,20 +485,25 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
             path: m.path, sourceId: m.sourceId, offset: 0, size: initSize,
           });
         }
-      }
-      if (msg.type === "Error") {
-        const err = msg as { code: string; message: string };
-        if (err.code === "NOT_A_FILE") {
-          setNavError(err.message);
-        } else {
-          setError(err.message ?? "Unknown error");
-          setLoading(false);
         }
-      }
-    };
+        if (msg.type === "Error") {
+          const err = msg as { code: string; message: string };
+          if (err.code === "NOT_A_FILE") {
+            setNavError(err.message);
+          } else {
+            setError(err.message ?? "Unknown error");
+            setLoading(false);
+          }
+        }
+      };
 
-    client.connect();
-    return () => client.destroy();
+      client.connect();
+    });
+    return () => {
+      cancelled = true;
+      clientRef.current?.destroy();
+      clientRef.current = null;
+    };
   }, [requestChunk]);
 
   // ── After large-mode buffer loads, set topLine ────────────────────────────

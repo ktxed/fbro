@@ -46,7 +46,7 @@ export function MkDirModal({ mkdir, client }: MkDirModalProps) {
       if (e.key === "Enter") { e.preventDefault(); submit(); return; }
       if (e.key === "Escape") { e.preventDefault(); close(); }
     }}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+      <div className="modal" role="dialog" aria-label="Create Directory" data-testid="mkdir-dialog" onClick={(e) => e.stopPropagation()}>
         <div className="modal__header">Create Directory</div>
         <div className="modal__body">
           <p className="modal__rename-from" title={mkdir.dirPath}>
@@ -57,6 +57,8 @@ export function MkDirModal({ mkdir, client }: MkDirModalProps) {
             <input
               ref={inputRef}
               className="modal__rename-input"
+              aria-label="Name"
+              data-testid="mkdir-name-input"
               value={value}
               onChange={(e) => setValue(e.target.value)}
               onKeyDown={handleKeyDown}
@@ -71,12 +73,13 @@ export function MkDirModal({ mkdir, client }: MkDirModalProps) {
         <div className="modal__actions">
           <button
             className="modal__btn modal__btn--primary"
+            data-command-id="file.mkdir.confirm"
             disabled={submitting || !value.trim()}
             onClick={submit}
           >
             {submitting ? "Creating…" : "Create"}
           </button>
-          <button className="modal__btn" onClick={close}>
+          <button className="modal__btn" data-command-id="file.mkdir.cancel" onClick={close}>
             Cancel
           </button>
         </div>

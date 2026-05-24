@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { AppContext, useAppReducer } from "./store";
-import { WsClient } from "./ws/client";
+import { resolveWsUrl, WsClient } from "./ws/client";
 import { Layout } from "./components/Layout";
 import { JobsBar } from "./components/JobsBar";
 import { Toolbar } from "./components/Toolbar";
@@ -23,30 +23,39 @@ export function App() {
   }, [state.discoveredPeers]);
 
   useEffect(() => {
-    const client = new WsClient();
-    clientRef.current = client;
+    let cancelled = false;
 
-    client.onConnected = () => dispatch({ type: "CONNECTED" });
-    client.onDisconnected = () => dispatch({ type: "DISCONNECTED" });
-    client.onMessage = (msg) => {
-      dispatch({ type: "BE_MESSAGE", msg });
-      // Side-effect: once a pairing handshake completes successfully,
-      // auto-mount the remote sources. The BE emits a `discoveredPeers`
-      // patch immediately before `PairingResolved`, so by this point our
-      // ref already reflects the freshly-paired peer.
-      if (msg.type === "PairingResolved" && msg.outcome === "paired" && msg.fingerprint) {
-        const fp = msg.fingerprint;
-        const peer = discoveredRef.current.find((p) => p.pubkeyFp === fp);
-        if (peer) {
-          client.sendIntent("ConnectRemotePeer", undefined, { peerId: peer.id });
-        } else {
-          client.sendIntent("RetryLastPeer", undefined, { fingerprint: fp });
+    resolveWsUrl().then((wsUrl) => {
+      if (cancelled) return;
+      const client = new WsClient("gui", wsUrl);
+      clientRef.current = client;
+
+      client.onConnected = () => dispatch({ type: "CONNECTED" });
+      client.onDisconnected = () => dispatch({ type: "DISCONNECTED" });
+      client.onMessage = (msg) => {
+        dispatch({ type: "BE_MESSAGE", msg });
+        // Side-effect: once a pairing handshake completes successfully,
+        // auto-mount the remote sources. The BE emits a `discoveredPeers`
+        // patch immediately before `PairingResolved`, so by this point our
+        // ref already reflects the freshly-paired peer.
+        if (msg.type === "PairingResolved" && msg.outcome === "paired" && msg.fingerprint) {
+          const fp = msg.fingerprint;
+          const peer = discoveredRef.current.find((p) => p.pubkeyFp === fp);
+          if (peer) {
+            client.sendIntent("ConnectRemotePeer", undefined, { peerId: peer.id });
+          } else {
+            client.sendIntent("RetryLastPeer", undefined, { fingerprint: fp });
+          }
         }
-      }
-    };
+      };
 
-    client.connect();
-    return () => client.destroy();
+      client.connect();
+    });
+    return () => {
+      cancelled = true;
+      clientRef.current?.destroy();
+      clientRef.current = null;
+    };
   }, [dispatch]);
 
   const client = clientRef.current;

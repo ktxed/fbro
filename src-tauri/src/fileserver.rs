@@ -89,8 +89,10 @@ pub fn start(
     thumb_cache: Arc<ThumbCache>,
     thumb_pool: Arc<ThumbPool>,
 ) -> u16 {
-    let listener = TcpListener::bind("127.0.0.1:0").expect("file server bind");
+    let bind = std::env::var("FBRO_FILESERVER_BIND").unwrap_or_else(|_| "127.0.0.1:0".to_string());
+    let listener = TcpListener::bind(&bind).expect("file server bind");
     let port = listener.local_addr().expect("file server addr").port();
+    eprintln!("[fbro fs] listening on http://{bind} (advertising port {port})");
     std::thread::spawn(move || {
         for stream in listener.incoming().flatten() {
             let plat = plat.clone();

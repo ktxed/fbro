@@ -159,7 +159,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
     const otherPanel = panelIds.find(id => id !== pendingDryRun.sourcePanel) ?? panelIds[0] ?? "";
     return (
       <div className="modal-overlay" ref={modalRef} tabIndex={-1} onKeyDown={(e) => { if (e.key === "Escape") closeDryRun(); if (e.key === "Tab") e.preventDefault(); }}>
-        <div className="modal modal--fixed" onClick={(e) => e.stopPropagation()}>
+        <div className="modal modal--fixed" role="dialog" aria-label="Dry Run Script Generated" data-testid="dry-run-dialog" onClick={(e) => e.stopPropagation()}>
           <div className="modal__header">Dry Run Script Generated</div>
           <div className="modal__body">
             <p className="modal__summary">Script saved to your home folder:</p>
@@ -187,7 +187,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
             </div>
           </div>
           <div className="modal__actions">
-            <button className="modal__btn modal__btn--primary" onClick={closeDryRun}>Close</button>
+            <button className="modal__btn modal__btn--primary" data-command-id="dry-run.close" onClick={closeDryRun}>Close</button>
           </div>
         </div>
       </div>
@@ -271,7 +271,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
 
     return (
       <div className="modal-overlay" ref={modalRef} tabIndex={-1} onClick={close} onKeyDown={handlePendingKeyDown}>
-        <div className="modal modal--fixed" onClick={(e) => e.stopPropagation()}>
+        <div className="modal modal--fixed" role="dialog" aria-label={label} data-testid="operation-dialog" onClick={(e) => e.stopPropagation()}>
           <div className="modal__header">{label}</div>
           <div className="modal__body">
             <p className="modal__summary">
@@ -353,15 +353,15 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
             )}
           </div>
           <div className="modal__actions">
-            <button className="modal__btn modal__btn--primary" disabled={submitted} onClick={() => startOp(false)}>
+            <button className="modal__btn modal__btn--primary" data-command-id={`file.${pending.opType}.confirm`} disabled={submitted} onClick={() => startOp(false)}>
               {submitted ? "Starting…" : label}
             </button>
             {canStartInBackground && (
-              <button className="modal__btn" disabled={submitted} onClick={() => startOp(true)}>
+              <button className="modal__btn" data-command-id={`file.${pending.opType}.background`} disabled={submitted} onClick={() => startOp(true)}>
                 <MnemonicLabel text="Background" mnemonic="b" />
               </button>
             )}
-            <button className="modal__btn" onClick={close}>
+            <button className="modal__btn" data-command-id={`file.${pending.opType}.cancel`} onClick={close}>
               Cancel
             </button>
           </div>
@@ -495,7 +495,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
 
     return (
       <div className="modal-overlay" ref={modalRef} tabIndex={-1} onClick={isTerminal ? close : undefined} onKeyDown={handleActiveJobKeyDown}>
-        <div className="modal modal--fixed" onClick={(e) => e.stopPropagation()}>
+        <div className="modal modal--fixed" role="dialog" aria-label={`${label} ${activeJob.state}`} data-testid="job-dialog" onClick={(e) => e.stopPropagation()}>
           <div className="modal__header">{label} — {activeJob.state}</div>
           <div className="modal__body">
             <div className="modal__job-params">
@@ -560,6 +560,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
                     <button
                       key={opt}
                       className={`modal__btn${opt === primaryDecision ? " modal__btn--primary" : ""}`}
+                      data-command-id={`job.decision.${opt}`}
                       onClick={() => submitDecision(opt)}
                     >
                       {opt === primaryDecision
@@ -676,41 +677,41 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
           <div className="modal__actions">
             {(isQueued || isProgress) && (
               <>
-                <button className="modal__btn modal__btn--primary" onClick={close}>
+                <button className="modal__btn modal__btn--primary" data-command-id="job.background" onClick={close}>
                   Background
                 </button>
                 {activeJob.supportsPause && activeJob.paused ? (
-                  <button className="modal__btn" onClick={resumeJob}>
+                  <button className="modal__btn" data-command-id="job.resume" onClick={resumeJob}>
                     <MnemonicLabel text="Resume" mnemonic="r" />
                   </button>
                 ) : activeJob.supportsPause ? (
-                  <button className="modal__btn" onClick={pauseJob}>
+                  <button className="modal__btn" data-command-id="job.pause" onClick={pauseJob}>
                     Pause
                   </button>
                 ) : null}
-                <button className="modal__btn" onClick={cancelJob}>
+                <button className="modal__btn" data-command-id="job.cancel" onClick={cancelJob}>
                   Cancel
                 </button>
               </>
             )}
             {isDecision && (
-              <button className="modal__btn" onClick={cancelJob}>
+              <button className="modal__btn" data-command-id="job.cancel" onClick={cancelJob}>
                 Cancel
               </button>
             )}
             {isTerminal && (
               <>
                 {isFpBro && activeJob.state === "Completed" && activeJob.resultPath && (
-                  <button className="modal__btn" onClick={showResult}>
+                  <button className="modal__btn" data-command-id="job.show-result" onClick={showResult}>
                     Show Result
                   </button>
                 )}
                 {isFpBro && activeJob.resultPath && (
-                  <button className="modal__btn" onClick={() => navigator.clipboard.writeText(activeJob.resultPath!)}>
+                  <button className="modal__btn" data-command-id="job.copy-path" onClick={() => navigator.clipboard.writeText(activeJob.resultPath!)}>
                     Copy Path
                   </button>
                 )}
-                <button className="modal__btn modal__btn--primary" onClick={() => {
+                <button className="modal__btn modal__btn--primary" data-command-id="job.close" onClick={() => {
                   client.sendIntent("RefreshPanels");
                   close();
                 }}>

@@ -1,0 +1,50 @@
+services:
+  fbro-a:
+    build:
+      context: .
+      dockerfile: docker/e2e/Dockerfile
+    environment:
+      FBRO_WS_BIND: 0.0.0.0:7878
+      FBRO_FILESERVER_BIND: 0.0.0.0:17881
+      HOME: /state/a/home
+      XDG_CONFIG_HOME: /state/a/config
+    ports:
+      - "17878:7878"
+      - "17881:17881"
+    volumes:
+      - ./artifacts/e2e:/artifacts
+      - ./artifacts/e2e/fbro-a/state:/state/a
+      - ./artifacts/e2e/fbro-a/work:/work/a
+    command: >
+      bash -lc '
+        set -o pipefail &&
+        rm -rf /state/a/home /state/a/config /work/a/src /work/a/dst &&
+        mkdir -p /state/a/home /state/a/config/fbro /work/a/src /work/a/dst &&
+        printf "[panels.left]\npath = \"/work/a/src\"\n\n[panels.right]\npath = \"/work/a/dst\"\n" > /state/a/config/fbro/session.toml &&
+        xvfb-run -a /app/src-tauri/target/release/fbro 2>&1 | tee /artifacts/fbro-a.log
+      '
+
+  fbro-b:
+    build:
+      context: .
+      dockerfile: docker/e2e/Dockerfile
+    environment:
+      FBRO_WS_BIND: 0.0.0.0:7878
+      FBRO_FILESERVER_BIND: 0.0.0.0:27881
+      HOME: /state/b/home
+      XDG_CONFIG_HOME: /state/b/config
+    ports:
+      - "27878:7878"
+      - "27881:27881"
+    volumes:
+      - ./artifacts/e2e:/artifacts
+      - ./artifacts/e2e/fbro-b/state:/state/b
+      - ./artifacts/e2e/fbro-b/work:/work/b
+    command: >
+      bash -lc '
+        set -o pipefail &&
+        rm -rf /state/b/home /state/b/config /work/b/src /work/b/dst &&
+        mkdir -p /state/b/home /state/b/config/fbro /work/b/src /work/b/dst &&
+        printf "[panels.left]\npath = \"/work/b/src\"\n\n[panels.right]\npath = \"/work/b/dst\"\n" > /state/b/config/fbro/session.toml &&
+        xvfb-run -a /app/src-tauri/target/release/fbro 2>&1 | tee /artifacts/fbro-b.log
+      '

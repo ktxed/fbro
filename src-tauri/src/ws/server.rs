@@ -20,7 +20,7 @@ use crate::ws::runtime::{
     IntentContext,
 };
 
-const WS_ADDR: &str = "127.0.0.1:7878";
+const DEFAULT_WS_ADDR: &str = "127.0.0.1:7878";
 const CHANNEL_CAP: usize = 512;
 
 pub async fn start(
@@ -29,14 +29,15 @@ pub async fn start(
     quit_notify: Arc<Notify>,
     viewer_prefetch: Arc<ViewerPrefetchQueue>,
 ) {
-    let listener = match TcpListener::bind(WS_ADDR).await {
+    let ws_addr = std::env::var("FBRO_WS_BIND").unwrap_or_else(|_| DEFAULT_WS_ADDR.to_string());
+    let listener = match TcpListener::bind(&ws_addr).await {
         Ok(listener) => listener,
         Err(error) => {
-            eprintln!("[fbro] Failed to bind WebSocket server on {WS_ADDR}: {error}");
+            eprintln!("[fbro] Failed to bind WebSocket server on {ws_addr}: {error}");
             return;
         }
     };
-    eprintln!("[fbro] WebSocket server listening on ws://{WS_ADDR}");
+    eprintln!("[fbro] WebSocket server listening on ws://{ws_addr}");
 
     let dir_size_queue = Arc::new(DirSizeQueue::new());
     let platform = state.lock().await.platform.clone();

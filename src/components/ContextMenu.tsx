@@ -258,6 +258,7 @@ export function ContextMenu({ client, menu }: ContextMenuProps) {
               <button
                 key={item.id}
                 className={`context-menu__item${index === highlightedIndex ? " context-menu__item--active" : ""}`}
+                data-command-id={item.kind === "command" && item.commandId ? item.commandId : undefined}
                 role="menuitem"
                 onMouseEnter={() => setHighlightedIndex(index)}
                 onClick={() => { void runItem(index); }}
