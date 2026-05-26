@@ -1,0 +1,20 @@
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    bash \
+    ca-certificates \
+    dbus-x11 \
+    ffmpeg \
+    libayatana-appindicator3-1 \
+    librsvg2-2 \
+    libwebkit2gtk-4.1-0 \
+    p7zip-full \
+    xauth \
+    xvfb \
+    zip \
+  && rm -rf /var/lib/apt/lists/*
+
+ENV FBRO_APP_BINARY=/usr/local/bin/fbro
+ENV RUST_LOG=info

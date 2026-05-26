@@ -20,6 +20,7 @@
 use std::any::Any;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
+use std::future::Future;
 use std::io::{self, Read, Write};
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -228,6 +229,14 @@ impl SftpFsDriver {
     #[inline]
     fn rt(&self) -> &Runtime {
         self.runtime.as_ref().expect("runtime live until Drop")
+    }
+
+    fn block_on<F: Future>(&self, future: F) -> F::Output {
+        if tokio::runtime::Handle::try_current().is_ok() {
+            tokio::task::block_in_place(|| self.rt().block_on(future))
+        } else {
+            self.rt().block_on(future)
+        }
     }
 
     /// Wait for the session to be Ready (or fail), then invoke `f` with
@@ -836,7 +845,7 @@ impl VfsDriver for SftpFsDriver {
                 *slot = None;
             }
         });
-        self.rt().block_on(self.drop_job_connection(job_id));
+        self.block_on(self.drop_job_connection(job_id));
     }
 
     fn list(
@@ -849,7 +858,7 @@ impl VfsDriver for SftpFsDriver {
         let abs = self.absolute(path);
         let sort = sort.clone();
         let filter = filter.cloned();
-        self.rt().block_on(async move {
+        self.block_on(async move {
             self.with_sftp(|sftp| async move {
                 let dir = sftp.read_dir(&abs).await?;
                 let mut out: Vec<VfsEntry> = Vec::new();
@@ -929,7 +938,7 @@ impl VfsDriver for SftpFsDriver {
         let job_id = current_file_op_job_id();
         let marker_job_id = job_id.clone();
         let probe_abs = abs.clone();
-        let (sftp, file_size) = self.rt().block_on(async move {
+        let (sftp, file_size) = self.block_on(async move {
             self.with_sftp(|sftp| async move {
                 use russh_sftp::protocol::OpenFlags;
                 if let Some(job_id) = marker_job_id.as_deref() {
@@ -972,32 +981,30 @@ impl VfsDriver for SftpFsDriver {
 
     fn exists(&self, path: &str) -> bool {
         let abs = self.absolute(path);
-        self.rt()
-            .block_on(async move {
-                self.with_sftp(|sftp| async move {
-                    Ok::<bool, russh_sftp::client::error::Error>(sftp.metadata(&abs).await.is_ok())
-                })
-                .await
+        self.block_on(async move {
+            self.with_sftp(|sftp| async move {
+                Ok::<bool, russh_sftp::client::error::Error>(sftp.metadata(&abs).await.is_ok())
             })
-            .unwrap_or(false)
+            .await
+        })
+        .unwrap_or(false)
     }
 
     fn file_size(&self, path: &str) -> Option<u64> {
         let abs = self.absolute(path);
-        self.rt()
-            .block_on(async move {
-                self.with_sftp(|sftp| async move {
-                    let meta = sftp.metadata(&abs).await?;
-                    Ok(meta.len())
-                })
-                .await
+        self.block_on(async move {
+            self.with_sftp(|sftp| async move {
+                let meta = sftp.metadata(&abs).await?;
+                Ok(meta.len())
             })
-            .ok()
+            .await
+        })
+        .ok()
     }
 
     fn read_dir_entries(&self, path: &str) -> Result<Vec<DirChild>, VfsError> {
         let abs = self.absolute(path);
-        self.rt().block_on(async move {
+        self.block_on(async move {
             self.with_sftp(|sftp| async move {
                 let dir = sftp.read_dir(&abs).await?;
                 Ok(dir
@@ -1024,7 +1031,7 @@ impl VfsDriver for SftpFsDriver {
     fn read_chunk(&self, path: &str, offset: u64, size: usize) -> Result<Vec<u8>, VfsError> {
         let abs = self.absolute(path);
         let job_id = current_file_op_job_id();
-        self.rt().block_on(async move {
+        self.block_on(async move {
             self.with_sftp(|sftp| async move {
                 use russh_sftp::protocol::OpenFlags;
                 use tokio::io::{AsyncReadExt, AsyncSeekExt};
@@ -1064,7 +1071,7 @@ impl VfsDriver for SftpFsDriver {
         let abs = self.absolute(path);
         let encoded_path = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(abs.as_bytes());
         let control_path = format!("/.fbro-integrity/result/{job_id}/{encoded_path}");
-        let response = self.rt().block_on(async move {
+        let response = self.block_on(async move {
             self.with_sftp(|sftp| async move {
                 use russh_sftp::protocol::OpenFlags;
                 use tokio::io::AsyncReadExt;
@@ -1122,7 +1129,7 @@ impl SftpReadStream {
         // SAFETY: see SftpFsDriverRef doc — driver outlives the reader.
         let driver: &SftpFsDriver = unsafe { &*self.driver.0 };
         if let Some(job_id) = self.job_id.as_deref() {
-            driver.rt().block_on(driver.drop_job_connection(job_id));
+            driver.block_on(driver.drop_job_connection(job_id));
         } else {
             driver.state.broken.notify_waiters();
         }
@@ -1140,7 +1147,7 @@ impl Read for SftpReadStream {
             self.current_pos = 0;
             // SAFETY: see SftpFsDriverRef doc — driver outlives the reader.
             let driver: &SftpFsDriver = unsafe { &*self.driver.0 };
-            match driver.rt().block_on(self.rx.recv()) {
+            match driver.block_on(self.rx.recv()) {
                 Some(Ok(chunk)) if !chunk.is_empty() => {
                     self.current = chunk;
                 }

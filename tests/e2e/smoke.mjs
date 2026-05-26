@@ -7,7 +7,11 @@ import { fileURLToPath } from "node:url";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const localMode = process.env.FBRO_E2E_LOCAL === "1";
+const keepDocker = process.env.FBRO_E2E_KEEP_DOCKER === "1";
 const artifactsDir = process.env.FBRO_E2E_ARTIFACTS ?? path.resolve("artifacts/e2e");
+const composeFiles = (process.env.FBRO_E2E_COMPOSE_FILES ?? "docker-compose.e2e.yml")
+  .split(path.delimiter)
+  .filter(Boolean);
 const appBinary = process.env.FBRO_APP_BINARY ?? (
   localMode
     ? ["src-tauri/target/release/fbro", "src-tauri/target/debug/fbro"]
@@ -31,6 +35,10 @@ const webdriverHosts = {
 const webdriverPorts = {
   a: Number(process.env.FBRO_A_WEBDRIVER_PORT ?? (localMode ? 4444 : 4444)),
   b: Number(process.env.FBRO_B_WEBDRIVER_PORT ?? (localMode ? 4445 : 4444)),
+};
+const nativeWebdriverPorts = {
+  a: Number(process.env.FBRO_A_NATIVE_WEBDRIVER_PORT ?? 4446),
+  b: Number(process.env.FBRO_B_NATIVE_WEBDRIVER_PORT ?? 4447),
 };
 
 function backendPath(instance, ...parts) {
@@ -100,6 +108,14 @@ function requireDockerUsable() {
   }
 }
 
+function dockerComposeArgs(...args) {
+  return [
+    "compose",
+    ...composeFiles.flatMap((file) => ["-f", file]),
+    ...args,
+  ];
+}
+
 function writeLaunchWrapper(name, wsUrl) {
   ensureLocalAppBinary();
   const binDir = path.join(artifactsDir, "bin");
@@ -158,27 +174,44 @@ async function waitForWebSocket(url, label) {
 
 async function startLocalBackends() {
   requireDockerUsable();
-  execFileSync("docker", [
-    "compose",
-    "-f",
-    "docker-compose.e2e.yml",
+  execFileSync("docker", dockerComposeArgs(
     "up",
     "-d",
     "--build",
     "fbro-a",
     "fbro-b",
-  ], { cwd: repoRoot, stdio: "inherit" });
+  ), { cwd: repoRoot, stdio: "inherit" });
   await Promise.all([
     waitForWebSocket(wsUrls.a, "fbro-a backend websocket"),
     waitForWebSocket(wsUrls.b, "fbro-b backend websocket"),
   ]);
 }
 
+function stopLocalBackends() {
+  if (keepDocker) return;
+  try {
+    execFileSync("docker", dockerComposeArgs(
+      "down",
+      "--remove-orphans",
+    ), { cwd: repoRoot, stdio: "inherit" });
+  } catch (error) {
+    console.error(`docker compose cleanup failed: ${error.message}`);
+  }
+}
+
 async function startLocalDrivers() {
   requireExecutable("tauri-driver");
   const drivers = [
-    spawnLogged("tauri-driver", ["--port", String(webdriverPorts.a)], "tauri-driver-a"),
-    spawnLogged("tauri-driver", ["--port", String(webdriverPorts.b)], "tauri-driver-b"),
+    spawnLogged(
+      "tauri-driver",
+      ["--port", String(webdriverPorts.a), "--native-port", String(nativeWebdriverPorts.a)],
+      "tauri-driver-a",
+    ),
+    spawnLogged(
+      "tauri-driver",
+      ["--port", String(webdriverPorts.b), "--native-port", String(nativeWebdriverPorts.b)],
+      "tauri-driver-b",
+    ),
   ];
   await Promise.all([
     waitForWebDriver("fbro-a", webdriverHosts.a, webdriverPorts.a),
@@ -258,6 +291,27 @@ class FbroObserver {
     }));
   }
 
+  sourceIdForPath(targetPath) {
+    return Object.values(this.state.sources)
+      .filter((source) =>
+        source.kind === "filesystem"
+        && source.mounted
+        && !source.shadow
+        && source.rootPath
+        && (targetPath === source.rootPath || targetPath.startsWith(`${source.rootPath}/`))
+      )
+      .sort((a, b) => b.rootPath.length - a.rootPath.length)[0]?.id;
+  }
+
+  navigatePanelToPath(panelId, targetPath, cursorHint) {
+    const sourceId = this.sourceIdForPath(targetPath);
+    if (sourceId) {
+      this.sendIntent("NavigateToHistoryEntry", undefined, { panelId, path: targetPath, sourceId });
+      return;
+    }
+    this.sendIntent("NavigatePanelTo", undefined, { panelId, path: targetPath, cursorHint });
+  }
+
   waitForPanelReady(panelId, timeout = 15_000) {
     return waitFor(() => {
       const panel = this.state.panels[panelId];
@@ -266,19 +320,74 @@ class FbroObserver {
   }
 
   waitForEntry(panelId, entryName, kind, timeout = 15_000) {
+    let lastSnapshotRequest = 0;
     return waitFor(() => {
       const panel = this.state.panels[panelId];
       const entry = panel?.entries?.find((candidate) => candidate.name === entryName);
-      if (!entry) return false;
-      return kind && entry.kind !== kind ? false : entry;
+      if (entry && (!kind || entry.kind === kind)) return entry;
+      const now = Date.now();
+      if (now - lastSnapshotRequest > 500) {
+        lastSnapshotRequest = now;
+        this.sendIntent("RequestStateSnapshot");
+      }
+      return false;
     }, { timeout, label: `${this.name} ${panelId} entry ${entryName}` });
   }
 
   waitForNoEntry(panelId, entryName, timeout = 15_000) {
+    let lastSnapshotRequest = 0;
     return waitFor(() => {
       const panel = this.state.panels[panelId];
-      return panel && !panel.entries?.some((candidate) => candidate.name === entryName);
+      if (panel && !panel.entries?.some((candidate) => candidate.name === entryName)) return panel;
+      const now = Date.now();
+      if (now - lastSnapshotRequest > 500) {
+        lastSnapshotRequest = now;
+        this.sendIntent("RequestStateSnapshot");
+      }
+      return false;
     }, { timeout, label: `${this.name} ${panelId} no entry ${entryName}` });
+  }
+
+  waitForPanelPath(panelId, expectedPath, timeout = 15_000) {
+    let lastSnapshotRequest = 0;
+    return waitFor(() => {
+      const panel = this.state.panels[panelId];
+      if (panel?.path === expectedPath) return panel;
+      const now = Date.now();
+      if (now - lastSnapshotRequest > 500) {
+        lastSnapshotRequest = now;
+        this.sendIntent("RequestStateSnapshot");
+      }
+      return false;
+    }, { timeout, label: `${this.name} ${panelId} path ${expectedPath}` });
+  }
+
+  waitForPanelShadow(panelId, timeout = 20_000) {
+    let lastSnapshotRequest = 0;
+    return waitFor(() => {
+      const panel = this.state.panels[panelId];
+      if (panel?.shadowSource) return panel.shadowSource;
+      const now = Date.now();
+      if (now - lastSnapshotRequest > 500) {
+        lastSnapshotRequest = now;
+        this.sendIntent("RequestStateSnapshot");
+      }
+      return false;
+    }, { timeout, label: `${this.name} ${panelId} shadow source` });
+  }
+
+  waitForPanelNotShadow(panelId, timeout = 15_000) {
+    let lastSnapshotRequest = 0;
+    return waitFor(() => {
+      const panel = this.state.panels[panelId];
+      if (panel && !panel.shadowSource) return panel;
+      const now = Date.now();
+      if (now - lastSnapshotRequest > 500) {
+        lastSnapshotRequest = now;
+        this.sendIntent("RequestStateSnapshot");
+      }
+      return false;
+    }, { timeout, label: `${this.name} ${panelId} non-shadow source` });
   }
 
   waitForJobIdle(timeout = 30_000) {
@@ -288,6 +397,36 @@ class FbroObserver {
       );
       return active.length === 0;
     }, { timeout, label: `${this.name} jobs idle` });
+  }
+
+  waitForSearchMatch(timeout = 20_000) {
+    let lastSnapshotRequest = 0;
+    return waitFor(() => {
+      const match = Object.values(this.state.jobs).find((job) =>
+        job.kind === "search" && job.searchMatched > 0
+      );
+      if (match) return match;
+      const now = Date.now();
+      if (now - lastSnapshotRequest > 500) {
+        lastSnapshotRequest = now;
+        this.sendIntent("RequestStateSnapshot");
+      }
+      return false;
+    }, { timeout, label: `${this.name} search match` });
+  }
+
+  waitForSearchResultsMounted(panelId, timeout = 10_000) {
+    let lastSnapshotRequest = 0;
+    return waitFor(() => {
+      const panel = this.state.panels[panelId];
+      if (panel?.sourceId?.startsWith("search:")) return panel;
+      const now = Date.now();
+      if (now - lastSnapshotRequest > 500) {
+        lastSnapshotRequest = now;
+        this.sendIntent("RequestStateSnapshot");
+      }
+      return false;
+    }, { timeout, label: `${this.name} search results mounted` });
   }
 
   async confirmPairingRequests() {
@@ -410,16 +549,24 @@ async function startBrowser(name, host, port, application) {
     path: "/",
     logLevel: "warn",
     capabilities: {
-      browserName: "wry",
       "tauri:options": { application },
     },
   });
   await browser.setWindowSize(1280, 800);
+  await waitForMainWindow(browser, name);
+  return browser;
+}
+
+async function waitForMainWindow(browser, name) {
   await waitFor(() => browser.$('[data-testid="panel-left"]').then((el) => el.isExisting()), {
     timeout: 30_000,
     label: `${name} main window`,
   });
-  return browser;
+}
+
+async function reloadBrowserApp(browser, name) {
+  await browser.refresh();
+  await waitForMainWindow(browser, name);
 }
 
 async function clickCommand(browser, commandId) {
@@ -510,9 +657,7 @@ async function runLocalFlow(browser, observer) {
   const aDst = backendPath("a", "dst");
   await createDirectory(browser, observer, "left", "alpha");
   await doubleClickEntry(browser, "left", "alpha");
-  await waitFor(() => observer.state.panels.left?.path === path.posix.join(aSrc, "alpha"), {
-    label: "left navigated into alpha",
-  });
+  await observer.waitForPanelPath("left", path.posix.join(aSrc, "alpha"));
   await createDirectory(browser, observer, "left", "nested");
   await createFile(browser, observer, "left", "note.txt");
   await createFile(browser, observer, "left", "remove.txt");
@@ -521,7 +666,7 @@ async function runLocalFlow(browser, observer) {
   fs.writeFileSync(hostPath(path.posix.join(aSrc, "alpha/remove.txt")), "delete me\n");
 
   observer.sendIntent("NavigatePanelTo", undefined, { panelId: "left", path: aSrc, cursorHint: "alpha" });
-  await waitFor(() => observer.state.panels.left?.path === aSrc, { label: "left back to source" });
+  await observer.waitForPanelPath("left", aSrc);
   await observer.waitForEntry("left", "alpha", "directory");
   await clickEntry(browser, "left", "alpha");
   await clickCommand(browser, "file.copy");
@@ -531,9 +676,7 @@ async function runLocalFlow(browser, observer) {
   await closeTerminalJobDialog(browser);
 
   await doubleClickEntry(browser, "right", "alpha");
-  await waitFor(() => observer.state.panels.right?.path === path.posix.join(aDst, "alpha"), {
-    label: "right navigated into copied alpha",
-  });
+  await observer.waitForPanelPath("right", path.posix.join(aDst, "alpha"));
   await clickEntry(browser, "right", "note.txt");
   await clickCommand(browser, "file.rename");
   const renameInput = await browser.$('[data-testid="rename-to-input"]');
@@ -565,10 +708,13 @@ async function runArchiveFlow(browser, observer) {
 
   observer.sendIntent("NavigatePanelTo", undefined, { panelId: "left", path: aSrc, cursorHint: "fixture.zip" });
   observer.sendIntent("NavigatePanelTo", undefined, { panelId: "right", path: aDst });
+  await observer.waitForPanelPath("left", aSrc);
+  await observer.waitForPanelPath("right", aDst);
   await observer.waitForEntry("left", "fixture.zip", "file");
+  await reloadBrowserApp(browser, "fbro-a");
   await clickEntry(browser, "left", "fixture.zip");
   await pressPanelKey(browser, "left", "Enter");
-  await waitFor(() => observer.state.panels.left?.shadowSource, { timeout: 20_000, label: "zip mounted" });
+  await observer.waitForPanelShadow("left");
   await observer.waitForEntry("left", "archive-root", "directory");
   await doubleClickEntry(browser, "left", "archive-root");
   await observer.waitForEntry("left", "nested", "directory");
@@ -586,8 +732,10 @@ async function runArchiveFlow(browser, observer) {
 
 async function runSearchFlow(browser, observer) {
   const aDst = backendPath("a", "dst");
-  observer.sendIntent("NavigatePanelTo", undefined, { panelId: "left", path: aDst });
-  await waitFor(() => observer.state.panels.left?.path === aDst, { label: "left at destination for search" });
+  observer.navigatePanelToPath("left", aDst);
+  await observer.waitForPanelPath("left", aDst);
+  await observer.waitForPanelNotShadow("left");
+  await reloadBrowserApp(browser, "fbro-a");
   await browser.execute(() => {
     window.dispatchEvent(new KeyboardEvent("keydown", {
       key: "f",
@@ -601,31 +749,26 @@ async function runSearchFlow(browser, observer) {
   await input.waitForDisplayed({ timeout: 10_000 });
   await input.setValue("renamed.txt");
   await clickCommand(browser, "search.start");
-  await waitFor(() => Object.values(observer.state.jobs).some((job) => job.kind === "search" && job.searchMatched > 0), {
-    timeout: 20_000,
-    label: "search match",
-  });
   await clickCommand(browser, "search.to-results");
-  await waitFor(() => observer.state.panels.left?.sourceId?.startsWith("search:"), {
-    timeout: 10_000,
-    label: "search results mounted",
-  });
+  await observer.waitForSearchResultsMounted("left");
   await observer.waitForEntry("left", "renamed.txt", "file");
 }
 
 async function runRemoteFlow(browserA, observerA, browserB, observerB) {
   const aSrc = backendPath("a", "src");
   const bDst = backendPath("b", "dst");
+  observerA.navigatePanelToPath("left", aSrc);
+  await observerA.waitForPanelPath("left", aSrc);
+  await observerA.waitForPanelNotShadow("left");
+  await reloadBrowserApp(browserA, "fbro-a");
   fs.writeFileSync(hostPath(path.posix.join(aSrc, "remote.txt")), "remote payload\n");
   observerA.sendIntent("Refresh", "left");
   await observerA.waitForEntry("left", "remote.txt", "file");
 
-  const sharedSourceIds = Object.values(observerA.state.sources)
-    .filter((source) => source.kind === "filesystem" && !source.shadow)
-    .map((source) => source.id);
-  if (sharedSourceIds.length === 0) throw new Error("no filesystem source to share");
+  const sharedSourceId = observerA.sourceIdForPath(aSrc);
+  if (!sharedSourceId) throw new Error("no filesystem source to share for /work/a");
 
-  observerA.sendIntent("SetSharedSources", undefined, { sourceIds: sharedSourceIds });
+  observerA.sendIntent("SetSharedSources", undefined, { sourceIds: [sharedSourceId] });
   observerA.sendIntent("EnableSharing", undefined, { enabled: true });
   observerB.sendIntent("EnableSharing", undefined, { enabled: true });
   await waitFor(() => observerA.state.shareConfig.enabled, { timeout: 20_000, label: "fbro-a sharing enabled" });
@@ -646,7 +789,9 @@ async function runRemoteFlow(browserA, observerA, browserB, observerB) {
     timeout: 30_000,
     label: "remote source mounted",
   });
-  const remoteSource = Object.values(observerB.state.sources).find((source) => source.kind === "remote");
+  const remoteSource = Object.values(observerB.state.sources)
+    .find((source) => source.kind === "remote" && source.id.endsWith(`:${sharedSourceId}`));
+  if (!remoteSource) throw new Error("remote /work/a source did not mount");
   if (!remoteSource.capabilities?.readOnly) throw new Error("remote source is not marked read-only");
   if (remoteSource.supports.includes("DeleteSelection") || remoteSource.supports.includes("NewFolder")) {
     throw new Error("remote source exposes write capabilities");
@@ -657,7 +802,11 @@ async function runRemoteFlow(browserA, observerA, browserB, observerB) {
     timeout: 15_000,
     label: "b left uses remote source",
   });
-  observerB.sendIntent("NavigatePanelTo", undefined, { panelId: "left", path: aSrc, cursorHint: "remote.txt" });
+  const srcEntry = await observerB.waitForEntry("left", "src", "directory", 20_000);
+  const srcIndex = observerB.state.panels.left.entries.indexOf(srcEntry);
+  observerB.sendIntent("SetCursor", "left", { index: srcIndex });
+  observerB.sendIntent("OpenEntry", "left");
+  await observerB.waitForPanelPath("left", "src");
   observerB.sendIntent("NavigatePanelTo", undefined, { panelId: "right", path: bDst });
   await observerB.waitForEntry("left", "remote.txt", "file", 20_000);
   observerB.sendIntent("StartFileOp", undefined, {
@@ -672,6 +821,10 @@ async function runRemoteFlow(browserA, observerA, browserB, observerB) {
     background: true,
   });
   await observerB.waitForJobIdle(30_000);
+  await waitFor(() => fs.existsSync(hostPath(path.posix.join(bDst, "remote.txt"))), {
+    timeout: 20_000,
+    label: "remote copied file on host",
+  });
   const copied = fs.readFileSync(hostPath(path.posix.join(bDst, "remote.txt")), "utf8");
   if (copied !== "remote payload\n") throw new Error("remote copied file content mismatch");
 
@@ -730,6 +883,7 @@ async function main() {
     if (browserA) await browserA.deleteSession().catch(() => {});
     if (browserB) await browserB.deleteSession().catch(() => {});
     stopProcesses(localDrivers);
+    if (localMode) stopLocalBackends();
   }
 }
 
