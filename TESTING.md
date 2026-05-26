@@ -1,7 +1,7 @@
 # Testing
 
 This project currently has a WebDriver smoke test for the Tauri app in
-`tests/e2e/smoke.mjs`.
+`tests/e2e/smoke/index.mjs`.
 
 ## Requirements
 
@@ -59,7 +59,7 @@ host app windows connect to the Dockerized instances over WebSocket.
 ```mermaid
 flowchart LR
   subgraph Host["Host"]
-    Smoke["tests/e2e/smoke.mjs"]
+    Smoke["tests/e2e/smoke/index.mjs"]
     TD_A["tauri-driver :4444"]
     TD_B["tauri-driver :4445"]
     WK_A["WebKitWebDriver :4446"]
