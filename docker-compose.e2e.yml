@@ -23,7 +23,7 @@ services:
         rm -rf /state/a/home /state/a/config /work/a/src /work/a/dst &&
         mkdir -p /state/a/home /state/a/config/fbro /work/a/src /work/a/dst &&
         printf "[panels.left]\npath = \"/work/a/src\"\n\n[panels.right]\npath = \"/work/a/dst\"\n" > /state/a/config/fbro/session.toml &&
-        xvfb-run -a /app/src-tauri/target/release/fbro 2>&1 | tee /artifacts/fbro-a.log
+        xvfb-run -a /usr/local/bin/fbro 2>&1 | tee /artifacts/fbro-a.log
       '
 
   fbro-b:
@@ -47,5 +47,5 @@ services:
         rm -rf /state/b/home /state/b/config /work/b/src /work/b/dst &&
         mkdir -p /state/b/home /state/b/config/fbro /work/b/src /work/b/dst &&
         printf "[panels.left]\npath = \"/work/b/src\"\n\n[panels.right]\npath = \"/work/b/dst\"\n" > /state/b/config/fbro/session.toml &&
-        xvfb-run -a /app/src-tauri/target/release/fbro 2>&1 | tee /artifacts/fbro-b.log
+        xvfb-run -a /usr/local/bin/fbro 2>&1 | tee /artifacts/fbro-b.log
       '

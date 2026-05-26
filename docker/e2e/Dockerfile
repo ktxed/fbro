@@ -1,4 +1,4 @@
-FROM rust:1-bookworm
+FROM rust:1-bookworm AS builder
 
 ENV DEBIAN_FRONTEND=noninteractive
 WORKDIR /app
@@ -36,5 +36,25 @@ RUN npm ci
 COPY . .
 RUN npm run tauri -- build --no-bundle
 
-ENV FBRO_APP_BINARY=/app/src-tauri/target/release/fbro
+FROM debian:bookworm-slim
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    bash \
+    ca-certificates \
+    dbus-x11 \
+    ffmpeg \
+    libayatana-appindicator3-1 \
+    librsvg2-2 \
+    libwebkit2gtk-4.1-0 \
+    p7zip-full \
+    xauth \
+    xvfb \
+    zip \
+  && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /app/src-tauri/target/release/fbro /usr/local/bin/fbro
+
+ENV FBRO_APP_BINARY=/usr/local/bin/fbro
 ENV RUST_LOG=info
