@@ -116,9 +116,13 @@ async function waitForWebSocket(url, label) {
 export async function startLocalBackends() {
   requireDockerUsable();
   execFileSync("docker", dockerComposeArgs(
+    "build",
+    "fbro-a",
+  ), { cwd: repoRoot, stdio: "inherit" });
+  execFileSync("docker", dockerComposeArgs(
     "up",
     "-d",
-    "--build",
+    "--no-build",
     "fbro-a",
     "fbro-b",
   ), { cwd: repoRoot, stdio: "inherit" });

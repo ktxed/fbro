@@ -1,8 +1,10 @@
 services:
   fbro-a:
+    image: fbro-e2e:latest
     build:
       context: .
       dockerfile: docker/e2e/Dockerfile
+    user: "${FBRO_E2E_UID:-1000}:${FBRO_E2E_GID:-1000}"
     environment:
       FBRO_WS_BIND: 0.0.0.0:7878
       FBRO_FILESERVER_BIND: 0.0.0.0:17881
@@ -25,9 +27,8 @@ services:
       '
 
   fbro-b:
-    build:
-      context: .
-      dockerfile: docker/e2e/Dockerfile
+    image: fbro-e2e:latest
+    user: "${FBRO_E2E_UID:-1000}:${FBRO_E2E_GID:-1000}"
     environment:
       FBRO_WS_BIND: 0.0.0.0:7878
       FBRO_FILESERVER_BIND: 0.0.0.0:27881
