@@ -811,6 +811,43 @@ body {
   font-size: 12px;
 }
 
+/* ── Input History Dropdown ─────────────────────────────────────────────── */
+
+.input-history {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  min-width: 180px;
+  max-width: 360px;
+  max-height: 240px;
+  overflow-y: auto;
+  z-index: 10001;
+}
+
+.input-history__list {
+  list-style: none;
+  margin: 0;
+  padding: 4px 0;
+}
+
+.input-history__item {
+  padding: 3px 10px;
+  font-size: var(--font-size);
+  font-family: var(--font);
+  color: var(--text);
+  cursor: default;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.input-history__item:hover,
+.input-history__item--active {
+  background: var(--bg-cursor);
+  color: var(--text);
+}
+
 .panel__sort-header {
   display: flex;
   align-items: center;

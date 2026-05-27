@@ -4,6 +4,8 @@ import type { PendingSearch } from "../store";
 import type { Source } from "../ws/types";
 import type { WsClient } from "../ws/client";
 import { IconX, IconFolder, IconFile } from "@tabler/icons-react";
+import { useInputHistory } from "../hooks/useInputHistory";
+import { InputHistoryDropdown } from "./InputHistoryDropdown";
 
 function MnemonicLabel({ text, mnemonic }: { text: string; mnemonic: string }) {
   const idx = text.toLowerCase().indexOf(mnemonic.toLowerCase());
@@ -55,14 +57,15 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
   // Section 3 — Content
   const [contentQuery, setContentQuery] = useState(p?.contentQuery ?? "");
 
+  const maskHistory = useInputHistory("search.fileMask", setFileMask);
+  const contentHistory = useInputHistory("search.content", setContentQuery);
+
   const pathInputRef = useRef<HTMLInputElement>(null);
-  const fileMaskInputRef = useRef<HTMLInputElement>(null);
-  const contentTextareaRef = useRef<HTMLTextAreaElement>(null);
   const modalRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (search.activeTab === "input") {
-      fileMaskInputRef.current?.focus();
+      (maskHistory.inputRef as React.RefObject<HTMLInputElement>).current?.focus();
     } else {
       modalRef.current?.focus();
     }
@@ -107,7 +110,9 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
     if (paths.length === 0) return;
     const requestId = globalThis.crypto?.randomUUID?.() ?? `search-${Date.now()}`;
 
-    // Reset accumulated results so the Results tab starts fresh for the new job.
+    maskHistory.addToHistory(fileMask);
+    contentHistory.addToHistory(contentQuery);
+
     dispatch({ type: "RESET_SEARCH_FOR_NEW_JOB", requestId });
 
     client.sendIntent("StartSearch", undefined, {
@@ -158,7 +163,7 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
       const target = e.target as HTMLElement;
       const isTextarea = target.tagName === "TEXTAREA";
       const isPathInput = target === pathInputRef.current;
-      const isFileMaskInput = target === fileMaskInputRef.current;
+      const isFileMaskInput = target === maskHistory.inputRef.current;
       if (!isTextarea && !isPathInput && !isFileMaskInput) {
         e.preventDefault();
         if (hasResults && search.jobId) {
@@ -347,7 +352,7 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
 
                 <div className="search-modal__mask-row">
                   <input
-                    ref={fileMaskInputRef}
+                    ref={maskHistory.inputRef as React.RefObject<HTMLInputElement>}
                     type="text"
                     className="search-modal__mask-input"
                     aria-label="File name"
@@ -355,6 +360,8 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
                     value={fileMask}
                     onChange={(e) => setFileMask(e.target.value)}
                     onKeyDown={(e) => {
+                      maskHistory.onKeyDown(e);
+                      if (e.defaultPrevented) return;
                       if (e.key === "Enter" && search.status === "idle") {
                         e.preventDefault();
                         startSearch(false);
@@ -366,6 +373,15 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
                     autoCorrect="off"
                     autoCapitalize="off"
                   />
+                  {maskHistory.isOpen && (
+                    <InputHistoryDropdown
+                      anchorEl={maskHistory.inputRef.current}
+                      items={maskHistory.items}
+                      activeIndex={maskHistory.activeIndex}
+                      onSelect={maskHistory.selectItem}
+                      onClose={maskHistory.close}
+                    />
+                  )}
                 </div>
 
                 <div className="search-modal__mode-row">
@@ -390,12 +406,13 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
 
                 <div className="search-modal__content-body">
                   <textarea
-                    ref={contentTextareaRef}
+                    ref={contentHistory.inputRef as React.RefObject<HTMLTextAreaElement>}
                     className="search-modal__content-input"
                     aria-label="Text to find"
                     data-testid="search-content-input"
                     value={contentQuery}
                     onChange={(e) => setContentQuery(e.target.value)}
+                    onKeyDown={contentHistory.onKeyDown}
                     placeholder="Text to find…"
                     rows={3}
                     spellCheck={false}
@@ -403,6 +420,15 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
                     autoCorrect="off"
                     autoCapitalize="off"
                   />
+                  {contentHistory.isOpen && (
+                    <InputHistoryDropdown
+                      anchorEl={contentHistory.inputRef.current}
+                      items={contentHistory.items}
+                      activeIndex={contentHistory.activeIndex}
+                      onSelect={contentHistory.selectItem}
+                      onClose={contentHistory.close}
+                    />
+                  )}
                 </div>
               </div>
             </>

@@ -1,7 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useAppDispatch } from "../store";
 import type { PendingGoToPath } from "../store";
 import type { WsClient } from "../ws/client";
+import { useInputHistory } from "../hooks/useInputHistory";
+import { InputHistoryDropdown } from "./InputHistoryDropdown";
 
 interface GoToPathModalProps {
   goToPath: PendingGoToPath;
@@ -12,11 +14,12 @@ export function GoToPathModal({ goToPath, client }: GoToPathModalProps) {
   const dispatch = useAppDispatch();
   const [value, setValue] = useState(goToPath.currentPath);
   const [submitting, setSubmitting] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
+
+  const history = useInputHistory("gotoPath", setValue);
 
   useEffect(() => {
-    inputRef.current?.focus();
-    inputRef.current?.select();
+    (history.inputRef as React.RefObject<HTMLInputElement>).current?.focus();
+    (history.inputRef as React.RefObject<HTMLInputElement>).current?.select();
   }, []);
 
   useEffect(() => {
@@ -29,16 +32,20 @@ export function GoToPathModal({ goToPath, client }: GoToPathModalProps) {
     const path = value.trim();
     if (submitting || !path) return;
     setSubmitting(true);
+    history.addToHistory(value);
     client.sendIntent("NavigatePanelTo", undefined, {
       panelId: goToPath.panelId,
       path,
     });
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLElement>) => {
+    history.onKeyDown(e);
+    if (e.defaultPrevented) return;
     if (e.key === "Enter") {
       e.preventDefault();
       submit();
+      return;
     }
     if (e.key === "Escape") {
       e.preventDefault();
@@ -61,7 +68,7 @@ export function GoToPathModal({ goToPath, client }: GoToPathModalProps) {
           <div className="modal__rename-row">
             <label className="modal__rename-label">Path:</label>
             <input
-              ref={inputRef}
+              ref={history.inputRef as React.RefObject<HTMLInputElement>}
               className="modal__rename-input"
               value={value}
               onChange={(e) => setValue(e.target.value)}
@@ -71,6 +78,15 @@ export function GoToPathModal({ goToPath, client }: GoToPathModalProps) {
               autoCorrect="off"
               autoCapitalize="off"
             />
+            {history.isOpen && (
+              <InputHistoryDropdown
+                anchorEl={history.inputRef.current}
+                items={history.items}
+                activeIndex={history.activeIndex}
+                onSelect={history.selectItem}
+                onClose={history.close}
+              />
+            )}
           </div>
           {goToPath.error && (
             <p className="modal__rename-error">{goToPath.error}</p>

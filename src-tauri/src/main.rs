@@ -6,6 +6,7 @@ mod bro;
 mod config;
 mod drag_out;
 mod fileserver;
+mod input_history;
 mod jobs;
 mod persistence;
 mod platform;
@@ -378,6 +379,7 @@ fn main() {
                         if let Ok(gtk_window) = window.gtk_window() {
                             let handle = drag_out::init_drag_out(&gtk_window, app.handle().clone());
                             drag_out::set_drag_out_handle(handle);
+                            input_history::init_input_history(&gtk_window, app.handle().clone());
                         }
                     }
                 }
