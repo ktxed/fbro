@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { IconCopy } from "@tabler/icons-react";
 import { useAppState } from "../store";
 import type { WsClient } from "../ws/client";
+import { useInputHistory } from "../hooks/useInputHistory";
+import { InputHistoryDropdown } from "./InputHistoryDropdown";
 
 interface SettingsSharingTabProps {
   client: WsClient;
@@ -125,9 +127,12 @@ export function SettingsSharingTab({ client }: SettingsSharingTabProps) {
   };
 
   const [directPairAddress, setDirectPairAddress] = useState("");
+  const pairHistory = useInputHistory("sharing.pair", setDirectPairAddress);
+
   const pairDirect = () => {
     const address = directPairAddress.trim();
     if (!address) return;
+    pairHistory.addToHistory(directPairAddress);
     client.sendIntent("StartPairing", undefined, { address });
   };
 
@@ -522,15 +527,27 @@ export function SettingsSharingTab({ client }: SettingsSharingTabProps) {
         </div>
         <div className="sharing-pair-row">
           <input
+            ref={pairHistory.inputRef as React.RefObject<HTMLInputElement>}
             className="sharing-input"
             type="text"
             value={directPairAddress}
             onChange={(event) => setDirectPairAddress(event.target.value)}
             onKeyDown={(event) => {
+              pairHistory.onKeyDown(event);
+              if (event.defaultPrevented) return;
               if (event.key === "Enter") pairDirect();
             }}
             placeholder="host or IP, e.g. 192.168.1.20"
           />
+          {pairHistory.isOpen && (
+            <InputHistoryDropdown
+              anchorEl={pairHistory.inputRef.current}
+              items={pairHistory.items}
+              activeIndex={pairHistory.activeIndex}
+              onSelect={pairHistory.selectItem}
+              onClose={pairHistory.close}
+            />
+          )}
           <button
             className="sharing-button sharing-button--primary"
             onClick={pairDirect}

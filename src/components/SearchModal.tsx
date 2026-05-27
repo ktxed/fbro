@@ -59,8 +59,8 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
 
   const maskHistory = useInputHistory("search.fileMask", setFileMask);
   const contentHistory = useInputHistory("search.content", setContentQuery);
+  const pathHistory = useInputHistory("search.path", setPathInput);
 
-  const pathInputRef = useRef<HTMLInputElement>(null);
   const modalRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -78,6 +78,7 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
   const addPath = () => {
     const trimmed = pathInput.trim();
     if (!trimmed || paths.includes(trimmed)) return;
+    pathHistory.addToHistory(pathInput);
     setPaths((prev) => [...prev, trimmed]);
     setPathInput("");
     setSelectedSourceId("");
@@ -96,6 +97,8 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
   };
 
   const handlePathInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    pathHistory.onKeyDown(e);
+    if (e.defaultPrevented) return;
     if (e.key === "Enter") {
       e.preventDefault();
       addPath();
@@ -162,7 +165,7 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
     if (e.key === "Enter") {
       const target = e.target as HTMLElement;
       const isTextarea = target.tagName === "TEXTAREA";
-      const isPathInput = target === pathInputRef.current;
+      const isPathInput = target === pathHistory.inputRef.current;
       const isFileMaskInput = target === maskHistory.inputRef.current;
       if (!isTextarea && !isPathInput && !isFileMaskInput) {
         e.preventDefault();
@@ -263,7 +266,7 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
 
                 <div className="search-modal__path-input-row">
                   <input
-                    ref={pathInputRef}
+                    ref={pathHistory.inputRef as React.RefObject<HTMLInputElement>}
                     type="text"
                     className="search-modal__path-input"
                     aria-label="Search path"
@@ -277,6 +280,15 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
                     autoCorrect="off"
                     autoCapitalize="off"
                   />
+                  {pathHistory.isOpen && (
+                    <InputHistoryDropdown
+                      anchorEl={pathHistory.inputRef.current}
+                      items={pathHistory.items}
+                      activeIndex={pathHistory.activeIndex}
+                      onSelect={pathHistory.selectItem}
+                      onClose={pathHistory.close}
+                    />
+                  )}
                   {mountedSources.length > 0 && (
                     <select
                       className="search-modal__source-select"

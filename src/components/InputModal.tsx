@@ -1,7 +1,9 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { useAppDispatch } from "../store";
 import type { PendingInput } from "../store";
 import type { WsClient } from "../ws/client";
+import { useInputHistory } from "../hooks/useInputHistory";
+import { InputHistoryDropdown } from "./InputHistoryDropdown";
 
 interface InputModalProps {
   input: PendingInput;
@@ -12,10 +14,10 @@ export function InputModal({ input, client }: InputModalProps) {
   const dispatch = useAppDispatch();
   const [value, setValue] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const history = useInputHistory("input", setValue);
 
   useEffect(() => {
-    inputRef.current?.focus();
+    (history.inputRef as React.RefObject<HTMLInputElement>).current?.focus();
   }, []);
 
   const close = () => dispatch({ type: "CLOSE_INPUT" });
@@ -24,6 +26,7 @@ export function InputModal({ input, client }: InputModalProps) {
     const trimmed = value.trim();
     if (submitting || !trimmed) return;
     setSubmitting(true);
+    if (input.kind !== "password") history.addToHistory(value);
     client.sendIntent("ProvideInput", undefined, {
       requestId: input.requestId,
       value: trimmed,
@@ -31,7 +34,9 @@ export function InputModal({ input, client }: InputModalProps) {
     close();
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLElement>) => {
+    if (input.kind !== "password") history.onKeyDown(e);
+    if (e.defaultPrevented) return;
     if (e.key === "Enter")  { e.preventDefault(); submit(); }
     if (e.key === "Escape") { e.preventDefault(); close(); }
   };
@@ -50,7 +55,7 @@ export function InputModal({ input, client }: InputModalProps) {
               {input.kind === "password" ? "Password:" : "Value:"}
             </label>
             <input
-              ref={inputRef}
+              ref={history.inputRef as React.RefObject<HTMLInputElement>}
               className="modal__rename-input"
               type={input.kind === "password" ? "password" : "text"}
               value={value}
@@ -59,6 +64,15 @@ export function InputModal({ input, client }: InputModalProps) {
               spellCheck={false}
               autoComplete="off"
             />
+            {history.isOpen && input.kind !== "password" && (
+              <InputHistoryDropdown
+                anchorEl={history.inputRef.current}
+                items={history.items}
+                activeIndex={history.activeIndex}
+                onSelect={history.selectItem}
+                onClose={history.close}
+              />
+            )}
           </div>
         </div>
         <div className="modal__actions">

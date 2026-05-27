@@ -7,6 +7,8 @@ import { detectRenderer, isImageExt, isMdExt, isVideoExt } from "../viewers/medi
 import { marked } from "marked";
 import { DirectFileViewer, canUseDirect } from "../viewers/DirectFileViewer";
 import { isArchiveSourceId, isRemoteSourceId } from "../utils/sourceId";
+import { useInputHistory } from "../hooks/useInputHistory";
+import { InputHistoryDropdown } from "./InputHistoryDropdown";
 
 // Mermaid v11 lazily registers diagram modules on the first render() call —
 // initialize() alone is not enough, and the first real render can produce empty
@@ -216,7 +218,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
   const [findOpen, setFindOpen]   = useState(false);
   const [findQuery, setFindQuery] = useState("");
   const [findIdx, setFindIdx]     = useState(0);
-  const findInputRef  = useRef<HTMLInputElement>(null);
+  const findHistory = useInputHistory("viewer.find", setFindQuery);
   // Stable refs so the keyboard handler closure doesn't go stale
   const findOpenRef    = useRef(false);
   const findMatchesRef = useRef<{ line: number; start: number; end: number }[]>([]);
@@ -591,7 +593,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
 
   // Focus input when find opens, close when switching to non-text mode
   useEffect(() => {
-    if (findOpen) setTimeout(() => findInputRef.current?.focus(), 0);
+    if (findOpen) setTimeout(() => (findHistory.inputRef as React.RefObject<HTMLInputElement>).current?.focus(), 0);
   }, [findOpen]);
 
   useEffect(() => {
@@ -607,7 +609,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const ctrl = e.ctrlKey || e.metaKey;
-      const inFind = e.target === findInputRef.current;
+      const inFind = e.target === findHistory.inputRef.current;
 
       if (ctrl && (e.key === "=" || e.key === "+")) {
         e.preventDefault();
@@ -638,14 +640,14 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
         e.preventDefault();
         setFindOpen(true);
         if (e.shiftKey) findPrev();
-        setTimeout(() => findInputRef.current?.focus(), 0);
+        setTimeout(() => (findHistory.inputRef as React.RefObject<HTMLInputElement>).current?.focus(), 0);
         return;
       }
 
       // When typing in the find input, only intercept Escape and Enter
       if (inFind) {
-        if (e.key === "Escape") { setFindOpen(false); }
-        else if (e.key === "Enter") { e.preventDefault(); e.shiftKey ? findPrev() : findNext(); }
+        if (e.key === "Escape") { findHistory.addToHistory(findQuery); setFindOpen(false); }
+        else if (e.key === "Enter") { e.preventDefault(); findHistory.addToHistory(findQuery); e.shiftKey ? findPrev() : findNext(); }
         return;
       }
 
@@ -1160,14 +1162,24 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
       {findOpen && effectiveMode === "text" && !markdownMode && (
         <div className="viewer__find-bar">
           <input
-            ref={findInputRef}
+            ref={findHistory.inputRef as React.RefObject<HTMLInputElement>}
             type="text"
             className="viewer__find-input"
             placeholder="Find…"
             value={findQuery}
             onChange={e => { setFindQuery(e.target.value); setFindIdx(0); }}
+            onKeyDown={findHistory.onKeyDown}
             spellCheck={false}
           />
+          {findHistory.isOpen && (
+            <InputHistoryDropdown
+              anchorEl={findHistory.inputRef.current}
+              items={findHistory.items}
+              activeIndex={findHistory.activeIndex}
+              onSelect={findHistory.selectItem}
+              onClose={findHistory.close}
+            />
+          )}
           <span className="viewer__find-count">{findLabel}</span>
           <button className="viewer__find-nav" onClick={findPrev} title="Previous (Shift+Enter)">↑</button>
           <button className="viewer__find-nav" onClick={findNext} title="Next (Enter)">↓</button>

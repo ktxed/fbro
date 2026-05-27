@@ -1,7 +1,9 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { useAppDispatch } from "../store";
 import type { PendingMkdir } from "../store";
 import type { WsClient } from "../ws/client";
+import { useInputHistory } from "../hooks/useInputHistory";
+import { InputHistoryDropdown } from "./InputHistoryDropdown";
 
 interface MkDirModalProps {
   mkdir: PendingMkdir;
@@ -12,10 +14,10 @@ export function MkDirModal({ mkdir, client }: MkDirModalProps) {
   const dispatch = useAppDispatch();
   const [value, setValue] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const history = useInputHistory("mkdir", setValue);
 
   useEffect(() => {
-    inputRef.current?.focus();
+    (history.inputRef as React.RefObject<HTMLInputElement>).current?.focus();
   }, []);
 
   useEffect(() => {
@@ -28,6 +30,7 @@ export function MkDirModal({ mkdir, client }: MkDirModalProps) {
     const name = value.trim();
     if (submitting || !name) return;
     setSubmitting(true);
+    history.addToHistory(value);
     client.sendIntent("MakeDir", undefined, {
       sourcePanel: mkdir.sourcePanel,
       dirPath: mkdir.dirPath,
@@ -35,7 +38,9 @@ export function MkDirModal({ mkdir, client }: MkDirModalProps) {
     });
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLElement>) => {
+    history.onKeyDown(e);
+    if (e.defaultPrevented) return;
     if (e.key === "Enter")  { e.preventDefault(); submit(); }
     if (e.key === "Escape") { e.preventDefault(); close(); }
   };
@@ -55,7 +60,7 @@ export function MkDirModal({ mkdir, client }: MkDirModalProps) {
           <div className="modal__rename-row">
             <label className="modal__rename-label">Name:</label>
             <input
-              ref={inputRef}
+              ref={history.inputRef as React.RefObject<HTMLInputElement>}
               className="modal__rename-input"
               aria-label="Name"
               data-testid="mkdir-name-input"
@@ -65,6 +70,15 @@ export function MkDirModal({ mkdir, client }: MkDirModalProps) {
               spellCheck={false}
               autoComplete="off"
             />
+            {history.isOpen && (
+              <InputHistoryDropdown
+                anchorEl={history.inputRef.current}
+                items={history.items}
+                activeIndex={history.activeIndex}
+                onSelect={history.selectItem}
+                onClose={history.close}
+              />
+            )}
           </div>
           {mkdir.error && (
             <p className="modal__rename-error">{mkdir.error}</p>

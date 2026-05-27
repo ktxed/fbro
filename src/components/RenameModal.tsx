@@ -1,7 +1,9 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { useAppDispatch } from "../store";
 import type { PendingRename } from "../store";
 import type { WsClient } from "../ws/client";
+import { useInputHistory } from "../hooks/useInputHistory";
+import { InputHistoryDropdown } from "./InputHistoryDropdown";
 
 interface RenameModalProps {
   rename: PendingRename;
@@ -13,14 +15,13 @@ export function RenameModal({ rename, client }: RenameModalProps) {
   const [value, setValue] = useState(rename.filename);
   const [localError, setLocalError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const history = useInputHistory("rename", setValue);
 
   useEffect(() => {
-    inputRef.current?.focus();
-    inputRef.current?.select();
+    (history.inputRef as React.RefObject<HTMLInputElement>).current?.focus();
+    (history.inputRef as React.RefObject<HTMLInputElement>).current?.select();
   }, []);
 
-  // When a new error arrives from the store, allow re-submission
   useEffect(() => {
     if (rename.error) setSubmitting(false);
   }, [rename.error]);
@@ -36,6 +37,7 @@ export function RenameModal({ rename, client }: RenameModalProps) {
     }
     setLocalError(null);
     setSubmitting(true);
+    history.addToHistory(value);
     client.sendIntent("RenameFile", undefined, {
       sourcePanel: rename.sourcePanel,
       sourcePath: rename.sourcePath,
@@ -43,7 +45,9 @@ export function RenameModal({ rename, client }: RenameModalProps) {
     });
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLElement>) => {
+    history.onKeyDown(e);
+    if (e.defaultPrevented) return;
     if (e.key === "Enter")  { e.preventDefault(); submit(); }
     if (e.key === "Escape") { e.preventDefault(); close(); }
   };
@@ -66,7 +70,7 @@ export function RenameModal({ rename, client }: RenameModalProps) {
           <div className="modal__rename-row">
             <label className="modal__rename-label">To:</label>
             <input
-              ref={inputRef}
+              ref={history.inputRef as React.RefObject<HTMLInputElement>}
               className="modal__rename-input"
               aria-label="To"
               data-testid="rename-to-input"
@@ -76,6 +80,15 @@ export function RenameModal({ rename, client }: RenameModalProps) {
               spellCheck={false}
               autoComplete="off"
             />
+            {history.isOpen && (
+              <InputHistoryDropdown
+                anchorEl={history.inputRef.current}
+                items={history.items}
+                activeIndex={history.activeIndex}
+                onSelect={history.selectItem}
+                onClose={history.close}
+              />
+            )}
           </div>
           {(localError ?? rename.error) && (
             <p className="modal__rename-error">{localError ?? rename.error}</p>
