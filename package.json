@@ -11,6 +11,7 @@
     "spy": "FBRO_SPY=1 tauri dev",
     "e2e:smoke": "npm run e2e:smoke:local",
     "e2e:smoke:local": "FBRO_E2E_LOCAL=1 node tests/e2e/smoke/index.mjs",
+    "e2e:smoke:local_debug": "tauri build --debug --no-bundle && FBRO_APP_BINARY=src-tauri/target/debug/fbro FBRO_E2E_COMPOSE_FILES=docker-compose.e2e.host.yml:docker-compose.e2e.debug.yml FBRO_E2E_LOCAL=1 node tests/e2e/smoke/index.mjs",
     "e2e:smoke:runner": "node tests/e2e/smoke/index.mjs"
   },
   "dependencies": {

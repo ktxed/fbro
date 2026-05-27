@@ -78,7 +78,7 @@ impl VfsDriver for SearchResultsDriver {
                     name: r.name.clone(),
                     kind: kind.clone(),
                     size: r.size,
-                    mtime: None,
+                    mtime: r.mtime.clone(),
                     btime: None,
                     permissions: None,
                     icon_name: icon_name_for_entry(&r.name, &kind),

@@ -1,0 +1,8 @@
+services:
+  fbro-a:
+    volumes:
+      - ./src-tauri/target/debug/fbro:/usr/local/bin/fbro:ro
+
+  fbro-b:
+    volumes:
+      - ./src-tauri/target/debug/fbro:/usr/local/bin/fbro:ro

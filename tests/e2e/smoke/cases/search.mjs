@@ -23,4 +23,13 @@ export async function runSearchFlow(browser, observer) {
   await clickCommand(browser, "search.to-results");
   await observer.waitForSearchResultsMounted("left");
   await observer.waitForEntry("left", "renamed.txt", "file");
+  await browser.waitUntil(async () => {
+    const dateCell = await browser.$('[data-testid="panel-left"] [data-entry-name="renamed.txt"] .panel__mtime');
+    if (!await dateCell.isExisting()) return false;
+    const text = await dateCell.getText();
+    return text.trim().length > 0;
+  }, {
+    timeout: 5_000,
+    timeoutMsg: "Mounted search result Date column stayed empty",
+  });
 }

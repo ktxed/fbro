@@ -75,7 +75,7 @@ export function writeLaunchWrapper(name, wsUrl) {
 }
 
 function spawnLogged(command, args, name, options = {}) {
-  const log = fs.openSync(path.join(artifactsDir, "logs", `${name}.log`), "a");
+  const log = fs.openSync(path.join(artifactsDir, "logs", `${name}.log`), "w");
   const child = spawn(command, args, {
     cwd: repoRoot,
     env: process.env,

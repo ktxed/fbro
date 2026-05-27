@@ -50,6 +50,20 @@ The host-runtime compose file builds only a runtime image and bind-mounts
 `src-tauri/target/release/fbro` into both containers. Both `fbro-a` and
 `fbro-b` use the same image.
 
+For backend/debug iteration, build the debug binary and use the debug local
+script:
+
+```bash
+GDK_BACKEND=wayland npm run e2e:smoke:local_debug
+```
+
+This uses `docker-compose.e2e.host.yml` plus `docker-compose.e2e.debug.yml`,
+bind-mounts `src-tauri/target/debug/fbro` into both containers, and launches
+the frontend-only app windows from the same debug binary. The script builds
+that binary with `tauri build --debug --no-bundle` first; a plain `cargo build`
+is not enough for this harness because it creates a dev-mode binary that tries
+to load `http://localhost:5173`.
+
 ### Hybrid Host/Docker Layout
 
 The local smoke mode is hybrid: WebDriver and the frontend-only app windows run
@@ -66,7 +80,7 @@ flowchart LR
     WK_B["WebKitWebDriver :4447"]
     FE_A["frontend-only fbro-a window"]
     FE_B["frontend-only fbro-b window"]
-    Bin["src-tauri/target/release/fbro"]
+    Bin["src-tauri/target/release/fbro\nor target/debug/fbro"]
     Artifacts["artifacts/e2e"]
   end
 
@@ -102,6 +116,8 @@ flowchart LR
 Useful environment variables:
 
 - `FBRO_E2E_COMPOSE_FILES`: compose file list used by local smoke runs.
+- `FBRO_APP_BINARY`: host app binary used by the frontend-only WebDriver
+  windows. The debug script sets this to `src-tauri/target/debug/fbro`.
 - `FBRO_E2E_ARTIFACTS`: artifact output directory. Defaults to `artifacts/e2e`.
 - `FBRO_E2E_KEEP_DOCKER=1`: keep Docker containers after the run for debugging.
 - `FBRO_A_WEBDRIVER_PORT`, `FBRO_B_WEBDRIVER_PORT`: tauri-driver HTTP ports.

@@ -670,6 +670,7 @@ pub struct SearchResultSchema {
     pub name: String,
     pub kind: String,
     pub size: Option<u64>,
+    pub mtime: Option<String>,
     pub parent_path: String,
     pub full_path: String,
     pub source_id: String,

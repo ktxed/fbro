@@ -161,6 +161,7 @@ export interface SearchResult {
   name: string;
   kind: string;
   size?: number;
+  mtime?: string;
   parentPath: string;
   fullPath: string;
   sourceId: string;

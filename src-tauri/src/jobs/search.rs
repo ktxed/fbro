@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 use regex::Regex;
 use tokio::sync::{mpsc, watch, Mutex, Semaphore};
 
+use crate::vfs::format_mtime;
 use crate::ws::protocol::{now, SearchProgressSchema, SearchResultSchema, ServerMessage};
 
 const MAX_CONCURRENT: usize = 8;
@@ -46,6 +47,7 @@ pub struct SearchResultEntry {
     pub name: String,
     pub kind: String, // "file" | "directory"
     pub size: Option<u64>,
+    pub mtime: Option<String>,
     pub parent_path: String,
     pub full_path: String,
     /// The real (non-shadow) source that owns this entry's filesystem path.
@@ -490,11 +492,13 @@ fn read_dir_entries(
             "file".to_string()
         };
         let size = if is_dir { None } else { Some(meta.len()) };
+        let mtime = meta.modified().ok().and_then(format_mtime);
 
         matched.push(SearchResultEntry {
             name,
             kind,
             size,
+            mtime,
             parent_path: dir_path.to_string(),
             full_path,
             source_id: source_id.to_string(),
@@ -519,6 +523,7 @@ async fn flush_batch(
             name: e.name.clone(),
             kind: e.kind.clone(),
             size: e.size,
+            mtime: e.mtime.clone(),
             parent_path: e.parent_path.clone(),
             full_path: e.full_path.clone(),
             source_id: e.source_id.clone(),
