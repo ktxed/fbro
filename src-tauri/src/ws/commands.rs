@@ -318,6 +318,20 @@ pub(crate) fn build_interactive_commands() -> Vec<InteractiveCommandSchema> {
             Some("MoveCursorWithSelect"),
         ),
         command(
+            "panel.selection.extend_first",
+            "Selection",
+            "Extend Selection To First Entry",
+            vec![keybinding_with_modifiers("Home", true, false, false, false)],
+            Some("MoveCursorWithSelect"),
+        ),
+        command(
+            "panel.selection.extend_last",
+            "Selection",
+            "Extend Selection To Last Entry",
+            vec![keybinding_with_modifiers("End", true, false, false, false)],
+            Some("MoveCursorWithSelect"),
+        ),
+        command(
             "panel.selection.toggle_or_size",
             "Selection",
             "Toggle Selection Or Directory Size",

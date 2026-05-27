@@ -57,6 +57,8 @@ export const PANEL_SHORTCUT_COMMAND_IDS = [
   "panel.cursor.last",
   "panel.selection.extend_up",
   "panel.selection.extend_down",
+  "panel.selection.extend_first",
+  "panel.selection.extend_last",
   "panel.selection.extend_left",
   "panel.selection.extend_right",
   "panel.selection.toggle_or_size",
@@ -716,6 +718,12 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
       }
       return true;
     }
+    case "panel.selection.extend_first":
+      client.sendIntent("MoveCursorWithSelect", "focused-panel", { edge: "first" });
+      return true;
+    case "panel.selection.extend_last":
+      client.sendIntent("MoveCursorWithSelect", "focused-panel", { edge: "last" });
+      return true;
     case "panel.selection.extend_left":
       client.sendIntent("MoveCursorWithSelect", "focused-panel", { delta: -1 });
       return true;

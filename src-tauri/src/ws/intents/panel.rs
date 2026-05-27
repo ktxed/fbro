@@ -673,8 +673,9 @@ async fn invert_selection(scope: &Value, ctx: &mut IntentContext<'_>) {
 async fn move_cursor_with_select(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
     let panel_id = resolve_panel_id(scope, ctx.state).await;
     // Prefer `delta` (used by grid mode for ±cols / ±1 cell jumps); fall
-    // back to single-step direction.
+    // back to edge selection, then single-step direction.
     let delta_opt = args.get("delta").and_then(Value::as_i64);
+    let edge_opt = arg_str(args, "edge");
     let direction = arg_str(args, "direction").unwrap_or("down");
     let (new_cursor, new_selection, version, needs_window, selected_entries) = {
         let mut state_guard = ctx.state.lock().await;
@@ -683,36 +684,49 @@ async fn move_cursor_with_select(scope: &Value, args: &Value, ctx: &mut IntentCo
             if len == 0 {
                 return;
             }
-            let step: i64 = match delta_opt {
-                Some(d) if d != 0 => d,
-                _ => {
-                    if direction == "up" {
-                        -1
-                    } else {
-                        1
-                    }
+            if let Some(edge) = edge_opt {
+                let target = if edge == "last" { len - 1 } else { 0 };
+                let start = panel.cursor.min(target);
+                let end = panel.cursor.max(target);
+                let mut selected: HashSet<usize> = panel.selection.iter().copied().collect();
+                for index in start..=end {
+                    selected.insert(index);
                 }
-            };
-            let target = (panel.cursor as i64 + step).clamp(0, (len - 1) as i64) as usize;
-            // Apply the single-step toggle for each step between current and target.
-            let dir: i64 = if target as i64 >= panel.cursor as i64 {
-                1
+                panel.selection = selected.into_iter().collect();
+                panel.selection.sort_unstable();
+                panel.cursor = target;
             } else {
-                -1
-            };
-            while panel.cursor != target {
-                let previous = panel.cursor;
-                let next = (panel.cursor as i64 + dir) as usize;
-                panel.cursor = next;
-                if panel.selection.contains(&next) {
-                    panel
-                        .selection
-                        .retain(|&index| index != next && index != previous);
-                } else {
-                    if !panel.selection.contains(&previous) {
-                        panel.selection.push(previous);
+                let step: i64 = match delta_opt {
+                    Some(d) if d != 0 => d,
+                    _ => {
+                        if direction == "up" {
+                            -1
+                        } else {
+                            1
+                        }
                     }
-                    panel.selection.push(next);
+                };
+                let target = (panel.cursor as i64 + step).clamp(0, (len - 1) as i64) as usize;
+                // Apply the single-step toggle for each step between current and target.
+                let dir: i64 = if target as i64 >= panel.cursor as i64 {
+                    1
+                } else {
+                    -1
+                };
+                while panel.cursor != target {
+                    let previous = panel.cursor;
+                    let next = (panel.cursor as i64 + dir) as usize;
+                    panel.cursor = next;
+                    if panel.selection.contains(&next) {
+                        panel
+                            .selection
+                            .retain(|&index| index != next && index != previous);
+                    } else {
+                        if !panel.selection.contains(&previous) {
+                            panel.selection.push(previous);
+                        }
+                        panel.selection.push(next);
+                    }
                 }
             }
             let cursor = panel.cursor;
