@@ -4,6 +4,7 @@ import { backendPath, hostPath } from "../config.mjs";
 import {
   clickCommand,
   clickEntry,
+  clickSortHeader,
   closeTerminalJobDialog,
   confirmOperation,
   createDirectory,
@@ -54,4 +55,58 @@ export async function runLocalFlow(browser, observer) {
   const copied = fs.readFileSync(hostPath(path.posix.join(aDst, "alpha/renamed.txt")), "utf8");
   if (copied !== "renamed payload\n") throw new Error("renamed copied file content mismatch");
   if (fs.existsSync(hostPath(path.posix.join(aDst, "alpha/remove.txt")))) throw new Error("deleted file still exists");
+
+  // ── Sort validation ──────────────────────────────────────────────────────
+
+  observer.sendIntent("NavigatePanelTo", undefined, { panelId: "left", path: aSrc });
+  await observer.waitForPanelPath("left", aSrc);
+  await createDirectory(browser, observer, "left", "sort-test");
+  await doubleClickEntry(browser, "left", "sort-test");
+  const sortDir = path.posix.join(aSrc, "sort-test");
+  await observer.waitForPanelPath("left", sortDir);
+
+  const hostSortDir = hostPath(sortDir);
+  fs.writeFileSync(path.join(hostSortDir, "aardvark.txt"), Buffer.alloc(500));
+  fs.writeFileSync(path.join(hostSortDir, "zebra.txt"), Buffer.alloc(10));
+  fs.writeFileSync(path.join(hostSortDir, "baby.txt"), Buffer.alloc(100));
+
+  const nowSec = Date.now() / 1000;
+  fs.utimesSync(path.join(hostSortDir, "aardvark.txt"), nowSec, nowSec - 3600);
+  fs.utimesSync(path.join(hostSortDir, "baby.txt"), nowSec, nowSec - 1800);
+  fs.utimesSync(path.join(hostSortDir, "zebra.txt"), nowSec, nowSec);
+
+  observer.sendIntent("NavigatePanelTo", undefined, { panelId: "left", path: aSrc });
+  await observer.waitForPanelPath("left", aSrc);
+  await doubleClickEntry(browser, "left", "sort-test");
+  await observer.waitForPanelPath("left", sortDir);
+  const sortFiles = ["aardvark.txt", "zebra.txt", "baby.txt"];
+  await observer.waitForAllEntries("left", sortFiles);
+
+  await observer.waitForSort("left", "name", "asc");
+  observer.assertFileEntryOrder("left", ["aardvark.txt", "baby.txt", "zebra.txt"]);
+
+  await clickSortHeader(browser, "left", "name");
+  await observer.waitForSort("left", "name", "desc");
+  await observer.waitForAllEntries("left", sortFiles);
+  observer.assertFileEntryOrder("left", ["zebra.txt", "baby.txt", "aardvark.txt"]);
+
+  await clickSortHeader(browser, "left", "size");
+  await observer.waitForSort("left", "size", "asc");
+  await observer.waitForAllEntries("left", sortFiles);
+  observer.assertFileEntryOrder("left", ["zebra.txt", "baby.txt", "aardvark.txt"]);
+
+  await clickSortHeader(browser, "left", "size");
+  await observer.waitForSort("left", "size", "desc");
+  await observer.waitForAllEntries("left", sortFiles);
+  observer.assertFileEntryOrder("left", ["aardvark.txt", "baby.txt", "zebra.txt"]);
+
+  await clickSortHeader(browser, "left", "date");
+  await observer.waitForSort("left", "date", "asc");
+  await observer.waitForAllEntries("left", sortFiles);
+  observer.assertFileEntryOrder("left", ["aardvark.txt", "baby.txt", "zebra.txt"]);
+
+  await clickSortHeader(browser, "left", "date");
+  await observer.waitForSort("left", "date", "desc");
+  await observer.waitForAllEntries("left", sortFiles);
+  observer.assertFileEntryOrder("left", ["zebra.txt", "baby.txt", "aardvark.txt"]);
 }

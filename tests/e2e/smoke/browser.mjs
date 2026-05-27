@@ -45,6 +45,12 @@ export async function reloadBrowserApp(browser, name) {
   await waitForMainWindow(browser, name);
 }
 
+export async function clickSortHeader(browser, panelId, by) {
+  const el = await browser.$(`[data-testid="panel-${panelId}"] .panel__sort-${by}`);
+  await el.waitForClickable({ timeout: 10_000 });
+  await el.click();
+}
+
 export async function clickCommand(browser, commandId) {
   const el = await browser.$(`[data-command-id="${cssString(commandId)}"]`);
   await el.waitForClickable({ timeout: 10_000 });

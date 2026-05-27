@@ -112,6 +112,46 @@ export class FbroObserver {
     }, { timeout, label: `${this.name} ${panelId} entry ${entryName}` });
   }
 
+  async waitForAllEntries(panelId, names, timeout = 15_000) {
+    for (const name of names) {
+      await this.waitForEntry(panelId, name, undefined, timeout);
+    }
+  }
+
+  waitForSort(panelId, expectedBy, expectedOrder, timeout = 15_000) {
+    let lastSnapshotRequest = 0;
+    return waitFor(() => {
+      const panel = this.state.panels[panelId];
+      if (panel?.sort?.by === expectedBy && panel?.sort?.order === expectedOrder) return panel;
+      const now = Date.now();
+      if (now - lastSnapshotRequest > 500) {
+        lastSnapshotRequest = now;
+        this.sendIntent("RequestStateSnapshot");
+      }
+      return false;
+    }, { timeout, label: `${this.name} ${panelId} sort ${expectedBy} ${expectedOrder}` });
+  }
+
+  assertFileEntryOrder(panelId, expectedNames) {
+    const panel = this.state.panels[panelId];
+    if (!panel?.entries) throw new Error(`panel ${panelId} has no entries`);
+    const fileNames = panel.entries
+      .filter((e) => e.kind !== "directory")
+      .map((e) => e.name);
+    if (fileNames.length !== expectedNames.length) {
+      throw new Error(
+        `panel ${panelId}: expected ${expectedNames.length} file entries but got ${fileNames.length} (${fileNames.join(", ")})`,
+      );
+    }
+    for (let i = 0; i < expectedNames.length; i++) {
+      if (fileNames[i] !== expectedNames[i]) {
+        throw new Error(
+          `panel ${panelId}: at position ${i} expected "${expectedNames[i]}" but got "${fileNames[i]}" (got [${fileNames.join(", ")}])`,
+        );
+      }
+    }
+  }
+
   waitForNoEntry(panelId, entryName, timeout = 15_000) {
     let lastSnapshotRequest = 0;
     return waitFor(() => {

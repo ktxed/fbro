@@ -135,7 +135,8 @@ docker compose ... down --remove-orphans
 The smoke test exercises these flows:
 
 - Local file operations on `fbro-a`: create directories/files, copy from left to
-  right panel, rename, delete, and verify final file contents.
+  right panel, rename, delete, verify final file contents, and validate sorting
+  by name/size/date.
 - Archive browsing: create a zip file, enter it from the UI, copy a file out of
   the archive, and verify extracted content.
 - Search: search for `renamed.txt`, mount the search results source, and verify
