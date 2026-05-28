@@ -5,7 +5,7 @@ use serde_json::Value;
 use tokio::sync::{mpsc, watch, Mutex};
 
 use crate::jobs::file_ops::{generate_dry_run_script, run_file_op};
-use crate::jobs::search::{run_search, MaskMode, SearchDepth, SearchParams, SearchResultStore};
+use crate::jobs::search::{run_search, MaskMode, SearchDepth, SearchParams, SearchResultStore, SizeOp, TimeOp};
 use crate::jobs::{
     AppJob, ConflictPolicy, DecisionResponse, FileOpEntry, FileOpJobMeta, FileOpType, JobKind,
     JobState, SearchJobMeta, VerificationPolicy,
@@ -13,7 +13,7 @@ use crate::jobs::{
 use crate::platform::{ExternalClipboardOp, ExternalClipboardPayload};
 use crate::state::{ShadowSource, Source};
 use crate::vfs::{search::SearchResultsDriver, VfsError};
-use crate::ws::intents::{arg_bool, arg_str, is_search_source};
+use crate::ws::intents::{arg_bool, arg_str, arg_u64, is_search_source};
 use crate::ws::protocol::SearchParamsSchema;
 use crate::ws::protocol::{now, FileOpFileSchema, JobStartSchema, ServerMessage};
 use crate::ws::runtime::{
@@ -1608,12 +1608,55 @@ async fn start_search(args: &Value, ctx: &mut IntentContext<'_>) {
         .filter(|s| !s.is_empty())
         .map(String::from);
 
+    // Parse size filter
+    let size_op = match arg_str(args, "sizeOp") {
+        Some("interval") => Some(SizeOp::Interval),
+        Some("gt") => Some(SizeOp::Gt),
+        Some("lt") => Some(SizeOp::Lt),
+        Some("eq") => Some(SizeOp::Eq),
+        _ => None,
+    };
+    let size_unit = arg_str(args, "sizeUnit").unwrap_or("B");
+    let size_mult = match size_unit {
+        "KiB" => 1024u64,
+        "MiB" => 1024 * 1024,
+        "GiB" => 1024 * 1024 * 1024,
+        _ => 1,
+    };
+    let size_value_raw = size_op.map(|_| arg_u64(args, "sizeValue", 0));
+    let size_value = size_value_raw.map(|v| v * size_mult);
+    let size_max_raw = size_op
+        .filter(|op| matches!(op, SizeOp::Interval))
+        .map(|_| arg_u64(args, "sizeMax", 0));
+    let size_max = size_max_raw.map(|v| v * size_mult);
+
+    // Parse time filter
+    let time_op = match arg_str(args, "timeOp") {
+        Some("interval") => Some(TimeOp::Interval),
+        Some("before") => Some(TimeOp::Before),
+        Some("after") => Some(TimeOp::After),
+        Some("relative") => Some(TimeOp::Relative),
+        _ => None,
+    };
+    let time_value = arg_str(args, "timeValue")
+        .filter(|s| !s.is_empty())
+        .map(String::from);
+    let time_to = arg_str(args, "timeTo")
+        .filter(|s| !s.is_empty())
+        .map(String::from);
+
     let params = SearchParams {
         paths: paths.clone(),
         depth,
         file_mask,
         mask_mode,
         content_query,
+        size_op,
+        size_value,
+        size_max,
+        time_op,
+        time_value,
+        time_to,
     };
 
     // Capture params as a serialisable schema before params is moved into run_search.
@@ -1631,6 +1674,23 @@ async fn start_search(args: &Value, ctx: &mut IntentContext<'_>) {
             MaskMode::Regex => "regex".to_string(),
         },
         content_query: params.content_query.clone(),
+        size_op: params.size_op.map(|op| match op {
+            SizeOp::Interval => "interval",
+            SizeOp::Gt => "gt",
+            SizeOp::Lt => "lt",
+            SizeOp::Eq => "eq",
+        }.to_string()),
+        size_value: size_value_raw,
+        size_max: size_max_raw,
+        size_unit: size_op.map(|_| size_unit.to_string()),
+        time_op: params.time_op.map(|op| match op {
+            TimeOp::Interval => "interval",
+            TimeOp::Before => "before",
+            TimeOp::After => "after",
+            TimeOp::Relative => "relative",
+        }.to_string()),
+        time_value: params.time_value.clone(),
+        time_to: params.time_to.clone(),
     };
 
     let (cancel_tx, cancel_rx) = watch::channel(false);

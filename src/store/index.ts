@@ -166,7 +166,7 @@ export interface PendingSearch {
   matched: number;
   currentPath: string;
   status: "idle" | "running" | "completed" | "cancelled" | "failed";
-  activeTab: "input" | "results";
+  activeTab: "input" | "results" | "extra";
   // Used to correlate the StartSearch intent with the JobStarted message
   requestId: string | null;
   // The params used for this search — used to pre-fill the Input tab when
@@ -327,7 +327,7 @@ export type AppAction =
   | { type: "CLOSE_BRO" }
   | { type: "OPEN_SEARCH"; search: PendingSearch }
   | { type: "CLOSE_SEARCH" }
-  | { type: "SET_SEARCH_TAB"; tab: "input" | "results" }
+  | { type: "SET_SEARCH_TAB"; tab: "input" | "results" | "extra" }
   | { type: "SET_SEARCH_REQUEST_ID"; requestId: string }
   | { type: "RESET_SEARCH_FOR_NEW_JOB"; requestId: string }
   | { type: "OPEN_COMMAND_PALETTE" }

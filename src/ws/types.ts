@@ -155,6 +155,13 @@ export interface SearchParams {
   fileMask?: string | null;
   maskMode: string;
   contentQuery?: string | null;
+  sizeOp?: "interval" | "gt" | "lt" | "eq";
+  sizeValue?: number;
+  sizeMax?: number;
+  sizeUnit?: "B" | "KiB" | "MiB" | "GiB";
+  timeOp?: "interval" | "before" | "after" | "relative";
+  timeValue?: string;
+  timeTo?: string;
 }
 
 export interface SearchResult {

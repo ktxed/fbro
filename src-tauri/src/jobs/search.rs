@@ -1,7 +1,7 @@
 use std::io::Read;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use regex::Regex;
 use tokio::sync::{mpsc, watch, Mutex, Semaphore};
@@ -30,6 +30,22 @@ pub enum MaskMode {
     Regex,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub enum SizeOp {
+    Interval,
+    Gt,
+    Lt,
+    Eq,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum TimeOp {
+    Interval,
+    Before,
+    After,
+    Relative,
+}
+
 #[derive(Clone, Debug)]
 pub struct SearchParams {
     pub paths: Vec<String>,
@@ -38,6 +54,15 @@ pub struct SearchParams {
     pub mask_mode: MaskMode,
     /// Content query; always matched case-insensitively.
     pub content_query: Option<String>,
+    /// File size filter (value and max are already in bytes).
+    pub size_op: Option<SizeOp>,
+    pub size_value: Option<u64>,
+    pub size_max: Option<u64>,
+    /// File datetime filter.
+    pub time_op: Option<TimeOp>,
+    /// For absolute ops: epoch seconds as string. For relative: compound string like "1h30m".
+    pub time_value: Option<String>,
+    pub time_to: Option<String>,
 }
 
 // ─── Search results ────────────────────────────────────────────────────────────
@@ -96,6 +121,68 @@ fn compile_mask(mask: Option<&str>, mode: &MaskMode) -> Arc<dyn Fn(&str) -> bool
             Ok(re) => Arc::new(move |name: &str| re.is_match(name)),
             Err(_) => Arc::new(|_| false),
         },
+    }
+}
+
+// ─── Extra filter helpers ──────────────────────────────────────────────────────
+
+/// Parse a compound relative time string like "1h30m", "2d", "1w3h" into seconds.
+/// Supports units: s, m, h, d, w.
+fn parse_relative_time(input: &str) -> Option<u64> {
+    let re = Regex::new(r"(\d+)\s*([smhdw])").ok()?;
+    let mut total: u64 = 0;
+    let mut found = false;
+    for cap in re.captures_iter(input) {
+        let num: u64 = cap.get(1)?.as_str().parse().ok()?;
+        let unit = cap.get(2)?.as_str();
+        let secs = match unit {
+            "s" => num,
+            "m" => num * 60,
+            "h" => num * 3600,
+            "d" => num * 86400,
+            "w" => num * 604800,
+            _ => continue,
+        };
+        total += secs;
+        found = true;
+    }
+    if found { Some(total) } else { None }
+}
+
+/// Resolve time filter cutoffs into epoch seconds.
+/// Returns (from_epoch, to_epoch) where each may be None if unbounded.
+fn resolve_time_filter(
+    time_op: Option<TimeOp>,
+    time_value: &Option<String>,
+    time_to: &Option<String>,
+    now_epoch: i64,
+) -> (Option<i64>, Option<i64>) {
+    let op = match time_op {
+        Some(op) => op,
+        None => return (None, None),
+    };
+
+    match op {
+        TimeOp::Relative => {
+            let dur_secs = time_value
+                .as_deref()
+                .and_then(parse_relative_time)
+                .unwrap_or(0) as i64;
+            (Some(now_epoch.saturating_sub(dur_secs)), None)
+        }
+        TimeOp::Before => {
+            let from = time_value.as_deref().and_then(|v| v.parse::<i64>().ok());
+            (from, None)
+        }
+        TimeOp::After => {
+            let from = time_value.as_deref().and_then(|v| v.parse::<i64>().ok());
+            (from, None)
+        }
+        TimeOp::Interval => {
+            let from = time_value.as_deref().and_then(|v| v.parse::<i64>().ok());
+            let to = time_to.as_deref().and_then(|v| v.parse::<i64>().ok());
+            (from, to)
+        }
     }
 }
 
@@ -193,6 +280,17 @@ pub async fn run_search(
         SearchDepth::Depth(d) => Some(*d as u32),
     };
 
+    let now_epoch = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    let (time_from, time_to) = resolve_time_filter(
+        params.time_op,
+        &params.time_value,
+        &params.time_to,
+        now_epoch,
+    );
+
     // Work queue: (dir_path, depth)
     let work_tx_cap = 4096;
     let (work_tx, work_rx) = async_channel::bounded::<WorkItem>(work_tx_cap);
@@ -235,6 +333,12 @@ pub async fn run_search(
         let pending = Arc::clone(&pending);
         let max_depth = max_depth;
         let cancel_rx = cancel_rx_clone.clone();
+        let size_op = params.size_op;
+        let size_value = params.size_value;
+        let size_max = params.size_max;
+        let time_op = params.time_op;
+        let time_from = time_from;
+        let time_to = time_to;
 
         let handle = tokio::spawn(async move {
             loop {
@@ -278,6 +382,12 @@ pub async fn run_search(
                         mask_fn.as_ref(),
                         &content_query_lower,
                         &cancel_check,
+                        size_op,
+                        size_value,
+                        size_max,
+                        time_op,
+                        time_from,
+                        time_to,
                     )
                 })
                 .await;
@@ -447,6 +557,12 @@ fn read_dir_entries(
     mask_fn: &dyn Fn(&str) -> bool,
     content_query_lower: &Option<String>,
     cancel: &watch::Receiver<bool>,
+    size_op: Option<SizeOp>,
+    size_value: Option<u64>,
+    size_max: Option<u64>,
+    time_op: Option<TimeOp>,
+    time_from: Option<i64>,
+    time_to: Option<i64>,
 ) -> Option<(Vec<SearchResultEntry>, Vec<String>)> {
     if *cancel.borrow() {
         return None;
@@ -493,6 +609,49 @@ fn read_dir_entries(
         };
         let size = if is_dir { None } else { Some(meta.len()) };
         let mtime = meta.modified().ok().and_then(format_mtime);
+
+        // Size filter: directories excluded when active
+        if let Some(op) = size_op {
+            if is_dir {
+                continue;
+            }
+            let entry_size = meta.len();
+            let val = size_value.unwrap_or(0);
+            let pass = match op {
+                SizeOp::Gt => entry_size > val,
+                SizeOp::Lt => entry_size < val,
+                SizeOp::Eq => entry_size == val,
+                SizeOp::Interval => {
+                    entry_size >= val && size_max.map_or(true, |max| entry_size <= max)
+                }
+            };
+            if !pass {
+                continue;
+            }
+        }
+
+        // Time filter
+        if let Some(op) = time_op {
+            let Some(ref ts) = mtime else {
+                continue;
+            };
+            let Ok(entry_epoch) = ts.parse::<i64>() else {
+                continue;
+            };
+            let pass = match op {
+                TimeOp::Before => time_from.map_or(true, |from| entry_epoch < from),
+                TimeOp::After => time_from.map_or(false, |from| entry_epoch > from),
+                TimeOp::Relative => time_from.map_or(false, |from| entry_epoch >= from),
+                TimeOp::Interval => {
+                    let from_ok = time_from.map_or(true, |from| entry_epoch >= from);
+                    let to_ok = time_to.map_or(true, |to| entry_epoch <= to);
+                    from_ok && to_ok
+                }
+            };
+            if !pass {
+                continue;
+            }
+        }
 
         matched.push(SearchResultEntry {
             name,

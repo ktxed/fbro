@@ -21,6 +21,27 @@ function MnemonicLabel({ text, mnemonic }: { text: string; mnemonic: string }) {
 
 type DepthOption = "unlimited" | "current" | number;
 type MaskMode = "substring" | "wildcard" | "regex";
+type SizeOp = "none" | "interval" | "gt" | "lt" | "eq";
+type TimeOp = "none" | "interval" | "before" | "after" | "relative";
+type SizeUnit = "B" | "KiB" | "MiB" | "GiB";
+
+const pad = (n: number) => String(n).padStart(2, "0");
+
+function epochToDate(epoch: string): string {
+  const d = new Date(Number(epoch) * 1000);
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+function epochToTime(epoch: string): string {
+  const d = new Date(Number(epoch) * 1000);
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function dateTimeToEpoch(date: string, time: string): string {
+  if (!date) return "";
+  const iso = time ? `${date}T${time}` : `${date}T00:00`;
+  return String(Math.floor(new Date(iso).getTime() / 1000));
+}
 
 interface SearchModalProps {
   search: PendingSearch;
@@ -56,6 +77,86 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
 
   // Section 3 — Content
   const [contentQuery, setContentQuery] = useState(p?.contentQuery ?? "");
+
+  // Section 4 — Extra: File Size
+  const [sizeOp, setSizeOp] = useState<SizeOp>(
+    (p?.sizeOp as SizeOp | undefined) ?? "none"
+  );
+  const [sizeValue, setSizeValue] = useState<string>(
+    p?.sizeValue != null ? String(p.sizeValue) : ""
+  );
+  const [sizeMax, setSizeMax] = useState<string>(
+    p?.sizeMax != null ? String(p.sizeMax) : ""
+  );
+  const [sizeUnit, setSizeUnit] = useState<SizeUnit>(
+    (p?.sizeUnit as SizeUnit | undefined) ?? "B"
+  );
+
+  const sizeEnabled = sizeOp !== "none";
+  const toggleSizeFilter = (on: boolean) => {
+    if (on) {
+      setSizeOp("gt");
+    } else {
+      setSizeOp("none");
+      setSizeValue("");
+      setSizeMax("");
+    }
+  };
+
+  // Section 5 — Extra: File Datetime
+  const [timeOp, setTimeOp] = useState<TimeOp>(
+    (p?.timeOp as TimeOp | undefined) ?? "none"
+  );
+  const [timeValueDate, setTimeValueDate] = useState<string>(() => {
+    const v = p?.timeValue;
+    if (!v) return "";
+    const op = (p?.timeOp as TimeOp | undefined) ?? "none";
+    if (op !== "none" && op !== "relative" && /^\d+$/.test(v)) {
+      return epochToDate(v);
+    }
+    return "";
+  });
+  const [timeValueTime, setTimeValueTime] = useState<string>(() => {
+    const v = p?.timeValue;
+    if (!v) return "";
+    const op = (p?.timeOp as TimeOp | undefined) ?? "none";
+    if (op !== "none" && op !== "relative" && /^\d+$/.test(v)) {
+      return epochToTime(v);
+    }
+    return "";
+  });
+  const [timeToDate, setTimeToDate] = useState<string>(() => {
+    const v = p?.timeTo;
+    if (!v) return "";
+    return epochToDate(v);
+  });
+  const [timeToTime, setTimeToTime] = useState<string>(() => {
+    const v = p?.timeTo;
+    if (!v) return "";
+    return epochToTime(v);
+  });
+  const [timeRelative, setTimeRelative] = useState<string>(() => {
+    const v = p?.timeValue;
+    if (!v) return "";
+    const op = (p?.timeOp as TimeOp | undefined) ?? "none";
+    return op === "relative" ? v : "";
+  });
+
+  const timeEnabled = timeOp !== "none";
+  const toggleTimeFilter = (on: boolean) => {
+    if (on) {
+      setTimeOp("after");
+    } else {
+      setTimeOp("none");
+      setTimeValueDate("");
+      setTimeValueTime("");
+      setTimeToDate("");
+      setTimeToTime("");
+      setTimeRelative("");
+    }
+  };
+
+  const RELATIVE_PRESETS = ["1h", "6h", "24h", "7d", "30d"];
 
   const maskHistory = useInputHistory("search.fileMask", setFileMask);
   const contentHistory = useInputHistory("search.content", setContentQuery);
@@ -126,6 +227,15 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
       maskMode,
       contentQuery: contentQuery.trim() ? contentQuery : null,
       background,
+      sizeOp: sizeOp !== "none" ? sizeOp : undefined,
+      sizeValue: sizeOp !== "none" && sizeValue ? Number(sizeValue) : undefined,
+      sizeMax: sizeOp === "interval" && sizeMax ? Number(sizeMax) : undefined,
+      sizeUnit: sizeOp !== "none" ? sizeUnit : undefined,
+      timeOp: timeOp !== "none" ? timeOp : undefined,
+      timeValue: timeOp !== "none"
+        ? (timeOp === "relative" ? (timeRelative || null) : (timeValueDate ? dateTimeToEpoch(timeValueDate, timeValueTime) : null))
+        : undefined,
+      timeTo: timeOp === "interval" && timeToDate ? dateTimeToEpoch(timeToDate, timeToTime) : undefined,
     });
 
     if (background) {
@@ -191,6 +301,13 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
         dispatch({ type: "SET_SEARCH_TAB", tab: "results" });
       }
     }
+    if (e.key === "e" || e.key === "E") {
+      const target = e.target as HTMLElement;
+      if (target.tagName !== "INPUT" && target.tagName !== "TEXTAREA" && target.tagName !== "SELECT") {
+        e.preventDefault();
+        dispatch({ type: "SET_SEARCH_TAB", tab: "extra" });
+      }
+    }
   };
 
   const depthOptions: { value: string; label: string }[] = [
@@ -252,6 +369,13 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
           >
             <MnemonicLabel text={`Results${resultCount > 0 ? ` (${resultCount})` : ""}`} mnemonic="r" />
             {isRunning && <span className="search-modal__tab-spinner" />}
+          </button>
+          <button
+            type="button"
+            className={`search-modal__tab${search.activeTab === "extra" ? " search-modal__tab--active" : ""}`}
+            onClick={() => dispatch({ type: "SET_SEARCH_TAB", tab: "extra" })}
+          >
+            <MnemonicLabel text="Extra" mnemonic="e" />
           </button>
         </div>
 
@@ -442,6 +566,172 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
                     />
                   )}
                 </div>
+              </div>
+            </>
+          )}
+
+          {/* ── Extra Tab ──────────────────────────────────────────── */}
+          {search.activeTab === "extra" && (
+            <>
+              {/* Section: File Size */}
+              <div className={`search-modal__section${sizeEnabled ? " search-modal__section--active" : ""}`}>
+                <label className="search-modal__extra-toggle">
+                  <input
+                    type="checkbox"
+                    checked={sizeEnabled}
+                    onChange={(e) => toggleSizeFilter(e.target.checked)}
+                  />
+                  <span className="search-modal__section-title">File size</span>
+                </label>
+
+                {sizeEnabled && (
+                  <>
+                    <div className="search-modal__extra-row">
+                      <select
+                        className="search-modal__extra-select"
+                        value={sizeOp}
+                        onChange={(e) => setSizeOp(e.target.value as SizeOp)}
+                      >
+                        <option value="gt">Bigger than</option>
+                        <option value="lt">Smaller than</option>
+                        <option value="eq">Equal to</option>
+                        <option value="interval">Between</option>
+                      </select>
+                      <input
+                        type="number"
+                        className="search-modal__extra-number"
+                        aria-label="File size value"
+                        value={sizeValue}
+                        onChange={(e) => setSizeValue(e.target.value)}
+                        min="0"
+                        placeholder="Value"
+                      />
+                      <select
+                        className="search-modal__extra-select search-modal__extra-select--unit"
+                        value={sizeUnit}
+                        onChange={(e) => setSizeUnit(e.target.value as SizeUnit)}
+                        aria-label="Size unit"
+                      >
+                        <option value="B">B</option>
+                        <option value="KiB">KiB</option>
+                        <option value="MiB">MiB</option>
+                        <option value="GiB">GiB</option>
+                      </select>
+                    </div>
+                    {sizeOp === "interval" && (
+                      <div className="search-modal__extra-row search-modal__extra-row--sub">
+                        <span className="search-modal__extra-sep">and</span>
+                        <input
+                          type="number"
+                          className="search-modal__extra-number"
+                          aria-label="File size max"
+                          value={sizeMax}
+                          onChange={(e) => setSizeMax(e.target.value)}
+                          min="0"
+                          placeholder="Max"
+                        />
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+
+              {/* Section: File Datetime */}
+              <div className={`search-modal__section search-modal__section--last${timeEnabled ? " search-modal__section--active" : ""}`}>
+                <label className="search-modal__extra-toggle">
+                  <input
+                    type="checkbox"
+                    checked={timeEnabled}
+                    onChange={(e) => toggleTimeFilter(e.target.checked)}
+                  />
+                  <span className="search-modal__section-title">File datetime</span>
+                </label>
+
+                {timeEnabled && (
+                  <>
+                    <div className="search-modal__extra-row">
+                      <select
+                        className="search-modal__extra-select"
+                        value={timeOp}
+                        onChange={(e) => setTimeOp(e.target.value as TimeOp)}
+                      >
+                        <option value="after">After</option>
+                        <option value="before">Before</option>
+                        <option value="interval">Between</option>
+                        <option value="relative">In the last…</option>
+                      </select>
+                      {timeOp !== "relative" && (
+                        <>
+                          <input
+                            type="date"
+                            className="search-modal__extra-date"
+                            aria-label="File date"
+                            key={`tvd-${timeEnabled}`}
+                            defaultValue={timeValueDate}
+                            onChange={(e) => setTimeValueDate(e.target.value)}
+                          />
+                          <input
+                            type="time"
+                            className="search-modal__extra-time"
+                            aria-label="File time"
+                            key={`tvt-${timeEnabled}`}
+                            defaultValue={timeValueTime || "00:00"}
+                            step="60"
+                            onChange={(e) => setTimeValueTime(e.target.value)}
+                          />
+                        </>
+                      )}
+                      {timeOp === "relative" && (
+                        <input
+                          type="text"
+                          className="search-modal__extra-text"
+                          aria-label="Relative time"
+                          value={timeRelative}
+                          onChange={(e) => setTimeRelative(e.target.value)}
+                          placeholder="e.g. 1h30m"
+                          spellCheck={false}
+                          autoComplete="off"
+                        />
+                      )}
+                    </div>
+                    {timeOp === "interval" && (
+                      <div className="search-modal__extra-row search-modal__extra-row--sub">
+                        <span className="search-modal__extra-sep">and</span>
+                        <input
+                          type="date"
+                          className="search-modal__extra-date"
+                          aria-label="File date max"
+                          key={`ttd-${timeEnabled}`}
+                          defaultValue={timeToDate}
+                          onChange={(e) => setTimeToDate(e.target.value)}
+                        />
+                        <input
+                          type="time"
+                          className="search-modal__extra-time"
+                          aria-label="File time max"
+                          key={`ttt-${timeEnabled}`}
+                          defaultValue={timeToTime || "00:00"}
+                          step="60"
+                          onChange={(e) => setTimeToTime(e.target.value)}
+                        />
+                      </div>
+                    )}
+                    {timeOp === "relative" && (
+                      <div className="search-modal__extra-presets">
+                        {RELATIVE_PRESETS.map((preset) => (
+                          <button
+                            key={preset}
+                            type="button"
+                            className={`search-modal__extra-preset${timeRelative === preset ? " search-modal__extra-preset--active" : ""}`}
+                            onClick={() => setTimeRelative(timeRelative === preset ? "" : preset)}
+                          >
+                            {preset}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
             </>
           )}

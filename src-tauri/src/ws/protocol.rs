@@ -662,6 +662,13 @@ pub struct SearchParamsSchema {
     pub file_mask: Option<String>,
     pub mask_mode: String,
     pub content_query: Option<String>,
+    pub size_op: Option<String>,
+    pub size_value: Option<u64>,
+    pub size_max: Option<u64>,
+    pub size_unit: Option<String>,
+    pub time_op: Option<String>,
+    pub time_value: Option<String>,
+    pub time_to: Option<String>,
 }
 
 #[derive(Serialize, Clone, Debug)]
