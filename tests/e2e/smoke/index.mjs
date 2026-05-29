@@ -24,7 +24,7 @@ import {
 import { runArchiveFlow } from "./cases/archive.mjs";
 import { runLocalFlow } from "./cases/local.mjs";
 import { runRemoteFlow } from "./cases/remote.mjs";
-import { runSearchFlow } from "./cases/search.mjs";
+import { runDatetimeSearchFlow, runSearchFlow, runSizeSearchFlow } from "./cases/search.mjs";
 
 async function main() {
   let browserA;
@@ -58,6 +58,8 @@ async function main() {
     await runLocalFlow(browserA, observerA);
     await runArchiveFlow(browserA, observerA);
     await runSearchFlow(browserA, observerA);
+    await runDatetimeSearchFlow(browserA, observerA);
+    await runSizeSearchFlow(browserA, observerA);
 
     browserB = await startBrowser("fbro-b", webdriverHosts.b, webdriverPorts.b, appB);
     observerB = new FbroObserver("fbro-b", wsUrls.b);

@@ -63,6 +63,10 @@ pub struct SearchParams {
     /// For absolute ops: epoch seconds as string. For relative: compound string like "1h30m".
     pub time_value: Option<String>,
     pub time_to: Option<String>,
+    /// Which timestamp to filter against: "modified" (default, most widely
+    /// available) or "created" (birth-time; may be unavailable on some
+    /// filesystems, in which case entries are skipped).
+    pub time_date_field: Option<String>,
 }
 
 // ─── Search results ────────────────────────────────────────────────────────────
@@ -339,6 +343,7 @@ pub async fn run_search(
         let time_op = params.time_op;
         let time_from = time_from;
         let time_to = time_to;
+        let time_date_field = params.time_date_field.clone();
 
         let handle = tokio::spawn(async move {
             loop {
@@ -374,6 +379,7 @@ pub async fn run_search(
                 let mask_fn = Arc::clone(&mask_fn);
                 let content_query_lower = Arc::clone(&content_query_lower);
                 let cancel_check = cancel_rx.clone();
+                let time_date_field = time_date_field.clone();
 
                 let entries = tokio::task::spawn_blocking(move || {
                     read_dir_entries(
@@ -388,6 +394,7 @@ pub async fn run_search(
                         time_op,
                         time_from,
                         time_to,
+                        time_date_field.as_deref(),
                     )
                 })
                 .await;
@@ -563,6 +570,7 @@ fn read_dir_entries(
     time_op: Option<TimeOp>,
     time_from: Option<i64>,
     time_to: Option<i64>,
+    time_date_field: Option<&str>,
 ) -> Option<(Vec<SearchResultEntry>, Vec<String>)> {
     if *cancel.borrow() {
         return None;
@@ -609,6 +617,7 @@ fn read_dir_entries(
         };
         let size = if is_dir { None } else { Some(meta.len()) };
         let mtime = meta.modified().ok().and_then(format_mtime);
+        let btime = meta.created().ok().and_then(format_mtime);
 
         // Size filter: directories excluded when active
         if let Some(op) = size_op {
@@ -632,7 +641,12 @@ fn read_dir_entries(
 
         // Time filter
         if let Some(op) = time_op {
-            let Some(ref ts) = mtime else {
+            let ts_opt = if time_date_field == Some("created") {
+                &btime
+            } else {
+                &mtime
+            };
+            let Some(ref ts) = ts_opt else {
                 continue;
             };
             let Ok(entry_epoch) = ts.parse::<i64>() else {

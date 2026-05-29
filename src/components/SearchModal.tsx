@@ -276,6 +276,7 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
       timeTo: timeOp === "interval" && timeToDT
         ? localToEpoch(timeToDT)
         : undefined,
+      timeDateField: timeOp !== "none" ? timeDateField : undefined,
     });
 
     if (background) {

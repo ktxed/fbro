@@ -1644,6 +1644,9 @@ async fn start_search(args: &Value, ctx: &mut IntentContext<'_>) {
     let time_to = arg_str(args, "timeTo")
         .filter(|s| !s.is_empty())
         .map(String::from);
+    let time_date_field = arg_str(args, "timeDateField")
+        .filter(|s| !s.is_empty())
+        .map(String::from);
 
     let params = SearchParams {
         paths: paths.clone(),
@@ -1657,6 +1660,7 @@ async fn start_search(args: &Value, ctx: &mut IntentContext<'_>) {
         time_op,
         time_value,
         time_to,
+        time_date_field,
     };
 
     // Capture params as a serialisable schema before params is moved into run_search.
@@ -1691,6 +1695,7 @@ async fn start_search(args: &Value, ctx: &mut IntentContext<'_>) {
         }.to_string()),
         time_value: params.time_value.clone(),
         time_to: params.time_to.clone(),
+        time_date_field: params.time_date_field.clone(),
     };
 
     let (cancel_tx, cancel_rx) = watch::channel(false);

@@ -669,6 +669,8 @@ pub struct SearchParamsSchema {
     pub time_op: Option<String>,
     pub time_value: Option<String>,
     pub time_to: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub time_date_field: Option<String>,
 }
 
 #[derive(Serialize, Clone, Debug)]

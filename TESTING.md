@@ -144,6 +144,15 @@ The smoke test exercises these flows:
   the archive, and verify extracted content.
 - Search: search for `renamed.txt`, mount the search results source, and verify
   the result appears in the panel.
+- Datetime search: verify the Created/Modified time filter toggle works correctly.
+  Creates a file with mtime set to two years ago and btime≈now, then searches
+  with a "Between" interval covering current year ±1.  The modified filter must
+  exclude the stale-mtime file (mtime outside the interval); the created filter
+  must include it if the filesystem reports birth time.
+- File size search: verify the size filter works for both "Bigger than" and
+  "In range" operators.  Uses the sort-test files with known byte sizes: 500 B,
+  100 B, and 10 B.  Asserts that only the correct file matches each filter and
+  that all other files are excluded from results.
 - Remote sharing: enable sharing on both instances, pair `fbro-b` to `fbro-a`,
   mount `fbro-a`'s shared `/work/a` source on `fbro-b`, verify the remote source
   is read-only, copy `remote.txt` from remote `fbro-a` into local `/work/b/dst`,
