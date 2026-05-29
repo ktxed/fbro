@@ -6,6 +6,7 @@ import type { WsClient } from "../ws/client";
 import { IconX, IconFolder, IconFile } from "@tabler/icons-react";
 import { useInputHistory } from "../hooks/useInputHistory";
 import { InputHistoryDropdown } from "./InputHistoryDropdown";
+import { DateTimeInput } from "./DateTimeInput";
 
 function MnemonicLabel({ text, mnemonic }: { text: string; mnemonic: string }) {
   const idx = text.toLowerCase().indexOf(mnemonic.toLowerCase());
@@ -24,23 +25,29 @@ type MaskMode = "substring" | "wildcard" | "regex";
 type SizeOp = "none" | "interval" | "gt" | "lt" | "eq";
 type TimeOp = "none" | "interval" | "before" | "after" | "relative";
 type SizeUnit = "B" | "KiB" | "MiB" | "GiB";
+type RelativeUnit = "Minutes" | "Hours" | "Days";
+
+const UNIT_CHAR: Record<RelativeUnit, string> = { Minutes: "m", Hours: "h", Days: "d" };
+const CHAR_UNIT: Record<string, RelativeUnit> = { m: "Minutes", h: "Hours", d: "Days" };
+const SIZE_UNITS: SizeUnit[] = ["B", "KiB", "MiB", "GiB"];
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
-function epochToDate(epoch: string): string {
-  const d = new Date(Number(epoch) * 1000);
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+// Default for the datetime fields: today at 00:00, in datetime-local shape.
+function todayMidnight(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T00:00`;
 }
 
-function epochToTime(epoch: string): string {
+// Epoch-seconds string -> datetime-local shape (local time).
+function epochToLocal(epoch: string): string {
   const d = new Date(Number(epoch) * 1000);
-  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-function dateTimeToEpoch(date: string, time: string): string {
-  if (!date) return "";
-  const iso = time ? `${date}T${time}` : `${date}T00:00`;
-  return String(Math.floor(new Date(iso).getTime() / 1000));
+// datetime-local shape -> epoch-seconds string.
+function localToEpoch(dt: string): string {
+  return String(Math.floor(new Date(dt).getTime() / 1000));
 }
 
 interface SearchModalProps {
@@ -89,7 +96,7 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
     p?.sizeMax != null ? String(p.sizeMax) : ""
   );
   const [sizeUnit, setSizeUnit] = useState<SizeUnit>(
-    (p?.sizeUnit as SizeUnit | undefined) ?? "B"
+    (p?.sizeUnit as SizeUnit | undefined) ?? "KiB"
   );
 
   const sizeEnabled = sizeOp !== "none";
@@ -107,56 +114,83 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
   const [timeOp, setTimeOp] = useState<TimeOp>(
     (p?.timeOp as TimeOp | undefined) ?? "none"
   );
-  const [timeValueDate, setTimeValueDate] = useState<string>(() => {
+  // Threshold for Older/Newer than (before/after).
+  const [timeValueDT, setTimeValueDT] = useState<string>(() => {
     const v = p?.timeValue;
-    if (!v) return "";
     const op = (p?.timeOp as TimeOp | undefined) ?? "none";
-    if (op !== "none" && op !== "relative" && /^\d+$/.test(v)) {
-      return epochToDate(v);
-    }
-    return "";
+    if (v && (op === "before" || op === "after") && /^\d+$/.test(v)) return epochToLocal(v);
+    return todayMidnight();
   });
-  const [timeValueTime, setTimeValueTime] = useState<string>(() => {
+  // Start of the Between range (independent of the threshold above).
+  const [timeFromDT, setTimeFromDT] = useState<string>(() => {
     const v = p?.timeValue;
-    if (!v) return "";
     const op = (p?.timeOp as TimeOp | undefined) ?? "none";
-    if (op !== "none" && op !== "relative" && /^\d+$/.test(v)) {
-      return epochToTime(v);
-    }
-    return "";
+    if (v && op === "interval" && /^\d+$/.test(v)) return epochToLocal(v);
+    return todayMidnight();
   });
-  const [timeToDate, setTimeToDate] = useState<string>(() => {
+  // End of the Between range.
+  const [timeToDT, setTimeToDT] = useState<string>(() => {
     const v = p?.timeTo;
-    if (!v) return "";
-    return epochToDate(v);
+    if (!v || !/^\d+$/.test(v)) return todayMidnight();
+    return epochToLocal(v);
   });
-  const [timeToTime, setTimeToTime] = useState<string>(() => {
-    const v = p?.timeTo;
-    if (!v) return "";
-    return epochToTime(v);
-  });
-  const [timeRelative, setTimeRelative] = useState<string>(() => {
+  const [timeRelativeNum, setTimeRelativeNum] = useState<string>(() => {
     const v = p?.timeValue;
-    if (!v) return "";
+    if (!v) return "6";
     const op = (p?.timeOp as TimeOp | undefined) ?? "none";
-    return op === "relative" ? v : "";
+    if (op === "relative") {
+      const match = v.match(/^(\d+)[mhd]$/);
+      return match ? match[1] : "6";
+    }
+    return "6";
   });
+  const [timeRelativeUnit, setTimeRelativeUnit] = useState<RelativeUnit>(() => {
+    const v = p?.timeValue;
+    if (!v) return "Hours";
+    const op = (p?.timeOp as TimeOp | undefined) ?? "none";
+    if (op === "relative") {
+      const match = v.match(/^\d+([mhd])$/);
+      if (match) return CHAR_UNIT[match[1]] ?? "Hours";
+    }
+    return "Hours";
+  });
+  const [timeDateField, setTimeDateField] = useState<"created" | "modified">("modified");
 
   const timeEnabled = timeOp !== "none";
   const toggleTimeFilter = (on: boolean) => {
     if (on) {
-      setTimeOp("after");
+      setTimeOp("relative");
     } else {
       setTimeOp("none");
-      setTimeValueDate("");
-      setTimeValueTime("");
-      setTimeToDate("");
-      setTimeToTime("");
-      setTimeRelative("");
+      setTimeValueDT(todayMidnight());
+      setTimeFromDT(todayMidnight());
+      setTimeToDT(todayMidnight());
+      setTimeRelativeNum("6");
+      setTimeRelativeUnit("Hours");
     }
   };
 
-  const RELATIVE_PRESETS = ["1h", "6h", "24h", "7d", "30d"];
+  const RELATIVE_PRESETS = ["5m", "1h", "6h", "24h", "7d", "30d"];
+
+  const applyPreset = (preset: string) => {
+    const match = preset.match(/^(\d+)([mhd])$/);
+    if (!match) return;
+    setTimeRelativeNum(match[1]);
+    setTimeRelativeUnit(CHAR_UNIT[match[2]] ?? "Hours");
+    setTimeOp("relative");
+  };
+
+  const isPresetActive = (preset: string) => {
+    if (timeOp !== "relative") return false;
+    const match = preset.match(/^(\d+)([mhd])$/);
+    if (!match) return false;
+    return timeRelativeNum === match[1] && timeRelativeUnit === (CHAR_UNIT[match[2]] ?? "Hours");
+  };
+
+  const cycleSizeUnit = () => {
+    const idx = SIZE_UNITS.indexOf(sizeUnit);
+    setSizeUnit(SIZE_UNITS[(idx + 1) % SIZE_UNITS.length]);
+  };
 
   const maskHistory = useInputHistory("search.fileMask", setFileMask);
   const contentHistory = useInputHistory("search.content", setContentQuery);
@@ -233,9 +267,15 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
       sizeUnit: sizeOp !== "none" ? sizeUnit : undefined,
       timeOp: timeOp !== "none" ? timeOp : undefined,
       timeValue: timeOp !== "none"
-        ? (timeOp === "relative" ? (timeRelative || null) : (timeValueDate ? dateTimeToEpoch(timeValueDate, timeValueTime) : null))
+        ? (timeOp === "relative"
+            ? (timeRelativeNum ? `${timeRelativeNum}${UNIT_CHAR[timeRelativeUnit]}` : null)
+            : timeOp === "interval"
+              ? (timeFromDT ? localToEpoch(timeFromDT) : null)
+              : (timeValueDT ? localToEpoch(timeValueDT) : null))
         : undefined,
-      timeTo: timeOp === "interval" && timeToDate ? dateTimeToEpoch(timeToDate, timeToTime) : undefined,
+      timeTo: timeOp === "interval" && timeToDT
+        ? localToEpoch(timeToDT)
+        : undefined,
     });
 
     if (background) {
@@ -575,18 +615,17 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
             <>
               {/* Section: File Size */}
               <div className={`search-modal__section${sizeEnabled ? " search-modal__section--active" : ""}`}>
-                <label className="search-modal__extra-toggle">
-                  <input
-                    type="checkbox"
-                    checked={sizeEnabled}
-                    onChange={(e) => toggleSizeFilter(e.target.checked)}
-                  />
-                  <span className="search-modal__section-title">File size</span>
-                </label>
-
-                {sizeEnabled && (
-                  <>
-                    <div className="search-modal__extra-row">
+                <div className="search-modal__extra-row">
+                  <label className="search-modal__extra-toggle">
+                    <input
+                      type="checkbox"
+                      checked={sizeEnabled}
+                      onChange={(e) => toggleSizeFilter(e.target.checked)}
+                    />
+                    <span className="search-modal__radio-label-text search-modal__section-title">File size</span>
+                  </label>
+                  {sizeEnabled && (
+                    <>
                       <select
                         className="search-modal__extra-select"
                         value={sizeOp}
@@ -595,142 +634,170 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
                         <option value="gt">Bigger than</option>
                         <option value="lt">Smaller than</option>
                         <option value="eq">Equal to</option>
-                        <option value="interval">Between</option>
+                        <option value="interval">In range</option>
                       </select>
                       <input
                         type="number"
-                        className="search-modal__extra-number"
+                        className="search-modal__extra-number search-modal__size-num"
                         aria-label="File size value"
                         value={sizeValue}
                         onChange={(e) => setSizeValue(e.target.value)}
                         min="0"
                         placeholder="Value"
                       />
-                      <select
-                        className="search-modal__extra-select search-modal__extra-select--unit"
-                        value={sizeUnit}
-                        onChange={(e) => setSizeUnit(e.target.value as SizeUnit)}
-                        aria-label="Size unit"
-                      >
-                        <option value="B">B</option>
-                        <option value="KiB">KiB</option>
-                        <option value="MiB">MiB</option>
-                        <option value="GiB">GiB</option>
-                      </select>
-                    </div>
-                    {sizeOp === "interval" && (
-                      <div className="search-modal__extra-row search-modal__extra-row--sub">
-                        <span className="search-modal__extra-sep">and</span>
+                      {sizeOp === "interval" && (
                         <input
                           type="number"
-                          className="search-modal__extra-number"
+                          className="search-modal__extra-number search-modal__size-num"
                           aria-label="File size max"
                           value={sizeMax}
                           onChange={(e) => setSizeMax(e.target.value)}
                           min="0"
                           placeholder="Max"
                         />
-                      </div>
-                    )}
-                  </>
-                )}
+                      )}
+                      <button
+                        type="button"
+                        className="search-modal__unit-badge"
+                        onClick={cycleSizeUnit}
+                        aria-label="Size unit, click to change"
+                        title="Click to change unit"
+                      >
+                        {sizeUnit}
+                      </button>
+                    </>
+                  )}
+                </div>
               </div>
 
               {/* Section: File Datetime */}
               <div className={`search-modal__section search-modal__section--last${timeEnabled ? " search-modal__section--active" : ""}`}>
-                <label className="search-modal__extra-toggle">
-                  <input
-                    type="checkbox"
-                    checked={timeEnabled}
-                    onChange={(e) => toggleTimeFilter(e.target.checked)}
-                  />
-                  <span className="search-modal__section-title">File datetime</span>
-                </label>
+                <div className="search-modal__section-header">
+                  <label className="search-modal__extra-toggle">
+                    <input
+                      type="checkbox"
+                      checked={timeEnabled}
+                      onChange={(e) => toggleTimeFilter(e.target.checked)}
+                    />
+                    <span className="search-modal__section-title">File datetime</span>
+                  </label>
+                  {timeEnabled && (
+                    <div className="search-modal__seg-group">
+                      <button
+                        type="button"
+                        className={`search-modal__seg-btn${timeDateField === "created" ? " search-modal__seg-btn--active" : ""}`}
+                        onClick={() => setTimeDateField("created")}
+                      >
+                        Created
+                      </button>
+                      <button
+                        type="button"
+                        className={`search-modal__seg-btn${timeDateField === "modified" ? " search-modal__seg-btn--active" : ""}`}
+                        onClick={() => setTimeDateField("modified")}
+                      >
+                        Modified
+                      </button>
+                    </div>
+                  )}
+                </div>
 
                 {timeEnabled && (
-                  <>
-                    <div className="search-modal__extra-row">
-                      <select
-                        className="search-modal__extra-select"
-                        value={timeOp}
-                        onChange={(e) => setTimeOp(e.target.value as TimeOp)}
-                      >
-                        <option value="after">After</option>
-                        <option value="before">Before</option>
-                        <option value="interval">Between</option>
-                        <option value="relative">In the last…</option>
-                      </select>
-                      {timeOp !== "relative" && (
-                        <>
-                          <input
-                            type="date"
-                            className="search-modal__extra-date"
-                            aria-label="File date"
-                            key={`tvd-${timeEnabled}`}
-                            defaultValue={timeValueDate}
-                            onChange={(e) => setTimeValueDate(e.target.value)}
-                          />
-                          <input
-                            type="time"
-                            className="search-modal__extra-time"
-                            aria-label="File time"
-                            key={`tvt-${timeEnabled}`}
-                            defaultValue={timeValueTime || "00:00"}
-                            step="60"
-                            onChange={(e) => setTimeValueTime(e.target.value)}
-                          />
-                        </>
-                      )}
-                      {timeOp === "relative" && (
+                  <div className="search-modal__radio-options">
+                    {/* Radio 1: In the last */}
+                    <div className="search-modal__radio-option">
+                      <label className="search-modal__radio-label">
                         <input
-                          type="text"
-                          className="search-modal__extra-text"
-                          aria-label="Relative time"
-                          value={timeRelative}
-                          onChange={(e) => setTimeRelative(e.target.value)}
-                          placeholder="e.g. 1h30m"
-                          spellCheck={false}
-                          autoComplete="off"
+                          type="radio"
+                          name="timeOp"
+                          checked={timeOp === "relative"}
+                          onChange={() => setTimeOp("relative")}
                         />
-                      )}
-                    </div>
-                    {timeOp === "interval" && (
-                      <div className="search-modal__extra-row search-modal__extra-row--sub">
-                        <span className="search-modal__extra-sep">and</span>
+                        <span>In the last...</span>
                         <input
-                          type="date"
-                          className="search-modal__extra-date"
-                          aria-label="File date max"
-                          key={`ttd-${timeEnabled}`}
-                          defaultValue={timeToDate}
-                          onChange={(e) => setTimeToDate(e.target.value)}
+                          type="number"
+                          className="search-modal__extra-number search-modal__relative-num"
+                          aria-label="Relative time amount"
+                          value={timeRelativeNum}
+                          onChange={(e) => setTimeRelativeNum(e.target.value)}
+                          min="1"
+                          onClick={() => setTimeOp("relative")}
                         />
-                        <input
-                          type="time"
-                          className="search-modal__extra-time"
-                          aria-label="File time max"
-                          key={`ttt-${timeEnabled}`}
-                          defaultValue={timeToTime || "00:00"}
-                          step="60"
-                          onChange={(e) => setTimeToTime(e.target.value)}
-                        />
-                      </div>
-                    )}
-                    {timeOp === "relative" && (
+                        <select
+                          className="search-modal__extra-select"
+                          value={timeRelativeUnit}
+                          onChange={(e) => {
+                            setTimeRelativeUnit(e.target.value as RelativeUnit);
+                            setTimeOp("relative");
+                          }}
+                        >
+                          <option value="Minutes">Minutes</option>
+                          <option value="Hours">Hours</option>
+                          <option value="Days">Days</option>
+                        </select>
+                      </label>
                       <div className="search-modal__extra-presets">
                         {RELATIVE_PRESETS.map((preset) => (
                           <button
                             key={preset}
                             type="button"
-                            className={`search-modal__extra-preset${timeRelative === preset ? " search-modal__extra-preset--active" : ""}`}
-                            onClick={() => setTimeRelative(timeRelative === preset ? "" : preset)}
+                            className={`search-modal__extra-preset${isPresetActive(preset) ? " search-modal__extra-preset--active" : ""}`}
+                            onClick={() => applyPreset(preset)}
                           >
                             {preset}
                           </button>
                         ))}
                       </div>
-                    )}
-                  </>
+                    </div>
+
+                    {/* Radio 2: Older than */}
+                    <label className="search-modal__radio-label search-modal__radio-label--spaced">
+                      <input
+                        type="radio"
+                        name="timeOp"
+                        checked={timeOp === "before" || timeOp === "after"}
+                        onChange={() => setTimeOp(timeOp === "after" ? "after" : "before")}
+                      />
+                      <select
+                        className="search-modal__extra-select search-modal__radio-label-text"
+                        value={timeOp === "after" ? "after" : "before"}
+                        onChange={(e) => setTimeOp(e.target.value as TimeOp)}
+                      >
+                        <option value="before">Older than</option>
+                        <option value="after">Newer than</option>
+                      </select>
+                      <DateTimeInput
+                        ariaLabel="Date threshold"
+                        value={timeValueDT}
+                        onChange={setTimeValueDT}
+                        onInteract={() => {
+                          if (timeOp !== "before" && timeOp !== "after") setTimeOp("before");
+                        }}
+                      />
+                    </label>
+
+                    {/* Radio 3: Between */}
+                    <label className="search-modal__radio-label search-modal__radio-label--spaced">
+                      <input
+                        type="radio"
+                        name="timeOp"
+                        checked={timeOp === "interval"}
+                        onChange={() => setTimeOp("interval")}
+                      />
+                      <span className="search-modal__radio-label-text">Between</span>
+                      <DateTimeInput
+                        ariaLabel="Between from date"
+                        value={timeFromDT}
+                        onChange={setTimeFromDT}
+                        onInteract={() => setTimeOp("interval")}
+                      />
+                      <DateTimeInput
+                        ariaLabel="Between to date"
+                        value={timeToDT}
+                        onChange={setTimeToDT}
+                        onInteract={() => setTimeOp("interval")}
+                      />
+                    </label>
+                  </div>
                 )}
               </div>
             </>

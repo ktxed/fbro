@@ -29,6 +29,9 @@ import {
 function isEditableTarget(target: EventTarget | null) {
   if (!(target instanceof HTMLElement)) return false;
   if (target.classList.contains("panel__filter-input")) return false;
+  // Custom segmented date/time control: its segments are spans, not inputs,
+  // but it consumes digit/arrow keys for editing — treat it like a text field.
+  if (target.closest(".dt-input")) return true;
   return target.isContentEditable
     || target instanceof HTMLInputElement
     || target instanceof HTMLTextAreaElement
