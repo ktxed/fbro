@@ -22,8 +22,13 @@ impl VolumeWatcher for UDisks2Watcher {
         let mut vols = self.udisks2.list_block_devices().await;
         // Merge with /proc/mounts-based volumes: udisks2 may miss some (e.g. root, network mounts)
         let ids: HashSet<String> = vols.iter().map(|v| v.id.clone()).collect();
+        // Also deduplicate by mount point: two volumes cannot share the same
+        // mounted path. This prevents duplicates when udisks2 and /proc/mounts
+        // both report the same physical volume with different ID formats.
+        let mounted_paths: HashSet<String> =
+            vols.iter().filter(|v| v.mounted).map(|v| v.root_path.clone()).collect();
         for pv in self.platform.list_volumes() {
-            if !ids.contains(&pv.id) {
+            if !ids.contains(&pv.id) && !mounted_paths.contains(&pv.root_path) {
                 vols.push(pv);
             }
         }
