@@ -6,6 +6,14 @@ use tokio::sync::mpsc;
 use super::udisks2::UDisks2;
 use crate::platform::{Platform, VolumeInfo, VolumeWatcher};
 
+fn mount_path_key(path: &str) -> String {
+    if path == "/" {
+        path.to_string()
+    } else {
+        path.trim_end_matches('/').to_string()
+    }
+}
+
 // ── UDisks2 volume watcher ─────────────────────────────────────────────────
 
 /// Volume watcher backed by udisks2 D-Bus. Supports unmounted volume enumeration
@@ -28,10 +36,10 @@ impl VolumeWatcher for UDisks2Watcher {
         let mounted_paths: HashSet<String> = vols
             .iter()
             .filter(|v| v.mounted)
-            .map(|v| v.root_path.clone())
+            .map(|v| mount_path_key(&v.root_path))
             .collect();
         for pv in self.platform.list_volumes() {
-            if !ids.contains(&pv.id) && !mounted_paths.contains(&pv.root_path) {
+            if !ids.contains(&pv.id) && !mounted_paths.contains(&mount_path_key(&pv.root_path)) {
                 vols.push(pv);
             }
         }
@@ -44,6 +52,24 @@ impl VolumeWatcher for UDisks2Watcher {
 
     async fn subscribe(&self) -> mpsc::Receiver<()> {
         self.udisks2.subscribe_signals().await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::mount_path_key;
+
+    #[test]
+    fn normalizes_mount_path_keys_for_deduplication() {
+        assert_eq!(mount_path_key("/"), "/");
+        assert_eq!(
+            mount_path_key("/run/media/me/Extreme SSD/"),
+            "/run/media/me/Extreme SSD"
+        );
+        assert_eq!(
+            mount_path_key("/run/media/me/Extreme SSD"),
+            "/run/media/me/Extreme SSD"
+        );
     }
 }
 

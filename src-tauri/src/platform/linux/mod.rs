@@ -22,6 +22,38 @@ enum LinuxLaunchMode {
     Uris,
 }
 
+fn decode_proc_mount_field(field: &str) -> String {
+    let bytes = field.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+
+    while i < bytes.len() {
+        if bytes[i] == b'\\'
+            && i + 3 < bytes.len()
+            && bytes[i + 1].is_ascii_digit()
+            && bytes[i + 2].is_ascii_digit()
+            && bytes[i + 3].is_ascii_digit()
+        {
+            let a = bytes[i + 1];
+            let b = bytes[i + 2];
+            let c = bytes[i + 3];
+            if (b'0'..=b'7').contains(&a)
+                && (b'0'..=b'7').contains(&b)
+                && (b'0'..=b'7').contains(&c)
+            {
+                out.push((a - b'0') * 64 + (b - b'0') * 8 + (c - b'0'));
+                i += 4;
+                continue;
+            }
+        }
+
+        out.push(bytes[i]);
+        i += 1;
+    }
+
+    String::from_utf8_lossy(&out).into_owned()
+}
+
 impl Platform for LinuxPlatform {
     fn open_file(&self, path: &str) {
         let _ = Command::new("xdg-open").arg(path).spawn();
@@ -260,16 +292,16 @@ impl Platform for LinuxPlatform {
             if fields.len() < 3 {
                 continue;
             }
-            let mountpoint = fields[1];
+            let mountpoint = decode_proc_mount_field(fields[1]);
             let fstype = fields[2];
 
             if !WHITELIST.contains(&fstype) {
                 continue;
             }
-            if seen.contains(mountpoint) {
+            if seen.contains(&mountpoint) {
                 continue;
             }
-            seen.insert(mountpoint.to_string());
+            seen.insert(mountpoint.clone());
 
             let (id, name) = if mountpoint == "/" {
                 ("vol-root".to_string(), "/".to_string())
@@ -279,7 +311,7 @@ impl Platform for LinuxPlatform {
                     .trim_end_matches('/')
                     .rsplit('/')
                     .next()
-                    .unwrap_or(mountpoint)
+                    .unwrap_or(&mountpoint)
                     .to_string();
                 (id, name)
             };
@@ -287,7 +319,7 @@ impl Platform for LinuxPlatform {
             volumes.push(VolumeInfo {
                 id,
                 name,
-                root_path: mountpoint.to_string(),
+                root_path: mountpoint,
                 mounted: true,
                 device_path: None,
             });
@@ -402,6 +434,29 @@ impl Platform for LinuxPlatform {
 
     fn remove_fbro_command(&self) -> Result<ShellCommandRemoveResult, String> {
         super::shell_command::remove_fbro_command()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::decode_proc_mount_field;
+
+    #[test]
+    fn decodes_proc_mount_octal_escapes() {
+        assert_eq!(
+            decode_proc_mount_field("/run/media/me/Extreme\\040SSD"),
+            "/run/media/me/Extreme SSD"
+        );
+        assert_eq!(
+            decode_proc_mount_field("/mnt/a\\011b\\012c\\134d"),
+            "/mnt/a\tb\nc\\d"
+        );
+    }
+
+    #[test]
+    fn leaves_non_octal_backslashes_alone() {
+        assert_eq!(decode_proc_mount_field("/mnt/a\\x20b"), "/mnt/a\\x20b");
+        assert_eq!(decode_proc_mount_field("/mnt/a\\999b"), "/mnt/a\\999b");
     }
 }
 
