@@ -105,23 +105,75 @@ fn path_starts_with(path: &str, root: &str) -> bool {
     !root.is_empty() && Path::new(path).starts_with(root_path)
 }
 
+fn most_specific_source_for_path<'a, I>(sources: I, path: &str) -> Option<String>
+where
+    I: IntoIterator<Item = (&'a String, &'a str)>,
+{
+    sources
+        .into_iter()
+        .filter(|(_, root_path)| path_starts_with(path, root_path))
+        .max_by_key(|(_, root_path)| root_path.len())
+        .map(|(id, _)| id.clone())
+}
+
 fn source_for_local_path(state: &crate::state::AppState, path: &str) -> Option<String> {
-    state
-        .sources
-        .iter()
-        .filter(|(id, source)| {
-            source.kind == "filesystem"
+    most_specific_source_for_path(
+        state.sources.iter().filter_map(|(id, source)| {
+            (source.kind == "filesystem"
                 && source.mounted
                 && !source.shadow
-                && path_starts_with(path, &source.root_path)
                 && state
                     .drivers
-                    .get(*id)
+                    .get(id)
                     .map(|driver| driver.is_local())
-                    .unwrap_or(false)
-        })
-        .max_by_key(|(_, source)| source.root_path.len())
-        .map(|(id, _)| id.clone())
+                    .unwrap_or(false))
+            .then_some((id, source.root_path.as_str()))
+        }),
+        path,
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::most_specific_source_for_path;
+
+    fn pick_source<'a>(sources: &'a [(&'a String, &'a str)], path: &str) -> Option<String> {
+        most_specific_source_for_path(sources.iter().copied(), path)
+    }
+
+    #[test]
+    fn absolute_path_uses_most_specific_source_root() {
+        let root = "vol-root".to_string();
+        let home = "vol-home".to_string();
+        let media = "vol-media".to_string();
+        let sources = [
+            (&root, "/"),
+            (&home, "/home/user"),
+            (&media, "/run/media/user/Extreme SSD"),
+        ];
+
+        assert_eq!(
+            pick_source(&sources, "/home/user/projects/fbro"),
+            Some("vol-home".to_string())
+        );
+        assert_eq!(
+            pick_source(&sources, "/run/media/user/Extreme SSD/photos"),
+            Some("vol-media".to_string())
+        );
+        assert_eq!(pick_source(&sources, "/etc"), Some("vol-root".to_string()));
+    }
+
+    #[test]
+    fn source_root_must_match_path_boundary() {
+        let home = "vol-home".to_string();
+        let sources = [(&home, "/home/user")];
+
+        assert_eq!(
+            pick_source(&sources, "/home/user"),
+            Some("vol-home".to_string())
+        );
+        assert_eq!(pick_source(&sources, "/home/user2"), None);
+    }
 }
 
 async fn emit_cli_open_error(message: impl Into<String>, ctx: &IntentContext<'_>) {
@@ -328,19 +380,7 @@ async fn open_entry(scope: &Value, ctx: &mut IntentContext<'_>) {
             // Switch the panel to the real source for this path before navigating.
             let real_source_id = {
                 let state_guard = ctx.state.lock().await;
-                state_guard
-                    .sources
-                    .iter()
-                    .filter(|(_, s)| !s.shadow && s.mounted)
-                    .max_by_key(|(_, s)| {
-                        if new_path.starts_with(&s.root_path) {
-                            s.root_path.len()
-                        } else {
-                            0
-                        }
-                    })
-                    .map(|(id, _)| id.clone())
-                    .unwrap_or_default()
+                source_for_local_path(&state_guard, &new_path).unwrap_or_default()
             };
             if !real_source_id.is_empty() {
                 let mut state_guard = ctx.state.lock().await;
@@ -1140,7 +1180,12 @@ async fn navigate_panel_to(args: &Value, ctx: &mut IntentContext<'_>) {
                 Some(panel) => panel,
                 None => return,
             };
-            let driver = match state_guard.drivers.get(&panel.source_id) {
+            let target_source_id = Path::new(&requested_path)
+                .is_absolute()
+                .then(|| source_for_local_path(&state_guard, &requested_path))
+                .flatten()
+                .unwrap_or_else(|| panel.source_id.clone());
+            let driver = match state_guard.drivers.get(&target_source_id) {
                 Some(driver) => driver,
                 None => return,
             };
@@ -1167,10 +1212,11 @@ async fn navigate_panel_to(args: &Value, ctx: &mut IntentContext<'_>) {
                 } else {
                     Err("Path is not a directory.".to_string())
                 }
+                .map(|(path, cursor)| (target_source_id, path, cursor))
             }
         };
 
-        let (validated_path, cursor_hint) = match resolved_target {
+        let (target_source_id, validated_path, cursor_hint) = match resolved_target {
             Ok(target) => target,
             Err(message) => {
                 let _ = ctx
@@ -1186,6 +1232,23 @@ async fn navigate_panel_to(args: &Value, ctx: &mut IntentContext<'_>) {
                 return;
             }
         };
+
+        {
+            let mut state_guard = ctx.state.lock().await;
+            if let Some(panel) = state_guard.panels.get_mut(&parsed.panel_id) {
+                if panel.source_id != target_source_id {
+                    let previous_source_id = panel.source_id.clone();
+                    let previous_path = panel.path.clone();
+                    panel.source_paths.insert(previous_source_id, previous_path);
+                    panel.source_id = target_source_id;
+                    panel.selection.clear();
+                    panel.filter = None;
+                    panel.filter_mode_active = false;
+                }
+            } else {
+                return;
+            }
+        }
 
         let _ = ctx
             .tx
