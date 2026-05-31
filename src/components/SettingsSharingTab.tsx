@@ -292,6 +292,12 @@ export function SettingsSharingTab({ client }: SettingsSharingTabProps) {
         )}
       </section>
 
+      {share.enabled && share.sharedRoots.length === 0 && (
+        <section className="sharing-warning" role="status">
+          Remote access is on, but no folders are shared. Paired peers can connect but will not see any files.
+        </section>
+      )}
+
       <section className="sharing-stats" aria-label="Sharing status">
         <div className="sharing-stat">
           <span className="sharing-stat__value">{sharedSet.size}</span>

@@ -3782,6 +3782,16 @@ body {
   gap: 8px;
 }
 
+.sharing-warning {
+  padding: 10px 12px;
+  border: 1px solid rgba(240, 160, 64, 0.36);
+  border-radius: 8px;
+  background: rgba(240, 160, 64, 0.12);
+  color: #f0b76c;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .sharing-stat {
   padding: 10px;
   border: 1px solid var(--border);
