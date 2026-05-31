@@ -15,11 +15,14 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::state::{SharedRoot, SharedRootOrigin};
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ShareState {
     pub enabled: bool,
     pub allow_ipv6: bool,
     pub shared_source_ids: HashSet<String>,
+    pub shared_roots: Vec<SharedRoot>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -33,7 +36,30 @@ struct ShareFile {
     shared_source_ids: Vec<String>,
 }
 
-const SHARE_FILE_VERSION: u32 = 1;
+#[derive(Serialize, Deserialize)]
+struct ShareFileV2 {
+    version: u32,
+    enabled: bool,
+    #[serde(default)]
+    allow_ipv6: bool,
+    #[serde(default)]
+    shared_source_ids: Vec<String>,
+    #[serde(default)]
+    shared_roots: Vec<SharedRootFile>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+struct SharedRootFile {
+    id: String,
+    name: String,
+    path: String,
+    source_id: String,
+    origin: String,
+    #[serde(default)]
+    icon_name: Option<String>,
+}
+
+const SHARE_FILE_VERSION: u32 = 2;
 
 pub fn default_share_path() -> PathBuf {
     if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
@@ -54,18 +80,46 @@ pub fn load(path: &Path) -> io::Result<ShareState> {
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(ShareState::default()),
         Err(e) => return Err(e),
     };
-    let parsed: ShareFile = serde_json::from_slice(&bytes)
+    let value: serde_json::Value = serde_json::from_slice(&bytes)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
-    if parsed.version != SHARE_FILE_VERSION {
+    let version = value
+        .get("version")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(1);
+    if version == 1 {
+        let parsed: ShareFile = serde_json::from_value(value)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
+        return Ok(ShareState {
+            enabled: parsed.enabled,
+            allow_ipv6: parsed.allow_ipv6,
+            shared_source_ids: parsed.shared_source_ids.into_iter().collect(),
+            shared_roots: Vec::new(),
+        });
+    }
+    if version != SHARE_FILE_VERSION as u64 {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            format!("share.json version {} not supported", parsed.version),
+            format!("share.json version {} not supported", version),
         ));
     }
+    let parsed: ShareFileV2 = serde_json::from_value(value)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
     Ok(ShareState {
         enabled: parsed.enabled,
         allow_ipv6: parsed.allow_ipv6,
         shared_source_ids: parsed.shared_source_ids.into_iter().collect(),
+        shared_roots: parsed
+            .shared_roots
+            .into_iter()
+            .map(|r| SharedRoot {
+                id: r.id,
+                name: r.name,
+                path: r.path,
+                source_id: r.source_id,
+                origin: SharedRootOrigin::from_str(&r.origin),
+                icon_name: r.icon_name,
+            })
+            .collect(),
     })
 }
 
@@ -75,11 +129,24 @@ pub fn save(path: &Path, state: &ShareState) -> io::Result<()> {
     }
     let mut ids: Vec<String> = state.shared_source_ids.iter().cloned().collect();
     ids.sort();
-    let body = serde_json::to_vec_pretty(&ShareFile {
+    let roots: Vec<SharedRootFile> = state
+        .shared_roots
+        .iter()
+        .map(|r| SharedRootFile {
+            id: r.id.clone(),
+            name: r.name.clone(),
+            path: r.path.clone(),
+            source_id: r.source_id.clone(),
+            origin: r.origin.as_str().to_string(),
+            icon_name: r.icon_name.clone(),
+        })
+        .collect();
+    let body = serde_json::to_vec_pretty(&ShareFileV2 {
         version: SHARE_FILE_VERSION,
         enabled: state.enabled,
         allow_ipv6: state.allow_ipv6,
         shared_source_ids: ids,
+        shared_roots: roots,
     })?;
     let tmp = path.with_extension("json.tmp");
     fs::write(&tmp, &body)?;
@@ -111,6 +178,7 @@ mod tests {
         let s = load(&p).expect("missing → default");
         assert!(!s.enabled);
         assert!(s.shared_source_ids.is_empty());
+        assert!(s.shared_roots.is_empty());
     }
 
     #[test]
@@ -121,6 +189,14 @@ mod tests {
         want.allow_ipv6 = true;
         want.shared_source_ids.insert("vol-root".to_string());
         want.shared_source_ids.insert("vol-photos".to_string());
+        want.shared_roots.push(SharedRoot {
+            id: "share-home".to_string(),
+            name: "Home".to_string(),
+            path: "/home/me".to_string(),
+            source_id: "vol-root".to_string(),
+            origin: SharedRootOrigin::Home,
+            icon_name: None,
+        });
         save(&p, &want).expect("save");
         let got = load(&p).expect("load");
         assert_eq!(got, want);
@@ -139,6 +215,7 @@ mod tests {
         assert!(got.enabled);
         assert!(!got.allow_ipv6);
         assert!(got.shared_source_ids.contains("vol-root"));
+        assert!(got.shared_roots.is_empty());
         let _ = std::fs::remove_file(&p);
     }
 

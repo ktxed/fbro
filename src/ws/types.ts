@@ -74,10 +74,21 @@ export interface ShareConfig {
   enabled: boolean;
   allowIpv6: boolean;
   sharedSourceIds: string[];
+  sharedRoots: SharedRoot[];
+  shareSuggestions: SharedRoot[];
   pairedPeers: PairedPeer[];
   /** Our own Ed25519 fingerprint. Surfaced so the user can compare it
    *  against what a peer sees during pairing. */
   fingerprint?: string;
+}
+
+export interface SharedRoot {
+  id: string;
+  name: string;
+  path: string;
+  sourceId: string;
+  origin: "source" | "home" | "bookmark";
+  iconName?: string;
 }
 
 export interface PendingPairing {

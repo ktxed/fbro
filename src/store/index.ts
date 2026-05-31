@@ -277,7 +277,7 @@ const initialState: AppState = {
   pendingSettings: null,
   commandPaletteOpen: false,
   discoveredPeers: [],
-  shareConfig: { enabled: false, allowIpv6: false, sharedSourceIds: [], pairedPeers: [] },
+  shareConfig: { enabled: false, allowIpv6: false, sharedSourceIds: [], sharedRoots: [], shareSuggestions: [], pairedPeers: [] },
   pendingPairing: null,
   remoteSourceStatus: {},
 
@@ -756,6 +756,8 @@ function applyPatch(state: AppState, msg: StatePatchMessage): AppState {
     const enabled = msg.patch.enabled as boolean | undefined;
     const allowIpv6 = msg.patch.allowIpv6 as boolean | undefined;
     const sharedSourceIds = msg.patch.sharedSourceIds as string[] | undefined;
+    const sharedRoots = msg.patch.sharedRoots as ShareConfig["sharedRoots"] | undefined;
+    const shareSuggestions = msg.patch.shareSuggestions as ShareConfig["shareSuggestions"] | undefined;
     const pairedPeers = msg.patch.pairedPeers as ShareConfig["pairedPeers"] | undefined;
     const fingerprint = msg.patch.fingerprint as string | undefined;
     return {
@@ -764,6 +766,8 @@ function applyPatch(state: AppState, msg: StatePatchMessage): AppState {
         enabled: enabled ?? state.shareConfig.enabled,
         allowIpv6: allowIpv6 ?? state.shareConfig.allowIpv6,
         sharedSourceIds: sharedSourceIds ?? state.shareConfig.sharedSourceIds,
+        sharedRoots: sharedRoots ?? state.shareConfig.sharedRoots,
+        shareSuggestions: shareSuggestions ?? state.shareConfig.shareSuggestions,
         pairedPeers: pairedPeers ?? state.shareConfig.pairedPeers,
         fingerprint: fingerprint ?? state.shareConfig.fingerprint,
       },

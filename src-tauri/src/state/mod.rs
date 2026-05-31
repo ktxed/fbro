@@ -90,7 +90,194 @@ pub struct ShareConfig {
     pub enabled: bool,
     pub allow_ipv6: bool,
     pub shared_source_ids: HashSet<String>,
+    pub shared_roots: Vec<SharedRoot>,
     pub paired_peers: HashMap<String, PairedPeer>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SharedRootOrigin {
+    Source,
+    Home,
+    Bookmark,
+}
+
+impl SharedRootOrigin {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            SharedRootOrigin::Source => "source",
+            SharedRootOrigin::Home => "home",
+            SharedRootOrigin::Bookmark => "bookmark",
+        }
+    }
+
+    pub fn from_str(value: &str) -> Self {
+        match value {
+            "home" => SharedRootOrigin::Home,
+            "bookmark" => SharedRootOrigin::Bookmark,
+            _ => SharedRootOrigin::Source,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SharedRoot {
+    pub id: String,
+    pub name: String,
+    pub path: String,
+    pub source_id: String,
+    pub origin: SharedRootOrigin,
+    pub icon_name: Option<String>,
+}
+
+pub fn share_root_id_for_path(origin: &SharedRootOrigin, path: &str) -> String {
+    match origin {
+        SharedRootOrigin::Source => path.to_string(),
+        SharedRootOrigin::Home => {
+            let hash = blake3::hash(format!("{}:{path}", origin.as_str()).as_bytes());
+            format!("home-{}", &hash.to_hex()[..10])
+        }
+        SharedRootOrigin::Bookmark => {
+            let hash = blake3::hash(format!("{}:{path}", origin.as_str()).as_bytes());
+            let label = Path::new(path)
+                .file_name()
+                .and_then(|name| name.to_str())
+                .map(sanitize_share_id_part)
+                .filter(|part| !part.is_empty())
+                .unwrap_or_else(|| "bookmark".to_string());
+            format!("bookmark-{label}-{}", &hash.to_hex()[..10])
+        }
+    }
+}
+
+fn sanitize_share_id_part(value: &str) -> String {
+    let mut out = String::new();
+    for ch in value.chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch.to_ascii_lowercase());
+        } else if matches!(ch, '-' | '_' | '.') {
+            out.push(ch);
+        } else if !out.ends_with('-') {
+            out.push('-');
+        }
+    }
+    out.trim_matches('-').chars().take(32).collect()
+}
+
+fn source_contains_path(source_root: &str, path: &str) -> bool {
+    let source_root = Path::new(source_root);
+    let path = Path::new(path);
+    path == source_root || path.starts_with(source_root)
+}
+
+pub fn source_id_for_local_path(sources: &HashMap<String, Source>, path: &str) -> Option<String> {
+    sources
+        .values()
+        .filter(|src| {
+            src.kind == "filesystem"
+                && src.mounted
+                && !src.shadow
+                && source_contains_path(&src.root_path, path)
+        })
+        .max_by_key(|src| src.root_path.len())
+        .map(|src| src.id.clone())
+}
+
+pub fn shared_root_for_source(source: &Source) -> SharedRoot {
+    SharedRoot {
+        id: source.id.clone(),
+        name: source.name.clone(),
+        path: source.root_path.clone(),
+        source_id: source.id.clone(),
+        origin: SharedRootOrigin::Source,
+        icon_name: source.icon_name.clone(),
+    }
+}
+
+pub fn shared_root_for_path(
+    sources: &HashMap<String, Source>,
+    name: String,
+    path: String,
+    origin: SharedRootOrigin,
+) -> Option<SharedRoot> {
+    if !Path::new(&path).is_dir() {
+        return None;
+    }
+    let source_id = source_id_for_local_path(sources, &path)?;
+    let icon_name = sources.get(&source_id).and_then(|s| s.icon_name.clone());
+    Some(SharedRoot {
+        id: share_root_id_for_path(&origin, &path),
+        name,
+        path,
+        source_id,
+        origin,
+        icon_name,
+    })
+}
+
+pub fn share_suggestions(
+    sources: &HashMap<String, Source>,
+    bookmarks: &[BookmarkEntry],
+    home: &str,
+) -> Vec<SharedRoot> {
+    let mut out = Vec::new();
+    let mut seen = HashSet::new();
+    for source in sources
+        .values()
+        .filter(|src| src.kind == "filesystem" && src.mounted && !src.shadow)
+    {
+        let root = shared_root_for_source(source);
+        seen.insert(root.path.clone());
+        out.push(root);
+    }
+    if let Some(root) = shared_root_for_path(
+        sources,
+        "Home".to_string(),
+        home.to_string(),
+        SharedRootOrigin::Home,
+    ) {
+        if seen.insert(root.path.clone()) {
+            out.push(root);
+        }
+    }
+    for bookmark in bookmarks {
+        if let Some(root) = shared_root_for_path(
+            sources,
+            bookmark.name.clone(),
+            bookmark.path.clone(),
+            SharedRootOrigin::Bookmark,
+        ) {
+            if seen.insert(root.path.clone()) {
+                out.push(root);
+            }
+        }
+    }
+    out.sort_by(|a, b| {
+        a.origin
+            .as_str()
+            .cmp(b.origin.as_str())
+            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+            .then_with(|| a.path.cmp(&b.path))
+    });
+    out
+}
+
+pub fn migrate_saved_shared_roots(
+    sources: &HashMap<String, Source>,
+    saved_source_ids: &HashSet<String>,
+    saved_roots: Vec<SharedRoot>,
+) -> Vec<SharedRoot> {
+    if !saved_roots.is_empty() {
+        return saved_roots
+            .into_iter()
+            .filter(|root| source_id_for_local_path(sources, &root.path).is_some())
+            .collect();
+    }
+    saved_source_ids
+        .iter()
+        .filter_map(|id| sources.get(id))
+        .filter(|src| src.kind == "filesystem" && src.mounted && !src.shadow)
+        .map(shared_root_for_source)
+        .collect()
 }
 
 // ─── Shadow source ────────────────────────────────────────────────────────────
@@ -577,6 +764,34 @@ impl AppState {
             }),
         );
 
+        let share_config = {
+            // Best-effort load from `~/.config/fbro/peers.json`. A missing
+            // or malformed file yields an empty map — pairing still works,
+            // the user just has nobody trusted yet.
+            let paired_peers =
+                crate::remote::pairing::load_peers(&crate::remote::pairing::default_peers_path())
+                    .unwrap_or_default();
+            // Restore the user's last sharing toggle + source picks. Same
+            // tolerance: missing/corrupt file → defaults (off, empty set).
+            let saved =
+                crate::remote::share_state::load(&crate::remote::share_state::default_share_path())
+                    .unwrap_or_default();
+            let shared_roots =
+                migrate_saved_shared_roots(&sources, &saved.shared_source_ids, saved.shared_roots);
+            let shared_source_ids = shared_roots
+                .iter()
+                .filter(|root| matches!(root.origin, SharedRootOrigin::Source))
+                .map(|root| root.source_id.clone())
+                .collect();
+            ShareConfig {
+                enabled: saved.enabled,
+                allow_ipv6: saved.allow_ipv6,
+                shared_source_ids,
+                shared_roots,
+                paired_peers,
+            }
+        };
+
         AppState {
             panels,
             slots,
@@ -601,27 +816,7 @@ impl AppState {
             thumb_pool,
             thumb_cache,
             discovered_peers: HashMap::new(),
-            share_config: {
-                // Best-effort load from `~/.config/fbro/peers.json`. A missing
-                // or malformed file yields an empty map — pairing still works,
-                // the user just has nobody trusted yet.
-                let paired_peers = crate::remote::pairing::load_peers(
-                    &crate::remote::pairing::default_peers_path(),
-                )
-                .unwrap_or_default();
-                // Restore the user's last sharing toggle + source picks. Same
-                // tolerance: missing/corrupt file → defaults (off, empty set).
-                let saved = crate::remote::share_state::load(
-                    &crate::remote::share_state::default_share_path(),
-                )
-                .unwrap_or_default();
-                ShareConfig {
-                    enabled: saved.enabled,
-                    allow_ipv6: saved.allow_ipv6,
-                    shared_source_ids: saved.shared_source_ids,
-                    paired_peers,
-                }
-            },
+            share_config,
             identity: None,
             remote_server_handle: None,
             discovery_handle: None,

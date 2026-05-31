@@ -991,19 +991,20 @@ fn has_dotdot(path: &str) -> bool {
 
 async fn resolve_source(
     state: &SharedState,
-    source_id: &str,
+    root_id: &str,
 ) -> Option<(Arc<dyn VfsDriver>, String, String, Option<String>)> {
     let guard = state.lock().await;
-    if !guard.share_config.shared_source_ids.contains(source_id) {
-        return None;
-    }
-    let src = guard.sources.get(source_id)?;
-    let driver = guard.drivers.get(source_id)?.clone();
+    let root = guard
+        .share_config
+        .shared_roots
+        .iter()
+        .find(|root| root.id == root_id)?;
+    let driver = guard.drivers.get(&root.source_id)?.clone();
     Some((
         driver,
-        src.root_path.clone(),
-        src.name.clone(),
-        src.icon_name.clone(),
+        root.path.clone(),
+        root.name.clone(),
+        root.icon_name.clone(),
     ))
 }
 
@@ -1159,18 +1160,14 @@ impl russh_sftp::server::Handler for SftpHandler {
         } else {
             // Virtual root: synthesize a directory per shared source id.
             let guard = self.state.lock().await;
-            let mut shared: Vec<String> = guard
-                .share_config
-                .shared_source_ids
-                .iter()
-                .cloned()
-                .collect();
-            shared.sort();
+            let mut shared: Vec<crate::state::SharedRoot> =
+                guard.share_config.shared_roots.iter().cloned().collect();
+            shared.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
             shared
                 .into_iter()
-                .filter(|sid| guard.sources.contains_key(sid))
-                .map(|name| DirEntry {
-                    name,
+                .filter(|root| guard.sources.contains_key(&root.source_id))
+                .map(|root| DirEntry {
+                    name: root.id,
                     is_dir: true,
                     size: None,
                     mtime: None,
@@ -1401,12 +1398,12 @@ impl russh_sftp::server::Handler for SftpHandler {
         }
         let guard = self.state.lock().await;
         let mut items: Vec<serde_json::Value> = Vec::new();
-        for sid in guard.share_config.shared_source_ids.iter() {
-            if let Some(src) = guard.sources.get(sid) {
+        for root in guard.share_config.shared_roots.iter() {
+            if guard.sources.contains_key(&root.source_id) {
                 items.push(serde_json::json!({
-                    "id": src.id,
-                    "name": src.name,
-                    "icon": src.icon_name,
+                    "id": root.id,
+                    "name": root.name,
+                    "icon": root.icon_name,
                     "read_only": true,
                 }));
             }

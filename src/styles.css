@@ -3890,6 +3890,19 @@ body {
   list-style: none;
 }
 
+.sharing-source-group + .sharing-source-group {
+  margin-top: 10px;
+}
+
+.sharing-source-group__label {
+  padding: 8px 14px 4px;
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
 .sharing-source-list li + li,
 .sharing-peer-list li + li {
   border-top: 1px solid rgba(200, 200, 208, 0.08);
@@ -3921,8 +3934,23 @@ body {
 }
 
 .sharing-source__main strong {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   color: var(--text);
   font-weight: 600;
+}
+
+.sharing-source__origin {
+  flex: 0 0 auto;
+  padding: 2px 6px;
+  border: 1px solid rgba(200, 200, 208, 0.16);
+  border-radius: 999px;
+  color: var(--text-dim);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  text-transform: uppercase;
 }
 
 .sharing-source__main span {

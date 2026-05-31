@@ -97,6 +97,7 @@ pub async fn dispatch(name: &str, scope: &Value, args: &Value, ctx: &mut IntentC
             tabs::handle(name, scope, args, ctx).await
         }
         "EnableSharing"
+        | "SetSharedTargets"
         | "SetSharedSources"
         | "SetSharingIpv6"
         | "StartPairing"

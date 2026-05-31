@@ -16,12 +16,13 @@ use crate::remote::keys::{self, Identity};
 use crate::remote::pairing;
 use crate::remote::share_state::{self, ShareState};
 use crate::ws::protocol::{now, ServerMessage};
-use crate::ws::runtime::{build_sources_json, IntentContext};
+use crate::ws::runtime::{build_share_config, build_sources_json, IntentContext};
 
 pub async fn handle(name: &str, args: &Value, ctx: &mut IntentContext<'_>) {
     match name {
         "EnableSharing" => enable_sharing(args, ctx).await,
         "SetSharingIpv6" => set_ipv6_enabled(args, ctx).await,
+        "SetSharedTargets" => set_shared_targets(args, ctx).await,
         "SetSharedSources" => set_shared_sources(args, ctx).await,
         "StartPairing" => start_pairing(args, ctx).await,
         "ConfirmPairing" => confirm_pairing(args, ctx).await,
@@ -260,6 +261,7 @@ async fn persist_share_state(ctx: &mut IntentContext<'_>) {
             enabled: state.share_config.enabled,
             allow_ipv6: state.share_config.allow_ipv6,
             shared_source_ids: state.share_config.shared_source_ids.clone(),
+            shared_roots: state.share_config.shared_roots.clone(),
         }
     };
     if let Err(e) = share_state::save(&share_state::default_share_path(), &snapshot) {
@@ -372,22 +374,61 @@ async fn set_shared_sources(args: &Value, ctx: &mut IntentContext<'_>) {
                 .collect()
         })
         .unwrap_or_default();
-    // Only allow sharing of *local* sources — sharing a remote source would
-    // create a chain that requires us to be already authenticated to that
-    // upstream, which we don't manage automatically yet. (Filtering also
-    // means a malicious / racy FE can't expose anything it shouldn't.)
-    let filtered: HashSet<String> = {
+    let roots = {
         let state = ctx.state.lock().await;
         ids.into_iter()
-            .filter(|sid| match state.sources.get(sid) {
-                Some(src) => src.kind == "filesystem" && !src.shadow,
-                None => false,
-            })
+            .filter_map(|sid| state.sources.get(&sid))
+            .filter(|src| src.kind == "filesystem" && src.mounted && !src.shadow)
+            .map(crate::state::shared_root_for_source)
             .collect()
     };
+    update_shared_roots(roots, ctx).await;
+}
+
+async fn set_shared_targets(args: &Value, ctx: &mut IntentContext<'_>) {
+    let ids: HashSet<String> = args
+        .get("targetIds")
+        .and_then(Value::as_array)
+        .map(|arr| {
+            arr.iter()
+                .filter_map(Value::as_str)
+                .map(String::from)
+                .collect()
+        })
+        .unwrap_or_default();
+    let roots = {
+        let state = ctx.state.lock().await;
+        let home = state.platform.home_dir();
+        let mut candidates =
+            crate::state::share_suggestions(&state.sources, &state.bookmarks, &home);
+        for root in &state.share_config.shared_roots {
+            if !candidates.iter().any(|candidate| candidate.id == root.id) {
+                candidates.push(root.clone());
+            }
+        }
+        candidates
+            .into_iter()
+            .filter(|root| ids.contains(&root.id))
+            .filter_map(|mut root| {
+                let source_id = crate::state::source_id_for_local_path(&state.sources, &root.path)?;
+                root.source_id = source_id;
+                Some(root)
+            })
+            .collect::<Vec<_>>()
+    };
+    update_shared_roots(roots, ctx).await;
+}
+
+async fn update_shared_roots(roots: Vec<crate::state::SharedRoot>, ctx: &mut IntentContext<'_>) {
+    let filtered_source_ids: HashSet<String> = roots
+        .iter()
+        .filter(|root| matches!(root.origin, crate::state::SharedRootOrigin::Source))
+        .map(|root| root.source_id.clone())
+        .collect();
     {
         let mut state = ctx.state.lock().await;
-        state.share_config.shared_source_ids = filtered;
+        state.share_config.shared_source_ids = filtered_source_ids;
+        state.share_config.shared_roots = roots;
     }
     persist_share_state(ctx).await;
     broadcast_share_status(ctx).await;
@@ -686,45 +727,7 @@ async fn stop_sharing_server(ctx: &mut IntentContext<'_>) {
 async fn broadcast_share_status(ctx: &mut IntentContext<'_>) {
     let payload = {
         let state = ctx.state.lock().await;
-        let paired: Vec<serde_json::Value> = state
-            .share_config
-            .paired_peers
-            .values()
-            .map(|p| {
-                serde_json::json!({
-                    "fingerprint": p.fingerprint,
-                    "name": p.name,
-                    "os": p.os,
-                    "pairedAt": p
-                        .paired_at
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map(|d| d.as_secs())
-                        .unwrap_or(0),
-                    "lastSeen": p
-                        .last_seen
-                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                        .map(|d| d.as_secs()),
-                    "lastHost": p.last_host.clone(),
-                    "lastSftpPort": p.last_sftp_port,
-                    "lastPairPort": p.last_pair_port,
-                    "lastEndpointSeenAt": p
-                        .last_endpoint_seen_at
-                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                        .map(|d| d.as_secs()),
-                })
-            })
-            .collect();
-        serde_json::json!({
-            "enabled": state.share_config.enabled,
-            "allowIpv6": state.share_config.allow_ipv6,
-            "sharedSourceIds": state
-                .share_config
-                .shared_source_ids
-                .iter()
-                .collect::<Vec<_>>(),
-            "pairedPeers": paired,
-            "fingerprint": state.identity.as_ref().map(|i| i.fingerprint.clone()),
-        })
+        build_share_config(&state)
     };
     let _ = ctx
         .tx

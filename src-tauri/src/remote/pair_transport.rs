@@ -669,43 +669,7 @@ async fn emit_discovered_peers_patch(state: &SharedState) {
 async fn emit_share_config_patch(state: &SharedState) {
     let payload = {
         let g = state.lock().await;
-        let paired: Vec<serde_json::Value> = g
-            .share_config
-            .paired_peers
-            .values()
-            .map(|p| {
-                serde_json::json!({
-                    "fingerprint": p.fingerprint,
-                    "name": p.name,
-                    "os": p.os,
-                    "pairedAt": p
-                        .paired_at
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map(|d| d.as_secs()).unwrap_or(0),
-                    "lastSeen": p.last_seen
-                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                        .map(|d| d.as_secs()),
-                    "lastHost": p.last_host.clone(),
-                    "lastSftpPort": p.last_sftp_port,
-                    "lastPairPort": p.last_pair_port,
-                    "lastEndpointSeenAt": p
-                        .last_endpoint_seen_at
-                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                        .map(|d| d.as_secs()),
-                })
-            })
-            .collect();
-        serde_json::json!({
-            "enabled": g.share_config.enabled,
-            "allowIpv6": g.share_config.allow_ipv6,
-            "sharedSourceIds": g
-                .share_config
-                .shared_source_ids
-                .iter()
-                .collect::<Vec<_>>(),
-            "pairedPeers": paired,
-            "fingerprint": g.identity.as_ref().map(|i| i.fingerprint.clone()),
-        })
+        crate::ws::runtime::build_share_config(&g)
     };
     emit_to_fe(
         state,

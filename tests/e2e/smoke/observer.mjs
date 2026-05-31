@@ -14,7 +14,7 @@ export class FbroObserver {
       panels: {},
       sources: {},
       jobs: {},
-      shareConfig: { enabled: false, allowIpv6: false, sharedSourceIds: [], pairedPeers: [] },
+      shareConfig: { enabled: false, allowIpv6: false, sharedSourceIds: [], sharedRoots: [], shareSuggestions: [], pairedPeers: [] },
       discoveredPeers: [],
       focus: "",
     };

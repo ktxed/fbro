@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { IconCopy } from "@tabler/icons-react";
 import { useAppState } from "../store";
 import type { WsClient } from "../ws/client";
+import type { SharedRoot } from "../ws/types";
 import { useInputHistory } from "../hooks/useInputHistory";
 import { InputHistoryDropdown } from "./InputHistoryDropdown";
 
@@ -41,6 +42,69 @@ function CopyMeta({ value, kind }: { value: string; kind: "endpoint" | "fingerpr
   );
 }
 
+function mergeShareTargets(selected: SharedRoot[], suggestions: SharedRoot[]) {
+  const byId = new Map<string, SharedRoot>();
+  for (const target of selected) byId.set(target.id, target);
+  for (const target of suggestions) byId.set(target.id, target);
+  return Array.from(byId.values()).sort((a, b) => {
+    const originOrder = originRank(a.origin) - originRank(b.origin);
+    if (originOrder !== 0) return originOrder;
+    const nameOrder = a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+    if (nameOrder !== 0) return nameOrder;
+    return a.path.localeCompare(b.path);
+  });
+}
+
+function originRank(origin: SharedRoot["origin"]) {
+  if (origin === "source") return 0;
+  if (origin === "home") return 1;
+  return 2;
+}
+
+function originLabel(origin: SharedRoot["origin"]) {
+  if (origin === "source") return "source";
+  if (origin === "home") return "home";
+  return "bookmark";
+}
+
+function ShareTargetGroup({
+  label,
+  targets,
+  sharedSet,
+  onToggle,
+}: {
+  label: string;
+  targets: SharedRoot[];
+  sharedSet: Set<string>;
+  onToggle: (targetId: string) => void;
+}) {
+  return (
+    <div className="sharing-source-group">
+      <div className="sharing-source-group__label">{label}</div>
+      <ul className="sharing-source-list">
+        {targets.map((target) => (
+          <li key={target.id}>
+            <label className="sharing-source">
+              <input
+                type="checkbox"
+                checked={sharedSet.has(target.id)}
+                onChange={() => onToggle(target.id)}
+              />
+              <span className="sharing-source__main">
+                <strong>
+                  {target.name}
+                  <span className="sharing-source__origin">{originLabel(target.origin)}</span>
+                </strong>
+                <span>{target.path}</span>
+              </span>
+            </label>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 /**
  * Sharing settings: enable LAN remote access, pick which local sources to
  * expose, manage paired peers, and see / connect to discovered peers.
@@ -49,10 +113,10 @@ export function SettingsSharingTab({ client }: SettingsSharingTabProps) {
   const state = useAppState();
   const share = state.shareConfig;
   const discovered = state.discoveredPeers;
-  const shareableSources = Object.values(state.sources).filter(
-    (s) => s.kind === "filesystem" && !s.shadow,
-  );
-  const sharedSet = new Set(share.sharedSourceIds);
+  const shareTargets = mergeShareTargets(share.sharedRoots, share.shareSuggestions);
+  const sharedSet = new Set(share.sharedRoots.map((root) => root.id));
+  const sourceTargets = shareTargets.filter((target) => target.origin === "source");
+  const suggestedTargets = shareTargets.filter((target) => target.origin !== "source");
 
   // Map peer fingerprint → arbitrary mounted source_id (used both for
   // the "live" stale-override and to feed DisconnectRemotePeer when
@@ -93,12 +157,12 @@ export function SettingsSharingTab({ client }: SettingsSharingTabProps) {
     client.sendIntent("SetSharingIpv6", undefined, { allowIpv6: !share.allowIpv6 });
   };
 
-  const toggleSource = (sourceId: string) => {
+  const toggleShareTarget = (targetId: string) => {
     const next = new Set(sharedSet);
-    if (next.has(sourceId)) next.delete(sourceId);
-    else next.add(sourceId);
-    client.sendIntent("SetSharedSources", undefined, {
-      sourceIds: Array.from(next),
+    if (next.has(targetId)) next.delete(targetId);
+    else next.add(targetId);
+    client.sendIntent("SetSharedTargets", undefined, {
+      targetIds: Array.from(next),
     });
   };
 
@@ -490,30 +554,31 @@ export function SettingsSharingTab({ client }: SettingsSharingTabProps) {
         <div className="sharing-card__header">
           <div>
             <span className="sharing-kicker">Expose</span>
-            <h3 className="sharing-card__title">Shared sources</h3>
+            <h3 className="sharing-card__title">Shared folders</h3>
           </div>
           <span className="sharing-chip">read-only</span>
         </div>
-        {shareableSources.length === 0 ? (
-          <p className="sharing-empty">No local filesystem sources to share.</p>
+        {shareTargets.length === 0 ? (
+          <p className="sharing-empty">No local folders to share.</p>
         ) : (
-          <ul className="sharing-source-list">
-            {shareableSources.map((src) => (
-              <li key={src.id}>
-                <label className="sharing-source">
-                  <input
-                    type="checkbox"
-                    checked={sharedSet.has(src.id)}
-                    onChange={() => toggleSource(src.id)}
-                  />
-                  <span className="sharing-source__main">
-                    <strong>{src.name}</strong>
-                    <span>{src.rootPath}</span>
-                  </span>
-                </label>
-              </li>
-            ))}
-          </ul>
+          <>
+            {sourceTargets.length > 0 && (
+              <ShareTargetGroup
+                label="Sources"
+                targets={sourceTargets}
+                sharedSet={sharedSet}
+                onToggle={toggleShareTarget}
+              />
+            )}
+            {suggestedTargets.length > 0 && (
+              <ShareTargetGroup
+                label="Suggestions"
+                targets={suggestedTargets}
+                sharedSet={sharedSet}
+                onToggle={toggleShareTarget}
+              />
+            )}
+          </>
         )}
       </section>
 

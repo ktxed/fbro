@@ -17,8 +17,11 @@ export async function runRemoteFlow(browserA, observerA, browserB, observerB) {
 
   const sharedSourceId = observerA.sourceIdForPath(aSrc);
   if (!sharedSourceId) throw new Error("no filesystem source to share for /work/a");
+  const sharedTargetId = observerA.state.shareConfig.shareSuggestions
+    ?.find((target) => target.sourceId === sharedSourceId && target.origin === "source")
+    ?.id ?? sharedSourceId;
 
-  observerA.sendIntent("SetSharedSources", undefined, { sourceIds: [sharedSourceId] });
+  observerA.sendIntent("SetSharedTargets", undefined, { targetIds: [sharedTargetId] });
   observerA.sendIntent("EnableSharing", undefined, { enabled: true });
   observerB.sendIntent("EnableSharing", undefined, { enabled: true });
   await waitFor(() => observerA.state.shareConfig.enabled, { timeout: 20_000, label: "fbro-a sharing enabled" });
@@ -40,7 +43,7 @@ export async function runRemoteFlow(browserA, observerA, browserB, observerB) {
     label: "remote source mounted",
   });
   const remoteSource = Object.values(observerB.state.sources)
-    .find((source) => source.kind === "remote" && source.id.endsWith(`:${sharedSourceId}`));
+    .find((source) => source.kind === "remote" && source.id.endsWith(`:${sharedTargetId}`));
   if (!remoteSource) throw new Error("remote /work/a source did not mount");
   if (!remoteSource.capabilities?.readOnly) throw new Error("remote source is not marked read-only");
   if (remoteSource.supports.includes("DeleteSelection") || remoteSource.supports.includes("NewFolder")) {

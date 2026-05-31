@@ -184,7 +184,7 @@ fn build_discovered_peers(state: &AppState) -> Vec<crate::remote::discovery::Dis
     out
 }
 
-fn build_share_config(state: &AppState) -> serde_json::Value {
+pub(crate) fn build_share_config(state: &AppState) -> serde_json::Value {
     let paired: Vec<serde_json::Value> = state
         .share_config
         .paired_peers
@@ -213,6 +213,20 @@ fn build_share_config(state: &AppState) -> serde_json::Value {
             })
         })
         .collect();
+    let roots: Vec<serde_json::Value> = state
+        .share_config
+        .shared_roots
+        .iter()
+        .map(shared_root_json)
+        .collect();
+    let suggestions: Vec<serde_json::Value> = crate::state::share_suggestions(
+        &state.sources,
+        &state.bookmarks,
+        &state.platform.home_dir(),
+    )
+    .iter()
+    .map(shared_root_json)
+    .collect();
     serde_json::json!({
         "enabled": state.share_config.enabled,
         "allowIpv6": state.share_config.allow_ipv6,
@@ -221,8 +235,21 @@ fn build_share_config(state: &AppState) -> serde_json::Value {
             .shared_source_ids
             .iter()
             .collect::<Vec<_>>(),
+        "sharedRoots": roots,
+        "shareSuggestions": suggestions,
         "pairedPeers": paired,
         "fingerprint": state.identity.as_ref().map(|i| i.fingerprint.clone()),
+    })
+}
+
+fn shared_root_json(root: &crate::state::SharedRoot) -> serde_json::Value {
+    serde_json::json!({
+        "id": root.id,
+        "name": root.name,
+        "path": root.path,
+        "sourceId": root.source_id,
+        "origin": root.origin.as_str(),
+        "iconName": root.icon_name,
     })
 }
 
