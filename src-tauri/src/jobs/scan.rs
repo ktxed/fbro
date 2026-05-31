@@ -2,8 +2,10 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 
 use crate::jobs::dirsize::DirSizeQueue;
+use crate::jobs::ScanHandle;
 use crate::state::SharedState;
-use crate::vfs::VfsDriver;
+use crate::vfs::{VfsDriver, VfsError};
+use crate::watcher::WatcherCommand;
 use crate::ws::protocol::{EntrySchema, FileOpFileSchema, FilterSpec, ServerMessage, SortSpec};
 
 const BATCH_SIZE: usize = 50;
@@ -24,44 +26,225 @@ fn build_selected_entries(entries: &[EntrySchema], selection: &[usize]) -> Vec<F
         .collect()
 }
 
-pub async fn run_scan(
-    panel_id: String,
+fn should_recover_scan_error(error: &VfsError) -> bool {
+    matches!(error, VfsError::NotFound(_) | VfsError::IOError(_))
+}
+
+struct RecoveryScan {
     path: String,
     sort: SortSpec,
-    filter: Option<FilterSpec>,
-    version_base: u64,
-    tx: mpsc::Sender<ServerMessage>,
+    version: u64,
     driver: Arc<dyn VfsDriver>,
-    cursor_hint: Option<String>,
-    cursor_index: Option<usize>,
-    selection_names: Option<Vec<String>>,
+    show_hidden: bool,
+}
+
+async fn prepare_panel_home_recovery(
+    panel_id: &str,
+    reason: impl Into<String>,
+    tx: &mpsc::Sender<ServerMessage>,
+    state: &SharedState,
+    watcher_cmd_tx: &mpsc::Sender<WatcherCommand>,
+) -> Option<RecoveryScan> {
+    let reason = reason.into();
+    let (path, sort, show_hidden, version, driver, source_id, supports_thumbs, view_mode) = {
+        let mut state_guard = state.lock().await;
+        let fallback_source_id = state_guard.fallback_source_id_for_home()?;
+        let home = state_guard.platform.home_dir();
+        let driver = state_guard.drivers.get(&fallback_source_id)?.clone();
+        let supports_thumbs = driver.supports_thumbnails();
+
+        let panel = state_guard.panels.get_mut(panel_id)?;
+        panel.source_id = fallback_source_id.clone();
+        panel.path = home.clone();
+        panel.entries.clear();
+        panel.cursor = 0;
+        panel.selection.clear();
+        panel.status = crate::state::PanelStatus::Loading;
+        panel.windowed = false;
+        panel.window_start = 0;
+        panel.window_count = 0;
+        panel.filter = None;
+        panel.filter_mode_active = false;
+        panel.shadow_source = None;
+        panel.version += 1;
+        if !supports_thumbs {
+            panel.view_mode = crate::state::PanelViewMode::List;
+        }
+
+        (
+            home,
+            panel.sort.clone(),
+            panel.show_hidden,
+            panel.version,
+            driver,
+            fallback_source_id,
+            supports_thumbs,
+            panel.view_mode.as_str().to_string(),
+        )
+    };
+
+    let _ = tx
+        .send(ServerMessage::StatePatch {
+            timestamp: crate::ws::protocol::now(),
+            domain: "panels".to_string(),
+            entity_id: Some(panel_id.to_string()),
+            version,
+            patch: serde_json::json!({
+                "path": path,
+                "sourceId": source_id,
+                "entries": [],
+                "cursor": 0,
+                "selection": [],
+                "selectedEntries": [],
+                "status": "loading",
+                "filter": null,
+                "filterModeActive": false,
+                "totalCount": null,
+                "totalSize": null,
+                "windowStart": null,
+                "shadowSource": null,
+                "supportsThumbnails": supports_thumbs,
+                "viewMode": view_mode,
+            }),
+        })
+        .await;
+
+    let message = if reason.is_empty() {
+        "Panel source became unavailable. Recovered to home.".to_string()
+    } else {
+        format!("Panel source became unavailable. Recovered to home. {reason}")
+    };
+    let _ = tx
+        .send(ServerMessage::Error {
+            timestamp: crate::ws::protocol::now(),
+            code: "PANEL_RECOVERED_HOME".to_string(),
+            message,
+            recoverable: true,
+            extra: Some(serde_json::json!({ "panelId": panel_id })),
+        })
+        .await;
+
+    if driver.is_local() {
+        let _ = watcher_cmd_tx
+            .send(WatcherCommand::Watch {
+                panel_id: panel_id.to_string(),
+                path: std::path::PathBuf::from(&path),
+            })
+            .await;
+    } else {
+        let _ = watcher_cmd_tx
+            .send(WatcherCommand::Unwatch {
+                panel_id: panel_id.to_string(),
+            })
+            .await;
+    }
+
+    Some(RecoveryScan {
+        path,
+        sort,
+        version,
+        driver,
+        show_hidden,
+    })
+}
+
+pub async fn recover_panel_to_home(
+    panel_id: &str,
+    reason: impl Into<String>,
+    tx: &mpsc::Sender<ServerMessage>,
+    state: &SharedState,
+    dir_size_queue: &Arc<DirSizeQueue>,
+    watcher_cmd_tx: &mpsc::Sender<WatcherCommand>,
+) -> Option<ScanHandle> {
+    let recovery = prepare_panel_home_recovery(panel_id, reason, tx, state, watcher_cmd_tx).await?;
+    let handle = tokio::spawn(run_scan(
+        panel_id.to_string(),
+        recovery.path,
+        recovery.sort,
+        None,
+        recovery.version,
+        tx.clone(),
+        recovery.driver,
+        None,
+        None,
+        None,
+        Arc::clone(state),
+        Arc::clone(dir_size_queue),
+        false,
+        recovery.show_hidden,
+        watcher_cmd_tx.clone(),
+        false,
+    ));
+    Some(ScanHandle { handle })
+}
+
+pub async fn run_scan(
+    panel_id: String,
+    mut path: String,
+    mut sort: SortSpec,
+    mut filter: Option<FilterSpec>,
+    mut version_base: u64,
+    tx: mpsc::Sender<ServerMessage>,
+    mut driver: Arc<dyn VfsDriver>,
+    mut cursor_hint: Option<String>,
+    mut cursor_index: Option<usize>,
+    mut selection_names: Option<Vec<String>>,
     state: SharedState,
     dir_size_queue: Arc<DirSizeQueue>,
     atomic: bool,
-    show_hidden: bool,
+    mut show_hidden: bool,
+    watcher_cmd_tx: mpsc::Sender<WatcherCommand>,
+    mut allow_recovery: bool,
 ) {
-    let path_clone = path.clone();
-    let sort_clone = sort.clone();
-    let result = tokio::task::spawn_blocking(move || {
-        driver.list(&path_clone, &sort_clone, filter.as_ref(), show_hidden)
-    })
-    .await;
+    let entries = loop {
+        let path_clone = path.clone();
+        let sort_clone = sort.clone();
+        let filter_clone = filter.clone();
+        let scan_driver = Arc::clone(&driver);
+        let result = tokio::task::spawn_blocking(move || {
+            scan_driver.list(&path_clone, &sort_clone, filter_clone.as_ref(), show_hidden)
+        })
+        .await;
 
-    let entries = match result {
-        Ok(Ok(e)) => e,
-        Ok(Err(err)) => {
-            let _ = tx
-                .send(ServerMessage::StatePatch {
-                    timestamp: crate::ws::protocol::now(),
-                    domain: "panels".to_string(),
-                    entity_id: Some(panel_id.clone()),
-                    version: version_base + 1,
-                    patch: serde_json::json!({ "status": "error", "error": err.to_string() }),
-                })
-                .await;
-            return;
+        match result {
+            Ok(Ok(e)) => break e,
+            Ok(Err(err)) => {
+                if allow_recovery && should_recover_scan_error(&err) {
+                    if let Some(recovery) = prepare_panel_home_recovery(
+                        &panel_id,
+                        format!("Scan failed: {err}"),
+                        &tx,
+                        &state,
+                        &watcher_cmd_tx,
+                    )
+                    .await
+                    {
+                        path = recovery.path;
+                        sort = recovery.sort;
+                        filter = None;
+                        version_base = recovery.version;
+                        driver = recovery.driver;
+                        cursor_hint = None;
+                        cursor_index = None;
+                        selection_names = None;
+                        show_hidden = recovery.show_hidden;
+                        allow_recovery = false;
+                        continue;
+                    }
+                }
+                let _ = tx
+                    .send(ServerMessage::StatePatch {
+                        timestamp: crate::ws::protocol::now(),
+                        domain: "panels".to_string(),
+                        entity_id: Some(panel_id.clone()),
+                        version: version_base + 1,
+                        patch: serde_json::json!({ "status": "error", "error": err.to_string() }),
+                    })
+                    .await;
+                return;
+            }
+            Err(_) => return,
         }
-        Err(_) => return,
     };
 
     let mut schema_entries: Vec<EntrySchema> = entries

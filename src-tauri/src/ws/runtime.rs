@@ -5,7 +5,7 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 
 use crate::jobs::dirsize::{DirSizeQueue, DirSizeTaskSnapshot};
-use crate::jobs::scan::run_scan;
+use crate::jobs::scan::{recover_panel_to_home, run_scan};
 use crate::jobs::viewer_prefetch::ViewerPrefetchQueue;
 use crate::jobs::{DecisionResponse, JobState, ScanHandle};
 use crate::persistence::{PanelSession, SessionState, SlotSession, TabSession};
@@ -402,8 +402,19 @@ pub(crate) async fn navigate_to(
                 return;
             };
         let Some(driver) = state_guard.drivers.get(&source_id).cloned() else {
-            // Source has no live driver (e.g. its volume was just unmounted).
-            // Silently skip rather than panic.
+            drop(state_guard);
+            if let Some(handle) = recover_panel_to_home(
+                panel_id,
+                "The source driver disappeared before navigation.",
+                tx,
+                state,
+                dir_size_queue,
+                watcher_cmd_tx,
+            )
+            .await
+            {
+                scan_handles.insert(panel_id.to_string(), handle);
+            }
             return;
         };
         let supports_thumbs = driver.supports_thumbnails();
@@ -490,6 +501,8 @@ pub(crate) async fn navigate_to(
         Arc::clone(state),
         Arc::clone(dir_size_queue),
         show_hidden,
+        watcher_cmd_tx.clone(),
+        true,
     );
     scan_handles.insert(panel_id.to_string(), handle);
 }
@@ -502,6 +515,7 @@ pub(crate) async fn rescan_panel(
     cursor_hint: Option<String>,
     selection_names: Option<Vec<String>>,
     dir_size_queue: &Arc<DirSizeQueue>,
+    watcher_cmd_tx: &mpsc::Sender<WatcherCommand>,
 ) {
     if let Some(handle) = scan_handles.remove(panel_id) {
         handle.abort();
@@ -559,6 +573,19 @@ pub(crate) async fn rescan_panel(
             return;
         };
         let Some(driver) = state_guard.drivers.get(&source_id).cloned() else {
+            drop(state_guard);
+            if let Some(handle) = recover_panel_to_home(
+                panel_id,
+                "The source driver disappeared before refresh.",
+                tx,
+                state,
+                dir_size_queue,
+                watcher_cmd_tx,
+            )
+            .await
+            {
+                scan_handles.insert(panel_id.to_string(), handle);
+            }
             return;
         };
         let supports_thumbs = driver.supports_thumbnails();
@@ -628,6 +655,8 @@ pub(crate) async fn rescan_panel(
         Arc::clone(state),
         Arc::clone(dir_size_queue),
         show_hidden,
+        watcher_cmd_tx.clone(),
+        true,
     );
     scan_handles.insert(panel_id.to_string(), handle);
 }
@@ -639,6 +668,7 @@ pub(crate) async fn quiet_rescan_panel(
     scan_handles: &mut HashMap<String, ScanHandle>,
     selection_names: Option<Vec<String>>,
     dir_size_queue: &Arc<DirSizeQueue>,
+    watcher_cmd_tx: &mpsc::Sender<WatcherCommand>,
 ) {
     if let Some(handle) = scan_handles.remove(panel_id) {
         handle.abort();
@@ -661,6 +691,19 @@ pub(crate) async fn quiet_rescan_panel(
                 return;
             };
         let Some(driver) = state_guard.drivers.get(&source_id).cloned() else {
+            drop(state_guard);
+            if let Some(handle) = recover_panel_to_home(
+                panel_id,
+                "The source driver disappeared before refresh.",
+                tx,
+                state,
+                dir_size_queue,
+                watcher_cmd_tx,
+            )
+            .await
+            {
+                scan_handles.insert(panel_id.to_string(), handle);
+            }
             return;
         };
         (path, sort, filter, show_hidden, version, driver)
@@ -689,6 +732,7 @@ pub(crate) async fn quiet_rescan_panel(
         Arc::clone(state),
         Arc::clone(dir_size_queue),
         show_hidden,
+        watcher_cmd_tx.clone(),
     );
     scan_handles.insert(panel_id.to_string(), handle);
 }
@@ -773,22 +817,6 @@ pub(crate) async fn handle_volumes_changed(
             .map(|(panel_id, _)| panel_id.clone())
             .collect();
 
-        if !panels_to_migrate.is_empty() {
-            let fallback_source = state_guard
-                .sources
-                .keys()
-                .next()
-                .cloned()
-                .unwrap_or_default();
-            let home = state_guard.platform.home_dir();
-            for panel_id in &panels_to_migrate {
-                if let Some(panel) = state_guard.panels.get_mut(panel_id) {
-                    panel.source_id = fallback_source.clone();
-                    panel.path = home.clone();
-                }
-            }
-        }
-
         let sources_json = build_sources_json(&state_guard);
         (removed, sources_json, panels_to_migrate)
     };
@@ -804,38 +832,17 @@ pub(crate) async fn handle_volumes_changed(
         .await;
 
     for panel_id in panels_to_migrate {
-        rescan_panel(
+        if let Some(handle) = recover_panel_to_home(
             panel_id.as_str(),
-            state,
+            "The previous source was removed.",
             tx,
-            scan_handles,
-            None,
-            None,
+            state,
             dir_size_queue,
+            watcher_cmd_tx,
         )
-        .await;
-        let path_if_local = {
-            let guard = state.lock().await;
-            guard.panels.get(&panel_id).and_then(|panel| {
-                let is_local = guard
-                    .drivers
-                    .get(&panel.source_id)
-                    .map(|d| d.is_local())
-                    .unwrap_or(false);
-                if is_local {
-                    Some(panel.path.clone())
-                } else {
-                    None
-                }
-            })
-        };
-        if let Some(path) = path_if_local {
-            let _ = watcher_cmd_tx
-                .send(WatcherCommand::Watch {
-                    panel_id,
-                    path: PathBuf::from(&path),
-                })
-                .await;
+        .await
+        {
+            scan_handles.insert(panel_id, handle);
         }
     }
 
@@ -1195,6 +1202,8 @@ fn spawn_scan(
     state: SharedState,
     dir_size_queue: Arc<DirSizeQueue>,
     show_hidden: bool,
+    watcher_cmd_tx: mpsc::Sender<WatcherCommand>,
+    allow_recovery: bool,
 ) -> ScanHandle {
     let handle = tokio::spawn(run_scan(
         panel_id,
@@ -1211,6 +1220,8 @@ fn spawn_scan(
         dir_size_queue,
         false,
         show_hidden,
+        watcher_cmd_tx,
+        allow_recovery,
     ));
     ScanHandle { handle }
 }
@@ -1228,6 +1239,7 @@ fn spawn_scan_atomic(
     state: SharedState,
     dir_size_queue: Arc<DirSizeQueue>,
     show_hidden: bool,
+    watcher_cmd_tx: mpsc::Sender<WatcherCommand>,
 ) -> ScanHandle {
     let handle = tokio::spawn(run_scan(
         panel_id,
@@ -1244,6 +1256,8 @@ fn spawn_scan_atomic(
         dir_size_queue,
         true,
         show_hidden,
+        watcher_cmd_tx,
+        true,
     ));
     ScanHandle { handle }
 }

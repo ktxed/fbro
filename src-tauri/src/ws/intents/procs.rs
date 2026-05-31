@@ -136,6 +136,7 @@ async fn enter_procs_source(scope: &Value, ctx: &mut IntentContext<'_>) {
         None,
         None,
         ctx.dir_size_queue,
+        ctx.watcher_cmd_tx,
     )
     .await;
 }

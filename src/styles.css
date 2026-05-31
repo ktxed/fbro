@@ -258,6 +258,16 @@ body {
   box-shadow: inset 0 0 0 1px rgba(74, 124, 191, 0.85);
 }
 
+.panel--render-error {
+  align-items: center;
+  justify-content: center;
+}
+
+.panel__render-error {
+  color: var(--text-dim);
+  font-size: var(--font-size);
+}
+
 .panel--external-drag-hover {
   border-color: rgba(74, 191, 124, 0.75);
 }

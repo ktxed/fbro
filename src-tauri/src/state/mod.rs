@@ -182,6 +182,34 @@ pub fn source_id_for_local_path(sources: &HashMap<String, Source>, path: &str) -
         .map(|src| src.id.clone())
 }
 
+fn fallback_source_id_for_home_candidates<'a, I>(candidates: I, home: &str) -> Option<String>
+where
+    I: IntoIterator<Item = (&'a str, &'a str, &'a str)>,
+{
+    let candidates: Vec<(&str, &str, &str)> = candidates.into_iter().collect();
+    candidates
+        .iter()
+        .filter(|(_, root_path, _)| source_contains_path(root_path, home))
+        .max_by_key(|(_, root_path, _)| root_path.len())
+        .map(|(id, _, _)| (*id).to_string())
+        .or_else(|| {
+            candidates
+                .iter()
+                .find(|(_, root_path, _)| *root_path == "/")
+                .map(|(id, _, _)| (*id).to_string())
+        })
+        .or_else(|| {
+            candidates
+                .iter()
+                .min_by(|a, b| {
+                    a.2.to_lowercase()
+                        .cmp(&b.2.to_lowercase())
+                        .then_with(|| a.1.cmp(b.1))
+                })
+                .map(|(id, _, _)| (*id).to_string())
+        })
+}
+
 pub fn shared_root_for_source(source: &Source) -> SharedRoot {
     SharedRoot {
         id: source.id.clone(),
@@ -534,6 +562,20 @@ pub struct BroRequest {
 }
 
 impl AppState {
+    pub fn fallback_source_id_for_home(&self) -> Option<String> {
+        let home = self.platform.home_dir();
+        fallback_source_id_for_home_candidates(
+            self.sources.iter().filter_map(|(id, source)| {
+                (source.kind == "filesystem"
+                    && source.mounted
+                    && !source.shadow
+                    && self.drivers.contains_key(id))
+                .then_some((id.as_str(), source.root_path.as_str(), source.name.as_str()))
+            }),
+            &home,
+        )
+    }
+
     pub fn new_default(
         platform: Arc<dyn Platform>,
         initial_paths: HashMap<String, String>,
@@ -1126,4 +1168,55 @@ pub fn collect_visible_thumb_paths(state: &AppState) -> std::collections::HashSe
         }
     }
     paths
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fallback_source_id_for_home_candidates;
+
+    #[test]
+    fn fallback_source_prefers_home_owner() {
+        let candidates = [
+            ("vol-root", "/", "/"),
+            ("vol-home", "/home/user", "home"),
+            ("vol-media", "/run/media/user/ssd", "ssd"),
+        ];
+
+        assert_eq!(
+            fallback_source_id_for_home_candidates(candidates, "/home/user/projects").as_deref(),
+            Some("vol-home")
+        );
+    }
+
+    #[test]
+    fn fallback_source_uses_root_when_home_owner_missing() {
+        let candidates = [
+            ("vol-root", "/", "/"),
+            ("vol-media", "/run/media/user/ssd", "ssd"),
+        ];
+
+        assert_eq!(
+            fallback_source_id_for_home_candidates(candidates, "/home/user").as_deref(),
+            Some("vol-root")
+        );
+    }
+
+    #[test]
+    fn fallback_source_uses_stable_first_available_without_home_or_root() {
+        let candidates = [("vol-z", "/mnt/z", "zeta"), ("vol-a", "/mnt/a", "alpha")];
+
+        assert_eq!(
+            fallback_source_id_for_home_candidates(candidates, "/home/user").as_deref(),
+            Some("vol-a")
+        );
+    }
+
+    #[test]
+    fn fallback_source_returns_none_without_candidates() {
+        let candidates: [(&str, &str, &str); 0] = [];
+        assert_eq!(
+            fallback_source_id_for_home_candidates(candidates, "/home/user"),
+            None
+        );
+    }
 }

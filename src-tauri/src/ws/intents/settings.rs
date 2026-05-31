@@ -248,6 +248,7 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
                 None,
                 selection_names,
                 ctx.dir_size_queue,
+                ctx.watcher_cmd_tx,
             )
             .await;
         }
@@ -273,6 +274,7 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
                 None,
                 None,
                 ctx.dir_size_queue,
+                ctx.watcher_cmd_tx,
             )
             .await;
         }

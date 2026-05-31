@@ -182,6 +182,8 @@ async fn handle_connection(
 
     let mut scan_handles: HashMap<String, ScanHandle> = HashMap::new();
     let mut decision_senders: HashMap<String, mpsc::Sender<DecisionResponse>> = HashMap::new();
+    let (watcher_cmd_tx, watcher_cmd_rx) = mpsc::channel::<WatcherCommand>(64);
+    let (watcher_action_tx, mut watcher_action_rx) = mpsc::channel::<WatcherAction>(64);
 
     if is_reconnect {
         // Reconnection: keep existing entries visible and refresh quietly
@@ -194,6 +196,7 @@ async fn handle_connection(
                 &mut scan_handles,
                 None,
                 &dir_size_queue,
+                &watcher_cmd_tx,
             )
             .await;
         }
@@ -237,14 +240,13 @@ async fn handle_connection(
                     Arc::clone(&dir_size_queue),
                     false,
                     show_hidden,
+                    watcher_cmd_tx.clone(),
+                    true,
                 )),
             };
             scan_handles.insert(panel_id.clone(), handle);
         }
     }
-
-    let (watcher_cmd_tx, watcher_cmd_rx) = mpsc::channel::<WatcherCommand>(64);
-    let (watcher_action_tx, mut watcher_action_rx) = mpsc::channel::<WatcherAction>(64);
 
     let watcher_handle = if is_gui {
         for panel_id in &panel_ids {
@@ -339,6 +341,7 @@ async fn handle_connection(
                                 None,
                                 None,
                                 &dir_size_queue,
+                                &watcher_cmd_tx,
                             ).await;
                         }
                         let _ = crate::ws::intents::bro::maybe_start_next_fp_job(&state, &tx).await;
@@ -364,6 +367,7 @@ async fn handle_connection(
                             &mut scan_handles,
                             names,
                             &dir_size_queue,
+                            &watcher_cmd_tx,
                         ).await;
                     }
                     WatcherAction::DirDeleted { panel_id } => {

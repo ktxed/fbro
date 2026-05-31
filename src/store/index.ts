@@ -1075,6 +1075,15 @@ function reducer(state: AppState, action: AppAction): AppState {
               },
             };
           }
+          if (msg.code === "PANEL_RECOVERED_HOME") {
+            return {
+              ...state,
+              transientHint: {
+                message: msg.message,
+                token: msg.timestamp,
+              },
+            };
+          }
           if (msg.code === "BRO_LAUNCH_FAILED") {
             return {
               ...state,

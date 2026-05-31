@@ -271,6 +271,8 @@ async fn new_tab(args: &Value, ctx: &mut IntentContext<'_>) {
             Arc::clone(ctx.dir_size_queue),
             false,
             show_hidden,
+            ctx.watcher_cmd_tx.clone(),
+            true,
         ));
         ctx.scan_handles.insert(
             new_panel.panel_id.clone(),

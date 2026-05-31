@@ -1295,6 +1295,7 @@ async fn rename_file(args: &Value, ctx: &mut IntentContext<'_>) {
                     Some(parsed.dest_name),
                     selection_names,
                     ctx.dir_size_queue,
+                    ctx.watcher_cmd_tx,
                 )
                 .await;
             }
@@ -1371,6 +1372,7 @@ async fn make_dir(args: &Value, ctx: &mut IntentContext<'_>) {
                     Some(parsed.name),
                     selection_names,
                     ctx.dir_size_queue,
+                    ctx.watcher_cmd_tx,
                 )
                 .await;
             }
@@ -1435,6 +1437,7 @@ async fn touch_file(args: &Value, ctx: &mut IntentContext<'_>) {
                     Some(parsed.name),
                     selection_names,
                     ctx.dir_size_queue,
+                    ctx.watcher_cmd_tx,
                 )
                 .await;
             }
@@ -1559,6 +1562,7 @@ async fn set_permissions(args: &Value, ctx: &mut IntentContext<'_>) {
             ctx.scan_handles,
             selection_names,
             ctx.dir_size_queue,
+            ctx.watcher_cmd_tx,
         )
         .await;
     }
@@ -1972,6 +1976,7 @@ async fn mount_search_results(args: &Value, ctx: &mut IntentContext<'_>) {
         None,
         None,
         ctx.dir_size_queue,
+        ctx.watcher_cmd_tx,
     )
     .await;
 }

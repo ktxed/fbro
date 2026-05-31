@@ -200,6 +200,7 @@ async fn refresh(scope: &Value, ctx: &mut IntentContext<'_>) {
         cursor_hint,
         selection_names,
         ctx.dir_size_queue,
+        ctx.watcher_cmd_tx,
     )
     .await;
 
@@ -233,6 +234,7 @@ async fn refresh_panels(ctx: &mut IntentContext<'_>) {
             None,
             names,
             ctx.dir_size_queue,
+            ctx.watcher_cmd_tx,
         )
         .await;
     }
@@ -260,6 +262,7 @@ async fn set_sort(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
         None,
         names,
         ctx.dir_size_queue,
+        ctx.watcher_cmd_tx,
     )
     .await;
 }
@@ -297,6 +300,7 @@ async fn set_filter(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
         None,
         names,
         ctx.dir_size_queue,
+        ctx.watcher_cmd_tx,
     )
     .await;
 }
@@ -358,6 +362,7 @@ async fn toggle_hidden(scope: &Value, _args: &Value, ctx: &mut IntentContext<'_>
         None,
         selection_names,
         ctx.dir_size_queue,
+        ctx.watcher_cmd_tx,
     )
     .await;
 }

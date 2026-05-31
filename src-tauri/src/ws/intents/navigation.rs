@@ -568,6 +568,7 @@ async fn enter_7z_archive(
         None,
         None,
         ctx.dir_size_queue,
+        ctx.watcher_cmd_tx,
     )
     .await;
 }
@@ -696,6 +697,7 @@ async fn enter_zip_archive(
         None,
         None,
         ctx.dir_size_queue,
+        ctx.watcher_cmd_tx,
     )
     .await;
 }
@@ -1584,6 +1586,7 @@ async fn navigate_to_source(scope: &Value, args: &Value, ctx: &mut IntentContext
             None,
             None,
             ctx.dir_size_queue,
+            ctx.watcher_cmd_tx,
         )
         .await;
     }
@@ -1668,6 +1671,7 @@ async fn mount_source(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) 
                     None,
                     None,
                     ctx.dir_size_queue,
+                    ctx.watcher_cmd_tx,
                 )
                 .await;
             }

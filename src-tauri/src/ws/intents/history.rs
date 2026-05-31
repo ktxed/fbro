@@ -131,6 +131,7 @@ async fn enter_history_source(scope: &Value, args: &Value, ctx: &mut IntentConte
         None,
         None,
         ctx.dir_size_queue,
+        ctx.watcher_cmd_tx,
     )
     .await;
 }

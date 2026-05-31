@@ -3,6 +3,7 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Panel } from "./Panel";
+import { PanelErrorBoundary } from "./PanelErrorBoundary";
 import { OperationModal } from "./OperationModal";
 import { QuitModal } from "./QuitModal";
 import { RenameModal } from "./RenameModal";
@@ -462,55 +463,61 @@ export function Layout({ client, jobsViewOpen, onCloseJobsView, onOpenJobsView }
           }
 
           return (
-            <Panel
+            <PanelErrorBoundary
               key={id}
               panelId={id}
-              panel={panel}
-              isFocused={state.focus === id}
-              modalActive={modalActive}
               client={client}
-              sources={state.sources}
-              otherPanelId={otherPanelId}
-              onRowPointerDown={({ absIndex, clientX, clientY }) => {
-                const currentPanel = state.panels[id];
-                const entry = currentPanel ? getEntryAtAbsIndex(currentPanel, absIndex) : null;
-                if (!currentPanel || !entry) return;
+              resetKey={`${panel.sourceId}:${panel.path}:${panel.version}`}
+            >
+              <Panel
+                panelId={id}
+                panel={panel}
+                isFocused={state.focus === id}
+                modalActive={modalActive}
+                client={client}
+                sources={state.sources}
+                otherPanelId={otherPanelId}
+                onRowPointerDown={({ absIndex, clientX, clientY }) => {
+                  const currentPanel = state.panels[id];
+                  const entry = currentPanel ? getEntryAtAbsIndex(currentPanel, absIndex) : null;
+                  if (!currentPanel || !entry) return;
 
-                const normalizedPath = normalizeDirPath(currentPanel.path);
-                const hasSelection = currentPanel.selection.length > 0;
-                const rowSelected = currentPanel.selection.includes(absIndex);
+                  const normalizedPath = normalizeDirPath(currentPanel.path);
+                  const hasSelection = currentPanel.selection.length > 0;
+                  const rowSelected = currentPanel.selection.includes(absIndex);
 
-                let files: FileOpFile[] | null = null;
-                let sourceAbsIndices: number[] | null = null;
+                  let files: FileOpFile[] | null = null;
+                  let sourceAbsIndices: number[] | null = null;
 
-                if (!hasSelection) {
-                  if (entry.name !== "..") {
-                    files = [{ name: entry.name, size: entry.size, kind: entry.kind, sourcePath: entry.sourcePath }];
-                    sourceAbsIndices = [absIndex];
+                  if (!hasSelection) {
+                    if (entry.name !== "..") {
+                      files = [{ name: entry.name, size: entry.size, kind: entry.kind, sourcePath: entry.sourcePath }];
+                      sourceAbsIndices = [absIndex];
+                    }
+                  } else if (rowSelected) {
+                    files = currentPanel.selectedEntries;
+                    sourceAbsIndices = currentPanel.selection;
                   }
-                } else if (rowSelected) {
-                  files = currentPanel.selectedEntries;
-                  sourceAbsIndices = currentPanel.selection;
-                }
 
-                setActiveDrag(null);
-                setDragCandidate({
-                  sourcePanelId: id,
-                  sourcePath: normalizedPath,
-                  absIndex,
-                  clientX,
-                  clientY,
-                  files,
-                  sourceAbsIndices,
-                });
-              }}
-              dragActive={activeDrag !== null}
-              dragSource={activeDrag?.sourcePanelId === id}
-              dragHovered={activeDrag?.hoverPanelId === id}
-              dragDropAllowed={activeDrag?.hoverPanelId === id && activeDrag.dropAllowed}
-              dragHoverAbsIndex={activeDrag?.hoverPanelId === id ? activeDrag.hoverAbsIndex : null}
-              externalDragHovered={externalDragHover?.panelId === id}
-            />
+                  setActiveDrag(null);
+                  setDragCandidate({
+                    sourcePanelId: id,
+                    sourcePath: normalizedPath,
+                    absIndex,
+                    clientX,
+                    clientY,
+                    files,
+                    sourceAbsIndices,
+                  });
+                }}
+                dragActive={activeDrag !== null}
+                dragSource={activeDrag?.sourcePanelId === id}
+                dragHovered={activeDrag?.hoverPanelId === id}
+                dragDropAllowed={activeDrag?.hoverPanelId === id && activeDrag.dropAllowed}
+                dragHoverAbsIndex={activeDrag?.hoverPanelId === id ? activeDrag.hoverAbsIndex : null}
+                externalDragHovered={externalDragHover?.panelId === id}
+              />
+            </PanelErrorBoundary>
           );
         })}
       </div>
