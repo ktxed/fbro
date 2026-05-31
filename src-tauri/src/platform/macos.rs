@@ -229,54 +229,43 @@ impl Platform for MacOSPlatform {
     // TODO: use NSWorkspace iconForFileType: for extension-based system icons.
 
     fn list_volumes(&self) -> Vec<VolumeInfo> {
+        let mut volumes = vec![VolumeInfo {
+            id: "vol-root".to_string(),
+            name: "/".to_string(),
+            root_path: "/".to_string(),
+            mounted: true,
+            device_path: None,
+        }];
         let ignored_mounts = disk_image_mount_points();
         let dir = match std::fs::read_dir("/Volumes") {
             Ok(d) => d,
-            Err(_) => {
-                return vec![VolumeInfo {
-                    id: "vol-root".to_string(),
-                    name: "/".to_string(),
-                    root_path: "/".to_string(),
-                    mounted: true,
-                    device_path: None,
-                }];
-            }
+            Err(_) => return volumes,
         };
 
-        let mut volumes: Vec<VolumeInfo> = dir
-            .filter_map(|entry| entry.ok())
-            .filter(|entry| {
-                entry
-                    .file_type()
-                    .map(|ft| ft.is_dir() || ft.is_symlink())
-                    .unwrap_or(false)
-            })
-            .filter_map(|entry| {
-                let name = entry.file_name().to_string_lossy().to_string();
-                let root_path = format!("/Volumes/{}", name);
-                if ignored_mounts.contains(&root_path) {
-                    return None;
-                }
-                let id = format!("vol-{}", name);
-                Some(VolumeInfo {
-                    id,
-                    name,
-                    root_path,
-                    mounted: true,
-                    device_path: None,
+        volumes.extend(
+            dir.filter_map(|entry| entry.ok())
+                .filter(|entry| {
+                    entry
+                        .file_type()
+                        .map(|ft| ft.is_dir() || ft.is_symlink())
+                        .unwrap_or(false)
                 })
-            })
-            .collect();
-
-        if volumes.is_empty() {
-            return vec![VolumeInfo {
-                id: "vol-root".to_string(),
-                name: "/".to_string(),
-                root_path: "/".to_string(),
-                mounted: true,
-                device_path: None,
-            }];
-        }
+                .filter_map(|entry| {
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    let root_path = format!("/Volumes/{}", name);
+                    if ignored_mounts.contains(&root_path) {
+                        return None;
+                    }
+                    let id = format!("vol-{}", name);
+                    Some(VolumeInfo {
+                        id,
+                        name,
+                        root_path,
+                        mounted: true,
+                        device_path: None,
+                    })
+                }),
+        );
 
         volumes.sort_by(|a, b| a.name.cmp(&b.name));
         volumes

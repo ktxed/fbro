@@ -5,7 +5,9 @@ use serde_json::Value;
 use tokio::sync::{mpsc, watch, Mutex};
 
 use crate::jobs::file_ops::{generate_dry_run_script, run_file_op};
-use crate::jobs::search::{run_search, MaskMode, SearchDepth, SearchParams, SearchResultStore, SizeOp, TimeOp};
+use crate::jobs::search::{
+    run_search, MaskMode, SearchDepth, SearchParams, SearchResultStore, SizeOp, TimeOp,
+};
 use crate::jobs::{
     AppJob, ConflictPolicy, DecisionResponse, FileOpEntry, FileOpJobMeta, FileOpType, JobKind,
     JobState, SearchJobMeta, VerificationPolicy,
@@ -1678,21 +1680,27 @@ async fn start_search(args: &Value, ctx: &mut IntentContext<'_>) {
             MaskMode::Regex => "regex".to_string(),
         },
         content_query: params.content_query.clone(),
-        size_op: params.size_op.map(|op| match op {
-            SizeOp::Interval => "interval",
-            SizeOp::Gt => "gt",
-            SizeOp::Lt => "lt",
-            SizeOp::Eq => "eq",
-        }.to_string()),
+        size_op: params.size_op.map(|op| {
+            match op {
+                SizeOp::Interval => "interval",
+                SizeOp::Gt => "gt",
+                SizeOp::Lt => "lt",
+                SizeOp::Eq => "eq",
+            }
+            .to_string()
+        }),
         size_value: size_value_raw,
         size_max: size_max_raw,
         size_unit: size_op.map(|_| size_unit.to_string()),
-        time_op: params.time_op.map(|op| match op {
-            TimeOp::Interval => "interval",
-            TimeOp::Before => "before",
-            TimeOp::After => "after",
-            TimeOp::Relative => "relative",
-        }.to_string()),
+        time_op: params.time_op.map(|op| {
+            match op {
+                TimeOp::Interval => "interval",
+                TimeOp::Before => "before",
+                TimeOp::After => "after",
+                TimeOp::Relative => "relative",
+            }
+            .to_string()
+        }),
         time_value: params.time_value.clone(),
         time_to: params.time_to.clone(),
         time_date_field: params.time_date_field.clone(),

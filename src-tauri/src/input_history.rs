@@ -9,32 +9,36 @@ pub fn init_input_history(window: &gtk::ApplicationWindow, app_handle: tauri::Ap
     {
         let compose_held = compose_held.clone();
         let app_handle = app_handle.clone();
-        window.connect_key_press_event(move |_widget: &gtk::ApplicationWindow, key: &gdk::EventKey| {
-            let keyval = key.keyval();
-            if keyval == Multi_key {
-                *compose_held.borrow_mut() = true;
-                return Propagation::Stop;
-            }
-            if *compose_held.borrow() && keyval == Down {
-                let _ = app_handle.emit("alt-arrow-down", ());
-                return Propagation::Stop;
-            }
-            if *compose_held.borrow() && keyval == Up {
-                let _ = app_handle.emit("alt-arrow-up", ());
-                return Propagation::Stop;
-            }
-            Propagation::Proceed
-        });
+        window.connect_key_press_event(
+            move |_widget: &gtk::ApplicationWindow, key: &gdk::EventKey| {
+                let keyval = key.keyval();
+                if keyval == Multi_key {
+                    *compose_held.borrow_mut() = true;
+                    return Propagation::Stop;
+                }
+                if *compose_held.borrow() && keyval == Down {
+                    let _ = app_handle.emit("alt-arrow-down", ());
+                    return Propagation::Stop;
+                }
+                if *compose_held.borrow() && keyval == Up {
+                    let _ = app_handle.emit("alt-arrow-up", ());
+                    return Propagation::Stop;
+                }
+                Propagation::Proceed
+            },
+        );
     }
 
     {
         let compose_held = compose_held.clone();
-        window.connect_key_release_event(move |_widget: &gtk::ApplicationWindow, key: &gdk::EventKey| {
-            if key.keyval() == Multi_key {
-                *compose_held.borrow_mut() = false;
-                return Propagation::Stop;
-            }
-            Propagation::Proceed
-        });
+        window.connect_key_release_event(
+            move |_widget: &gtk::ApplicationWindow, key: &gdk::EventKey| {
+                if key.keyval() == Multi_key {
+                    *compose_held.borrow_mut() = false;
+                    return Propagation::Stop;
+                }
+                Propagation::Proceed
+            },
+        );
     }
 }

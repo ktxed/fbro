@@ -150,7 +150,11 @@ fn parse_relative_time(input: &str) -> Option<u64> {
         total += secs;
         found = true;
     }
-    if found { Some(total) } else { None }
+    if found {
+        Some(total)
+    } else {
+        None
+    }
 }
 
 /// Resolve time filter cutoffs into epoch seconds.
