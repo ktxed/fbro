@@ -9,14 +9,18 @@ export async function runRemoteFlow(browserA, observerA, browserB, observerB) {
   const aHome = "/state/a/home";
   const aHomeDownloads = path.posix.join(aHome, "Downloads");
   const aHomeDownloadsHost = path.join(artifactsDir, "fbro-a/state/home/Downloads");
+  const aHomeDeepHost = path.join(artifactsDir, "fbro-a/state/home/Projects/Deep");
   observerA.navigatePanelToPath("left", aHome);
   await observerA.waitForPanelPath("left", aHome);
   await observerA.waitForPanelNotShadow("left");
   await reloadBrowserApp(browserA, "fbro-a");
   fs.mkdirSync(aHomeDownloadsHost, { recursive: true });
+  fs.mkdirSync(aHomeDeepHost, { recursive: true });
   fs.writeFileSync(path.join(aHomeDownloadsHost, "remote.txt"), "remote payload\n");
+  fs.writeFileSync(path.join(aHomeDeepHost, "deep.txt"), "deep remote payload\n");
   observerA.sendIntent("Refresh", "left");
   await observerA.waitForEntry("left", "Downloads", "directory");
+  await observerA.waitForEntry("left", "Projects", "directory");
 
   const sharedTarget = observerA.state.shareConfig.shareSuggestions
     ?.find((target) => target.origin === "home" && target.path === aHome);
@@ -57,6 +61,19 @@ export async function runRemoteFlow(browserA, observerA, browserB, observerB) {
     timeout: 15_000,
     label: "b left uses remote source",
   });
+  const projectsEntry = await observerB.waitForEntry("left", "Projects", "directory", 20_000);
+  observerB.sendIntent("SetCursor", "left", { index: observerB.state.panels.left.entries.indexOf(projectsEntry) });
+  observerB.sendIntent("OpenEntry", "left");
+  await observerB.waitForPanelPath("left", "Projects");
+  const deepEntry = await observerB.waitForEntry("left", "Deep", "directory", 20_000);
+  observerB.sendIntent("SetCursor", "left", { index: observerB.state.panels.left.entries.indexOf(deepEntry) });
+  observerB.sendIntent("OpenEntry", "left");
+  await observerB.waitForPanelPath("left", "Projects/Deep");
+  await observerB.waitForEntry("left", "deep.txt", "file", 20_000);
+  observerB.sendIntent("NavigateUp", "left");
+  await observerB.waitForPanelPath("left", "Projects");
+  observerB.sendIntent("NavigateUp", "left");
+  await observerB.waitForPanelPath("left", "");
   const downloadsEntry = await observerB.waitForEntry("left", "Downloads", "directory", 20_000);
   const downloadsIndex = observerB.state.panels.left.entries.indexOf(downloadsEntry);
   observerB.sendIntent("SetCursor", "left", { index: downloadsIndex });

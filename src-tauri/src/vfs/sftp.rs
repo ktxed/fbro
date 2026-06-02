@@ -929,7 +929,9 @@ impl VfsDriver for SftpFsDriver {
         if trimmed.is_empty() {
             return None;
         }
-        let idx = trimmed.rfind('/')?;
+        let Some(idx) = trimmed.rfind('/') else {
+            return Some(String::new());
+        };
         Some(trimmed[..idx].to_string())
     }
 
@@ -1409,6 +1411,17 @@ mod tests {
         assert_eq!(driver.absolute("/"), "/src1");
         assert_eq!(driver.absolute("foo"), "/src1/foo");
         assert_eq!(driver.absolute("/foo/bar"), "/src1/foo/bar");
+    }
+
+    #[test]
+    fn parent_path_returns_remote_root_for_single_segment() {
+        let driver = dummy_driver();
+        assert_eq!(driver.parent_path("Downloads").as_deref(), Some(""));
+        assert_eq!(
+            driver.parent_path("Downloads/photos").as_deref(),
+            Some("Downloads")
+        );
+        assert_eq!(driver.parent_path("").as_deref(), None);
     }
 
     #[test]
