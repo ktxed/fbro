@@ -517,8 +517,10 @@ body {
 }
 
 .panel__remote-volume .panel__volume-btn {
+  flex: 1 1 auto;
   min-width: 0;
   max-width: 100%;
+  overflow: hidden;
 }
 
 .panel__remote-volume--expandable .panel__volume-btn {
