@@ -992,7 +992,7 @@ fn has_dotdot(path: &str) -> bool {
 async fn resolve_source(
     state: &SharedState,
     root_id: &str,
-) -> Option<(Arc<dyn VfsDriver>, String, String, Option<String>)> {
+) -> Option<(Arc<dyn VfsDriver>, String, String, String, Option<String>)> {
     let guard = state.lock().await;
     let root = guard
         .share_config
@@ -1003,6 +1003,7 @@ async fn resolve_source(
     Some((
         driver,
         root.path.clone(),
+        root.source_id.clone(),
         root.name.clone(),
         root.icon_name.clone(),
     ))
@@ -1137,7 +1138,8 @@ impl russh_sftp::server::Handler for SftpHandler {
         let (source_id, rest) = parse_path(&path);
 
         let entries: Vec<DirEntry> = if let Some(sid) = source_id.as_deref() {
-            let Some((driver, root, _name, _icon)) = resolve_source(&self.state, sid).await else {
+            let Some((driver, root, _, _name, _icon)) = resolve_source(&self.state, sid).await
+            else {
                 return Err(StatusCode::NoSuchFile);
             };
             let driver_path = compose_driver_path(&root, &rest);
@@ -1215,7 +1217,7 @@ impl russh_sftp::server::Handler for SftpHandler {
         let attrs = match source_id {
             None => attrs_for_dir(), // virtual root
             Some(sid) => {
-                let Some((driver, root, _, _)) = resolve_source(&self.state, &sid).await else {
+                let Some((driver, root, _, _, _)) = resolve_source(&self.state, &sid).await else {
                     return Err(StatusCode::NoSuchFile);
                 };
                 let driver_path = compose_driver_path(&root, &rest);
@@ -1285,7 +1287,8 @@ impl russh_sftp::server::Handler for SftpHandler {
         let Some(sid) = source_id else {
             return Err(StatusCode::NoSuchFile);
         };
-        let Some((driver, root, _, _)) = resolve_source(&self.state, &sid).await else {
+        let Some((driver, root, actual_source_id, _, _)) = resolve_source(&self.state, &sid).await
+        else {
             return Err(StatusCode::NoSuchFile);
         };
         let display_path = format!("/{sid}/{}", rest).trim_end_matches('/').to_string();
@@ -1302,7 +1305,7 @@ impl russh_sftp::server::Handler for SftpHandler {
         self.handles.insert(
             handle.clone(),
             HandleState::File {
-                source_id: sid,
+                source_id: actual_source_id,
                 path_in_source: driver_path,
                 display_path: display_path.clone(),
                 transfer_key: transfer_key.clone(),
@@ -1443,158 +1446,4 @@ fn compose_driver_path(root: &str, rest: &str) -> String {
 const _EPOCH: SystemTime = UNIX_EPOCH;
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parse_root() {
-        let (sid, rest) = parse_path("/");
-        assert_eq!(sid, None);
-        assert_eq!(rest, "");
-    }
-
-    #[test]
-    fn parse_source_root() {
-        let (sid, rest) = parse_path("/src1");
-        assert_eq!(sid.as_deref(), Some("src1"));
-        assert_eq!(rest, "");
-    }
-
-    #[test]
-    fn parse_nested() {
-        let (sid, rest) = parse_path("/src1/foo/bar");
-        assert_eq!(sid.as_deref(), Some("src1"));
-        assert_eq!(rest, "foo/bar");
-    }
-
-    #[test]
-    fn outgoing_transfer_key_splits_sibling_subtrees() {
-        assert_eq!(
-            outgoing_transfer_key("/src1/a/pics1/img.jpg"),
-            "/src1/a/pics1"
-        );
-        assert_eq!(
-            outgoing_transfer_key("/src1/a/pics2/img.jpg"),
-            "/src1/a/pics2"
-        );
-        assert_eq!(outgoing_transfer_key("/src1/file.jpg"), "/src1/file.jpg");
-    }
-
-    #[test]
-    fn transfer_context_marker_accepts_job_ids() {
-        assert_eq!(
-            transfer_context_from_marker_path("/.fbro-transfer-context/job-42").as_deref(),
-            Some("client:job-42")
-        );
-        assert!(transfer_context_from_marker_path("/.fbro-transfer-context/../x").is_none());
-        assert!(transfer_context_from_marker_path("/src1/file.jpg").is_none());
-    }
-
-    #[test]
-    fn detects_dotdot() {
-        assert!(has_dotdot("/src1/../etc"));
-        assert!(has_dotdot("../etc"));
-        assert!(!has_dotdot("/src1/foo..bar"));
-        assert!(!has_dotdot("/src1/foo"));
-    }
-
-    #[test]
-    fn entry_to_file_round_trips_dir_vs_file() {
-        // Ensures we set the correct FileMode bits — historical bug.
-        let f = entry_to_file(&DirEntry {
-            name: "foo.txt".to_string(),
-            is_dir: false,
-            size: Some(42),
-            mtime: Some(0),
-        });
-        assert!(
-            !f.attrs.is_dir(),
-            "regular file should not be reported as dir"
-        );
-        assert!(
-            f.attrs.is_regular(),
-            "regular file should be marked regular"
-        );
-
-        let d = entry_to_file(&DirEntry {
-            name: "subdir".to_string(),
-            is_dir: true,
-            size: None,
-            mtime: Some(0),
-        });
-        assert!(d.attrs.is_dir(), "dir should be reported as dir");
-        assert!(!d.attrs.is_regular(), "dir should not be marked regular");
-    }
-
-    #[test]
-    fn compose_paths() {
-        assert_eq!(compose_driver_path("/home/u", ""), "/home/u");
-        assert_eq!(compose_driver_path("/home/u", "a/b"), "/home/u/a/b");
-        assert_eq!(compose_driver_path("/home/u/", "a"), "/home/u/a");
-        assert_eq!(compose_driver_path("", "a/b"), "a/b");
-        assert_eq!(compose_driver_path("", ""), "");
-    }
-
-    #[test]
-    fn covered_ranges_ignore_repeated_reads() {
-        let mut ranges = Vec::new();
-        assert_eq!(add_covered_range(&mut ranges, 0, 100), 100);
-        assert_eq!(add_covered_range(&mut ranges, 0, 100), 0);
-        assert_eq!(covered_len(&ranges), 100);
-    }
-
-    #[test]
-    fn covered_ranges_merge_overlaps() {
-        let mut ranges = Vec::new();
-        assert_eq!(add_covered_range(&mut ranges, 0, 100), 100);
-        assert_eq!(add_covered_range(&mut ranges, 50, 150), 50);
-        assert_eq!(add_covered_range(&mut ranges, 140, 200), 50);
-        assert_eq!(covered_len(&ranges), 200);
-    }
-
-    #[test]
-    fn covered_ranges_handle_out_of_order_reads() {
-        let mut ranges = Vec::new();
-        assert_eq!(add_covered_range(&mut ranges, 200, 300), 100);
-        assert_eq!(add_covered_range(&mut ranges, 0, 100), 100);
-        assert_eq!(add_covered_range(&mut ranges, 100, 200), 100);
-        assert_eq!(covered_len(&ranges), 300);
-    }
-
-    #[test]
-    fn ordered_digest_handles_out_of_order_chunks() {
-        let data = b"abcdefghijklmnopqrstuvwxyz";
-        let mut digest = OrderedTransferDigest::new(Some(data.len() as u64));
-        digest.add_chunk(10, &data[10..]);
-        assert!(!digest.is_complete());
-        digest.add_chunk(0, &data[..10]);
-        assert!(digest.is_complete());
-        assert_eq!(
-            digest.finalized.as_deref(),
-            Some(blake3::hash(data).to_hex().as_str())
-        );
-    }
-
-    #[test]
-    fn ordered_digest_ignores_repeated_reads() {
-        let data = b"hello world";
-        let mut digest = OrderedTransferDigest::new(Some(data.len() as u64));
-        digest.add_chunk(0, data);
-        digest.add_chunk(0, data);
-        assert!(digest.is_complete());
-        assert_eq!(
-            digest.finalized.as_deref(),
-            Some(blake3::hash(data).to_hex().as_str())
-        );
-    }
-
-    #[test]
-    fn integrity_result_path_parses_job_and_path() {
-        let encoded = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(b"/src/file.bin");
-        let path = format!("/.fbro-integrity/result/job-42/{encoded}");
-        let (job, encoded_path) = integrity_result_from_path(&path).unwrap();
-        assert_eq!(job, "job-42");
-        assert_eq!(encoded_path, encoded);
-        assert!(integrity_result_from_path("/.fbro-integrity/result/../abc").is_none());
-    }
-}
+mod tests;

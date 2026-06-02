@@ -1,25 +1,27 @@
 import fs from "node:fs";
 import path from "node:path";
-import { backendPath, hostPath } from "../config.mjs";
+import { artifactsDir, backendPath, hostPath } from "../config.mjs";
 import { reloadBrowserApp } from "../browser.mjs";
 import { waitFor } from "../wait.mjs";
 
 export async function runRemoteFlow(browserA, observerA, browserB, observerB) {
-  const aSrc = backendPath("a", "src");
   const bDst = backendPath("b", "dst");
-  observerA.navigatePanelToPath("left", aSrc);
-  await observerA.waitForPanelPath("left", aSrc);
+  const aHome = "/state/a/home";
+  const aHomeDownloads = path.posix.join(aHome, "Downloads");
+  const aHomeDownloadsHost = path.join(artifactsDir, "fbro-a/state/home/Downloads");
+  observerA.navigatePanelToPath("left", aHome);
+  await observerA.waitForPanelPath("left", aHome);
   await observerA.waitForPanelNotShadow("left");
   await reloadBrowserApp(browserA, "fbro-a");
-  fs.writeFileSync(hostPath(path.posix.join(aSrc, "remote.txt")), "remote payload\n");
+  fs.mkdirSync(aHomeDownloadsHost, { recursive: true });
+  fs.writeFileSync(path.join(aHomeDownloadsHost, "remote.txt"), "remote payload\n");
   observerA.sendIntent("Refresh", "left");
-  await observerA.waitForEntry("left", "remote.txt", "file");
+  await observerA.waitForEntry("left", "Downloads", "directory");
 
-  const sharedSourceId = observerA.sourceIdForPath(aSrc);
-  if (!sharedSourceId) throw new Error("no filesystem source to share for /work/a");
-  const sharedTargetId = observerA.state.shareConfig.shareSuggestions
-    ?.find((target) => target.sourceId === sharedSourceId && target.origin === "source")
-    ?.id ?? sharedSourceId;
+  const sharedTarget = observerA.state.shareConfig.shareSuggestions
+    ?.find((target) => target.origin === "home" && target.path === aHome);
+  if (!sharedTarget) throw new Error("no Home share target suggestion");
+  const sharedTargetId = sharedTarget.id;
 
   observerA.sendIntent("SetSharedTargets", undefined, { targetIds: [sharedTargetId] });
   observerA.sendIntent("EnableSharing", undefined, { enabled: true });
@@ -44,7 +46,7 @@ export async function runRemoteFlow(browserA, observerA, browserB, observerB) {
   });
   const remoteSource = Object.values(observerB.state.sources)
     .find((source) => source.kind === "remote" && source.id.endsWith(`:${sharedTargetId}`));
-  if (!remoteSource) throw new Error("remote /work/a source did not mount");
+  if (!remoteSource) throw new Error("remote Home source did not mount");
   if (!remoteSource.capabilities?.readOnly) throw new Error("remote source is not marked read-only");
   if (remoteSource.supports.includes("DeleteSelection") || remoteSource.supports.includes("NewFolder")) {
     throw new Error("remote source exposes write capabilities");
@@ -55,11 +57,11 @@ export async function runRemoteFlow(browserA, observerA, browserB, observerB) {
     timeout: 15_000,
     label: "b left uses remote source",
   });
-  const srcEntry = await observerB.waitForEntry("left", "src", "directory", 20_000);
-  const srcIndex = observerB.state.panels.left.entries.indexOf(srcEntry);
-  observerB.sendIntent("SetCursor", "left", { index: srcIndex });
+  const downloadsEntry = await observerB.waitForEntry("left", "Downloads", "directory", 20_000);
+  const downloadsIndex = observerB.state.panels.left.entries.indexOf(downloadsEntry);
+  observerB.sendIntent("SetCursor", "left", { index: downloadsIndex });
   observerB.sendIntent("OpenEntry", "left");
-  await observerB.waitForPanelPath("left", "src");
+  await observerB.waitForPanelPath("left", "Downloads");
   observerB.sendIntent("NavigatePanelTo", undefined, { panelId: "right", path: bDst });
   await observerB.waitForEntry("left", "remote.txt", "file", 20_000);
   observerB.sendIntent("StartFileOp", undefined, {
