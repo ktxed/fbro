@@ -146,6 +146,24 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
                 }
                 proc_tree_mode_changed = Some(v);
             }
+            "colorScheme" => {
+                let Some(v) = value.as_str() else {
+                    drop(state_guard);
+                    bad_setting(ctx.tx, "colorScheme must be a string").await;
+                    return;
+                };
+                match v {
+                    "fbro-dark" | "daylight" => {
+                        state_guard.settings.general.color_scheme = v.to_string();
+                    }
+                    _ => {
+                        let msg = format!("Unknown color scheme: {v}");
+                        drop(state_guard);
+                        bad_setting(ctx.tx, &msg).await;
+                        return;
+                    }
+                }
+            }
             "savePanelViewMode" => {
                 let Some(v) = value.as_bool() else {
                     drop(state_guard);
@@ -303,6 +321,7 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
                 "thumbnailVideoFrameSkip": general.thumbnail_video_frame_skip,
                 "persistPanelTabs": general.persist_panel_tabs,
                 "procTreeMode": general.proc_tree_mode,
+                "colorScheme": general.color_scheme,
             }
         }),
     };

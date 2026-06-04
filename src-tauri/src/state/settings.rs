@@ -49,6 +49,10 @@ pub struct GeneralSettings {
     /// are shown in a single flat list with the full ancestor chain in the name.
     #[serde(default)]
     pub proc_tree_mode: bool,
+    /// Selected frontend color scheme id. Unknown values are rejected by the
+    /// settings intent handler; the default preserves the pre-existing look.
+    #[serde(default = "default_color_scheme")]
+    pub color_scheme: String,
 }
 
 fn default_true() -> bool {
@@ -67,6 +71,10 @@ fn default_thumb_video_frame_skip() -> u32 {
     5
 }
 
+fn default_color_scheme() -> String {
+    "fbro-dark".to_string()
+}
+
 impl Default for GeneralSettings {
     fn default() -> Self {
         Self {
@@ -81,6 +89,7 @@ impl Default for GeneralSettings {
             thumbnail_video_frame_skip: 5,
             persist_panel_tabs: true,
             proc_tree_mode: false,
+            color_scheme: default_color_scheme(),
         }
     }
 }

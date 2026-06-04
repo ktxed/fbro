@@ -184,9 +184,13 @@ async fn view_file(args: &Value, ctx: &mut IntentContext<'_>) {
         )
     };
 
-    let (is_local, driver, file_server_port, image_cap_bytes) = {
+    let (is_local, driver, file_server_port, image_cap_bytes, viewer_bg) = {
         let state_guard = ctx.state.lock().await;
         let driver = state_guard.drivers.get(&effective_source_id).cloned();
+        let viewer_bg = match state_guard.settings.general.color_scheme.as_str() {
+            "daylight" => tauri::webview::Color(244, 246, 248, 255),
+            _ => tauri::webview::Color(13, 13, 13, 255),
+        };
         (
             driver
                 .as_ref()
@@ -195,6 +199,7 @@ async fn view_file(args: &Value, ctx: &mut IntentContext<'_>) {
             driver,
             state_guard.file_server_port,
             effective_image_cap_bytes(&state_guard.settings.general),
+            viewer_bg,
         )
     };
     let file_size = driver_file_size(driver.clone(), full_path.clone()).await;
@@ -236,7 +241,7 @@ async fn view_file(args: &Value, ctx: &mut IntentContext<'_>) {
         .inner_size(900.0, 700.0)
         .resizable(true)
         .devtools(true)
-        .background_color(tauri::webview::Color(13, 13, 13, 255))
+        .background_color(viewer_bg)
         .build();
     });
 

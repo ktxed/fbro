@@ -11,8 +11,11 @@ import {
   createFile,
   doubleClickEntry,
 } from "../browser.mjs";
+import { waitFor } from "../wait.mjs";
 
 export async function runLocalFlow(browser, observer) {
+  await verifyColorSchemeSwitch(browser, observer);
+
   const aSrc = backendPath("a", "src");
   const aDst = backendPath("a", "dst");
   await createDirectory(browser, observer, "left", "alpha");
@@ -109,4 +112,31 @@ export async function runLocalFlow(browser, observer) {
   await observer.waitForSort("left", "date", "desc");
   await observer.waitForAllEntries("left", sortFiles);
   observer.assertFileEntryOrder("left", ["zebra.txt", "baby.txt", "aardvark.txt"]);
+}
+
+async function verifyColorSchemeSwitch(browser, observer) {
+  await clickCommand(browser, "app.settings");
+  const displayTab = await browser.$('[data-testid="settings-tab-display"]');
+  await displayTab.waitForClickable({ timeout: 10_000 });
+  await displayTab.click();
+
+  const select = await browser.$('[data-testid="color-scheme-select"]');
+  await select.waitForDisplayed({ timeout: 10_000 });
+  await select.selectByAttribute("value", "daylight");
+
+  await waitFor(() => observer.state.settings?.general?.colorScheme === "daylight", {
+    timeout: 10_000,
+    label: "daylight color scheme setting",
+  });
+  await waitFor(async () => {
+    return browser.execute(() => {
+      const app = document.querySelector(".app");
+      const bg = getComputedStyle(app).getPropertyValue("--bg").trim();
+      return app?.getAttribute("data-color-scheme") === "daylight" && bg === "#f4f6f8";
+    });
+  }, { timeout: 10_000, label: "daylight color scheme CSS" });
+
+  const close = await browser.$(".modal--settings .modal__actions .modal__btn");
+  await close.waitForClickable({ timeout: 10_000 });
+  await close.click();
 }

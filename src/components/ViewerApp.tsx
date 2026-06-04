@@ -9,21 +9,30 @@ import { DirectFileViewer, canUseDirect } from "../viewers/DirectFileViewer";
 import { isArchiveSourceId, isRemoteSourceId } from "../utils/sourceId";
 import { useInputHistory } from "../hooks/useInputHistory";
 import { InputHistoryDropdown } from "./InputHistoryDropdown";
+import { DEFAULT_COLOR_SCHEME_ID, resolveColorScheme, type ColorSchemeId } from "../theme/colorSchemes";
 
 // Mermaid v11 lazily registers diagram modules on the first render() call —
 // initialize() alone is not enough, and the first real render can produce empty
 // output before the registration promise settles. We do a discarded warm-up
 // render here so every render() the viewer issues is on a fully-ready instance.
 let _mermaidReady: Promise<Awaited<typeof import("mermaid")>["default"]> | null = null;
-function getMermaid() {
+let _mermaidTheme: "dark" | "default" | null = null;
+function getMermaid(theme: "dark" | "default") {
   if (!_mermaidReady) {
     _mermaidReady = import("mermaid").then(async ({ default: m }) => {
-      m.initialize({ startOnLoad: false, theme: "dark" });
+      m.initialize({ startOnLoad: false, theme });
+      _mermaidTheme = theme;
       try { await m.render("mermaid-warmup", "graph TD\n  A-->B"); } catch {}
       return m;
     });
   }
-  return _mermaidReady;
+  return _mermaidReady.then((m) => {
+    if (_mermaidTheme !== theme) {
+      m.initialize({ startOnLoad: false, theme });
+      _mermaidTheme = theme;
+    }
+    return m;
+  });
 }
 
 const SMALL_LIMIT = 1 * 1024 * 1024;  // 1 MiB — files at or below this are loaded fully
@@ -170,6 +179,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
   const [loading, setLoading]     = useState(true);
   const [error, setError]         = useState<string | null>(null);
   const [navError, setNavError]   = useState<string | null>(null);
+  const [colorSchemeId, setColorSchemeId] = useState<ColorSchemeId>(DEFAULT_COLOR_SCHEME_ID);
 
   // Buffer
   const [buffer, setBuffer]             = useState<Uint8Array | null>(null);
@@ -411,8 +421,10 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
 
       client.onMessage = (msg: BEMessage) => {
         if (msg.type === "StateSnapshot") {
-          const fontSize = (msg as StateSnapshotMessage).domains.fontSize;
+          const snapshot = msg as StateSnapshotMessage;
+          const fontSize = snapshot.domains.fontSize;
           if (fontSize !== undefined) { currentFontSizeRef.current = fontSize; applyZoom(fontSize); }
+          setColorSchemeId(resolveColorScheme(snapshot.domains.settings?.general.colorScheme).id);
         }
         if (msg.type === "StatePatch") {
           const patch = msg as StatePatchMessage;
@@ -420,6 +432,12 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
             const fontSize = patch.patch.fontSize as number;
             currentFontSizeRef.current = fontSize;
             applyZoom(fontSize);
+          }
+          if (patch.domain === "settings") {
+            const general = patch.patch.general as { colorScheme?: string } | undefined;
+            if (general?.colorScheme !== undefined) {
+              setColorSchemeId(resolveColorScheme(general.colorScheme).id);
+            }
           }
         }
         if (msg.type === "FileChunk") {
@@ -898,8 +916,8 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
   // Start loading mermaid as soon as the viewer mounts on a markdown file, so
   // the async warm-up overlaps with the file fetch instead of running after.
   useEffect(() => {
-    if (isMdExt(filenameRef.current)) getMermaid();
-  }, []);
+    if (isMdExt(filenameRef.current)) getMermaid(resolveColorScheme(colorSchemeId).mermaidTheme);
+  }, [colorSchemeId]);
 
   // Inject the markdown HTML manually and render any mermaid diagrams. We
   // deliberately avoid dangerouslySetInnerHTML: React would rewrite innerHTML
@@ -915,7 +933,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
     if (codeBlocks.length === 0) return;
 
     let cancelled = false;
-    getMermaid().then(mermaid => {
+    getMermaid(resolveColorScheme(colorSchemeId).mermaidTheme).then(mermaid => {
       if (cancelled) return;
       codeBlocks.forEach(async (code, i) => {
         const source = code.textContent ?? "";
@@ -934,7 +952,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
       });
     });
     return () => { cancelled = true; };
-  }, [markdownHtml]);
+  }, [markdownHtml, colorSchemeId]);
 
   // ── Status bar info ───────────────────────────────────────────────────────
 
@@ -1017,7 +1035,11 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
   }
 
   return (
-    <div className={`viewer${dosMode && effectiveMode === "text" && !markdownMode ? " viewer--dos" : ""}${markdownMode && effectiveMode === "text" ? " viewer--markdown" : ""}`}>
+    <div
+      className={`viewer${dosMode && effectiveMode === "text" && !markdownMode ? " viewer--dos" : ""}${markdownMode && effectiveMode === "text" ? " viewer--markdown" : ""}`}
+      data-color-scheme={colorSchemeId}
+      style={{ colorScheme: resolveColorScheme(colorSchemeId).mode }}
+    >
       <div className="viewer__header">
         <span className="viewer__filename">{curFilename}</span>
         <div className="viewer__mode-btns">

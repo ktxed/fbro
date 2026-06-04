@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { GeneralSettings } from "../ws/types";
 import type { WsClient } from "../ws/client";
 import { isLinux } from "../utils/platform";
+import { COLOR_SCHEMES, resolveColorScheme } from "../theme/colorSchemes";
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -15,7 +16,7 @@ interface SettingsDisplayTabProps {
 }
 
 export function SettingsDisplayTab({ general, client }: SettingsDisplayTabProps) {
-  const send = (key: string, value: boolean | number) => {
+  const send = (key: string, value: boolean | number | string) => {
     client.sendIntent("SetGeneralOption", undefined, { key, value });
   };
 
@@ -60,9 +61,33 @@ export function SettingsDisplayTab({ general, client }: SettingsDisplayTabProps)
     client.sendIntent("ClearThumbnailCache");
   };
 
+  const activeScheme = resolveColorScheme(general.colorScheme);
+  const colorSchemeSection = (
+    <div className="settings-tab__section">
+      <h3 className="settings-tab__section-title">Color Scheme</h3>
+      <label className="settings-tab__option">
+        <span className="settings-tab__select-label">Scheme</span>
+        <select
+          className="settings-tab__select"
+          data-testid="color-scheme-select"
+          value={activeScheme.id}
+          onChange={(e) => send("colorScheme", e.target.value)}
+        >
+          {COLOR_SCHEMES.map((scheme) => (
+            <option key={scheme.id} value={scheme.id}>
+              {scheme.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <p className="settings-tab__hint">{activeScheme.description}</p>
+    </div>
+  );
+
   if (!isLinux) {
     return (
       <div className="settings-tab">
+        {colorSchemeSection}
         <h3>Thumbnails</h3>
         <p className="settings-tab__hint">
           On this platform fbro uses the OS-native thumbnail provider. The
@@ -74,6 +99,7 @@ export function SettingsDisplayTab({ general, client }: SettingsDisplayTabProps)
 
   return (
     <div className="settings-tab">
+      {colorSchemeSection}
       <div className="settings-tab__section">
         <h3 className="settings-tab__section-title">Thumbnails</h3>
         <p className="settings-tab__hint">

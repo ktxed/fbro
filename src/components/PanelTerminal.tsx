@@ -5,6 +5,7 @@ import { IconMaximize, IconMinimize, IconExternalLink } from "@tabler/icons-reac
 import "@xterm/xterm/css/xterm.css";
 import type { WsClient } from "../ws/client";
 import { DEFAULT_FONT_SIZE } from "../utils/zoom";
+import { resolveColorScheme } from "../theme/colorSchemes";
 
 interface PanelTerminalProps {
   client: WsClient;
@@ -28,6 +29,7 @@ interface PanelTerminalProps {
   /** True when the terminal owns the whole panel (terminal tab) rather than
    *  sharing space with a listing split. */
   solo?: boolean;
+  colorScheme?: string;
 }
 
 const RESIZE_DEBOUNCE_MS = 50;
@@ -65,6 +67,7 @@ export function PanelTerminal({
   onToggleMaximize,
   onPromote,
   solo = false,
+  colorScheme = "fbro-dark",
 }: PanelTerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
@@ -92,6 +95,7 @@ export function PanelTerminal({
         container.appendChild(cached.term.element);
       }
     } else {
+      const scheme = resolveColorScheme(colorScheme);
       const term = new Terminal({
         cursorBlink: true,
         fontFamily: '"JetBrains Mono", monospace',
@@ -100,8 +104,10 @@ export function PanelTerminal({
         letterSpacing: 0.9 * (fontSize / DEFAULT_FONT_SIZE),
         scrollback: 5000,
         theme: {
-          background: "#1e1e1e",
-          foreground: "#dddddd",
+          background: scheme.terminal.background,
+          foreground: scheme.terminal.foreground,
+          cursor: scheme.terminal.cursor,
+          selectionBackground: scheme.terminal.selectionBackground,
         },
       });
       const fit = new FitAddon();
@@ -206,6 +212,18 @@ export function PanelTerminal({
       client.sendIntent("ResizeTerminal", panelId, { cols, rows });
     }
   }, [fontSize]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    const term = termRef.current;
+    if (!term) return;
+    const scheme = resolveColorScheme(colorScheme);
+    term.options.theme = {
+      background: scheme.terminal.background,
+      foreground: scheme.terminal.foreground,
+      cursor: scheme.terminal.cursor,
+      selectionBackground: scheme.terminal.selectionBackground,
+    };
+  }, [colorScheme]);
 
   // Re-fit on maximize/restore. ResizeObserver also fires, but kicking fit on
   // the next frame avoids a brief mis-sized cell grid during the CSS swap.

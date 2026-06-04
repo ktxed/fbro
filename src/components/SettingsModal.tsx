@@ -57,6 +57,7 @@ export function SettingsModal({ client }: SettingsModalProps) {
                 ref={i === 0 ? firstTabRef : undefined}
                 role="tab"
                 aria-selected={activeTab === tab.id}
+                data-testid={`settings-tab-${tab.id}`}
                 className={`settings-modal__tab${activeTab === tab.id ? " settings-modal__tab--active" : ""}`}
                 onClick={() => dispatch({ type: "OPEN_SETTINGS", tab: tab.id })}
                 onKeyDown={(e) => {

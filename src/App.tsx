@@ -6,11 +6,13 @@ import { JobsBar } from "./components/JobsBar";
 import { Toolbar } from "./components/Toolbar";
 import { PairingRequestModal } from "./components/PairingRequestModal";
 import { applyZoom } from "./utils/zoom";
+import { resolveColorScheme } from "./theme/colorSchemes";
 
 export function App() {
   const [state, dispatch] = useAppReducer();
   const clientRef = useRef<WsClient | null>(null);
   const [jobsViewOpen, setJobsViewOpen] = useState(false);
+  const colorScheme = resolveColorScheme(state.settings.general.colorScheme);
 
   useEffect(() => { applyZoom(state.fontSize); }, [state.fontSize]);
 
@@ -67,7 +69,11 @@ export function App() {
           Connecting to backend…
         </div>
       )}
-      <div className="app">
+      <div
+        className="app"
+        data-color-scheme={colorScheme.id}
+        style={{ colorScheme: colorScheme.mode }}
+      >
         {client && <Layout client={client} jobsViewOpen={jobsViewOpen} onCloseJobsView={() => setJobsViewOpen(false)} onOpenJobsView={() => setJobsViewOpen(true)} />}
         {client && <JobsBar client={client} />}
         {client && <Toolbar client={client} jobsViewOpen={jobsViewOpen} onOpenJobsView={() => setJobsViewOpen(true)} />}

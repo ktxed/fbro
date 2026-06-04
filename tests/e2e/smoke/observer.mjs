@@ -16,6 +16,7 @@ export class FbroObserver {
       jobs: {},
       shareConfig: { enabled: false, allowIpv6: false, sharedSourceIds: [], sharedRoots: [], shareSuggestions: [], pairedPeers: [] },
       discoveredPeers: [],
+      settings: { general: { colorScheme: "fbro-dark" } },
       focus: "",
     };
     this.pairingRequests = new Map();
@@ -281,6 +282,7 @@ export class FbroObserver {
     if (domains.focus !== undefined) this.state.focus = domains.focus;
     if (domains.shareConfig) this.state.shareConfig = domains.shareConfig;
     if (domains.discoveredPeers) this.state.discoveredPeers = domains.discoveredPeers;
+    if (domains.settings) this.state.settings = domains.settings;
   }
 
   #applyPatch(msg) {
@@ -299,6 +301,12 @@ export class FbroObserver {
     if (msg.domain === "focus") this.state.focus = patch.focus;
     if (msg.domain === "shareConfig") {
       this.state.shareConfig = { ...this.state.shareConfig, ...patch };
+    }
+    if (msg.domain === "settings" && patch.general) {
+      this.state.settings = {
+        ...this.state.settings,
+        general: { ...this.state.settings.general, ...patch.general },
+      };
     }
     if (msg.domain === "discoveredPeers") this.state.discoveredPeers = patch.peers ?? [];
     if (msg.domain === "jobs" && patch.removeJobId) delete this.state.jobs[patch.removeJobId];

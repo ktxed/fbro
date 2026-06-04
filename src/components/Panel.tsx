@@ -1344,6 +1344,7 @@ export function Panel({
           panelId={panelId}
           sessionId={panel.terminalSessionId}
           fontSize={appState.fontSize}
+          colorScheme={appState.settings.general.colorScheme}
           solo
           maximized={appState.maximizedTerminalPanelId === panelId}
           onToggleMaximize={() => dispatch({
@@ -1512,6 +1513,7 @@ export function Panel({
           panelId={panelId}
           sessionId={panel.terminalSessionId}
           fontSize={appState.fontSize}
+          colorScheme={appState.settings.general.colorScheme}
           maximized={appState.maximizedTerminalPanelId === panelId}
           onToggleMaximize={() => dispatch({
             type: "SET_MAXIMIZED_TERMINAL",

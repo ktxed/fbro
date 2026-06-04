@@ -326,6 +326,7 @@ pub struct GeneralSettingsSchema {
     pub thumbnail_cache_size_bytes: u64,
     pub persist_panel_tabs: bool,
     pub proc_tree_mode: bool,
+    pub color_scheme: String,
 }
 
 #[derive(Serialize, Clone, Debug)]

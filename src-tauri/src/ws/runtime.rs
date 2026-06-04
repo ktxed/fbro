@@ -143,6 +143,7 @@ pub(crate) fn build_state_snapshot(
                     thumbnail_cache_size_bytes: thumbnail_cache_stats().1,
                     persist_panel_tabs: state.settings.general.persist_panel_tabs,
                     proc_tree_mode: state.settings.general.proc_tree_mode,
+                    color_scheme: state.settings.general.color_scheme.clone(),
                 },
             },
             discovered_peers: build_discovered_peers(state),
