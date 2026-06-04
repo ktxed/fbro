@@ -20,6 +20,7 @@ if (params.get("viewer") === "1") {
         panelId={params.get("panel") ?? ""}
         isLocal={params.get("local") === "1"}
         nativeFileSize={sizeParam !== null ? Number(sizeParam) : null}
+        initialColorScheme={params.get("colorScheme")}
       />
     </React.StrictMode>,
   );

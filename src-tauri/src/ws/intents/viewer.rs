@@ -184,10 +184,11 @@ async fn view_file(args: &Value, ctx: &mut IntentContext<'_>) {
         )
     };
 
-    let (is_local, driver, file_server_port, image_cap_bytes, viewer_bg) = {
+    let (is_local, driver, file_server_port, image_cap_bytes, color_scheme, viewer_bg) = {
         let state_guard = ctx.state.lock().await;
         let driver = state_guard.drivers.get(&effective_source_id).cloned();
-        let viewer_bg = match state_guard.settings.general.color_scheme.as_str() {
+        let color_scheme = state_guard.settings.general.color_scheme.clone();
+        let viewer_bg = match color_scheme.as_str() {
             "daylight" => tauri::webview::Color(244, 246, 248, 255),
             _ => tauri::webview::Color(13, 13, 13, 255),
         };
@@ -199,6 +200,7 @@ async fn view_file(args: &Value, ctx: &mut IntentContext<'_>) {
             driver,
             state_guard.file_server_port,
             effective_image_cap_bytes(&state_guard.settings.general),
+            color_scheme,
             viewer_bg,
         )
     };
@@ -223,6 +225,7 @@ async fn view_file(args: &Value, ctx: &mut IntentContext<'_>) {
         query_string.push_str(&format!("&fsport={file_server_port}"));
     }
     query_string.push_str(&format!("&imgcap={image_cap_bytes}"));
+    query_string.push_str(&format!("&colorScheme={}", url_encode(&color_scheme)));
 
     // Use spawn_blocking so the macOS dispatch_sync to the Cocoa main thread
     // runs on the blocking thread pool rather than a Tokio async worker thread.

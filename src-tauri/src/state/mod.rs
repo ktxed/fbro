@@ -481,6 +481,9 @@ pub struct AppState {
     /// Senders for all connected GUI clients — used to broadcast state updates
     /// from non-GUI connections (e.g. viewer windows).
     pub gui_senders: Vec<mpsc::Sender<ServerMessage>>,
+    /// Senders for connected external viewer clients — used for lightweight
+    /// display setting updates without broadcasting full GUI state.
+    pub viewer_senders: Vec<mpsc::Sender<ServerMessage>>,
     /// Port of the local HTTP file server used by viewer windows for media streaming.
     pub file_server_port: u16,
     /// Count of currently active viewers (external viewer windows + embedded
@@ -847,6 +850,7 @@ impl AppState {
             bro_requests: HashMap::new(),
             search_stores: HashMap::new(),
             gui_senders: Vec::new(),
+            viewer_senders: Vec::new(),
             file_server_port,
             active_viewers: 0,
             has_gui_connected: false,

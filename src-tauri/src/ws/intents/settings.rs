@@ -39,7 +39,7 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
     // Track whether proc_tree_mode changed so we can reload the procs driver.
     let mut proc_tree_mode_changed: Option<bool> = None;
 
-    let gui_senders = {
+    let (gui_senders, viewer_senders) = {
         let mut state_guard = ctx.state.lock().await;
 
         match key {
@@ -201,7 +201,10 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
             state_guard.settings.general.thumbnail_video_frame_skip,
         );
 
-        state_guard.gui_senders.clone()
+        (
+            state_guard.gui_senders.clone(),
+            state_guard.viewer_senders.clone(),
+        )
     };
 
     // Apply show_hidden_default to all panels immediately.
@@ -326,6 +329,9 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
         }),
     };
     for sender in &gui_senders {
+        let _ = sender.send(patch.clone()).await;
+    }
+    for sender in &viewer_senders {
         let _ = sender.send(patch.clone()).await;
     }
     let _ = ctx.tx.send(patch).await;

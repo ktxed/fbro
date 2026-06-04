@@ -38,10 +38,13 @@ async fn set_font_size(args: &Value, ctx: &mut IntentContext<'_>) {
         return;
     };
     let font_size = value.clamp(8, 24) as u8;
-    let gui_senders = {
+    let (gui_senders, viewer_senders) = {
         let mut state_guard = ctx.state.lock().await;
         state_guard.font_size = font_size;
-        state_guard.gui_senders.clone()
+        (
+            state_guard.gui_senders.clone(),
+            state_guard.viewer_senders.clone(),
+        )
     };
     save_session(ctx.state, ctx.app_handle).await;
     let patch = ServerMessage::StatePatch {
@@ -52,6 +55,9 @@ async fn set_font_size(args: &Value, ctx: &mut IntentContext<'_>) {
         patch: serde_json::json!({ "fontSize": font_size }),
     };
     for sender in &gui_senders {
+        let _ = sender.send(patch.clone()).await;
+    }
+    for sender in &viewer_senders {
         let _ = sender.send(patch.clone()).await;
     }
     let _ = ctx.tx.send(patch).await;

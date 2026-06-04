@@ -48,6 +48,7 @@ interface ViewerAppProps {
   panelId: string;
   isLocal: boolean;
   nativeFileSize: number | null;
+  initialColorScheme?: string | null;
 }
 
 type ViewMode = "text" | "image" | "hex";
@@ -157,7 +158,7 @@ function highlightLine(
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: initFilename, windowLabel, panelId, isLocal, nativeFileSize }: ViewerAppProps) {
+export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: initFilename, windowLabel, panelId, isLocal, nativeFileSize, initialColorScheme }: ViewerAppProps) {
   // Effective image cap (in bytes) for this viewer window. Passed via the
   // launch URL by the BE based on the current ludicrousMode + maxImageSizeMb.
   // Falls back to IMAGE_LIMIT (5 MiB) so old links / missing param keep working.
@@ -179,7 +180,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
   const [loading, setLoading]     = useState(true);
   const [error, setError]         = useState<string | null>(null);
   const [navError, setNavError]   = useState<string | null>(null);
-  const [colorSchemeId, setColorSchemeId] = useState<ColorSchemeId>(DEFAULT_COLOR_SCHEME_ID);
+  const [colorSchemeId, setColorSchemeId] = useState<ColorSchemeId>(() => resolveColorScheme(initialColorScheme ?? DEFAULT_COLOR_SCHEME_ID).id);
 
   // Buffer
   const [buffer, setBuffer]             = useState<Uint8Array | null>(null);
@@ -985,10 +986,15 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
     : isSmall === false
       ? `${Math.min(findIdx + 1, findMatches.length)}`
       : `${Math.min(findIdx + 1, findMatches.length)} / ${findMatches.length}`;
+  const colorScheme = resolveColorScheme(colorSchemeId);
 
   if (useDirect) {
     return (
-      <div className="viewer">
+      <div
+        className="viewer"
+        data-color-scheme={colorScheme.id}
+        style={{ colorScheme: colorScheme.mode }}
+      >
         <div className="viewer__header">
           <span className="viewer__filename">{curFilename}</span>
           <div className="viewer__mode-btns">
@@ -1037,8 +1043,8 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
   return (
     <div
       className={`viewer${dosMode && effectiveMode === "text" && !markdownMode ? " viewer--dos" : ""}${markdownMode && effectiveMode === "text" ? " viewer--markdown" : ""}`}
-      data-color-scheme={colorSchemeId}
-      style={{ colorScheme: resolveColorScheme(colorSchemeId).mode }}
+      data-color-scheme={colorScheme.id}
+      style={{ colorScheme: colorScheme.mode }}
     >
       <div className="viewer__header">
         <span className="viewer__filename">{curFilename}</span>

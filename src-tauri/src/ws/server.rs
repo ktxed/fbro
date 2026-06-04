@@ -165,8 +165,14 @@ async fn handle_connection(
         let _ = send_msg(&mut ws_tx, &snapshot).await;
     } else {
         // Non-GUI clients (viewers) don't get the full snapshot but still need
-        // the current font size so they render at the correct zoom level.
-        let font_size = state.lock().await.font_size;
+        // display settings so they render consistently with the main window.
+        let (font_size, color_scheme) = {
+            let state_guard = state.lock().await;
+            (
+                state_guard.font_size,
+                state_guard.settings.general.color_scheme.clone(),
+            )
+        };
         let _ = send_msg(
             &mut ws_tx,
             &ServerMessage::StatePatch {
@@ -174,7 +180,12 @@ async fn handle_connection(
                 domain: "settings".to_string(),
                 entity_id: None,
                 version: 0,
-                patch: serde_json::json!({ "fontSize": font_size }),
+                patch: serde_json::json!({
+                    "fontSize": font_size,
+                    "general": {
+                        "colorScheme": color_scheme,
+                    },
+                }),
             },
         )
         .await;
@@ -285,10 +296,14 @@ async fn handle_connection(
         None
     };
 
-    if is_gui {
+    {
         let mut state_guard = state.lock().await;
-        state_guard.gui_senders.push(tx.clone());
-        state_guard.has_gui_connected = true;
+        if is_gui {
+            state_guard.gui_senders.push(tx.clone());
+            state_guard.has_gui_connected = true;
+        } else {
+            state_guard.viewer_senders.push(tx.clone());
+        }
     }
 
     if is_gui {
@@ -486,10 +501,9 @@ async fn handle_connection(
         handle.abort();
     }
 
-    if is_gui {
-        let mut state_guard = state.lock().await;
-        state_guard.gui_senders.retain(|sender| !sender.is_closed());
-    }
+    let mut state_guard = state.lock().await;
+    state_guard.gui_senders.retain(|sender| !sender.is_closed());
+    state_guard.viewer_senders.retain(|sender| !sender.is_closed());
 }
 
 fn cli_open_request_from_args(args: &serde_json::Value) -> CliOpenRequest {
