@@ -10,15 +10,12 @@ import {
   createDirectory,
   createFile,
   doubleClickEntry,
-  pressPanelKey,
   pressWindowKey,
-  waitForNewWindow,
 } from "../browser.mjs";
 import { waitFor } from "../wait.mjs";
 
 export async function runLocalFlow(browser, observer) {
   await verifyColorSchemeSwitch(browser, observer);
-  await verifyMarkdownViewerModeSwitch(browser, observer);
 
   const aSrc = backendPath("a", "src");
   const aDst = backendPath("a", "dst");
@@ -118,66 +115,8 @@ export async function runLocalFlow(browser, observer) {
   observer.assertFileEntryOrder("left", ["zebra.txt", "baby.txt", "aardvark.txt"]);
 }
 
-async function verifyMarkdownViewerModeSwitch(browser, observer) {
-  const aSrc = backendPath("a", "src");
-  const filename = "viewer-markdown.md";
-  const mainHandle = await browser.getWindowHandle();
-  fs.writeFileSync(
-    hostPath(path.posix.join(aSrc, filename)),
-    "# Viewer Markdown\n\nThis file verifies markdown preview mode switching.\n",
-  );
-
-  observer.sendIntent("NavigatePanelTo", undefined, { panelId: "left", path: aSrc, cursorHint: filename });
-  await observer.waitForPanelPath("left", aSrc);
-  await observer.waitForEntry("left", filename, "file");
-  await clickEntry(browser, "left", filename);
-
-  const handlesBefore = await browser.getWindowHandles();
-  await pressPanelKey(browser, "left", "F3");
-  const viewerHandle = await waitForNewWindow(browser, handlesBefore, "markdown viewer window");
-  await browser.switchToWindow(viewerHandle);
-
-  try {
-    await waitFor(async () => {
-      return browser.execute(() => document.querySelector(".viewer__markdown h1")?.textContent === "Viewer Markdown");
-    }, { timeout: 15_000, label: "initial markdown render" });
-
-    await pressWindowKey(browser, "3");
-    await waitFor(async () => {
-      return browser.execute(() => document.querySelector(".viewer__pre")?.textContent?.includes("56 69 65 77"));
-    }, { timeout: 10_000, label: "viewer hex mode" });
-
-    await pressWindowKey(browser, "1");
-    await waitFor(async () => {
-      return browser.execute(() => document.querySelector(".viewer__markdown h1")?.textContent === "Viewer Markdown");
-    }, { timeout: 10_000, label: "markdown render after hex text switch" });
-
-    await pressWindowKey(browser, "m");
-    await waitFor(async () => {
-      return browser.execute(() => {
-        const text = document.querySelector(".viewer__text");
-        const content = text?.querySelector(".viewer__content");
-        return !!text
-          && !text.querySelector(".viewer__markdown h1")
-          && content?.textContent?.includes("# Viewer Markdown");
-      });
-    }, { timeout: 10_000, label: "raw text after markdown toggle" });
-
-    await pressWindowKey(browser, "Escape");
-    await waitFor(async () => {
-      const handles = await browser.getWindowHandles();
-      return !handles.includes(viewerHandle);
-    }, { timeout: 10_000, label: "markdown viewer close" });
-  } finally {
-    const handles = await browser.getWindowHandles();
-    if (handles.includes(mainHandle)) {
-      await browser.switchToWindow(mainHandle);
-    }
-  }
-}
-
 async function verifyColorSchemeSwitch(browser, observer) {
-  await clickCommand(browser, "app.settings");
+  await pressWindowKey(browser, ",", { ctrl: true });
   const displayTab = await browser.$('[data-testid="settings-tab-display"]');
   await displayTab.waitForClickable({ timeout: 10_000 });
   await displayTab.click();

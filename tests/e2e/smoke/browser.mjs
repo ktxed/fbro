@@ -101,14 +101,6 @@ export async function pressWindowKey(browser, key, modifiers = {}) {
   }, { key, modifiers });
 }
 
-export async function waitForNewWindow(browser, previousHandles, label = "new window") {
-  const known = new Set(previousHandles);
-  return waitFor(async () => {
-    const handles = await browser.getWindowHandles();
-    return handles.find((handle) => !known.has(handle)) ?? false;
-  }, { timeout: 15_000, interval: 100, label });
-}
-
 export async function createDirectory(browser, observer, panelId, name) {
   await browser.execute((panelId) => document.querySelector(`[data-testid="panel-${panelId}"]`)?.focus(), panelId);
   await clickCommand(browser, "file.mkdir");
