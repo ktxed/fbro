@@ -909,10 +909,12 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
     return { gutterText: gutterEntries.join("\n"), textContent: visLines.join("\n"), rows, visLines };
   }, [effectiveMode, buffer, isSmall, lines, lineNums, topLine, vpLines, wordWrap]);
 
+  const isMarkdownPreviewActive = effectiveMode === "text" && markdownMode && isSmall === true;
+
   const markdownHtml = useMemo((): string => {
-    if (!markdownMode || !buffer || isSmall !== true) return "";
+    if (!isMarkdownPreviewActive || !buffer) return "";
     return marked.parse(renderText(buffer)) as string;
-  }, [markdownMode, buffer, isSmall]);
+  }, [isMarkdownPreviewActive, buffer]);
 
   // Start loading mermaid as soon as the viewer mounts on a markdown file, so
   // the async warm-up overlaps with the file fetch instead of running after.

@@ -86,6 +86,29 @@ export async function pressPanelKey(browser, panelId, key, modifiers = {}) {
   }, { panelId, key, modifiers });
 }
 
+export async function pressWindowKey(browser, key, modifiers = {}) {
+  await browser.execute(({ key, modifiers }) => {
+    window.dispatchEvent(new KeyboardEvent("keydown", {
+      key,
+      code: key.startsWith("F") ? key : undefined,
+      shiftKey: !!modifiers.shift,
+      ctrlKey: !!modifiers.ctrl,
+      altKey: !!modifiers.alt,
+      metaKey: !!modifiers.meta,
+      bubbles: true,
+      cancelable: true,
+    }));
+  }, { key, modifiers });
+}
+
+export async function waitForNewWindow(browser, previousHandles, label = "new window") {
+  const known = new Set(previousHandles);
+  return waitFor(async () => {
+    const handles = await browser.getWindowHandles();
+    return handles.find((handle) => !known.has(handle)) ?? false;
+  }, { timeout: 15_000, interval: 100, label });
+}
+
 export async function createDirectory(browser, observer, panelId, name) {
   await browser.execute((panelId) => document.querySelector(`[data-testid="panel-${panelId}"]`)?.focus(), panelId);
   await clickCommand(browser, "file.mkdir");
