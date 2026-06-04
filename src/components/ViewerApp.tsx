@@ -1123,6 +1123,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
             {effectiveMode === "text" && markdownMode ? (
               isSmall === true ? (
                 <div
+                  key="markdown-preview"
                   className="viewer__markdown"
                   ref={contentRef as React.RefObject<HTMLDivElement>}
                 />
@@ -1133,6 +1134,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
               )
             ) : effectiveMode === "hex" ? (
               <pre
+                key="hex"
                 className={`viewer__pre${isSmall === false ? " viewer__pre--virtual" : ""}`}
                 ref={contentRef as React.RefObject<HTMLPreElement>}
               >
@@ -1140,6 +1142,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
               </pre>
             ) : wordWrap ? (
               <div
+                key="text-wrap"
                 className={`viewer__text viewer__text--wrap${isSmall === false ? " viewer__text--virtual" : ""}`}
                 ref={contentRef as React.RefObject<HTMLDivElement>}
               >
@@ -1156,6 +1159,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
               </div>
             ) : (
               <div
+                key="text"
                 className={`viewer__text${isSmall === false ? " viewer__text--virtual" : ""}`}
                 ref={contentRef as React.RefObject<HTMLDivElement>}
               >

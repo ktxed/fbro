@@ -152,6 +152,17 @@ async function verifyMarkdownViewerModeSwitch(browser, observer) {
       return browser.execute(() => document.querySelector(".viewer__markdown h1")?.textContent === "Viewer Markdown");
     }, { timeout: 10_000, label: "markdown render after hex text switch" });
 
+    await pressWindowKey(browser, "m");
+    await waitFor(async () => {
+      return browser.execute(() => {
+        const text = document.querySelector(".viewer__text");
+        const content = text?.querySelector(".viewer__content");
+        return !!text
+          && !text.querySelector(".viewer__markdown h1")
+          && content?.textContent?.includes("# Viewer Markdown");
+      });
+    }, { timeout: 10_000, label: "raw text after markdown toggle" });
+
     await pressWindowKey(browser, "Escape");
     await waitFor(async () => {
       const handles = await browser.getWindowHandles();
