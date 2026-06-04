@@ -42,7 +42,7 @@
   --text-archive: #d670d6;
   --text-exec:    #8bc34a;
   --text-media:   #3a8794;
-  --text-dot:     var(--text);
+  --text-dot:     #8f8fa0;
   --text-warning: #ffaa44;
   --text-danger:  #ff6060;
   --text-success: #5ac45a;
@@ -89,7 +89,7 @@
   --text-archive: #7d248f;
   --text-exec:    #176c28;
   --text-media:   #006f7c;
-  --text-dot:     var(--text);
+  --text-dot:     #8a96a3;
   --text-warning: #9b5a00;
   --text-danger:  #c93d3d;
   --text-success: #2f7d32;
@@ -198,7 +198,7 @@ body {
   flex: 1;
   display: flex;
   flex-direction: column;
-  background: var(--bg-panel);
+  background: var(--bg-focused);
   border: 1px solid var(--border);
   outline: none;
   min-width: 0;
@@ -207,7 +207,7 @@ body {
 
 .panel--focused {
   border-color: var(--border-focus);
-  background: var(--bg-focused);
+  background: var(--bg-panel);
 }
 
 .panel--drag-source {

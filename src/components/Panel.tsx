@@ -44,6 +44,11 @@ function computeGridMetrics(listEl: HTMLElement | null) {
   return { cols, cardWidth, cardHeight, pageRows };
 }
 
+function colorClassForEntry(entry: VFSEntry): string | undefined {
+  if (entry.name.startsWith(".") && entry.name !== "..") return "cc-dot";
+  return entry.cc;
+}
+
 function SortHeader({ sort, panelId, client }: {
   sort: PanelState["sort"];
   panelId: string;
@@ -1090,6 +1095,7 @@ export function Panel({
   ) {
     const isTooltip = options?.tooltip === true;
     const handlers = isTooltip ? null : rowEventHandlers(entry, absIndex);
+    const colorClass = colorClassForEntry(entry);
     const baseStyle: React.CSSProperties | undefined = pos
       ? { position: "absolute", top: pos.top, left: pos.left, width: pos.width, height: pos.height }
       : undefined;
@@ -1124,7 +1130,7 @@ export function Panel({
           <div className="panel__card-name-row">
             <div
               ref={tooltipNameRef}
-              className={`panel__card-name${entry.cc ? ` ${entry.cc}` : ""}`}
+              className={`panel__card-name${colorClass ? ` ${colorClass}` : ""}`}
               title={entry.name}
             >
               {entry.name}
@@ -1167,7 +1173,7 @@ export function Panel({
             )}
           </div>
         ) : (
-          <div className={`panel__card-name${entry.cc ? ` ${entry.cc}` : ""}`} title={entry.name}>{entry.name}</div>
+          <div className={`panel__card-name${colorClass ? ` ${colorClass}` : ""}`} title={entry.name}>{entry.name}</div>
         )}
         <div className="panel__card-meta">
           <span className="panel__card-size">{formatSize(entry, calcSet)}</span>
@@ -1178,6 +1184,7 @@ export function Panel({
   }
 
   function renderRow(entry: VFSEntry, absIndex: number) {
+    const colorClass = colorClassForEntry(entry);
     return (
       <div
         key={absIndex}
@@ -1261,7 +1268,7 @@ export function Panel({
           const { base, ext } = splitNameExt(entry);
           const restricted = isRestricted(entry);
           return (
-            <span className={`panel__name${entry.cc ? ` ${entry.cc}` : ""}`}>
+            <span className={`panel__name${colorClass ? ` ${colorClass}` : ""}`}>
               <span className="panel__name-base">{base}</span>
               {ext && <span className="panel__name-ext">{ext}</span>}
               {restricted && (
