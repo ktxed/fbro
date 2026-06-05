@@ -336,5 +336,10 @@ fn manifest_paths_parse_start_and_status() {
         manifest_status_from_path("/.fbro-manifest/status/manifest-h1"),
         Some("manifest-h1".to_string())
     );
+    assert_eq!(
+        manifest_cancel_from_path("/.fbro-manifest/cancel/manifest-h1"),
+        Some("manifest-h1".to_string())
+    );
     assert!(manifest_status_from_path("/.fbro-manifest/status/../x").is_none());
+    assert!(manifest_cancel_from_path("/.fbro-manifest/cancel/../x").is_none());
 }

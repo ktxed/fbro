@@ -12,6 +12,7 @@ pub mod spy;
 pub mod zip;
 
 use std::io::{Read, Write};
+use std::sync::atomic::AtomicBool;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::ws::protocol::{FilterSpec, SortSpec};
@@ -40,6 +41,18 @@ pub struct VfsManifestError {
 pub struct VfsManifest {
     pub entries: Vec<VfsManifestEntry>,
     pub errors: Vec<VfsManifestError>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct VfsManifestProgress {
+    pub processed: usize,
+    pub current_path: Option<String>,
+    pub remote: bool,
+}
+
+pub struct VfsManifestOptions<'a> {
+    pub cancel: &'a AtomicBool,
+    pub progress: Option<&'a (dyn Fn(VfsManifestProgress) + Send + Sync)>,
 }
 
 // ─── VFS trait ──────────────────────────────────────────────────────────────
@@ -150,7 +163,11 @@ pub trait VfsDriver: Send + Sync {
         Ok(None)
     }
 
-    fn remote_manifest(&self, _path: &str) -> Result<Option<VfsManifest>, VfsError> {
+    fn remote_manifest(
+        &self,
+        _path: &str,
+        _options: &VfsManifestOptions<'_>,
+    ) -> Result<Option<VfsManifest>, VfsError> {
         Ok(None)
     }
 

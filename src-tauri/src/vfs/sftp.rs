@@ -23,7 +23,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::future::Future;
 use std::io::{self, Read, Write};
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::sync::{atomic::Ordering, Arc};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use base64::Engine as _;
@@ -37,7 +37,8 @@ use tokio::sync::{mpsc, Mutex, Notify};
 use crate::remote::keys::{fingerprint_of, Identity};
 use crate::vfs::{
     color_class_for_entry, format_mtime, icon_name_for_entry, DirChild, VfsDriver, VfsEntry,
-    VfsError, VfsKind, VfsManifest, VfsManifestEntry, VfsManifestError, VfsTransferDigest,
+    VfsError, VfsKind, VfsManifest, VfsManifestEntry, VfsManifestError, VfsManifestOptions,
+    VfsManifestProgress, VfsTransferDigest,
 };
 use crate::ws::protocol::{FilterSpec, SortSpec};
 
@@ -65,6 +66,10 @@ pub struct SftpDriverConfig {
     /// Negotiated from the remote fbro source metadata. When true this
     /// remote source can provide thumbnails generated on the peer.
     pub supports_thumbnails: bool,
+    /// Negotiated from the remote fbro source metadata. When true this
+    /// remote source can hash a tree locally on the peer and stream manifest
+    /// status back to this client.
+    pub supports_manifest: bool,
 }
 
 /// Heartbeat cadence: 10s, comfortably under russh's 60s
@@ -88,6 +93,7 @@ const SFTP_READ_CHUNK_SIZE: usize = 256 * 1024;
 const SFTP_READ_AHEAD_CHUNKS: usize = 16;
 const FBRO_INTEGRITY_ALGORITHM: &str = "blake3";
 const REMOTE_MANIFEST_POLL_INTERVAL: Duration = Duration::from_secs(5);
+const REMOTE_MANIFEST_STALE_TIMEOUT: Duration = Duration::from_secs(60);
 
 thread_local! {
     static CURRENT_FILE_OP_JOB: RefCell<Option<String>> = const { RefCell::new(None) };
@@ -187,7 +193,15 @@ struct RemoteManifestStartResponse {
 #[serde(rename_all = "camelCase")]
 struct RemoteManifestStatusResponse {
     done: bool,
+    #[serde(default)]
+    cancelled: bool,
     error: Option<String>,
+    #[serde(default)]
+    processed: usize,
+    #[serde(default)]
+    current_path: Option<String>,
+    #[serde(default)]
+    updated_at: u64,
     entries: Option<Vec<RemoteManifestEntry>>,
     errors: Option<Vec<RemoteManifestError>>,
 }
@@ -214,6 +228,8 @@ pub struct RemoteSourceInfo {
     pub read_only: bool,
     #[serde(default)]
     pub supports_thumbnails: bool,
+    #[serde(default)]
+    pub supports_manifest: bool,
 }
 
 // ─── Driver lifecycle ─────────────────────────────────────────────────────────
@@ -1252,11 +1268,29 @@ impl VfsDriver for SftpFsDriver {
         }))
     }
 
-    fn remote_manifest(&self, path: &str) -> Result<Option<VfsManifest>, VfsError> {
+    fn remote_manifest(
+        &self,
+        path: &str,
+        options: &VfsManifestOptions<'_>,
+    ) -> Result<Option<VfsManifest>, VfsError> {
+        if !self.config.supports_manifest {
+            return Ok(None);
+        }
         let abs = self.absolute(path);
         let encoded_path = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(abs.as_bytes());
         let start_path = format!("/.fbro-manifest/start/{encoded_path}");
-        let response = self.read_control_file(start_path)?;
+        if let Some(progress) = options.progress {
+            progress(VfsManifestProgress {
+                processed: 0,
+                current_path: None,
+                remote: true,
+            });
+        }
+        let response = match self.read_control_file(start_path) {
+            Ok(response) => response,
+            Err(VfsError::NotFound(_) | VfsError::NotSupported(_)) => return Ok(None),
+            Err(error) => return Err(error),
+        };
         let started: RemoteManifestStartResponse =
             serde_json::from_str(&response).map_err(|e| VfsError::IOError(e.to_string()))?;
         if !started
@@ -1270,16 +1304,54 @@ impl VfsDriver for SftpFsDriver {
         }
 
         let mut first_poll = true;
+        let mut last_status_change = Instant::now();
+        let mut last_updated_at = 0u64;
+        let mut last_processed = 0usize;
+        let mut last_current_path: Option<String> = None;
         loop {
             if first_poll {
                 first_poll = false;
-            } else {
-                std::thread::sleep(REMOTE_MANIFEST_POLL_INTERVAL);
+            } else if sleep_with_cancel(options.cancel, REMOTE_MANIFEST_POLL_INTERVAL) {
+                let cancel_path = format!("/.fbro-manifest/cancel/{}", started.job_id);
+                let _ = self.read_control_file(cancel_path);
+                return Err(VfsError::IOError("Cancelled".to_string()));
+            }
+            if options.cancel.load(Ordering::SeqCst) {
+                let cancel_path = format!("/.fbro-manifest/cancel/{}", started.job_id);
+                let _ = self.read_control_file(cancel_path);
+                return Err(VfsError::IOError("Cancelled".to_string()));
             }
             let status_path = format!("/.fbro-manifest/status/{}", started.job_id);
             let response = self.read_control_file(status_path)?;
             let status: RemoteManifestStatusResponse =
                 serde_json::from_str(&response).map_err(|e| VfsError::IOError(e.to_string()))?;
+            if status.cancelled {
+                return Err(VfsError::IOError("Cancelled".to_string()));
+            }
+            if status.updated_at != last_updated_at
+                || status.processed != last_processed
+                || status.current_path != last_current_path
+            {
+                last_status_change = Instant::now();
+                last_updated_at = status.updated_at;
+                last_processed = status.processed;
+                last_current_path = status.current_path.clone();
+            } else if !status.done && last_status_change.elapsed() >= REMOTE_MANIFEST_STALE_TIMEOUT
+            {
+                let cancel_path = format!("/.fbro-manifest/cancel/{}", started.job_id);
+                let _ = self.read_control_file(cancel_path);
+                return Err(VfsError::IOError(format!(
+                    "remote manifest stale for {}s",
+                    REMOTE_MANIFEST_STALE_TIMEOUT.as_secs()
+                )));
+            }
+            if let Some(progress) = options.progress {
+                progress(VfsManifestProgress {
+                    processed: status.processed,
+                    current_path: status.current_path.clone(),
+                    remote: true,
+                });
+            }
             if !status.done {
                 continue;
             }
@@ -1310,6 +1382,18 @@ impl VfsDriver for SftpFsDriver {
             return Ok(Some(VfsManifest { entries, errors }));
         }
     }
+}
+
+fn sleep_with_cancel(cancel: &std::sync::atomic::AtomicBool, duration: Duration) -> bool {
+    let deadline = Instant::now() + duration;
+    while Instant::now() < deadline {
+        if cancel.load(Ordering::SeqCst) {
+            return true;
+        }
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        std::thread::sleep(remaining.min(Duration::from_millis(100)));
+    }
+    cancel.load(Ordering::SeqCst)
 }
 
 // ─── Streaming Read adapter ──────────────────────────────────────────────────
@@ -1610,6 +1694,7 @@ mod tests {
                 source_id: "test".to_string(),
                 allow_ipv6: false,
                 supports_thumbnails: false,
+                supports_manifest: false,
             },
             Arc::new(NoopStatusBroadcaster),
         )

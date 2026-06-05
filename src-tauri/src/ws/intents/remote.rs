@@ -203,6 +203,7 @@ async fn connect_to_endpoint(
         "probe",
         allow_ipv6,
         false,
+        false,
         Arc::new(crate::vfs::sftp::NoopStatusBroadcaster),
     ) {
         Ok(d) => d,
@@ -230,6 +231,7 @@ async fn connect_to_endpoint(
                             icon: Some("network-server".to_string()),
                             read_only: true,
                             supports_thumbnails: false,
+                            supports_manifest: false,
                         })
                         .collect()
                 })
@@ -268,6 +270,7 @@ async fn connect_to_endpoint(
             &local_source_id,
             allow_ipv6,
             remote_source.supports_thumbnails,
+            remote_source.supports_manifest,
             status,
         ) {
             Ok(d) => d,
@@ -349,6 +352,7 @@ fn build_driver(
     source_id: &str,
     allow_ipv6: bool,
     supports_thumbnails: bool,
+    supports_manifest: bool,
     status: Arc<dyn crate::vfs::sftp::StatusBroadcaster>,
 ) -> Result<SftpFsDriver, String> {
     SftpFsDriver::new(
@@ -362,6 +366,7 @@ fn build_driver(
             source_id: source_id.to_string(),
             allow_ipv6,
             supports_thumbnails,
+            supports_manifest,
         },
         status,
     )

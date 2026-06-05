@@ -397,7 +397,11 @@ struct OutgoingTransfer {
 #[derive(Default)]
 struct ManifestJobState {
     done: bool,
+    cancelled: bool,
     error: Option<String>,
+    processed: usize,
+    current_path: Option<String>,
+    updated_at: u64,
     entries: Vec<ManifestEntryResponse>,
     errors: Vec<ManifestErrorResponse>,
 }
@@ -425,6 +429,11 @@ struct ManifestStartResponse {
 #[serde(rename_all = "camelCase")]
 struct ManifestStatusResponse {
     done: bool,
+    cancelled: bool,
+    processed: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    current_path: Option<String>,
+    updated_at: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -456,6 +465,7 @@ struct SourceMetadataItem {
     icon: Option<String>,
     read_only: bool,
     supports_thumbnails: bool,
+    supports_manifest: bool,
 }
 
 #[derive(Clone)]
@@ -757,22 +767,27 @@ impl SftpHandler {
         }
 
         let job_id = format!("manifest-{}", self.fresh_handle());
-        let job = Arc::new(Mutex::new(ManifestJobState::default()));
+        let job = Arc::new(Mutex::new(ManifestJobState {
+            updated_at: unix_millis_now(),
+            ..Default::default()
+        }));
         self.manifest_jobs.insert(job_id.clone(), Arc::clone(&job));
 
         tokio::task::spawn_blocking(move || {
-            let result = build_manifest_on_remote(&*driver, &root_path);
+            let result = build_manifest_on_remote(&*driver, &root_path, &job);
             let mut guard = job.blocking_lock();
             match result {
-                Ok((entries, errors)) => {
-                    guard.entries = entries;
-                    guard.errors = errors;
+                Ok(()) => {}
+                Err(error) if error == "Cancelled" => {
+                    guard.cancelled = true;
                 }
                 Err(error) => {
                     guard.error = Some(error);
                 }
             }
             guard.done = true;
+            guard.current_path = None;
+            guard.updated_at = unix_millis_now();
         });
 
         serde_json::to_vec(&ManifestStartResponse { job_id }).map_err(|_| StatusCode::Failure)
@@ -787,6 +802,10 @@ impl SftpHandler {
         let response = if done {
             ManifestStatusResponse {
                 done: true,
+                cancelled: guard.cancelled,
+                processed: guard.processed,
+                current_path: guard.current_path.clone(),
+                updated_at: guard.updated_at,
                 error: guard.error.clone(),
                 entries: Some(guard.entries.clone()),
                 errors: Some(guard.errors.clone()),
@@ -794,6 +813,10 @@ impl SftpHandler {
         } else {
             ManifestStatusResponse {
                 done: false,
+                cancelled: guard.cancelled,
+                processed: guard.processed,
+                current_path: guard.current_path.clone(),
+                updated_at: guard.updated_at,
                 error: None,
                 entries: None,
                 errors: None,
@@ -803,6 +826,28 @@ impl SftpHandler {
         if done {
             self.manifest_jobs.remove(job_id);
         }
+        serde_json::to_vec(&response).map_err(|_| StatusCode::Failure)
+    }
+
+    async fn manifest_cancel_json(&mut self, job_id: &str) -> Result<Vec<u8>, StatusCode> {
+        let Some(job) = self.manifest_jobs.get(job_id).cloned() else {
+            return Err(StatusCode::NoSuchFile);
+        };
+        let mut guard = job.lock().await;
+        guard.cancelled = true;
+        guard.updated_at = unix_millis_now();
+        let response = ManifestStatusResponse {
+            done: guard.done,
+            cancelled: true,
+            processed: guard.processed,
+            current_path: guard.current_path.clone(),
+            updated_at: guard.updated_at,
+            error: guard.error.clone(),
+            entries: None,
+            errors: None,
+        };
+        drop(guard);
+        self.manifest_jobs.remove(job_id);
         serde_json::to_vec(&response).map_err(|_| StatusCode::Failure)
     }
 
@@ -823,6 +868,7 @@ impl SftpHandler {
                 icon: root.icon_name.clone(),
                 read_only: true,
                 supports_thumbnails: stream_thumbnails && driver.supports_thumbnails(),
+                supports_manifest: true,
             });
         }
         serde_json::to_vec(&items).map_err(|_| StatusCode::Failure)
@@ -1245,6 +1291,17 @@ fn manifest_status_from_path(path: &str) -> Option<String> {
     let job_id = path
         .trim_start_matches('/')
         .strip_prefix(".fbro-manifest/status/")?;
+    manifest_job_id_from_suffix(job_id)
+}
+
+fn manifest_cancel_from_path(path: &str) -> Option<String> {
+    let job_id = path
+        .trim_start_matches('/')
+        .strip_prefix(".fbro-manifest/cancel/")?;
+    manifest_job_id_from_suffix(job_id)
+}
+
+fn manifest_job_id_from_suffix(job_id: &str) -> Option<String> {
     if job_id.is_empty()
         || job_id.len() > 128
         || job_id.contains("..")
@@ -1257,35 +1314,48 @@ fn manifest_status_from_path(path: &str) -> Option<String> {
     Some(job_id.to_string())
 }
 
+fn unix_millis_now() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or(0)
+}
+
 fn build_manifest_on_remote(
     driver: &dyn VfsDriver,
     root: &str,
-) -> Result<(Vec<ManifestEntryResponse>, Vec<ManifestErrorResponse>), String> {
-    let mut entries = Vec::new();
-    let mut errors = Vec::new();
-    walk_manifest_on_remote(driver, root, "", &mut entries, &mut errors)?;
-    entries.sort_by(|a, b| a.path.cmp(&b.path));
-    errors.sort_by(|a, b| a.path.cmp(&b.path));
-    Ok((entries, errors))
+    job: &Arc<Mutex<ManifestJobState>>,
+) -> Result<(), String> {
+    walk_manifest_on_remote(driver, root, "", job)?;
+    let mut guard = job.blocking_lock();
+    guard.entries.sort_by(|a, b| a.path.cmp(&b.path));
+    guard.errors.sort_by(|a, b| a.path.cmp(&b.path));
+    guard.updated_at = unix_millis_now();
+    Ok(())
 }
 
 fn walk_manifest_on_remote(
     driver: &dyn VfsDriver,
     abs_dir: &str,
     rel_dir: &str,
-    entries: &mut Vec<ManifestEntryResponse>,
-    errors: &mut Vec<ManifestErrorResponse>,
+    job: &Arc<Mutex<ManifestJobState>>,
 ) -> Result<(), String> {
+    if manifest_cancelled(job) {
+        return Err("Cancelled".to_string());
+    }
     let children = match driver.read_dir_entries(abs_dir) {
         Ok(children) => children,
         Err(error) if rel_dir.is_empty() => {
             return Err(format!("Cannot read directory {abs_dir}: {error}"));
         }
         Err(error) => {
-            errors.push(ManifestErrorResponse {
-                path: rel_dir.to_string(),
-                message: format!("Cannot read directory {abs_dir}: {error}"),
-            });
+            push_manifest_error(
+                job,
+                ManifestErrorResponse {
+                    path: rel_dir.to_string(),
+                    message: format!("Cannot read directory {abs_dir}: {error}"),
+                },
+            );
             return Ok(());
         }
     };
@@ -1301,18 +1371,26 @@ fn walk_manifest_on_remote(
             format!("{rel_dir}/{}", child.name)
         };
         if child.is_dir {
-            walk_manifest_on_remote(driver, &child_abs, &child_rel, entries, errors)?;
+            walk_manifest_on_remote(driver, &child_abs, &child_rel, job)?;
         } else {
-            match hash_file_on_remote(driver, &child_abs, child.size) {
-                Ok((size, hash)) => entries.push(ManifestEntryResponse {
-                    path: child_rel,
-                    size,
-                    hash,
-                }),
-                Err(message) => errors.push(ManifestErrorResponse {
-                    path: child_rel,
-                    message,
-                }),
+            update_manifest_progress(job, Some(child_rel.clone()), None);
+            match hash_file_on_remote(driver, &child_abs, &child_rel, child.size, job) {
+                Ok((size, hash)) => push_manifest_entry(
+                    job,
+                    ManifestEntryResponse {
+                        path: child_rel,
+                        size,
+                        hash,
+                    },
+                ),
+                Err(message) if message == "Cancelled" => return Err(message),
+                Err(message) => push_manifest_error(
+                    job,
+                    ManifestErrorResponse {
+                        path: child_rel,
+                        message,
+                    },
+                ),
             }
         }
     }
@@ -1322,12 +1400,18 @@ fn walk_manifest_on_remote(
 fn hash_file_on_remote(
     driver: &dyn VfsDriver,
     path: &str,
+    rel_path: &str,
     size_hint: u64,
+    job: &Arc<Mutex<ManifestJobState>>,
 ) -> Result<(u64, String), String> {
     let size = driver.file_size(path).unwrap_or(size_hint);
     let mut hasher = blake3::Hasher::new();
     let mut offset = 0u64;
     while offset < size {
+        if manifest_cancelled(job) {
+            return Err("Cancelled".to_string());
+        }
+        update_manifest_progress(job, Some(rel_path.to_string()), None);
         let remaining = size
             .saturating_sub(offset)
             .min(MANIFEST_HASH_CHUNK_SIZE as u64) as usize;
@@ -1344,6 +1428,37 @@ fn hash_file_on_remote(
         return Err(format!("digest read ended at {offset} of {size} bytes"));
     }
     Ok((size, hasher.finalize().to_hex().to_string()))
+}
+
+fn manifest_cancelled(job: &Arc<Mutex<ManifestJobState>>) -> bool {
+    job.blocking_lock().cancelled
+}
+
+fn update_manifest_progress(
+    job: &Arc<Mutex<ManifestJobState>>,
+    current_path: Option<String>,
+    processed: Option<usize>,
+) {
+    let mut guard = job.blocking_lock();
+    if let Some(processed) = processed {
+        guard.processed = processed;
+    }
+    guard.current_path = current_path;
+    guard.updated_at = unix_millis_now();
+}
+
+fn push_manifest_entry(job: &Arc<Mutex<ManifestJobState>>, entry: ManifestEntryResponse) {
+    let mut guard = job.blocking_lock();
+    guard.entries.push(entry);
+    guard.processed = guard.entries.len() + guard.errors.len();
+    guard.updated_at = unix_millis_now();
+}
+
+fn push_manifest_error(job: &Arc<Mutex<ManifestJobState>>, error: ManifestErrorResponse) {
+    let mut guard = job.blocking_lock();
+    guard.errors.push(error);
+    guard.processed = guard.entries.len() + guard.errors.len();
+    guard.updated_at = unix_millis_now();
 }
 
 fn is_sources_metadata_path(path: &str) -> bool {
@@ -1684,6 +1799,13 @@ impl russh_sftp::server::Handler for SftpHandler {
                 .insert(handle.clone(), HandleState::ControlData { data });
             return Ok(Handle { id, handle });
         }
+        if let Some(job_id) = manifest_cancel_from_path(&filename) {
+            let data = self.manifest_cancel_json(&job_id).await?;
+            let handle = self.fresh_handle();
+            self.handles
+                .insert(handle.clone(), HandleState::ControlData { data });
+            return Ok(Handle { id, handle });
+        }
         if is_sources_metadata_path(&filename) {
             let data = self.sources_metadata_json().await?;
             let handle = self.fresh_handle();
@@ -1828,6 +1950,7 @@ impl russh_sftp::server::Handler for SftpHandler {
                     "icon": root.icon_name,
                     "read_only": true,
                     "supports_thumbnails": stream_thumbnails && driver.supports_thumbnails(),
+                    "supports_manifest": true,
                 }));
             }
         }

@@ -1,12 +1,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
-    Arc,
+    Arc, Barrier,
 };
 
 use tokio::sync::{mpsc, watch};
 
-use crate::vfs::{VfsDriver, VfsManifest};
+use crate::vfs::{VfsDriver, VfsManifest, VfsManifestOptions, VfsManifestProgress};
 use crate::ws::protocol::{now, FileOpProgressSchema, ServerMessage};
 
 const CHUNK_SIZE: usize = 1024 * 1024;
@@ -118,16 +118,19 @@ pub async fn run_sync_bro(
         tx.clone(),
         progress_rx,
     ));
+    let start_barrier = Arc::new(Barrier::new(2));
 
     let local_root_for_worker = local_root.clone();
     let local_driver_for_worker = Arc::clone(&local_driver);
     let local_cancel = Arc::clone(&cancel_flag);
     let local_progress_tx = progress_tx.clone();
+    let local_start_barrier = Arc::clone(&start_barrier);
     let local_worker = tokio::task::spawn_blocking(move || {
         send_manifest_progress_sync(
             &local_progress_tx,
             ManifestProgressEvent::Started(ManifestSide::Local),
         );
+        local_start_barrier.wait();
         build_manifest(
             ManifestSide::Local,
             "local",
@@ -142,11 +145,13 @@ pub async fn run_sync_bro(
     let remote_driver_for_worker = Arc::clone(&remote_driver);
     let remote_cancel = Arc::clone(&cancel_flag);
     let remote_progress_tx = progress_tx.clone();
+    let remote_start_barrier = Arc::clone(&start_barrier);
     let remote_worker = tokio::task::spawn_blocking(move || {
         send_manifest_progress_sync(
             &remote_progress_tx,
             ManifestProgressEvent::Started(ManifestSide::Remote),
         );
+        remote_start_barrier.wait();
         build_manifest(
             ManifestSide::Remote,
             "remote",
@@ -277,16 +282,41 @@ fn build_manifest(
     progress_tx: &mpsc::Sender<ManifestProgressEvent>,
     cancel: &AtomicBool,
 ) -> Result<ManifestBuild, String> {
-    if side == ManifestSide::Remote {
-        send_manifest_progress_sync(
-            progress_tx,
-            ManifestProgressEvent::RemoteManifestRequested(side),
-        );
-    }
-    if let Some(manifest) = driver
-        .remote_manifest(root)
-        .map_err(|error| format!("Cannot request {label} manifest for {root}: {error}"))?
-    {
+    let manifest_progress = |progress: VfsManifestProgress| {
+        if progress.remote && progress.processed == 0 && progress.current_path.is_none() {
+            send_manifest_progress_sync(
+                progress_tx,
+                ManifestProgressEvent::RemoteManifestRequested(side),
+            );
+        } else {
+            send_manifest_progress_sync(
+                progress_tx,
+                ManifestProgressEvent::FileHashed {
+                    side,
+                    path: progress
+                        .current_path
+                        .unwrap_or_else(|| format!("{label} manifest")),
+                    processed: progress.processed,
+                },
+            );
+        }
+    };
+    let manifest_options = VfsManifestOptions {
+        cancel,
+        progress: Some(&manifest_progress),
+    };
+    let manifest = match driver.remote_manifest(root, &manifest_options) {
+        Ok(manifest) => manifest,
+        Err(error) if error.to_string().contains("Cancelled") => {
+            return Err("Cancelled".to_string());
+        }
+        Err(error) => {
+            return Err(format!(
+                "Cannot request {label} manifest for {root}: {error}"
+            ));
+        }
+    };
+    if let Some(manifest) = manifest {
         let build = manifest_from_vfs(manifest);
         send_manifest_progress_sync(
             progress_tx,
