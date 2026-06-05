@@ -3,16 +3,19 @@ extern crate libc;
 
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::{atomic::AtomicBool, Arc};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
 use tokio::sync::watch;
 
 use crate::bro::{
-    launch_bro, list_bros, BroInputItem, BroLaunchInputKind, BroProtocol, LaunchRecipe, ResolvedBro,
+    launch_bro, list_bros, BroInputItem, BroLaunchInputKind, BroOption, BroPre, BroProtocol,
+    BroSource, LaunchRecipe, ResolvedBro,
 };
 use crate::jobs::fp_bro::run_fp_bro;
-use crate::jobs::{AppJob, FileOpProgress, FpBroJobMeta, JobKind, JobState};
+use crate::jobs::integrity_compare::{run_sync_bro, SYNC_REPORT_NAME};
+use crate::jobs::{AppJob, FileOpProgress, FpBroJobMeta, JobKind, JobState, SyncBroJobMeta};
 use crate::state::ChildProcessEntry;
 use crate::ws::intents::arg_str;
 use crate::ws::protocol::{
@@ -75,6 +78,90 @@ impl LaunchBroArgs {
     }
 }
 
+type SyncRoots = (
+    String,
+    String,
+    String,
+    String,
+    Arc<dyn crate::vfs::VfsDriver>,
+    Arc<dyn crate::vfs::VfsDriver>,
+);
+
+fn sync_bro() -> ResolvedBro {
+    ResolvedBro {
+        option: BroOption {
+            id: "builtin.sync_bro".to_string(),
+            name: "Sync Bro".to_string(),
+            version: "1".to_string(),
+            source: BroSource::Native,
+            detail: Some("Compare local and remote folders with BLAKE3".to_string()),
+            protocol: BroProtocol::Fnf,
+            output: None,
+            params: Vec::new(),
+            pre: BroPre {
+                score: 100,
+                reason: "Local/remote panel pair".to_string(),
+            },
+        },
+        launch: LaunchRecipe::BuiltInSyncBro,
+    }
+}
+
+fn sync_roots_for_panels(
+    state: &crate::state::AppState,
+    panel_id: &str,
+    other_panel_id: Option<&str>,
+) -> Result<SyncRoots, String> {
+    let other_panel_id =
+        other_panel_id.ok_or_else(|| "Sync Bro requires another visible panel.".to_string())?;
+    let panel = state
+        .panels
+        .get(panel_id)
+        .ok_or_else(|| "Sync panel is unavailable.".to_string())?;
+    let other_panel = state
+        .panels
+        .get(other_panel_id)
+        .ok_or_else(|| "Other panel is unavailable.".to_string())?;
+    let source = state
+        .sources
+        .get(&panel.source_id)
+        .ok_or_else(|| "Sync source is unavailable.".to_string())?;
+    let other_source = state
+        .sources
+        .get(&other_panel.source_id)
+        .ok_or_else(|| "Other source is unavailable.".to_string())?;
+    let driver = state
+        .drivers
+        .get(&panel.source_id)
+        .cloned()
+        .ok_or_else(|| "Sync driver is unavailable.".to_string())?;
+    let other_driver = state
+        .drivers
+        .get(&other_panel.source_id)
+        .cloned()
+        .ok_or_else(|| "Other driver is unavailable.".to_string())?;
+
+    match (source.kind.as_str(), other_source.kind.as_str()) {
+        ("filesystem", "remote") => Ok((
+            panel.panel_id.clone(),
+            other_panel.panel_id.clone(),
+            panel.path.clone(),
+            other_panel.path.clone(),
+            driver,
+            other_driver,
+        )),
+        ("remote", "filesystem") => Ok((
+            other_panel.panel_id.clone(),
+            panel.panel_id.clone(),
+            other_panel.path.clone(),
+            panel.path.clone(),
+            other_driver,
+            driver,
+        )),
+        _ => Err("Sync Bro requires one local filesystem panel and one remote panel.".to_string()),
+    }
+}
+
 async fn list_bros_for_request(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
     let panel_id = resolve_panel_id(scope, ctx.state).await;
     let parsed = ListBrosArgs::from_args(args);
@@ -82,10 +169,12 @@ async fn list_bros_for_request(scope: &Value, args: &Value, ctx: &mut IntentCont
         return;
     }
 
-    let (ranking_inputs, result_panel_id, panel_source_id) = {
+    let (ranking_inputs, result_panel_id, panel_source_id, sync_available) = {
         let state_guard = ctx.state.lock().await;
         let result_panel_id =
             Some(other_panel_id(&state_guard, &panel_id).unwrap_or_else(|| panel_id.clone()));
+        let sync_available = parsed.target_path.is_none()
+            && sync_roots_for_panels(&state_guard, &panel_id, result_panel_id.as_deref()).is_ok();
         let panel_source_id = state_guard
             .panels
             .get(&panel_id)
@@ -99,7 +188,7 @@ async fn list_bros_for_request(scope: &Value, args: &Value, ctx: &mut IntentCont
             },
             None => Err("Panel not found.".to_string()),
         };
-        (result, result_panel_id, panel_source_id)
+        (result, result_panel_id, panel_source_id, sync_available)
     };
 
     let ranking_inputs = match ranking_inputs {
@@ -119,7 +208,7 @@ async fn list_bros_for_request(scope: &Value, args: &Value, ctx: &mut IntentCont
 
     let suggested_output_dir = parsed.suggested_output_dir.clone();
     let lookup_inputs = ranking_inputs.clone();
-    let bros = match tokio::task::spawn_blocking(move || {
+    let mut bros = match tokio::task::spawn_blocking(move || {
         list_bros(
             &lookup_inputs,
             suggested_output_dir.as_deref(),
@@ -141,6 +230,9 @@ async fn list_bros_for_request(scope: &Value, args: &Value, ctx: &mut IntentCont
             return;
         }
     };
+    if sync_available {
+        bros.insert(0, sync_bro());
+    }
     let input_schemas = ranking_inputs
         .iter()
         .map(|input| BroInputSchema {
@@ -245,6 +337,25 @@ async fn launch_selected_bro(args: &Value, ctx: &mut IntentContext<'_>) {
         );
         return;
     };
+
+    if matches!(bro.launch, LaunchRecipe::BuiltInSyncBro) {
+        if let Err(message) = launch_sync_bro(request, ctx).await {
+            let _ = ctx
+                .tx
+                .send(ServerMessage::Error {
+                    timestamp: now(),
+                    code: "BRO_LAUNCH_FAILED".to_string(),
+                    message,
+                    recoverable: true,
+                    extra: Some(serde_json::json!({
+                        "requestId": parsed.request_id,
+                        "broId": parsed.bro_id,
+                    })),
+                })
+                .await;
+        }
+        return;
+    }
 
     // Re-resolve the full inputs at launch time. Clone the raw (name, kind) pairs and the
     // driver Arc under a brief lock, then build the BroInputItems (path resolution) outside
@@ -629,6 +740,7 @@ async fn launch_fp_bro(
                 handle: None,
                 cancel_tx,
                 pause_tx,
+                keep_partial_files_on_cancel: Arc::new(AtomicBool::new(false)),
             },
         );
 
@@ -672,6 +784,98 @@ async fn launch_fp_bro(
     if should_start_now {
         start_fp_job(job_id, ctx.state, ctx.tx).await?;
     }
+
+    Ok(())
+}
+
+async fn launch_sync_bro(
+    request: crate::state::BroRequest,
+    ctx: &mut IntentContext<'_>,
+) -> Result<(), String> {
+    let (local_panel, remote_panel, local_root, remote_root, local_driver, remote_driver) = {
+        let state_guard = ctx.state.lock().await;
+        sync_roots_for_panels(
+            &state_guard,
+            &request.source_panel_id,
+            request.result_panel_id.as_deref(),
+        )?
+    };
+    let report_path = local_driver.resolve_child(&local_root, SYNC_REPORT_NAME);
+    let job_id = {
+        let mut state_guard = ctx.state.lock().await;
+        state_guard.job_store.next_job_id()
+    };
+
+    let _ = ctx
+        .tx
+        .send(ServerMessage::JobStarted {
+            timestamp: now(),
+            job: JobStartSchema {
+                job_id: job_id.clone(),
+                kind: "sync-bro".to_string(),
+                op_type: "Sync Bro".to_string(),
+                files: Vec::new(),
+                source_panel: local_panel.clone(),
+                source_path: local_root.clone(),
+                dest_panel: Some(remote_panel.clone()),
+                dest_path: Some(remote_root.clone()),
+                initial_state: "Running".to_string(),
+                total_files: 0,
+                total_bytes_total: 0,
+                background: false,
+                supports_pause: false,
+                result_path: Some(report_path.clone()),
+                result_panel_id: Some(local_panel.clone()),
+                request_id: None,
+                search_source_id: None,
+                search_params: None,
+            },
+        })
+        .await;
+
+    let (cancel_tx, cancel_rx) = watch::channel(false);
+    let (pause_tx, _pause_rx) = watch::channel(false);
+    let handle = tokio::spawn(run_sync_bro(
+        job_id.clone(),
+        local_panel.clone(),
+        remote_panel.clone(),
+        local_root.clone(),
+        remote_root.clone(),
+        report_path.clone(),
+        local_driver,
+        remote_driver,
+        ctx.tx.clone(),
+        cancel_rx,
+    ));
+
+    let mut state_guard = ctx.state.lock().await;
+    state_guard.job_store.jobs.insert(
+        job_id.clone(),
+        AppJob {
+            job_id,
+            kind: JobKind::SyncBro(SyncBroJobMeta {
+                local_panel: local_panel.clone(),
+                remote_panel: remote_panel.clone(),
+                local_root: local_root.clone(),
+                remote_root: remote_root.clone(),
+                report_path,
+            }),
+            source_panel: local_panel,
+            dest_panel: Some(remote_panel),
+            source_path: local_root,
+            dest_path: Some(remote_root),
+            state: JobState::Running,
+            progress: FileOpProgress::default(),
+            decision: None,
+            error: None,
+            background: false,
+            paused: false,
+            handle: Some(handle),
+            cancel_tx,
+            pause_tx,
+            keep_partial_files_on_cancel: Arc::new(AtomicBool::new(false)),
+        },
+    );
 
     Ok(())
 }

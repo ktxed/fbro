@@ -20,7 +20,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::sync::{atomic::AtomicBool, Arc};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use base64::Engine as _;
@@ -868,6 +868,7 @@ async fn start_outgoing_transfer(state: &SharedState, peer_fp: &str) -> Option<O
                 handle: None,
                 cancel_tx,
                 pause_tx,
+                keep_partial_files_on_cancel: Arc::new(AtomicBool::new(false)),
             },
         );
         (job_id, cancel_rx, guard.gui_senders.clone(), peer_label)

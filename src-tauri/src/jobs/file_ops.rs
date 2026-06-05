@@ -1,6 +1,9 @@
 use std::io::{Read, Write};
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, watch};
 
@@ -91,6 +94,7 @@ pub async fn run_file_op(
     verification_policy: VerificationPolicy,
     save_digest_file: bool,
     auto_resume_copies: bool,
+    keep_partial_files_on_cancel: Arc<AtomicBool>,
 ) {
     let job_id_clone = job_id.clone();
     let tx_clone = tx.clone();
@@ -112,6 +116,7 @@ pub async fn run_file_op(
             &verification_policy,
             save_digest_file,
             auto_resume_copies,
+            keep_partial_files_on_cancel,
         )
     })
     .await;
@@ -180,6 +185,7 @@ fn run_file_op_blocking(
     verification_policy: &VerificationPolicy,
     save_digest_file: bool,
     auto_resume_copies: bool,
+    keep_partial_files_on_cancel: Arc<AtomicBool>,
 ) -> Result<(), String> {
     // Totals grow as directories are discovered (no pre-scan — VFS may be remote)
     let mut total_files = 0usize;
@@ -272,6 +278,7 @@ fn run_file_op_blocking(
                         verification_policy,
                         save_digest_file,
                         auto_resume_copies,
+                        Arc::clone(&keep_partial_files_on_cancel),
                     )?;
                 } else {
                     let mut resume_requested = false;
@@ -339,6 +346,7 @@ fn run_file_op_blocking(
                         save_digest_file,
                         auto_resume_copies,
                         resume_requested,
+                        Arc::clone(&keep_partial_files_on_cancel),
                     )?;
 
                     if copied && preserve_attributes && dst_drv.is_local() {
@@ -584,6 +592,7 @@ fn copy_file_with_progress(
     save_digest_file: bool,
     auto_resume_copies: bool,
     resume_requested: bool,
+    keep_partial_files_on_cancel: Arc<AtomicBool>,
 ) -> Result<bool, String> {
     let src_name = Path::new(src)
         .file_name()
@@ -611,6 +620,7 @@ fn copy_file_with_progress(
             &src_name,
             save_digest_file,
             resume_next_attempt,
+            Arc::clone(&keep_partial_files_on_cancel),
         ) {
             Ok(()) => return Ok(true),
             Err(CopyFileError::Fatal(e)) => return Err(e),
@@ -692,6 +702,7 @@ fn copy_file_once_with_progress(
     src_name: &str,
     save_digest_file: bool,
     resume_requested: bool,
+    keep_partial_files_on_cancel: Arc<AtomicBool>,
 ) -> Result<(), CopyFileError> {
     let file_size = if total_bytes > 0 {
         total_bytes
@@ -732,6 +743,18 @@ fn copy_file_once_with_progress(
             .map_err(|e| CopyFileError::Fatal(format!("Cannot open {src}: {e}")))?
     };
 
+    if resume_offset == 0 {
+        if let Some(parent) = dst_driver.parent_path(dst) {
+            if !parent.is_empty() {
+                dst_driver.create_dir_all(&parent).map_err(|e| {
+                    CopyFileError::Fatal(format!(
+                        "Cannot create destination directory {parent}: {e}"
+                    ))
+                })?;
+            }
+        }
+    }
+
     let mut writer = if resume_offset > 0 {
         dst_driver.open_write_at(dst, resume_offset).map_err(|e| {
             CopyFileError::Fatal(format!(
@@ -752,7 +775,7 @@ fn copy_file_once_with_progress(
     loop {
         if wait_if_paused(pause_rx, cancel_rx) {
             drop(writer);
-            if resume_offset == 0 {
+            if resume_offset == 0 && !keep_partial_files_on_cancel.load(Ordering::Relaxed) {
                 let _ = dst_driver.remove_file(dst);
             }
             return Err(CopyFileError::Fatal(CANCELLED_ERR.to_string()));
@@ -1004,6 +1027,7 @@ fn copy_dir_recursive(
     verification_policy: &VerificationPolicy,
     save_digest_file: bool,
     auto_resume_copies: bool,
+    keep_partial_files_on_cancel: Arc<AtomicBool>,
 ) -> Result<(), String> {
     dst_driver
         .create_dir_all(dst)
@@ -1055,6 +1079,7 @@ fn copy_dir_recursive(
                 verification_policy,
                 save_digest_file,
                 auto_resume_copies,
+                Arc::clone(&keep_partial_files_on_cancel),
             )?;
         } else {
             let mut resume_requested = false;
@@ -1116,6 +1141,7 @@ fn copy_dir_recursive(
                 save_digest_file,
                 auto_resume_copies,
                 resume_requested,
+                Arc::clone(&keep_partial_files_on_cancel),
             )?;
 
             if copied && preserve_attributes && dst_driver.is_local() {
@@ -1607,6 +1633,7 @@ mod tests {
             false,
             true,
             false,
+            Arc::new(AtomicBool::new(false)),
         )
         .unwrap();
 
@@ -1649,6 +1676,7 @@ mod tests {
             false,
             true,
             true,
+            Arc::new(AtomicBool::new(false)),
         )
         .unwrap();
 
@@ -1691,6 +1719,7 @@ mod tests {
             false,
             true,
             true,
+            Arc::new(AtomicBool::new(false)),
         )
         .unwrap_err();
 
@@ -1698,5 +1727,73 @@ mod tests {
         assert!(dst.exists());
         assert_eq!(fs::metadata(&dst).unwrap().len(), 512 * 1024);
         assert_eq!(fs::read(dst).unwrap(), data[..512 * 1024]);
+    }
+
+    #[test]
+    fn cancelling_fresh_copy_honors_keep_partial_choice() {
+        let dir = TestDir::new("cancel-keep-partial");
+        let src = dir.path.join("source.bin");
+        let dst_delete = dir.path.join("dest-delete.bin");
+        let dst_keep = dir.path.join("dest-keep.bin");
+        let data = bytes(1024);
+        fs::write(&src, &data).unwrap();
+
+        let src_driver = FlakyReadDriver::new(None);
+        let dst_driver = crate::vfs::local::LocalFsDriver;
+        let (tx, _rx) = mpsc::channel(64);
+        let (_cancel_tx, cancel_rx) = watch::channel(true);
+        let (_pause_tx, pause_rx) = watch::channel(false);
+        let (_decision_tx, mut decision_rx) = mpsc::channel(1);
+
+        let err = copy_file_with_progress(
+            "job-test",
+            &src.to_string_lossy(),
+            &dst_delete.to_string_lossy(),
+            data.len() as u64,
+            &tx,
+            &cancel_rx,
+            &pause_rx,
+            1,
+            0,
+            data.len() as u64,
+            0,
+            &src_driver,
+            &dst_driver,
+            &mut decision_rx,
+            &VerificationPolicy::Fail,
+            false,
+            true,
+            false,
+            Arc::new(AtomicBool::new(false)),
+        )
+        .unwrap_err();
+        assert_eq!(err, CANCELLED_ERR);
+        assert!(!dst_delete.exists());
+
+        let (_decision_tx, mut decision_rx) = mpsc::channel(1);
+        let err = copy_file_with_progress(
+            "job-test",
+            &src.to_string_lossy(),
+            &dst_keep.to_string_lossy(),
+            data.len() as u64,
+            &tx,
+            &cancel_rx,
+            &pause_rx,
+            1,
+            0,
+            data.len() as u64,
+            0,
+            &src_driver,
+            &dst_driver,
+            &mut decision_rx,
+            &VerificationPolicy::Fail,
+            false,
+            true,
+            false,
+            Arc::new(AtomicBool::new(true)),
+        )
+        .unwrap_err();
+        assert_eq!(err, CANCELLED_ERR);
+        assert!(dst_keep.exists());
     }
 }

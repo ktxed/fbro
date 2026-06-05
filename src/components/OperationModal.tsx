@@ -1,8 +1,8 @@
 import { useState, useRef, useEffect } from "react";
 import type { WsClient } from "../ws/client";
-import type { PendingOp, Job, ConflictPolicy, VerificationPolicy } from "../ws/types";
+import type { PendingOp, Job, ConflictPolicy, VerificationPolicy, FileOpFile } from "../ws/types";
 import { useAppDispatch, useAppState } from "../store";
-import type { PendingDryRun } from "../store";
+import type { AppState, PendingDryRun } from "../store";
 import { isArchiveSourceId } from "../utils/sourceId";
 import { IconCopy } from "@tabler/icons-react";
 
@@ -34,6 +34,14 @@ function opLabel(t: string) {
     case "delete": return "Delete";
     case "outgoing": return "Outgoing transfer";
     default: return t;
+  }
+}
+
+function decisionLabel(decision: string) {
+  switch (decision) {
+    case "copyRemote": return "Copy Remote Files";
+    case "report": return "Generate Report";
+    default: return decision.charAt(0).toUpperCase() + decision.slice(1);
   }
 }
 
@@ -74,42 +82,135 @@ function formatEta(remainingBytes: number, bytesPerSec: number): string {
   return `${Math.floor(secs / 3600)}h ${Math.floor((secs % 3600) / 60)}m`;
 }
 
-const LARGE_FILE_THRESHOLD = 1024 * 1024; // 1 MiB — show speed only above this
+const SPEED_DISPLAY_THRESHOLD = 1024 * 1024; // 1 MiB — show speed only above this
+const LARGE_CANCEL_THRESHOLD = 1024 * 1024 * 1024; // 1 GiB
+const SPEED_SAMPLE_MIN_INTERVAL_MS = 500;
+const SPEED_SAMPLE_MAX_COUNT = 120;
+const SPEED_GRAPH_WIDTH = 280;
+const SPEED_GRAPH_HEIGHT = 56;
+const SPEED_GRAPH_PADDING = 4;
+const SPEED_GRAPH_RIGHT = SPEED_GRAPH_WIDTH - SPEED_GRAPH_PADDING;
+const SPEED_GRAPH_BOTTOM = SPEED_GRAPH_HEIGHT - SPEED_GRAPH_PADDING;
 
-function useTransferSpeed(currentFile: string | undefined, bytesCopied: number) {
-  const sampleRef = useRef<{ file: string; bytes: number; time: number; speed: number | null } | null>(null);
+function useJobTransferSpeed(jobId: string | null, bytesCopied: number, terminal: boolean) {
+  const sampleRef = useRef<{ jobId: string; bytes: number; time: number; speed: number | null } | null>(null);
   const [speed, setSpeed] = useState<number | null>(null);
+  const [samples, setSamples] = useState<number[]>([]);
 
   useEffect(() => {
-    if (!currentFile) {
+    if (!jobId || terminal) {
       sampleRef.current = null;
       setSpeed(null);
+      setSamples([]);
       return;
     }
 
     const now = Date.now();
     const prev = sampleRef.current;
 
-    if (!prev || prev.file !== currentFile) {
-      sampleRef.current = { file: currentFile, bytes: bytesCopied, time: now, speed: null };
+    if (!prev || prev.jobId !== jobId || bytesCopied < prev.bytes) {
+      sampleRef.current = { jobId, bytes: bytesCopied, time: now, speed: null };
       setSpeed(null);
+      setSamples([]);
       return;
     }
 
     const deltaBytes = bytesCopied - prev.bytes;
-    const deltaSec = (now - prev.time) / 1000;
+    const deltaMs = now - prev.time;
+    const deltaSec = deltaMs / 1000;
 
-    if (deltaSec >= 0.5 && deltaBytes > 0) {
+    if (deltaMs >= SPEED_SAMPLE_MIN_INTERVAL_MS && deltaBytes > 0) {
       const instantSpeed = deltaBytes / deltaSec;
       const smoothedSpeed = prev.speed == null
         ? instantSpeed
         : (prev.speed * 0.7) + (instantSpeed * 0.3);
       setSpeed(smoothedSpeed);
-      sampleRef.current = { file: currentFile, bytes: bytesCopied, time: now, speed: smoothedSpeed };
+      setSamples((current) => [...current.slice(-(SPEED_SAMPLE_MAX_COUNT - 1)), smoothedSpeed]);
+      sampleRef.current = { jobId, bytes: bytesCopied, time: now, speed: smoothedSpeed };
     }
-  }, [bytesCopied, currentFile]);
+  }, [bytesCopied, jobId, terminal]);
 
-  return speed;
+  return { speed, samples };
+}
+
+function movingAverage3(samples: number[]) {
+  return samples.map((_, index) => {
+    const start = Math.max(0, index - 2);
+    const window = samples.slice(start, index + 1);
+    return window.reduce((sum, value) => sum + value, 0) / window.length;
+  });
+}
+
+function speedGraphData(samples: number[]) {
+  if (samples.length < 2) return null;
+  const averaged = movingAverage3(samples);
+  let minSpeed = Math.min(...averaged);
+  let maxSpeed = Math.max(...averaged);
+  if (maxSpeed <= 0) return null;
+
+  const span = maxSpeed - minSpeed;
+  const minUsefulSpan = Math.max(maxSpeed * 0.12, 1024);
+  if (span < minUsefulSpan) {
+    const center = averaged[averaged.length - 1] || maxSpeed;
+    minSpeed = Math.max(0, center - (minUsefulSpan / 2));
+    maxSpeed = center + (minUsefulSpan / 2);
+  }
+
+  const domain = Math.max(maxSpeed - minSpeed, 1);
+  const usableWidth = SPEED_GRAPH_RIGHT - SPEED_GRAPH_PADDING;
+  const usableHeight = SPEED_GRAPH_HEIGHT - (SPEED_GRAPH_PADDING * 2);
+  const points = averaged.map((sample, index) => {
+    const x = SPEED_GRAPH_PADDING + (index / (samples.length - 1)) * usableWidth;
+    const normalized = Math.max(0, Math.min(1, (sample - minSpeed) / domain));
+    const y = SPEED_GRAPH_PADDING + usableHeight - (normalized * usableHeight);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(" ");
+  return {
+    points,
+    areaPoints: `${SPEED_GRAPH_PADDING},${SPEED_GRAPH_BOTTOM} ${points} ${SPEED_GRAPH_RIGHT},${SPEED_GRAPH_BOTTOM}`,
+    minSpeed,
+    midSpeed: minSpeed + (domain / 2),
+    maxSpeed,
+  };
+}
+
+function hasPartialDestinationFile(destPanelState: AppState["panels"][string] | undefined, file: FileOpFile) {
+  if (!destPanelState || file.kind === "directory" || file.size === undefined || file.size === null) {
+    return false;
+  }
+  const destEntry = destPanelState.entries.find((entry) => entry.name === file.name);
+  return destEntry?.kind === "file"
+    && typeof destEntry.size === "number"
+    && destEntry.size > 0
+    && destEntry.size < file.size;
+}
+
+function canSuggestResumeForPending(state: AppState, pending: PendingOp) {
+  const destPanelState = pending.destPanel ? state.panels[pending.destPanel] : undefined;
+  return pending.opType !== "delete"
+    && !!destPanelState
+    && (!pending.destPath || pending.destPath === destPanelState.path)
+    && pending.files.some((file) => hasPartialDestinationFile(destPanelState, file));
+}
+
+function shouldDefaultResumeForPending(state: AppState, pending: PendingOp) {
+  if (pending.opType !== "copy" || pending.files.length !== 1) return false;
+  const sourcePanelState = state.panels[pending.sourcePanel];
+  const destPanelState = pending.destPanel ? state.panels[pending.destPanel] : undefined;
+  const source = sourcePanelState ? state.sources[sourcePanelState.sourceId] : undefined;
+  const dest = destPanelState ? state.sources[destPanelState.sourceId] : undefined;
+  return source?.kind === "remote"
+    && dest?.kind === "filesystem"
+    && (!pending.destPath || pending.destPath === destPanelState?.path)
+    && hasPartialDestinationFile(destPanelState, pending.files[0]);
+}
+
+function pendingSessionKey(pending: PendingOp | null) {
+  if (!pending) return "none";
+  const filesKey = pending.files
+    .map((file) => `${file.name}:${file.kind}:${file.size ?? ""}:${file.sourcePath ?? ""}`)
+    .join("|");
+  return `${pending.opType}:${pending.sourcePanel}:${pending.destPanel ?? ""}:${pending.destPath ?? ""}:${filesKey}`;
 }
 
 export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun, panelIds, client }: OperationModalProps) {
@@ -122,9 +223,12 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
   const [dryMode, setDryMode] = useState(false);
   const [startPaused, setStartPaused] = useState(true);
   const [applyToAll, setApplyToAll] = useState(false);
+  const [confirmingCancel, setConfirmingCancel] = useState(false);
   const modalRef = useRef<HTMLDivElement>(null);
   const p = activeJob?.progress;
-  const speed = useTransferSpeed(p?.currentFile, p?.currentFileBytesCopied ?? 0);
+  const isTransferTerminal = activeJob?.state === "Completed" || activeJob?.state === "Cancelled" || activeJob?.state === "Failed";
+  const { speed, samples: speedSamples } = useJobTransferSpeed(activeJobId, p?.totalBytesCopied ?? 0, isTransferTerminal);
+  const pendingKey = pendingSessionKey(pending);
 
   const close = () => { setSubmitted(false); setDryMode(false); dispatch({ type: "CLOSE_OPERATION" }); };
   const closeDryRun = () => { setSubmitted(false); setDryMode(false); dispatch({ type: "CLOSE_DRY_RUN" }); };
@@ -150,6 +254,15 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
       setApplyToAll(false);
     }
   }, [activeJob?.state, activeJob?.decision?.destination]);
+
+  useEffect(() => {
+    setConfirmingCancel(false);
+  }, [activeJobId, activeJob?.state]);
+
+  useEffect(() => {
+    if (!pending) return;
+    setConflictPolicy(shouldDefaultResumeForPending(state, pending) ? "resume" : pending.conflictPolicy);
+  }, [pendingKey]);
 
   // Nothing to show
   if (!pendingDryRun && !pending && !activeJob) return null;
@@ -199,21 +312,10 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
     const fileCount = pending.files.length;
     const isDelete = pending.opType === "delete";
     const sourcePanelState = state.panels[pending.sourcePanel];
-    const destPanelState = pending.destPanel ? state.panels[pending.destPanel] : undefined;
     const isArchiveSource = !!sourcePanelState?.shadowSource && isArchiveSourceId(sourcePanelState.sourceId);
     const label = isArchiveSource && pending.opType === "copy" ? "Extract" : opLabel(pending.opType);
     const canStartInBackground = !dryMode;
-    const canSuggestResume = !isDelete
-      && !!destPanelState
-      && (!pending.destPath || pending.destPath === destPanelState.path)
-      && pending.files.some((file) => {
-        if (file.kind === "directory" || file.size === undefined || file.size === null) return false;
-        const destEntry = destPanelState.entries.find((entry) => entry.name === file.name);
-        return destEntry?.kind === "file"
-          && typeof destEntry.size === "number"
-          && destEntry.size > 0
-          && destEntry.size < file.size;
-      });
+    const canSuggestResume = canSuggestResumeForPending(state, pending);
     const conflictPolicies: ConflictPolicy[] = canSuggestResume
       ? ["ask", "resume", "overwrite", "skip"]
       : ["ask", "overwrite", "skip"];
@@ -392,8 +494,13 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
     const isDecision = activeJob.state === "AwaitingDecision";
     const isQueued = activeJob.state === "Queued";
     const isProgress = activeJob.state === "Running";
-    const isFpBro = activeJob.kind === "fp-bro";
+    const isBroResult = activeJob.kind === "fp-bro" || activeJob.kind === "sync-bro";
     const isOutgoing = activeJob.kind === "outgoing-transfer";
+    const activeSourcePanel = state.panels[activeJob.sourcePanel];
+    const activeSource = activeSourcePanel ? state.sources[activeSourcePanel.sourceId] : undefined;
+    const isRemoteCopy = activeJob.kind === "file-op"
+      && activeJob.type === "copy"
+      && activeSource?.kind === "remote";
     const label = isOutgoing && activeJobId
       ? `Outgoing ${jobShortId(activeJobId)}`
       : opLabel(activeJob.type);
@@ -419,6 +526,14 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
           : 0
       );
     const currentProgressLabel = p?.statusText ?? p?.currentFile ?? "Waiting";
+    const totalFileCount = p && p.totalFiles > 0 ? p.totalFiles : activeJob.files.length;
+    const showOverallProgress = totalFileCount > 1;
+    const shouldConfirmCancel = (isQueued || isProgress)
+      && (isRemoteCopy || (p?.currentFileBytesTotal ?? 0) > LARGE_CANCEL_THRESHOLD);
+    const graph = speedGraphData(speedSamples);
+    const showSpeedGraph = !!graph
+      && speed !== null
+      && (p?.totalBytesTotal ?? 0) >= SPEED_DISPLAY_THRESHOLD;
 
     const submitDecision = (decision: string) => {
       if (!activeJobId) return;
@@ -430,10 +545,19 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
       setApplyToAll(false);
     };
 
-    const cancelJob = () => {
+    const cancelJob = (keepPartialFiles = false) => {
       if (!activeJobId) return;
-      client.sendIntent("CancelJob", undefined, { jobId: activeJobId });
+      client.sendIntent("CancelJob", undefined, { jobId: activeJobId, keepPartialFiles });
       setApplyToAll(false);
+      setConfirmingCancel(false);
+    };
+
+    const requestCancelJob = () => {
+      if (shouldConfirmCancel) {
+        setConfirmingCancel(true);
+        return;
+      }
+      cancelJob();
     };
 
     const resumeJob = () => {
@@ -488,6 +612,14 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
         }
       }
       if (isQueued || isProgress) {
+        if (confirmingCancel) {
+          if (e.key === "Escape" || e.key === "Enter") {
+            e.preventDefault();
+            setConfirmingCancel(false);
+            return;
+          }
+          return;
+        }
         if (e.key === "Enter") {
           e.preventDefault();
           close();
@@ -495,7 +627,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
         }
         if (e.key === "Escape") {
           e.preventDefault();
-          cancelJob();
+          requestCancelJob();
           return;
         }
         if ((e.key === "r" || e.key === "R") && activeJob.supportsPause && activeJob.paused) {
@@ -524,7 +656,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
                   <span className="modal__job-param-label">To:</span>
                   <span className="modal__job-param-value">Remote fbro destination unavailable</span>
                 </>
-              ) : isFpBro ? (
+              ) : isBroResult ? (
                 <>
                   <span className="modal__job-param-label">Inputs:</span>
                   <span className="modal__job-param-value" title={activeJob.sourcePath}>{activeJob.sourcePath}</span>
@@ -548,10 +680,84 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
                 </>
               )}
             </div>
+            {showSpeedGraph && (
+              <div className="modal__speed-graph" aria-label="Transfer speed graph">
+                <div className="modal__speed-graph-frame">
+                  <svg
+                    className="modal__speed-graph-svg"
+                    viewBox={`0 0 ${SPEED_GRAPH_WIDTH} ${SPEED_GRAPH_HEIGHT}`}
+                    preserveAspectRatio="none"
+                    aria-hidden="true"
+                  >
+                    <line
+                      className="modal__speed-graph-grid"
+                      x1={SPEED_GRAPH_PADDING}
+                      y1={SPEED_GRAPH_PADDING}
+                      x2={SPEED_GRAPH_RIGHT}
+                      y2={SPEED_GRAPH_PADDING}
+                    />
+                    <line
+                      className="modal__speed-graph-grid"
+                      x1={SPEED_GRAPH_PADDING}
+                      y1={SPEED_GRAPH_HEIGHT / 2}
+                      x2={SPEED_GRAPH_RIGHT}
+                      y2={SPEED_GRAPH_HEIGHT / 2}
+                    />
+                    <line
+                      className="modal__speed-graph-grid"
+                      x1={SPEED_GRAPH_PADDING}
+                      y1={SPEED_GRAPH_BOTTOM}
+                      x2={SPEED_GRAPH_RIGHT}
+                      y2={SPEED_GRAPH_BOTTOM}
+                    />
+                    <line
+                      className="modal__speed-graph-axis"
+                      x1={SPEED_GRAPH_RIGHT}
+                      y1={SPEED_GRAPH_PADDING}
+                      x2={SPEED_GRAPH_RIGHT}
+                      y2={SPEED_GRAPH_BOTTOM}
+                    />
+                    <polygon className="modal__speed-graph-fill" points={graph.areaPoints} />
+                    <polyline className="modal__speed-graph-line" points={graph.points} />
+                  </svg>
+                  <div className="modal__speed-graph-scale-panel" aria-hidden="true">
+                    <span>{formatSpeed(graph.maxSpeed)}</span>
+                    <span>{formatSpeed(graph.midSpeed)}</span>
+                    <span>{formatSpeed(graph.minSpeed)}</span>
+                  </div>
+                </div>
+                <div className="modal__speed-graph-meta">
+                  <span className="modal__progress-speed">{formatSpeed(speed)}</span>
+                  {p && p.totalBytesTotal > p.totalBytesCopied && (
+                    <span>ETA {formatEta(p.totalBytesTotal - p.totalBytesCopied, speed)}</span>
+                  )}
+                </div>
+              </div>
+            )}
             {isOutgoing && (
               <p className="modal__summary">
                 The external destination is controlled by the remote fbro and is not available here.
               </p>
+            )}
+            {confirmingCancel && (
+              <div className="modal__cancel-confirm" role="alertdialog" aria-label="Confirm cancel transfer">
+                <p className="modal__cancel-title">Cancel this transfer?</p>
+                {isRemoteCopy ? (
+                  <p className="modal__summary">
+                    This is a remote copy. Choose whether partially copied destination files should be kept for resuming later or deleted.
+                  </p>
+                ) : (
+                  <p className="modal__summary">
+                    {p?.currentFile ? <strong>{p.currentFile}</strong> : "The current file"} is larger than 1 GiB.
+                    Cancelling will stop the active job.
+                  </p>
+                )}
+                {p && p.currentFileBytesTotal > 0 && (
+                  <p className="modal__cancel-detail">
+                    {formatBytes(p.currentFileBytesCopied)} of {formatBytes(p.currentFileBytesTotal)} copied for the current file.
+                  </p>
+                )}
+              </div>
             )}
             {/* Decision required */}
             {isDecision && activeJob.decision && (
@@ -582,10 +788,10 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
                       onClick={() => submitDecision(opt)}
                     >
                       {opt === primaryDecision
-                        ? opt.charAt(0).toUpperCase() + opt.slice(1)
+                        ? decisionLabel(opt)
                         : opt === skipDecision
-                          ? <MnemonicLabel text={opt.charAt(0).toUpperCase() + opt.slice(1)} mnemonic="s" />
-                          : opt.charAt(0).toUpperCase() + opt.slice(1)}
+                          ? <MnemonicLabel text={decisionLabel(opt)} mnemonic="s" />
+                          : decisionLabel(opt)}
                     </button>
                   ))}
                 </div>
@@ -614,36 +820,30 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
                     {p.currentFileBytesTotal > 0 ? (
                       <>
                         {filePercent}% ({formatBytes(p.currentFileBytesCopied)} / {formatBytes(p.currentFileBytesTotal)})
-                        {speed !== null && p.currentFileBytesTotal >= LARGE_FILE_THRESHOLD && (
-                          <span className="modal__progress-speed">
-                            {" — "}{formatSpeed(speed)}
-                            {p.currentFileBytesTotal > p.currentFileBytesCopied && (
-                              <> · ETA {formatEta(p.currentFileBytesTotal - p.currentFileBytesCopied, speed)}</>
-                            )}
-                          </span>
-                        )}
                       </>
                     ) : p.currentFilePercent !== undefined ? `${filePercent}%` : currentProgressLabel}
                   </span>
                 </div>
 
                 {/* Job-wide progress */}
-                <div className="modal__progress-section">
-                  <span className="modal__progress-label">Overall</span>
-                  <div className="modal__progress-bar">
-                    <div
-                      className="modal__progress-fill"
-                      style={{ width: `${jobPercent}%` }}
-                    />
+                {showOverallProgress && (
+                  <div className="modal__progress-section">
+                    <span className="modal__progress-label">Overall</span>
+                    <div className="modal__progress-bar">
+                      <div
+                        className="modal__progress-fill"
+                        style={{ width: `${jobPercent}%` }}
+                      />
+                    </div>
+                    <span className="modal__progress-text">
+                      {p.totalBytesTotal > 0
+                        ? `${formatBytes(p.totalBytesCopied)} / ${formatBytes(p.totalBytesTotal)}`
+                        : p.overallPercent !== undefined
+                          ? `${jobPercent}%`
+                          : `${p.completedFiles + (p.currentFile ? 1 : 0)} / ${p.totalFiles} files`}
+                    </span>
                   </div>
-                  <span className="modal__progress-text">
-                    {p.totalBytesTotal > 0
-                      ? `${formatBytes(p.totalBytesCopied)} / ${formatBytes(p.totalBytesTotal)}`
-                      : p.overallPercent !== undefined
-                        ? `${jobPercent}%`
-                        : `${p.completedFiles + (p.currentFile ? 1 : 0)} / ${p.totalFiles} files`}
-                  </span>
-                </div>
+                )}
               </div>
             )}
 
@@ -670,11 +870,11 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
             {isTerminal && (
               <>
                 <p className="modal__terminal">
-                  {activeJob.state === "Completed" && (isOutgoing ? "Outgoing transfer completed." : isFpBro ? "Bro completed successfully." : "Operation completed successfully.")}
-                  {activeJob.state === "Cancelled" && (isOutgoing ? "Outgoing transfer was cancelled." : isFpBro ? "Bro job was cancelled." : "Operation was cancelled.")}
-                  {activeJob.state === "Failed" && (isOutgoing ? `Outgoing transfer failed: ${activeJob.error ?? "unknown error"}` : isFpBro ? `Bro failed: ${activeJob.error ?? "unknown error"}` : `Operation failed: ${activeJob.error ?? "unknown error"}`)}
+                  {activeJob.state === "Completed" && (isOutgoing ? "Outgoing transfer completed." : isBroResult ? "Bro completed successfully." : "Operation completed successfully.")}
+                  {activeJob.state === "Cancelled" && (isOutgoing ? "Outgoing transfer was cancelled." : isBroResult ? "Bro job was cancelled." : "Operation was cancelled.")}
+                  {activeJob.state === "Failed" && (isOutgoing ? `Outgoing transfer failed: ${activeJob.error ?? "unknown error"}` : isBroResult ? `Bro failed: ${activeJob.error ?? "unknown error"}` : `Operation failed: ${activeJob.error ?? "unknown error"}`)}
                 </p>
-                {isFpBro && activeJob.state === "Completed" && activeJob.resultPath && (
+                {isBroResult && activeJob.state === "Completed" && activeJob.resultPath && (
                   <div className="modal__job-params">
                     <span className="modal__job-param-label">Output:</span>
                     <button
@@ -693,7 +893,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
             )}
           </div>
           <div className="modal__actions">
-            {(isQueued || isProgress) && (
+            {(isQueued || isProgress) && !confirmingCancel && (
               <>
                 <button className="modal__btn modal__btn--primary" data-command-id="job.background" onClick={close}>
                   Background
@@ -707,24 +907,24 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
                     Pause
                   </button>
                 ) : null}
-                <button className="modal__btn" data-command-id="job.cancel" onClick={cancelJob}>
+                <button className="modal__btn" data-command-id="job.cancel" onClick={requestCancelJob}>
                   Cancel
                 </button>
               </>
             )}
             {isDecision && (
-              <button className="modal__btn" data-command-id="job.cancel" onClick={cancelJob}>
+              <button className="modal__btn" data-command-id="job.cancel" onClick={() => cancelJob()}>
                 Cancel
               </button>
             )}
             {isTerminal && (
               <>
-                {isFpBro && activeJob.state === "Completed" && activeJob.resultPath && (
+                {isBroResult && activeJob.state === "Completed" && activeJob.resultPath && (
                   <button className="modal__btn" data-command-id="job.show-result" onClick={showResult}>
                     Show Result
                   </button>
                 )}
-                {isFpBro && activeJob.resultPath && (
+                {isBroResult && activeJob.resultPath && (
                   <button className="modal__btn" data-command-id="job.copy-path" onClick={() => navigator.clipboard.writeText(activeJob.resultPath!)}>
                     Copy Path
                   </button>
@@ -735,6 +935,27 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
                 }}>
                   Close
                 </button>
+              </>
+            )}
+            {confirmingCancel && (
+              <>
+                <button className="modal__btn modal__btn--primary" data-command-id="job.keep-running" onClick={() => setConfirmingCancel(false)}>
+                  Keep Running
+                </button>
+                {isRemoteCopy ? (
+                  <>
+                    <button className="modal__btn" data-command-id="job.cancel.delete-partials" onClick={() => cancelJob(false)}>
+                      Delete Partials
+                    </button>
+                    <button className="modal__btn" data-command-id="job.cancel.keep-partials" onClick={() => cancelJob(true)}>
+                      Keep Partials
+                    </button>
+                  </>
+                ) : (
+                  <button className="modal__btn" data-command-id="job.cancel.confirm" onClick={() => cancelJob()}>
+                    Cancel Transfer
+                  </button>
+                )}
               </>
             )}
           </div>

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useAppState, useAppDispatch } from "../store";
 import type { WsClient } from "../ws/client";
 import { IconChevronLeft, IconChevronRight, IconX } from "@tabler/icons-react";
+import { cancelJobWithPartialPrompt } from "../utils/jobCancel";
 
 const VISIBLE = 5;
 
@@ -59,6 +60,8 @@ export function JobsBar({ client }: { client: WsClient }) {
           ? "Search"
           : job.kind === "outgoing-transfer"
           ? `Outgoing ${jobShortId(job.jobId)}`
+          : job.kind === "sync-bro"
+          ? "Sync Bro"
           : job.type.charAt(0).toUpperCase() + job.type.slice(1);
         const searchPct = job.kind === "search" && job.searchMatched !== undefined
           ? `${job.searchMatched} hits`
@@ -83,7 +86,7 @@ export function JobsBar({ client }: { client: WsClient }) {
                 if (job.kind === "search" && job.state !== "Running" && job.state !== "Queued") {
                   client.sendIntent("RemoveSearchSource", undefined, { sourceId: job.searchSourceId });
                 } else {
-                  client.sendIntent("CancelJob", undefined, { jobId: job.jobId });
+                  cancelJobWithPartialPrompt(client, state, job);
                 }
               }}
               >

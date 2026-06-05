@@ -1,5 +1,5 @@
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{atomic::AtomicBool, Arc};
 
 use serde_json::Value;
 use tokio::sync::{mpsc, watch, Mutex};
@@ -128,12 +128,14 @@ impl JobDecisionArgs {
 
 struct JobIdArgs {
     job_id: String,
+    keep_partial_files: bool,
 }
 
 impl JobIdArgs {
     fn from_args(args: &Value) -> Self {
         Self {
             job_id: arg_str(args, "jobId").unwrap_or("").to_string(),
+            keep_partial_files: arg_bool(args, "keepPartialFiles", false),
         }
     }
 }
@@ -904,6 +906,7 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
     let (cancel_tx, cancel_rx) = watch::channel(false);
     let (pause_tx, pause_rx) = watch::channel(parsed.start_paused);
     let (decision_tx, decision_rx) = mpsc::channel::<DecisionResponse>(4);
+    let keep_partial_files_on_cancel = Arc::new(AtomicBool::new(false));
 
     let (job_id, preserve_attributes, auto_resume_copies) = {
         let mut state_guard = ctx.state.lock().await;
@@ -961,6 +964,7 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
     let conflict_policy_spawn = conflict_policy.clone();
     let verification_policy_spawn = verification_policy.clone();
     let save_digest_file_spawn = parsed.save_digest_file;
+    let keep_partial_files_on_cancel_spawn = Arc::clone(&keep_partial_files_on_cancel);
 
     let handle = tokio::spawn(async move {
         run_file_op(
@@ -979,6 +983,7 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
             verification_policy_spawn,
             save_digest_file_spawn,
             auto_resume_copies,
+            keep_partial_files_on_cancel_spawn,
         )
         .await;
 
@@ -1022,6 +1027,7 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
                 handle: Some(handle),
                 cancel_tx,
                 pause_tx,
+                keep_partial_files_on_cancel,
             },
         );
     }
@@ -1102,6 +1108,7 @@ async fn cancel_job(args: &Value, ctx: &mut IntentContext<'_>) {
         }
 
         if let Some(job) = state_guard.job_store.jobs.get_mut(&parsed.job_id) {
+            job.set_keep_partial_files_on_cancel(parsed.keep_partial_files);
             match &job.kind {
                 JobKind::FpBro(_)
                     if job.state == JobState::Queued || job.state == JobState::AwaitingDecision =>
@@ -1766,6 +1773,7 @@ async fn start_search(args: &Value, ctx: &mut IntentContext<'_>) {
             handle: None,
             cancel_tx,
             pause_tx: watch::channel(false).0,
+            keep_partial_files_on_cancel: Arc::new(AtomicBool::new(false)),
         };
         state.job_store.jobs.insert(job_id.clone(), job);
 

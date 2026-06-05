@@ -194,13 +194,15 @@ export interface SearchProgress {
 
 export interface Job {
   jobId: string;
-  kind: "file-op" | "fp-bro" | "search" | "outgoing-transfer";
+  kind: "file-op" | "fp-bro" | "search" | "outgoing-transfer" | "sync-bro";
   type: string;
   state: "Queued" | "Running" | "AwaitingDecision" | "Completed" | "Cancelled" | "Failed";
   paused: boolean;
   supportsPause: boolean;
   startedAt: number;
+  sourcePanel: string;
   sourcePath: string;
+  destPanel?: string;
   destPath?: string;
   resultPath?: string;
   resultPanelId?: string;
@@ -322,7 +324,7 @@ export interface BroItem {
 
 export interface JobStart {
   jobId: string;
-  kind: "file-op" | "fp-bro" | "search" | "outgoing-transfer";
+  kind: "file-op" | "fp-bro" | "search" | "outgoing-transfer" | "sync-bro";
   opType: string;
   files: FileOpFile[];
   sourcePanel: string;

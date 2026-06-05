@@ -3,6 +3,7 @@ import { useAppState } from "../store";
 import type { ChildProcess, DirSizeTask, FileOpProgress, Job, PrefetchCacheStatus } from "../ws/types";
 import type { WsClient } from "../ws/client";
 import { IconPlayerPlay, IconPlayerPause, IconX } from "@tabler/icons-react";
+import { cancelJobWithPartialPrompt } from "../utils/jobCancel";
 
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -45,9 +46,12 @@ function ProgressBar({ p }: { p: FileOpProgress }) {
 }
 
 function JobRow({ job, client }: { job: Job; client: WsClient }) {
+  const state = useAppState();
   const isActive = job.state === "Queued" || job.state === "Running" || job.state === "AwaitingDecision";
   const typeLabel = job.kind === "outgoing-transfer"
     ? `Outgoing ${jobShortId(job.jobId)}`
+    : job.kind === "sync-bro"
+    ? "Sync Bro"
     : job.type.charAt(0).toUpperCase() + job.type.slice(1);
 
   const stateLabel: Record<string, string> = {
@@ -89,7 +93,7 @@ function JobRow({ job, client }: { job: Job; client: WsClient }) {
               <button
                 className="jobs-modal__cancel"
                 title="Force cancel"
-                onClick={() => client.sendIntent("CancelJob", undefined, { jobId: job.jobId })}
+                onClick={() => cancelJobWithPartialPrompt(client, state, job)}
               >
                 <IconX size={12} /> Cancel
               </button>
@@ -106,6 +110,17 @@ function JobRow({ job, client }: { job: Job; client: WsClient }) {
             <span className="jobs-modal__path">
               External destination is on the remote fbro.
             </span>
+          </>
+        ) : job.kind === "sync-bro" ? (
+          <>
+            <span className="jobs-modal__path" title={job.sourcePath}>
+              Local: {job.sourcePath}
+            </span>
+            {job.destPath && (
+              <span className="jobs-modal__path" title={job.destPath}>
+                Remote: {job.destPath}
+              </span>
+            )}
           </>
         ) : job.kind === "fp-bro" ? (
           <>
@@ -248,7 +263,7 @@ export function JobsModal({ onClose, client }: { onClose: () => void; client: Ws
   const jobs = Object.values(state.jobs).sort(byNewest);
   const fileJobs = jobs.filter((job) => job.kind === "file-op");
   const outgoingJobs = jobs.filter((job) => job.kind === "outgoing-transfer");
-  const broJobs = jobs.filter((job) => job.kind === "fp-bro");
+  const broJobs = jobs.filter((job) => job.kind === "fp-bro" || job.kind === "sync-bro");
   const activeFileJobs = fileJobs.filter(
     (job) => job.state === "Queued" || job.state === "Running" || job.state === "AwaitingDecision"
   );

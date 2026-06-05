@@ -6,5 +6,7 @@ mod registry;
 mod version;
 
 pub(crate) use model::LaunchRecipe;
-pub use model::{BroInputItem, BroLaunchInputKind, BroProtocol, ResolvedBro};
+pub use model::{
+    BroInputItem, BroLaunchInputKind, BroOption, BroPre, BroProtocol, BroSource, ResolvedBro,
+};
 pub use registry::{launch_bro, list_bros};

@@ -74,7 +74,9 @@ pub async fn run_fp_bro(
             )
             .await;
         }
-        LaunchRecipe::BuiltInCopyPaths | LaunchRecipe::BuiltInKillProc => {}
+        LaunchRecipe::BuiltInCopyPaths
+        | LaunchRecipe::BuiltInKillProc
+        | LaunchRecipe::BuiltInSyncBro => {}
     }
 }
 

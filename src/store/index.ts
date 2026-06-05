@@ -799,7 +799,9 @@ function applyJobStarted(state: AppState, msg: JobStartedMessage): AppState {
     paused: false,
     supportsPause: job.supportsPause,
     startedAt: msg.timestamp,
+    sourcePanel: job.sourcePanel,
     sourcePath: job.sourcePath,
+    destPanel: job.destPanel,
     destPath: job.destPath,
     resultPath: job.resultPath,
     resultPanelId: job.resultPanelId,
@@ -897,7 +899,7 @@ function applyJobEvent(state: AppState, msg: JobEventMessage): AppState {
             currentFile: undefined,
             statusText: job.kind === "outgoing-transfer"
               ? "Outgoing transfer completed"
-              : job.kind === "fp-bro"
+              : job.kind === "fp-bro" || job.kind === "sync-bro"
                 ? "Bro completed successfully"
                 : "Operation completed successfully",
             currentFileBytesCopied: job.progress.currentFileBytesTotal || job.progress.currentFileBytesCopied,

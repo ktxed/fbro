@@ -1,11 +1,16 @@
 pub mod dirsize;
 pub mod file_ops;
 pub mod fp_bro;
+pub mod integrity_compare;
 pub mod scan;
 pub mod search;
 pub mod viewer_prefetch;
 
 use std::collections::{HashMap, VecDeque};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 
@@ -126,6 +131,14 @@ pub struct AppJob {
     pub handle: Option<JoinHandle<()>>,
     pub cancel_tx: watch::Sender<bool>,
     pub pause_tx: watch::Sender<bool>,
+    pub keep_partial_files_on_cancel: Arc<AtomicBool>,
+}
+
+impl AppJob {
+    pub fn set_keep_partial_files_on_cancel(&self, keep: bool) {
+        self.keep_partial_files_on_cancel
+            .store(keep, Ordering::Relaxed);
+    }
 }
 
 pub enum JobKind {
@@ -133,6 +146,7 @@ pub enum JobKind {
     FpBro(FpBroJobMeta),
     Search(SearchJobMeta),
     OutgoingTransfer(OutgoingTransferJobMeta),
+    SyncBro(SyncBroJobMeta),
 }
 
 #[allow(dead_code)]
@@ -163,6 +177,15 @@ pub struct FpBroJobMeta {
 pub struct OutgoingTransferJobMeta {
     pub peer_fp: String,
     pub completion_generation: u64,
+}
+
+#[allow(dead_code)]
+pub struct SyncBroJobMeta {
+    pub local_panel: String,
+    pub remote_panel: String,
+    pub local_root: String,
+    pub remote_root: String,
+    pub report_path: String,
 }
 
 /// Container for all active jobs in AppState.
