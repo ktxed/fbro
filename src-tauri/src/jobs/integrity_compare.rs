@@ -50,6 +50,44 @@ struct DiffEntry {
     remote_hash: String,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ManifestSide {
+    Local,
+    Remote,
+}
+
+#[derive(Clone, Debug)]
+enum ManifestProgressEvent {
+    Started(ManifestSide),
+    RemoteManifestRequested(ManifestSide),
+    FileHashed {
+        side: ManifestSide,
+        path: String,
+        processed: usize,
+    },
+    Done {
+        side: ManifestSide,
+        processed: usize,
+    },
+}
+
+#[derive(Clone, Debug, Default)]
+struct ManifestSideProgress {
+    started: bool,
+    remote_manifest: bool,
+    done: bool,
+    processed: usize,
+    current_file: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+struct CombinedManifestProgress {
+    status_text: String,
+    current_file: Option<String>,
+    completed_files: usize,
+    overall_percent: Option<u8>,
+}
+
 pub async fn run_sync_bro(
     job_id: String,
     local_panel: String,
@@ -74,39 +112,51 @@ pub async fn run_sync_bro(
         }
     });
 
-    let local_tx = tx.clone();
-    let local_job = job_id.clone();
+    let (progress_tx, progress_rx) = mpsc::channel(128);
+    let progress_task = tokio::spawn(sync_bro_progress_aggregator(
+        job_id.clone(),
+        tx.clone(),
+        progress_rx,
+    ));
+
     let local_root_for_worker = local_root.clone();
     let local_driver_for_worker = Arc::clone(&local_driver);
     let local_cancel = Arc::clone(&cancel_flag);
+    let local_progress_tx = progress_tx.clone();
     let local_worker = tokio::task::spawn_blocking(move || {
-        send_progress_sync(&local_tx, &local_job, "Hashing local tree", None, 0, 0);
+        send_manifest_progress_sync(
+            &local_progress_tx,
+            ManifestProgressEvent::Started(ManifestSide::Local),
+        );
         build_manifest(
-            &local_job,
+            ManifestSide::Local,
             "local",
             &local_root_for_worker,
             &*local_driver_for_worker,
-            &local_tx,
+            &local_progress_tx,
             &local_cancel,
         )
     });
 
-    let remote_tx = tx.clone();
-    let remote_job = job_id.clone();
     let remote_root_for_worker = remote_root.clone();
     let remote_driver_for_worker = Arc::clone(&remote_driver);
     let remote_cancel = Arc::clone(&cancel_flag);
+    let remote_progress_tx = progress_tx.clone();
     let remote_worker = tokio::task::spawn_blocking(move || {
-        send_progress_sync(&remote_tx, &remote_job, "Hashing remote tree", None, 0, 0);
+        send_manifest_progress_sync(
+            &remote_progress_tx,
+            ManifestProgressEvent::Started(ManifestSide::Remote),
+        );
         build_manifest(
-            &remote_job,
+            ManifestSide::Remote,
             "remote",
             &remote_root_for_worker,
             &*remote_driver_for_worker,
-            &remote_tx,
+            &remote_progress_tx,
             &remote_cancel,
         )
     });
+    drop(progress_tx);
 
     let (local_result, remote_result) = tokio::join!(local_worker, remote_worker);
     cancel_task.abort();
@@ -114,10 +164,12 @@ pub async fn run_sync_bro(
     let local_build = match manifest_worker_result(local_result) {
         Ok(build) => build,
         Err(error) if error == "Cancelled" => {
+            let _ = progress_task.await;
             let _ = send_terminal(&tx, &job_id, "Cancelled", None, None, None).await;
             return;
         }
         Err(error) => {
+            let _ = progress_task.await;
             let _ = send_terminal(&tx, &job_id, "Failed", Some(error), None, None).await;
             return;
         }
@@ -125,14 +177,35 @@ pub async fn run_sync_bro(
     let remote_build = match manifest_worker_result(remote_result) {
         Ok(build) => build,
         Err(error) if error == "Cancelled" => {
+            let _ = progress_task.await;
             let _ = send_terminal(&tx, &job_id, "Cancelled", None, None, None).await;
             return;
         }
         Err(error) => {
+            let _ = progress_task.await;
             let _ = send_terminal(&tx, &job_id, "Failed", Some(error), None, None).await;
             return;
         }
     };
+    let _ = progress_task.await;
+
+    let _ = send_progress(
+        &tx,
+        &job_id,
+        FileOpProgressSchema {
+            total_files: local_build.entries.len().max(remote_build.entries.len()),
+            completed_files: local_build.entries.len().max(remote_build.entries.len()),
+            current_file: None,
+            status_text: Some("Comparing manifests".to_string()),
+            current_file_bytes_total: 0,
+            current_file_bytes_copied: 0,
+            total_bytes_total: 0,
+            total_bytes_copied: 0,
+            current_file_percent: None,
+            overall_percent: None,
+        },
+    )
+    .await;
 
     let mut summary = compare_manifests(&local_build.entries, &remote_build.entries);
     summary.local_errors = local_build.errors;
@@ -197,39 +270,61 @@ fn manifest_worker_result(
 }
 
 fn build_manifest(
-    job_id: &str,
+    side: ManifestSide,
     label: &str,
     root: &str,
     driver: &dyn VfsDriver,
-    tx: &mpsc::Sender<ServerMessage>,
+    progress_tx: &mpsc::Sender<ManifestProgressEvent>,
     cancel: &AtomicBool,
 ) -> Result<ManifestBuild, String> {
+    if side == ManifestSide::Remote {
+        send_manifest_progress_sync(
+            progress_tx,
+            ManifestProgressEvent::RemoteManifestRequested(side),
+        );
+    }
     if let Some(manifest) = driver
         .remote_manifest(root)
         .map_err(|error| format!("Cannot request {label} manifest for {root}: {error}"))?
     {
-        return Ok(manifest_from_vfs(manifest));
+        let build = manifest_from_vfs(manifest);
+        send_manifest_progress_sync(
+            progress_tx,
+            ManifestProgressEvent::Done {
+                side,
+                processed: build.entries.len() + build.errors.len(),
+            },
+        );
+        return Ok(build);
     }
 
     let mut out = Vec::new();
     let mut errors = Vec::new();
     walk_dir(
-        job_id,
+        side,
         label,
         root,
         "",
         driver,
-        tx,
+        progress_tx,
         cancel,
         &mut out,
         &mut errors,
     )?;
     out.sort_by(|a, b| a.path.cmp(&b.path));
     errors.sort_by(|a, b| a.path.cmp(&b.path));
-    Ok(ManifestBuild {
+    let build = ManifestBuild {
         entries: out,
         errors,
-    })
+    };
+    send_manifest_progress_sync(
+        progress_tx,
+        ManifestProgressEvent::Done {
+            side,
+            processed: build.entries.len() + build.errors.len(),
+        },
+    );
+    Ok(build)
 }
 
 fn manifest_from_vfs(manifest: VfsManifest) -> ManifestBuild {
@@ -256,12 +351,12 @@ fn manifest_from_vfs(manifest: VfsManifest) -> ManifestBuild {
 }
 
 fn walk_dir(
-    job_id: &str,
+    side: ManifestSide,
     label: &str,
     abs_dir: &str,
     rel_dir: &str,
     driver: &dyn VfsDriver,
-    tx: &mpsc::Sender<ServerMessage>,
+    progress_tx: &mpsc::Sender<ManifestProgressEvent>,
     cancel: &AtomicBool,
     out: &mut Vec<ManifestEntry>,
     errors: &mut Vec<ManifestError>,
@@ -293,7 +388,15 @@ fn walk_dir(
         let child_rel = join_rel(rel_dir, &child.name);
         if child.is_dir {
             walk_dir(
-                job_id, label, &child_abs, &child_rel, driver, tx, cancel, out, errors,
+                side,
+                label,
+                &child_abs,
+                &child_rel,
+                driver,
+                progress_tx,
+                cancel,
+                out,
+                errors,
             )?;
         } else {
             match digest_file(driver, &child_abs, child.size) {
@@ -307,13 +410,13 @@ fn walk_dir(
                     message,
                 }),
             }
-            send_progress_sync(
-                tx,
-                job_id,
-                &format!("Hashing {label} tree"),
-                Some(child_rel),
-                out.len() + errors.len(),
-                0,
+            send_manifest_progress_sync(
+                progress_tx,
+                ManifestProgressEvent::FileHashed {
+                    side,
+                    path: child_rel,
+                    processed: out.len() + errors.len(),
+                },
             );
         }
     }
@@ -473,37 +576,145 @@ fn join_rel(base: &str, name: &str) -> String {
     }
 }
 
-fn send_progress_sync(
-    tx: &mpsc::Sender<ServerMessage>,
-    job_id: &str,
-    status: &str,
-    current_file: Option<String>,
-    completed_files: usize,
-    total_files: usize,
+async fn sync_bro_progress_aggregator(
+    job_id: String,
+    tx: mpsc::Sender<ServerMessage>,
+    mut rx: mpsc::Receiver<ManifestProgressEvent>,
 ) {
-    let _ = tx.blocking_send(ServerMessage::JobEvent {
-        timestamp: now(),
-        job_id: job_id.to_string(),
-        event: "Progress".to_string(),
-        files: None,
-        progress: Some(FileOpProgressSchema {
-            total_files,
-            completed_files,
-            current_file,
-            status_text: Some(status.to_string()),
-            current_file_bytes_total: 0,
-            current_file_bytes_copied: 0,
-            total_bytes_total: 0,
-            total_bytes_copied: 0,
-            current_file_percent: None,
-            overall_percent: None,
-        }),
-        search_progress: None,
-        decision: None,
-        error: None,
-        result_path: None,
-        result_panel_id: None,
-    });
+    let mut local = ManifestSideProgress::default();
+    let mut remote = ManifestSideProgress::default();
+    while let Some(event) = rx.recv().await {
+        apply_manifest_progress(&mut local, &mut remote, event);
+        let combined = combined_manifest_progress(&local, &remote);
+        let _ = send_progress(
+            &tx,
+            &job_id,
+            FileOpProgressSchema {
+                total_files: 0,
+                completed_files: combined.completed_files,
+                current_file: combined.current_file,
+                status_text: Some(combined.status_text),
+                current_file_bytes_total: 0,
+                current_file_bytes_copied: 0,
+                total_bytes_total: 0,
+                total_bytes_copied: 0,
+                current_file_percent: None,
+                overall_percent: combined.overall_percent,
+            },
+        )
+        .await;
+    }
+}
+
+fn apply_manifest_progress(
+    local: &mut ManifestSideProgress,
+    remote: &mut ManifestSideProgress,
+    event: ManifestProgressEvent,
+) {
+    match event {
+        ManifestProgressEvent::Started(side) => {
+            side_progress_mut(local, remote, side).started = true;
+        }
+        ManifestProgressEvent::RemoteManifestRequested(side) => {
+            let progress = side_progress_mut(local, remote, side);
+            progress.started = true;
+            progress.remote_manifest = true;
+        }
+        ManifestProgressEvent::FileHashed {
+            side,
+            path,
+            processed,
+        } => {
+            let progress = side_progress_mut(local, remote, side);
+            progress.started = true;
+            progress.remote_manifest = false;
+            progress.processed = processed;
+            progress.current_file = Some(path);
+        }
+        ManifestProgressEvent::Done { side, processed } => {
+            let progress = side_progress_mut(local, remote, side);
+            progress.started = true;
+            progress.remote_manifest = false;
+            progress.done = true;
+            progress.processed = processed;
+            progress.current_file = None;
+        }
+    }
+}
+
+fn side_progress_mut<'a>(
+    local: &'a mut ManifestSideProgress,
+    remote: &'a mut ManifestSideProgress,
+    side: ManifestSide,
+) -> &'a mut ManifestSideProgress {
+    match side {
+        ManifestSide::Local => local,
+        ManifestSide::Remote => remote,
+    }
+}
+
+fn combined_manifest_progress(
+    local: &ManifestSideProgress,
+    remote: &ManifestSideProgress,
+) -> CombinedManifestProgress {
+    let both_started = local.started && remote.started;
+    let any_processed = local.processed > 0 || remote.processed > 0;
+    let status_text = if local.done && remote.done {
+        "Hashing complete".to_string()
+    } else if !any_processed
+        && both_started
+        && !local.done
+        && !remote.done
+        && !remote.remote_manifest
+    {
+        "Hashing local and remote trees".to_string()
+    } else {
+        format!(
+            "{}; {}",
+            format_side_progress("local", local),
+            format_side_progress("remote", remote)
+        )
+    };
+
+    CombinedManifestProgress {
+        status_text,
+        current_file: local
+            .current_file
+            .clone()
+            .or_else(|| remote.current_file.clone()),
+        completed_files: local.processed.max(remote.processed),
+        overall_percent: if local.done && remote.done {
+            Some(100)
+        } else {
+            None
+        },
+    }
+}
+
+fn format_side_progress(label: &str, progress: &ManifestSideProgress) -> String {
+    if !progress.started {
+        return format!("{label} tree starting");
+    }
+    if progress.done {
+        if progress.processed > 0 {
+            return format!("{label} tree complete ({} files)", progress.processed);
+        }
+        return format!("{label} tree complete");
+    }
+    if progress.remote_manifest && label == "remote" {
+        return "remote tree hashing on remote fbro".to_string();
+    }
+    if progress.processed > 0 {
+        return format!("{label} tree hashing ({} files)", progress.processed);
+    }
+    format!("{label} tree hashing")
+}
+
+fn send_manifest_progress_sync(
+    tx: &mpsc::Sender<ManifestProgressEvent>,
+    event: ManifestProgressEvent,
+) {
+    let _ = tx.blocking_send(event);
 }
 
 async fn send_progress(
@@ -587,6 +798,89 @@ mod tests {
         assert!(report.contains("Remote hash errors:"));
         assert!(report.contains("some_file.mkv"));
         assert!(report.contains("Timeout"));
+    }
+
+    #[test]
+    fn combined_progress_shows_both_trees_when_both_are_running() {
+        let local = ManifestSideProgress {
+            started: true,
+            ..Default::default()
+        };
+        let remote = ManifestSideProgress {
+            started: true,
+            ..Default::default()
+        };
+
+        let combined = combined_manifest_progress(&local, &remote);
+
+        assert_eq!(combined.status_text, "Hashing local and remote trees");
+    }
+
+    #[test]
+    fn combined_progress_keeps_remote_manifest_visible_during_local_hashing() {
+        let local = ManifestSideProgress {
+            started: true,
+            processed: 245,
+            current_file: Some("movie.mkv".to_string()),
+            ..Default::default()
+        };
+        let remote = ManifestSideProgress {
+            started: true,
+            remote_manifest: true,
+            ..Default::default()
+        };
+
+        let combined = combined_manifest_progress(&local, &remote);
+
+        assert_eq!(
+            combined.status_text,
+            "local tree hashing (245 files); remote tree hashing on remote fbro"
+        );
+        assert_eq!(combined.current_file.as_deref(), Some("movie.mkv"));
+    }
+
+    #[test]
+    fn combined_progress_reports_one_side_complete_while_other_continues() {
+        let local = ManifestSideProgress {
+            started: true,
+            processed: 912,
+            ..Default::default()
+        };
+        let remote = ManifestSideProgress {
+            started: true,
+            done: true,
+            processed: 904,
+            ..Default::default()
+        };
+
+        let combined = combined_manifest_progress(&local, &remote);
+
+        assert_eq!(
+            combined.status_text,
+            "local tree hashing (912 files); remote tree complete (904 files)"
+        );
+        assert_eq!(combined.overall_percent, None);
+    }
+
+    #[test]
+    fn combined_progress_is_complete_only_after_both_sides_finish() {
+        let local = ManifestSideProgress {
+            started: true,
+            done: true,
+            processed: 10,
+            ..Default::default()
+        };
+        let remote = ManifestSideProgress {
+            started: true,
+            done: true,
+            processed: 10,
+            ..Default::default()
+        };
+
+        let combined = combined_manifest_progress(&local, &remote);
+
+        assert_eq!(combined.status_text, "Hashing complete");
+        assert_eq!(combined.overall_percent, Some(100));
     }
 }
 
