@@ -174,14 +174,8 @@ pub async fn run_sync_bro(
     }
     if let Some(error) = first_manifest_error(local_result.as_ref(), remote_result.as_ref()) {
         cancel_flag.store(true, Ordering::SeqCst);
-        if local_result.is_none() {
-            let _ = manifest_worker_result((&mut local_worker).await);
-        }
-        if remote_result.is_none() {
-            let _ = manifest_worker_result((&mut remote_worker).await);
-        }
         cancel_task.abort();
-        let _ = progress_task.await;
+        progress_task.abort();
         if error == "Cancelled" {
             let _ = send_terminal(&tx, &job_id, "Cancelled", None, None, None).await;
         } else {
