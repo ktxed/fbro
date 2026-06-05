@@ -37,6 +37,7 @@ struct CompareSummary {
     differing: Vec<DiffEntry>,
     local_only: Vec<String>,
     remote_only: Vec<String>,
+    unverified: Vec<String>,
     local_errors: Vec<ManifestError>,
     remote_errors: Vec<ManifestError>,
 }
@@ -163,10 +164,40 @@ pub async fn run_sync_bro(
     });
     drop(progress_tx);
 
-    let (local_result, remote_result) = tokio::join!(local_worker, remote_worker);
+    tokio::pin!(local_worker);
+    tokio::pin!(remote_worker);
+    let mut local_result: Option<Result<ManifestBuild, String>> = None;
+    let mut remote_result: Option<Result<ManifestBuild, String>> = None;
+    tokio::select! {
+        result = &mut local_worker => local_result = Some(manifest_worker_result(result)),
+        result = &mut remote_worker => remote_result = Some(manifest_worker_result(result)),
+    }
+    if let Some(error) = first_manifest_error(local_result.as_ref(), remote_result.as_ref()) {
+        cancel_flag.store(true, Ordering::SeqCst);
+        if local_result.is_none() {
+            let _ = manifest_worker_result((&mut local_worker).await);
+        }
+        if remote_result.is_none() {
+            let _ = manifest_worker_result((&mut remote_worker).await);
+        }
+        cancel_task.abort();
+        let _ = progress_task.await;
+        if error == "Cancelled" {
+            let _ = send_terminal(&tx, &job_id, "Cancelled", None, None, None).await;
+        } else {
+            let _ = send_terminal(&tx, &job_id, "Failed", Some(error), None, None).await;
+        }
+        return;
+    }
+    if local_result.is_none() {
+        local_result = Some(manifest_worker_result((&mut local_worker).await));
+    }
+    if remote_result.is_none() {
+        remote_result = Some(manifest_worker_result((&mut remote_worker).await));
+    }
     cancel_task.abort();
 
-    let local_build = match manifest_worker_result(local_result) {
+    let local_build = match local_result.expect("local result recorded") {
         Ok(build) => build,
         Err(error) if error == "Cancelled" => {
             let _ = progress_task.await;
@@ -179,7 +210,7 @@ pub async fn run_sync_bro(
             return;
         }
     };
-    let remote_build = match manifest_worker_result(remote_result) {
+    let remote_build = match remote_result.expect("remote result recorded") {
         Ok(build) => build,
         Err(error) if error == "Cancelled" => {
             let _ = progress_task.await;
@@ -212,15 +243,21 @@ pub async fn run_sync_bro(
     )
     .await;
 
-    let mut summary = compare_manifests(&local_build.entries, &remote_build.entries);
+    let mut summary = compare_manifests(
+        &local_build.entries,
+        &remote_build.entries,
+        &local_build.errors,
+        &remote_build.errors,
+    );
     summary.local_errors = local_build.errors;
     summary.remote_errors = remote_build.errors;
     let status = format!(
-        "{} matched, {} differing, {} local-only, {} remote-only, {} errors",
+        "{} matched, {} differing, {} local-only, {} remote-only, {} unverified, {} errors",
         summary.matched,
         summary.differing.len(),
         summary.local_only.len(),
         summary.remote_only.len(),
+        summary.unverified.len(),
         summary.local_errors.len() + summary.remote_errors.len()
     );
     let _ = send_progress(
@@ -272,6 +309,15 @@ fn manifest_worker_result(
         Ok(result) => result,
         Err(error) => Err(error.to_string()),
     }
+}
+
+fn first_manifest_error(
+    local: Option<&Result<ManifestBuild, String>>,
+    remote: Option<&Result<ManifestBuild, String>>,
+) -> Option<String> {
+    local
+        .and_then(|result| result.as_ref().err().cloned())
+        .or_else(|| remote.and_then(|result| result.as_ref().err().cloned()))
 }
 
 fn build_manifest(
@@ -326,6 +372,9 @@ fn build_manifest(
             },
         );
         return Ok(build);
+    }
+    if side == ManifestSide::Remote {
+        return Err("Remote fbro does not advertise Sync Bro manifest support. Deploy the new build on the remote host and reconnect the remote source.".to_string());
     }
 
     let mut out = Vec::new();
@@ -429,12 +478,13 @@ fn walk_dir(
                 errors,
             )?;
         } else {
-            match digest_file(driver, &child_abs, child.size) {
+            match digest_file(driver, &child_abs, child.size, cancel) {
                 Ok(digest) => out.push(ManifestEntry {
                     path: child_rel.clone(),
                     size: digest.size,
                     hash: digest.hash,
                 }),
+                Err(message) if message == "Cancelled" => return Err(message),
                 Err(message) => errors.push(ManifestError {
                     path: child_rel.clone(),
                     message,
@@ -457,7 +507,11 @@ fn digest_file(
     driver: &dyn VfsDriver,
     path: &str,
     size_hint: u64,
+    cancel: &AtomicBool,
 ) -> Result<ManifestEntry, String> {
+    if cancel.load(Ordering::SeqCst) {
+        return Err("Cancelled".to_string());
+    }
     if let Some(digest) = driver
         .file_digest(path)
         .map_err(|e| format!("Cannot digest {path}: {e}"))?
@@ -472,6 +526,9 @@ fn digest_file(
     let mut hasher = blake3::Hasher::new();
     let mut offset = 0u64;
     while offset < size {
+        if cancel.load(Ordering::SeqCst) {
+            return Err("Cancelled".to_string());
+        }
         let remaining = size.saturating_sub(offset).min(CHUNK_SIZE as u64) as usize;
         let chunk = driver
             .read_chunk(path, offset, remaining)
@@ -494,7 +551,12 @@ fn digest_file(
     })
 }
 
-fn compare_manifests(local: &[ManifestEntry], remote: &[ManifestEntry]) -> CompareSummary {
+fn compare_manifests(
+    local: &[ManifestEntry],
+    remote: &[ManifestEntry],
+    local_errors: &[ManifestError],
+    remote_errors: &[ManifestError],
+) -> CompareSummary {
     let local_map: BTreeMap<&str, &ManifestEntry> = local
         .iter()
         .map(|entry| (entry.path.as_str(), entry))
@@ -503,9 +565,29 @@ fn compare_manifests(local: &[ManifestEntry], remote: &[ManifestEntry]) -> Compa
         .iter()
         .map(|entry| (entry.path.as_str(), entry))
         .collect();
-    let paths: BTreeSet<&str> = local_map.keys().chain(remote_map.keys()).copied().collect();
+    let local_error_paths: BTreeSet<&str> = local_errors
+        .iter()
+        .map(|error| error.path.as_str())
+        .collect();
+    let remote_error_paths: BTreeSet<&str> = remote_errors
+        .iter()
+        .map(|error| error.path.as_str())
+        .collect();
+    let paths: BTreeSet<&str> = local_map
+        .keys()
+        .chain(remote_map.keys())
+        .chain(local_error_paths.iter())
+        .chain(remote_error_paths.iter())
+        .copied()
+        .collect();
     let mut summary = CompareSummary::default();
     for path in paths {
+        let has_local_error = local_error_paths.contains(path);
+        let has_remote_error = remote_error_paths.contains(path);
+        if has_local_error || has_remote_error {
+            summary.unverified.push(path.to_string());
+            continue;
+        }
         match (local_map.get(path), remote_map.get(path)) {
             (Some(local), Some(remote)) => {
                 if local.size == remote.size && local.hash == remote.hash {
@@ -558,6 +640,7 @@ fn format_report(local_root: &str, remote_root: &str, summary: &CompareSummary) 
     body.push_str(&format!("Differing: {}\n", summary.differing.len()));
     body.push_str(&format!("Local-only: {}\n", summary.local_only.len()));
     body.push_str(&format!("Remote-only: {}\n", summary.remote_only.len()));
+    body.push_str(&format!("Unverified: {}\n", summary.unverified.len()));
     body.push_str(&format!(
         "Hash errors: {}\n\n",
         summary.local_errors.len() + summary.remote_errors.len()
@@ -580,6 +663,12 @@ fn format_report(local_root: &str, remote_root: &str, summary: &CompareSummary) 
     if !summary.remote_only.is_empty() {
         body.push_str("\nRemote-only files:\n");
         for path in &summary.remote_only {
+            body.push_str(&format!("- {path}\n"));
+        }
+    }
+    if !summary.unverified.is_empty() {
+        body.push_str("\nUnverified files:\n");
+        for path in &summary.unverified {
             body.push_str(&format!("- {path}\n"));
         }
     }
@@ -771,6 +860,10 @@ async fn send_progress(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::vfs::{DirChild, VfsError};
+    use crate::ws::protocol::{FilterSpec, SortSpec};
+    use std::any::Any;
+    use std::io::{Read, Write};
 
     fn entry(path: &str, size: u64, hash: &str) -> ManifestEntry {
         ManifestEntry {
@@ -791,7 +884,7 @@ mod tests {
             entry("changed.txt", 4, "cccc"),
         ];
 
-        let summary = compare_manifests(&local, &remote);
+        let summary = compare_manifests(&local, &remote, &[], &[]);
 
         assert_eq!(summary.matched, 1);
         assert_eq!(summary.differing.len(), 1);
@@ -805,12 +898,28 @@ mod tests {
         let local = vec![entry("local-only.txt", 4, "aaaa")];
         let remote = vec![entry("remote-only.txt", 4, "bbbb")];
 
-        let summary = compare_manifests(&local, &remote);
+        let summary = compare_manifests(&local, &remote, &[], &[]);
 
         assert_eq!(summary.matched, 0);
         assert!(summary.differing.is_empty());
         assert_eq!(summary.local_only, vec!["local-only.txt"]);
         assert_eq!(summary.remote_only, vec!["remote-only.txt"]);
+    }
+
+    #[test]
+    fn compare_manifests_does_not_report_hash_error_paths_as_missing() {
+        let local = vec![entry("movie.mkv", 4, "aaaa")];
+        let remote = Vec::new();
+        let remote_errors = vec![ManifestError {
+            path: "movie.mkv".to_string(),
+            message: "Cannot digest remote/movie.mkv: IOError: disconnected: Timeout".to_string(),
+        }];
+
+        let summary = compare_manifests(&local, &remote, &[], &remote_errors);
+
+        assert!(summary.local_only.is_empty());
+        assert!(summary.remote_only.is_empty());
+        assert_eq!(summary.unverified, vec!["movie.mkv"]);
     }
 
     #[test]
@@ -828,6 +937,101 @@ mod tests {
         assert!(report.contains("Remote hash errors:"));
         assert!(report.contains("some_file.mkv"));
         assert!(report.contains("Timeout"));
+    }
+
+    #[test]
+    fn report_includes_unverified_files() {
+        let mut summary = CompareSummary::default();
+        summary.unverified.push("movie.mkv".to_string());
+        summary.remote_errors.push(ManifestError {
+            path: "movie.mkv".to_string(),
+            message: "Cannot digest remote/movie.mkv: IOError: disconnected: Timeout".to_string(),
+        });
+
+        let report = format_report("/local", "/remote", &summary);
+
+        assert!(report.contains("Unverified: 1"));
+        assert!(report.contains("Unverified files:"));
+        assert!(report.contains("- movie.mkv"));
+    }
+
+    #[test]
+    fn remote_manifest_unsupported_fails_before_remote_walk() {
+        let (tx, _rx) = mpsc::channel(1);
+        let cancel = AtomicBool::new(false);
+        let result = build_manifest(
+            ManifestSide::Remote,
+            "remote",
+            "/remote",
+            &UnsupportedRemoteManifestDriver,
+            &tx,
+            &cancel,
+        );
+
+        let error = result.expect_err("remote manifest support should be required");
+        assert!(error.contains("does not advertise Sync Bro manifest support"));
+    }
+
+    struct UnsupportedRemoteManifestDriver;
+
+    impl VfsDriver for UnsupportedRemoteManifestDriver {
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+
+        fn list(
+            &self,
+            _path: &str,
+            _sort: &SortSpec,
+            _filter: Option<&FilterSpec>,
+            _show_hidden: bool,
+        ) -> Result<Vec<crate::vfs::VfsEntry>, VfsError> {
+            panic!("Sync Bro must not list unsupported remote manifests")
+        }
+
+        fn resolve_child(&self, _base: &str, _name: &str) -> String {
+            panic!("Sync Bro must not walk unsupported remote manifests")
+        }
+
+        fn parent_path(&self, _path: &str) -> Option<String> {
+            None
+        }
+
+        fn open_read(&self, _path: &str) -> Result<Box<dyn Read + Send>, VfsError> {
+            Err(VfsError::NotSupported("test".to_string()))
+        }
+
+        fn open_write(&self, _path: &str) -> Result<Box<dyn Write + Send>, VfsError> {
+            Err(VfsError::NotSupported("test".to_string()))
+        }
+
+        fn create_dir_all(&self, _path: &str) -> Result<(), VfsError> {
+            Err(VfsError::NotSupported("test".to_string()))
+        }
+
+        fn remove_file(&self, _path: &str) -> Result<(), VfsError> {
+            Err(VfsError::NotSupported("test".to_string()))
+        }
+
+        fn remove_dir_all(&self, _path: &str) -> Result<(), VfsError> {
+            Err(VfsError::NotSupported("test".to_string()))
+        }
+
+        fn exists(&self, _path: &str) -> bool {
+            false
+        }
+
+        fn file_size(&self, _path: &str) -> Option<u64> {
+            None
+        }
+
+        fn read_dir_entries(&self, _path: &str) -> Result<Vec<DirChild>, VfsError> {
+            panic!("Sync Bro must not walk unsupported remote manifests")
+        }
+
+        fn read_chunk(&self, _path: &str, _offset: u64, _size: usize) -> Result<Vec<u8>, VfsError> {
+            panic!("Sync Bro must not read unsupported remote manifests")
+        }
     }
 
     #[test]
