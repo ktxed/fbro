@@ -112,6 +112,14 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
                 };
                 state_guard.settings.general.thumbnail_video_frame_skip = (v.min(60)) as u32;
             }
+            "streamThumbnails" => {
+                let Some(v) = value.as_bool() else {
+                    drop(state_guard);
+                    bad_setting(ctx.tx, "streamThumbnails must be a boolean").await;
+                    return;
+                };
+                state_guard.settings.general.stream_thumbnails = v;
+            }
             "persistPanelTabs" => {
                 let Some(v) = value.as_bool() else {
                     drop(state_guard);

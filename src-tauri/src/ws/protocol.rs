@@ -319,6 +319,7 @@ pub struct GeneralSettingsSchema {
     pub enable_video_thumbnails: bool,
     pub thumbnail_max_image_size_mb: u64,
     pub thumbnail_video_frame_skip: u32,
+    pub stream_thumbnails: bool,
     pub session_path: String,
     pub bookmarks_path: String,
     pub thumbnail_cache_dir: String,

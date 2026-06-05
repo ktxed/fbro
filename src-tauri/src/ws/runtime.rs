@@ -132,6 +132,7 @@ pub(crate) fn build_state_snapshot(
                     enable_video_thumbnails: state.settings.general.enable_video_thumbnails,
                     thumbnail_max_image_size_mb: state.settings.general.thumbnail_max_image_size_mb,
                     thumbnail_video_frame_skip: state.settings.general.thumbnail_video_frame_skip,
+                    stream_thumbnails: state.settings.general.stream_thumbnails,
                     session_path: crate::persistence::session_path()
                         .to_string_lossy()
                         .to_string(),

@@ -90,9 +90,17 @@ export function SettingsDisplayTab({ general, client }: SettingsDisplayTabProps)
         {colorSchemeSection}
         <h3>Thumbnails</h3>
         <p className="settings-tab__hint">
-          On this platform fbro uses the OS-native thumbnail provider. The
-          fbro-managed thumbnailer settings below only apply on Linux.
+          On this platform fbro uses the OS-native thumbnail provider for
+          local and streamed thumbnails.
         </p>
+        <label className="settings-tab__option">
+          <input
+            type="checkbox"
+            checked={general.streamThumbnails}
+            onChange={(e) => send("streamThumbnails", e.target.checked)}
+          />
+          <span>Stream thumbnails to paired fbro clients</span>
+        </label>
       </div>
     );
   }
@@ -113,6 +121,14 @@ export function SettingsDisplayTab({ general, client }: SettingsDisplayTabProps)
             onChange={(e) => send("enableVideoThumbnails", e.target.checked)}
           />
           <span>Generate thumbnails for video files</span>
+        </label>
+        <label className="settings-tab__option">
+          <input
+            type="checkbox"
+            checked={general.streamThumbnails}
+            onChange={(e) => send("streamThumbnails", e.target.checked)}
+          />
+          <span>Stream thumbnails to paired fbro clients</span>
         </label>
         <label className="settings-tab__option">
           <span style={{ minWidth: 220 }}>Skip images larger than (MiB):</span>

@@ -62,6 +62,9 @@ pub struct SftpDriverConfig {
     pub source_id: String,
     /// When false, connection setup only uses IPv4 socket addresses.
     pub allow_ipv6: bool,
+    /// Negotiated from the remote fbro source metadata. When true this
+    /// remote source can provide thumbnails generated on the peer.
+    pub supports_thumbnails: bool,
 }
 
 /// Heartbeat cadence: 10s, comfortably under russh's 60s
@@ -173,6 +176,17 @@ struct RemoteDigestResponse {
     complete: bool,
 }
 
+#[derive(Clone, Debug, Deserialize)]
+pub struct RemoteSourceInfo {
+    pub id: String,
+    pub name: String,
+    pub icon: Option<String>,
+    #[serde(default)]
+    pub read_only: bool,
+    #[serde(default)]
+    pub supports_thumbnails: bool,
+}
+
 // ─── Driver lifecycle ─────────────────────────────────────────────────────────
 
 impl SftpFsDriver {
@@ -211,6 +225,46 @@ impl SftpFsDriver {
     /// backoff. Called by `ReconnectRemoteSource` intent.
     pub fn force_reconnect(&self) {
         self.state.force_reconnect.notify_waiters();
+    }
+
+    pub fn list_fbro_sources(&self) -> Result<Vec<RemoteSourceInfo>, VfsError> {
+        let response = self.block_on(async move {
+            self.with_sftp(|sftp| async move {
+                use tokio::io::AsyncReadExt;
+                let mut file = sftp
+                    .open_with_flags("/.fbro-sources.json", russh_sftp::protocol::OpenFlags::READ)
+                    .await?;
+                let mut data = Vec::new();
+                file.read_to_end(&mut data).await?;
+                Ok(data)
+            })
+            .await
+        })?;
+        serde_json::from_slice(&response)
+            .map_err(|e| VfsError::IOError(format!("invalid fbro source metadata: {e}")))
+    }
+
+    pub fn remote_thumbnail(&self, path: &str, size: u32) -> Result<Vec<u8>, VfsError> {
+        if !self.config.supports_thumbnails {
+            return Err(VfsError::NotSupported(
+                "remote source does not support thumbnails".to_string(),
+            ));
+        }
+        let abs = self.absolute(path);
+        let encoded_path = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(abs.as_bytes());
+        let control_path = format!("/.fbro-thumbnail/{}/{encoded_path}", size.clamp(32, 512));
+        self.block_on(async move {
+            self.with_sftp(|sftp| async move {
+                use tokio::io::AsyncReadExt;
+                let mut file = sftp
+                    .open_with_flags(&control_path, russh_sftp::protocol::OpenFlags::READ)
+                    .await?;
+                let mut data = Vec::new();
+                file.read_to_end(&mut data).await?;
+                Ok(data)
+            })
+            .await
+        })
     }
 
     /// Convert a VfsDriver-facing path into an SFTP absolute path with
@@ -828,6 +882,10 @@ impl VfsDriver for SftpFsDriver {
         false
     }
 
+    fn supports_thumbnails(&self) -> bool {
+        self.config.supports_thumbnails
+    }
+
     fn as_any(&self) -> &dyn Any {
         self
     }
@@ -1398,6 +1456,7 @@ mod tests {
                 path_prefix: "/src1".to_string(),
                 source_id: "test".to_string(),
                 allow_ipv6: false,
+                supports_thumbnails: false,
             },
             Arc::new(NoopStatusBroadcaster),
         )

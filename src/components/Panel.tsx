@@ -994,12 +994,21 @@ export function Panel({
 
   const isGrid = panel.viewMode === "grid" && panel.supportsThumbnails;
 
-  const hostPathFor = (entry: VFSEntry): string | null => {
+  const entryPathFor = (entry: VFSEntry): string | null => {
     if (entry.sourcePath) return entry.sourcePath;
     if (entry.name === "..") return null;
     if (entry.kind !== "file") return null;
     const dir = panel.path.replace(/[/\\]+$/, "");
     return `${dir}/${entry.name}`;
+  };
+
+  const thumbUrlFor = (entry: VFSEntry): string | null => {
+    const entryPath = entryPathFor(entry);
+    if (!entryPath || appState.fileServerPort <= 0) return null;
+    if (source?.kind === "remote") {
+      return `http://127.0.0.1:${appState.fileServerPort}/__remote_thumb__/${encodeURIComponent(panel.sourceId)}/${GRID_THUMB_SIZE}/${encodeURIComponent(entry.mtime ?? "0")}/${encodeURIComponent(String(entry.size ?? 0))}/${encodeURIComponent(entryPath)}`;
+    }
+    return `http://127.0.0.1:${appState.fileServerPort}/__thumb__/${GRID_THUMB_SIZE}/${encodeURIComponent(entryPath)}`;
   };
 
   const openEntry = (entry: VFSEntry, absIndex: number) => {
@@ -1125,7 +1134,7 @@ export function Panel({
         style={style}
         {...(handlers ?? {})}
       >
-        <EntryThumb entry={entry} hostPath={hostPathFor(entry)} size={GRID_THUMB_SIZE} />
+        <EntryThumb entry={entry} thumbUrl={thumbUrlFor(entry)} />
         {isTooltip ? (
           <div className="panel__card-name-row">
             <div

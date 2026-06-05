@@ -1,5 +1,6 @@
 use crate::jobs::viewer_prefetch::ViewerPrefetchQueue;
 use crate::platform::{self, Platform};
+use crate::state::SharedState;
 use crate::thumb_pool::{ThumbJobKey, ThumbPool};
 /// Minimal HTTP file server for the viewer and icon serving.
 ///
@@ -15,7 +16,12 @@ use crate::thumb_pool::{ThumbJobKey, ThumbPool};
 use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::net::{TcpListener, TcpStream};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+pub type SharedStateSlot = Arc<Mutex<Option<SharedState>>>;
+const REMOTE_THUMB_TTL: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 
 /// In-memory thumbnail LRU cache, keyed by (path, size, mtime_secs).
 /// Capped by entry count; thumbnails are tens of KB each.
@@ -88,6 +94,7 @@ pub fn start(
     prefetch: Arc<ViewerPrefetchQueue>,
     thumb_cache: Arc<ThumbCache>,
     thumb_pool: Arc<ThumbPool>,
+    state_slot: SharedStateSlot,
 ) -> u16 {
     let bind = std::env::var("FBRO_FILESERVER_BIND").unwrap_or_else(|_| "127.0.0.1:0".to_string());
     let listener = TcpListener::bind(&bind).expect("file server bind");
@@ -99,8 +106,16 @@ pub fn start(
             let prefetch = Arc::clone(&prefetch);
             let thumb_cache = Arc::clone(&thumb_cache);
             let thumb_pool = Arc::clone(&thumb_pool);
+            let state_slot = Arc::clone(&state_slot);
             std::thread::spawn(move || {
-                let _ = handle(stream, &*plat, &prefetch, &thumb_cache, &thumb_pool);
+                let _ = handle(
+                    stream,
+                    &*plat,
+                    &prefetch,
+                    &thumb_cache,
+                    &thumb_pool,
+                    &state_slot,
+                );
             });
         }
     });
@@ -113,6 +128,7 @@ fn handle(
     prefetch: &ViewerPrefetchQueue,
     thumb_cache: &ThumbCache,
     thumb_pool: &ThumbPool,
+    state_slot: &SharedStateSlot,
 ) -> std::io::Result<()> {
     // Read until end-of-headers (\r\n\r\n). A single read() may return only
     // part of the request — TCP can split it arbitrarily — and parsing a
@@ -165,6 +181,12 @@ fn handle(
     // Thumbnail requests: /__thumb__/{size}/{percent-encoded-host-path}
     if let Some(rest) = url_path.strip_prefix("/__thumb__/") {
         return handle_thumb(stream, thumb_cache, thumb_pool, rest);
+    }
+
+    // Remote thumbnail requests:
+    // /__remote_thumb__/{sourceId}/{size}/{mtime}/{fileSize}/{remote-path}
+    if let Some(rest) = url_path.strip_prefix("/__remote_thumb__/") {
+        return handle_remote_thumb(stream, state_slot, rest);
     }
 
     let decoded = percent_decode(&url_path);
@@ -237,6 +259,149 @@ fn handle(
     )?;
     stream.write_all(&data)?;
     Ok(())
+}
+
+fn handle_remote_thumb(
+    mut stream: TcpStream,
+    state_slot: &SharedStateSlot,
+    rest: &str,
+) -> std::io::Result<()> {
+    let mut parts = rest.splitn(5, '/');
+    let Some(source_part) = parts.next() else {
+        stream.write_all(b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n")?;
+        return Ok(());
+    };
+    let Some(size_part) = parts.next() else {
+        stream.write_all(b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n")?;
+        return Ok(());
+    };
+    let Some(mtime_part) = parts.next() else {
+        stream.write_all(b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n")?;
+        return Ok(());
+    };
+    let Some(file_size_part) = parts.next() else {
+        stream.write_all(b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n")?;
+        return Ok(());
+    };
+    let Some(path_part) = parts.next() else {
+        stream.write_all(b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n")?;
+        return Ok(());
+    };
+    let source_id = percent_decode(source_part);
+    let size = size_part.parse::<u32>().unwrap_or(128).clamp(32, 512);
+    let mtime = percent_decode(mtime_part);
+    let file_size = percent_decode(file_size_part);
+    let path = percent_decode(path_part);
+    if source_id.is_empty() || path.is_empty() || path.split('/').any(|part| part == "..") {
+        stream.write_all(b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n")?;
+        return Ok(());
+    }
+
+    if let Some(cached) = read_remote_thumb_cache(&source_id, &path, &mtime, &file_size, size) {
+        return write_remote_thumb_response(&mut stream, &cached);
+    }
+
+    let state = match state_slot.lock().ok().and_then(|slot| slot.clone()) {
+        Some(state) => state,
+        None => {
+            stream.write_all(b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\n\r\n")?;
+            return Ok(());
+        }
+    };
+    let driver = futures::executor::block_on(async {
+        let guard = state.lock().await;
+        guard.drivers.get(&source_id).cloned()
+    });
+    let Some(driver) = driver else {
+        stream.write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n")?;
+        return Ok(());
+    };
+    let bytes = match driver
+        .as_any()
+        .downcast_ref::<crate::vfs::sftp::SftpFsDriver>()
+        .and_then(|sftp| sftp.remote_thumbnail(&path, size).ok())
+    {
+        Some(bytes) => bytes,
+        None => {
+            stream.write_all(
+                b"HTTP/1.1 404 Not Found\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            )?;
+            return Ok(());
+        }
+    };
+    write_remote_thumb_cache(&source_id, &path, &mtime, &file_size, size, &bytes);
+    write_remote_thumb_response(&mut stream, &bytes)
+}
+
+fn remote_thumb_cache_dir() -> Option<PathBuf> {
+    let base = std::env::var_os("XDG_CACHE_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))
+        .or_else(|| Some(std::env::temp_dir()))?;
+    Some(base.join("fbro").join("remote-thumbnails"))
+}
+
+fn remote_thumb_cache_path(
+    source_id: &str,
+    path: &str,
+    mtime: &str,
+    file_size: &str,
+    thumb_size: u32,
+) -> Option<PathBuf> {
+    let mut h = blake3::Hasher::new();
+    h.update(source_id.as_bytes());
+    h.update(b"\0");
+    h.update(path.as_bytes());
+    h.update(b"\0");
+    h.update(mtime.as_bytes());
+    h.update(b"\0");
+    h.update(file_size.as_bytes());
+    h.update(b"\0");
+    h.update(&thumb_size.to_le_bytes());
+    Some(remote_thumb_cache_dir()?.join(format!("{}.png", h.finalize().to_hex())))
+}
+
+fn read_remote_thumb_cache(
+    source_id: &str,
+    path: &str,
+    mtime: &str,
+    file_size: &str,
+    thumb_size: u32,
+) -> Option<Vec<u8>> {
+    let cache_path = remote_thumb_cache_path(source_id, path, mtime, file_size, thumb_size)?;
+    let meta = std::fs::metadata(&cache_path).ok()?;
+    let fresh = meta
+        .modified()
+        .ok()
+        .and_then(|modified| modified.elapsed().ok())
+        .map(|age| age <= REMOTE_THUMB_TTL)
+        .unwrap_or(false);
+    if !fresh {
+        let _ = std::fs::remove_file(&cache_path);
+        return None;
+    }
+    std::fs::read(cache_path).ok()
+}
+
+fn write_remote_thumb_cache(
+    source_id: &str,
+    path: &str,
+    mtime: &str,
+    file_size: &str,
+    thumb_size: u32,
+    bytes: &[u8],
+) {
+    let Some(cache_path) = remote_thumb_cache_path(source_id, path, mtime, file_size, thumb_size)
+    else {
+        return;
+    };
+    if let Some(parent) = cache_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let tmp = cache_path.with_extension("png.tmp");
+    if std::fs::write(&tmp, bytes).is_ok() {
+        let _ = std::fs::rename(tmp, cache_path);
+    }
 }
 
 fn handle_thumb(
@@ -313,6 +478,16 @@ fn write_thumb_response(stream: &mut TcpStream, bytes: &[u8]) -> std::io::Result
     write!(
         stream,
         "HTTP/1.1 200 OK\r\nContent-Type: image/png\r\nContent-Length: {}\r\nCache-Control: public, max-age=3600\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n",
+        bytes.len()
+    )?;
+    stream.write_all(bytes)?;
+    Ok(())
+}
+
+fn write_remote_thumb_response(stream: &mut TcpStream, bytes: &[u8]) -> std::io::Result<()> {
+    write!(
+        stream,
+        "HTTP/1.1 200 OK\r\nContent-Type: image/png\r\nContent-Length: {}\r\nCache-Control: public, max-age=86400\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n",
         bytes.len()
     )?;
     stream.write_all(bytes)?;

@@ -503,7 +503,9 @@ async fn handle_connection(
 
     let mut state_guard = state.lock().await;
     state_guard.gui_senders.retain(|sender| !sender.is_closed());
-    state_guard.viewer_senders.retain(|sender| !sender.is_closed());
+    state_guard
+        .viewer_senders
+        .retain(|sender| !sender.is_closed());
 }
 
 fn cli_open_request_from_args(args: &serde_json::Value) -> CliOpenRequest {

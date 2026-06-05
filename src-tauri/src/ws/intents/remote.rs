@@ -20,7 +20,7 @@ use serde_json::Value;
 
 use crate::remote::keys::Identity;
 use crate::state::{PairedPeer, Source};
-use crate::vfs::sftp::{SftpDriverConfig, SftpFsDriver};
+use crate::vfs::sftp::{RemoteSourceInfo, SftpDriverConfig, SftpFsDriver};
 use crate::vfs::VfsDriver;
 use crate::ws::intents::sharing::ensure_identity;
 use crate::ws::protocol::{now, ServerMessage};
@@ -202,32 +202,47 @@ async fn connect_to_endpoint(
         "",
         "probe",
         allow_ipv6,
+        false,
         Arc::new(crate::vfs::sftp::NoopStatusBroadcaster),
     ) {
         Ok(d) => d,
         Err(e) => return Err(format!("driver build: {e}")),
     };
-    let probe_arc: Arc<dyn VfsDriver> = Arc::new(probe);
-    let listing = {
-        let probe = probe_arc.clone();
-        tokio::task::spawn_blocking(move || {
-            let sort = crate::ws::protocol::SortSpec {
-                by: "name".to_string(),
-                order: "asc".to_string(),
-            };
-            probe.list("", &sort, None, true)
+    let remote_sources = {
+        let probe = probe;
+        tokio::task::spawn_blocking(move || match probe.list_fbro_sources() {
+            Ok(items) => Ok(items),
+            Err(_) => {
+                let sort = crate::ws::protocol::SortSpec {
+                    by: "name".to_string(),
+                    order: "asc".to_string(),
+                };
+                probe.list("", &sort, None, true).map(|entries| {
+                    entries
+                        .into_iter()
+                        .filter(|e| {
+                            matches!(e.kind, crate::vfs::VfsKind::Directory)
+                                && !e.name.starts_with('.')
+                        })
+                        .map(|e| RemoteSourceInfo {
+                            id: e.name.clone(),
+                            name: e.name,
+                            icon: Some("network-server".to_string()),
+                            read_only: true,
+                            supports_thumbnails: false,
+                        })
+                        .collect()
+                })
+            }
         })
         .await
         .map_err(|e| e.to_string())
     };
-    let listing = match listing {
+    let remote_sources = match remote_sources {
         Ok(Ok(entries)) => entries,
         Ok(Err(e)) => return Err(format!("list remote root: {e}")),
         Err(e) => return Err(format!("spawn blocking: {e}")),
     };
-    // Drop the probe driver — we'll spawn fresh per-source drivers below so
-    // their path_prefix is scoped correctly.
-    drop(probe_arc);
 
     let supports = vec![
         "ListEntries".to_string(),
@@ -237,11 +252,8 @@ async fn connect_to_endpoint(
     ];
 
     let mut registered: Vec<String> = Vec::new();
-    for entry in listing
-        .iter()
-        .filter(|e| matches!(e.kind, crate::vfs::VfsKind::Directory) && !e.name.starts_with('.'))
-    {
-        let remote_source_id = entry.name.clone();
+    for remote_source in remote_sources.iter().filter(|s| !s.id.starts_with('.')) {
+        let remote_source_id = remote_source.id.clone();
         let local_source_id = format!("remote:{}:{remote_source_id}", paired.fingerprint);
         let status: Arc<dyn crate::vfs::sftp::StatusBroadcaster> =
             Arc::new(crate::remote::server::GuiStatusBroadcaster {
@@ -255,6 +267,7 @@ async fn connect_to_endpoint(
             &format!("/{remote_source_id}"),
             &local_source_id,
             allow_ipv6,
+            remote_source.supports_thumbnails,
             status,
         ) {
             Ok(d) => d,
@@ -265,16 +278,19 @@ async fn connect_to_endpoint(
         };
         let source = Source {
             id: local_source_id.clone(),
-            name: format!("{} @ {}", remote_source_id, paired.name),
+            name: format!("{} @ {}", remote_source.name, paired.name),
             kind: "remote".to_string(),
             supports: supports.clone(),
             root_path: String::new(),
             mounted: true,
             device_path: None,
             shadow: false,
-            icon_name: Some("network-server".to_string()),
+            icon_name: remote_source
+                .icon
+                .clone()
+                .or_else(|| Some("network-server".to_string())),
             sort_priority: 200,
-            read_only: true,
+            read_only: remote_source.read_only,
             peer_id: Some(paired.fingerprint.clone()),
         };
         let mut state = ctx.state.lock().await;
@@ -332,6 +348,7 @@ fn build_driver(
     path_prefix: &str,
     source_id: &str,
     allow_ipv6: bool,
+    supports_thumbnails: bool,
     status: Arc<dyn crate::vfs::sftp::StatusBroadcaster>,
 ) -> Result<SftpFsDriver, String> {
     SftpFsDriver::new(
@@ -344,6 +361,7 @@ fn build_driver(
             path_prefix: path_prefix.to_string(),
             source_id: source_id.to_string(),
             allow_ipv6,
+            supports_thumbnails,
         },
         status,
     )

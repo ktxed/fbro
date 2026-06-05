@@ -39,6 +39,10 @@ pub struct GeneralSettings {
     /// open on black or studio cards.
     #[serde(default = "default_thumb_video_frame_skip")]
     pub thumbnail_video_frame_skip: u32,
+    /// When true, this fbro will generate thumbnails for paired remote fbro
+    /// clients browsing shared folders in grid mode.
+    #[serde(default = "default_true")]
+    pub stream_thumbnails: bool,
     /// When true, every tab in every slot is saved at shutdown and restored on
     /// startup. When false, only the active tab per slot is persisted (the
     /// pre-tabs behavior).
@@ -87,6 +91,7 @@ impl Default for GeneralSettings {
             enable_video_thumbnails: true,
             thumbnail_max_image_size_mb: 100,
             thumbnail_video_frame_skip: 5,
+            stream_thumbnails: true,
             persist_panel_tabs: true,
             proc_tree_mode: false,
             color_scheme: default_color_scheme(),

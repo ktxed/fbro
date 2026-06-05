@@ -423,6 +423,7 @@ export interface GeneralSettings {
   enableVideoThumbnails: boolean;
   thumbnailMaxImageSizeMb: number;
   thumbnailVideoFrameSkip: number;
+  streamThumbnails: boolean;
   sessionPath: string;
   bookmarksPath: string;
   /** Empty string on platforms that don't use the fbro-managed thumbnailer. */

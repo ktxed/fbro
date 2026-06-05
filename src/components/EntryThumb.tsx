@@ -4,13 +4,11 @@ import { useAppState } from "../store";
 
 export interface EntryThumbProps {
   entry: VFSEntry;
-  /** Real OS path used to fetch a thumbnail. When null/undefined, only the icon is rendered. */
-  hostPath: string | null;
-  /** Requested thumbnail size (px, longer edge). */
-  size: number;
+  /** Fully resolved thumbnail URL. When null/undefined, only the icon is rendered. */
+  thumbUrl: string | null;
 }
 
-export function EntryThumb({ entry, hostPath, size }: EntryThumbProps) {
+export function EntryThumb({ entry, thumbUrl }: EntryThumbProps) {
   const { fileServerPort } = useAppState();
   const [iconFailed, setIconFailed] = useState(false);
   const [thumbLoaded, setThumbLoaded] = useState(false);
@@ -19,13 +17,9 @@ export function EntryThumb({ entry, hostPath, size }: EntryThumbProps) {
   const iconName = entry.iconName;
   const isThumbCandidate =
     entry.kind === "file" &&
-    !!hostPath &&
-    fileServerPort > 0 &&
+    !!thumbUrl &&
     !thumbFailed;
-
-  const thumbUrl = isThumbCandidate
-    ? `http://127.0.0.1:${fileServerPort}/__thumb__/${size}/${encodeURIComponent(hostPath!)}`
-    : null;
+  const resolvedThumbUrl = isThumbCandidate ? thumbUrl : null;
 
   return (
     <div className="panel__thumb">
@@ -41,7 +35,7 @@ export function EntryThumb({ entry, hostPath, size }: EntryThumbProps) {
           <span className="panel__thumb-icon-fallback">{entry.kind === "directory" ? "📁" : "📄"}</span>
         )}
       </div>
-      {thumbUrl && (
+      {resolvedThumbUrl && (
         <img
           className={`panel__thumb-img${thumbLoaded ? " panel__thumb-img--loaded" : ""}`}
           // Defer the HTTP request until the card is actually in the
@@ -50,7 +44,7 @@ export function EntryThumb({ entry, hostPath, size }: EntryThumbProps) {
           // floods the BE worker pool with stale work during fast scrolls.
           loading="lazy"
           decoding="async"
-          src={thumbUrl}
+          src={resolvedThumbUrl}
           alt=""
           draggable={false}
           onLoad={() => setThumbLoaded(true)}

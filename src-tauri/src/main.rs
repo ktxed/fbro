@@ -265,6 +265,7 @@ fn main() {
     let is_frontend_only = frontend_only();
     let platform = platform::create_platform();
     let viewer_prefetch = Arc::new(ViewerPrefetchQueue::new());
+    let file_server_state: fileserver::SharedStateSlot = Arc::new(StdMutex::new(None));
     // 1024 entries × ~20 KB/PNG ≈ 20 MB resident cap. Comfortable for browsing
     // image-heavy folders (thousands of files) without re-extracting thumbnails
     // on every scroll-back.
@@ -282,6 +283,7 @@ fn main() {
             Arc::clone(&viewer_prefetch),
             Arc::clone(&thumb_cache),
             Arc::clone(&thumb_pool),
+            Arc::clone(&file_server_state),
         )
     };
     let icon_cache: Arc<StdMutex<HashMap<String, (Vec<u8>, &'static str)>>> =
@@ -435,6 +437,9 @@ fn main() {
                     app_state.pending_cli_opens.push(request);
                 }
                 let shared_state = Arc::new(Mutex::new(app_state));
+                if let Ok(mut slot) = file_server_state.lock() {
+                    *slot = Some(Arc::clone(&shared_state));
+                }
 
                 // If the user previously enabled sharing, restart the russh +
                 // pair listeners, start discovery, and re-advertise. This is

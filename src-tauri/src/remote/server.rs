@@ -407,6 +407,15 @@ struct DigestResponse {
     complete: bool,
 }
 
+#[derive(Serialize)]
+struct SourceMetadataItem {
+    id: String,
+    name: String,
+    icon: Option<String>,
+    read_only: bool,
+    supports_thumbnails: bool,
+}
+
 #[derive(Clone)]
 struct DirEntry {
     name: String,
@@ -631,6 +640,71 @@ impl SftpHandler {
             complete: digest.is_complete(),
         };
         serde_json::to_vec(&response).map_err(|_| StatusCode::Failure)
+    }
+
+    async fn sources_metadata_json(&self) -> Result<Vec<u8>, StatusCode> {
+        let guard = self.state.lock().await;
+        let stream_thumbnails = guard.settings.general.stream_thumbnails;
+        let mut items: Vec<SourceMetadataItem> = Vec::new();
+        for root in guard.share_config.shared_roots.iter() {
+            let Some(driver) = guard.drivers.get(&root.source_id) else {
+                continue;
+            };
+            if !guard.sources.contains_key(&root.source_id) {
+                continue;
+            }
+            items.push(SourceMetadataItem {
+                id: root.id.clone(),
+                name: root.name.clone(),
+                icon: root.icon_name.clone(),
+                read_only: true,
+                supports_thumbnails: stream_thumbnails && driver.supports_thumbnails(),
+            });
+        }
+        serde_json::to_vec(&items).map_err(|_| StatusCode::Failure)
+    }
+
+    async fn thumbnail_bytes(&self, size: u32, encoded_path: &str) -> Result<Vec<u8>, StatusCode> {
+        let path_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(encoded_path)
+            .map_err(|_| StatusCode::BadMessage)?;
+        let path = String::from_utf8(path_bytes).map_err(|_| StatusCode::BadMessage)?;
+        if has_dotdot(&path) {
+            return Err(StatusCode::PermissionDenied);
+        }
+        let stream_thumbnails = {
+            let guard = self.state.lock().await;
+            guard.settings.general.stream_thumbnails
+        };
+        if !stream_thumbnails {
+            return Err(StatusCode::OpUnsupported);
+        }
+        let (source_id, rest) = parse_path(&path);
+        let Some(sid) = source_id else {
+            return Err(StatusCode::NoSuchFile);
+        };
+        let Some((driver, root, _, _, _)) = resolve_source(&self.state, &sid).await else {
+            return Err(StatusCode::NoSuchFile);
+        };
+        if !driver.supports_thumbnails() {
+            return Err(StatusCode::OpUnsupported);
+        }
+        let driver_path = compose_driver_path(&root, &rest);
+        if !driver.exists(&driver_path) || driver.file_size(&driver_path).is_none() {
+            return Err(StatusCode::NoSuchFile);
+        }
+        let platform = {
+            let guard = self.state.lock().await;
+            guard.platform.clone()
+        };
+        tokio::task::spawn_blocking(move || {
+            platform
+                .get_thumbnail(&driver_path, size.clamp(32, 512))
+                .map(|(bytes, _)| bytes)
+                .ok_or(StatusCode::NoSuchFile)
+        })
+        .await
+        .map_err(|_| StatusCode::Failure)?
     }
 }
 
@@ -982,6 +1056,22 @@ fn integrity_result_from_path(path: &str) -> Option<(String, String)> {
     Some((job_id.to_string(), encoded_path.to_string()))
 }
 
+fn is_sources_metadata_path(path: &str) -> bool {
+    path.trim_start_matches('/').trim_end_matches('/') == ".fbro-sources.json"
+}
+
+fn thumbnail_request_from_path(path: &str) -> Option<(u32, String)> {
+    let suffix = path
+        .trim_start_matches('/')
+        .strip_prefix(".fbro-thumbnail/")?;
+    let (size_str, encoded_path) = suffix.split_once('/')?;
+    if encoded_path.is_empty() || encoded_path.contains('/') {
+        return None;
+    }
+    let size = size_str.parse::<u32>().ok()?.clamp(32, 512);
+    Some((size, encoded_path.to_string()))
+}
+
 /// Reject path-traversal — any `..` segment, after normalization, is a
 /// traversal attempt and must be refused. (defence in depth on top of
 /// the driver's own canonicalization.)
@@ -1283,6 +1373,20 @@ impl russh_sftp::server::Handler for SftpHandler {
                 .insert(handle.clone(), HandleState::ControlData { data });
             return Ok(Handle { id, handle });
         }
+        if is_sources_metadata_path(&filename) {
+            let data = self.sources_metadata_json().await?;
+            let handle = self.fresh_handle();
+            self.handles
+                .insert(handle.clone(), HandleState::ControlData { data });
+            return Ok(Handle { id, handle });
+        }
+        if let Some((size, encoded_path)) = thumbnail_request_from_path(&filename) {
+            let data = self.thumbnail_bytes(size, &encoded_path).await?;
+            let handle = self.fresh_handle();
+            self.handles
+                .insert(handle.clone(), HandleState::ControlData { data });
+            return Ok(Handle { id, handle });
+        }
         let (source_id, rest) = parse_path(&filename);
         let Some(sid) = source_id else {
             return Err(StatusCode::NoSuchFile);
@@ -1400,14 +1504,19 @@ impl russh_sftp::server::Handler for SftpHandler {
             return Err(StatusCode::OpUnsupported);
         }
         let guard = self.state.lock().await;
+        let stream_thumbnails = guard.settings.general.stream_thumbnails;
         let mut items: Vec<serde_json::Value> = Vec::new();
         for root in guard.share_config.shared_roots.iter() {
-            if guard.sources.contains_key(&root.source_id) {
+            if let Some(driver) = guard.drivers.get(&root.source_id) {
+                if !guard.sources.contains_key(&root.source_id) {
+                    continue;
+                }
                 items.push(serde_json::json!({
                     "id": root.id,
                     "name": root.name,
                     "icon": root.icon_name,
                     "read_only": true,
+                    "supports_thumbnails": stream_thumbnails && driver.supports_thumbnails(),
                 }));
             }
         }
