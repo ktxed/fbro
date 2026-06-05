@@ -23,6 +23,25 @@ pub struct VfsTransferDigest {
     pub hash: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct VfsManifestEntry {
+    pub path: String,
+    pub size: u64,
+    pub hash: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct VfsManifestError {
+    pub path: String,
+    pub message: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct VfsManifest {
+    pub entries: Vec<VfsManifestEntry>,
+    pub errors: Vec<VfsManifestError>,
+}
+
 // ─── VFS trait ──────────────────────────────────────────────────────────────
 
 /// Abstraction over a filesystem-like data source.
@@ -128,6 +147,10 @@ pub trait VfsDriver: Send + Sync {
     }
 
     fn file_digest(&self, _path: &str) -> Result<Option<VfsTransferDigest>, VfsError> {
+        Ok(None)
+    }
+
+    fn remote_manifest(&self, _path: &str) -> Result<Option<VfsManifest>, VfsError> {
         Ok(None)
     }
 

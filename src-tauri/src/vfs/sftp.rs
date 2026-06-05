@@ -37,7 +37,7 @@ use tokio::sync::{mpsc, Mutex, Notify};
 use crate::remote::keys::{fingerprint_of, Identity};
 use crate::vfs::{
     color_class_for_entry, format_mtime, icon_name_for_entry, DirChild, VfsDriver, VfsEntry,
-    VfsError, VfsKind, VfsTransferDigest,
+    VfsError, VfsKind, VfsManifest, VfsManifestEntry, VfsManifestError, VfsTransferDigest,
 };
 use crate::ws::protocol::{FilterSpec, SortSpec};
 
@@ -87,6 +87,7 @@ const SFTP_CLIENT_MAX_PACKET_LEN: u32 = 1024 * 1024;
 const SFTP_READ_CHUNK_SIZE: usize = 256 * 1024;
 const SFTP_READ_AHEAD_CHUNKS: usize = 16;
 const FBRO_INTEGRITY_ALGORITHM: &str = "blake3";
+const REMOTE_MANIFEST_POLL_INTERVAL: Duration = Duration::from_secs(5);
 
 thread_local! {
     static CURRENT_FILE_OP_JOB: RefCell<Option<String>> = const { RefCell::new(None) };
@@ -176,6 +177,34 @@ struct RemoteDigestResponse {
     complete: bool,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RemoteManifestStartResponse {
+    job_id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RemoteManifestStatusResponse {
+    done: bool,
+    error: Option<String>,
+    entries: Option<Vec<RemoteManifestEntry>>,
+    errors: Option<Vec<RemoteManifestError>>,
+}
+
+#[derive(Deserialize)]
+struct RemoteManifestEntry {
+    path: String,
+    size: u64,
+    hash: String,
+}
+
+#[derive(Deserialize)]
+struct RemoteManifestError {
+    path: String,
+    message: String,
+}
+
 #[derive(Clone, Debug, Deserialize)]
 pub struct RemoteSourceInfo {
     pub id: String,
@@ -262,6 +291,21 @@ impl SftpFsDriver {
                 let mut data = Vec::new();
                 file.read_to_end(&mut data).await?;
                 Ok(data)
+            })
+            .await
+        })
+    }
+
+    fn read_control_file(&self, path: String) -> Result<String, VfsError> {
+        self.block_on(async move {
+            self.with_sftp(|sftp| async move {
+                use russh_sftp::protocol::OpenFlags;
+                use tokio::io::AsyncReadExt;
+                let mut file = sftp.open_with_flags(&path, OpenFlags::READ).await?;
+                let mut body = String::new();
+                file.read_to_string(&mut body).await?;
+                drop(file);
+                Ok(body)
             })
             .await
         })
@@ -1206,6 +1250,65 @@ impl VfsDriver for SftpFsDriver {
             size: parsed.size,
             hash: parsed.hash,
         }))
+    }
+
+    fn remote_manifest(&self, path: &str) -> Result<Option<VfsManifest>, VfsError> {
+        let abs = self.absolute(path);
+        let encoded_path = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(abs.as_bytes());
+        let start_path = format!("/.fbro-manifest/start/{encoded_path}");
+        let response = self.read_control_file(start_path)?;
+        let started: RemoteManifestStartResponse =
+            serde_json::from_str(&response).map_err(|e| VfsError::IOError(e.to_string()))?;
+        if !started
+            .job_id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b':'))
+        {
+            return Err(VfsError::IOError(
+                "remote manifest returned invalid job id".to_string(),
+            ));
+        }
+
+        let mut first_poll = true;
+        loop {
+            if first_poll {
+                first_poll = false;
+            } else {
+                std::thread::sleep(REMOTE_MANIFEST_POLL_INTERVAL);
+            }
+            let status_path = format!("/.fbro-manifest/status/{}", started.job_id);
+            let response = self.read_control_file(status_path)?;
+            let status: RemoteManifestStatusResponse =
+                serde_json::from_str(&response).map_err(|e| VfsError::IOError(e.to_string()))?;
+            if !status.done {
+                continue;
+            }
+            if let Some(error) = status.error {
+                return Err(VfsError::IOError(error));
+            }
+            let mut entries = status
+                .entries
+                .unwrap_or_default()
+                .into_iter()
+                .map(|entry| VfsManifestEntry {
+                    path: entry.path,
+                    size: entry.size,
+                    hash: entry.hash,
+                })
+                .collect::<Vec<_>>();
+            let mut errors = status
+                .errors
+                .unwrap_or_default()
+                .into_iter()
+                .map(|error| VfsManifestError {
+                    path: error.path,
+                    message: error.message,
+                })
+                .collect::<Vec<_>>();
+            entries.sort_by(|a, b| a.path.cmp(&b.path));
+            errors.sort_by(|a, b| a.path.cmp(&b.path));
+            return Ok(Some(VfsManifest { entries, errors }));
+        }
     }
 }
 

@@ -6,7 +6,7 @@ use std::sync::{
 
 use tokio::sync::{mpsc, watch};
 
-use crate::vfs::VfsDriver;
+use crate::vfs::{VfsDriver, VfsManifest};
 use crate::ws::protocol::{now, FileOpProgressSchema, ServerMessage};
 
 const CHUNK_SIZE: usize = 1024 * 1024;
@@ -20,11 +20,25 @@ pub struct ManifestEntry {
 }
 
 #[derive(Clone, Debug, Default)]
+struct ManifestBuild {
+    entries: Vec<ManifestEntry>,
+    errors: Vec<ManifestError>,
+}
+
+#[derive(Clone, Debug)]
+struct ManifestError {
+    path: String,
+    message: String,
+}
+
+#[derive(Clone, Debug, Default)]
 struct CompareSummary {
     matched: usize,
     differing: Vec<DiffEntry>,
     local_only: Vec<String>,
     remote_only: Vec<String>,
+    local_errors: Vec<ManifestError>,
+    remote_errors: Vec<ManifestError>,
 }
 
 #[derive(Clone, Debug)]
@@ -60,85 +74,83 @@ pub async fn run_sync_bro(
         }
     });
 
-    let tx_for_worker = tx.clone();
-    let job_for_worker = job_id.clone();
+    let local_tx = tx.clone();
+    let local_job = job_id.clone();
     let local_root_for_worker = local_root.clone();
-    let remote_root_for_worker = remote_root.clone();
     let local_driver_for_worker = Arc::clone(&local_driver);
-    let remote_driver_for_worker = Arc::clone(&remote_driver);
-    let worker = tokio::task::spawn_blocking(move || {
-        send_progress_sync(
-            &tx_for_worker,
-            &job_for_worker,
-            "Hashing local tree",
-            None,
-            0,
-            0,
-        );
-        let local = build_manifest(
-            &job_for_worker,
+    let local_cancel = Arc::clone(&cancel_flag);
+    let local_worker = tokio::task::spawn_blocking(move || {
+        send_progress_sync(&local_tx, &local_job, "Hashing local tree", None, 0, 0);
+        build_manifest(
+            &local_job,
             "local",
             &local_root_for_worker,
             &*local_driver_for_worker,
-            &tx_for_worker,
-            &cancel_flag,
-        )?;
-        send_progress_sync(
-            &tx_for_worker,
-            &job_for_worker,
-            "Hashing remote tree",
-            None,
-            local.len(),
-            local.len(),
-        );
-        let remote = build_manifest(
-            &job_for_worker,
+            &local_tx,
+            &local_cancel,
+        )
+    });
+
+    let remote_tx = tx.clone();
+    let remote_job = job_id.clone();
+    let remote_root_for_worker = remote_root.clone();
+    let remote_driver_for_worker = Arc::clone(&remote_driver);
+    let remote_cancel = Arc::clone(&cancel_flag);
+    let remote_worker = tokio::task::spawn_blocking(move || {
+        send_progress_sync(&remote_tx, &remote_job, "Hashing remote tree", None, 0, 0);
+        build_manifest(
+            &remote_job,
             "remote",
             &remote_root_for_worker,
             &*remote_driver_for_worker,
-            &tx_for_worker,
-            &cancel_flag,
-        )?;
-        if cancel_flag.load(Ordering::SeqCst) {
-            return Err("Cancelled".to_string());
-        }
-        Ok::<_, String>((local, remote))
+            &remote_tx,
+            &remote_cancel,
+        )
     });
 
-    let result = worker.await;
+    let (local_result, remote_result) = tokio::join!(local_worker, remote_worker);
     cancel_task.abort();
 
-    let (local_manifest, remote_manifest) = match result {
-        Ok(Ok(pair)) => pair,
-        Ok(Err(error)) if error == "Cancelled" => {
+    let local_build = match manifest_worker_result(local_result) {
+        Ok(build) => build,
+        Err(error) if error == "Cancelled" => {
             let _ = send_terminal(&tx, &job_id, "Cancelled", None, None, None).await;
             return;
         }
-        Ok(Err(error)) => {
+        Err(error) => {
             let _ = send_terminal(&tx, &job_id, "Failed", Some(error), None, None).await;
             return;
         }
+    };
+    let remote_build = match manifest_worker_result(remote_result) {
+        Ok(build) => build,
+        Err(error) if error == "Cancelled" => {
+            let _ = send_terminal(&tx, &job_id, "Cancelled", None, None, None).await;
+            return;
+        }
         Err(error) => {
-            let _ =
-                send_terminal(&tx, &job_id, "Failed", Some(error.to_string()), None, None).await;
+            let _ = send_terminal(&tx, &job_id, "Failed", Some(error), None, None).await;
             return;
         }
     };
 
-    let summary = compare_manifests(&local_manifest, &remote_manifest);
+    let mut summary = compare_manifests(&local_build.entries, &remote_build.entries);
+    summary.local_errors = local_build.errors;
+    summary.remote_errors = remote_build.errors;
     let status = format!(
-        "{} matched, {} differing, {} local-only, {} remote-only",
+        "{} matched, {} differing, {} local-only, {} remote-only, {} errors",
         summary.matched,
         summary.differing.len(),
         summary.local_only.len(),
-        summary.remote_only.len()
+        summary.remote_only.len(),
+        summary.local_errors.len() + summary.remote_errors.len()
     );
     let _ = send_progress(
         &tx,
         &job_id,
         FileOpProgressSchema {
-            total_files: local_manifest.len().max(remote_manifest.len()),
-            completed_files: local_manifest.len().max(remote_manifest.len()),
+            total_files: local_build.entries.len().max(remote_build.entries.len()),
+            completed_files: local_build.entries.len().max(remote_build.entries.len()),
             current_file: None,
             status_text: Some(status.clone()),
             current_file_bytes_total: 0,
@@ -175,6 +187,15 @@ pub async fn run_sync_bro(
     }
 }
 
+fn manifest_worker_result(
+    result: Result<Result<ManifestBuild, String>, tokio::task::JoinError>,
+) -> Result<ManifestBuild, String> {
+    match result {
+        Ok(result) => result,
+        Err(error) => Err(error.to_string()),
+    }
+}
+
 fn build_manifest(
     job_id: &str,
     label: &str,
@@ -182,11 +203,56 @@ fn build_manifest(
     driver: &dyn VfsDriver,
     tx: &mpsc::Sender<ServerMessage>,
     cancel: &AtomicBool,
-) -> Result<Vec<ManifestEntry>, String> {
+) -> Result<ManifestBuild, String> {
+    if let Some(manifest) = driver
+        .remote_manifest(root)
+        .map_err(|error| format!("Cannot request {label} manifest for {root}: {error}"))?
+    {
+        return Ok(manifest_from_vfs(manifest));
+    }
+
     let mut out = Vec::new();
-    walk_dir(job_id, label, root, "", driver, tx, cancel, &mut out)?;
+    let mut errors = Vec::new();
+    walk_dir(
+        job_id,
+        label,
+        root,
+        "",
+        driver,
+        tx,
+        cancel,
+        &mut out,
+        &mut errors,
+    )?;
     out.sort_by(|a, b| a.path.cmp(&b.path));
-    Ok(out)
+    errors.sort_by(|a, b| a.path.cmp(&b.path));
+    Ok(ManifestBuild {
+        entries: out,
+        errors,
+    })
+}
+
+fn manifest_from_vfs(manifest: VfsManifest) -> ManifestBuild {
+    let mut entries = manifest
+        .entries
+        .into_iter()
+        .map(|entry| ManifestEntry {
+            path: entry.path,
+            size: entry.size,
+            hash: entry.hash,
+        })
+        .collect::<Vec<_>>();
+    let mut errors = manifest
+        .errors
+        .into_iter()
+        .map(|error| ManifestError {
+            path: error.path,
+            message: error.message,
+        })
+        .collect::<Vec<_>>();
+    entries.sort_by(|a, b| a.path.cmp(&b.path));
+    errors.sort_by(|a, b| a.path.cmp(&b.path));
+    ManifestBuild { entries, errors }
 }
 
 fn walk_dir(
@@ -198,36 +264,55 @@ fn walk_dir(
     tx: &mpsc::Sender<ServerMessage>,
     cancel: &AtomicBool,
     out: &mut Vec<ManifestEntry>,
+    errors: &mut Vec<ManifestError>,
 ) -> Result<(), String> {
     if cancel.load(Ordering::SeqCst) {
         return Err("Cancelled".to_string());
     }
-    let children = driver
-        .read_dir_entries(abs_dir)
-        .map_err(|e| format!("Cannot read {label} directory {abs_dir}: {e}"))?;
+    let children = match driver.read_dir_entries(abs_dir) {
+        Ok(children) => children,
+        Err(error) if rel_dir.is_empty() => {
+            return Err(format!("Cannot read {label} directory {abs_dir}: {error}"));
+        }
+        Err(error) => {
+            errors.push(ManifestError {
+                path: rel_dir.to_string(),
+                message: format!("Cannot read {label} directory {abs_dir}: {error}"),
+            });
+            return Ok(());
+        }
+    };
     for child in children {
         if cancel.load(Ordering::SeqCst) {
             return Err("Cancelled".to_string());
+        }
+        if rel_dir.is_empty() && child.name == SYNC_REPORT_NAME {
+            continue;
         }
         let child_abs = driver.resolve_child(abs_dir, &child.name);
         let child_rel = join_rel(rel_dir, &child.name);
         if child.is_dir {
             walk_dir(
-                job_id, label, &child_abs, &child_rel, driver, tx, cancel, out,
+                job_id, label, &child_abs, &child_rel, driver, tx, cancel, out, errors,
             )?;
         } else {
-            let digest = digest_file(driver, &child_abs, child.size)?;
-            out.push(ManifestEntry {
-                path: child_rel.clone(),
-                size: digest.size,
-                hash: digest.hash,
-            });
+            match digest_file(driver, &child_abs, child.size) {
+                Ok(digest) => out.push(ManifestEntry {
+                    path: child_rel.clone(),
+                    size: digest.size,
+                    hash: digest.hash,
+                }),
+                Err(message) => errors.push(ManifestError {
+                    path: child_rel.clone(),
+                    message,
+                }),
+            }
             send_progress_sync(
                 tx,
                 job_id,
                 &format!("Hashing {label} tree"),
                 Some(child_rel),
-                out.len(),
+                out.len() + errors.len(),
                 0,
             );
         }
@@ -317,6 +402,21 @@ fn write_report(
     remote_root: &str,
     summary: &CompareSummary,
 ) -> Result<(), String> {
+    let body = format_report(local_root, remote_root, summary);
+    let mut writer = driver
+        .open_write(path)
+        .map_err(|e| format!("Cannot create report {path}: {e}"))?;
+    use std::io::Write;
+    writer
+        .write_all(body.as_bytes())
+        .map_err(|e| format!("Cannot write report {path}: {e}"))?;
+    writer
+        .flush()
+        .map_err(|e| format!("Cannot flush report {path}: {e}"))?;
+    Ok(())
+}
+
+fn format_report(local_root: &str, remote_root: &str, summary: &CompareSummary) -> String {
     let mut body = String::new();
     body.push_str("fbro Sync Bro report\n\n");
     body.push_str(&format!("Local:  {local_root}\n"));
@@ -324,7 +424,11 @@ fn write_report(
     body.push_str(&format!("Matched: {}\n", summary.matched));
     body.push_str(&format!("Differing: {}\n", summary.differing.len()));
     body.push_str(&format!("Local-only: {}\n", summary.local_only.len()));
-    body.push_str(&format!("Remote-only: {}\n\n", summary.remote_only.len()));
+    body.push_str(&format!("Remote-only: {}\n", summary.remote_only.len()));
+    body.push_str(&format!(
+        "Hash errors: {}\n\n",
+        summary.local_errors.len() + summary.remote_errors.len()
+    ));
     if !summary.differing.is_empty() {
         body.push_str("Differing files:\n");
         for diff in &summary.differing {
@@ -346,17 +450,19 @@ fn write_report(
             body.push_str(&format!("- {path}\n"));
         }
     }
-    let mut writer = driver
-        .open_write(path)
-        .map_err(|e| format!("Cannot create report {path}: {e}"))?;
-    use std::io::Write;
-    writer
-        .write_all(body.as_bytes())
-        .map_err(|e| format!("Cannot write report {path}: {e}"))?;
-    writer
-        .flush()
-        .map_err(|e| format!("Cannot flush report {path}: {e}"))?;
-    Ok(())
+    if !summary.local_errors.is_empty() {
+        body.push_str("\nLocal hash errors:\n");
+        for error in &summary.local_errors {
+            body.push_str(&format!("- {}: {}\n", error.path, error.message));
+        }
+    }
+    if !summary.remote_errors.is_empty() {
+        body.push_str("\nRemote hash errors:\n");
+        for error in &summary.remote_errors {
+            body.push_str(&format!("- {}: {}\n", error.path, error.message));
+        }
+    }
+    body
 }
 
 fn join_rel(base: &str, name: &str) -> String {
@@ -464,6 +570,23 @@ mod tests {
         assert!(summary.differing.is_empty());
         assert_eq!(summary.local_only, vec!["local-only.txt"]);
         assert_eq!(summary.remote_only, vec!["remote-only.txt"]);
+    }
+
+    #[test]
+    fn report_includes_hash_errors() {
+        let mut summary = CompareSummary::default();
+        summary.remote_errors.push(ManifestError {
+            path: "some_file.mkv".to_string(),
+            message: "Cannot digest remote/some_file.mkv: IOError: disconnected: Timeout"
+                .to_string(),
+        });
+
+        let report = format_report("/local", "/remote", &summary);
+
+        assert!(report.contains("Hash errors: 1"));
+        assert!(report.contains("Remote hash errors:"));
+        assert!(report.contains("some_file.mkv"));
+        assert!(report.contains("Timeout"));
     }
 }
 

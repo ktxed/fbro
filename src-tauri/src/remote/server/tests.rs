@@ -324,3 +324,17 @@ fn integrity_result_path_parses_job_and_path() {
     assert_eq!(encoded_path, encoded);
     assert!(integrity_result_from_path("/.fbro-integrity/result/../abc").is_none());
 }
+
+#[test]
+fn manifest_paths_parse_start_and_status() {
+    let encoded = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(b"/src");
+    assert_eq!(
+        manifest_start_from_path(&format!("/.fbro-manifest/start/{encoded}")),
+        Some(encoded)
+    );
+    assert_eq!(
+        manifest_status_from_path("/.fbro-manifest/status/manifest-h1"),
+        Some("manifest-h1".to_string())
+    );
+    assert!(manifest_status_from_path("/.fbro-manifest/status/../x").is_none());
+}

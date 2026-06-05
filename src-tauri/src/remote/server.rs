@@ -45,6 +45,8 @@ use crate::ws::protocol::{
 pub const DEFAULT_PORT: u16 = 7879;
 const SSH_CHANNEL_WINDOW_SIZE: u32 = 16 * 1024 * 1024;
 const FBRO_INTEGRITY_ALGORITHM: &str = "blake3";
+const MANIFEST_HASH_CHUNK_SIZE: usize = 1024 * 1024;
+const SYNC_REPORT_NAME: &str = "fbro-sync-report.txt";
 
 /// Hook the discovery module passes in so the server can emit
 /// `RemoteSessionStarted` / `RemoteSessionEnded` to GUI clients.
@@ -351,6 +353,7 @@ struct SftpHandler {
     version: Option<u32>,
     transfers: HashMap<String, OutgoingTransfer>,
     session_transfer_key: Option<String>,
+    manifest_jobs: HashMap<String, Arc<Mutex<ManifestJobState>>>,
 }
 
 enum HandleState {
@@ -389,6 +392,45 @@ struct OutgoingTransfer {
     file_digests: HashMap<String, OrderedTransferDigest>,
     last_emit: Instant,
     completion_generation: u64,
+}
+
+#[derive(Default)]
+struct ManifestJobState {
+    done: bool,
+    error: Option<String>,
+    entries: Vec<ManifestEntryResponse>,
+    errors: Vec<ManifestErrorResponse>,
+}
+
+#[derive(Clone, Serialize)]
+struct ManifestEntryResponse {
+    path: String,
+    size: u64,
+    hash: String,
+}
+
+#[derive(Clone, Serialize)]
+struct ManifestErrorResponse {
+    path: String,
+    message: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ManifestStartResponse {
+    job_id: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ManifestStatusResponse {
+    done: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    entries: Option<Vec<ManifestEntryResponse>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    errors: Option<Vec<ManifestErrorResponse>>,
 }
 
 struct OrderedTransferDigest {
@@ -434,6 +476,7 @@ impl SftpHandler {
             version: None,
             transfers: HashMap::new(),
             session_transfer_key: None,
+            manifest_jobs: HashMap::new(),
         }
     }
 
@@ -690,6 +733,76 @@ impl SftpHandler {
             hash: digest,
             complete: true,
         };
+        serde_json::to_vec(&response).map_err(|_| StatusCode::Failure)
+    }
+
+    async fn start_manifest_json(&mut self, encoded_path: &str) -> Result<Vec<u8>, StatusCode> {
+        let path_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(encoded_path)
+            .map_err(|_| StatusCode::BadMessage)?;
+        let path = String::from_utf8(path_bytes).map_err(|_| StatusCode::BadMessage)?;
+        if has_dotdot(&path) {
+            return Err(StatusCode::PermissionDenied);
+        }
+        let (source_id, rest) = parse_path(&path);
+        let Some(sid) = source_id else {
+            return Err(StatusCode::NoSuchFile);
+        };
+        let Some((driver, root, _, _, _)) = resolve_source(&self.state, &sid).await else {
+            return Err(StatusCode::NoSuchFile);
+        };
+        let root_path = compose_driver_path(&root, &rest);
+        if !driver.exists(&root_path) {
+            return Err(StatusCode::NoSuchFile);
+        }
+
+        let job_id = format!("manifest-{}", self.fresh_handle());
+        let job = Arc::new(Mutex::new(ManifestJobState::default()));
+        self.manifest_jobs.insert(job_id.clone(), Arc::clone(&job));
+
+        tokio::task::spawn_blocking(move || {
+            let result = build_manifest_on_remote(&*driver, &root_path);
+            let mut guard = job.blocking_lock();
+            match result {
+                Ok((entries, errors)) => {
+                    guard.entries = entries;
+                    guard.errors = errors;
+                }
+                Err(error) => {
+                    guard.error = Some(error);
+                }
+            }
+            guard.done = true;
+        });
+
+        serde_json::to_vec(&ManifestStartResponse { job_id }).map_err(|_| StatusCode::Failure)
+    }
+
+    async fn manifest_status_json(&mut self, job_id: &str) -> Result<Vec<u8>, StatusCode> {
+        let Some(job) = self.manifest_jobs.get(job_id).cloned() else {
+            return Err(StatusCode::NoSuchFile);
+        };
+        let guard = job.lock().await;
+        let done = guard.done;
+        let response = if done {
+            ManifestStatusResponse {
+                done: true,
+                error: guard.error.clone(),
+                entries: Some(guard.entries.clone()),
+                errors: Some(guard.errors.clone()),
+            }
+        } else {
+            ManifestStatusResponse {
+                done: false,
+                error: None,
+                entries: None,
+                errors: None,
+            }
+        };
+        drop(guard);
+        if done {
+            self.manifest_jobs.remove(job_id);
+        }
         serde_json::to_vec(&response).map_err(|_| StatusCode::Failure)
     }
 
@@ -1118,6 +1231,121 @@ fn integrity_file_from_path(path: &str) -> Option<String> {
     Some(encoded_path.to_string())
 }
 
+fn manifest_start_from_path(path: &str) -> Option<String> {
+    let encoded_path = path
+        .trim_start_matches('/')
+        .strip_prefix(".fbro-manifest/start/")?;
+    if encoded_path.is_empty() {
+        return None;
+    }
+    Some(encoded_path.to_string())
+}
+
+fn manifest_status_from_path(path: &str) -> Option<String> {
+    let job_id = path
+        .trim_start_matches('/')
+        .strip_prefix(".fbro-manifest/status/")?;
+    if job_id.is_empty()
+        || job_id.len() > 128
+        || job_id.contains("..")
+        || !job_id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b':'))
+    {
+        return None;
+    }
+    Some(job_id.to_string())
+}
+
+fn build_manifest_on_remote(
+    driver: &dyn VfsDriver,
+    root: &str,
+) -> Result<(Vec<ManifestEntryResponse>, Vec<ManifestErrorResponse>), String> {
+    let mut entries = Vec::new();
+    let mut errors = Vec::new();
+    walk_manifest_on_remote(driver, root, "", &mut entries, &mut errors)?;
+    entries.sort_by(|a, b| a.path.cmp(&b.path));
+    errors.sort_by(|a, b| a.path.cmp(&b.path));
+    Ok((entries, errors))
+}
+
+fn walk_manifest_on_remote(
+    driver: &dyn VfsDriver,
+    abs_dir: &str,
+    rel_dir: &str,
+    entries: &mut Vec<ManifestEntryResponse>,
+    errors: &mut Vec<ManifestErrorResponse>,
+) -> Result<(), String> {
+    let children = match driver.read_dir_entries(abs_dir) {
+        Ok(children) => children,
+        Err(error) if rel_dir.is_empty() => {
+            return Err(format!("Cannot read directory {abs_dir}: {error}"));
+        }
+        Err(error) => {
+            errors.push(ManifestErrorResponse {
+                path: rel_dir.to_string(),
+                message: format!("Cannot read directory {abs_dir}: {error}"),
+            });
+            return Ok(());
+        }
+    };
+
+    for child in children {
+        if rel_dir.is_empty() && child.name == SYNC_REPORT_NAME {
+            continue;
+        }
+        let child_abs = driver.resolve_child(abs_dir, &child.name);
+        let child_rel = if rel_dir.is_empty() {
+            child.name.clone()
+        } else {
+            format!("{rel_dir}/{}", child.name)
+        };
+        if child.is_dir {
+            walk_manifest_on_remote(driver, &child_abs, &child_rel, entries, errors)?;
+        } else {
+            match hash_file_on_remote(driver, &child_abs, child.size) {
+                Ok((size, hash)) => entries.push(ManifestEntryResponse {
+                    path: child_rel,
+                    size,
+                    hash,
+                }),
+                Err(message) => errors.push(ManifestErrorResponse {
+                    path: child_rel,
+                    message,
+                }),
+            }
+        }
+    }
+    Ok(())
+}
+
+fn hash_file_on_remote(
+    driver: &dyn VfsDriver,
+    path: &str,
+    size_hint: u64,
+) -> Result<(u64, String), String> {
+    let size = driver.file_size(path).unwrap_or(size_hint);
+    let mut hasher = blake3::Hasher::new();
+    let mut offset = 0u64;
+    while offset < size {
+        let remaining = size
+            .saturating_sub(offset)
+            .min(MANIFEST_HASH_CHUNK_SIZE as u64) as usize;
+        let chunk = driver
+            .read_chunk(path, offset, remaining)
+            .map_err(|error| format!("Cannot read {path}: {error}"))?;
+        if chunk.is_empty() {
+            break;
+        }
+        offset = offset.saturating_add(chunk.len() as u64);
+        hasher.update(&chunk);
+    }
+    if offset != size {
+        return Err(format!("digest read ended at {offset} of {size} bytes"));
+    }
+    Ok((size, hasher.finalize().to_hex().to_string()))
+}
+
 fn is_sources_metadata_path(path: &str) -> bool {
     path.trim_start_matches('/').trim_end_matches('/') == ".fbro-sources.json"
 }
@@ -1437,6 +1665,20 @@ impl russh_sftp::server::Handler for SftpHandler {
         }
         if let Some(encoded_path) = integrity_file_from_path(&filename) {
             let data = self.full_file_digest_json(&encoded_path).await?;
+            let handle = self.fresh_handle();
+            self.handles
+                .insert(handle.clone(), HandleState::ControlData { data });
+            return Ok(Handle { id, handle });
+        }
+        if let Some(encoded_path) = manifest_start_from_path(&filename) {
+            let data = self.start_manifest_json(&encoded_path).await?;
+            let handle = self.fresh_handle();
+            self.handles
+                .insert(handle.clone(), HandleState::ControlData { data });
+            return Ok(Handle { id, handle });
+        }
+        if let Some(job_id) = manifest_status_from_path(&filename) {
+            let data = self.manifest_status_json(&job_id).await?;
             let handle = self.fresh_handle();
             self.handles
                 .insert(handle.clone(), HandleState::ControlData { data });

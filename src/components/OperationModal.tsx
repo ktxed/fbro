@@ -495,6 +495,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
     const isQueued = activeJob.state === "Queued";
     const isProgress = activeJob.state === "Running";
     const isBroResult = activeJob.kind === "fp-bro" || activeJob.kind === "sync-bro";
+    const requiresExplicitClose = activeJob.kind === "sync-bro";
     const isOutgoing = activeJob.kind === "outgoing-transfer";
     const activeSourcePanel = state.panels[activeJob.sourcePanel];
     const activeSource = activeSourcePanel ? state.sources[activeSourcePanel.sourceId] : undefined;
@@ -636,7 +637,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
           return;
         }
       }
-      if (!isTerminal) return;
+      if (!isTerminal || requiresExplicitClose) return;
       if (e.key === "Escape" || e.key === "Enter") {
         e.preventDefault();
         close();
@@ -644,7 +645,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
     };
 
     return (
-      <div className="modal-overlay" ref={modalRef} tabIndex={-1} onClick={isTerminal ? close : undefined} onKeyDown={handleActiveJobKeyDown}>
+      <div className="modal-overlay" ref={modalRef} tabIndex={-1} onClick={isTerminal && !requiresExplicitClose ? close : undefined} onKeyDown={handleActiveJobKeyDown}>
         <div className="modal modal--fixed" role="dialog" aria-label={`${label} ${activeJob.state}`} data-testid="job-dialog" onClick={(e) => e.stopPropagation()}>
           <div className="modal__header">{label} — {activeJob.state}</div>
           <div className="modal__body">
