@@ -72,7 +72,36 @@ pub trait VfsDriver: Send + Sync {
     // ── File I/O ────────────────────────────────────────────────────────────
 
     fn open_read(&self, path: &str) -> Result<Box<dyn Read + Send>, VfsError>;
+    fn supports_read_at(&self) -> bool {
+        false
+    }
+    fn open_read_at(&self, path: &str, offset: u64) -> Result<Box<dyn Read + Send>, VfsError> {
+        if offset == 0 {
+            self.open_read(path)
+        } else {
+            Err(VfsError::NotSupported(
+                "offset reads are not supported by this driver".to_string(),
+            ))
+        }
+    }
     fn open_write(&self, path: &str) -> Result<Box<dyn Write + Send>, VfsError>;
+    fn supports_write_at(&self) -> bool {
+        false
+    }
+    fn open_write_at(&self, path: &str, offset: u64) -> Result<Box<dyn Write + Send>, VfsError> {
+        if offset == 0 {
+            self.open_write(path)
+        } else {
+            Err(VfsError::NotSupported(
+                "offset writes are not supported by this driver".to_string(),
+            ))
+        }
+    }
+    fn truncate_file(&self, _path: &str, _len: u64) -> Result<(), VfsError> {
+        Err(VfsError::NotSupported(
+            "truncate is not supported by this driver".to_string(),
+        ))
+    }
     fn create_dir_all(&self, path: &str) -> Result<(), VfsError>;
     fn remove_file(&self, path: &str) -> Result<(), VfsError>;
     fn remove_dir_all(&self, path: &str) -> Result<(), VfsError>;
@@ -95,6 +124,10 @@ pub trait VfsDriver: Send + Sync {
         _job_id: &str,
         _path: &str,
     ) -> Result<Option<VfsTransferDigest>, VfsError> {
+        Ok(None)
+    }
+
+    fn file_digest(&self, _path: &str) -> Result<Option<VfsTransferDigest>, VfsError> {
         Ok(None)
     }
 

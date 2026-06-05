@@ -68,6 +68,14 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
                 };
                 state_guard.settings.general.preserve_attributes = v;
             }
+            "autoResumeCopies" => {
+                let Some(v) = value.as_bool() else {
+                    drop(state_guard);
+                    bad_setting(ctx.tx, "autoResumeCopies must be a boolean").await;
+                    return;
+                };
+                state_guard.settings.general.auto_resume_copies = v;
+            }
             "ludicrousMode" => {
                 let Some(v) = value.as_bool() else {
                     drop(state_guard);
@@ -324,6 +332,7 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
                 "showHiddenDefault": general.show_hidden_default,
                 "rememberWindowState": general.remember_window_state,
                 "preserveAttributes": general.preserve_attributes,
+                "autoResumeCopies": general.auto_resume_copies,
                 "ludicrousMode": general.ludicrous_mode,
                 "maxImageSizeMb": general.max_image_size_mb,
                 "savePanelViewMode": general.save_panel_view_mode,

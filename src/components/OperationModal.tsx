@@ -199,10 +199,25 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
     const fileCount = pending.files.length;
     const isDelete = pending.opType === "delete";
     const sourcePanelState = state.panels[pending.sourcePanel];
+    const destPanelState = pending.destPanel ? state.panels[pending.destPanel] : undefined;
     const isArchiveSource = !!sourcePanelState?.shadowSource && isArchiveSourceId(sourcePanelState.sourceId);
     const label = isArchiveSource && pending.opType === "copy" ? "Extract" : opLabel(pending.opType);
     const canStartInBackground = !dryMode;
-    const conflictPolicies: ConflictPolicy[] = ["ask", "overwrite", "skip"];
+    const canSuggestResume = !isDelete
+      && !!destPanelState
+      && (!pending.destPath || pending.destPath === destPanelState.path)
+      && pending.files.some((file) => {
+        if (file.kind === "directory" || file.size === undefined || file.size === null) return false;
+        const destEntry = destPanelState.entries.find((entry) => entry.name === file.name);
+        return destEntry?.kind === "file"
+          && typeof destEntry.size === "number"
+          && destEntry.size > 0
+          && destEntry.size < file.size;
+      });
+    const conflictPolicies: ConflictPolicy[] = canSuggestResume
+      ? ["ask", "resume", "overwrite", "skip"]
+      : ["ask", "overwrite", "skip"];
+    const selectedConflictPolicy = conflictPolicies.includes(conflictPolicy) ? conflictPolicy : "ask";
 
     const startOp = (background: boolean) => {
       if (submitted) return;
@@ -213,7 +228,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
         sourcePanel: pending.sourcePanel,
         destPanel: pending.destPanel,
         destPath: pending.destPath,
-        conflictPolicy,
+        conflictPolicy: selectedConflictPolicy,
         verificationPolicy,
         saveDigestFile,
         background,
@@ -228,7 +243,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
 
     const cycleConflictPolicy = () => {
       if (isDelete || submitted) return;
-      const index = conflictPolicies.indexOf(conflictPolicy);
+      const index = conflictPolicies.indexOf(selectedConflictPolicy);
       const next = conflictPolicies[(index + 1 + conflictPolicies.length) % conflictPolicies.length];
       setConflictPolicy(next);
     };
@@ -299,10 +314,11 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
                 <div className="modal__option">
                   <label><MnemonicLabel text="Action if file exists:" mnemonic="a" /></label>
                   <select
-                    value={conflictPolicy}
+                    value={selectedConflictPolicy}
                     onChange={(e) => setConflictPolicy(e.target.value as ConflictPolicy)}
                   >
                     <option value="ask">Ask</option>
+                    {canSuggestResume && <option value="resume">Resume partial files</option>}
                     <option value="overwrite">Overwrite</option>
                     <option value="skip">Skip</option>
                   </select>
@@ -383,7 +399,9 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
       : opLabel(activeJob.type);
     const decisionOptions = activeJob.decision?.options ?? [];
     const isVerificationDecision = activeJob.decision?.kind === "verification";
-    const primaryDecision = decisionOptions.includes("retry")
+    const primaryDecision = decisionOptions.includes("resume")
+      ? "resume"
+      : decisionOptions.includes("retry")
       ? "retry"
       : decisionOptions.includes("overwrite")
       ? "overwrite"

@@ -12,6 +12,8 @@ use crate::ws::protocol::{now, ConflictDecisionSchema, FileOpProgressSchema, Ser
 
 const COPY_BUF_SIZE: usize = 256 * 1024; // 256 KiB
 const COPY_PROGRESS_INTERVAL: Duration = Duration::from_millis(80);
+const COPY_RESUME_REWIND_BYTES: u64 = 1024 * 1024;
+const COPY_RESUME_MAX_ATTEMPTS: usize = 8;
 
 fn apply_file_attrs(dst_path: &str, mtime_secs: Option<u64>, permissions: Option<&str>) {
     if let Some(secs) = mtime_secs {
@@ -88,6 +90,7 @@ pub async fn run_file_op(
     preserve_attributes: bool,
     verification_policy: VerificationPolicy,
     save_digest_file: bool,
+    auto_resume_copies: bool,
 ) {
     let job_id_clone = job_id.clone();
     let tx_clone = tx.clone();
@@ -108,6 +111,7 @@ pub async fn run_file_op(
             preserve_attributes,
             &verification_policy,
             save_digest_file,
+            auto_resume_copies,
         )
     })
     .await;
@@ -175,6 +179,7 @@ fn run_file_op_blocking(
     preserve_attributes: bool,
     verification_policy: &VerificationPolicy,
     save_digest_file: bool,
+    auto_resume_copies: bool,
 ) -> Result<(), String> {
     // Totals grow as directories are discovered (no pre-scan — VFS may be remote)
     let mut total_files = 0usize;
@@ -266,20 +271,32 @@ fn run_file_op_blocking(
                         preserve_attributes,
                         verification_policy,
                         save_digest_file,
+                        auto_resume_copies,
                     )?;
                 } else {
-                    // Check conflict
+                    let mut resume_requested = false;
                     if dst_drv.exists(&dst_str) {
+                        let resume_candidate = resume_candidate(
+                            src,
+                            &dst_str,
+                            entry.size.unwrap_or(0),
+                            src_driver,
+                            dst_drv,
+                        );
                         match resolve_conflict(
                             conflict_policy,
                             src,
                             &dst_str,
+                            resume_candidate.as_ref(),
                             tx,
                             job_id,
                             decision_rx,
                             &mut apply_to_all,
                         )? {
                             ConflictOutcome::Overwrite => { /* proceed */ }
+                            ConflictOutcome::Resume => {
+                                resume_requested = true;
+                            }
                             ConflictOutcome::Skip => {
                                 total_bytes_completed += entry.size.unwrap_or(0);
                                 completed_files += 1;
@@ -320,6 +337,8 @@ fn run_file_op_blocking(
                         decision_rx,
                         verification_policy,
                         save_digest_file,
+                        auto_resume_copies,
+                        resume_requested,
                     )?;
 
                     if copied && preserve_attributes && dst_drv.is_local() {
@@ -400,6 +419,7 @@ fn run_file_op_blocking(
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ConflictOutcome {
     Overwrite,
+    Resume,
     Skip,
     Cancel,
 }
@@ -407,8 +427,47 @@ enum ConflictOutcome {
 fn apply_all_outcome(policy: Option<&ConflictPolicy>) -> Option<ConflictOutcome> {
     match policy {
         Some(ConflictPolicy::Overwrite) => Some(ConflictOutcome::Overwrite),
+        Some(ConflictPolicy::Resume) => Some(ConflictOutcome::Resume),
         Some(ConflictPolicy::Skip) => Some(ConflictOutcome::Skip),
         _ => None,
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ResumeCandidate {
+    dest_size: u64,
+    source_size: u64,
+}
+
+impl ResumeCandidate {
+    fn offset(self) -> u64 {
+        self.dest_size.saturating_sub(COPY_RESUME_REWIND_BYTES)
+    }
+}
+
+fn resume_candidate(
+    src: &str,
+    dst: &str,
+    known_source_size: u64,
+    src_driver: &dyn VfsDriver,
+    dst_driver: &dyn VfsDriver,
+) -> Option<ResumeCandidate> {
+    if !src_driver.supports_read_at() || !dst_driver.supports_write_at() {
+        return None;
+    }
+    let source_size = if known_source_size > 0 {
+        known_source_size
+    } else {
+        src_driver.file_size(src)?
+    };
+    let dest_size = dst_driver.file_size(dst)?;
+    if dest_size > 0 && dest_size < source_size {
+        Some(ResumeCandidate {
+            dest_size,
+            source_size,
+        })
+    } else {
+        None
     }
 }
 
@@ -416,6 +475,7 @@ fn resolve_conflict(
     policy: &ConflictPolicy,
     src: &str,
     dst: &str,
+    resume_candidate: Option<&ResumeCandidate>,
     tx: &mpsc::Sender<ServerMessage>,
     job_id: &str,
     decision_rx: &mut DecisionRx,
@@ -424,10 +484,34 @@ fn resolve_conflict(
     match policy {
         ConflictPolicy::Skip => Ok(ConflictOutcome::Skip),
         ConflictPolicy::Overwrite => Ok(ConflictOutcome::Overwrite),
+        ConflictPolicy::Resume => {
+            if resume_candidate.is_some() {
+                Ok(ConflictOutcome::Resume)
+            } else {
+                Ok(ConflictOutcome::Overwrite)
+            }
+        }
         ConflictPolicy::Ask => {
             if let Some(outcome) = *apply_to_all {
+                if outcome == ConflictOutcome::Resume && resume_candidate.is_none() {
+                    return Ok(ConflictOutcome::Overwrite);
+                }
                 return Ok(outcome);
             }
+            let mut options = vec![
+                "overwrite".to_string(),
+                "skip".to_string(),
+                "cancel".to_string(),
+            ];
+            let message = resume_candidate.map(|candidate| {
+                options.insert(0, "resume".to_string());
+                format!(
+                    "Destination is {} of {} bytes; resume will rewind to byte {}.",
+                    candidate.dest_size,
+                    candidate.source_size,
+                    candidate.offset()
+                )
+            });
             send_event_sync(
                 tx,
                 job_id,
@@ -437,12 +521,8 @@ fn resolve_conflict(
                     kind: Some("conflict".to_string()),
                     source: src.to_string(),
                     destination: dst.to_string(),
-                    message: None,
-                    options: vec![
-                        "overwrite".to_string(),
-                        "skip".to_string(),
-                        "cancel".to_string(),
-                    ],
+                    message,
+                    options,
                     supports_apply_to_all: true,
                 }),
                 None,
@@ -454,17 +534,24 @@ fn resolve_conflict(
                     apply_to_all: true,
                 }) => {
                     let outcome = match decision.as_str() {
+                        "resume" if resume_candidate.is_some() => ConflictOutcome::Resume,
                         "overwrite" => ConflictOutcome::Overwrite,
                         "skip" => ConflictOutcome::Skip,
                         "cancel" => ConflictOutcome::Cancel,
                         _ => ConflictOutcome::Skip,
                     };
-                    if matches!(outcome, ConflictOutcome::Overwrite | ConflictOutcome::Skip) {
+                    if matches!(
+                        outcome,
+                        ConflictOutcome::Overwrite
+                            | ConflictOutcome::Resume
+                            | ConflictOutcome::Skip
+                    ) {
                         *apply_to_all = Some(outcome);
                     }
                     Ok(outcome)
                 }
                 Some(DecisionResponse { decision, .. }) => match decision.as_str() {
+                    "resume" if resume_candidate.is_some() => Ok(ConflictOutcome::Resume),
                     "overwrite" => Ok(ConflictOutcome::Overwrite),
                     "skip" => Ok(ConflictOutcome::Skip),
                     "cancel" => Ok(ConflictOutcome::Cancel),
@@ -495,12 +582,17 @@ fn copy_file_with_progress(
     decision_rx: &mut DecisionRx,
     verification_policy: &VerificationPolicy,
     save_digest_file: bool,
+    auto_resume_copies: bool,
+    resume_requested: bool,
 ) -> Result<bool, String> {
     let src_name = Path::new(src)
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_default();
 
+    let can_resume = src_driver.supports_read_at() && dst_driver.supports_write_at();
+    let mut resume_next_attempt = resume_requested;
+    let mut resume_attempts = 0usize;
     loop {
         match copy_file_once_with_progress(
             job_id,
@@ -518,15 +610,43 @@ fn copy_file_with_progress(
             dst_driver,
             &src_name,
             save_digest_file,
+            resume_next_attempt,
         ) {
             Ok(()) => return Ok(true),
             Err(CopyFileError::Fatal(e)) => return Err(e),
+            Err(CopyFileError::Recoverable(e)) => {
+                if !auto_resume_copies || !can_resume {
+                    return Err(e);
+                }
+                resume_attempts += 1;
+                if resume_attempts > COPY_RESUME_MAX_ATTEMPTS {
+                    return Err(e);
+                }
+                let partial = dst_driver.file_size(dst).unwrap_or(0).min(total_bytes);
+                send_progress_sync_with_status(
+                    tx,
+                    job_id,
+                    total_files,
+                    completed_files,
+                    Some(src_name.clone()),
+                    total_bytes,
+                    partial,
+                    total_bytes_total,
+                    total_bytes_completed + partial,
+                    Some(format!(
+                        "Resuming transfer after read error ({resume_attempts}/{COPY_RESUME_MAX_ATTEMPTS})"
+                    )),
+                );
+                resume_next_attempt = true;
+                continue;
+            }
             Err(CopyFileError::Verification(e)) => {
                 if *verification_policy == VerificationPolicy::Fail {
                     return Err(e);
                 }
                 match resolve_verification_mismatch(src, dst, &e, tx, job_id, decision_rx)? {
                     VerificationOutcome::Retry => {
+                        resume_next_attempt = false;
                         send_progress_sync_with_status(
                             tx,
                             job_id,
@@ -551,6 +671,7 @@ fn copy_file_with_progress(
 
 enum CopyFileError {
     Fatal(String),
+    Recoverable(String),
     Verification(String),
 }
 
@@ -570,35 +691,76 @@ fn copy_file_once_with_progress(
     dst_driver: &dyn VfsDriver,
     src_name: &str,
     save_digest_file: bool,
+    resume_requested: bool,
 ) -> Result<(), CopyFileError> {
-    let mut reader = src_driver
-        .open_read(src)
-        .map_err(|e| CopyFileError::Fatal(format!("Cannot open {src}: {e}")))?;
-
     let file_size = if total_bytes > 0 {
         total_bytes
     } else {
         src_driver.file_size(src).unwrap_or(0)
     };
 
-    let mut writer = dst_driver
-        .open_write(dst)
-        .map_err(|e| CopyFileError::Fatal(format!("Cannot create {dst}: {e}")))?;
+    let resume_offset = if resume_requested {
+        resume_candidate(src, dst, file_size, src_driver, dst_driver)
+            .map(ResumeCandidate::offset)
+            .unwrap_or(0)
+    } else {
+        0
+    };
+
+    if resume_offset > 0 {
+        send_progress_sync_with_status(
+            tx,
+            job_id,
+            total_files,
+            completed_files,
+            Some(src_name.to_string()),
+            file_size,
+            resume_offset,
+            total_bytes_total,
+            total_bytes_completed + resume_offset,
+            Some(format!("Resuming from byte {resume_offset}")),
+        );
+    }
+
+    let mut reader = if resume_offset > 0 {
+        src_driver.open_read_at(src, resume_offset).map_err(|e| {
+            CopyFileError::Recoverable(format!("Cannot resume {src} at byte {resume_offset}: {e}"))
+        })?
+    } else {
+        src_driver
+            .open_read(src)
+            .map_err(|e| CopyFileError::Fatal(format!("Cannot open {src}: {e}")))?
+    };
+
+    let mut writer = if resume_offset > 0 {
+        dst_driver.open_write_at(dst, resume_offset).map_err(|e| {
+            CopyFileError::Fatal(format!(
+                "Cannot resume writing {dst} at byte {resume_offset}: {e}"
+            ))
+        })?
+    } else {
+        dst_driver
+            .open_write(dst)
+            .map_err(|e| CopyFileError::Fatal(format!("Cannot create {dst}: {e}")))?
+    };
 
     let mut buf = vec![0u8; COPY_BUF_SIZE];
-    let mut copied: u64 = 0;
-    let mut stream_hasher = blake3::Hasher::new();
+    let mut copied: u64 = resume_offset;
+    let mut stream_hasher =
+        hash_existing_prefix(dst_driver, dst, resume_offset).map_err(CopyFileError::Fatal)?;
     let mut last_progress_at = Instant::now();
     loop {
         if wait_if_paused(pause_rx, cancel_rx) {
             drop(writer);
-            let _ = dst_driver.remove_file(dst);
+            if resume_offset == 0 {
+                let _ = dst_driver.remove_file(dst);
+            }
             return Err(CopyFileError::Fatal(CANCELLED_ERR.to_string()));
         }
 
         let n = reader
             .read(&mut buf)
-            .map_err(|e| CopyFileError::Fatal(format!("Read error on {src}: {e}")))?;
+            .map_err(|e| CopyFileError::Recoverable(format!("Read error on {src}: {e}")))?;
         if n == 0 {
             break;
         }
@@ -631,10 +793,17 @@ fn copy_file_once_with_progress(
         .map_err(|e| CopyFileError::Fatal(format!("Flush error on {dst}: {e}")))?;
     drop(writer);
 
-    if let Some(remote_digest) = src_driver
-        .transfer_digest(job_id, src)
-        .map_err(|e| CopyFileError::Verification(format!("Verification failed for {src}: {e}")))?
-    {
+    let remote_digest = if resume_offset > 0 {
+        src_driver.file_digest(src).map_err(|e| {
+            CopyFileError::Verification(format!("Verification failed for {src}: {e}"))
+        })?
+    } else {
+        src_driver.transfer_digest(job_id, src).map_err(|e| {
+            CopyFileError::Verification(format!("Verification failed for {src}: {e}"))
+        })?
+    };
+
+    if let Some(remote_digest) = remote_digest {
         send_progress_sync_with_status(
             tx,
             job_id,
@@ -665,6 +834,36 @@ fn copy_file_once_with_progress(
     }
 
     Ok(())
+}
+
+fn hash_existing_prefix(
+    driver: &dyn VfsDriver,
+    path: &str,
+    len: u64,
+) -> Result<blake3::Hasher, String> {
+    let mut hasher = blake3::Hasher::new();
+    if len == 0 {
+        return Ok(hasher);
+    }
+    let mut reader = driver
+        .open_read(path)
+        .map_err(|e| format!("Cannot open {path} for resume hashing: {e}"))?;
+    let mut remaining = len;
+    let mut buf = vec![0u8; COPY_BUF_SIZE];
+    while remaining > 0 {
+        let want = (remaining as usize).min(buf.len());
+        let n = reader
+            .read(&mut buf[..want])
+            .map_err(|e| format!("Read error hashing resume prefix {path}: {e}"))?;
+        if n == 0 {
+            return Err(format!(
+                "Cannot resume {path}: destination ended before byte {len}"
+            ));
+        }
+        hasher.update(&buf[..n]);
+        remaining -= n as u64;
+    }
+    Ok(hasher)
 }
 
 enum VerificationOutcome {
@@ -804,6 +1003,7 @@ fn copy_dir_recursive(
     preserve_attributes: bool,
     verification_policy: &VerificationPolicy,
     save_digest_file: bool,
+    auto_resume_copies: bool,
 ) -> Result<(), String> {
     dst_driver
         .create_dir_all(dst)
@@ -854,19 +1054,27 @@ fn copy_dir_recursive(
                 preserve_attributes,
                 verification_policy,
                 save_digest_file,
+                auto_resume_copies,
             )?;
         } else {
+            let mut resume_requested = false;
             if dst_driver.exists(&child_dst) {
+                let resume_candidate =
+                    resume_candidate(&child_src, &child_dst, child.size, src_driver, dst_driver);
                 match resolve_conflict(
                     conflict_policy,
                     &child_src,
                     &child_dst,
+                    resume_candidate.as_ref(),
                     tx,
                     job_id,
                     decision_rx,
                     apply_to_all,
                 )? {
                     ConflictOutcome::Overwrite => {}
+                    ConflictOutcome::Resume => {
+                        resume_requested = true;
+                    }
                     ConflictOutcome::Skip => {
                         *completed_files += 1;
                         *total_bytes_completed += child.size;
@@ -906,6 +1114,8 @@ fn copy_dir_recursive(
                 decision_rx,
                 verification_policy,
                 save_digest_file,
+                auto_resume_copies,
+                resume_requested,
             )?;
 
             if copied && preserve_attributes && dst_driver.is_local() {
@@ -1157,4 +1367,336 @@ async fn tx_event(
     })
     .await
     .map_err(|_| ())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::vfs::{DirChild, VfsEntry, VfsError};
+    use crate::ws::protocol::{FilterSpec, SortSpec};
+    use std::any::Any;
+    use std::fs;
+    use std::io::{Read, Seek, SeekFrom, Write};
+    use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    struct TestDir {
+        path: PathBuf,
+    }
+
+    impl TestDir {
+        fn new(name: &str) -> Self {
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let path =
+                std::env::temp_dir().join(format!("fbro-{name}-{}-{nanos}", std::process::id()));
+            fs::create_dir_all(&path).unwrap();
+            Self { path }
+        }
+    }
+
+    impl Drop for TestDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
+    struct FlakyReadDriver {
+        fail_after: Option<u64>,
+        failed: Arc<AtomicBool>,
+    }
+
+    struct FlakyReader {
+        file: fs::File,
+        pos: u64,
+        fail_at: Option<u64>,
+        failed: Arc<AtomicBool>,
+    }
+
+    impl Read for FlakyReader {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            if let Some(fail_at) = self.fail_at {
+                if self.pos >= fail_at {
+                    self.failed.store(true, Ordering::SeqCst);
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        "test timeout",
+                    ));
+                }
+                let allowed = (fail_at - self.pos) as usize;
+                let want = allowed.min(buf.len());
+                let n = self.file.read(&mut buf[..want])?;
+                self.pos += n as u64;
+                return Ok(n);
+            }
+            let n = self.file.read(buf)?;
+            self.pos += n as u64;
+            Ok(n)
+        }
+    }
+
+    impl FlakyReadDriver {
+        fn new(fail_after: Option<u64>) -> Self {
+            Self {
+                fail_after,
+                failed: Arc::new(AtomicBool::new(false)),
+            }
+        }
+
+        fn digest_path(path: &str) -> Result<VfsTransferDigest, VfsError> {
+            let mut file = fs::File::open(path).map_err(|e| VfsError::IOError(e.to_string()))?;
+            let mut hasher = blake3::Hasher::new();
+            let mut buf = vec![0u8; COPY_BUF_SIZE];
+            let mut size = 0u64;
+            loop {
+                let n = file
+                    .read(&mut buf)
+                    .map_err(|e| VfsError::IOError(e.to_string()))?;
+                if n == 0 {
+                    break;
+                }
+                hasher.update(&buf[..n]);
+                size += n as u64;
+            }
+            Ok(VfsTransferDigest {
+                algorithm: "blake3".to_string(),
+                size,
+                hash: hasher.finalize().to_hex().to_string(),
+            })
+        }
+    }
+
+    impl VfsDriver for FlakyReadDriver {
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+
+        fn list(
+            &self,
+            _path: &str,
+            _sort: &SortSpec,
+            _filter: Option<&FilterSpec>,
+            _show_hidden: bool,
+        ) -> Result<Vec<VfsEntry>, VfsError> {
+            Ok(Vec::new())
+        }
+
+        fn resolve_child(&self, base: &str, name: &str) -> String {
+            Path::new(base).join(name).to_string_lossy().to_string()
+        }
+
+        fn parent_path(&self, path: &str) -> Option<String> {
+            Path::new(path)
+                .parent()
+                .map(|path| path.to_string_lossy().to_string())
+        }
+
+        fn open_read(&self, path: &str) -> Result<Box<dyn Read + Send>, VfsError> {
+            self.open_read_at(path, 0)
+        }
+
+        fn supports_read_at(&self) -> bool {
+            true
+        }
+
+        fn open_read_at(&self, path: &str, offset: u64) -> Result<Box<dyn Read + Send>, VfsError> {
+            let mut file = fs::File::open(path).map_err(|e| VfsError::IOError(e.to_string()))?;
+            file.seek(SeekFrom::Start(offset))
+                .map_err(|e| VfsError::IOError(e.to_string()))?;
+            let fail_at = self
+                .fail_after
+                .filter(|fail_after| !self.failed.load(Ordering::SeqCst) && offset < *fail_after);
+            Ok(Box::new(FlakyReader {
+                file,
+                pos: offset,
+                fail_at,
+                failed: self.failed.clone(),
+            }))
+        }
+
+        fn open_write(&self, _path: &str) -> Result<Box<dyn Write + Send>, VfsError> {
+            Err(VfsError::NotSupported(
+                "test source is read-only".to_string(),
+            ))
+        }
+
+        fn create_dir_all(&self, _path: &str) -> Result<(), VfsError> {
+            Err(VfsError::NotSupported(
+                "test source is read-only".to_string(),
+            ))
+        }
+
+        fn remove_file(&self, _path: &str) -> Result<(), VfsError> {
+            Err(VfsError::NotSupported(
+                "test source is read-only".to_string(),
+            ))
+        }
+
+        fn remove_dir_all(&self, _path: &str) -> Result<(), VfsError> {
+            Err(VfsError::NotSupported(
+                "test source is read-only".to_string(),
+            ))
+        }
+
+        fn exists(&self, path: &str) -> bool {
+            Path::new(path).exists()
+        }
+
+        fn file_size(&self, path: &str) -> Option<u64> {
+            fs::metadata(path).ok().map(|meta| meta.len())
+        }
+
+        fn read_dir_entries(&self, _path: &str) -> Result<Vec<DirChild>, VfsError> {
+            Ok(Vec::new())
+        }
+
+        fn read_chunk(&self, path: &str, offset: u64, size: usize) -> Result<Vec<u8>, VfsError> {
+            let mut file = fs::File::open(path).map_err(|e| VfsError::IOError(e.to_string()))?;
+            file.seek(SeekFrom::Start(offset))
+                .map_err(|e| VfsError::IOError(e.to_string()))?;
+            let mut buf = vec![0u8; size];
+            let n = file
+                .read(&mut buf)
+                .map_err(|e| VfsError::IOError(e.to_string()))?;
+            buf.truncate(n);
+            Ok(buf)
+        }
+
+        fn file_digest(&self, path: &str) -> Result<Option<VfsTransferDigest>, VfsError> {
+            Ok(Some(Self::digest_path(path)?))
+        }
+    }
+
+    fn bytes(len: usize) -> Vec<u8> {
+        (0..len).map(|i| ((i * 31 + 7) % 251) as u8).collect()
+    }
+
+    #[test]
+    fn auto_resume_recovers_after_read_timeout() {
+        let dir = TestDir::new("auto-resume");
+        let src = dir.path.join("source.bin");
+        let dst = dir.path.join("dest.bin");
+        let data = bytes(2 * 1024 * 1024 + 17);
+        fs::write(&src, &data).unwrap();
+
+        let src_driver = FlakyReadDriver::new(Some(1536 * 1024));
+        let dst_driver = crate::vfs::local::LocalFsDriver;
+        let (tx, _rx) = mpsc::channel(64);
+        let (_cancel_tx, cancel_rx) = watch::channel(false);
+        let (_pause_tx, pause_rx) = watch::channel(false);
+        let (_decision_tx, mut decision_rx) = mpsc::channel(1);
+        let copied = copy_file_with_progress(
+            "job-test",
+            &src.to_string_lossy(),
+            &dst.to_string_lossy(),
+            data.len() as u64,
+            &tx,
+            &cancel_rx,
+            &pause_rx,
+            1,
+            0,
+            data.len() as u64,
+            0,
+            &src_driver,
+            &dst_driver,
+            &mut decision_rx,
+            &VerificationPolicy::Fail,
+            false,
+            true,
+            false,
+        )
+        .unwrap();
+
+        assert!(copied);
+        assert!(src_driver.failed.load(Ordering::SeqCst));
+        assert_eq!(fs::read(dst).unwrap(), data);
+    }
+
+    #[test]
+    fn manual_resume_uses_existing_partial_destination() {
+        let dir = TestDir::new("manual-resume");
+        let src = dir.path.join("source.bin");
+        let dst = dir.path.join("dest.bin");
+        let data = bytes(2 * 1024 * 1024 + 113);
+        fs::write(&src, &data).unwrap();
+        fs::write(&dst, &data[..1536 * 1024]).unwrap();
+
+        let src_driver = FlakyReadDriver::new(None);
+        let dst_driver = crate::vfs::local::LocalFsDriver;
+        let (tx, _rx) = mpsc::channel(64);
+        let (_cancel_tx, cancel_rx) = watch::channel(false);
+        let (_pause_tx, pause_rx) = watch::channel(false);
+        let (_decision_tx, mut decision_rx) = mpsc::channel(1);
+        let copied = copy_file_with_progress(
+            "job-test",
+            &src.to_string_lossy(),
+            &dst.to_string_lossy(),
+            data.len() as u64,
+            &tx,
+            &cancel_rx,
+            &pause_rx,
+            1,
+            0,
+            data.len() as u64,
+            0,
+            &src_driver,
+            &dst_driver,
+            &mut decision_rx,
+            &VerificationPolicy::Fail,
+            false,
+            true,
+            true,
+        )
+        .unwrap();
+
+        assert!(copied);
+        assert_eq!(fs::read(dst).unwrap(), data);
+    }
+
+    #[test]
+    fn cancelling_resumed_copy_preserves_partial_destination() {
+        let dir = TestDir::new("cancel-resume");
+        let src = dir.path.join("source.bin");
+        let dst = dir.path.join("dest.bin");
+        let data = bytes(2 * 1024 * 1024 + 113);
+        let partial_len = 1536 * 1024;
+        fs::write(&src, &data).unwrap();
+        fs::write(&dst, &data[..partial_len]).unwrap();
+
+        let src_driver = FlakyReadDriver::new(None);
+        let dst_driver = crate::vfs::local::LocalFsDriver;
+        let (tx, _rx) = mpsc::channel(64);
+        let (_cancel_tx, cancel_rx) = watch::channel(true);
+        let (_pause_tx, pause_rx) = watch::channel(false);
+        let (_decision_tx, mut decision_rx) = mpsc::channel(1);
+        let err = copy_file_with_progress(
+            "job-test",
+            &src.to_string_lossy(),
+            &dst.to_string_lossy(),
+            data.len() as u64,
+            &tx,
+            &cancel_rx,
+            &pause_rx,
+            1,
+            0,
+            data.len() as u64,
+            0,
+            &src_driver,
+            &dst_driver,
+            &mut decision_rx,
+            &VerificationPolicy::Fail,
+            false,
+            true,
+            true,
+        )
+        .unwrap_err();
+
+        assert_eq!(err, CANCELLED_ERR);
+        assert!(dst.exists());
+        assert_eq!(fs::metadata(&dst).unwrap().len(), 512 * 1024);
+        assert_eq!(fs::read(dst).unwrap(), data[..512 * 1024]);
+    }
 }

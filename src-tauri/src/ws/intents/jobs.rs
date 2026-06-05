@@ -629,6 +629,7 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
     let conflict_policy = match parsed.conflict_policy.as_str() {
         "skip" => ConflictPolicy::Skip,
         "overwrite" => ConflictPolicy::Overwrite,
+        "resume" => ConflictPolicy::Resume,
         _ => ConflictPolicy::Ask,
     };
     let verification_policy = match parsed.verification_policy.as_str() {
@@ -904,11 +905,12 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
     let (pause_tx, pause_rx) = watch::channel(parsed.start_paused);
     let (decision_tx, decision_rx) = mpsc::channel::<DecisionResponse>(4);
 
-    let (job_id, preserve_attributes) = {
+    let (job_id, preserve_attributes, auto_resume_copies) = {
         let mut state_guard = ctx.state.lock().await;
         let job_id = state_guard.job_store.next_job_id();
         let preserve = state_guard.settings.general.preserve_attributes;
-        (job_id, preserve)
+        let auto_resume = state_guard.settings.general.auto_resume_copies;
+        (job_id, preserve, auto_resume)
     };
 
     let file_schemas: Vec<FileOpFileSchema> = files
@@ -976,6 +978,7 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
             preserve_attributes,
             verification_policy_spawn,
             save_digest_file_spawn,
+            auto_resume_copies,
         )
         .await;
 
@@ -1063,6 +1066,7 @@ async fn provide_job_decision(args: &Value, ctx: &mut IntentContext<'_>) {
                 meta.apply_to_all_decision = if parsed.apply_to_all {
                     match parsed.decision.as_str() {
                         "overwrite" => Some(ConflictPolicy::Overwrite),
+                        "resume" => Some(ConflictPolicy::Resume),
                         "skip" => Some(ConflictPolicy::Skip),
                         _ => None,
                     }

@@ -313,6 +313,7 @@ pub struct GeneralSettingsSchema {
     pub show_hidden_default: bool,
     pub remember_window_state: bool,
     pub preserve_attributes: bool,
+    pub auto_resume_copies: bool,
     pub ludicrous_mode: bool,
     pub max_image_size_mb: u64,
     pub save_panel_view_mode: bool,

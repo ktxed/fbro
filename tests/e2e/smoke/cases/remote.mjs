@@ -4,6 +4,29 @@ import { artifactsDir, backendPath, hostPath } from "../config.mjs";
 import { reloadBrowserApp } from "../browser.mjs";
 import { waitFor } from "../wait.mjs";
 
+function tinyBmp() {
+  const width = 2;
+  const height = 2;
+  const rowSize = 8; // 2 pixels * 3 bytes, padded to a 4-byte boundary.
+  const pixelBytes = rowSize * height;
+  const bytes = Buffer.alloc(14 + 40 + pixelBytes);
+  bytes.write("BM", 0, "ascii");
+  bytes.writeUInt32LE(bytes.length, 2);
+  bytes.writeUInt32LE(14 + 40, 10);
+  bytes.writeUInt32LE(40, 14);
+  bytes.writeInt32LE(width, 18);
+  bytes.writeInt32LE(height, 22);
+  bytes.writeUInt16LE(1, 26);
+  bytes.writeUInt16LE(24, 28);
+  bytes.writeUInt32LE(pixelBytes, 34);
+  // BMP stores rows bottom-up, BGR.
+  bytes.set([
+    0x00, 0x00, 0xff, 0x00, 0xff, 0x00, 0x00, 0x00,
+    0xff, 0x00, 0x00, 0xff, 0xff, 0xff, 0x00, 0x00,
+  ], 54);
+  return bytes;
+}
+
 export async function runRemoteFlow(browserA, observerA, browserB, observerB) {
   const bDst = backendPath("b", "dst");
   const aHome = "/state/a/home";
@@ -17,6 +40,7 @@ export async function runRemoteFlow(browserA, observerA, browserB, observerB) {
   fs.mkdirSync(aHomeDownloadsHost, { recursive: true });
   fs.mkdirSync(aHomeDeepHost, { recursive: true });
   fs.writeFileSync(path.join(aHomeDownloadsHost, "remote.txt"), "remote payload\n");
+  fs.writeFileSync(path.join(aHomeDownloadsHost, "remote-thumb.bmp"), tinyBmp());
   fs.writeFileSync(path.join(aHomeDeepHost, "deep.txt"), "deep remote payload\n");
   observerA.sendIntent("Refresh", "left");
   await observerA.waitForEntry("left", "Downloads", "directory");
@@ -52,6 +76,9 @@ export async function runRemoteFlow(browserA, observerA, browserB, observerB) {
     .find((source) => source.kind === "remote" && source.id.endsWith(`:${sharedTargetId}`));
   if (!remoteSource) throw new Error("remote Home source did not mount");
   if (!remoteSource.capabilities?.readOnly) throw new Error("remote source is not marked read-only");
+  if (!observerB.state.panels.left?.supportsThumbnails && observerB.state.panels.left?.sourceId === remoteSource.id) {
+    throw new Error("remote panel unexpectedly lacks thumbnail support");
+  }
   if (remoteSource.supports.includes("DeleteSelection") || remoteSource.supports.includes("NewFolder")) {
     throw new Error("remote source exposes write capabilities");
   }
@@ -81,6 +108,35 @@ export async function runRemoteFlow(browserA, observerA, browserB, observerB) {
   await observerB.waitForPanelPath("left", "Downloads");
   observerB.sendIntent("NavigatePanelTo", undefined, { panelId: "right", path: bDst });
   await observerB.waitForEntry("left", "remote.txt", "file", 20_000);
+  const thumbEntry = await observerB.waitForEntry("left", "remote-thumb.bmp", "file", 20_000);
+  if (!observerB.state.panels.left?.supportsThumbnails) {
+    throw new Error("remote Downloads panel does not advertise thumbnail support");
+  }
+  observerB.sendIntent("SetPanelViewMode", "left", { mode: "grid" });
+  await waitFor(() => observerB.state.panels.left?.viewMode === "grid", {
+    timeout: 10_000,
+    label: "remote panel grid mode",
+  });
+  const remoteThumbUrl = `http://127.0.0.1:${observerB.state.fileServerPort}/__remote_thumb__/${encodeURIComponent(observerB.state.panels.left.sourceId)}/160/${encodeURIComponent(thumbEntry.mtime ?? "0")}/${encodeURIComponent(String(thumbEntry.size ?? 0))}/${encodeURIComponent("Downloads/remote-thumb.bmp")}`;
+  await waitFor(async () => {
+    const response = await fetch(remoteThumbUrl);
+    if (!response.ok) return false;
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    return bytes.length > 8
+      && bytes[0] === 0x89
+      && bytes[1] === 0x50
+      && bytes[2] === 0x4e
+      && bytes[3] === 0x47;
+  }, {
+    timeout: 20_000,
+    interval: 250,
+    label: "remote thumbnail PNG fetched through local proxy",
+  });
+  observerB.sendIntent("SetPanelViewMode", "left", { mode: "list" });
+  await waitFor(() => observerB.state.panels.left?.viewMode === "list", {
+    timeout: 10_000,
+    label: "remote panel list mode restore",
+  });
   observerB.sendIntent("StartFileOp", undefined, {
     opType: "copy",
     files: [{ name: "remote.txt", kind: "file" }],

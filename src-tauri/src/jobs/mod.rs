@@ -39,6 +39,7 @@ pub enum ConflictPolicy {
     Ask,
     Skip,
     Overwrite,
+    Resume,
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]

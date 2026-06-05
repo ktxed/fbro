@@ -642,6 +642,57 @@ impl SftpHandler {
         serde_json::to_vec(&response).map_err(|_| StatusCode::Failure)
     }
 
+    async fn full_file_digest_json(&self, encoded_path: &str) -> Result<Vec<u8>, StatusCode> {
+        let path_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(encoded_path)
+            .map_err(|_| StatusCode::BadMessage)?;
+        let path = String::from_utf8(path_bytes).map_err(|_| StatusCode::BadMessage)?;
+        if has_dotdot(&path) {
+            return Err(StatusCode::PermissionDenied);
+        }
+        let (source_id, rest) = parse_path(&path);
+        let Some(sid) = source_id else {
+            return Err(StatusCode::NoSuchFile);
+        };
+        let Some((driver, root, _, _, _)) = resolve_source(&self.state, &sid).await else {
+            return Err(StatusCode::NoSuchFile);
+        };
+        let driver_path = compose_driver_path(&root, &rest);
+        let size = driver
+            .file_size(&driver_path)
+            .ok_or(StatusCode::NoSuchFile)?;
+        let digest = tokio::task::spawn_blocking(move || {
+            let mut hasher = blake3::Hasher::new();
+            let mut offset = 0u64;
+            let chunk_size = 1024 * 1024usize;
+            while offset < size {
+                let remaining = size.saturating_sub(offset).min(chunk_size as u64) as usize;
+                let chunk = driver.read_chunk(&driver_path, offset, remaining)?;
+                if chunk.is_empty() {
+                    break;
+                }
+                offset = offset.saturating_add(chunk.len() as u64);
+                hasher.update(&chunk);
+            }
+            if offset != size {
+                return Err(VfsError::IOError(format!(
+                    "digest read ended at {offset} of {size} bytes"
+                )));
+            }
+            Ok::<String, VfsError>(hasher.finalize().to_hex().to_string())
+        })
+        .await
+        .map_err(|_| StatusCode::Failure)?
+        .map_err(vfs_err_to_status)?;
+        let response = DigestResponse {
+            algorithm: FBRO_INTEGRITY_ALGORITHM,
+            size,
+            hash: digest,
+            complete: true,
+        };
+        serde_json::to_vec(&response).map_err(|_| StatusCode::Failure)
+    }
+
     async fn sources_metadata_json(&self) -> Result<Vec<u8>, StatusCode> {
         let guard = self.state.lock().await;
         let stream_thumbnails = guard.settings.general.stream_thumbnails;
@@ -1056,6 +1107,16 @@ fn integrity_result_from_path(path: &str) -> Option<(String, String)> {
     Some((job_id.to_string(), encoded_path.to_string()))
 }
 
+fn integrity_file_from_path(path: &str) -> Option<String> {
+    let encoded_path = path
+        .trim_start_matches('/')
+        .strip_prefix(".fbro-integrity/file/")?;
+    if encoded_path.is_empty() {
+        return None;
+    }
+    Some(encoded_path.to_string())
+}
+
 fn is_sources_metadata_path(path: &str) -> bool {
     path.trim_start_matches('/').trim_end_matches('/') == ".fbro-sources.json"
 }
@@ -1368,6 +1429,13 @@ impl russh_sftp::server::Handler for SftpHandler {
         }
         if let Some((job_id, encoded_path)) = integrity_result_from_path(&filename) {
             let data = self.integrity_result_json(&job_id, &encoded_path)?;
+            let handle = self.fresh_handle();
+            self.handles
+                .insert(handle.clone(), HandleState::ControlData { data });
+            return Ok(Handle { id, handle });
+        }
+        if let Some(encoded_path) = integrity_file_from_path(&filename) {
+            let data = self.full_file_digest_json(&encoded_path).await?;
             let handle = self.fresh_handle();
             self.handles
                 .insert(handle.clone(), HandleState::ControlData { data });

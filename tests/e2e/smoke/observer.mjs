@@ -18,6 +18,7 @@ export class FbroObserver {
       discoveredPeers: [],
       settings: { general: { colorScheme: "fbro-dark" } },
       focus: "",
+      fileServerPort: 0,
     };
     this.pairingRequests = new Map();
   }
@@ -250,6 +251,7 @@ export class FbroObserver {
       return;
     }
     this.messages.push(msg);
+    if (msg.type === "Welcome") this.state.fileServerPort = msg.fileServerPort;
     if (msg.type === "StateSnapshot") this.#applySnapshot(msg.domains);
     if (msg.type === "StatePatch") this.#applyPatch(msg);
     if (msg.type === "JobStarted") {

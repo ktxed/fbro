@@ -994,6 +994,14 @@ impl VfsDriver for SftpFsDriver {
     }
 
     fn open_read(&self, path: &str) -> Result<Box<dyn Read + Send>, VfsError> {
+        self.open_read_at(path, 0)
+    }
+
+    fn supports_read_at(&self) -> bool {
+        true
+    }
+
+    fn open_read_at(&self, path: &str, offset: u64) -> Result<Box<dyn Read + Send>, VfsError> {
         let abs = self.absolute(path);
         let job_id = current_file_op_job_id();
         let marker_job_id = job_id.clone();
@@ -1012,7 +1020,8 @@ impl VfsDriver for SftpFsDriver {
             .await
         })?;
         let (tx, rx) = mpsc::channel(SFTP_READ_AHEAD_CHUNKS * 2);
-        self.rt().spawn(run_read_ahead(sftp, abs, file_size, tx));
+        self.rt()
+            .spawn(run_read_ahead(sftp, abs, offset, file_size, tx));
         Ok(Box::new(SftpReadStream {
             driver: SftpFsDriverRef(self as *const SftpFsDriver),
             rx,
@@ -1162,6 +1171,42 @@ impl VfsDriver for SftpFsDriver {
             hash: parsed.hash,
         }))
     }
+
+    fn file_digest(&self, path: &str) -> Result<Option<VfsTransferDigest>, VfsError> {
+        let abs = self.absolute(path);
+        let encoded_path = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(abs.as_bytes());
+        let control_path = format!("/.fbro-integrity/file/{encoded_path}");
+        let response = self.block_on(async move {
+            self.with_sftp(|sftp| async move {
+                use russh_sftp::protocol::OpenFlags;
+                use tokio::io::AsyncReadExt;
+                let mut file = sftp.open_with_flags(&control_path, OpenFlags::READ).await?;
+                let mut body = String::new();
+                file.read_to_string(&mut body).await?;
+                drop(file);
+                Ok(body)
+            })
+            .await
+        })?;
+        let parsed: RemoteDigestResponse =
+            serde_json::from_str(&response).map_err(|e| VfsError::IOError(e.to_string()))?;
+        if !parsed.complete {
+            return Err(VfsError::IOError(format!(
+                "remote {FBRO_INTEGRITY_ALGORITHM} digest is incomplete"
+            )));
+        }
+        if parsed.algorithm != FBRO_INTEGRITY_ALGORITHM {
+            return Err(VfsError::IOError(format!(
+                "unsupported remote digest algorithm {}",
+                parsed.algorithm
+            )));
+        }
+        Ok(Some(VfsTransferDigest {
+            algorithm: parsed.algorithm,
+            size: parsed.size,
+            hash: parsed.hash,
+        }))
+    }
 }
 
 // ─── Streaming Read adapter ──────────────────────────────────────────────────
@@ -1249,14 +1294,16 @@ enum ReadAheadResult {
 async fn run_read_ahead(
     sftp: Arc<SftpSession>,
     abs: String,
+    start_offset: u64,
     file_size: u64,
     out_tx: mpsc::Sender<Result<Vec<u8>, String>>,
 ) {
-    if file_size == 0 {
+    if file_size == 0 || start_offset >= file_size {
         return;
     }
 
-    let total_chunks = (file_size + SFTP_READ_CHUNK_SIZE as u64 - 1) / SFTP_READ_CHUNK_SIZE as u64;
+    let remaining = file_size - start_offset;
+    let total_chunks = (remaining + SFTP_READ_CHUNK_SIZE as u64 - 1) / SFTP_READ_CHUNK_SIZE as u64;
     let worker_count = SFTP_READ_AHEAD_CHUNKS.min(total_chunks as usize).max(1);
     let (result_tx, mut result_rx) = mpsc::channel::<ReadAheadResult>(worker_count * 2);
     let mut work_txs = Vec::with_capacity(worker_count);
@@ -1291,6 +1338,7 @@ async fn run_read_ahead(
         if !dispatch_read_work(
             &work_txs[worker_idx],
             next_dispatch_seq,
+            start_offset,
             file_size,
             &mut next_dispatch_seq,
         )
@@ -1323,6 +1371,7 @@ async fn run_read_ahead(
                     if !dispatch_read_work(
                         &work_txs[worker_idx],
                         next_dispatch_seq,
+                        start_offset,
                         file_size,
                         &mut next_dispatch_seq,
                     )
@@ -1353,10 +1402,11 @@ async fn run_read_ahead(
 async fn dispatch_read_work(
     work_tx: &mpsc::Sender<ReadWork>,
     seq: u64,
+    start_offset: u64,
     file_size: u64,
     next_dispatch_seq: &mut u64,
 ) -> bool {
-    let offset = seq * SFTP_READ_CHUNK_SIZE as u64;
+    let offset = start_offset + seq * SFTP_READ_CHUNK_SIZE as u64;
     let remaining = file_size.saturating_sub(offset);
     let len = remaining.min(SFTP_READ_CHUNK_SIZE as u64) as usize;
     if work_tx.send(ReadWork { seq, offset, len }).await.is_err() {

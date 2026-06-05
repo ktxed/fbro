@@ -1,4 +1,4 @@
-use std::fs;
+use std::fs::{self, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
 
@@ -230,9 +230,44 @@ impl VfsDriver for LocalFsDriver {
         Ok(Box::new(f))
     }
 
+    fn supports_read_at(&self) -> bool {
+        true
+    }
+
+    fn open_read_at(&self, path: &str, offset: u64) -> Result<Box<dyn Read + Send>, VfsError> {
+        let mut f = fs::File::open(path).map_err(|e| map_io_err(path, e))?;
+        f.seek(SeekFrom::Start(offset))
+            .map_err(|e| map_io_err(path, e))?;
+        Ok(Box::new(f))
+    }
+
     fn open_write(&self, path: &str) -> Result<Box<dyn Write + Send>, VfsError> {
         let f = fs::File::create(path).map_err(|e| map_io_err(path, e))?;
         Ok(Box::new(f))
+    }
+
+    fn supports_write_at(&self) -> bool {
+        true
+    }
+
+    fn open_write_at(&self, path: &str, offset: u64) -> Result<Box<dyn Write + Send>, VfsError> {
+        let mut f = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .open(path)
+            .map_err(|e| map_io_err(path, e))?;
+        f.set_len(offset).map_err(|e| map_io_err(path, e))?;
+        f.seek(SeekFrom::Start(offset))
+            .map_err(|e| map_io_err(path, e))?;
+        Ok(Box::new(f))
+    }
+
+    fn truncate_file(&self, path: &str, len: u64) -> Result<(), VfsError> {
+        let f = OpenOptions::new()
+            .write(true)
+            .open(path)
+            .map_err(|e| map_io_err(path, e))?;
+        f.set_len(len).map_err(|e| map_io_err(path, e))
     }
 
     fn create_dir_all(&self, path: &str) -> Result<(), VfsError> {

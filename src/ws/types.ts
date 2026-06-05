@@ -342,7 +342,7 @@ export interface JobStart {
 }
 
 export type FileOpType = "copy" | "move" | "delete";
-export type ConflictPolicy = "ask" | "skip" | "overwrite";
+export type ConflictPolicy = "ask" | "skip" | "overwrite" | "resume";
 export type VerificationPolicy = "fail" | "prompt";
 
 export interface PendingOp {
@@ -417,6 +417,7 @@ export interface GeneralSettings {
   showHiddenDefault: boolean;
   rememberWindowState: boolean;
   preserveAttributes: boolean;
+  autoResumeCopies: boolean;
   ludicrousMode: boolean;
   maxImageSizeMb: number;
   savePanelViewMode: boolean;

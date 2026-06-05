@@ -17,6 +17,8 @@ pub struct GeneralSettings {
     pub remember_window_state: bool,
     #[serde(default = "default_true")]
     pub preserve_attributes: bool,
+    #[serde(default = "default_true")]
+    pub auto_resume_copies: bool,
     #[serde(default)]
     pub ludicrous_mode: bool,
     #[serde(default = "default_max_image_size_mb")]
@@ -85,6 +87,7 @@ impl Default for GeneralSettings {
             show_hidden_default: false,
             remember_window_state: true,
             preserve_attributes: true,
+            auto_resume_copies: true,
             ludicrous_mode: false,
             max_image_size_mb: 512,
             save_panel_view_mode: false,

@@ -183,6 +183,14 @@ export function SettingsGeneralTab({ general, client }: SettingsGeneralTabProps)
           />
           <span>Preserve file timestamps and permissions when copying</span>
         </label>
+        <label className="settings-tab__option">
+          <input
+            type="checkbox"
+            checked={general.autoResumeCopies}
+            onChange={(e) => send("autoResumeCopies", e.target.checked)}
+          />
+          <span>Auto-retry interrupted copies</span>
+        </label>
       </div>
       <div className="settings-tab__section">
         <h3 className="settings-tab__section-title">Data files</h3>

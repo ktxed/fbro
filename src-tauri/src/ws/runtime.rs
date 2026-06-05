@@ -126,6 +126,7 @@ pub(crate) fn build_state_snapshot(
                     show_hidden_default: state.settings.general.show_hidden_default,
                     remember_window_state: state.settings.general.remember_window_state,
                     preserve_attributes: state.settings.general.preserve_attributes,
+                    auto_resume_copies: state.settings.general.auto_resume_copies,
                     ludicrous_mode: state.settings.general.ludicrous_mode,
                     max_image_size_mb: state.settings.general.max_image_size_mb,
                     save_panel_view_mode: state.settings.general.save_panel_view_mode,
