@@ -899,6 +899,8 @@ function applyJobEvent(state: AppState, msg: JobEventMessage): AppState {
             currentFile: undefined,
             statusText: job.kind === "outgoing-transfer"
               ? "Outgoing transfer completed"
+              : job.kind === "remote-manifest"
+                ? "Remote Sync hashing completed"
               : job.kind === "fp-bro" || job.kind === "sync-bro"
                 ? "Bro completed successfully"
                 : "Operation completed successfully",

@@ -60,6 +60,8 @@ export function JobsBar({ client }: { client: WsClient }) {
           ? "Search"
           : job.kind === "outgoing-transfer"
           ? `Outgoing ${jobShortId(job.jobId)}`
+          : job.kind === "remote-manifest"
+          ? "Remote Sync"
           : job.kind === "sync-bro"
           ? "Sync Bro"
           : job.type.charAt(0).toUpperCase() + job.type.slice(1);

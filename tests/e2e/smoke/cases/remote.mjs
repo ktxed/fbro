@@ -186,7 +186,9 @@ export async function runRemoteFlow(browserA, observerA, browserB, observerB) {
     broId: "builtin.sync_bro",
   });
   const syncJob = await observerB.waitForJob("sync-bro", "Completed", 45_000);
+  const remoteManifestJob = await observerA.waitForJob("remote-manifest", "Completed", 45_000);
   if (syncJob.error) throw new Error(`Sync Bro failed: ${syncJob.error}`);
+  if (remoteManifestJob.error) throw new Error(`Remote manifest failed: ${remoteManifestJob.error}`);
   const reportPath = path.join(bSyncHost, "fbro-sync-report.txt");
   await waitFor(() => fs.existsSync(reportPath), {
     timeout: 10_000,

@@ -47,6 +47,8 @@ pub struct VfsManifest {
 pub struct VfsManifestProgress {
     pub processed: usize,
     pub current_path: Option<String>,
+    pub current_file_bytes_total: u64,
+    pub current_file_bytes_hashed: u64,
     pub remote: bool,
 }
 

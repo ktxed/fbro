@@ -343,3 +343,25 @@ fn manifest_paths_parse_start_and_status() {
     assert!(manifest_status_from_path("/.fbro-manifest/status/../x").is_none());
     assert!(manifest_cancel_from_path("/.fbro-manifest/cancel/../x").is_none());
 }
+
+#[test]
+fn manifest_status_serializes_file_byte_progress() {
+    let response = ManifestStatusResponse {
+        done: false,
+        cancelled: false,
+        processed: 2,
+        current_path: Some("movie.mkv".to_string()),
+        current_file_bytes_total: 100,
+        current_file_bytes_hashed: 40,
+        updated_at: 123,
+        error: None,
+        entries: None,
+        errors: None,
+    };
+
+    let json = serde_json::to_value(response).unwrap();
+
+    assert_eq!(json["currentPath"], "movie.mkv");
+    assert_eq!(json["currentFileBytesTotal"], 100);
+    assert_eq!(json["currentFileBytesHashed"], 40);
+}

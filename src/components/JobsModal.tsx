@@ -50,6 +50,8 @@ function JobRow({ job, client }: { job: Job; client: WsClient }) {
   const isActive = job.state === "Queued" || job.state === "Running" || job.state === "AwaitingDecision";
   const typeLabel = job.kind === "outgoing-transfer"
     ? `Outgoing ${jobShortId(job.jobId)}`
+    : job.kind === "remote-manifest"
+    ? "Remote Sync Hashing"
     : job.kind === "sync-bro"
     ? "Sync Bro"
     : job.type.charAt(0).toUpperCase() + job.type.slice(1);
@@ -109,6 +111,12 @@ function JobRow({ job, client }: { job: Job; client: WsClient }) {
             </span>
             <span className="jobs-modal__path">
               External destination is on the remote fbro.
+            </span>
+          </>
+        ) : job.kind === "remote-manifest" ? (
+          <>
+            <span className="jobs-modal__path" title={job.sourcePath}>
+              Remote hashing: {job.sourcePath}
             </span>
           </>
         ) : job.kind === "sync-bro" ? (
@@ -263,7 +271,7 @@ export function JobsModal({ onClose, client }: { onClose: () => void; client: Ws
   const jobs = Object.values(state.jobs).sort(byNewest);
   const fileJobs = jobs.filter((job) => job.kind === "file-op");
   const outgoingJobs = jobs.filter((job) => job.kind === "outgoing-transfer");
-  const broJobs = jobs.filter((job) => job.kind === "fp-bro" || job.kind === "sync-bro");
+  const broJobs = jobs.filter((job) => job.kind === "fp-bro" || job.kind === "sync-bro" || job.kind === "remote-manifest");
   const activeFileJobs = fileJobs.filter(
     (job) => job.state === "Queued" || job.state === "Running" || job.state === "AwaitingDecision"
   );

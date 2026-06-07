@@ -65,6 +65,8 @@ enum ManifestProgressEvent {
         side: ManifestSide,
         path: String,
         processed: usize,
+        current_file_bytes_total: u64,
+        current_file_bytes_hashed: u64,
     },
     Done {
         side: ManifestSide,
@@ -79,6 +81,8 @@ struct ManifestSideProgress {
     done: bool,
     processed: usize,
     current_file: Option<String>,
+    current_file_bytes_total: u64,
+    current_file_bytes_hashed: u64,
 }
 
 #[derive(Clone, Debug)]
@@ -86,6 +90,8 @@ struct CombinedManifestProgress {
     status_text: String,
     current_file: Option<String>,
     completed_files: usize,
+    current_file_bytes_total: u64,
+    current_file_bytes_hashed: u64,
     overall_percent: Option<u8>,
 }
 
@@ -359,6 +365,8 @@ fn build_manifest(
                         .current_path
                         .unwrap_or_else(|| format!("{label} manifest")),
                     processed: progress.processed,
+                    current_file_bytes_total: progress.current_file_bytes_total,
+                    current_file_bytes_hashed: progress.current_file_bytes_hashed,
                 },
             );
         }
@@ -512,6 +520,8 @@ fn walk_dir(
                     side,
                     path: child_rel,
                     processed: out.len() + errors.len(),
+                    current_file_bytes_total: 0,
+                    current_file_bytes_hashed: 0,
                 },
             );
         }
@@ -728,12 +738,15 @@ async fn sync_bro_progress_aggregator(
                 total_files: 0,
                 completed_files: combined.completed_files,
                 current_file: combined.current_file,
+                current_file_bytes_total: combined.current_file_bytes_total,
+                current_file_bytes_copied: combined.current_file_bytes_hashed,
                 status_text: Some(combined.status_text),
-                current_file_bytes_total: 0,
-                current_file_bytes_copied: 0,
                 total_bytes_total: 0,
                 total_bytes_copied: 0,
-                current_file_percent: None,
+                current_file_percent: percent(
+                    combined.current_file_bytes_hashed,
+                    combined.current_file_bytes_total,
+                ),
                 overall_percent: combined.overall_percent,
             },
         )
@@ -759,12 +772,16 @@ fn apply_manifest_progress(
             side,
             path,
             processed,
+            current_file_bytes_total,
+            current_file_bytes_hashed,
         } => {
             let progress = side_progress_mut(local, remote, side);
             progress.started = true;
             progress.remote_manifest = false;
             progress.processed = processed;
             progress.current_file = Some(path);
+            progress.current_file_bytes_total = current_file_bytes_total;
+            progress.current_file_bytes_hashed = current_file_bytes_hashed;
         }
         ManifestProgressEvent::Done { side, processed } => {
             let progress = side_progress_mut(local, remote, side);
@@ -773,6 +790,8 @@ fn apply_manifest_progress(
             progress.done = true;
             progress.processed = processed;
             progress.current_file = None;
+            progress.current_file_bytes_total = 0;
+            progress.current_file_bytes_hashed = 0;
         }
     }
 }
@@ -818,6 +837,12 @@ fn combined_manifest_progress(
             .clone()
             .or_else(|| remote.current_file.clone()),
         completed_files: local.processed.max(remote.processed),
+        current_file_bytes_total: local
+            .current_file_bytes_total
+            .max(remote.current_file_bytes_total),
+        current_file_bytes_hashed: local
+            .current_file_bytes_hashed
+            .max(remote.current_file_bytes_hashed),
         overall_percent: if local.done && remote.done {
             Some(100)
         } else {
@@ -843,6 +868,13 @@ fn format_side_progress(label: &str, progress: &ManifestSideProgress) -> String 
         return format!("{label} tree hashing ({} files)", progress.processed);
     }
     format!("{label} tree hashing")
+}
+
+fn percent(done: u64, total: u64) -> Option<u8> {
+    if total == 0 {
+        return None;
+    }
+    Some(((done.saturating_mul(100) / total).min(100)) as u8)
 }
 
 fn send_manifest_progress_sync(
@@ -1110,6 +1142,30 @@ mod tests {
             "local tree hashing (912 files); remote tree complete (904 files)"
         );
         assert_eq!(combined.overall_percent, None);
+    }
+
+    #[test]
+    fn combined_progress_carries_remote_file_byte_progress() {
+        let local = ManifestSideProgress {
+            started: true,
+            done: true,
+            processed: 1,
+            ..Default::default()
+        };
+        let remote = ManifestSideProgress {
+            started: true,
+            processed: 0,
+            current_file: Some("movie.mkv".to_string()),
+            current_file_bytes_total: 100,
+            current_file_bytes_hashed: 40,
+            ..Default::default()
+        };
+
+        let combined = combined_manifest_progress(&local, &remote);
+
+        assert_eq!(combined.current_file.as_deref(), Some("movie.mkv"));
+        assert_eq!(combined.current_file_bytes_total, 100);
+        assert_eq!(combined.current_file_bytes_hashed, 40);
     }
 
     #[test]

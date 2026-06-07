@@ -1132,6 +1132,11 @@ async fn cancel_job(args: &Value, ctx: &mut IntentContext<'_>) {
                     job.state = JobState::Cancelled;
                     send_cancelled_event = true;
                 }
+                JobKind::RemoteManifest(meta) => {
+                    let _ = (&meta.root, &meta.peer_fp);
+                    let _ = job.cancel_tx.send(true);
+                    job.state = JobState::Cancelled;
+                }
                 _ => {
                     let _ = job.cancel_tx.send(true);
                     job.state = JobState::Cancelled;

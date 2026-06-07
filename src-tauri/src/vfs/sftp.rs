@@ -201,6 +201,10 @@ struct RemoteManifestStatusResponse {
     #[serde(default)]
     current_path: Option<String>,
     #[serde(default)]
+    current_file_bytes_total: u64,
+    #[serde(default)]
+    current_file_bytes_hashed: u64,
+    #[serde(default)]
     updated_at: u64,
     entries: Option<Vec<RemoteManifestEntry>>,
     errors: Option<Vec<RemoteManifestError>>,
@@ -1283,6 +1287,8 @@ impl VfsDriver for SftpFsDriver {
             progress(VfsManifestProgress {
                 processed: 0,
                 current_path: None,
+                current_file_bytes_total: 0,
+                current_file_bytes_hashed: 0,
                 remote: true,
             });
         }
@@ -1308,6 +1314,8 @@ impl VfsDriver for SftpFsDriver {
         let mut last_updated_at = 0u64;
         let mut last_processed = 0usize;
         let mut last_current_path: Option<String> = None;
+        let mut last_current_file_bytes_total = 0u64;
+        let mut last_current_file_bytes_hashed = 0u64;
         loop {
             if first_poll {
                 first_poll = false;
@@ -1331,11 +1339,15 @@ impl VfsDriver for SftpFsDriver {
             if status.updated_at != last_updated_at
                 || status.processed != last_processed
                 || status.current_path != last_current_path
+                || status.current_file_bytes_total != last_current_file_bytes_total
+                || status.current_file_bytes_hashed != last_current_file_bytes_hashed
             {
                 last_status_change = Instant::now();
                 last_updated_at = status.updated_at;
                 last_processed = status.processed;
                 last_current_path = status.current_path.clone();
+                last_current_file_bytes_total = status.current_file_bytes_total;
+                last_current_file_bytes_hashed = status.current_file_bytes_hashed;
             } else if !status.done && last_status_change.elapsed() >= REMOTE_MANIFEST_STALE_TIMEOUT
             {
                 let cancel_path = format!("/.fbro-manifest/cancel/{}", started.job_id);
@@ -1349,6 +1361,8 @@ impl VfsDriver for SftpFsDriver {
                 progress(VfsManifestProgress {
                     processed: status.processed,
                     current_path: status.current_path.clone(),
+                    current_file_bytes_total: status.current_file_bytes_total,
+                    current_file_bytes_hashed: status.current_file_bytes_hashed,
                     remote: true,
                 });
             }

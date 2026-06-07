@@ -147,6 +147,7 @@ pub enum JobKind {
     Search(SearchJobMeta),
     OutgoingTransfer(OutgoingTransferJobMeta),
     SyncBro(SyncBroJobMeta),
+    RemoteManifest(RemoteManifestJobMeta),
 }
 
 #[allow(dead_code)]
@@ -186,6 +187,12 @@ pub struct SyncBroJobMeta {
     pub local_root: String,
     pub remote_root: String,
     pub report_path: String,
+}
+
+#[allow(dead_code)]
+pub struct RemoteManifestJobMeta {
+    pub root: String,
+    pub peer_fp: String,
 }
 
 /// Container for all active jobs in AppState.

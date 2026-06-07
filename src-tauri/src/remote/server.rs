@@ -34,7 +34,9 @@ use russh_sftp::protocol::{
 use serde::Serialize;
 use tokio::sync::{watch, Mutex};
 
-use crate::jobs::{AppJob, FileOpProgress, JobKind, JobState, OutgoingTransferJobMeta};
+use crate::jobs::{
+    AppJob, FileOpProgress, JobKind, JobState, OutgoingTransferJobMeta, RemoteManifestJobMeta,
+};
 use crate::remote::keys::{fingerprint_of, Identity};
 use crate::state::SharedState;
 use crate::vfs::{VfsDriver, VfsError, VfsKind};
@@ -401,9 +403,14 @@ struct ManifestJobState {
     error: Option<String>,
     processed: usize,
     current_path: Option<String>,
+    current_file_bytes_total: u64,
+    current_file_bytes_hashed: u64,
     updated_at: u64,
     entries: Vec<ManifestEntryResponse>,
     errors: Vec<ManifestErrorResponse>,
+    visible_job_id: String,
+    visible_cancel_rx: Option<watch::Receiver<bool>>,
+    last_emit: Option<Instant>,
 }
 
 #[derive(Clone, Serialize)]
@@ -433,6 +440,8 @@ struct ManifestStatusResponse {
     processed: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     current_path: Option<String>,
+    current_file_bytes_total: u64,
+    current_file_bytes_hashed: u64,
     updated_at: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<String>,
@@ -767,27 +776,70 @@ impl SftpHandler {
         }
 
         let job_id = format!("manifest-{}", self.fresh_handle());
+        let (visible_job_id, visible_cancel_rx) = start_remote_manifest_job(
+            &self.state,
+            &self.peer_fp,
+            &root_path,
+            &format!("/{sid}/{rest}").trim_end_matches('/').to_string(),
+        )
+        .await;
+        eprintln!(
+            "[remote-manifest] start control_job={job_id} ui_job={visible_job_id} root={root_path}"
+        );
         let job = Arc::new(Mutex::new(ManifestJobState {
             updated_at: unix_millis_now(),
+            visible_job_id,
+            visible_cancel_rx: Some(visible_cancel_rx),
+            last_emit: Some(Instant::now() - OUTGOING_PROGRESS_INTERVAL),
             ..Default::default()
         }));
         self.manifest_jobs.insert(job_id.clone(), Arc::clone(&job));
 
+        let state = self.state.clone();
+        let control_job_id = job_id.clone();
         tokio::task::spawn_blocking(move || {
-            let result = build_manifest_on_remote(&*driver, &root_path, &job);
-            let mut guard = job.blocking_lock();
-            match result {
-                Ok(()) => {}
-                Err(error) if error == "Cancelled" => {
-                    guard.cancelled = true;
+            let result =
+                build_manifest_on_remote(&state, &control_job_id, &*driver, &root_path, &job);
+            let (visible_job_id, terminal_event, terminal_error, processed, error_count) = {
+                let mut guard = job.blocking_lock();
+                match result {
+                    Ok(()) => {}
+                    Err(error) if error == "Cancelled" => {
+                        guard.cancelled = true;
+                    }
+                    Err(error) => {
+                        guard.error = Some(error);
+                    }
                 }
-                Err(error) => {
-                    guard.error = Some(error);
-                }
-            }
-            guard.done = true;
-            guard.current_path = None;
-            guard.updated_at = unix_millis_now();
+                guard.done = true;
+                guard.current_path = None;
+                guard.current_file_bytes_total = 0;
+                guard.current_file_bytes_hashed = 0;
+                guard.updated_at = unix_millis_now();
+                let event = if guard.cancelled {
+                    "Cancelled"
+                } else if guard.error.is_some() {
+                    "Failed"
+                } else {
+                    "Completed"
+                };
+                (
+                    guard.visible_job_id.clone(),
+                    event.to_string(),
+                    guard.error.clone(),
+                    guard.processed,
+                    guard.errors.len(),
+                )
+            };
+            eprintln!(
+                "[remote-manifest] finish control_job={control_job_id} ui_job={visible_job_id} event={terminal_event} processed={processed} errors={error_count}"
+            );
+            emit_remote_manifest_terminal_sync(
+                &state,
+                &visible_job_id,
+                &terminal_event,
+                terminal_error,
+            );
         });
 
         serde_json::to_vec(&ManifestStartResponse { job_id }).map_err(|_| StatusCode::Failure)
@@ -805,6 +857,8 @@ impl SftpHandler {
                 cancelled: guard.cancelled,
                 processed: guard.processed,
                 current_path: guard.current_path.clone(),
+                current_file_bytes_total: guard.current_file_bytes_total,
+                current_file_bytes_hashed: guard.current_file_bytes_hashed,
                 updated_at: guard.updated_at,
                 error: guard.error.clone(),
                 entries: Some(guard.entries.clone()),
@@ -816,6 +870,8 @@ impl SftpHandler {
                 cancelled: guard.cancelled,
                 processed: guard.processed,
                 current_path: guard.current_path.clone(),
+                current_file_bytes_total: guard.current_file_bytes_total,
+                current_file_bytes_hashed: guard.current_file_bytes_hashed,
                 updated_at: guard.updated_at,
                 error: None,
                 entries: None,
@@ -836,11 +892,14 @@ impl SftpHandler {
         let mut guard = job.lock().await;
         guard.cancelled = true;
         guard.updated_at = unix_millis_now();
+        let visible_job_id = guard.visible_job_id.clone();
         let response = ManifestStatusResponse {
             done: guard.done,
             cancelled: true,
             processed: guard.processed,
             current_path: guard.current_path.clone(),
+            current_file_bytes_total: guard.current_file_bytes_total,
+            current_file_bytes_hashed: guard.current_file_bytes_hashed,
             updated_at: guard.updated_at,
             error: guard.error.clone(),
             entries: None,
@@ -848,6 +907,8 @@ impl SftpHandler {
         };
         drop(guard);
         self.manifest_jobs.remove(job_id);
+        eprintln!("[remote-manifest] cancel control_job={job_id} ui_job={visible_job_id}");
+        emit_remote_manifest_terminal(&self.state, &visible_job_id, "Cancelled", None).await;
         serde_json::to_vec(&response).map_err(|_| StatusCode::Failure)
     }
 
@@ -1148,6 +1209,219 @@ async fn finish_outgoing_transfer(state: SharedState, job_id: String) {
     }
 }
 
+async fn start_remote_manifest_job(
+    state: &SharedState,
+    peer_fp: &str,
+    root_path: &str,
+    display_path: &str,
+) -> (String, watch::Receiver<bool>) {
+    let (job_id, cancel_rx, senders, peer_label) = {
+        let mut guard = state.lock().await;
+        let peer_name = guard
+            .share_config
+            .paired_peers
+            .get(peer_fp)
+            .map(|peer| peer.name.clone())
+            .unwrap_or_else(|| "remote fbro".to_string());
+        let job_id = guard.job_store.next_job_id();
+        let (cancel_tx, cancel_rx) = watch::channel(false);
+        let (pause_tx, _pause_rx) = watch::channel(false);
+        let peer_label = format!("Remote Sync hashing for {peer_name}: {display_path}");
+        guard.job_store.jobs.insert(
+            job_id.clone(),
+            AppJob {
+                job_id: job_id.clone(),
+                kind: JobKind::RemoteManifest(RemoteManifestJobMeta {
+                    root: root_path.to_string(),
+                    peer_fp: peer_fp.to_string(),
+                }),
+                source_panel: String::new(),
+                dest_panel: None,
+                source_path: peer_label.clone(),
+                dest_path: None,
+                state: JobState::Running,
+                progress: FileOpProgress {
+                    status_text: Some("Hashing for remote Sync Bro".to_string()),
+                    ..Default::default()
+                },
+                decision: None,
+                error: None,
+                background: true,
+                paused: false,
+                handle: None,
+                cancel_tx,
+                pause_tx,
+                keep_partial_files_on_cancel: Arc::new(AtomicBool::new(false)),
+            },
+        );
+        (job_id, cancel_rx, guard.gui_senders.clone(), peer_label)
+    };
+
+    let msg = ServerMessage::JobStarted {
+        timestamp: now(),
+        job: JobStartSchema {
+            job_id: job_id.clone(),
+            kind: "remote-manifest".to_string(),
+            op_type: "remote-manifest".to_string(),
+            files: Vec::new(),
+            source_panel: String::new(),
+            source_path: peer_label,
+            dest_panel: None,
+            dest_path: None,
+            initial_state: "Running".to_string(),
+            total_files: 0,
+            total_bytes_total: 0,
+            background: true,
+            supports_pause: false,
+            result_path: None,
+            result_panel_id: None,
+            request_id: None,
+            search_source_id: None,
+            search_params: None,
+        },
+    };
+    for tx in senders {
+        let _ = tx.try_send(msg.clone());
+    }
+    (job_id, cancel_rx)
+}
+
+fn emit_remote_manifest_progress_sync(state: &SharedState, job_id: &str, progress: FileOpProgress) {
+    let (senders, schema) = {
+        let mut guard = state.blocking_lock();
+        if let Some(job) = guard.job_store.jobs.get_mut(job_id) {
+            job.state = JobState::Running;
+            job.progress = progress.clone();
+        }
+        (guard.gui_senders.clone(), progress_schema(&progress))
+    };
+    let msg = ServerMessage::JobEvent {
+        timestamp: now(),
+        job_id: job_id.to_string(),
+        event: "Progress".to_string(),
+        files: None,
+        progress: Some(schema),
+        search_progress: None,
+        decision: None,
+        error: None,
+        result_path: None,
+        result_panel_id: None,
+    };
+    for tx in senders {
+        let _ = tx.try_send(msg.clone());
+    }
+}
+
+fn emit_remote_manifest_terminal_sync(
+    state: &SharedState,
+    job_id: &str,
+    event: &str,
+    error: Option<String>,
+) {
+    let senders = {
+        let mut guard = state.blocking_lock();
+        if let Some(job) = guard.job_store.jobs.get_mut(job_id) {
+            match event {
+                "Completed" => {
+                    job.state = JobState::Completed;
+                    job.progress.status_text = Some("Remote Sync hashing completed".to_string());
+                    job.progress.current_file = None;
+                    job.progress.current_file_bytes_total = 0;
+                    job.progress.current_file_bytes_copied = 0;
+                    job.progress.current_file_percent = Some(100);
+                    job.progress.overall_percent = Some(100);
+                }
+                "Cancelled" => {
+                    job.state = JobState::Cancelled;
+                    job.progress.status_text = Some("Remote Sync hashing cancelled".to_string());
+                    job.progress.current_file = None;
+                }
+                "Failed" => {
+                    job.state = JobState::Failed;
+                    job.progress.status_text = Some("Remote Sync hashing failed".to_string());
+                    job.error = error.clone();
+                    job.progress.current_file = None;
+                }
+                _ => {}
+            }
+            job.paused = false;
+            job.decision = None;
+            job.handle = None;
+        }
+        guard.gui_senders.clone()
+    };
+    let msg = ServerMessage::JobEvent {
+        timestamp: now(),
+        job_id: job_id.to_string(),
+        event: event.to_string(),
+        files: None,
+        progress: None,
+        search_progress: None,
+        decision: None,
+        error,
+        result_path: None,
+        result_panel_id: None,
+    };
+    for tx in senders {
+        let _ = tx.try_send(msg.clone());
+    }
+}
+
+async fn emit_remote_manifest_terminal(
+    state: &SharedState,
+    job_id: &str,
+    event: &str,
+    error: Option<String>,
+) {
+    let senders = {
+        let mut guard = state.lock().await;
+        if let Some(job) = guard.job_store.jobs.get_mut(job_id) {
+            match event {
+                "Completed" => {
+                    job.state = JobState::Completed;
+                    job.progress.status_text = Some("Remote Sync hashing completed".to_string());
+                    job.progress.current_file = None;
+                    job.progress.current_file_bytes_total = 0;
+                    job.progress.current_file_bytes_copied = 0;
+                    job.progress.current_file_percent = Some(100);
+                    job.progress.overall_percent = Some(100);
+                }
+                "Cancelled" => {
+                    job.state = JobState::Cancelled;
+                    job.progress.status_text = Some("Remote Sync hashing cancelled".to_string());
+                    job.progress.current_file = None;
+                }
+                "Failed" => {
+                    job.state = JobState::Failed;
+                    job.progress.status_text = Some("Remote Sync hashing failed".to_string());
+                    job.error = error.clone();
+                    job.progress.current_file = None;
+                }
+                _ => {}
+            }
+            job.paused = false;
+            job.decision = None;
+            job.handle = None;
+        }
+        guard.gui_senders.clone()
+    };
+    let msg = ServerMessage::JobEvent {
+        timestamp: now(),
+        job_id: job_id.to_string(),
+        event: event.to_string(),
+        files: None,
+        progress: None,
+        search_progress: None,
+        decision: None,
+        error,
+        result_path: None,
+        result_panel_id: None,
+    };
+    for tx in senders {
+        let _ = tx.try_send(msg.clone());
+    }
+}
+
 fn schedule_outgoing_completion(state: SharedState, job_id: String, generation: u64) {
     tokio::spawn(async move {
         tokio::time::sleep(OUTGOING_COMPLETE_IDLE).await;
@@ -1322,11 +1596,13 @@ fn unix_millis_now() -> u64 {
 }
 
 fn build_manifest_on_remote(
+    state: &SharedState,
+    control_job_id: &str,
     driver: &dyn VfsDriver,
     root: &str,
     job: &Arc<Mutex<ManifestJobState>>,
 ) -> Result<(), String> {
-    walk_manifest_on_remote(driver, root, "", job)?;
+    walk_manifest_on_remote(state, control_job_id, driver, root, "", job)?;
     let mut guard = job.blocking_lock();
     guard.entries.sort_by(|a, b| a.path.cmp(&b.path));
     guard.errors.sort_by(|a, b| a.path.cmp(&b.path));
@@ -1335,6 +1611,8 @@ fn build_manifest_on_remote(
 }
 
 fn walk_manifest_on_remote(
+    state: &SharedState,
+    control_job_id: &str,
     driver: &dyn VfsDriver,
     abs_dir: &str,
     rel_dir: &str,
@@ -1350,6 +1628,7 @@ fn walk_manifest_on_remote(
         }
         Err(error) => {
             push_manifest_error(
+                state,
                 job,
                 ManifestErrorResponse {
                     path: rel_dir.to_string(),
@@ -1371,11 +1650,32 @@ fn walk_manifest_on_remote(
             format!("{rel_dir}/{}", child.name)
         };
         if child.is_dir {
-            walk_manifest_on_remote(driver, &child_abs, &child_rel, job)?;
+            walk_manifest_on_remote(state, control_job_id, driver, &child_abs, &child_rel, job)?;
         } else {
-            update_manifest_progress(job, Some(child_rel.clone()), None);
-            match hash_file_on_remote(driver, &child_abs, &child_rel, child.size, job) {
+            eprintln!(
+                "[remote-manifest] file start control_job={control_job_id} path={child_rel} size={}",
+                child.size
+            );
+            update_manifest_progress(
+                state,
+                job,
+                Some(child_rel.clone()),
+                None,
+                child.size,
+                0,
+                true,
+            );
+            match hash_file_on_remote(
+                state,
+                control_job_id,
+                driver,
+                &child_abs,
+                &child_rel,
+                child.size,
+                job,
+            ) {
                 Ok((size, hash)) => push_manifest_entry(
+                    state,
                     job,
                     ManifestEntryResponse {
                         path: child_rel,
@@ -1385,6 +1685,7 @@ fn walk_manifest_on_remote(
                 ),
                 Err(message) if message == "Cancelled" => return Err(message),
                 Err(message) => push_manifest_error(
+                    state,
                     job,
                     ManifestErrorResponse {
                         path: child_rel,
@@ -1398,6 +1699,8 @@ fn walk_manifest_on_remote(
 }
 
 fn hash_file_on_remote(
+    state: &SharedState,
+    control_job_id: &str,
     driver: &dyn VfsDriver,
     path: &str,
     rel_path: &str,
@@ -1409,9 +1712,20 @@ fn hash_file_on_remote(
     let mut offset = 0u64;
     while offset < size {
         if manifest_cancelled(job) {
+            eprintln!(
+                "[remote-manifest] file cancelled control_job={control_job_id} path={rel_path}"
+            );
             return Err("Cancelled".to_string());
         }
-        update_manifest_progress(job, Some(rel_path.to_string()), None);
+        update_manifest_progress(
+            state,
+            job,
+            Some(rel_path.to_string()),
+            None,
+            size,
+            offset,
+            false,
+        );
         let remaining = size
             .saturating_sub(offset)
             .min(MANIFEST_HASH_CHUNK_SIZE as u64) as usize;
@@ -1423,42 +1737,122 @@ fn hash_file_on_remote(
         }
         offset = offset.saturating_add(chunk.len() as u64);
         hasher.update(&chunk);
+        update_manifest_progress(
+            state,
+            job,
+            Some(rel_path.to_string()),
+            None,
+            size,
+            offset,
+            false,
+        );
     }
     if offset != size {
+        eprintln!(
+            "[remote-manifest] file short-read control_job={control_job_id} path={rel_path} offset={offset} size={size}"
+        );
         return Err(format!("digest read ended at {offset} of {size} bytes"));
     }
+    eprintln!("[remote-manifest] file complete control_job={control_job_id} path={rel_path}");
     Ok((size, hasher.finalize().to_hex().to_string()))
 }
 
 fn manifest_cancelled(job: &Arc<Mutex<ManifestJobState>>) -> bool {
-    job.blocking_lock().cancelled
+    let guard = job.blocking_lock();
+    guard.cancelled
+        || guard
+            .visible_cancel_rx
+            .as_ref()
+            .map(|rx| *rx.borrow())
+            .unwrap_or(false)
 }
 
 fn update_manifest_progress(
+    state: &SharedState,
     job: &Arc<Mutex<ManifestJobState>>,
     current_path: Option<String>,
     processed: Option<usize>,
+    current_file_bytes_total: u64,
+    current_file_bytes_hashed: u64,
+    force_emit: bool,
 ) {
-    let mut guard = job.blocking_lock();
-    if let Some(processed) = processed {
-        guard.processed = processed;
+    let (visible_job_id, progress, should_emit) = {
+        let mut guard = job.blocking_lock();
+        if let Some(processed) = processed {
+            guard.processed = processed;
+        }
+        guard.current_path = current_path;
+        guard.current_file_bytes_total = current_file_bytes_total;
+        guard.current_file_bytes_hashed = current_file_bytes_hashed;
+        guard.updated_at = unix_millis_now();
+        let now = Instant::now();
+        let should_emit = force_emit
+            || guard
+                .last_emit
+                .map(|last| now.duration_since(last) >= OUTGOING_PROGRESS_INTERVAL)
+                .unwrap_or(true);
+        if should_emit {
+            guard.last_emit = Some(now);
+        }
+        let status_text = guard
+            .current_path
+            .as_ref()
+            .map(|path| format!("Hashing for remote Sync Bro: {path}"))
+            .unwrap_or_else(|| "Hashing for remote Sync Bro".to_string());
+        (
+            guard.visible_job_id.clone(),
+            FileOpProgress {
+                total_files: 0,
+                completed_files: guard.processed,
+                current_file: guard.current_path.clone(),
+                status_text: Some(status_text),
+                current_file_bytes_total: guard.current_file_bytes_total,
+                current_file_bytes_copied: guard.current_file_bytes_hashed,
+                current_file_percent: percent(
+                    guard.current_file_bytes_hashed,
+                    guard.current_file_bytes_total,
+                ),
+                ..Default::default()
+            },
+            should_emit,
+        )
+    };
+    if should_emit {
+        emit_remote_manifest_progress_sync(state, &visible_job_id, progress);
     }
-    guard.current_path = current_path;
-    guard.updated_at = unix_millis_now();
 }
 
-fn push_manifest_entry(job: &Arc<Mutex<ManifestJobState>>, entry: ManifestEntryResponse) {
-    let mut guard = job.blocking_lock();
-    guard.entries.push(entry);
-    guard.processed = guard.entries.len() + guard.errors.len();
-    guard.updated_at = unix_millis_now();
+fn push_manifest_entry(
+    state: &SharedState,
+    job: &Arc<Mutex<ManifestJobState>>,
+    entry: ManifestEntryResponse,
+) {
+    let path = entry.path.clone();
+    let size = entry.size;
+    {
+        let mut guard = job.blocking_lock();
+        guard.entries.push(entry);
+        guard.processed = guard.entries.len() + guard.errors.len();
+    }
+    update_manifest_progress(state, job, Some(path), None, size, size, true);
 }
 
-fn push_manifest_error(job: &Arc<Mutex<ManifestJobState>>, error: ManifestErrorResponse) {
-    let mut guard = job.blocking_lock();
-    guard.errors.push(error);
-    guard.processed = guard.entries.len() + guard.errors.len();
-    guard.updated_at = unix_millis_now();
+fn push_manifest_error(
+    state: &SharedState,
+    job: &Arc<Mutex<ManifestJobState>>,
+    error: ManifestErrorResponse,
+) {
+    eprintln!(
+        "[remote-manifest] file error path={} message={}",
+        error.path, error.message
+    );
+    let path = error.path.clone();
+    {
+        let mut guard = job.blocking_lock();
+        guard.errors.push(error);
+        guard.processed = guard.entries.len() + guard.errors.len();
+    }
+    update_manifest_progress(state, job, Some(path), None, 0, 0, true);
 }
 
 fn is_sources_metadata_path(path: &str) -> bool {
