@@ -44,6 +44,9 @@ export async function runRemoteFlow(browserA, observerA, browserB, observerB) {
   fs.mkdirSync(aHomeDeepHost, { recursive: true });
   fs.mkdirSync(aHomeSyncHost, { recursive: true });
   fs.mkdirSync(bSyncHost, { recursive: true });
+  // The compose command wipes src/dst but not sync-bro; clear any stale report
+  // from a previous run so the no-auto-write assertion is meaningful.
+  fs.rmSync(path.join(bSyncHost, "fbro-sync-report.txt"), { force: true });
   fs.writeFileSync(path.join(aHomeDownloadsHost, "remote.txt"), "remote payload\n");
   fs.writeFileSync(path.join(aHomeDownloadsHost, "remote-thumb.bmp"), tinyBmp());
   fs.writeFileSync(path.join(aHomeDeepHost, "deep.txt"), "deep remote payload\n");
@@ -189,15 +192,47 @@ export async function runRemoteFlow(browserA, observerA, browserB, observerB) {
   const remoteManifestJob = await observerA.waitForJob("remote-manifest", "Completed", 45_000);
   if (syncJob.error) throw new Error(`Sync Bro failed: ${syncJob.error}`);
   if (remoteManifestJob.error) throw new Error(`Remote manifest failed: ${remoteManifestJob.error}`);
+
+  // Results are delivered to the client for the modal, not written to disk.
+  const result = await waitFor(() => syncJob.syncResult ?? false, {
+    timeout: 10_000,
+    label: "Sync Bro result delivered to client",
+  });
+  if (result.matched !== 1) {
+    throw new Error(`Sync Bro matched ${result.matched}, expected 1`);
+  }
+  if (
+    result.differing.length
+    || result.localOnly.length
+    || result.remoteOnly.length
+    || result.unverified.length
+    || result.localErrors.length
+    || result.remoteErrors.length
+  ) {
+    throw new Error(`Sync Bro reported unexpected differences: ${JSON.stringify(result)}`);
+  }
   const reportPath = path.join(bSyncHost, "fbro-sync-report.txt");
+  if (fs.existsSync(reportPath)) {
+    throw new Error("Sync Bro wrote a report file without an explicit save");
+  }
+
+  // The report file is written only on demand via SaveSyncReport.
+  observerB.sendIntent("SaveSyncReport", undefined, {
+    jobId: syncJob.jobId,
+    result: syncJob.syncResult,
+  });
   await waitFor(() => fs.existsSync(reportPath), {
     timeout: 10_000,
-    label: "Sync Bro report written",
+    label: "Sync Bro report saved on demand",
   });
   const report = fs.readFileSync(reportPath, "utf8");
   if (!report.includes("Matched: 1")) {
     throw new Error(`Sync Bro report did not include the expected match count:\n${report}`);
   }
+  await waitFor(() => syncJob.reportSavedPath ?? false, {
+    timeout: 10_000,
+    label: "Sync Bro report-saved confirmation",
+  });
 
   await browserA.getTitle();
   await browserB.getTitle();

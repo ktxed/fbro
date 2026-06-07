@@ -280,6 +280,14 @@ export class FbroObserver {
       };
     }
     if (msg.type === "JobEvent") this.#applyJobEvent(msg);
+    if (msg.type === "SyncBroResult") {
+      const job = this.state.jobs[msg.jobId];
+      if (job) job.syncResult = msg.result;
+    }
+    if (msg.type === "SyncReportSaved") {
+      const job = this.state.jobs[msg.jobId];
+      if (job) job.reportSavedPath = msg.path;
+    }
     if (msg.type === "PairingRequested") this.pairingRequests.set(msg.handshakeId, msg);
     if (msg.type === "PairingResolved") this.pairingRequests.delete(msg.handshakeId);
     if (msg.type === "RemoteSourceStatus" && msg.status !== "connected") {
