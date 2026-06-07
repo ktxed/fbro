@@ -733,7 +733,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
 
     return (
       <div className="modal-overlay" ref={modalRef} tabIndex={-1} onClick={isTerminal && !requiresExplicitClose ? close : undefined} onKeyDown={handleActiveJobKeyDown}>
-        <div className="modal modal--fixed" role="dialog" aria-label={`${label} ${activeJob.state}`} data-testid="job-dialog" onClick={(e) => e.stopPropagation()}>
+        <div className={`modal modal--fixed${isSyncBro ? " modal--sync" : ""}`} role="dialog" aria-label={`${label} ${activeJob.state}`} data-testid="job-dialog" onClick={(e) => e.stopPropagation()}>
           <div className="modal__header">{label} — {activeJob.state}</div>
           <div className="modal__body">
             <div className="modal__job-params">
@@ -912,6 +912,24 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
                     ) : p.currentFilePercent !== undefined ? `${filePercent}%` : currentProgressLabel}
                   </span>
                 </div>
+
+                {/* File currently being hashed (the status label shows tree-level
+                    progress). Two lines are reserved so the layout stays steady. */}
+                {isSyncBro && isProgress && (
+                  <div className="modal__sync-current">
+                    <span className="modal__sync-current-label">Hashing:</span>
+                    <span className="modal__sync-current-path" title={p.currentFile ?? undefined}>
+                      {p.currentFile ?? "…"}
+                    </span>
+                    {p.currentFile && (
+                      <button
+                        className="modal__job-param-copy"
+                        onClick={() => navigator.clipboard.writeText(p.currentFile!)}
+                        title="Copy path"
+                      ><IconCopy size={14} /></button>
+                    )}
+                  </div>
+                )}
 
                 {/* Job-wide progress */}
                 {showOverallProgress && (

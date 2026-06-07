@@ -1898,6 +1898,43 @@ body {
   height: 340px;
 }
 
+/* Sync Bro needs more room for the results lists. */
+.modal--sync {
+  height: 460px;
+}
+
+.modal__sync-current {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: calc(var(--font-size) * 0.9);
+}
+
+.modal__sync-current-label {
+  flex-shrink: 0;
+  color: var(--text-dim);
+  line-height: 1.4em;
+}
+
+.modal__sync-current-path {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-path);
+  /* Reserve two lines and ellipsize a long path at the end of the second. */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  height: 2.8em;
+  line-height: 1.4em;
+  word-break: break-all;
+}
+
+.modal__sync-current .modal__job-param-copy {
+  flex-shrink: 0;
+}
+
 .modal__btn {
   background: var(--bg-footer);
   color: var(--text-dim);
