@@ -57,6 +57,56 @@ pub struct VfsManifestOptions<'a> {
     pub progress: Option<&'a (dyn Fn(VfsManifestProgress) + Send + Sync)>,
 }
 
+/// BLAKE3 hex digest of a local file using a memory map and multi-core hashing.
+///
+/// `cancel` is checked between hash windows so a single very large file stays
+/// cancellable; `progress` reports bytes hashed so far for the FE progress bar.
+/// Chunked `update_rayon` over the mapping is bit-identical to a single
+/// streaming `blake3::Hasher`, so the digest stays comparable with the remote
+/// side of Sync Bro (which produces the same BLAKE3 hex).
+pub fn hash_local_file_blake3(
+    path: &std::path::Path,
+    cancel: &dyn Fn() -> bool,
+    mut progress: impl FnMut(u64),
+) -> Result<String, VfsError> {
+    // Window large enough to amortize rayon dispatch, small enough to keep
+    // cancellation and progress responsive on multi-GB files.
+    const HASH_WINDOW: usize = 64 * 1024 * 1024;
+
+    let file = std::fs::File::open(path).map_err(|e| VfsError::IOError(e.to_string()))?;
+    let meta = file
+        .metadata()
+        .map_err(|e| VfsError::IOError(e.to_string()))?;
+    if !meta.is_file() {
+        return Err(VfsError::NotSupported(format!(
+            "not a regular file: {}",
+            path.display()
+        )));
+    }
+    let mut hasher = blake3::Hasher::new();
+    // Empty files cannot be memory-mapped; hash the empty input directly.
+    if meta.len() == 0 {
+        progress(0);
+        return Ok(hasher.finalize().to_hex().to_string());
+    }
+    // SAFETY: mmap of a regular file. Concurrent truncation of the mapped file
+    // could raise SIGBUS — an accepted risk for a local integrity tool.
+    let mmap = unsafe { memmap2::Mmap::map(&file) }.map_err(|e| VfsError::IOError(e.to_string()))?;
+    let len = mmap.len();
+    let mut offset = 0usize;
+    while offset < len {
+        if cancel() {
+            return Err(VfsError::IOError("Cancelled".to_string()));
+        }
+        progress(offset as u64);
+        let end = (offset + HASH_WINDOW).min(len);
+        hasher.update_rayon(&mmap[offset..end]);
+        offset = end;
+    }
+    progress(len as u64);
+    Ok(hasher.finalize().to_hex().to_string())
+}
+
 // ─── VFS trait ──────────────────────────────────────────────────────────────
 
 /// Abstraction over a filesystem-like data source.
@@ -82,6 +132,14 @@ pub trait VfsDriver: Send + Sync {
 
     /// Downcast helper for runtime type checking (e.g. detecting ZipFsDriver).
     fn as_any(&self) -> &dyn std::any::Any;
+
+    /// Return the real on-disk path for `path` when this driver maps directly
+    /// to the local native filesystem. Enables fast memory-mapped, multi-core
+    /// hashing (see [`hash_local_file_blake3`]). Drivers without real OS paths
+    /// (archives, remote, virtual) return `None`.
+    fn local_path(&self, _path: &str) -> Option<std::path::PathBuf> {
+        None
+    }
 
     /// Optional hook for drivers that need to scope backend resources to a
     /// file-operation job. Most VFS drivers do not need this.
@@ -360,4 +418,73 @@ pub fn format_mtime(t: SystemTime) -> Option<String> {
         let secs = d.as_secs();
         format!("{secs}")
     })
+}
+
+#[cfg(test)]
+mod hash_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    struct TempFile(std::path::PathBuf);
+    impl TempFile {
+        fn with_bytes(bytes: &[u8]) -> Self {
+            let n = COUNTER.fetch_add(1, Ordering::SeqCst);
+            let path =
+                std::env::temp_dir().join(format!("fbro-hash-test-{}-{n}", std::process::id()));
+            std::fs::write(&path, bytes).expect("write temp file");
+            TempFile(path)
+        }
+    }
+    impl Drop for TempFile {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+
+    fn no_cancel() -> bool {
+        false
+    }
+
+    #[test]
+    fn matches_canonical_blake3_for_nonempty_file() {
+        let bytes = b"the quick brown fox jumps over the lazy dog".repeat(100);
+        let file = TempFile::with_bytes(&bytes);
+        let expected = blake3::hash(&bytes).to_hex().to_string();
+
+        let mut last_progress = 0u64;
+        let got =
+            hash_local_file_blake3(&file.0, &no_cancel, |hashed| last_progress = hashed).unwrap();
+
+        assert_eq!(got, expected);
+        assert_eq!(last_progress, bytes.len() as u64);
+    }
+
+    #[test]
+    fn empty_file_hashes_empty_input() {
+        let file = TempFile::with_bytes(b"");
+        let expected = blake3::hash(b"").to_hex().to_string();
+
+        let got = hash_local_file_blake3(&file.0, &no_cancel, |_| {}).unwrap();
+
+        assert_eq!(got, expected);
+    }
+
+    #[test]
+    fn non_regular_file_is_not_supported() {
+        // A directory is not a regular file.
+        let dir = std::env::temp_dir();
+        let err = hash_local_file_blake3(&dir, &no_cancel, |_| {}).unwrap_err();
+        assert!(matches!(err, VfsError::NotSupported(_)));
+    }
+
+    #[test]
+    fn cancellation_mid_hash_returns_cancelled() {
+        let bytes = b"some bytes to hash".repeat(50);
+        let file = TempFile::with_bytes(&bytes);
+
+        let err = hash_local_file_blake3(&file.0, &|| true, |_| {}).unwrap_err();
+        assert!(err.to_string().contains("Cancelled"));
+    }
 }

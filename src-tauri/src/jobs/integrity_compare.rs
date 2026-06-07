@@ -6,10 +6,12 @@ use std::sync::{
 
 use tokio::sync::{mpsc, watch};
 
-use crate::vfs::{VfsDriver, VfsManifest, VfsManifestOptions, VfsManifestProgress};
+use std::io::Read;
+
+use crate::vfs::{hash_local_file_blake3, VfsDriver, VfsManifest, VfsManifestOptions, VfsManifestProgress};
 use crate::ws::protocol::{now, FileOpProgressSchema, ServerMessage};
 
-const CHUNK_SIZE: usize = 1024 * 1024;
+const STREAM_BUF_SIZE: usize = 8 * 1024 * 1024;
 pub const SYNC_REPORT_NAME: &str = "fbro-sync-report.txt";
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -502,7 +504,16 @@ fn walk_dir(
                 errors,
             )?;
         } else {
-            match digest_file(driver, &child_abs, child.size, cancel) {
+            match digest_file(
+                side,
+                driver,
+                &child_abs,
+                &child_rel,
+                out.len() + errors.len(),
+                child.size,
+                cancel,
+                progress_tx,
+            ) {
                 Ok(digest) => out.push(ManifestEntry {
                     path: child_rel.clone(),
                     size: digest.size,
@@ -530,10 +541,14 @@ fn walk_dir(
 }
 
 fn digest_file(
+    side: ManifestSide,
     driver: &dyn VfsDriver,
     path: &str,
+    rel_path: &str,
+    processed_so_far: usize,
     size_hint: u64,
     cancel: &AtomicBool,
+    progress_tx: &mpsc::Sender<ManifestProgressEvent>,
 ) -> Result<ManifestEntry, String> {
     if cancel.load(Ordering::SeqCst) {
         return Err("Cancelled".to_string());
@@ -549,21 +564,57 @@ fn digest_file(
         });
     }
     let size = driver.file_size(path).unwrap_or(size_hint);
+
+    // Fast path: a real local file is hashed with a memory map and multi-core
+    // BLAKE3, emitting mid-file byte progress and staying cancellable.
+    if let Some(local) = driver.local_path(path) {
+        let emit = |hashed: u64| {
+            send_manifest_progress_sync(
+                progress_tx,
+                ManifestProgressEvent::FileHashed {
+                    side,
+                    path: rel_path.to_string(),
+                    processed: processed_so_far,
+                    current_file_bytes_total: size,
+                    current_file_bytes_hashed: hashed,
+                },
+            );
+        };
+        let hash = hash_local_file_blake3(&local, &|| cancel.load(Ordering::SeqCst), emit)
+            .map_err(|e| {
+                if e.to_string().contains("Cancelled") {
+                    "Cancelled".to_string()
+                } else {
+                    format!("Cannot digest {path}: {e}")
+                }
+            })?;
+        return Ok(ManifestEntry {
+            path: String::new(),
+            size,
+            hash,
+        });
+    }
+
+    // Fallback: stream the file once via `open_read` with a large buffer
+    // (no reopen-per-chunk) for drivers without a real local path.
+    let mut reader = driver
+        .open_read(path)
+        .map_err(|e| format!("Cannot read {path}: {e}"))?;
     let mut hasher = blake3::Hasher::new();
+    let mut buf = vec![0u8; STREAM_BUF_SIZE];
     let mut offset = 0u64;
-    while offset < size {
+    loop {
         if cancel.load(Ordering::SeqCst) {
             return Err("Cancelled".to_string());
         }
-        let remaining = size.saturating_sub(offset).min(CHUNK_SIZE as u64) as usize;
-        let chunk = driver
-            .read_chunk(path, offset, remaining)
+        let n = reader
+            .read(&mut buf)
             .map_err(|e| format!("Cannot read {path}: {e}"))?;
-        if chunk.is_empty() {
+        if n == 0 {
             break;
         }
-        offset = offset.saturating_add(chunk.len() as u64);
-        hasher.update(&chunk);
+        offset = offset.saturating_add(n as u64);
+        hasher.update(&buf[..n]);
     }
     if offset != size {
         return Err(format!(

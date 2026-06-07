@@ -40,7 +40,7 @@ use crate::jobs::{
 };
 use crate::remote::keys::{fingerprint_of, Identity};
 use crate::state::SharedState;
-use crate::vfs::{VfsDriver, VfsError, VfsKind};
+use crate::vfs::{hash_local_file_blake3, VfsDriver, VfsError, VfsKind};
 use crate::ws::protocol::{
     now, FileOpFileSchema, FileOpProgressSchema, JobStartSchema, ServerMessage,
 };
@@ -1597,6 +1597,14 @@ fn unix_millis_now() -> u64 {
         .unwrap_or(0)
 }
 
+/// Whether to emit per-file `[remote-manifest]` traces to stderr. Cached: these
+/// fire for every file (and used to fire per chunk), so gate them behind the
+/// existing spy flag to keep large-tree hashing off the stderr-write hot path.
+fn manifest_debug() -> bool {
+    static DEBUG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *DEBUG.get_or_init(|| std::env::var("FBRO_SPY").is_ok())
+}
+
 fn build_manifest_on_remote(
     state: &SharedState,
     control_job_id: &str,
@@ -1654,10 +1662,12 @@ fn walk_manifest_on_remote(
         if child.is_dir {
             walk_manifest_on_remote(state, control_job_id, driver, &child_abs, &child_rel, job)?;
         } else {
-            eprintln!(
-                "[remote-manifest] file start control_job={control_job_id} path={child_rel} size={}",
-                child.size
-            );
+            if manifest_debug() {
+                eprintln!(
+                    "[remote-manifest] file start control_job={control_job_id} path={child_rel} size={}",
+                    child.size
+                );
+            }
             update_manifest_progress(
                 state,
                 job,
@@ -1710,6 +1720,29 @@ fn hash_file_on_remote(
     job: &Arc<Mutex<ManifestJobState>>,
 ) -> Result<(u64, String), String> {
     let size = driver.file_size(path).unwrap_or(size_hint);
+
+    // Fast path: a real local file on the remote host is hashed with a memory
+    // map and multi-core BLAKE3 — the main speedup for large transferred files.
+    if let Some(local) = driver.local_path(path) {
+        let progress = |hashed: u64| {
+            update_manifest_progress(state, job, Some(rel_path.to_string()), None, size, hashed, false);
+        };
+        match hash_local_file_blake3(&local, &|| manifest_cancelled(job), progress) {
+            Ok(hash) => {
+                if manifest_debug() {
+                    eprintln!(
+                        "[remote-manifest] file complete control_job={control_job_id} path={rel_path}"
+                    );
+                }
+                return Ok((size, hash));
+            }
+            Err(error) if error.to_string().contains("Cancelled") => {
+                return Err("Cancelled".to_string());
+            }
+            Err(error) => return Err(format!("Cannot digest {path}: {error}")),
+        }
+    }
+
     match hash_file_on_remote_streaming(state, control_job_id, driver, path, rel_path, size, job) {
         Err(message) if message.starts_with("streaming unsupported:") => {}
         result => return result,
@@ -1719,20 +1752,13 @@ fn hash_file_on_remote(
     let mut offset = 0u64;
     while offset < size {
         if manifest_cancelled(job) {
-            eprintln!(
-                "[remote-manifest] file cancelled control_job={control_job_id} path={rel_path}"
-            );
+            if manifest_debug() {
+                eprintln!(
+                    "[remote-manifest] file cancelled control_job={control_job_id} path={rel_path}"
+                );
+            }
             return Err("Cancelled".to_string());
         }
-        update_manifest_progress(
-            state,
-            job,
-            Some(rel_path.to_string()),
-            None,
-            size,
-            offset,
-            false,
-        );
         let remaining = size
             .saturating_sub(offset)
             .min(MANIFEST_HASH_CHUNK_SIZE as u64) as usize;
@@ -1755,12 +1781,16 @@ fn hash_file_on_remote(
         );
     }
     if offset != size {
-        eprintln!(
-            "[remote-manifest] file short-read control_job={control_job_id} path={rel_path} offset={offset} size={size}"
-        );
+        if manifest_debug() {
+            eprintln!(
+                "[remote-manifest] file short-read control_job={control_job_id} path={rel_path} offset={offset} size={size}"
+            );
+        }
         return Err(format!("digest read ended at {offset} of {size} bytes"));
     }
-    eprintln!("[remote-manifest] file complete control_job={control_job_id} path={rel_path}");
+    if manifest_debug() {
+        eprintln!("[remote-manifest] file complete control_job={control_job_id} path={rel_path}");
+    }
     Ok((size, hasher.finalize().to_hex().to_string()))
 }
 
@@ -1786,20 +1816,13 @@ fn hash_file_on_remote_streaming(
     let mut buf = vec![0u8; MANIFEST_STREAM_BUF_SIZE];
     loop {
         if manifest_cancelled(job) {
-            eprintln!(
-                "[remote-manifest] file cancelled control_job={control_job_id} path={rel_path}"
-            );
+            if manifest_debug() {
+                eprintln!(
+                    "[remote-manifest] file cancelled control_job={control_job_id} path={rel_path}"
+                );
+            }
             return Err("Cancelled".to_string());
         }
-        update_manifest_progress(
-            state,
-            job,
-            Some(rel_path.to_string()),
-            None,
-            size,
-            offset,
-            false,
-        );
         let n = reader
             .read(&mut buf)
             .map_err(|error| format!("Cannot read {path}: {error}"))?;
@@ -1819,12 +1842,16 @@ fn hash_file_on_remote_streaming(
         );
     }
     if offset != size {
-        eprintln!(
-            "[remote-manifest] file short-read control_job={control_job_id} path={rel_path} offset={offset} size={size}"
-        );
+        if manifest_debug() {
+            eprintln!(
+                "[remote-manifest] file short-read control_job={control_job_id} path={rel_path} offset={offset} size={size}"
+            );
+        }
         return Err(format!("digest read ended at {offset} of {size} bytes"));
     }
-    eprintln!("[remote-manifest] file complete control_job={control_job_id} path={rel_path}");
+    if manifest_debug() {
+        eprintln!("[remote-manifest] file complete control_job={control_job_id} path={rel_path}");
+    }
     Ok((size, hasher.finalize().to_hex().to_string()))
 }
 
@@ -1847,7 +1874,11 @@ fn update_manifest_progress(
     current_file_bytes_hashed: u64,
     force_emit: bool,
 ) {
-    let (visible_job_id, progress, should_emit) = {
+    // The lock fields (updated_at, byte counters) are refreshed on every call so
+    // the status endpoint and stale-timeout see live data, but the status-string
+    // allocation and progress struct are only built when we actually emit (this
+    // runs per chunk on large files).
+    let (visible_job_id, progress) = {
         let mut guard = job.blocking_lock();
         if let Some(processed) = processed {
             guard.processed = processed;
@@ -1862,9 +1893,10 @@ fn update_manifest_progress(
                 .last_emit
                 .map(|last| now.duration_since(last) >= OUTGOING_PROGRESS_INTERVAL)
                 .unwrap_or(true);
-        if should_emit {
-            guard.last_emit = Some(now);
+        if !should_emit {
+            return;
         }
+        guard.last_emit = Some(now);
         let status_text = guard
             .current_path
             .as_ref()
@@ -1885,12 +1917,9 @@ fn update_manifest_progress(
                 ),
                 ..Default::default()
             },
-            should_emit,
         )
     };
-    if should_emit {
-        emit_remote_manifest_progress_sync(state, &visible_job_id, progress);
-    }
+    emit_remote_manifest_progress_sync(state, &visible_job_id, progress);
 }
 
 fn push_manifest_entry(

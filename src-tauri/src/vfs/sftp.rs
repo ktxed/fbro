@@ -92,7 +92,7 @@ const SFTP_CLIENT_MAX_PACKET_LEN: u32 = 1024 * 1024;
 const SFTP_READ_CHUNK_SIZE: usize = 256 * 1024;
 const SFTP_READ_AHEAD_CHUNKS: usize = 16;
 const FBRO_INTEGRITY_ALGORITHM: &str = "blake3";
-const REMOTE_MANIFEST_POLL_INTERVAL: Duration = Duration::from_secs(5);
+const REMOTE_MANIFEST_POLL_INTERVAL: Duration = Duration::from_millis(500);
 const REMOTE_MANIFEST_STALE_TIMEOUT: Duration = Duration::from_secs(60);
 
 thread_local! {

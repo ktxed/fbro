@@ -69,6 +69,10 @@ impl VfsDriver for LocalFsDriver {
         self
     }
 
+    fn local_path(&self, path: &str) -> Option<std::path::PathBuf> {
+        Some(std::path::PathBuf::from(path))
+    }
+
     // ── Listing & navigation ────────────────────────────────────────────────
 
     fn list(

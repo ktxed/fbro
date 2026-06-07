@@ -37,7 +37,8 @@ mdns-sd = "0.11"
 russh = "0.54"
 russh-sftp = "2.1"
 bytes = "1"
-blake3 = "1"
+blake3 = { version = "1", features = ["rayon", "mmap"] }
+memmap2 = "0.9"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 png = "0.17"
