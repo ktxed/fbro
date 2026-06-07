@@ -19,6 +19,7 @@
 //! open callbacks.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::io::Read;
 use std::net::SocketAddr;
 use std::sync::{atomic::AtomicBool, Arc};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -143,6 +144,7 @@ fn emit_session(state: &SharedState, fingerprint: String, started: bool) {
 
 const OUTGOING_PROGRESS_INTERVAL: Duration = Duration::from_millis(120);
 const OUTGOING_COMPLETE_IDLE: Duration = Duration::from_millis(1_500);
+const MANIFEST_STREAM_BUF_SIZE: usize = 8 * 1024 * 1024;
 
 fn progress_schema(progress: &FileOpProgress) -> FileOpProgressSchema {
     FileOpProgressSchema {
@@ -1708,6 +1710,11 @@ fn hash_file_on_remote(
     job: &Arc<Mutex<ManifestJobState>>,
 ) -> Result<(u64, String), String> {
     let size = driver.file_size(path).unwrap_or(size_hint);
+    match hash_file_on_remote_streaming(state, control_job_id, driver, path, rel_path, size, job) {
+        Err(message) if message.starts_with("streaming unsupported:") => {}
+        result => return result,
+    }
+
     let mut hasher = blake3::Hasher::new();
     let mut offset = 0u64;
     while offset < size {
@@ -1737,6 +1744,70 @@ fn hash_file_on_remote(
         }
         offset = offset.saturating_add(chunk.len() as u64);
         hasher.update(&chunk);
+        update_manifest_progress(
+            state,
+            job,
+            Some(rel_path.to_string()),
+            None,
+            size,
+            offset,
+            false,
+        );
+    }
+    if offset != size {
+        eprintln!(
+            "[remote-manifest] file short-read control_job={control_job_id} path={rel_path} offset={offset} size={size}"
+        );
+        return Err(format!("digest read ended at {offset} of {size} bytes"));
+    }
+    eprintln!("[remote-manifest] file complete control_job={control_job_id} path={rel_path}");
+    Ok((size, hasher.finalize().to_hex().to_string()))
+}
+
+fn hash_file_on_remote_streaming(
+    state: &SharedState,
+    control_job_id: &str,
+    driver: &dyn VfsDriver,
+    path: &str,
+    rel_path: &str,
+    size: u64,
+    job: &Arc<Mutex<ManifestJobState>>,
+) -> Result<(u64, String), String> {
+    let mut reader = match driver.open_read(path) {
+        Ok(reader) => reader,
+        Err(VfsError::NotSupported(message)) => {
+            return Err(format!("streaming unsupported: {message}"));
+        }
+        Err(error) => return Err(format!("Cannot open {path}: {error}")),
+    };
+
+    let mut hasher = blake3::Hasher::new();
+    let mut offset = 0u64;
+    let mut buf = vec![0u8; MANIFEST_STREAM_BUF_SIZE];
+    loop {
+        if manifest_cancelled(job) {
+            eprintln!(
+                "[remote-manifest] file cancelled control_job={control_job_id} path={rel_path}"
+            );
+            return Err("Cancelled".to_string());
+        }
+        update_manifest_progress(
+            state,
+            job,
+            Some(rel_path.to_string()),
+            None,
+            size,
+            offset,
+            false,
+        );
+        let n = reader
+            .read(&mut buf)
+            .map_err(|error| format!("Cannot read {path}: {error}"))?;
+        if n == 0 {
+            break;
+        }
+        offset = offset.saturating_add(n as u64);
+        hasher.update(&buf[..n]);
         update_manifest_progress(
             state,
             job,

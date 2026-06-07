@@ -1,5 +1,5 @@
 use super::*;
-use std::io::{Read, Write};
+use std::io::{Cursor, Read, Write};
 use std::sync::{Arc, Mutex as StdMutex};
 
 use crate::platform::{Platform, VolumeInfo};
@@ -90,6 +90,102 @@ impl VfsDriver for RecordingDriver {
     }
 }
 
+struct ManifestHashDriver {
+    data: Vec<u8>,
+    streaming_supported: bool,
+    open_reads: StdMutex<usize>,
+    read_chunks: StdMutex<usize>,
+}
+
+impl ManifestHashDriver {
+    fn new(data: &[u8], streaming_supported: bool) -> Self {
+        Self {
+            data: data.to_vec(),
+            streaming_supported,
+            open_reads: StdMutex::new(0),
+            read_chunks: StdMutex::new(0),
+        }
+    }
+}
+
+impl VfsDriver for ManifestHashDriver {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn list(
+        &self,
+        _path: &str,
+        _sort: &SortSpec,
+        _filter: Option<&FilterSpec>,
+        _show_hidden: bool,
+    ) -> Result<Vec<VfsEntry>, VfsError> {
+        Ok(vec![])
+    }
+
+    fn resolve_child(&self, base: &str, name: &str) -> String {
+        compose_driver_path(base, name)
+    }
+
+    fn parent_path(&self, path: &str) -> Option<String> {
+        path.rsplit_once('/').map(|(parent, _)| parent.to_string())
+    }
+
+    fn open_read(&self, _path: &str) -> Result<Box<dyn Read + Send>, VfsError> {
+        *self.open_reads.lock().unwrap() += 1;
+        if !self.streaming_supported {
+            return Err(VfsError::NotSupported("streaming disabled".to_string()));
+        }
+        Ok(Box::new(Cursor::new(self.data.clone())))
+    }
+
+    fn open_write(&self, _path: &str) -> Result<Box<dyn Write + Send>, VfsError> {
+        Err(VfsError::NotSupported(
+            "open_write unused in test".to_string(),
+        ))
+    }
+
+    fn create_dir_all(&self, _path: &str) -> Result<(), VfsError> {
+        Err(VfsError::NotSupported(
+            "create_dir_all unused in test".to_string(),
+        ))
+    }
+
+    fn remove_file(&self, _path: &str) -> Result<(), VfsError> {
+        Err(VfsError::NotSupported(
+            "remove_file unused in test".to_string(),
+        ))
+    }
+
+    fn remove_dir_all(&self, _path: &str) -> Result<(), VfsError> {
+        Err(VfsError::NotSupported(
+            "remove_dir_all unused in test".to_string(),
+        ))
+    }
+
+    fn exists(&self, _path: &str) -> bool {
+        true
+    }
+
+    fn file_size(&self, _path: &str) -> Option<u64> {
+        Some(self.data.len() as u64)
+    }
+
+    fn read_dir_entries(&self, _path: &str) -> Result<Vec<DirChild>, VfsError> {
+        Ok(vec![])
+    }
+
+    fn read_chunk(&self, _path: &str, offset: u64, size: usize) -> Result<Vec<u8>, VfsError> {
+        *self.read_chunks.lock().unwrap() += 1;
+        let start = offset as usize;
+        if start >= self.data.len() {
+            return Ok(vec![]);
+        }
+        let end = start.saturating_add(size).min(self.data.len());
+        Ok(self.data[start..end].to_vec())
+    }
+}
+
 struct TestPlatform;
 
 impl Platform for TestPlatform {
@@ -143,6 +239,26 @@ fn test_state_with_shared_home_and_volume(driver: Arc<RecordingDriver>) -> Share
         },
     ];
     Arc::new(tokio::sync::Mutex::new(state))
+}
+
+fn empty_test_state() -> SharedState {
+    let platform: Arc<dyn Platform> = Arc::new(TestPlatform);
+    Arc::new(tokio::sync::Mutex::new(AppState::new_default(
+        platform.clone(),
+        std::collections::HashMap::new(),
+        0,
+        crate::thumb_pool::ThumbPool::start(platform, 1),
+        Arc::new(crate::fileserver::ThumbCache::new(1)),
+    )))
+}
+
+fn test_manifest_job() -> Arc<Mutex<ManifestJobState>> {
+    Arc::new(Mutex::new(ManifestJobState {
+        updated_at: unix_millis_now(),
+        visible_job_id: "job-test".to_string(),
+        last_emit: Some(Instant::now() - OUTGOING_PROGRESS_INTERVAL),
+        ..Default::default()
+    }))
 }
 
 #[test]
@@ -232,6 +348,77 @@ fn compose_paths() {
     assert_eq!(compose_driver_path("/home/u/", "a"), "/home/u/a");
     assert_eq!(compose_driver_path("", "a/b"), "a/b");
     assert_eq!(compose_driver_path("", ""), "");
+}
+
+#[test]
+fn remote_manifest_hash_streams_when_open_read_is_available() {
+    let data = b"remote manifest payload";
+    let driver = ManifestHashDriver::new(data, true);
+    let state = empty_test_state();
+    let job = test_manifest_job();
+
+    let (size, hash) = hash_file_on_remote(
+        &state,
+        "manifest-test",
+        &driver,
+        "/src/file.bin",
+        "file.bin",
+        data.len() as u64,
+        &job,
+    )
+    .expect("streaming hash");
+
+    assert_eq!(size, data.len() as u64);
+    assert_eq!(hash, blake3::hash(data).to_hex().to_string());
+    assert_eq!(*driver.open_reads.lock().unwrap(), 1);
+    assert_eq!(*driver.read_chunks.lock().unwrap(), 0);
+}
+
+#[test]
+fn remote_manifest_hash_falls_back_to_read_chunk_when_streaming_unsupported() {
+    let data = b"remote manifest payload";
+    let driver = ManifestHashDriver::new(data, false);
+    let state = empty_test_state();
+    let job = test_manifest_job();
+
+    let (size, hash) = hash_file_on_remote(
+        &state,
+        "manifest-test",
+        &driver,
+        "/src/file.bin",
+        "file.bin",
+        data.len() as u64,
+        &job,
+    )
+    .expect("fallback hash");
+
+    assert_eq!(size, data.len() as u64);
+    assert_eq!(hash, blake3::hash(data).to_hex().to_string());
+    assert_eq!(*driver.open_reads.lock().unwrap(), 1);
+    assert!(*driver.read_chunks.lock().unwrap() > 0);
+}
+
+#[test]
+fn remote_manifest_streaming_hash_observes_cancellation() {
+    let data = b"remote manifest payload";
+    let driver = ManifestHashDriver::new(data, true);
+    let state = empty_test_state();
+    let job = test_manifest_job();
+    job.blocking_lock().cancelled = true;
+
+    let error = hash_file_on_remote(
+        &state,
+        "manifest-test",
+        &driver,
+        "/src/file.bin",
+        "file.bin",
+        data.len() as u64,
+        &job,
+    )
+    .expect_err("cancelled hash should fail");
+
+    assert_eq!(error, "Cancelled");
+    assert_eq!(*driver.read_chunks.lock().unwrap(), 0);
 }
 
 #[tokio::test]
