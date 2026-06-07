@@ -29,22 +29,30 @@ function tinyBmp() {
 
 export async function runRemoteFlow(browserA, observerA, browserB, observerB) {
   const bDst = backendPath("b", "dst");
+  const bSync = backendPath("b", "sync-bro");
   const aHome = "/state/a/home";
   const aHomeDownloads = path.posix.join(aHome, "Downloads");
   const aHomeDownloadsHost = path.join(artifactsDir, "fbro-a/state/home/Downloads");
   const aHomeDeepHost = path.join(artifactsDir, "fbro-a/state/home/Projects/Deep");
+  const aHomeSyncHost = path.join(artifactsDir, "fbro-a/state/home/SyncBro");
+  const bSyncHost = hostPath(bSync);
   observerA.navigatePanelToPath("left", aHome);
   await observerA.waitForPanelPath("left", aHome);
   await observerA.waitForPanelNotShadow("left");
   await reloadBrowserApp(browserA, "fbro-a");
   fs.mkdirSync(aHomeDownloadsHost, { recursive: true });
   fs.mkdirSync(aHomeDeepHost, { recursive: true });
+  fs.mkdirSync(aHomeSyncHost, { recursive: true });
+  fs.mkdirSync(bSyncHost, { recursive: true });
   fs.writeFileSync(path.join(aHomeDownloadsHost, "remote.txt"), "remote payload\n");
   fs.writeFileSync(path.join(aHomeDownloadsHost, "remote-thumb.bmp"), tinyBmp());
   fs.writeFileSync(path.join(aHomeDeepHost, "deep.txt"), "deep remote payload\n");
+  fs.writeFileSync(path.join(aHomeSyncHost, "sync.txt"), "sync payload\n");
+  fs.writeFileSync(path.join(bSyncHost, "sync.txt"), "sync payload\n");
   observerA.sendIntent("Refresh", "left");
   await observerA.waitForEntry("left", "Downloads", "directory");
   await observerA.waitForEntry("left", "Projects", "directory");
+  await observerA.waitForEntry("left", "SyncBro", "directory");
 
   const sharedTarget = observerA.state.shareConfig.shareSuggestions
     ?.find((target) => target.origin === "home" && target.path === aHome);
@@ -155,6 +163,39 @@ export async function runRemoteFlow(browserA, observerA, browserB, observerB) {
   });
   const copied = fs.readFileSync(hostPath(path.posix.join(bDst, "remote.txt")), "utf8");
   if (copied !== "remote payload\n") throw new Error("remote copied file content mismatch");
+
+  observerB.sendIntent("NavigateUp", "left");
+  await observerB.waitForPanelPath("left", "");
+  const syncEntry = await observerB.waitForEntry("left", "SyncBro", "directory", 20_000);
+  observerB.sendIntent("SetCursor", "left", { index: observerB.state.panels.left.entries.indexOf(syncEntry) });
+  observerB.sendIntent("OpenEntry", "left");
+  await observerB.waitForPanelPath("left", "SyncBro");
+  await observerB.waitForEntry("left", "sync.txt", "file", 20_000);
+  observerB.navigatePanelToPath("right", bSync);
+  await observerB.waitForPanelPath("right", bSync);
+  await observerB.waitForEntry("right", "sync.txt", "file", 20_000);
+
+  const broRequestId = `sync-bro-${Date.now()}`;
+  observerB.sendIntent("ListBros", "left", { requestId: broRequestId });
+  const broOptions = await observerB.waitForBroOptions(broRequestId, 20_000);
+  if (!broOptions.bros?.some((bro) => bro.id === "builtin.sync_bro")) {
+    throw new Error("Sync Bro was not offered for local/remote panel pair");
+  }
+  observerB.sendIntent("LaunchBro", undefined, {
+    requestId: broRequestId,
+    broId: "builtin.sync_bro",
+  });
+  const syncJob = await observerB.waitForJob("sync-bro", "Completed", 45_000);
+  if (syncJob.error) throw new Error(`Sync Bro failed: ${syncJob.error}`);
+  const reportPath = path.join(bSyncHost, "fbro-sync-report.txt");
+  await waitFor(() => fs.existsSync(reportPath), {
+    timeout: 10_000,
+    label: "Sync Bro report written",
+  });
+  const report = fs.readFileSync(reportPath, "utf8");
+  if (!report.includes("Matched: 1")) {
+    throw new Error(`Sync Bro report did not include the expected match count:\n${report}`);
+  }
 
   await browserA.getTitle();
   await browserB.getTitle();

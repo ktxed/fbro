@@ -126,7 +126,9 @@ pub async fn run_sync_bro(
     let local_cancel = Arc::clone(&cancel_flag);
     let local_progress_tx = progress_tx.clone();
     let local_start_barrier = Arc::clone(&start_barrier);
+    let local_job_id = job_id.clone();
     let local_worker = tokio::task::spawn_blocking(move || {
+        let _ctx = ManifestDriverContext::new(&*local_driver_for_worker, &local_job_id);
         send_manifest_progress_sync(
             &local_progress_tx,
             ManifestProgressEvent::Started(ManifestSide::Local),
@@ -147,7 +149,9 @@ pub async fn run_sync_bro(
     let remote_cancel = Arc::clone(&cancel_flag);
     let remote_progress_tx = progress_tx.clone();
     let remote_start_barrier = Arc::clone(&start_barrier);
+    let remote_job_id = job_id.clone();
     let remote_worker = tokio::task::spawn_blocking(move || {
+        let _ctx = ManifestDriverContext::new(&*remote_driver_for_worker, &remote_job_id);
         send_manifest_progress_sync(
             &remote_progress_tx,
             ManifestProgressEvent::Started(ManifestSide::Remote),
@@ -293,6 +297,24 @@ pub async fn run_sync_bro(
         Err(error) => {
             let _ = send_terminal(&tx, &job_id, "Failed", Some(error), None, None).await;
         }
+    }
+}
+
+struct ManifestDriverContext<'a> {
+    driver: &'a dyn VfsDriver,
+    job_id: &'a str,
+}
+
+impl<'a> ManifestDriverContext<'a> {
+    fn new(driver: &'a dyn VfsDriver, job_id: &'a str) -> Self {
+        driver.begin_file_op(job_id);
+        Self { driver, job_id }
+    }
+}
+
+impl Drop for ManifestDriverContext<'_> {
+    fn drop(&mut self) {
+        self.driver.end_file_op(self.job_id);
     }
 }
 

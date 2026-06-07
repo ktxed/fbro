@@ -219,6 +219,22 @@ export class FbroObserver {
     }, { timeout, label: `${this.name} jobs idle` });
   }
 
+  waitForBroOptions(requestId, timeout = 15_000) {
+    return waitFor(() => {
+      return this.messages.find((msg) =>
+        msg.type === "BroOptionsReady" && msg.requestId === requestId
+      ) ?? false;
+    }, { timeout, label: `${this.name} bro options ${requestId}` });
+  }
+
+  waitForJob(kind, state, timeout = 30_000) {
+    return waitFor(() => {
+      return Object.values(this.state.jobs).find((job) =>
+        job.kind === kind && (!state || job.state === state)
+      ) ?? false;
+    }, { timeout, label: `${this.name} ${kind} job ${state ?? "any"}` });
+  }
+
   waitForSearchResultsMounted(panelId, timeout = 10_000) {
     let lastSnapshotRequest = 0;
     return waitFor(() => {
