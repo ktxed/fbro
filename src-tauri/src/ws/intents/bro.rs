@@ -14,13 +14,15 @@ use crate::bro::{
     BroSource, LaunchRecipe, ResolvedBro,
 };
 use crate::jobs::fp_bro::run_fp_bro;
-use crate::jobs::integrity_compare::{run_sync_bro, SYNC_REPORT_NAME};
+use crate::jobs::integrity_compare::{
+    format_sync_report_from_schema, run_sync_bro, SYNC_REPORT_NAME,
+};
 use crate::jobs::{AppJob, FileOpProgress, FpBroJobMeta, JobKind, JobState, SyncBroJobMeta};
 use crate::state::ChildProcessEntry;
 use crate::ws::intents::arg_str;
 use crate::ws::protocol::{
     now, BroInputSchema, BroOutputSchema, BroParamSchema, BroPreSchema, BroSchema,
-    FileOpFileSchema, JobStartSchema, ServerMessage,
+    FileOpFileSchema, JobStartSchema, ServerMessage, SyncBroResultSchema,
 };
 use crate::ws::runtime::{resolve_panel_id, IntentContext};
 
@@ -29,8 +31,97 @@ pub(crate) async fn handle(name: &str, scope: &Value, args: &Value, ctx: &mut In
         "ListBros" => list_bros_for_request(scope, args, ctx).await,
         "LaunchBro" => launch_selected_bro(args, ctx).await,
         "KillProcess" => kill_process(args, ctx).await,
+        "SaveSyncReport" => save_sync_report(args, ctx).await,
         _ => {}
     }
+}
+
+async fn save_sync_report(args: &Value, ctx: &mut IntentContext<'_>) {
+    let job_id = arg_str(args, "jobId").unwrap_or("").to_string();
+    let result: SyncBroResultSchema = match args
+        .get("result")
+        .cloned()
+        .and_then(|value| serde_json::from_value(value).ok())
+    {
+        Some(result) => result,
+        None => {
+            send_save_report_error(ctx, &job_id, "missing or invalid sync result".to_string()).await;
+            return;
+        }
+    };
+
+    // Recover the local folder, roots and intended report path from the job meta.
+    let resolved = {
+        let state_guard = ctx.state.lock().await;
+        match state_guard.job_store.jobs.get(&job_id).map(|job| &job.kind) {
+            Some(JobKind::SyncBro(meta)) => state_guard
+                .panels
+                .get(&meta.local_panel)
+                .and_then(|panel| state_guard.drivers.get(&panel.source_id).cloned())
+                .map(|driver| {
+                    (
+                        driver,
+                        meta.local_root.clone(),
+                        meta.remote_root.clone(),
+                        meta.report_path.clone(),
+                    )
+                }),
+            _ => None,
+        }
+    };
+    let (driver, local_root, remote_root, report_path) = match resolved {
+        Some(resolved) => resolved,
+        None => {
+            send_save_report_error(ctx, &job_id, "sync job is no longer available".to_string())
+                .await;
+            return;
+        }
+    };
+
+    let write_path = report_path.clone();
+    let write_result = tokio::task::spawn_blocking(move || {
+        use std::io::Write;
+        let body = format_sync_report_from_schema(&local_root, &remote_root, &result);
+        let mut writer = driver
+            .open_write(&write_path)
+            .map_err(|e| format!("Cannot create report {write_path}: {e}"))?;
+        writer
+            .write_all(body.as_bytes())
+            .map_err(|e| format!("Cannot write report {write_path}: {e}"))?;
+        writer
+            .flush()
+            .map_err(|e| format!("Cannot flush report {write_path}: {e}"))?;
+        Ok::<(), String>(())
+    })
+    .await;
+
+    match write_result {
+        Ok(Ok(())) => {
+            let _ = ctx
+                .tx
+                .send(ServerMessage::SyncReportSaved {
+                    timestamp: now(),
+                    job_id,
+                    path: report_path,
+                })
+                .await;
+        }
+        Ok(Err(error)) => send_save_report_error(ctx, &job_id, error).await,
+        Err(error) => send_save_report_error(ctx, &job_id, error.to_string()).await,
+    }
+}
+
+async fn send_save_report_error(ctx: &IntentContext<'_>, job_id: &str, message: String) {
+    let _ = ctx
+        .tx
+        .send(ServerMessage::Error {
+            timestamp: now(),
+            code: "SAVE_SYNC_REPORT_FAILED".to_string(),
+            message: format!("Could not save sync report: {message}"),
+            recoverable: true,
+            extra: Some(serde_json::json!({ "jobId": job_id })),
+        })
+        .await;
 }
 
 struct ListBrosArgs {
@@ -824,7 +915,9 @@ async fn launch_sync_bro(
                 total_bytes_total: 0,
                 background: false,
                 supports_pause: false,
-                result_path: Some(report_path.clone()),
+                // The report file is written only on demand (SaveSyncReport), so
+                // no result path exists yet; results are shown in the modal.
+                result_path: None,
                 result_panel_id: Some(local_panel.clone()),
                 request_id: None,
                 search_source_id: None,
@@ -841,7 +934,6 @@ async fn launch_sync_bro(
         remote_panel.clone(),
         local_root.clone(),
         remote_root.clone(),
-        report_path.clone(),
         local_driver,
         remote_driver,
         ctx.tx.clone(),

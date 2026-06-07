@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import type { WsClient } from "../ws/client";
-import type { PendingOp, Job, ConflictPolicy, VerificationPolicy, FileOpFile } from "../ws/types";
+import type { PendingOp, Job, ConflictPolicy, VerificationPolicy, FileOpFile, SyncBroResult } from "../ws/types";
 import { useAppDispatch, useAppState } from "../store";
 import type { AppState, PendingDryRun } from "../store";
 import { isArchiveSourceId } from "../utils/sourceId";
@@ -24,6 +24,80 @@ function MnemonicLabel({ text, mnemonic }: { text: string; mnemonic: string }) {
       <span className="modal__mnemonic">{text[idx]}</span>
       {text.slice(idx + 1)}
     </>
+  );
+}
+
+function SyncBroResultsView({ result }: { result: SyncBroResult }) {
+  const errorCount = result.localErrors.length + result.remoteErrors.length;
+  const counts: { label: string; value: number; cc?: string }[] = [
+    { label: "Matched", value: result.matched, cc: "ok" },
+    { label: "Differing", value: result.differing.length, cc: result.differing.length ? "warn" : undefined },
+    { label: "Local-only", value: result.localOnly.length, cc: result.localOnly.length ? "warn" : undefined },
+    { label: "Remote-only", value: result.remoteOnly.length, cc: result.remoteOnly.length ? "warn" : undefined },
+    { label: "Unverified", value: result.unverified.length, cc: result.unverified.length ? "warn" : undefined },
+    { label: "Errors", value: errorCount, cc: errorCount ? "err" : undefined },
+  ];
+  return (
+    <div className="modal__sync-results">
+      <div className="modal__sync-counts">
+        {counts.map((c) => (
+          <div key={c.label} className={`modal__sync-count${c.cc ? ` modal__sync-count--${c.cc}` : ""}`}>
+            <span className="modal__sync-count-value">{c.value}</span>
+            <span className="modal__sync-count-label">{c.label}</span>
+          </div>
+        ))}
+      </div>
+      <div className="modal__sync-lists">
+        {result.differing.length > 0 && (
+          <section className="modal__sync-section">
+            <h4>Differing</h4>
+            {result.differing.map((d) => (
+              <div key={d.path} className="modal__sync-row" title={d.path}>
+                <span className="modal__sync-path">{d.path}</span>
+                <span className="modal__sync-detail">
+                  local {formatBytes(d.localSize)} · remote {formatBytes(d.remoteSize)}
+                </span>
+              </div>
+            ))}
+          </section>
+        )}
+        {result.localOnly.length > 0 && (
+          <section className="modal__sync-section">
+            <h4>Local-only</h4>
+            {result.localOnly.map((p) => (
+              <div key={p} className="modal__sync-row" title={p}><span className="modal__sync-path">{p}</span></div>
+            ))}
+          </section>
+        )}
+        {result.remoteOnly.length > 0 && (
+          <section className="modal__sync-section">
+            <h4>Remote-only</h4>
+            {result.remoteOnly.map((p) => (
+              <div key={p} className="modal__sync-row" title={p}><span className="modal__sync-path">{p}</span></div>
+            ))}
+          </section>
+        )}
+        {result.unverified.length > 0 && (
+          <section className="modal__sync-section">
+            <h4>Unverified</h4>
+            {result.unverified.map((p) => (
+              <div key={p} className="modal__sync-row" title={p}><span className="modal__sync-path">{p}</span></div>
+            ))}
+          </section>
+        )}
+        {(result.localErrors.length > 0 || result.remoteErrors.length > 0) && (
+          <section className="modal__sync-section">
+            <h4>Hash errors</h4>
+            {[...result.localErrors, ...result.remoteErrors].map((e) => (
+              <div key={e.path} className="modal__sync-row" title={`${e.path}: ${e.message}`}>
+                <span className="modal__sync-path">{e.path}</span>
+                <span className="modal__sync-detail modal__sync-detail--err">{e.message}</span>
+              </div>
+            ))}
+          </section>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -495,6 +569,11 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
     const isQueued = activeJob.state === "Queued";
     const isProgress = activeJob.state === "Running";
     const isBroResult = activeJob.kind === "fp-bro" || activeJob.kind === "sync-bro";
+    const isSyncBro = activeJob.kind === "sync-bro";
+    const syncResult = activeJob.syncResult;
+    // For Sync Bro the report file is written only on demand; the result path
+    // exists only once the user has saved it. fp-bro produces a file directly.
+    const effectiveResultPath = isSyncBro ? activeJob.reportSavedPath : activeJob.resultPath;
     const requiresExplicitClose = activeJob.kind === "sync-bro";
     const isOutgoing = activeJob.kind === "outgoing-transfer";
     const activeSourcePanel = state.panels[activeJob.sourcePanel];
@@ -572,8 +651,8 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
     };
 
     const showResult = () => {
-      if (!activeJob.resultPath) return;
-      const { parent, name } = splitParentAndName(activeJob.resultPath);
+      if (!effectiveResultPath) return;
+      const { parent, name } = splitParentAndName(effectiveResultPath);
       const targetPanel = activeJob.resultPanelId ?? panelIds[0];
       if (targetPanel) {
         client.sendIntent("NavigatePanelTo", undefined, {
@@ -583,6 +662,14 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
         });
       }
       close();
+    };
+
+    const saveSyncReport = () => {
+      if (!syncResult) return;
+      client.sendIntent("SaveSyncReport", undefined, {
+        jobId: activeJob.jobId,
+        result: syncResult,
+      });
     };
 
     const handleActiveJobKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -875,17 +962,20 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
                   {activeJob.state === "Cancelled" && (isOutgoing ? "Outgoing transfer was cancelled." : isBroResult ? "Bro job was cancelled." : "Operation was cancelled.")}
                   {activeJob.state === "Failed" && (isOutgoing ? `Outgoing transfer failed: ${activeJob.error ?? "unknown error"}` : isBroResult ? `Bro failed: ${activeJob.error ?? "unknown error"}` : `Operation failed: ${activeJob.error ?? "unknown error"}`)}
                 </p>
-                {isBroResult && activeJob.state === "Completed" && activeJob.resultPath && (
+                {isSyncBro && activeJob.state === "Completed" && syncResult && (
+                  <SyncBroResultsView result={syncResult} />
+                )}
+                {isBroResult && activeJob.state === "Completed" && effectiveResultPath && (
                   <div className="modal__job-params">
-                    <span className="modal__job-param-label">Output:</span>
+                    <span className="modal__job-param-label">{isSyncBro ? "Saved:" : "Output:"}</span>
                     <button
                       className="modal__dry-run-name"
-                      title={activeJob.resultPath}
+                      title={effectiveResultPath}
                       onClick={showResult}
-                    >{splitParentAndName(activeJob.resultPath).name}</button>
+                    >{splitParentAndName(effectiveResultPath).name}</button>
                     <button
                       className="modal__job-param-copy"
-                      onClick={() => navigator.clipboard.writeText(activeJob.resultPath!)}
+                      onClick={() => navigator.clipboard.writeText(effectiveResultPath)}
                       title="Copy path"
                     ><IconCopy size={14} /></button>
                   </div>
@@ -920,13 +1010,18 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
             )}
             {isTerminal && (
               <>
-                {isBroResult && activeJob.state === "Completed" && activeJob.resultPath && (
+                {isSyncBro && activeJob.state === "Completed" && syncResult && !activeJob.reportSavedPath && (
+                  <button className="modal__btn" data-command-id="job.save-report" onClick={saveSyncReport}>
+                    Save report…
+                  </button>
+                )}
+                {isBroResult && activeJob.state === "Completed" && effectiveResultPath && (
                   <button className="modal__btn" data-command-id="job.show-result" onClick={showResult}>
                     Show Result
                   </button>
                 )}
-                {isBroResult && activeJob.resultPath && (
-                  <button className="modal__btn" data-command-id="job.copy-path" onClick={() => navigator.clipboard.writeText(activeJob.resultPath!)}>
+                {isBroResult && effectiveResultPath && (
+                  <button className="modal__btn" data-command-id="job.copy-path" onClick={() => navigator.clipboard.writeText(effectiveResultPath)}>
                     Copy Path
                   </button>
                 )}

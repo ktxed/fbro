@@ -101,6 +101,18 @@ pub enum ServerMessage {
         #[serde(rename = "panelId")]
         panel_id: String,
     },
+    SyncBroResult {
+        timestamp: u64,
+        #[serde(rename = "jobId")]
+        job_id: String,
+        result: SyncBroResultSchema,
+    },
+    SyncReportSaved {
+        timestamp: u64,
+        #[serde(rename = "jobId")]
+        job_id: String,
+        path: String,
+    },
     ExternalClipboardReady {
         timestamp: u64,
         #[serde(rename = "panelId")]
@@ -704,6 +716,35 @@ pub struct FileOpFileSchema {
     pub kind: String,
     #[serde(rename = "sourcePath", skip_serializing_if = "Option::is_none")]
     pub source_path: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncBroDiffSchema {
+    pub path: String,
+    pub local_size: u64,
+    pub remote_size: u64,
+    pub local_hash: String,
+    pub remote_hash: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncBroErrorSchema {
+    pub path: String,
+    pub message: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncBroResultSchema {
+    pub matched: usize,
+    pub differing: Vec<SyncBroDiffSchema>,
+    pub local_only: Vec<String>,
+    pub remote_only: Vec<String>,
+    pub unverified: Vec<String>,
+    pub local_errors: Vec<SyncBroErrorSchema>,
+    pub remote_errors: Vec<SyncBroErrorSchema>,
 }
 
 // ─── Incoming (FE → BE) ───────────────────────────────────────────────────────

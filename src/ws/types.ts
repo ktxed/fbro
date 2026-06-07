@@ -217,6 +217,32 @@ export interface Job {
   searchScanned?: number;
   searchMatched?: number;
   searchCurrentPath?: string;
+  // Sync Bro-specific fields
+  syncResult?: SyncBroResult;
+  reportSavedPath?: string;
+}
+
+export interface SyncBroDiff {
+  path: string;
+  localSize: number;
+  remoteSize: number;
+  localHash: string;
+  remoteHash: string;
+}
+
+export interface SyncBroError {
+  path: string;
+  message: string;
+}
+
+export interface SyncBroResult {
+  matched: number;
+  differing: SyncBroDiff[];
+  localOnly: string[];
+  remoteOnly: string[];
+  unverified: string[];
+  localErrors: SyncBroError[];
+  remoteErrors: SyncBroError[];
 }
 
 export interface DirSizeTask {
@@ -360,6 +386,20 @@ export interface NavigateOkMessage {
   type: "NavigateOk";
   timestamp: number;
   panelId: string;
+}
+
+export interface SyncBroResultMessage {
+  type: "SyncBroResult";
+  timestamp: number;
+  jobId: string;
+  result: SyncBroResult;
+}
+
+export interface SyncReportSavedMessage {
+  type: "SyncReportSaved";
+  timestamp: number;
+  jobId: string;
+  path: string;
 }
 
 export interface ExternalClipboardReadyMessage {
@@ -721,6 +761,8 @@ export type BEMessage =
   | TouchFileOkMessage
   | SetPermissionsOkMessage
   | NavigateOkMessage
+  | SyncBroResultMessage
+  | SyncReportSavedMessage
   | ExternalClipboardReadyMessage
   | ExternalClipboardWrittenMessage
   | ViewerFileChangedMessage

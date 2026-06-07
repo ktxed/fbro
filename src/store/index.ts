@@ -1004,6 +1004,23 @@ function reducer(state: AppState, action: AppAction): AppState {
           return applyJobStarted(state, msg);
         case "JobEvent":
           return applyJobEvent(state, msg);
+        case "SyncBroResult": {
+          const job = state.jobs[msg.jobId];
+          if (!job) return state;
+          return {
+            ...state,
+            jobs: { ...state.jobs, [msg.jobId]: { ...job, syncResult: msg.result } },
+          };
+        }
+        case "SyncReportSaved": {
+          const job = state.jobs[msg.jobId];
+          if (!job) return state;
+          return {
+            ...state,
+            jobs: { ...state.jobs, [msg.jobId]: { ...job, reportSavedPath: msg.path } },
+            transientHint: { message: `Saved sync report to ${msg.path}`, token: msg.timestamp },
+          };
+        }
         case "Error":
           if (msg.code === "RENAME_FAILED" && state.pendingRename) {
             return { ...state, pendingRename: { ...state.pendingRename, error: msg.message } };

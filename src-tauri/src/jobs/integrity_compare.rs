@@ -9,7 +9,10 @@ use tokio::sync::{mpsc, watch};
 use std::io::Read;
 
 use crate::vfs::{hash_local_file_blake3, VfsDriver, VfsManifest, VfsManifestOptions, VfsManifestProgress};
-use crate::ws::protocol::{now, FileOpProgressSchema, ServerMessage};
+use crate::ws::protocol::{
+    now, FileOpProgressSchema, ServerMessage, SyncBroDiffSchema, SyncBroErrorSchema,
+    SyncBroResultSchema,
+};
 
 const STREAM_BUF_SIZE: usize = 8 * 1024 * 1024;
 pub const SYNC_REPORT_NAME: &str = "fbro-sync-report.txt";
@@ -103,7 +106,6 @@ pub async fn run_sync_bro(
     _remote_panel: String,
     local_root: String,
     remote_root: String,
-    report_path: String,
     local_driver: Arc<dyn VfsDriver>,
     remote_driver: Arc<dyn VfsDriver>,
     tx: mpsc::Sender<ServerMessage>,
@@ -284,28 +286,96 @@ pub async fn run_sync_bro(
     )
     .await;
 
-    match write_report(
-        &*local_driver,
-        &report_path,
-        &local_root,
-        &remote_root,
-        &summary,
-    ) {
-        Ok(()) => {
-            let _ = send_terminal(
-                &tx,
-                &job_id,
-                "Completed",
-                None,
-                Some(report_path),
-                Some(local_panel),
-            )
-            .await;
-        }
-        Err(error) => {
-            let _ = send_terminal(&tx, &job_id, "Failed", Some(error), None, None).await;
-        }
+    // Results are shown in the FE modal; the on-disk report is written only on
+    // demand via the SaveSyncReport intent. Send the structured result first so
+    // the modal has it when it flips to the terminal "Completed" state.
+    let _ = tx
+        .send(ServerMessage::SyncBroResult {
+            timestamp: now(),
+            job_id: job_id.clone(),
+            result: summary_to_schema(&summary),
+        })
+        .await;
+    let _ = send_terminal(&tx, &job_id, "Completed", None, None, Some(local_panel)).await;
+}
+
+fn summary_to_schema(summary: &CompareSummary) -> SyncBroResultSchema {
+    SyncBroResultSchema {
+        matched: summary.matched,
+        differing: summary
+            .differing
+            .iter()
+            .map(|d| SyncBroDiffSchema {
+                path: d.rel_path.clone(),
+                local_size: d.local_size,
+                remote_size: d.remote_size,
+                local_hash: d.local_hash.clone(),
+                remote_hash: d.remote_hash.clone(),
+            })
+            .collect(),
+        local_only: summary.local_only.clone(),
+        remote_only: summary.remote_only.clone(),
+        unverified: summary.unverified.clone(),
+        local_errors: summary
+            .local_errors
+            .iter()
+            .map(|e| SyncBroErrorSchema {
+                path: e.path.clone(),
+                message: e.message.clone(),
+            })
+            .collect(),
+        remote_errors: summary
+            .remote_errors
+            .iter()
+            .map(|e| SyncBroErrorSchema {
+                path: e.path.clone(),
+                message: e.message.clone(),
+            })
+            .collect(),
     }
+}
+
+/// Format the human-readable report from a result schema (round-tripped from the
+/// FE on save). Reuses the single `format_report` formatter to avoid drift.
+pub(crate) fn format_sync_report_from_schema(
+    local_root: &str,
+    remote_root: &str,
+    result: &SyncBroResultSchema,
+) -> String {
+    let summary = CompareSummary {
+        matched: result.matched,
+        differing: result
+            .differing
+            .iter()
+            .map(|d| DiffEntry {
+                rel_path: d.path.clone(),
+                local_size: d.local_size,
+                remote_size: d.remote_size,
+                local_hash: d.local_hash.clone(),
+                remote_hash: d.remote_hash.clone(),
+            })
+            .collect(),
+        local_only: result.local_only.clone(),
+        remote_only: result.remote_only.clone(),
+        unverified: result.unverified.clone(),
+        local_errors: result
+            .local_errors
+            .iter()
+            .map(|e| ManifestError {
+                path: e.path.clone(),
+                message: e.message.clone(),
+            })
+            .collect(),
+        remote_errors: result
+            .remote_errors
+            .iter()
+            .map(|e| ManifestError {
+                path: e.path.clone(),
+                message: e.message.clone(),
+            })
+            .collect(),
+    };
+    format_report(local_root, remote_root, &summary)
 }
 
 struct ManifestDriverContext<'a> {
@@ -687,27 +757,6 @@ fn compare_manifests(
     summary
 }
 
-fn write_report(
-    driver: &dyn VfsDriver,
-    path: &str,
-    local_root: &str,
-    remote_root: &str,
-    summary: &CompareSummary,
-) -> Result<(), String> {
-    let body = format_report(local_root, remote_root, summary);
-    let mut writer = driver
-        .open_write(path)
-        .map_err(|e| format!("Cannot create report {path}: {e}"))?;
-    use std::io::Write;
-    writer
-        .write_all(body.as_bytes())
-        .map_err(|e| format!("Cannot write report {path}: {e}"))?;
-    writer
-        .flush()
-        .map_err(|e| format!("Cannot flush report {path}: {e}"))?;
-    Ok(())
-}
-
 fn format_report(local_root: &str, remote_root: &str, summary: &CompareSummary) -> String {
     let mut body = String::new();
     body.push_str("fbro Sync Bro report\n\n");
@@ -1052,6 +1101,32 @@ mod tests {
         assert!(report.contains("Unverified: 1"));
         assert!(report.contains("Unverified files:"));
         assert!(report.contains("- movie.mkv"));
+    }
+
+    #[test]
+    fn schema_roundtrip_formats_identically() {
+        let mut summary = CompareSummary::default();
+        summary.matched = 3;
+        summary.differing.push(DiffEntry {
+            rel_path: "a.bin".to_string(),
+            local_size: 10,
+            remote_size: 12,
+            local_hash: "aaaa".to_string(),
+            remote_hash: "bbbb".to_string(),
+        });
+        summary.local_only.push("only-local.txt".to_string());
+        summary.remote_only.push("only-remote.txt".to_string());
+        summary.unverified.push("movie.mkv".to_string());
+        summary.remote_errors.push(ManifestError {
+            path: "movie.mkv".to_string(),
+            message: "Timeout".to_string(),
+        });
+
+        let direct = format_report("/local", "/remote", &summary);
+        let via_schema =
+            format_sync_report_from_schema("/local", "/remote", &summary_to_schema(&summary));
+
+        assert_eq!(direct, via_schema);
     }
 
     #[test]
