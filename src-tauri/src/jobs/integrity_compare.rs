@@ -1020,6 +1020,27 @@ mod tests {
         assert!(error.contains("does not advertise Sync Bro manifest support"));
     }
 
+    #[test]
+    fn remote_manifest_result_is_used_without_client_side_remote_hashing() {
+        let (tx, _rx) = mpsc::channel(1);
+        let cancel = AtomicBool::new(false);
+        let result = build_manifest(
+            ManifestSide::Remote,
+            "remote",
+            "/remote",
+            &RemoteManifestOnlyDriver,
+            &tx,
+            &cancel,
+        )
+        .expect("remote manifest should be accepted");
+
+        assert_eq!(result.entries.len(), 1);
+        assert_eq!(result.entries[0].path, "remote.txt");
+        assert_eq!(result.entries[0].size, 12);
+        assert_eq!(result.entries[0].hash, "remote-hash");
+        assert!(result.errors.is_empty());
+    }
+
     struct UnsupportedRemoteManifestDriver;
 
     impl VfsDriver for UnsupportedRemoteManifestDriver {
@@ -1079,6 +1100,83 @@ mod tests {
 
         fn read_chunk(&self, _path: &str, _offset: u64, _size: usize) -> Result<Vec<u8>, VfsError> {
             panic!("Sync Bro must not read unsupported remote manifests")
+        }
+    }
+
+    struct RemoteManifestOnlyDriver;
+
+    impl VfsDriver for RemoteManifestOnlyDriver {
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+
+        fn list(
+            &self,
+            _path: &str,
+            _sort: &SortSpec,
+            _filter: Option<&FilterSpec>,
+            _show_hidden: bool,
+        ) -> Result<Vec<crate::vfs::VfsEntry>, VfsError> {
+            panic!("Sync Bro must not list remote entries when remote manifest is available")
+        }
+
+        fn resolve_child(&self, _base: &str, _name: &str) -> String {
+            panic!("Sync Bro must not resolve remote children when remote manifest is available")
+        }
+
+        fn parent_path(&self, _path: &str) -> Option<String> {
+            None
+        }
+
+        fn open_read(&self, _path: &str) -> Result<Box<dyn Read + Send>, VfsError> {
+            panic!("Sync Bro must not open remote files when remote manifest is available")
+        }
+
+        fn open_write(&self, _path: &str) -> Result<Box<dyn Write + Send>, VfsError> {
+            Err(VfsError::NotSupported("test".to_string()))
+        }
+
+        fn create_dir_all(&self, _path: &str) -> Result<(), VfsError> {
+            Err(VfsError::NotSupported("test".to_string()))
+        }
+
+        fn remove_file(&self, _path: &str) -> Result<(), VfsError> {
+            Err(VfsError::NotSupported("test".to_string()))
+        }
+
+        fn remove_dir_all(&self, _path: &str) -> Result<(), VfsError> {
+            Err(VfsError::NotSupported("test".to_string()))
+        }
+
+        fn exists(&self, _path: &str) -> bool {
+            false
+        }
+
+        fn file_size(&self, _path: &str) -> Option<u64> {
+            panic!("Sync Bro must not stat remote files when remote manifest is available")
+        }
+
+        fn read_dir_entries(&self, _path: &str) -> Result<Vec<DirChild>, VfsError> {
+            panic!("Sync Bro must not walk remote directories when remote manifest is available")
+        }
+
+        fn read_chunk(&self, _path: &str, _offset: u64, _size: usize) -> Result<Vec<u8>, VfsError> {
+            panic!("Sync Bro must not read remote chunks when remote manifest is available")
+        }
+
+        fn remote_manifest(
+            &self,
+            _path: &str,
+            _options: &VfsManifestOptions<'_>,
+        ) -> Result<Option<VfsManifest>, VfsError> {
+            Ok(Some(VfsManifest {
+                entries: vec![crate::vfs::VfsManifestEntry {
+                    path: "remote.txt".to_string(),
+                    size: 12,
+                    hash: "remote-hash".to_string(),
+                }],
+                errors: Vec::new(),
+            }))
         }
     }
 
