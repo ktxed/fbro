@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { resolveWsUrl, WsClient } from "../ws/client";
 import type { BEMessage, FileChunkMessage, ViewerFileChangedMessage, StateSnapshotMessage, StatePatchMessage } from "../ws/types";
 import { applyZoom, nextZoomSize, DEFAULT_FONT_SIZE } from "../utils/zoom";
@@ -685,10 +686,24 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
         return;
       }
 
-      // Escape: close find bar first, otherwise close viewer
+      // Escape: close find bar first, otherwise close viewer.
+      // On macOS, calling window.close() while the window is in native
+      // fullscreen (green-button) crashes the app — the OS animates a
+      // fullscreen-exit on a window being torn down. So when fullscreen,
+      // Escape leaves fullscreen first (matching native behavior) and only
+      // closes the viewer when windowed.
       if (e.key === "Escape") {
         if (findOpenRef.current) { setFindOpen(false); return; }
-        clientRef.current?.sendIntent("CloseViewerWindow", undefined, { label: windowLabel });
+        const closeViewer = () =>
+          clientRef.current?.sendIntent("CloseViewerWindow", undefined, { label: windowLabel });
+        try {
+          const appWindow = getCurrentWindow();
+          appWindow.isFullscreen()
+            .then((fs) => { if (fs) appWindow.setFullscreen(false); else closeViewer(); })
+            .catch(closeViewer);
+        } catch {
+          closeViewer();
+        }
         return;
       }
 
