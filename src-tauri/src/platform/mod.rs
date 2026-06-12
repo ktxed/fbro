@@ -44,6 +44,14 @@ pub enum OpenWithLaunch {
     MacApplication {
         application_path: String,
     },
+    /// Windows-only: re-enumerate `SHAssocEnumHandlers(ext)` at launch time,
+    /// find the handler whose registered name matches `exe_path`, and call
+    /// `IAssocHandler::Invoke` with an `IDataObject` built from the file path.
+    /// This honors the registered command template (e.g. VLC's `--started-from-file %1`).
+    WindowsHandlerInvoke {
+        ext: String,
+        exe_path: String,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -152,6 +160,19 @@ pub trait Platform: Send + Sync {
             }
             OpenWithLaunch::LinuxApp { .. } => {
                 Err("Open With is not supported for this app on this platform".to_string())
+            }
+            OpenWithLaunch::WindowsHandlerInvoke {
+                ext: _ext,
+                exe_path: _exe_path,
+            } => {
+                #[cfg(target_os = "windows")]
+                {
+                    windows::invoke_handler(_ext, _exe_path, path)
+                }
+                #[cfg(not(target_os = "windows"))]
+                {
+                    Err("Windows handler invocation is only supported on Windows".to_string())
+                }
             }
         }
     }

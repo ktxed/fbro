@@ -829,9 +829,9 @@ fn windows_enumerate_handlers(ext: &str) -> Vec<ResolvedOpenWithApp> {
                         is_default: false,
                         source: "system".to_string(),
                     },
-                    launch: OpenWithLaunch::Command {
-                        program: exe,
-                        args: vec![],
+                    launch: OpenWithLaunch::WindowsHandlerInvoke {
+                        ext: ext.to_string(),
+                        exe_path: exe,
                     },
                 });
             }
@@ -1009,4 +1009,176 @@ unsafe fn hbitmap_to_png(hbitmap: *mut c_void) -> Option<Vec<u8>> {
         writer.write_image_data(&pixels).ok()?;
     }
     Some(png_bytes)
+}
+
+// ── IAssocHandler::Invoke launch path ────────────────────────────────────────
+//
+// Spawning the registered exe directly (`Command::new(exe).arg(path)`) drops
+// the verb-specific command template stored in the registry. For apps like
+// VLC that template is `"vlc.exe" --started-from-file "%1"`, so plain
+// `vlc.exe <path>` launches the player without opening the file.
+//
+// `IAssocHandler::Invoke(IDataObject*)` is the shell's official entry point;
+// it honors the registered template and works for UWP handlers too.
+
+// IID_IShellItem: 43826d1e-e718-42ee-bc55-a1e261c37bfe
+const IID_ISHELL_ITEM: GUID = GUID {
+    data1: 0x43826d1e,
+    data2: 0xe718,
+    data3: 0x42ee,
+    data4: [0xbc, 0x55, 0xa1, 0xe2, 0x61, 0xc3, 0x7b, 0xfe],
+};
+
+// IID_IDataObject: 0000010e-0000-0000-c000-000000000046
+const IID_IDATA_OBJECT: GUID = GUID {
+    data1: 0x0000010e,
+    data2: 0x0000,
+    data3: 0x0000,
+    data4: [0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46],
+};
+
+// BHID_DataObject: b8c0bd9f-ed24-455c-83e6-d5390c4fe8c4
+const BHID_DATA_OBJECT: GUID = GUID {
+    data1: 0xb8c0bd9f,
+    data2: 0xed24,
+    data3: 0x455c,
+    data4: [0x83, 0xe6, 0xd5, 0x39, 0x0c, 0x4f, 0xe8, 0xc4],
+};
+
+#[repr(C)]
+struct IShellItemVtbl {
+    query_interface: unsafe extern "system" fn(*mut c_void, *const GUID, *mut *mut c_void) -> i32,
+    add_ref: unsafe extern "system" fn(*mut c_void) -> u32,
+    release: unsafe extern "system" fn(*mut c_void) -> u32,
+    bind_to_handler: unsafe extern "system" fn(
+        *mut c_void,
+        *mut c_void,
+        *const GUID,
+        *const GUID,
+        *mut *mut c_void,
+    ) -> i32,
+    // Remaining IShellItem methods (GetParent, GetDisplayName, GetAttributes, Compare) unused.
+}
+
+#[repr(C)]
+struct IShellItem {
+    vtbl: *const IShellItemVtbl,
+}
+
+#[repr(C)]
+struct IUnknownVtbl {
+    query_interface: unsafe extern "system" fn(*mut c_void, *const GUID, *mut *mut c_void) -> i32,
+    add_ref: unsafe extern "system" fn(*mut c_void) -> u32,
+    release: unsafe extern "system" fn(*mut c_void) -> u32,
+}
+
+#[repr(C)]
+struct IUnknown {
+    vtbl: *const IUnknownVtbl,
+}
+
+/// Release any COM object via its IUnknown vtable slot (Release at offset 2).
+unsafe fn com_release(p: *mut c_void) {
+    if p.is_null() {
+        return;
+    }
+    let unk = p as *mut IUnknown;
+    let vtbl = (*unk).vtbl;
+    ((*vtbl).release)(p);
+}
+
+pub fn invoke_handler(ext: &str, exe_path: &str, file_path: &str) -> Result<(), String> {
+    let wext = to_wide(ext);
+    let win_file_path = file_path.replace('/', "\\");
+    let wfile = to_wide(&win_file_path);
+    let exe_lower = exe_path.to_ascii_lowercase();
+
+    unsafe {
+        let hr = CoInitializeEx(
+            ptr::null_mut(),
+            COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE,
+        );
+        if hr < 0 {
+            return Err(format!("CoInitializeEx failed: 0x{:08x}", hr));
+        }
+
+        // Locate the handler whose GetName() matches exe_path.
+        let mut enumerator: *mut c_void = ptr::null_mut();
+        let hr = SHAssocEnumHandlers(wext.as_ptr(), ASSOC_FILTER_RECOMMENDED, &mut enumerator);
+        if hr < 0 || enumerator.is_null() {
+            return Err(format!("SHAssocEnumHandlers failed: 0x{:08x}", hr));
+        }
+        let enum_vtbl = (*(enumerator as *mut IEnumAssocHandlers)).vtbl;
+
+        let mut chosen: *mut c_void = ptr::null_mut();
+        loop {
+            let mut handler: *mut c_void = ptr::null_mut();
+            let mut fetched: u32 = 0;
+            let hr = ((*enum_vtbl).next)(enumerator, 1, &mut handler, &mut fetched);
+            if hr != 0 || fetched == 0 || handler.is_null() {
+                break;
+            }
+            let handler_vtbl = (*(handler as *mut IAssocHandler)).vtbl;
+            let mut name_ptr: *mut u16 = ptr::null_mut();
+            let matched = if ((*handler_vtbl).get_name)(handler, &mut name_ptr) >= 0 {
+                cotask_string(name_ptr)
+                    .map(|n| n.to_ascii_lowercase() == exe_lower)
+                    .unwrap_or(false)
+            } else {
+                false
+            };
+            if matched {
+                chosen = handler;
+                break;
+            }
+            ((*handler_vtbl).release)(handler);
+        }
+        com_release(enumerator);
+
+        if chosen.is_null() {
+            return Err(format!(
+                "No registered handler matched '{}' for extension '{}'",
+                exe_path, ext
+            ));
+        }
+
+        // Build an IDataObject for the file via IShellItem::BindToHandler(BHID_DataObject).
+        let mut shell_item: *mut c_void = ptr::null_mut();
+        let hr = SHCreateItemFromParsingName(
+            wfile.as_ptr(),
+            ptr::null_mut(),
+            &IID_ISHELL_ITEM,
+            &mut shell_item,
+        );
+        if hr < 0 || shell_item.is_null() {
+            com_release(chosen);
+            return Err(format!("SHCreateItemFromParsingName failed: 0x{:08x}", hr));
+        }
+        let item_vtbl = (*(shell_item as *mut IShellItem)).vtbl;
+
+        let mut data_obj: *mut c_void = ptr::null_mut();
+        let hr = ((*item_vtbl).bind_to_handler)(
+            shell_item,
+            ptr::null_mut(),
+            &BHID_DATA_OBJECT,
+            &IID_IDATA_OBJECT,
+            &mut data_obj,
+        );
+        com_release(shell_item);
+        if hr < 0 || data_obj.is_null() {
+            com_release(chosen);
+            return Err(format!("BindToHandler(BHID_DataObject) failed: 0x{:08x}", hr));
+        }
+
+        let handler_vtbl = (*(chosen as *mut IAssocHandler)).vtbl;
+        let hr = ((*handler_vtbl).invoke)(chosen, data_obj);
+        com_release(data_obj);
+        com_release(chosen);
+
+        if hr < 0 {
+            Err(format!("IAssocHandler::Invoke failed: 0x{:08x}", hr))
+        } else {
+            Ok(())
+        }
+    }
 }
