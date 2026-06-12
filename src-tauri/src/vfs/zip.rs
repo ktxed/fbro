@@ -155,6 +155,32 @@ impl DirTree {
         }
         total
     }
+
+    /// All file (non-directory) descendants of `dir_path`, returned as
+    /// `(inner_path, size)` pairs. Used to expand a directory selection into
+    /// the concrete entry list for batch extraction.
+    fn flatten_files(&self, dir_path: &str) -> Vec<(String, u64)> {
+        let mut out = Vec::new();
+        let mut stack = vec![dir_path.to_string()];
+        while let Some(current) = stack.pop() {
+            let Some(entries) = self.children.get(&current) else {
+                continue;
+            };
+            for entry in entries {
+                let child_path = if current.is_empty() {
+                    entry.name.clone()
+                } else {
+                    format!("{}/{}", current, entry.name)
+                };
+                if entry.is_dir {
+                    stack.push(child_path);
+                } else {
+                    out.push((child_path, entry.size));
+                }
+            }
+        }
+        out
+    }
 }
 
 /// Ensure all ancestor paths are registered as directories in the tree.
@@ -346,6 +372,114 @@ impl ZipFsDriver {
         self.tree.recursive_size(path)
     }
 
+    /// Look up the uncompressed size of a single file entry. Returns `None`
+    /// for directories or missing paths.
+    pub fn entry_size(&self, inner_path: &str) -> Option<u64> {
+        self.tree.find_entry(inner_path).and_then(|meta| {
+            if meta.is_dir {
+                None
+            } else {
+                Some(meta.size)
+            }
+        })
+    }
+
+    /// Expand a directory entry into a flat `(inner_path, size)` list of every
+    /// file beneath it.
+    pub fn flatten_files(&self, dir_path: &str) -> Vec<(String, u64)> {
+        self.tree.flatten_files(dir_path)
+    }
+
+    /// Stream-extract many entries in a single pass over the zip archive.
+    ///
+    /// Opens the archive once and walks entries by index, writing those whose
+    /// name appears in `targets` directly to disk. Avoids the per-file
+    /// `open_archive + by_name + read_to_end(Vec)` cycle that `extract_to_temp`
+    /// performs, and avoids loading entries fully into memory.
+    pub fn extract_many(
+        &self,
+        targets: &[(String, std::path::PathBuf)],
+        reporter: &crate::jobs::progress::ProgressReporter,
+    ) -> Result<(), VfsError> {
+        use std::io::copy;
+
+        let mut want: HashMap<String, std::path::PathBuf> = HashMap::with_capacity(targets.len());
+        for (inner, dest) in targets {
+            want.insert(inner.replace('\\', "/").trim_end_matches('/').to_string(), dest.clone());
+        }
+
+        let mut archive = self.open_archive()?;
+        let password = self.get_password();
+
+        for i in 0..archive.len() {
+            if reporter.is_cancelled() {
+                return Err(VfsError::IOError("Cancelled".to_string()));
+            }
+
+            // First peek at the entry name via the raw view (no decompression).
+            let entry_name = {
+                let raw = match archive.by_index_raw(i) {
+                    Ok(r) => r,
+                    Err(_) => continue,
+                };
+                if raw.is_dir() {
+                    continue;
+                }
+                raw.name().replace('\\', "/").trim_end_matches('/').to_string()
+            };
+
+            let Some(dest_path) = want.get(&entry_name) else {
+                continue;
+            };
+
+            // Open the entry for reading (decrypting if needed).
+            let mut entry = if let Some(ref pwd) = password {
+                archive
+                    .by_index_decrypt(i, pwd.as_bytes())
+                    .map_err(|e| map_zip_open_err(e, &entry_name))?
+            } else {
+                archive
+                    .by_index(i)
+                    .map_err(|e| map_zip_open_err(e, &entry_name))?
+            };
+
+            if let Some(parent) = dest_path.parent() {
+                if !parent.as_os_str().is_empty() {
+                    std::fs::create_dir_all(parent).map_err(|e| {
+                        VfsError::IOError(format!("Cannot create {}: {e}", parent.display()))
+                    })?;
+                }
+            }
+
+            let dest_file = std::fs::File::create(dest_path).map_err(|e| {
+                VfsError::IOError(format!("Cannot create {}: {e}", dest_path.display()))
+            })?;
+            let mut sink = std::io::BufWriter::with_capacity(256 * 1024, dest_file);
+            let total = entry.size();
+            let mut progress = crate::jobs::progress::ProgressReader::new(
+                &mut entry,
+                reporter.clone(),
+                entry_name.clone(),
+                total,
+                "Extracting",
+            );
+            copy(&mut progress, &mut sink).map_err(|e| {
+                if e.to_string() == "Cancelled" {
+                    VfsError::IOError("Cancelled".to_string())
+                } else if e.to_string().contains("invalid password")
+                    || e.to_string().contains("Hmac")
+                    || e.to_string().contains("checksum")
+                {
+                    VfsError::PermissionDenied("encrypted:bad_password".to_string())
+                } else {
+                    VfsError::IOError(format!("Extract failed for {entry_name}: {e}"))
+                }
+            })?;
+        }
+
+        Ok(())
+    }
+
     /// Open a ZipArchive handle — helper used by open_read and read_chunk.
     fn open_archive(&self) -> Result<zip::ZipArchive<std::fs::File>, VfsError> {
         let file = std::fs::File::open(&self.archive_path)
@@ -357,6 +491,22 @@ impl ZipFsDriver {
     fn zip_entry_name(&self, path: &str) -> String {
         // Try exact name first, then with trailing slash for directories.
         path.to_string()
+    }
+}
+
+/// Map a `zip::result::ZipError` from `by_index*` into a `VfsError` with the
+/// same categories the existing `open_read` uses.
+fn map_zip_open_err(e: zip::result::ZipError, entry_name: &str) -> VfsError {
+    let msg = e.to_string();
+    if msg.contains("not found") || msg.contains("name not found") {
+        VfsError::NotFound(entry_name.to_string())
+    } else if msg.contains("invalid password")
+        || msg.contains("encrypted")
+        || msg.contains("password")
+    {
+        VfsError::PermissionDenied("encrypted".to_string())
+    } else {
+        VfsError::IOError(format!("Zip error on {entry_name}: {e}"))
     }
 }
 

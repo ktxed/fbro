@@ -1,7 +1,9 @@
 pub mod dirsize;
+pub mod extract_archive;
 pub mod file_ops;
 pub mod fp_bro;
 pub mod integrity_compare;
+pub(crate) mod progress;
 pub mod scan;
 pub mod search;
 pub mod viewer_prefetch;

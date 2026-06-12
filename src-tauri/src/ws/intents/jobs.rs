@@ -925,7 +925,76 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
             source_path: Some(file.source_path.clone()),
         })
         .collect();
-    let total_bytes_total: u64 = files.iter().map(|file| file.size.unwrap_or(0)).sum();
+
+    // Archive-source Copy → batch streaming extraction. The generic file-op
+    // worker calls `src_driver.open_read(path)` per file, which on a 7z source
+    // resolves to extract_to_temp — O(N²) decompression over the solid stream
+    // and no progress until each file is fully extracted to temp. We detour to
+    // a single-pass extractor that walks the archive once.
+    let archive_extract: Option<(Vec<(String, std::path::PathBuf)>, u64)> = if op_type
+        == FileOpType::Copy
+        && dest_path.is_some()
+        && crate::jobs::extract_archive::driver_is_archive(&src_driver)
+    {
+        let dest_root = std::path::PathBuf::from(dest_path.as_ref().unwrap());
+        let base_prefix = if source_path.is_empty() {
+            String::new()
+        } else {
+            format!("{}/", source_path.trim_end_matches('/'))
+        };
+        let mut targets: Vec<(String, std::path::PathBuf)> = Vec::new();
+        let mut total: u64 = 0;
+        for file in &files {
+            let inner = file.source_path.clone();
+            let expanded: Vec<(String, u64)> = if file.kind == "directory" {
+                if let Some(sz) = src_driver
+                    .as_ref()
+                    .as_any()
+                    .downcast_ref::<crate::vfs::seven_zip::SevenZipFsDriver>()
+                {
+                    sz.flatten_files(&inner)
+                } else if let Some(zp) = src_driver
+                    .as_ref()
+                    .as_any()
+                    .downcast_ref::<crate::vfs::zip::ZipFsDriver>()
+                {
+                    zp.flatten_files(&inner)
+                } else {
+                    Vec::new()
+                }
+            } else {
+                let size = file.size.unwrap_or(0);
+                vec![(inner.clone(), size)]
+            };
+            for (child_inner, size) in expanded {
+                let rel = child_inner
+                    .strip_prefix(&base_prefix)
+                    .unwrap_or(&child_inner);
+                let dest = dest_root.join(rel.replace('/', std::path::MAIN_SEPARATOR_STR));
+                total = total.saturating_add(size);
+                targets.push((child_inner, dest));
+            }
+        }
+        Some((targets, total))
+    } else {
+        None
+    };
+
+    let total_bytes_total: u64 = archive_extract
+        .as_ref()
+        .map(|(_, total)| *total)
+        .unwrap_or_else(|| files.iter().map(|file| file.size.unwrap_or(0)).sum());
+    let total_files_for_job: usize = archive_extract
+        .as_ref()
+        .map(|(targets, _)| targets.len())
+        .unwrap_or_else(|| files.len());
+    if let Some((targets, total)) = archive_extract.as_ref() {
+        eprintln!(
+            "[fbro] archive-extract dispatch: {} entries, {} bytes",
+            targets.len(),
+            total
+        );
+    }
     let _ = ctx
         .tx
         .send(ServerMessage::JobStarted {
@@ -940,7 +1009,7 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
                 dest_panel: parsed.dest_panel.clone(),
                 dest_path: dest_path.clone(),
                 initial_state: "Running".to_string(),
-                total_files: files.len(),
+                total_files: total_files_for_job,
                 total_bytes_total,
                 background: parsed.background,
                 supports_pause: true,
@@ -966,41 +1035,72 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
     let save_digest_file_spawn = parsed.save_digest_file;
     let keep_partial_files_on_cancel_spawn = Arc::clone(&keep_partial_files_on_cancel);
 
-    let handle = tokio::spawn(async move {
-        run_file_op(
-            job_id_spawn,
-            op_type_spawn,
-            files_spawn,
-            dest_path_spawn,
-            conflict_policy_spawn,
-            tx_for_patch.clone(),
-            cancel_rx,
-            pause_rx,
-            decision_rx,
-            src_driver,
-            dst_driver,
-            preserve_attributes,
-            verification_policy_spawn,
-            save_digest_file_spawn,
-            auto_resume_copies,
-            keep_partial_files_on_cancel_spawn,
-        )
-        .await;
-
-        let sources_json = {
-            let state = state_for_patch.lock().await;
-            build_sources_json(&state)
-        };
-        let _ = tx_for_patch
-            .send(ServerMessage::StatePatch {
-                timestamp: now(),
-                domain: "sources".to_string(),
-                entity_id: None,
-                version: 0,
-                patch: serde_json::json!({ "sources": sources_json }),
-            })
+    let handle = if let Some((targets, total)) = archive_extract {
+        let src_driver_extract = Arc::clone(&src_driver);
+        let tx_extract = tx_for_patch.clone();
+        let job_id_extract = job_id_spawn;
+        tokio::spawn(async move {
+            crate::jobs::extract_archive::run_extract_archive(
+                job_id_extract,
+                src_driver_extract,
+                targets,
+                total,
+                tx_extract,
+                cancel_rx,
+            )
             .await;
-    });
+
+            let sources_json = {
+                let state = state_for_patch.lock().await;
+                build_sources_json(&state)
+            };
+            let _ = tx_for_patch
+                .send(ServerMessage::StatePatch {
+                    timestamp: now(),
+                    domain: "sources".to_string(),
+                    entity_id: None,
+                    version: 0,
+                    patch: serde_json::json!({ "sources": sources_json }),
+                })
+                .await;
+        })
+    } else {
+        tokio::spawn(async move {
+            run_file_op(
+                job_id_spawn,
+                op_type_spawn,
+                files_spawn,
+                dest_path_spawn,
+                conflict_policy_spawn,
+                tx_for_patch.clone(),
+                cancel_rx,
+                pause_rx,
+                decision_rx,
+                src_driver,
+                dst_driver,
+                preserve_attributes,
+                verification_policy_spawn,
+                save_digest_file_spawn,
+                auto_resume_copies,
+                keep_partial_files_on_cancel_spawn,
+            )
+            .await;
+
+            let sources_json = {
+                let state = state_for_patch.lock().await;
+                build_sources_json(&state)
+            };
+            let _ = tx_for_patch
+                .send(ServerMessage::StatePatch {
+                    timestamp: now(),
+                    domain: "sources".to_string(),
+                    entity_id: None,
+                    version: 0,
+                    patch: serde_json::json!({ "sources": sources_json }),
+                })
+                .await;
+        })
+    };
 
     {
         let mut state_guard = ctx.state.lock().await;

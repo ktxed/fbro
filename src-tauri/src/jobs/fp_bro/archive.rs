@@ -1,17 +1,16 @@
+use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::sync::{
     atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
     Arc,
 };
-use std::time::{Duration, Instant};
-use std::{fs::File, io, io::Read};
 
 use tokio::sync::mpsc;
 
 use crate::bro::BroInputItem;
-use crate::ws::protocol::{now, FileOpProgressSchema, ServerMessage};
-
-const ARCHIVE_PROGRESS_INTERVAL: Duration = Duration::from_millis(100);
+use crate::jobs::progress::send_progress_sync;
+pub(crate) use crate::jobs::progress::{ProgressReader, ProgressReporter};
+use crate::ws::protocol::{FileOpProgressSchema, ServerMessage};
 
 pub(crate) struct ArchivePlan {
     pub(crate) items: Vec<ArchiveItem>,
@@ -44,174 +43,6 @@ pub(crate) struct ArchiveSummary {
 pub(crate) enum ArchiveRunError {
     Cancelled,
     Failed(String),
-}
-
-#[derive(Clone)]
-pub(crate) struct ProgressReporter {
-    tx: mpsc::Sender<ServerMessage>,
-    job_id: String,
-    total_files: usize,
-    total_bytes_total: u64,
-    completed_files: Arc<AtomicUsize>,
-    pub(crate) total_bytes_copied: Arc<AtomicU64>,
-    cancel_flag: Arc<AtomicBool>,
-}
-
-impl ProgressReporter {
-    pub(crate) fn new(
-        tx: mpsc::Sender<ServerMessage>,
-        job_id: String,
-        total_files: usize,
-        total_bytes_total: u64,
-        completed_files: Arc<AtomicUsize>,
-        total_bytes_copied: Arc<AtomicU64>,
-        cancel_flag: Arc<AtomicBool>,
-    ) -> Self {
-        Self {
-            tx,
-            job_id,
-            total_files,
-            total_bytes_total,
-            completed_files,
-            total_bytes_copied,
-            cancel_flag,
-        }
-    }
-
-    pub(crate) fn is_cancelled(&self) -> bool {
-        self.cancel_flag.load(Ordering::SeqCst)
-    }
-
-    pub(crate) fn send_snapshot(
-        &self,
-        current_file: Option<String>,
-        status_text: Option<String>,
-        current_file_total: u64,
-        current_file_copied: u64,
-        completed_file: bool,
-    ) {
-        let completed_files = if completed_file {
-            self.completed_files.fetch_add(1, Ordering::SeqCst) + 1
-        } else {
-            self.completed_files.load(Ordering::SeqCst)
-        };
-        let total_bytes_copied = self.total_bytes_copied.load(Ordering::SeqCst);
-
-        send_progress_sync(
-            &self.tx,
-            &self.job_id,
-            FileOpProgressSchema {
-                total_files: self.total_files,
-                completed_files,
-                current_file,
-                status_text,
-                current_file_bytes_total: current_file_total,
-                current_file_bytes_copied: current_file_copied,
-                total_bytes_total: self.total_bytes_total,
-                total_bytes_copied,
-                current_file_percent: percent(current_file_copied, current_file_total),
-                overall_percent: percent(total_bytes_copied, self.total_bytes_total),
-            },
-        );
-    }
-
-    pub(crate) fn file_completed(
-        &self,
-        current_file: String,
-        done_text: String,
-        current_file_total: u64,
-        current_file_copied: u64,
-    ) {
-        self.send_snapshot(
-            Some(current_file),
-            Some(done_text),
-            current_file_total,
-            current_file_copied,
-            true,
-        );
-    }
-}
-
-pub(crate) struct ProgressReader<R> {
-    inner: R,
-    reporter: ProgressReporter,
-    current_file: String,
-    current_file_total: u64,
-    current_file_copied: u64,
-    /// Present-participle action shown in the status line, e.g. "Compressing" or "Extracting".
-    verb: &'static str,
-    last_emit: Instant,
-}
-
-impl<R: Read> ProgressReader<R> {
-    pub(crate) fn new(
-        inner: R,
-        reporter: ProgressReporter,
-        current_file: String,
-        current_file_total: u64,
-        verb: &'static str,
-    ) -> Self {
-        let now = Instant::now();
-        reporter.send_snapshot(
-            Some(current_file.clone()),
-            Some(format!("{verb} {current_file}")),
-            current_file_total,
-            0,
-            false,
-        );
-        Self {
-            inner,
-            reporter,
-            current_file,
-            current_file_total,
-            current_file_copied: 0,
-            verb,
-            last_emit: now,
-        }
-    }
-}
-
-impl<R: Read> Read for ProgressReader<R> {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        if self.reporter.is_cancelled() {
-            // Must NOT use ErrorKind::Interrupted: `io::copy` (and BufReader)
-            // treat that as an EINTR-style transient signal and retry the read,
-            // which produces a tight spin-loop instead of unwinding.
-            return Err(io::Error::new(io::ErrorKind::Other, "Cancelled"));
-        }
-
-        let n = self.inner.read(buf)?;
-        if n == 0 {
-            self.reporter.file_completed(
-                self.current_file.clone(),
-                format!("{} done", self.verb),
-                self.current_file_total,
-                self.current_file_copied,
-            );
-            return Ok(0);
-        }
-
-        let n = n as u64;
-        self.current_file_copied += n;
-        self.reporter
-            .total_bytes_copied
-            .fetch_add(n, Ordering::SeqCst);
-
-        if self.last_emit.elapsed() >= ARCHIVE_PROGRESS_INTERVAL
-            || self.current_file_copied >= self.current_file_total
-        {
-            self.reporter.send_snapshot(
-                Some(self.current_file.clone()),
-                Some(format!("{} {}", self.verb, self.current_file)),
-                self.current_file_total,
-                self.current_file_copied,
-                false,
-            );
-            self.last_emit = Instant::now();
-        }
-
-        Ok(n as usize)
-    }
 }
 
 pub(crate) fn build_archive_plan(inputs: &[BroInputItem]) -> Result<ArchivePlan, String> {
@@ -403,43 +234,4 @@ fn first_input_parent(inputs: &[BroInputItem]) -> Option<String> {
     Path::new(&first.path)
         .parent()
         .map(|path| path.to_string_lossy().to_string())
-}
-
-fn percent(numerator: u64, denominator: u64) -> Option<u8> {
-    if denominator == 0 {
-        return None;
-    }
-    let pct = ((numerator.saturating_mul(100)) / denominator).min(100);
-    u8::try_from(pct).ok()
-}
-
-fn send_progress_sync(
-    tx: &mpsc::Sender<ServerMessage>,
-    job_id: &str,
-    progress: FileOpProgressSchema,
-) {
-    let _ = tx.try_send(ServerMessage::JobEvent {
-        timestamp: now(),
-        job_id: job_id.to_string(),
-        event: "Progress".to_string(),
-        files: None,
-        progress: Some(progress),
-        search_progress: None,
-        decision: None,
-        error: None,
-        result_path: None,
-        result_panel_id: None,
-    });
-}
-
-#[cfg(test)]
-mod tests {
-    use super::percent;
-
-    #[test]
-    fn percent_clamps_to_hundred() {
-        assert_eq!(percent(15, 10), Some(100));
-        assert_eq!(percent(5, 10), Some(50));
-        assert_eq!(percent(0, 0), None);
-    }
 }
