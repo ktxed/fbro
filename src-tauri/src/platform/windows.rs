@@ -120,14 +120,19 @@ impl Platform for WindowsPlatform {
         path: &str,
         kind: &str,
     ) -> Result<Vec<ResolvedOpenWithApp>, String> {
+        let ext = file_extension_dot(path);
+        let default_label = if kind == "directory" {
+            "File Explorer".to_string()
+        } else {
+            ext.as_deref()
+                .and_then(query_friendly_app_name)
+                .unwrap_or_else(|| "Default application".to_string())
+        };
+
         let mut apps = vec![ResolvedOpenWithApp {
             option: OpenWithAppOption {
                 id: "windows:default".to_string(),
-                label: if kind == "directory" {
-                    "File Explorer".to_string()
-                } else {
-                    "Default application".to_string()
-                },
+                label: default_label,
                 detail: None,
                 is_default: true,
                 source: "system".to_string(),
@@ -135,7 +140,11 @@ impl Platform for WindowsPlatform {
             launch: OpenWithLaunch::Default,
         }];
 
-        apps.extend(windows_supplemental_apps(path));
+        if let Some(ref ext) = ext {
+            apps.extend(windows_enumerate_handlers(ext));
+        }
+
+        super::append_supplemental_apps(&mut apps, windows_supplemental_apps(path));
         Ok(apps)
     }
 
@@ -607,6 +616,230 @@ struct BITMAPINFO {
 extern "system" {
     fn CoInitializeEx(reserved: *mut c_void, co_init: u32) -> i32;
     fn CoUninitialize();
+    fn CoTaskMemFree(pv: *mut c_void);
+}
+
+#[link(name = "shlwapi")]
+extern "system" {
+    fn AssocQueryStringW(
+        flags: u32,
+        str_kind: u32,
+        psz_assoc: *const u16,
+        psz_extra: *const u16,
+        psz_out: *mut u16,
+        pcch_out: *mut u32,
+    ) -> i32;
+}
+
+const ASSOCSTR_FRIENDLYAPPNAME: u32 = 4;
+const ASSOC_FILTER_RECOMMENDED: u32 = 1;
+
+// IID_IEnumAssocHandlers: 973810ae-9599-4b88-9e4d-6ee98c9552da
+const IID_IENUM_ASSOC_HANDLERS: GUID = GUID {
+    data1: 0x973810ae,
+    data2: 0x9599,
+    data3: 0x4b88,
+    data4: [0x9e, 0x4d, 0x6e, 0xe9, 0x8c, 0x95, 0x52, 0xda],
+};
+
+#[repr(C)]
+struct IEnumAssocHandlersVtbl {
+    query_interface: unsafe extern "system" fn(*mut c_void, *const GUID, *mut *mut c_void) -> i32,
+    add_ref: unsafe extern "system" fn(*mut c_void) -> u32,
+    release: unsafe extern "system" fn(*mut c_void) -> u32,
+    next: unsafe extern "system" fn(*mut c_void, u32, *mut *mut c_void, *mut u32) -> i32,
+}
+
+#[repr(C)]
+struct IEnumAssocHandlers {
+    vtbl: *const IEnumAssocHandlersVtbl,
+}
+
+#[repr(C)]
+struct IAssocHandlerVtbl {
+    query_interface: unsafe extern "system" fn(*mut c_void, *const GUID, *mut *mut c_void) -> i32,
+    add_ref: unsafe extern "system" fn(*mut c_void) -> u32,
+    release: unsafe extern "system" fn(*mut c_void) -> u32,
+    get_name: unsafe extern "system" fn(*mut c_void, *mut *mut u16) -> i32,
+    get_ui_name: unsafe extern "system" fn(*mut c_void, *mut *mut u16) -> i32,
+    get_icon_location: unsafe extern "system" fn(*mut c_void, *mut *mut u16, *mut i32) -> i32,
+    is_recommended: unsafe extern "system" fn(*mut c_void) -> i32,
+    make_default: unsafe extern "system" fn(*mut c_void, *const u16) -> i32,
+    invoke: unsafe extern "system" fn(*mut c_void, *mut c_void) -> i32,
+}
+
+#[repr(C)]
+struct IAssocHandler {
+    vtbl: *const IAssocHandlerVtbl,
+}
+
+#[link(name = "shell32")]
+extern "system" {
+    fn SHAssocEnumHandlers(
+        psz_extra: *const u16,
+        af_filter: u32,
+        pp_enum_handler: *mut *mut c_void,
+    ) -> i32;
+}
+
+/// Extract the dotted file extension (e.g. ".png") in lowercase, or None.
+fn file_extension_dot(path: &str) -> Option<String> {
+    let trimmed = path.trim_end_matches(['/', '\\']);
+    let basename = trimmed
+        .rsplit_once(['/', '\\'])
+        .map(|(_, b)| b)
+        .unwrap_or(trimmed);
+    let dot = basename.rfind('.')?;
+    if dot == 0 {
+        return None; // hidden file with no extension (.gitignore)
+    }
+    let ext = &basename[dot..];
+    if ext.len() < 2 || ext.len() > 32 {
+        return None;
+    }
+    Some(ext.to_ascii_lowercase())
+}
+
+fn query_friendly_app_name(ext: &str) -> Option<String> {
+    let wext = to_wide(ext);
+    let mut len: u32 = 0;
+    let hr = unsafe {
+        AssocQueryStringW(
+            0,
+            ASSOCSTR_FRIENDLYAPPNAME,
+            wext.as_ptr(),
+            ptr::null(),
+            ptr::null_mut(),
+            &mut len,
+        )
+    };
+    // E_POINTER (0x80004003) is expected when probing for size.
+    if len == 0 {
+        return None;
+    }
+    let _ = hr;
+    let mut buf = vec![0u16; len as usize];
+    let hr = unsafe {
+        AssocQueryStringW(
+            0,
+            ASSOCSTR_FRIENDLYAPPNAME,
+            wext.as_ptr(),
+            ptr::null(),
+            buf.as_mut_ptr(),
+            &mut len,
+        )
+    };
+    if hr < 0 {
+        return None;
+    }
+    let end = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+    let name = String::from_utf16_lossy(&buf[..end]);
+    if name.trim().is_empty() {
+        None
+    } else {
+        Some(name)
+    }
+}
+
+/// Read a CoTaskMem-allocated UTF-16 string and free it.
+unsafe fn cotask_string(p: *mut u16) -> Option<String> {
+    if p.is_null() {
+        return None;
+    }
+    let mut len = 0usize;
+    while *p.add(len) != 0 {
+        len += 1;
+    }
+    let slice = std::slice::from_raw_parts(p, len);
+    let s = String::from_utf16_lossy(slice);
+    CoTaskMemFree(p as *mut c_void);
+    Some(s)
+}
+
+fn windows_enumerate_handlers(ext: &str) -> Vec<ResolvedOpenWithApp> {
+    let wext = to_wide(ext);
+
+    unsafe {
+        let hr = CoInitializeEx(
+            ptr::null_mut(),
+            COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE,
+        );
+        if hr < 0 {
+            return Vec::new();
+        }
+
+        let mut enumerator: *mut c_void = ptr::null_mut();
+        let hr = SHAssocEnumHandlers(wext.as_ptr(), ASSOC_FILTER_RECOMMENDED, &mut enumerator);
+        if hr < 0 || enumerator.is_null() {
+            return Vec::new();
+        }
+
+        let enum_ptr = enumerator as *mut IEnumAssocHandlers;
+        let enum_vtbl = (*enum_ptr).vtbl;
+
+        let mut out = Vec::new();
+        let mut seen_programs: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+        loop {
+            let mut handler: *mut c_void = ptr::null_mut();
+            let mut fetched: u32 = 0;
+            let hr = ((*enum_vtbl).next)(enumerator, 1, &mut handler, &mut fetched);
+            if hr != 0 || fetched == 0 || handler.is_null() {
+                break;
+            }
+
+            let handler_ptr = handler as *mut IAssocHandler;
+            let handler_vtbl = (*handler_ptr).vtbl;
+
+            let mut name_ptr: *mut u16 = ptr::null_mut();
+            let mut ui_name_ptr: *mut u16 = ptr::null_mut();
+            let name_hr = ((*handler_vtbl).get_name)(handler, &mut name_ptr);
+            let ui_hr = ((*handler_vtbl).get_ui_name)(handler, &mut ui_name_ptr);
+
+            let exe = if name_hr >= 0 {
+                cotask_string(name_ptr)
+            } else {
+                None
+            };
+            let ui_name = if ui_hr >= 0 {
+                cotask_string(ui_name_ptr)
+            } else {
+                None
+            };
+
+            ((*handler_vtbl).release)(handler);
+
+            // Keep only handlers backed by a real .exe path; skip UWP / protocol handlers.
+            if let (Some(exe), Some(label)) = (exe, ui_name) {
+                let exe_lower = exe.to_ascii_lowercase();
+                if !exe_lower.ends_with(".exe") {
+                    continue;
+                }
+                if !std::path::Path::new(&exe).is_file() {
+                    continue;
+                }
+                if !seen_programs.insert(exe_lower) {
+                    continue;
+                }
+                out.push(ResolvedOpenWithApp {
+                    option: OpenWithAppOption {
+                        id: format!("windows:handler:{}", out.len()),
+                        label,
+                        detail: Some(exe.clone()),
+                        is_default: false,
+                        source: "system".to_string(),
+                    },
+                    launch: OpenWithLaunch::Command {
+                        program: exe,
+                        args: vec![],
+                    },
+                });
+            }
+        }
+
+        ((*enum_vtbl).release)(enumerator);
+        out
+    }
 }
 
 #[link(name = "shell32")]
