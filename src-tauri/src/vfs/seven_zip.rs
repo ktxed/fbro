@@ -290,6 +290,12 @@ impl SevenZipFsDriver {
         *lock = Some(pwd.to_string());
     }
 
+    /// The absolute on-disk path of the 7z archive backing this driver.
+    /// Used by the native-7z extractor to feed `7z.exe x <archive>`.
+    pub fn archive_path(&self) -> &str {
+        &self.archive_path
+    }
+
     pub fn get_password(&self) -> Option<String> {
         self.password.lock().unwrap().clone()
     }

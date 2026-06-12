@@ -341,6 +341,13 @@ pub struct GeneralSettingsSchema {
     pub persist_panel_tabs: bool,
     pub proc_tree_mode: bool,
     pub color_scheme: String,
+    pub sevenzip_extractor: String,
+    pub sevenzip_custom_path: String,
+    /// Effective binary picked given the current mode + custom path. Empty
+    /// string means "fall back to internal extractor". Computed by the backend
+    /// so the settings UI can show "Found at <path>" / "Not found" without
+    /// re-running probe logic in the FE.
+    pub sevenzip_resolved_path: String,
 }
 
 #[derive(Serialize, Clone, Debug)]

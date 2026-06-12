@@ -476,6 +476,11 @@ export interface GeneralSettings {
   persistPanelTabs: boolean;
   procTreeMode: boolean;
   colorScheme: string;
+  /** "auto" | "custom" | "internal" */
+  sevenzipExtractor: string;
+  sevenzipCustomPath: string;
+  /** Absolute path the backend resolved given the mode + custom path; empty if it'll fall back to the in-process extractor. */
+  sevenzipResolvedPath: string;
 }
 
 export interface SettingsState {

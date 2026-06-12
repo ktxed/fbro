@@ -59,6 +59,49 @@ pub struct GeneralSettings {
     /// settings intent handler; the default preserves the pre-existing look.
     #[serde(default = "default_color_scheme")]
     pub color_scheme: String,
+    /// How to extract .7z archives. `Auto` looks for `7z` / `7zz` / `7za` on
+    /// PATH and falls back to the in-process Rust extractor if none is
+    /// installed. `Custom` invokes whatever the user set in
+    /// `sevenzip_custom_path`. `Internal` always uses the in-process path
+    /// (slower for max-compression solid 7z, no native dependency).
+    #[serde(default)]
+    pub sevenzip_extractor: SevenzipExtractorMode,
+    /// Absolute path to a 7-Zip binary, used only when `sevenzip_extractor`
+    /// is `Custom`. Empty by default.
+    #[serde(default)]
+    pub sevenzip_custom_path: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum SevenzipExtractorMode {
+    /// Find `7z` / `7zz` / `7za` on $PATH; fall back to internal if none
+    /// found. Default — matches what most users want.
+    #[default]
+    Auto,
+    /// Use the explicit path in `sevenzip_custom_path`.
+    Custom,
+    /// Always use the in-process Rust extractor (sevenz-rust2).
+    Internal,
+}
+
+impl SevenzipExtractorMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Custom => "custom",
+            Self::Internal => "internal",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "auto" => Some(Self::Auto),
+            "custom" => Some(Self::Custom),
+            "internal" => Some(Self::Internal),
+            _ => None,
+        }
+    }
 }
 
 fn default_true() -> bool {
@@ -98,6 +141,8 @@ impl Default for GeneralSettings {
             persist_panel_tabs: true,
             proc_tree_mode: false,
             color_scheme: default_color_scheme(),
+            sevenzip_extractor: SevenzipExtractorMode::default(),
+            sevenzip_custom_path: String::new(),
         }
     }
 }

@@ -146,6 +146,19 @@ pub(crate) fn build_state_snapshot(
                     persist_panel_tabs: state.settings.general.persist_panel_tabs,
                     proc_tree_mode: state.settings.general.proc_tree_mode,
                     color_scheme: state.settings.general.color_scheme.clone(),
+                    sevenzip_extractor: state
+                        .settings
+                        .general
+                        .sevenzip_extractor
+                        .as_str()
+                        .to_string(),
+                    sevenzip_custom_path: state.settings.general.sevenzip_custom_path.clone(),
+                    sevenzip_resolved_path: crate::jobs::extract_archive::resolve_sevenzip_binary(
+                        state.settings.general.sevenzip_extractor,
+                        &state.settings.general.sevenzip_custom_path,
+                    )
+                    .map(|p| p.to_string_lossy().to_string())
+                    .unwrap_or_default(),
                 },
             },
             discovered_peers: build_discovered_peers(state),

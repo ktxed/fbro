@@ -908,12 +908,14 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
     let (decision_tx, decision_rx) = mpsc::channel::<DecisionResponse>(4);
     let keep_partial_files_on_cancel = Arc::new(AtomicBool::new(false));
 
-    let (job_id, preserve_attributes, auto_resume_copies) = {
+    let (job_id, preserve_attributes, auto_resume_copies, sevenzip_mode, sevenzip_custom) = {
         let mut state_guard = ctx.state.lock().await;
         let job_id = state_guard.job_store.next_job_id();
         let preserve = state_guard.settings.general.preserve_attributes;
         let auto_resume = state_guard.settings.general.auto_resume_copies;
-        (job_id, preserve, auto_resume)
+        let mode = state_guard.settings.general.sevenzip_extractor;
+        let custom = state_guard.settings.general.sevenzip_custom_path.clone();
+        (job_id, preserve, auto_resume, mode, custom)
     };
 
     let file_schemas: Vec<FileOpFileSchema> = files
@@ -1039,12 +1041,19 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
         let src_driver_extract = Arc::clone(&src_driver);
         let tx_extract = tx_for_patch.clone();
         let job_id_extract = job_id_spawn;
+        let extract_options = crate::jobs::extract_archive::ExtractOptions {
+            sevenzip_binary: crate::jobs::extract_archive::resolve_sevenzip_binary(
+                sevenzip_mode,
+                &sevenzip_custom,
+            ),
+        };
         tokio::spawn(async move {
             crate::jobs::extract_archive::run_extract_archive(
                 job_id_extract,
                 src_driver_extract,
                 targets,
                 total,
+                extract_options,
                 tx_extract,
                 cancel_rx,
             )

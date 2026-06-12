@@ -290,7 +290,7 @@ const initialState: AppState = {
   childProcesses: {},
   fontSize: 13,
   settings: {
-    general: { showHiddenDefault: false, rememberWindowState: true, preserveAttributes: true, autoResumeCopies: true, ludicrousMode: false, maxImageSizeMb: 512, savePanelViewMode: false, enableVideoThumbnails: true, thumbnailMaxImageSizeMb: 100, thumbnailVideoFrameSkip: 5, streamThumbnails: true, sessionPath: "", bookmarksPath: "", thumbnailCacheDir: "", thumbnailCacheItemCount: 0, thumbnailCacheSizeBytes: 0, persistPanelTabs: true, procTreeMode: false, colorScheme: "fbro-dark" },
+    general: { showHiddenDefault: false, rememberWindowState: true, preserveAttributes: true, autoResumeCopies: true, ludicrousMode: false, maxImageSizeMb: 512, savePanelViewMode: false, enableVideoThumbnails: true, thumbnailMaxImageSizeMb: 100, thumbnailVideoFrameSkip: 5, streamThumbnails: true, sessionPath: "", bookmarksPath: "", thumbnailCacheDir: "", thumbnailCacheItemCount: 0, thumbnailCacheSizeBytes: 0, persistPanelTabs: true, procTreeMode: false, colorScheme: "fbro-dark", sevenzipExtractor: "auto", sevenzipCustomPath: "", sevenzipResolvedPath: "" },
   },
 };
 

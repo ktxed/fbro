@@ -104,6 +104,17 @@ impl ProgressReporter {
         );
     }
 
+    pub(crate) fn total_bytes_total(&self) -> u64 {
+        self.total_bytes_total
+    }
+
+    /// Replace the cumulative byte counter wholesale. Used by progress sources
+    /// that report percent rather than incremental byte deltas (e.g. parsing
+    /// `7z.exe -bsp1` stdout).
+    pub(crate) fn set_total_bytes_copied(&self, bytes: u64) {
+        self.total_bytes_copied.store(bytes, Ordering::SeqCst);
+    }
+
     pub(crate) fn file_completed(
         &self,
         current_file: String,

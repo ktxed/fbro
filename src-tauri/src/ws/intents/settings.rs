@@ -194,6 +194,32 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
                     state_guard.settings.panel_view_modes.clear();
                 }
             }
+            "sevenzipExtractor" => {
+                let Some(v) = value.as_str() else {
+                    drop(state_guard);
+                    bad_setting(ctx.tx, "sevenzipExtractor must be a string").await;
+                    return;
+                };
+                match crate::state::settings::SevenzipExtractorMode::from_str(v) {
+                    Some(mode) => {
+                        state_guard.settings.general.sevenzip_extractor = mode;
+                    }
+                    None => {
+                        let msg = format!("Unknown sevenzipExtractor: {v}");
+                        drop(state_guard);
+                        bad_setting(ctx.tx, &msg).await;
+                        return;
+                    }
+                }
+            }
+            "sevenzipCustomPath" => {
+                let Some(v) = value.as_str() else {
+                    drop(state_guard);
+                    bad_setting(ctx.tx, "sevenzipCustomPath must be a string").await;
+                    return;
+                };
+                state_guard.settings.general.sevenzip_custom_path = v.trim().to_string();
+            }
             _ => {
                 let msg = format!("Unknown setting key: {key}");
                 drop(state_guard);
@@ -322,6 +348,14 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
         state_guard.settings.general.clone()
     };
 
+    let sevenzip_resolved =
+        crate::jobs::extract_archive::resolve_sevenzip_binary(
+            general.sevenzip_extractor,
+            &general.sevenzip_custom_path,
+        )
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default();
+
     let patch = ServerMessage::StatePatch {
         timestamp: now(),
         domain: "settings".to_string(),
@@ -342,6 +376,9 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
                 "persistPanelTabs": general.persist_panel_tabs,
                 "procTreeMode": general.proc_tree_mode,
                 "colorScheme": general.color_scheme,
+                "sevenzipExtractor": general.sevenzip_extractor.as_str(),
+                "sevenzipCustomPath": general.sevenzip_custom_path,
+                "sevenzipResolvedPath": sevenzip_resolved,
             }
         }),
     };

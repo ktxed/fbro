@@ -16,7 +16,7 @@ interface ShellCommandStatus {
 }
 
 export function SettingsGeneralTab({ general, client }: SettingsGeneralTabProps) {
-  const send = (key: string, value: boolean | number) => {
+  const send = (key: string, value: boolean | number | string) => {
     client.sendIntent("SetGeneralOption", undefined, { key, value });
   };
 
@@ -25,7 +25,13 @@ export function SettingsGeneralTab({ general, client }: SettingsGeneralTabProps)
   const [commandStatus, setCommandStatus] = useState<string | null>(null);
   const [commandBusy, setCommandBusy] = useState(false);
   const [commandProbing, setCommandProbing] = useState(true);
+  const [sevenzipPathDraft, setSevenzipPathDraft] = useState(general.sevenzipCustomPath);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sevenzipPathDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    setSevenzipPathDraft(general.sevenzipCustomPath);
+  }, [general.sevenzipCustomPath]);
 
   useEffect(() => {
     setMaxImageDraft(general.maxImageSizeMb);
@@ -191,6 +197,62 @@ export function SettingsGeneralTab({ general, client }: SettingsGeneralTabProps)
           />
           <span>Auto-retry interrupted copies</span>
         </label>
+      </div>
+      <div className="settings-tab__section">
+        <h3 className="settings-tab__section-title">7-Zip extractor</h3>
+        <div className="settings-tab__option" style={{ flexDirection: "column", alignItems: "flex-start", gap: 6 }}>
+          <label className="settings-tab__option" style={{ margin: 0 }}>
+            <input
+              type="radio"
+              name="sevenzip-extractor"
+              checked={general.sevenzipExtractor === "auto"}
+              onChange={() => send("sevenzipExtractor", "auto")}
+            />
+            <span>Auto-detect on PATH (recommended)</span>
+          </label>
+          <label className="settings-tab__option" style={{ margin: 0 }}>
+            <input
+              type="radio"
+              name="sevenzip-extractor"
+              checked={general.sevenzipExtractor === "custom"}
+              onChange={() => send("sevenzipExtractor", "custom")}
+            />
+            <span>Custom path</span>
+          </label>
+          <input
+            type="text"
+            placeholder="C:\Program Files\7-Zip\7z.exe"
+            value={sevenzipPathDraft}
+            disabled={general.sevenzipExtractor !== "custom"}
+            onChange={(e) => {
+              setSevenzipPathDraft(e.target.value);
+              if (sevenzipPathDebounce.current) clearTimeout(sevenzipPathDebounce.current);
+              const v = e.target.value;
+              sevenzipPathDebounce.current = setTimeout(() => send("sevenzipCustomPath", v), 350);
+            }}
+            style={{ width: "100%", maxWidth: 480, marginLeft: 24 }}
+          />
+          <label className="settings-tab__option" style={{ margin: 0 }}>
+            <input
+              type="radio"
+              name="sevenzip-extractor"
+              checked={general.sevenzipExtractor === "internal"}
+              onChange={() => send("sevenzipExtractor", "internal")}
+            />
+            <span>Internal (pure Rust, no native dependency)</span>
+          </label>
+        </div>
+        <div className="settings-tab__hint">
+          {general.sevenzipResolvedPath
+            ? `Using ${general.sevenzipResolvedPath}`
+            : general.sevenzipExtractor === "internal"
+              ? "Using the in-process extractor"
+              : general.sevenzipExtractor === "custom"
+                ? sevenzipPathDraft.trim() === ""
+                  ? "No custom path set — will fall back to the in-process extractor"
+                  : `Path not found — will fall back to the in-process extractor`
+                : "No 7z / 7zz / 7za binary found on PATH — will fall back to the in-process extractor"}
+        </div>
       </div>
       <div className="settings-tab__section">
         <h3 className="settings-tab__section-title">Data files</h3>
