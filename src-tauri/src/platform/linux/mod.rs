@@ -217,6 +217,9 @@ impl Platform for LinuxPlatform {
             OpenWithLaunch::MacApplication { .. } => {
                 Err("The selected application is not available on Linux".to_string())
             }
+            OpenWithLaunch::WindowsHandlerInvoke { .. } => {
+                Err("The selected application is not available on Linux".to_string())
+            }
         }
     }
 
