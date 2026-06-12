@@ -95,3 +95,16 @@ fn zip_sorts_above_tar_for_archive_selection() {
     assert_eq!(bros[0].option.name, "zip");
     assert!(bros[0].option.pre.score > bros[1].option.pre.score);
 }
+
+#[test]
+fn extract_bro_sorts_above_pack_bros_for_single_archive() {
+    let inputs = vec![BroInputItem {
+        path: "/tmp/photos.zip".to_string(),
+        name: "photos.zip".to_string(),
+        kind: "file".to_string(),
+    }];
+    let bros = rank_bros(&inputs, vec![bro("zip"), bro("7z"), bro("unzip")]);
+    assert_eq!(bros[0].option.name, "unzip");
+    assert_eq!(bros[0].option.pre.score, 99);
+    assert!(bros[0].option.pre.score > bros[1].option.pre.score);
+}

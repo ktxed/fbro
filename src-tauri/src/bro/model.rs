@@ -99,6 +99,8 @@ pub(crate) enum LaunchRecipe {
     },
     BuiltInSevenZip,
     BuiltInZip,
+    BuiltInSevenZipExtract,
+    BuiltInZipExtract,
     BuiltInCopyPaths,
     BuiltInKillProc,
     BuiltInSyncBro,
@@ -202,6 +204,8 @@ impl ResolvedBro {
             }
             LaunchRecipe::BuiltInSevenZip
             | LaunchRecipe::BuiltInZip
+            | LaunchRecipe::BuiltInSevenZipExtract
+            | LaunchRecipe::BuiltInZipExtract
             | LaunchRecipe::BuiltInCopyPaths
             | LaunchRecipe::BuiltInKillProc
             | LaunchRecipe::BuiltInSyncBro => Err(

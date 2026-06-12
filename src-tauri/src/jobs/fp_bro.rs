@@ -1,6 +1,10 @@
 mod archive;
 mod seven_zip;
+mod seven_zip_extract;
+#[cfg(test)]
+mod test_support;
 mod zip;
+mod zip_extract;
 
 use std::collections::HashMap;
 use std::sync::{
@@ -74,6 +78,32 @@ pub async fn run_fp_bro(
             )
             .await;
         }
+        LaunchRecipe::BuiltInSevenZipExtract => {
+            run_builtin_archive(
+                job_id,
+                bro,
+                inputs,
+                output_path,
+                params,
+                tx,
+                cancel_rx,
+                seven_zip_extract::run_blocking,
+            )
+            .await;
+        }
+        LaunchRecipe::BuiltInZipExtract => {
+            run_builtin_archive(
+                job_id,
+                bro,
+                inputs,
+                output_path,
+                params,
+                tx,
+                cancel_rx,
+                zip_extract::run_blocking,
+            )
+            .await;
+        }
         LaunchRecipe::BuiltInCopyPaths
         | LaunchRecipe::BuiltInKillProc
         | LaunchRecipe::BuiltInSyncBro => {}
@@ -97,6 +127,22 @@ async fn run_legacy_fp_bro(
             return;
         }
     };
+
+    // Extraction commands (e.g. `tar -xf … -C <dir>`) need the destination directory to exist
+    // before launch; pack commands write a file and must not have it pre-created as a dir.
+    if bro.option.id.starts_with("native:extract-") {
+        if let Err(error) = std::fs::create_dir_all(&output_path) {
+            let _ = send_terminal(
+                &tx,
+                &job_id,
+                "Failed",
+                Some(format!("Failed to create {output_path}: {error}")),
+                None,
+            )
+            .await;
+            return;
+        }
+    }
 
     let mut command = Command::new(&program);
     command.args(args);

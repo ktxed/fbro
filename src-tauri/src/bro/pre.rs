@@ -41,9 +41,36 @@ fn evaluate_bro(inputs: &[BroInputItem], bro: &BroOption) -> BroPre {
         return evaluate_tar_bro(inputs);
     }
 
+    if is_extract_bro(bro) {
+        return evaluate_extract_bro(inputs);
+    }
+
     BroPre {
         score: 50,
         reason: "Available for this selection".to_string(),
+    }
+}
+
+fn is_extract_bro(bro: &BroOption) -> bool {
+    matches!(
+        bro.name.to_ascii_lowercase().as_str(),
+        "unzip" | "un7z" | "untar" | "untar.gz"
+    )
+}
+
+fn evaluate_extract_bro(inputs: &[BroInputItem]) -> BroPre {
+    // The provider only emits an extract bro for a single matching archive file, so when that
+    // holds we rank it above every pack bro (max 98); otherwise it is not applicable.
+    if inputs.len() == 1 && inputs[0].kind != "directory" {
+        BroPre {
+            score: 99,
+            reason: "Extract this archive".to_string(),
+        }
+    } else {
+        BroPre {
+            score: 0,
+            reason: "Extraction needs a single archive".to_string(),
+        }
     }
 }
 

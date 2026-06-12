@@ -1,6 +1,7 @@
 use crate::bro::model::{BroInputItem, ResolvedBro};
 
 pub mod copy_paths;
+pub mod extract;
 pub mod kill_proc;
 #[cfg(target_os = "linux")]
 pub mod linux_media;
@@ -38,6 +39,7 @@ pub fn builtin_providers() -> Vec<Box<dyn BroProvider>> {
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     providers.push(Box::new(tar::TarProvider));
     providers.push(Box::new(zip::ZipProvider));
+    providers.push(Box::new(extract::ExtractProvider));
 
     providers
 }

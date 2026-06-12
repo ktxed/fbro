@@ -40,6 +40,7 @@ pub(crate) struct ArchiveSummary {
     pub(crate) total_bytes_total: u64,
 }
 
+#[derive(Debug)]
 pub(crate) enum ArchiveRunError {
     Cancelled,
     Failed(String),
@@ -117,12 +118,13 @@ impl ProgressReporter {
     pub(crate) fn file_completed(
         &self,
         current_file: String,
+        done_text: String,
         current_file_total: u64,
         current_file_copied: u64,
     ) {
         self.send_snapshot(
             Some(current_file),
-            Some("File compressed".to_string()),
+            Some(done_text),
             current_file_total,
             current_file_copied,
             true,
@@ -136,6 +138,8 @@ pub(crate) struct ProgressReader<R> {
     current_file: String,
     current_file_total: u64,
     current_file_copied: u64,
+    /// Present-participle action shown in the status line, e.g. "Compressing" or "Extracting".
+    verb: &'static str,
     last_emit: Instant,
 }
 
@@ -145,11 +149,12 @@ impl<R: Read> ProgressReader<R> {
         reporter: ProgressReporter,
         current_file: String,
         current_file_total: u64,
+        verb: &'static str,
     ) -> Self {
         let now = Instant::now();
         reporter.send_snapshot(
             Some(current_file.clone()),
-            Some(format!("Compressing {}", current_file)),
+            Some(format!("{verb} {current_file}")),
             current_file_total,
             0,
             false,
@@ -160,6 +165,7 @@ impl<R: Read> ProgressReader<R> {
             current_file,
             current_file_total,
             current_file_copied: 0,
+            verb,
             last_emit: now,
         }
     }
@@ -178,6 +184,7 @@ impl<R: Read> Read for ProgressReader<R> {
         if n == 0 {
             self.reporter.file_completed(
                 self.current_file.clone(),
+                format!("{} done", self.verb),
                 self.current_file_total,
                 self.current_file_copied,
             );
@@ -195,7 +202,7 @@ impl<R: Read> Read for ProgressReader<R> {
         {
             self.reporter.send_snapshot(
                 Some(self.current_file.clone()),
-                Some(format!("Compressing {}", self.current_file)),
+                Some(format!("{} {}", self.verb, self.current_file)),
                 self.current_file_total,
                 self.current_file_copied,
                 false,
@@ -264,6 +271,7 @@ pub(crate) fn map_archive_error(error: impl ToString, cancel_flag: &AtomicBool) 
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn open_progress_reader(
     source_path: &Path,
     archive_name: &str,
@@ -290,7 +298,35 @@ pub(crate) fn open_progress_reader(
         ),
         archive_name.to_string(),
         size,
+        "Compressing",
     ))
+}
+
+/// Emit a "Preparing …" snapshot for extraction, where totals come from a pre-scan of the
+/// archive entries (extraction cannot use `build_archive_plan`, which walks the filesystem).
+pub(crate) fn emit_preparing_extract(
+    tx: &mpsc::Sender<ServerMessage>,
+    job_id: &str,
+    bro_name: &str,
+    total_files: usize,
+    total_bytes_total: u64,
+) {
+    send_progress_sync(
+        tx,
+        job_id,
+        FileOpProgressSchema {
+            total_files,
+            completed_files: 0,
+            current_file: None,
+            status_text: Some(format!("Preparing {bro_name} extraction")),
+            current_file_bytes_total: 0,
+            current_file_bytes_copied: 0,
+            total_bytes_total,
+            total_bytes_copied: 0,
+            current_file_percent: None,
+            overall_percent: None,
+        },
+    );
 }
 
 fn collect_plan_item(
