@@ -77,6 +77,7 @@ pub enum JobState {
 #[derive(Clone, Debug, serde::Serialize)]
 pub struct FileOpEntry {
     pub name: String,
+    pub dest_name: Option<String>,
     pub source_path: String,
     pub size: Option<u64>,
     pub kind: String,

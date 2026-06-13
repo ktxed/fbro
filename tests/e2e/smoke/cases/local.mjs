@@ -39,6 +39,38 @@ export async function runLocalFlow(browser, observer) {
   await observer.waitForEntry("right", "alpha", "directory");
   await closeTerminalJobDialog(browser);
 
+  await clickEntry(browser, "left", "alpha");
+  await clickCommand(browser, "file.copy");
+  const duplicateWarning = await browser.$('[data-testid="operation-dialog"] .modal__warning');
+  await duplicateWarning.waitForDisplayed({ timeout: 10_000 });
+  const duplicateCopyButton = await browser.$('[data-command-id="file.copy.confirm"]');
+  if (await duplicateCopyButton.isEnabled()) {
+    throw new Error("duplicate destination copy button should be disabled");
+  }
+  await clickCommand(browser, "file.copy.cancel");
+
+  await createFile(browser, observer, "left", "single-copy.txt");
+  fs.writeFileSync(hostPath(path.posix.join(aSrc, "single-copy.txt")), "single payload\n");
+  await clickEntry(browser, "left", "single-copy.txt");
+  await clickCommand(browser, "file.copy");
+  const fileCopyNameInput = await browser.$('[data-testid="copy-destination-name-input"]');
+  await fileCopyNameInput.waitForDisplayed({ timeout: 10_000 });
+  await fileCopyNameInput.setValue("single-renamed.txt");
+  await confirmOperation(browser, "file.copy.confirm");
+  await observer.waitForJobIdle();
+  await observer.waitForEntry("right", "single-renamed.txt", "file");
+  await closeTerminalJobDialog(browser);
+
+  await clickEntry(browser, "left", "alpha");
+  await clickCommand(browser, "file.copy");
+  const folderCopyNameInput = await browser.$('[data-testid="copy-destination-name-input"]');
+  await folderCopyNameInput.waitForDisplayed({ timeout: 10_000 });
+  await folderCopyNameInput.setValue("alpha-copy");
+  await confirmOperation(browser, "file.copy.confirm");
+  await observer.waitForJobIdle();
+  await observer.waitForEntry("right", "alpha-copy", "directory");
+  await closeTerminalJobDialog(browser);
+
   await doubleClickEntry(browser, "right", "alpha");
   await observer.waitForPanelPath("right", path.posix.join(aDst, "alpha"));
   await clickEntry(browser, "right", "note.txt");
@@ -58,6 +90,10 @@ export async function runLocalFlow(browser, observer) {
 
   const copied = fs.readFileSync(hostPath(path.posix.join(aDst, "alpha/renamed.txt")), "utf8");
   if (copied !== "renamed payload\n") throw new Error("renamed copied file content mismatch");
+  const renamedSingle = fs.readFileSync(hostPath(path.posix.join(aDst, "single-renamed.txt")), "utf8");
+  if (renamedSingle !== "single payload\n") throw new Error("renamed single-file copy content mismatch");
+  const renamedFolderFile = fs.readFileSync(hostPath(path.posix.join(aDst, "alpha-copy/note.txt")), "utf8");
+  if (renamedFolderFile !== "renamed payload\n") throw new Error("renamed folder copy content mismatch");
   if (fs.existsSync(hostPath(path.posix.join(aDst, "alpha/remove.txt")))) throw new Error("deleted file still exists");
 
   // ── Sort validation ──────────────────────────────────────────────────────

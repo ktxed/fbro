@@ -1642,7 +1642,7 @@ body {
   border: 1px solid var(--border-focus);
   border-radius: 6px;
   min-width: 360px;
-  max-width: 520px;
+  max-width: 560px;
   display: flex;
   flex-direction: column;
   width: 90%;
@@ -1865,9 +1865,27 @@ body {
   margin-top: 8px;
 }
 
+.modal__option--field {
+  align-items: baseline;
+}
+
 .modal__option label {
   font-size: var(--font-size);
   color: var(--text-dim);
+}
+
+.modal__copy-name-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.modal__warning {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  color: var(--text-warning);
+  font-size: var(--font-size);
 }
 
 .modal__mnemonic {
@@ -1895,7 +1913,7 @@ body {
 }
 
 .modal--fixed {
-  height: 340px;
+  height: 380px;
 }
 
 /* Sync Bro needs more room for the results lists. */
@@ -1950,6 +1968,15 @@ body {
   background: var(--bg-focused);
   color: var(--text);
   border-color: var(--border-focus);
+}
+
+.modal__btn:disabled,
+.modal__btn:disabled:hover {
+  opacity: 0.55;
+  cursor: not-allowed;
+  background: var(--bg-footer);
+  color: var(--text-dim);
+  border-color: var(--border);
 }
 
 .modal__btn--primary {

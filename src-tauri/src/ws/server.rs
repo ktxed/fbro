@@ -653,6 +653,7 @@ async fn apply_job_event_to_state(state: &SharedState, msg: &ServerMessage) {
                         .iter()
                         .map(|file| crate::jobs::FileOpEntry {
                             name: file.name.clone(),
+                            dest_name: None,
                             source_path: file.source_path.clone().unwrap_or_default(),
                             size: file.size,
                             kind: file.kind.clone(),

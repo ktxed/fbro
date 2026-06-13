@@ -4,7 +4,7 @@ use std::sync::{atomic::AtomicBool, Arc};
 use serde_json::Value;
 use tokio::sync::{mpsc, watch, Mutex};
 
-use crate::jobs::file_ops::{generate_dry_run_script, run_file_op};
+use crate::jobs::file_ops::{generate_dry_run_script, run_file_op, same_resolved_path};
 use crate::jobs::search::{
     run_search, MaskMode, SearchDepth, SearchParams, SearchResultStore, SizeOp, TimeOp,
 };
@@ -48,6 +48,7 @@ struct StartFileOpArgs {
     source_panel: String,
     dest_panel: Option<String>,
     dest_path: Option<String>,
+    dest_name: Option<String>,
     op_type: String,
     conflict_policy: String,
     verification_policy: String,
@@ -74,6 +75,7 @@ impl StartFileOpArgs {
             source_panel: arg_str(args, "sourcePanel").unwrap_or("").to_string(),
             dest_panel: arg_str(args, "destPanel").map(String::from),
             dest_path: arg_str(args, "destPath").map(String::from),
+            dest_name: arg_str(args, "destName").map(String::from),
             op_type: arg_str(args, "opType").unwrap_or("copy").to_string(),
             conflict_policy: arg_str(args, "conflictPolicy").unwrap_or("ask").to_string(),
             verification_policy: arg_str(args, "verificationPolicy")
@@ -108,6 +110,29 @@ impl WriteExternalClipboardArgs {
             op_type: arg_str(args, "opType").unwrap_or("copy").to_string(),
         }
     }
+}
+
+fn validate_copy_dest_name(
+    op_type: &FileOpType,
+    files: &[FileOpEntry],
+    dest_name: &str,
+) -> Result<String, String> {
+    if dest_name.is_empty() {
+        return Err("Destination name is required.".to_string());
+    }
+    if dest_name.contains('/') || dest_name.contains('\\') {
+        return Err("Destination name cannot contain path separators.".to_string());
+    }
+    if *op_type != FileOpType::Copy {
+        return Err("Destination name can only be used with copy.".to_string());
+    }
+    if files.len() != 1 {
+        return Err("Destination name can only be used when copying one item.".to_string());
+    }
+    if files[0].kind != "file" && files[0].kind != "directory" {
+        return Err("Destination name can only be used for files and folders.".to_string());
+    }
+    Ok(dest_name.to_string())
 }
 
 struct JobDecisionArgs {
@@ -709,6 +734,7 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
                     })?;
                     Ok(FileOpEntry {
                         name: file.name.clone(),
+                        dest_name: None,
                         source_path,
                         size: file.size,
                         kind: file.kind.clone(),
@@ -743,6 +769,7 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
                     .filter_map(|&index| {
                         source_panel.entries.get(index).map(|entry| FileOpEntry {
                             name: entry.name.clone(),
+                            dest_name: None,
                             source_path: panel_driver
                                 .resolve_child(&source_panel.path, &entry.name),
                             size: entry.size,
@@ -760,6 +787,7 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
                         let panel_entry = source_panel.entries.iter().find(|e| e.name == file.name);
                         FileOpEntry {
                             name: file.name.clone(),
+                            dest_name: None,
                             source_path: panel_driver.resolve_child(&source_panel.path, &file.name),
                             size: file.size,
                             kind: file.kind.clone(),
@@ -830,7 +858,7 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
     }
     .await;
 
-    let (files, source_path, dest_path, src_driver, dst_driver) = match prepared {
+    let (mut files, source_path, dest_path, src_driver, dst_driver) = match prepared {
         Ok(prepared) => prepared,
         Err(error) => {
             let _ = send_error(ctx, "START_FILE_OP_FAILED", error).await;
@@ -840,6 +868,36 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
 
     if files.is_empty() {
         return;
+    }
+
+    if let Some(dest_name) = parsed.dest_name.as_deref() {
+        match validate_copy_dest_name(&op_type, &files, dest_name) {
+            Ok(dest_name) => {
+                files[0].dest_name = Some(dest_name);
+            }
+            Err(error) => {
+                let _ = send_error(ctx, "START_FILE_OP_FAILED", error).await;
+                return;
+            }
+        }
+    }
+
+    if op_type == FileOpType::Copy {
+        if let (Some(dest_dir), Some(dst_driver)) = (dest_path.as_deref(), dst_driver.as_deref()) {
+            for file in &files {
+                let dest_name = file.dest_name.as_deref().unwrap_or(&file.name);
+                let dst = dst_driver.resolve_child(dest_dir, dest_name);
+                if same_resolved_path(&file.source_path, &dst) {
+                    let _ = send_error(
+                        ctx,
+                        "START_FILE_OP_FAILED",
+                        format!("Cannot copy {} onto itself", file.source_path),
+                    )
+                    .await;
+                    return;
+                }
+            }
+        }
     }
 
     if parsed.dry_mode {
@@ -944,6 +1002,16 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
         } else {
             format!("{}/", source_path.trim_end_matches('/'))
         };
+        let single_dest_name = if files.len() == 1 {
+            files[0].dest_name.clone()
+        } else {
+            None
+        };
+        let single_source_inner = if files.len() == 1 {
+            Some(files[0].source_path.trim_matches('/').to_string())
+        } else {
+            None
+        };
         let mut targets: Vec<(String, std::path::PathBuf)> = Vec::new();
         let mut total: u64 = 0;
         for file in &files {
@@ -969,9 +1037,28 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
                 vec![(inner.clone(), size)]
             };
             for (child_inner, size) in expanded {
-                let rel = child_inner
+                let mut rel = child_inner
                     .strip_prefix(&base_prefix)
-                    .unwrap_or(&child_inner);
+                    .unwrap_or(&child_inner)
+                    .to_string();
+                if let Some(dest_name) = single_dest_name.as_deref() {
+                    if file.kind == "directory" {
+                        if let Some(source_inner) = single_source_inner.as_deref() {
+                            let source_prefix = format!("{}/", source_inner.trim_end_matches('/'));
+                            if let Some(child_rel) = child_inner.strip_prefix(&source_prefix) {
+                                rel = if child_rel.is_empty() {
+                                    dest_name.to_string()
+                                } else {
+                                    format!("{dest_name}/{child_rel}")
+                                };
+                            } else if child_inner == source_inner {
+                                rel = dest_name.to_string();
+                            }
+                        }
+                    } else {
+                        rel = dest_name.to_string();
+                    }
+                }
                 let dest = dest_root.join(rel.replace('/', std::path::MAIN_SEPARATOR_STR));
                 total = total.saturating_add(size);
                 targets.push((child_inner, dest));

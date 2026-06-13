@@ -220,7 +220,12 @@ fn run_file_op_blocking(
                 let dst_drv = dst_driver.ok_or("No destination driver for copy/move")?;
                 let dest_dir = dest_path.ok_or("No destination path for copy/move")?;
                 let src = &entry.source_path;
-                let dst_str = dst_drv.resolve_child(dest_dir, &entry.name);
+                let dst_name = destination_name(entry);
+                let dst_str = dst_drv.resolve_child(dest_dir, dst_name);
+
+                if *op_type == FileOpType::Copy && same_resolved_path(src, &dst_str) {
+                    return Err(format!("Cannot copy {src} onto itself"));
+                }
 
                 // For move with same driver: only use O(1) rename when the
                 // destination entry does not already exist. Existing targets
@@ -420,6 +425,33 @@ fn run_file_op_blocking(
     }
 
     Ok(())
+}
+
+fn destination_name(entry: &FileOpEntry) -> &str {
+    entry.dest_name.as_deref().unwrap_or(&entry.name)
+}
+
+pub(crate) fn same_resolved_path(left: &str, right: &str) -> bool {
+    if left == right {
+        return true;
+    }
+    let left_path = Path::new(left);
+    let right_path = Path::new(right);
+    if let (Ok(left_canon), Ok(right_canon)) = (left_path.canonicalize(), right_path.canonicalize())
+    {
+        return left_canon == right_canon;
+    }
+    normalize_path_for_compare(left) == normalize_path_for_compare(right)
+}
+
+fn normalize_path_for_compare(path: &str) -> String {
+    let normalized = path.replace('\\', "/");
+    let trimmed = normalized.trim_end_matches('/');
+    if trimmed.is_empty() {
+        "/".to_string()
+    } else {
+        trimmed.to_string()
+    }
 }
 
 // ─── Conflict resolution ────────────────────────────────────────────────────
@@ -1199,7 +1231,7 @@ pub fn generate_dry_run_script(
             FileOpType::Copy => {
                 let dp = dest_path.ok_or("No destination path for copy dry-run")?;
                 let dd = dst_driver.ok_or("No destination driver for copy dry-run")?;
-                let dst = dd.resolve_child(dp, &entry.name);
+                let dst = dd.resolve_child(dp, destination_name(entry));
                 collect_cp_lines(
                     &entry.source_path,
                     &dst,
@@ -1212,7 +1244,7 @@ pub fn generate_dry_run_script(
             FileOpType::Move => {
                 let dp = dest_path.ok_or("No destination path for move dry-run")?;
                 let dd = dst_driver.ok_or("No destination driver for move dry-run")?;
-                let dst = dd.resolve_child(dp, &entry.name);
+                let dst = dd.resolve_child(dp, destination_name(entry));
                 collect_mv_lines(&entry.source_path, &dst, &mut lines);
             }
         }
@@ -1795,5 +1827,155 @@ mod tests {
         .unwrap_err();
         assert_eq!(err, CANCELLED_ERR);
         assert!(dst_keep.exists());
+    }
+
+    #[test]
+    fn copy_single_file_uses_destination_name() {
+        let dir = TestDir::new("copy-dest-name-file");
+        let src_dir = dir.path.join("src");
+        let dst_dir = dir.path.join("dst");
+        fs::create_dir_all(&src_dir).unwrap();
+        fs::create_dir_all(&dst_dir).unwrap();
+        let src = src_dir.join("source.txt");
+        fs::write(&src, "payload\n").unwrap();
+
+        let driver = crate::vfs::local::LocalFsDriver;
+        let (tx, _rx) = mpsc::channel(64);
+        let (_cancel_tx, cancel_rx) = watch::channel(false);
+        let (_pause_tx, pause_rx) = watch::channel(false);
+        let (_decision_tx, mut decision_rx) = mpsc::channel(1);
+        let entry = FileOpEntry {
+            name: "source.txt".to_string(),
+            dest_name: Some("renamed.txt".to_string()),
+            source_path: src.to_string_lossy().to_string(),
+            size: Some(8),
+            kind: "file".to_string(),
+            mtime: None,
+            permissions: None,
+        };
+
+        run_file_op_blocking(
+            "job-test",
+            &FileOpType::Copy,
+            &[entry],
+            Some(&dst_dir.to_string_lossy()),
+            &ConflictPolicy::Overwrite,
+            &tx,
+            &cancel_rx,
+            &pause_rx,
+            &mut decision_rx,
+            &driver,
+            Some(&driver),
+            false,
+            &VerificationPolicy::Fail,
+            false,
+            false,
+            Arc::new(AtomicBool::new(false)),
+        )
+        .unwrap();
+
+        assert_eq!(
+            fs::read_to_string(dst_dir.join("renamed.txt")).unwrap(),
+            "payload\n"
+        );
+        assert!(src.exists());
+        assert!(!dst_dir.join("source.txt").exists());
+    }
+
+    #[test]
+    fn copy_single_directory_uses_destination_name() {
+        let dir = TestDir::new("copy-dest-name-dir");
+        let src_dir = dir.path.join("src");
+        let dst_dir = dir.path.join("dst");
+        fs::create_dir_all(src_dir.join("folder/nested")).unwrap();
+        fs::create_dir_all(&dst_dir).unwrap();
+        fs::write(src_dir.join("folder/nested/file.txt"), "payload\n").unwrap();
+
+        let driver = crate::vfs::local::LocalFsDriver;
+        let (tx, _rx) = mpsc::channel(64);
+        let (_cancel_tx, cancel_rx) = watch::channel(false);
+        let (_pause_tx, pause_rx) = watch::channel(false);
+        let (_decision_tx, mut decision_rx) = mpsc::channel(1);
+        let entry = FileOpEntry {
+            name: "folder".to_string(),
+            dest_name: Some("renamed-folder".to_string()),
+            source_path: src_dir.join("folder").to_string_lossy().to_string(),
+            size: None,
+            kind: "directory".to_string(),
+            mtime: None,
+            permissions: None,
+        };
+
+        run_file_op_blocking(
+            "job-test",
+            &FileOpType::Copy,
+            &[entry],
+            Some(&dst_dir.to_string_lossy()),
+            &ConflictPolicy::Overwrite,
+            &tx,
+            &cancel_rx,
+            &pause_rx,
+            &mut decision_rx,
+            &driver,
+            Some(&driver),
+            false,
+            &VerificationPolicy::Fail,
+            false,
+            false,
+            Arc::new(AtomicBool::new(false)),
+        )
+        .unwrap();
+
+        assert_eq!(
+            fs::read_to_string(dst_dir.join("renamed-folder/nested/file.txt")).unwrap(),
+            "payload\n"
+        );
+        assert!(src_dir.join("folder/nested/file.txt").exists());
+        assert!(!dst_dir.join("folder").exists());
+    }
+
+    #[test]
+    fn copy_rejects_exact_self_copy() {
+        let dir = TestDir::new("copy-self");
+        let src = dir.path.join("same.txt");
+        fs::write(&src, "payload\n").unwrap();
+
+        let driver = crate::vfs::local::LocalFsDriver;
+        let (tx, _rx) = mpsc::channel(64);
+        let (_cancel_tx, cancel_rx) = watch::channel(false);
+        let (_pause_tx, pause_rx) = watch::channel(false);
+        let (_decision_tx, mut decision_rx) = mpsc::channel(1);
+        let entry = FileOpEntry {
+            name: "same.txt".to_string(),
+            dest_name: None,
+            source_path: src.to_string_lossy().to_string(),
+            size: Some(8),
+            kind: "file".to_string(),
+            mtime: None,
+            permissions: None,
+        };
+
+        let err = run_file_op_blocking(
+            "job-test",
+            &FileOpType::Copy,
+            &[entry],
+            Some(&dir.path.to_string_lossy()),
+            &ConflictPolicy::Overwrite,
+            &tx,
+            &cancel_rx,
+            &pause_rx,
+            &mut decision_rx,
+            &driver,
+            Some(&driver),
+            false,
+            &VerificationPolicy::Fail,
+            false,
+            false,
+            Arc::new(AtomicBool::new(false)),
+        )
+        .unwrap_err();
+
+        assert!(err.contains("onto itself"));
+        assert_eq!(fs::read_to_string(src).unwrap(), "payload\n");
     }
 }

@@ -4,7 +4,7 @@ import type { PendingOp, Job, ConflictPolicy, VerificationPolicy, FileOpFile, Sy
 import { useAppDispatch, useAppState } from "../store";
 import type { AppState, PendingDryRun } from "../store";
 import { isArchiveSourceId } from "../utils/sourceId";
-import { IconCopy } from "@tabler/icons-react";
+import { IconAlertTriangle, IconCopy } from "@tabler/icons-react";
 
 interface OperationModalProps {
   pending: PendingOp | null;
@@ -259,6 +259,64 @@ function hasPartialDestinationFile(destPanelState: AppState["panels"][string] | 
     && destEntry.size < file.size;
 }
 
+function supportsCopyDestName(pending: PendingOp) {
+  if (pending.opType !== "copy" || pending.files.length !== 1) return false;
+  const kind = pending.files[0].kind;
+  return kind === "file" || kind === "directory";
+}
+
+function destinationPanelShowsTargetPath(
+  pending: PendingOp,
+  destPanelState: AppState["panels"][string] | undefined,
+) {
+  return !!destPanelState && (!pending.destPath || pending.destPath === destPanelState.path);
+}
+
+type CopyDestNameIssueKind = "empty" | "separator" | "existing-destination" | "same-panel-name";
+
+interface CopyDestNameIssue {
+  kind: CopyDestNameIssueKind;
+  message: string;
+}
+
+function copyDestNameIssue(
+  pending: PendingOp,
+  destName: string,
+  destPanelState: AppState["panels"][string] | undefined,
+): CopyDestNameIssue | null {
+  if (!supportsCopyDestName(pending)) return null;
+  if (!destName) return { kind: "empty", message: "Destination name is required." };
+  if (/[\\/]/.test(destName)) {
+    return { kind: "separator", message: "Destination name cannot contain path separators." };
+  }
+  if (
+    pending.destPanel !== pending.sourcePanel
+    && destPanelState
+    && destinationPanelShowsTargetPath(pending, destPanelState)
+    && destPanelState.entries.some((entry) => entry.name === destName)
+  ) {
+    return { kind: "existing-destination", message: "Destination already contains an item with this name." };
+  }
+  if (
+    pending.destPanel === pending.sourcePanel
+    && !pending.files[0].sourcePath
+    && destName === pending.files[0].name
+  ) {
+    return { kind: "same-panel-name", message: "Change the destination name when copying into the same panel." };
+  }
+  return null;
+}
+
+function isCopyDestNameConflictIssue(issue: CopyDestNameIssue | null) {
+  return issue?.kind === "existing-destination" || issue?.kind === "same-panel-name";
+}
+
+function isFormControlTarget(target: EventTarget | null) {
+  return target instanceof HTMLInputElement
+    || target instanceof HTMLSelectElement
+    || target instanceof HTMLTextAreaElement;
+}
+
 function canSuggestResumeForPending(state: AppState, pending: PendingOp) {
   const destPanelState = pending.destPanel ? state.panels[pending.destPanel] : undefined;
   return pending.opType !== "delete"
@@ -296,13 +354,23 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
   const [submitted, setSubmitted] = useState(false);
   const [dryMode, setDryMode] = useState(false);
   const [startPaused, setStartPaused] = useState(true);
+  const [destName, setDestName] = useState("");
   const [applyToAll, setApplyToAll] = useState(false);
   const [confirmingCancel, setConfirmingCancel] = useState(false);
   const modalRef = useRef<HTMLDivElement>(null);
+  const destNameInputRef = useRef<HTMLInputElement>(null);
+  const selectedDestNameConflictRef = useRef<string | null>(null);
   const p = activeJob?.progress;
   const isTransferTerminal = activeJob?.state === "Completed" || activeJob?.state === "Cancelled" || activeJob?.state === "Failed";
   const { speed, samples: speedSamples } = useJobTransferSpeed(activeJobId, p?.totalBytesCopied ?? 0, isTransferTerminal);
   const pendingKey = pendingSessionKey(pending);
+  const pendingDestPanelState = pending?.destPanel ? state.panels[pending.destPanel] : undefined;
+  const pendingDestNameIssue = pending && supportsCopyDestName(pending)
+    ? copyDestNameIssue(pending, destName, pendingDestPanelState)
+    : null;
+  const pendingDestNameConflictKey = pending && isCopyDestNameConflictIssue(pendingDestNameIssue)
+    ? `${pendingKey}:${pendingDestNameIssue?.kind}:${destName}`
+    : null;
 
   const close = () => { setSubmitted(false); setDryMode(false); dispatch({ type: "CLOSE_OPERATION" }); };
   const closeDryRun = () => { setSubmitted(false); setDryMode(false); dispatch({ type: "CLOSE_DRY_RUN" }); };
@@ -336,7 +404,22 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
   useEffect(() => {
     if (!pending) return;
     setConflictPolicy(shouldDefaultResumeForPending(state, pending) ? "resume" : pending.conflictPolicy);
+    setDestName(supportsCopyDestName(pending) ? pending.files[0].name : "");
   }, [pendingKey]);
+
+  useEffect(() => {
+    if (!pendingDestNameConflictKey) {
+      selectedDestNameConflictRef.current = null;
+      return;
+    }
+    if (selectedDestNameConflictRef.current === pendingDestNameConflictKey) return;
+    selectedDestNameConflictRef.current = pendingDestNameConflictKey;
+    const timer = window.setTimeout(() => {
+      destNameInputRef.current?.focus();
+      destNameInputRef.current?.select();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [pendingDestNameConflictKey]);
 
   // Nothing to show
   if (!pendingDryRun && !pending && !activeJob) return null;
@@ -394,9 +477,12 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
       ? ["ask", "resume", "overwrite", "skip"]
       : ["ask", "overwrite", "skip"];
     const selectedConflictPolicy = conflictPolicies.includes(conflictPolicy) ? conflictPolicy : "ask";
+    const showDestNameInput = supportsCopyDestName(pending);
+    const destNameWarning = showDestNameInput ? pendingDestNameIssue?.message ?? null : null;
+    const canSubmitPending = !submitted && !destNameWarning;
 
     const startOp = (background: boolean) => {
-      if (submitted) return;
+      if (!canSubmitPending) return;
       setSubmitted(true);
       client.sendIntent("StartFileOp", undefined, {
         opType: pending.opType,
@@ -404,6 +490,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
         sourcePanel: pending.sourcePanel,
         destPanel: pending.destPanel,
         destPath: pending.destPath,
+        ...(showDestNameInput && destName !== pending.files[0].name ? { destName } : {}),
         conflictPolicy: selectedConflictPolicy,
         verificationPolicy,
         saveDigestFile,
@@ -434,6 +521,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
         close();
         return;
       }
+      if (isFormControlTarget(e.target) && e.key !== "Enter") return;
       if (e.key === "Enter") {
         e.preventDefault();
         startOp(false);
@@ -519,6 +607,27 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
                     {" "}Save BLAKE3 digest file
                   </label>
                 </div>
+                {showDestNameInput && (
+                  <>
+                    <div className="modal__option modal__option--field">
+                      <label htmlFor="copy-destination-name">Destination name:</label>
+                      <input
+                        ref={destNameInputRef}
+                        id="copy-destination-name"
+                        className="modal__rename-input modal__copy-name-input"
+                        data-testid="copy-destination-name-input"
+                        value={destName}
+                        onChange={(e) => setDestName(e.target.value)}
+                      />
+                    </div>
+                    {destNameWarning && (
+                      <div className="modal__warning" role="alert">
+                        <IconAlertTriangle size={15} />
+                        <span>{destNameWarning}</span>
+                      </div>
+                    )}
+                  </>
+                )}
               </>
             )}
             <div className="modal__option">
@@ -545,11 +654,11 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
             )}
           </div>
           <div className="modal__actions">
-            <button className="modal__btn modal__btn--primary" data-command-id={`file.${pending.opType}.confirm`} disabled={submitted} onClick={() => startOp(false)}>
+            <button className="modal__btn modal__btn--primary" data-command-id={`file.${pending.opType}.confirm`} disabled={!canSubmitPending} onClick={() => startOp(false)}>
               {submitted ? "Starting…" : label}
             </button>
             {canStartInBackground && (
-              <button className="modal__btn" data-command-id={`file.${pending.opType}.background`} disabled={submitted} onClick={() => startOp(true)}>
+              <button className="modal__btn" data-command-id={`file.${pending.opType}.background`} disabled={!canSubmitPending} onClick={() => startOp(true)}>
                 <MnemonicLabel text="Background" mnemonic="b" />
               </button>
             )}
