@@ -17,7 +17,7 @@ services:
       - ./artifacts/e2e:/artifacts
       - ./artifacts/e2e/fbro-a/state:/state/a
       - ./artifacts/e2e/fbro-a/work:/work/a
-      - ./src-tauri/target/release/fbro:/usr/local/bin/fbro:ro
+      - ${FBRO_E2E_BACKEND_BINARY:-./src-tauri/target/release/fbro}:/usr/local/bin/fbro:ro
     command: >
       bash -lc '
         set -o pipefail &&
@@ -42,7 +42,7 @@ services:
       - ./artifacts/e2e:/artifacts
       - ./artifacts/e2e/fbro-b/state:/state/b
       - ./artifacts/e2e/fbro-b/work:/work/b
-      - ./src-tauri/target/release/fbro:/usr/local/bin/fbro:ro
+      - ${FBRO_E2E_BACKEND_BINARY:-./src-tauri/target/release/fbro}:/usr/local/bin/fbro:ro
     command: >
       bash -lc '
         set -o pipefail &&

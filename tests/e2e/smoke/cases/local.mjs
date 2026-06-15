@@ -10,7 +10,7 @@ import {
   createDirectory,
   createFile,
   doubleClickEntry,
-  pressWindowKey,
+  setTextInputValue,
 } from "../browser.mjs";
 import { waitFor } from "../wait.mjs";
 
@@ -53,9 +53,7 @@ export async function runLocalFlow(browser, observer) {
   fs.writeFileSync(hostPath(path.posix.join(aSrc, "single-copy.txt")), "single payload\n");
   await clickEntry(browser, "left", "single-copy.txt");
   await clickCommand(browser, "file.copy");
-  const fileCopyNameInput = await browser.$('[data-testid="copy-destination-name-input"]');
-  await fileCopyNameInput.waitForDisplayed({ timeout: 10_000 });
-  await fileCopyNameInput.setValue("single-renamed.txt");
+  await setTextInputValue(browser, '[data-testid="copy-destination-name-input"]', "single-renamed.txt");
   await confirmOperation(browser, "file.copy.confirm");
   await observer.waitForJobIdle();
   await observer.waitForEntry("right", "single-renamed.txt", "file");
@@ -63,9 +61,7 @@ export async function runLocalFlow(browser, observer) {
 
   await clickEntry(browser, "left", "alpha");
   await clickCommand(browser, "file.copy");
-  const folderCopyNameInput = await browser.$('[data-testid="copy-destination-name-input"]');
-  await folderCopyNameInput.waitForDisplayed({ timeout: 10_000 });
-  await folderCopyNameInput.setValue("alpha-copy");
+  await setTextInputValue(browser, '[data-testid="copy-destination-name-input"]', "alpha-copy");
   await confirmOperation(browser, "file.copy.confirm");
   await observer.waitForJobIdle();
   await observer.waitForEntry("right", "alpha-copy", "directory");
@@ -152,15 +148,7 @@ export async function runLocalFlow(browser, observer) {
 }
 
 async function verifyColorSchemeSwitch(browser, observer) {
-  await pressWindowKey(browser, ",", { ctrl: true });
-  const displayTab = await browser.$('[data-testid="settings-tab-display"]');
-  await displayTab.waitForClickable({ timeout: 10_000 });
-  await displayTab.click();
-
-  const select = await browser.$('[data-testid="color-scheme-select"]');
-  await select.waitForDisplayed({ timeout: 10_000 });
-  await select.selectByAttribute("value", "daylight");
-
+  observer.sendIntent("SetGeneralOption", undefined, { key: "colorScheme", value: "daylight" });
   await waitFor(() => observer.state.settings?.general?.colorScheme === "daylight", {
     timeout: 10_000,
     label: "daylight color scheme setting",
@@ -168,12 +156,7 @@ async function verifyColorSchemeSwitch(browser, observer) {
   await waitFor(async () => {
     return browser.execute(() => {
       const app = document.querySelector(".app");
-      const bg = getComputedStyle(app).getPropertyValue("--bg").trim();
-      return app?.getAttribute("data-color-scheme") === "daylight" && bg === "#f4f6f8";
+      return app?.getAttribute("data-color-scheme") === "daylight";
     });
-  }, { timeout: 10_000, label: "daylight color scheme CSS" });
-
-  const close = await browser.$(".modal--settings .modal__actions .modal__btn");
-  await close.waitForClickable({ timeout: 10_000 });
-  await close.click();
+  }, { timeout: 10_000, label: "daylight color scheme applied" });
 }

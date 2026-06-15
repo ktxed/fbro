@@ -69,6 +69,31 @@ export async function doubleClickEntry(browser, panelId, name) {
   await el.doubleClick();
 }
 
+export async function setTextInputValue(browser, selector, value) {
+  const input = await browser.$(selector);
+  await input.waitForDisplayed({ timeout: 10_000 });
+  await browser.execute(({ selector, value }) => {
+    const el = document.querySelector(selector);
+    if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) {
+      throw new Error(`Expected text input for selector: ${selector}`);
+    }
+    const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    const valueSetter = Object.getOwnPropertyDescriptor(proto, "value")?.set;
+    valueSetter?.call(el, value);
+    el.dispatchEvent(new InputEvent("input", {
+      bubbles: true,
+      cancelable: true,
+      data: value,
+      inputType: "insertReplacementText",
+    }));
+  }, { selector, value });
+  await waitFor(async () => await input.getValue() === value, {
+    timeout: 5_000,
+    label: `${selector} value ${value}`,
+  });
+  return input;
+}
+
 export async function pressPanelKey(browser, panelId, key, modifiers = {}) {
   await browser.execute(({ panelId, key, modifiers }) => {
     const el = document.querySelector(`[data-testid="panel-${panelId}"]`);

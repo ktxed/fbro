@@ -115,17 +115,18 @@ async function waitForWebSocket(url, label) {
 
 export async function startLocalBackends() {
   requireDockerUsable();
+  const composeEnv = { ...process.env, FBRO_E2E_BACKEND_BINARY: appBinary };
   execFileSync("docker", dockerComposeArgs(
     "build",
     "fbro-a",
-  ), { cwd: repoRoot, stdio: "inherit" });
+  ), { cwd: repoRoot, env: composeEnv, stdio: "inherit" });
   execFileSync("docker", dockerComposeArgs(
     "up",
     "-d",
     "--no-build",
     "fbro-a",
     "fbro-b",
-  ), { cwd: repoRoot, stdio: "inherit" });
+  ), { cwd: repoRoot, env: composeEnv, stdio: "inherit" });
   await Promise.all([
     waitForWebSocket(wsUrls.a, "fbro-a backend websocket"),
     waitForWebSocket(wsUrls.b, "fbro-b backend websocket"),

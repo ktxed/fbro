@@ -11,11 +11,16 @@ export const composeFiles = (process.env.FBRO_E2E_COMPOSE_FILES ?? "docker-compo
   .split(path.delimiter)
   .filter(Boolean);
 
+function newestExistingPath(candidates) {
+  return candidates
+    .map((candidate) => path.join(repoRoot, candidate))
+    .filter((candidate) => fs.existsSync(candidate))
+    .sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs)[0];
+}
+
 export const appBinary = process.env.FBRO_APP_BINARY ?? (
   localMode
-    ? ["src-tauri/target/release/fbro", "src-tauri/target/debug/fbro"]
-        .map((candidate) => path.join(repoRoot, candidate))
-        .find((candidate) => fs.existsSync(candidate))
+    ? newestExistingPath(["src-tauri/target/release/fbro", "src-tauri/target/debug/fbro"])
     : "/app/src-tauri/target/release/fbro"
 );
 
