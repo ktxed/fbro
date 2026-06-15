@@ -1,7 +1,16 @@
 import fs from "node:fs";
 import path from "node:path";
 import { artifactsDir, backendPath, hostPath } from "../config.mjs";
-import { reloadBrowserApp } from "../browser.mjs";
+import {
+  clickCommand,
+  clickEntry,
+  clickSource,
+  closeTerminalJobDialog,
+  confirmOperation,
+  doubleClickEntry,
+  expectCheckboxSelected,
+  reloadBrowserApp,
+} from "../browser.mjs";
 import { waitFor } from "../wait.mjs";
 
 function tinyBmp() {
@@ -148,17 +157,18 @@ export async function runRemoteFlow(browserA, observerA, browserB, observerB) {
     timeout: 10_000,
     label: "remote panel list mode restore",
   });
-  observerB.sendIntent("StartFileOp", undefined, {
-    opType: "copy",
-    files: [{ name: "remote.txt", kind: "file" }],
-    sourcePanel: "left",
-    destPanel: "right",
-    destPath: bDst,
-    conflictPolicy: "overwrite",
-    verificationPolicy: "fail",
-    saveDigestFile: false,
-    background: true,
-  });
+  await clickSource(browserB, "left", remoteSource.id);
+  await doubleClickEntry(browserB, "left", "Downloads");
+  await clickEntry(browserB, "left", "remote.txt");
+  await clickCommand(browserB, "file.copy");
+  const saveDigestFile = await expectCheckboxSelected(
+    browserB,
+    '[data-testid="copy-save-digest-file-input"]',
+    true,
+    "remote copy digest checkbox default",
+  );
+  await saveDigestFile.click();
+  await confirmOperation(browserB, "file.copy.confirm");
   await observerB.waitForJobIdle(30_000);
   await waitFor(() => fs.existsSync(hostPath(path.posix.join(bDst, "remote.txt"))), {
     timeout: 20_000,
@@ -166,6 +176,7 @@ export async function runRemoteFlow(browserA, observerA, browserB, observerB) {
   });
   const copied = fs.readFileSync(hostPath(path.posix.join(bDst, "remote.txt")), "utf8");
   if (copied !== "remote payload\n") throw new Error("remote copied file content mismatch");
+  await closeTerminalJobDialog(browserB);
 
   observerB.sendIntent("NavigateUp", "left");
   await observerB.waitForPanelPath("left", "");

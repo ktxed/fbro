@@ -337,6 +337,13 @@ function shouldDefaultResumeForPending(state: AppState, pending: PendingOp) {
     && hasPartialDestinationFile(destPanelState, pending.files[0]);
 }
 
+function shouldDefaultSaveDigestFileForPending(state: AppState, pending: PendingOp) {
+  if (pending.opType !== "copy") return false;
+  const sourcePanelState = state.panels[pending.sourcePanel];
+  const source = sourcePanelState ? state.sources[sourcePanelState.sourceId] : undefined;
+  return source?.kind === "remote";
+}
+
 function pendingSessionKey(pending: PendingOp | null) {
   if (!pending) return "none";
   const filesKey = pending.files
@@ -350,7 +357,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
   const dispatch = useAppDispatch();
   const [conflictPolicy, setConflictPolicy] = useState<ConflictPolicy>("ask");
   const [verificationPolicy, setVerificationPolicy] = useState<VerificationPolicy>("fail");
-  const [saveDigestFile, setSaveDigestFile] = useState(true);
+  const [saveDigestFileState, setSaveDigestFileState] = useState({ pendingKey: "none", value: false });
   const [submitted, setSubmitted] = useState(false);
   const [dryMode, setDryMode] = useState(false);
   const [startPaused, setStartPaused] = useState(true);
@@ -371,6 +378,10 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
   const pendingDestNameConflictKey = pending && isCopyDestNameConflictIssue(pendingDestNameIssue)
     ? `${pendingKey}:${pendingDestNameIssue?.kind}:${destName}`
     : null;
+  const defaultSaveDigestFile = pending ? shouldDefaultSaveDigestFileForPending(state, pending) : false;
+  const saveDigestFile = saveDigestFileState.pendingKey === pendingKey
+    ? saveDigestFileState.value
+    : defaultSaveDigestFile;
 
   const close = () => { setSubmitted(false); setDryMode(false); dispatch({ type: "CLOSE_OPERATION" }); };
   const closeDryRun = () => { setSubmitted(false); setDryMode(false); dispatch({ type: "CLOSE_DRY_RUN" }); };
@@ -601,8 +612,9 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
                   <label>
                     <input
                       type="checkbox"
+                      data-testid="copy-save-digest-file-input"
                       checked={saveDigestFile}
-                      onChange={(e) => setSaveDigestFile(e.target.checked)}
+                      onChange={(e) => setSaveDigestFileState({ pendingKey, value: e.target.checked })}
                     />
                     {" "}Save BLAKE3 digest file
                   </label>

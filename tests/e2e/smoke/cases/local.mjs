@@ -10,6 +10,7 @@ import {
   createDirectory,
   createFile,
   doubleClickEntry,
+  expectCheckboxSelected,
   setTextInputValue,
 } from "../browser.mjs";
 import { waitFor } from "../wait.mjs";
@@ -34,6 +35,12 @@ export async function runLocalFlow(browser, observer) {
   await observer.waitForEntry("left", "alpha", "directory");
   await clickEntry(browser, "left", "alpha");
   await clickCommand(browser, "file.copy");
+  await expectCheckboxSelected(
+    browser,
+    '[data-testid="copy-save-digest-file-input"]',
+    false,
+    "local copy digest checkbox default",
+  );
   await confirmOperation(browser, "file.copy.confirm");
   await observer.waitForJobIdle();
   await observer.waitForEntry("right", "alpha", "directory");

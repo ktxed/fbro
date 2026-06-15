@@ -57,8 +57,25 @@ export async function clickCommand(browser, commandId) {
   await el.click();
 }
 
+export async function expectCheckboxSelected(browser, selector, expected, label) {
+  const input = await browser.$(selector);
+  await input.waitForDisplayed({ timeout: 10_000 });
+  const selected = await input.isSelected();
+  if (selected !== expected) {
+    throw new Error(`${label} expected ${expected ? "checked" : "unchecked"}, got ${selected ? "checked" : "unchecked"}`);
+  }
+  return input;
+}
+
 export async function clickEntry(browser, panelId, name) {
   const el = await browser.$(`[data-testid="panel-${panelId}"] [data-testid="panel-entry"][data-entry-name="${cssString(name)}"]`);
+  await el.waitForClickable({ timeout: 10_000 });
+  await el.click();
+  return el;
+}
+
+export async function clickSource(browser, panelId, sourceId) {
+  const el = await browser.$(`[data-testid="panel-${panelId}"] [data-source-id="${cssString(sourceId)}"] .panel__volume-btn`);
   await el.waitForClickable({ timeout: 10_000 });
   await el.click();
   return el;
