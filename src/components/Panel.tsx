@@ -28,6 +28,12 @@ const GRID_CARD_MIN_WIDTH = 144;
 const GRID_GAP = 8;
 const GRID_PADDING = 16; // 8px on each side from .panel__list--grid padding
 const FILTER_DEBOUNCE_MS = 200;
+const SORT_COLUMNS = [
+  { id: "kind", label: "Kind" },
+  { id: "name", label: "Name" },
+  { id: "size", label: "Size" },
+  { id: "date", label: "Date" },
+] as const;
 
 function computeGridMetrics(listEl: HTMLElement | null) {
   if (!listEl) return { cols: 1, cardWidth: GRID_CARD_MIN_WIDTH, cardHeight: 168, pageRows: 1 };
@@ -71,6 +77,43 @@ function SortHeader({ sort, panelId, client }: {
       <span className="panel__sort-name" onClick={() => handleSort("name")}>Name {tri("name")}</span>
       <span className="panel__sort-size" onClick={() => handleSort("size")}>Size {tri("size")}</span>
       <span className="panel__sort-date" onClick={() => handleSort("date")}>Date {tri("date")}</span>
+    </div>
+  );
+}
+
+function SortSelector({
+  draft,
+  current,
+}: {
+  draft: PanelState["sort"];
+  current: PanelState["sort"];
+}) {
+  return (
+    <div className="panel__sort-selector" data-testid="panel-sort-selector">
+      <div className="panel__sort-selector-row">
+        {SORT_COLUMNS.map((column) => {
+          const active = draft.by === column.id;
+          const applied = current.by === column.id;
+          const Icon = draft.order === "desc" ? IconChevronDown : IconChevronUp;
+          return (
+            <div
+              key={column.id}
+              className={[
+                "panel__sort-selector-col",
+                active ? "panel__sort-selector-col--active" : "",
+                applied ? "panel__sort-selector-col--applied" : "",
+              ].filter(Boolean).join(" ")}
+              data-sort-column={column.id}
+              data-sort-active={active ? "true" : "false"}
+            >
+              <span className="panel__sort-selector-label">{column.label}</span>
+              <span className="panel__sort-selector-icon">
+                {active ? <Icon size={14} /> : applied ? (current.order === "desc" ? <IconChevronDown size={13} /> : <IconChevronUp size={13} />) : null}
+              </span>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -514,6 +557,9 @@ export function Panel({
   const filterInputRef = useRef<HTMLInputElement>(null);
   const filterDebounceRef = useRef<number>(0);
   const shouldFocusFilterRef = useRef(false);
+  const sortSelectorOpen = appState.activeSortSelectorPanelId === panelId;
+  const sortSelectorOpenRef = useRef(sortSelectorOpen);
+  const [sortDraft, setSortDraft] = useState<PanelState["sort"]>(panel.sort);
 
   const sendFilterValue = useCallback((value: string) => {
     client.sendIntent("SetFilter", panelId, { value });
@@ -529,6 +575,43 @@ export function Panel({
     shouldFocusFilterRef.current = false;
     focusDivRef.current?.focus();
   }, []);
+
+  const closeSortSelector = useCallback(() => {
+    if (appState.activeSortSelectorPanelId === panelId) {
+      dispatch({ type: "CLOSE_SORT_SELECTOR" });
+    }
+  }, [appState.activeSortSelectorPanelId, dispatch, panelId]);
+
+  const applySortSelector = useCallback(() => {
+    client.sendIntent("SetSort", panelId, sortDraft);
+    dispatch({ type: "CLOSE_SORT_SELECTOR" });
+  }, [client, dispatch, panelId, sortDraft]);
+
+  const handleSortSelectorKeyDown = useCallback((e: React.KeyboardEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (e.key === "Escape") {
+      closeSortSelector();
+      return;
+    }
+    if (e.key === "Enter") {
+      applySortSelector();
+      return;
+    }
+    if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+      setSortDraft((current) => ({ ...current, order: current.order === "asc" ? "desc" : "asc" }));
+      return;
+    }
+    if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+      setSortDraft((current) => {
+        const idx = SORT_COLUMNS.findIndex((column) => column.id === current.by);
+        const direction = e.key === "ArrowRight" ? 1 : -1;
+        const nextIdx = (Math.max(0, idx) + direction + SORT_COLUMNS.length) % SORT_COLUMNS.length;
+        return { ...current, by: SORT_COLUMNS[nextIdx].id };
+      });
+    }
+  }, [applySortSelector, closeSortSelector]);
 
   const closeFilterMode = useCallback((options?: { clear?: boolean }) => {
     const clear = options?.clear ?? false;
@@ -648,6 +731,30 @@ export function Panel({
       focusDivRef.current?.focus();
     }
   }, [isFocused, modalActive, panel.filterModeActive]);
+
+  useEffect(() => {
+    if (sortSelectorOpen) {
+      setSortDraft(panel.sort);
+    }
+  }, [sortSelectorOpen, panel.sort]);
+
+  useEffect(() => {
+    if (sortSelectorOpen && (!isFocused || modalActive || panel.filterModeActive)) {
+      dispatch({ type: "CLOSE_SORT_SELECTOR" });
+    }
+  }, [dispatch, isFocused, modalActive, panel.filterModeActive, sortSelectorOpen]);
+
+  useEffect(() => {
+    sortSelectorOpenRef.current = sortSelectorOpen;
+  }, [sortSelectorOpen]);
+
+  useEffect(() => {
+    return () => {
+      if (sortSelectorOpenRef.current) {
+        dispatch({ type: "CLOSE_SORT_SELECTOR" });
+      }
+    };
+  }, [dispatch]);
 
   // Restore focus to the listing when the embedded terminal closes.
   useEffect(() => {
@@ -859,6 +966,10 @@ export function Panel({
     // Keys typed inside the embedded terminal must not trigger panel shortcuts —
     // otherwise typing a literal `t` into the shell would close the terminal.
     if (e.target instanceof Element && e.target.closest(".panel-terminal")) {
+      return;
+    }
+    if (sortSelectorOpen) {
+      handleSortSelectorKeyDown(e);
       return;
     }
     if (panel.filterModeActive && e.key === "Escape") {
@@ -1464,6 +1575,10 @@ export function Panel({
           </>
         )}
       </div>
+
+      {sortSelectorOpen && (
+        <SortSelector draft={sortDraft} current={panel.sort} />
+      )}
 
       {panel.filterModeActive && (
         <div className="panel__filter-bar">

@@ -536,6 +536,13 @@ pub(crate) fn build_interactive_commands() -> Vec<InteractiveCommandSchema> {
             None,
         ),
         command(
+            "panel.sort.open",
+            "Panel",
+            "Sort Panel",
+            vec![keybinding_with_modifiers("s", true, false, false, false)],
+            None,
+        ),
+        command(
             "panel.bookmarks.open",
             "Panel",
             "Bookmarks…",

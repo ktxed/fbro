@@ -87,6 +87,7 @@ export const PANEL_SHORTCUT_COMMAND_IDS = [
   "panel.context_menu",
   "panel.toggle_hidden",
   "panel.toggle_view_mode",
+  "panel.sort.open",
   "panel.bookmarks.open",
   "panel.bookmarks.browse",
   "panel.toggle_embedded_terminal",
@@ -898,6 +899,11 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
         return true;
       }
       client.sendIntent("SetPanelViewMode", focused.panelId, { mode: next });
+      return true;
+    }
+    case "panel.sort.open": {
+      if (!focused) return false;
+      dispatch({ type: "OPEN_SORT_SELECTOR", panelId: focused.panelId });
       return true;
     }
     case "panel.bookmarks.open": {

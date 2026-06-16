@@ -220,6 +220,7 @@ export interface AppState {
   pendingAttributes: PendingAttributes | null;
   pendingSettings: PendingSettings | null;
   commandPaletteOpen: boolean;
+  activeSortSelectorPanelId: string | null;
   /** mDNS-discovered fbro peers on the LAN. Updated via
    *  `StatePatch { domain: "discoveredPeers" }`. */
   discoveredPeers: DiscoveredPeer[];
@@ -276,6 +277,7 @@ const initialState: AppState = {
   pendingAttributes: null,
   pendingSettings: null,
   commandPaletteOpen: false,
+  activeSortSelectorPanelId: null,
   discoveredPeers: [],
   shareConfig: { enabled: false, allowIpv6: false, sharedSourceIds: [], sharedRoots: [], shareSuggestions: [], pairedPeers: [] },
   pendingPairing: null,
@@ -332,6 +334,8 @@ export type AppAction =
   | { type: "RESET_SEARCH_FOR_NEW_JOB"; requestId: string }
   | { type: "OPEN_COMMAND_PALETTE" }
   | { type: "CLOSE_COMMAND_PALETTE" }
+  | { type: "OPEN_SORT_SELECTOR"; panelId: string }
+  | { type: "CLOSE_SORT_SELECTOR" }
   | { type: "CLOSE_TRANSIENT_HINT" }
   | { type: "SHOW_TRANSIENT_HINT"; message: string }
   | { type: "CLOSE_INPUT" }
@@ -1410,6 +1414,10 @@ function reducer(state: AppState, action: AppAction): AppState {
       return { ...state, commandPaletteOpen: true };
     case "CLOSE_COMMAND_PALETTE":
       return { ...state, commandPaletteOpen: false };
+    case "OPEN_SORT_SELECTOR":
+      return { ...state, activeSortSelectorPanelId: action.panelId };
+    case "CLOSE_SORT_SELECTOR":
+      return { ...state, activeSortSelectorPanelId: null };
     case "CLOSE_TRANSIENT_HINT":
       return { ...state, transientHint: null };
     case "SHOW_TRANSIENT_HINT":

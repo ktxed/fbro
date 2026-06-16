@@ -11,6 +11,7 @@ import {
   createFile,
   doubleClickEntry,
   expectCheckboxSelected,
+  openSortSelector,
   setTextInputValue,
 } from "../browser.mjs";
 import { waitFor } from "../wait.mjs";
@@ -152,6 +153,23 @@ export async function runLocalFlow(browser, observer) {
   await observer.waitForSort("left", "date", "desc");
   await observer.waitForAllEntries("left", sortFiles);
   observer.assertFileEntryOrder("left", ["zebra.txt", "baby.txt", "aardvark.txt"]);
+
+  await openSortSelector(browser, "left");
+  await browser.keys(["ArrowLeft"]);
+  await browser.keys(["ArrowDown"]);
+  await browser.keys(["ArrowDown"]);
+  await browser.keys(["Enter"]);
+  await observer.waitForSort("left", "size", "desc");
+  await observer.waitForAllEntries("left", sortFiles);
+  observer.assertFileEntryOrder("left", ["aardvark.txt", "baby.txt", "zebra.txt"]);
+
+  await openSortSelector(browser, "left");
+  await browser.keys(["ArrowRight"]);
+  await browser.keys(["ArrowUp"]);
+  await browser.keys(["ArrowUp"]);
+  await browser.keys(["Escape"]);
+  await observer.waitForSort("left", "size", "desc");
+  observer.assertFileEntryOrder("left", ["aardvark.txt", "baby.txt", "zebra.txt"]);
 }
 
 async function verifyColorSchemeSwitch(browser, observer) {

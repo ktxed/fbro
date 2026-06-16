@@ -51,6 +51,26 @@ export async function clickSortHeader(browser, panelId, by) {
   await el.click();
 }
 
+export async function openSortSelector(browser, panelId) {
+  const panel = await browser.$(`[data-testid="panel-${panelId}"]`);
+  await panel.waitForClickable({ timeout: 10_000 });
+  await panel.click();
+  await browser.performActions([{
+    type: "key",
+    id: "keyboard",
+    actions: [
+      { type: "keyDown", value: "\uE008" },
+      { type: "keyDown", value: "s" },
+      { type: "keyUp", value: "s" },
+      { type: "keyUp", value: "\uE008" },
+    ],
+  }]);
+  await browser.releaseActions();
+  const selector = await browser.$(`[data-testid="panel-${panelId}"] [data-testid="panel-sort-selector"]`);
+  await selector.waitForDisplayed({ timeout: 10_000 });
+  return selector;
+}
+
 export async function clickCommand(browser, commandId) {
   const el = await browser.$(`[data-command-id="${cssString(commandId)}"]`);
   await el.waitForClickable({ timeout: 10_000 });

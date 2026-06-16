@@ -195,6 +195,7 @@ body {
 /* ── Panel ───────────────────────────────────────────────────────────────── */
 
 .panel {
+  position: relative;
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -966,6 +967,67 @@ body {
 
 .panel__sort-tri svg {
   display: block;
+}
+
+.panel__sort-selector {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 20;
+  max-width: calc(100% - 32px);
+  padding: 6px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-focus);
+  border-radius: 4px;
+  box-shadow: var(--shadow-modal);
+  pointer-events: none;
+}
+
+.panel__sort-selector-row {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+}
+
+.panel__sort-selector-col {
+  width: 72px;
+  min-height: 42px;
+  display: grid;
+  grid-template-rows: 1fr 16px;
+  align-items: center;
+  justify-items: center;
+  padding: 5px 6px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg);
+  color: var(--text-dim);
+}
+
+.panel__sort-selector-col--applied {
+  color: var(--text);
+}
+
+.panel__sort-selector-col--active {
+  border-color: var(--accent);
+  background: var(--bg-cursor);
+  color: var(--text);
+}
+
+.panel__sort-selector-label {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: calc(var(--font-size) - 1px);
+}
+
+.panel__sort-selector-icon {
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent);
 }
 
 .panel__list {
