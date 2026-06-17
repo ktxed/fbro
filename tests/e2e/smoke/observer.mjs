@@ -17,6 +17,7 @@ export class FbroObserver {
       shareConfig: { enabled: false, allowIpv6: false, sharedSourceIds: [], sharedRoots: [], shareSuggestions: [], pairedPeers: [] },
       discoveredPeers: [],
       settings: { general: { colorScheme: "fbro-dark" } },
+      globalSelections: [],
       focus: "",
       fileServerPort: 0,
     };
@@ -77,6 +78,8 @@ export class FbroObserver {
         source.kind === "filesystem"
         && source.mounted
         && !source.shadow
+        && !source.id.startsWith("search:")
+        && source.id !== "global-selections"
         && source.rootPath
         && (targetPath === source.rootPath || targetPath.startsWith(`${source.rootPath}/`))
       )
@@ -249,6 +252,37 @@ export class FbroObserver {
     }, { timeout, label: `${this.name} search results mounted` });
   }
 
+  waitForSource(sourceId, timeout = 15_000) {
+    let lastSnapshotRequest = 0;
+    return waitFor(() => {
+      const source = this.state.sources[sourceId];
+      if (source) return source;
+      const now = Date.now();
+      if (now - lastSnapshotRequest > 500) {
+        lastSnapshotRequest = now;
+        this.sendIntent("RequestStateSnapshot");
+      }
+      return false;
+    }, { timeout, label: `${this.name} source ${sourceId}` });
+  }
+
+  waitForGlobalSelection(name, itemCount, timeout = 15_000) {
+    let lastSnapshotRequest = 0;
+    return waitFor(() => {
+      const selection = this.state.globalSelections.find((candidate) => candidate.name === name);
+      if (selection && (itemCount === undefined || selection.itemCount === itemCount)) return selection;
+      const now = Date.now();
+      if (now - lastSnapshotRequest > 500) {
+        lastSnapshotRequest = now;
+        this.sendIntent("RequestStateSnapshot");
+      }
+      return false;
+    }, {
+      timeout,
+      label: `${this.name} global selection ${name}${itemCount === undefined ? "" : ` count ${itemCount}`}`,
+    });
+  }
+
   async confirmPairingRequests() {
     await waitFor(() => this.pairingRequests.size > 0, {
       timeout: 20_000,
@@ -309,6 +343,7 @@ export class FbroObserver {
     if (domains.shareConfig) this.state.shareConfig = domains.shareConfig;
     if (domains.discoveredPeers) this.state.discoveredPeers = domains.discoveredPeers;
     if (domains.settings) this.state.settings = domains.settings;
+    if (domains.globalSelections) this.state.globalSelections = domains.globalSelections;
   }
 
   #applyPatch(msg) {
@@ -336,6 +371,7 @@ export class FbroObserver {
     }
     if (msg.domain === "discoveredPeers") this.state.discoveredPeers = patch.peers ?? [];
     if (msg.domain === "jobs" && patch.removeJobId) delete this.state.jobs[patch.removeJobId];
+    if (msg.domain === "globalSelections") this.state.globalSelections = patch.globalSelections ?? [];
   }
 
   #applyJobEvent(msg) {

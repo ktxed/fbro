@@ -94,6 +94,60 @@ export async function clickEntry(browser, panelId, name) {
   return el;
 }
 
+export async function clickContextMenuItem(browser, label) {
+  const item = await waitFor(async () => {
+    const items = await browser.$$(".context-menu [role='menuitem']");
+    for (const candidate of items) {
+      const text = (await candidate.getText()).trim();
+      if (text.split("\n")[0] === label || text === label) return candidate;
+    }
+    return false;
+  }, { timeout: 10_000, label: `context menu item ${label}` });
+  await item.waitForClickable({ timeout: 10_000 });
+  await item.click();
+  return item;
+}
+
+export async function openPanelContextMenu(browser, panelId) {
+  await browser.execute((panelId) => document.querySelector(`[data-testid="panel-${panelId}"]`)?.focus(), panelId);
+  await browser.keys("c");
+  const menu = await browser.$(".context-menu");
+  await menu.waitForDisplayed({ timeout: 10_000 });
+  return menu;
+}
+
+export async function longRightClickEntry(browser, panelId, name, holdMs = 500) {
+  const el = await browser.$(`[data-testid="panel-${panelId}"] [data-testid="panel-entry"][data-entry-name="${cssString(name)}"]`);
+  await el.waitForDisplayed({ timeout: 10_000 });
+  await browser.executeAsync(({ panelId, name, holdMs }, done) => {
+    const escaped = globalThis.CSS?.escape ? CSS.escape(name) : String(name).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+    const el = document.querySelector(`[data-testid="panel-${panelId}"] [data-testid="panel-entry"][data-entry-name="${escaped}"]`);
+    if (!el) {
+      done(`missing entry ${name}`);
+      return;
+    }
+    const rect = el.getBoundingClientRect();
+    const eventInit = {
+      bubbles: true,
+      cancelable: true,
+      button: 2,
+      buttons: 2,
+      clientX: rect.left + 4,
+      clientY: rect.top + 4,
+      view: window,
+    };
+    el.dispatchEvent(new MouseEvent("mousedown", eventInit));
+    window.setTimeout(() => {
+      el.dispatchEvent(new MouseEvent("mouseup", { ...eventInit, buttons: 0 }));
+      el.dispatchEvent(new MouseEvent("contextmenu", { ...eventInit, buttons: 0 }));
+      done(null);
+    }, holdMs);
+  }, { panelId, name, holdMs });
+  const menu = await browser.$(".context-menu");
+  await menu.waitForDisplayed({ timeout: 10_000 });
+  return menu;
+}
+
 export async function clickSource(browser, panelId, sourceId) {
   const el = await browser.$(`[data-testid="panel-${panelId}"] [data-source-id="${cssString(sourceId)}"] .panel__volume-btn`);
   await el.waitForClickable({ timeout: 10_000 });
