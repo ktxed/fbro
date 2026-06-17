@@ -163,6 +163,7 @@ pub(crate) fn build_state_snapshot(
             },
             discovered_peers: build_discovered_peers(state),
             share_config: build_share_config(state),
+            global_selections: build_global_selection_summaries(state),
         },
     }
 }
@@ -322,6 +323,65 @@ pub(crate) fn build_sources_json(state: &AppState) -> Vec<serde_json::Value> {
         .into_iter()
         .map(|source| serde_json::to_value(source).unwrap_or(serde_json::Value::Null))
         .collect()
+}
+
+pub(crate) fn build_global_selection_summaries(
+    state: &AppState,
+) -> Vec<crate::vfs::global_selection::GlobalSelectionSummary> {
+    state
+        .global_selections
+        .lock()
+        .map(|store| store.summaries())
+        .unwrap_or_default()
+}
+
+pub(crate) fn ensure_global_selection_source(state: &mut AppState) {
+    let has_any = state
+        .global_selections
+        .lock()
+        .map(|store| !store.is_empty())
+        .unwrap_or(false);
+    if !has_any {
+        state
+            .sources
+            .remove(crate::vfs::global_selection::SOURCE_ID);
+        return;
+    }
+    state
+        .sources
+        .entry(crate::vfs::global_selection::SOURCE_ID.to_string())
+        .or_insert_with(|| crate::state::Source {
+            id: crate::vfs::global_selection::SOURCE_ID.to_string(),
+            name: "Selections".to_string(),
+            kind: "virtual".to_string(),
+            supports: vec![
+                "ListEntries".to_string(),
+                "OpenFolder".to_string(),
+                crate::ws::intents::CAP_INTERNAL_NAV.to_string(),
+                "DeleteSelection".to_string(),
+                "Rename".to_string(),
+            ],
+            root_path: String::new(),
+            mounted: true,
+            device_path: None,
+            shadow: false,
+            icon_name: Some("list-check".to_string()),
+            sort_priority: 1,
+            read_only: false,
+            peer_id: None,
+        });
+}
+
+pub(crate) fn build_global_selection_patch(state: &AppState) -> ServerMessage {
+    ServerMessage::StatePatch {
+        timestamp: now(),
+        domain: "globalSelections".to_string(),
+        entity_id: None,
+        version: 0,
+        patch: serde_json::json!({
+            "globalSelections": build_global_selection_summaries(state),
+        }),
+    }
 }
 
 pub(crate) fn selected_names_for(state_guard: &AppState, panel_id: &str) -> Option<Vec<String>> {

@@ -15,12 +15,14 @@ use crate::jobs::{
 use crate::platform::{ExternalClipboardOp, ExternalClipboardPayload};
 use crate::state::{ShadowSource, Source};
 use crate::vfs::{search::SearchResultsDriver, VfsError};
-use crate::ws::intents::{arg_bool, arg_str, arg_u64, is_search_source};
+use crate::ws::intents::{
+    arg_bool, arg_str, arg_u64, is_global_selection_source, is_search_source,
+};
 use crate::ws::protocol::SearchParamsSchema;
 use crate::ws::protocol::{now, FileOpFileSchema, JobStartSchema, ServerMessage};
 use crate::ws::runtime::{
-    build_sources_json, navigate_to, quiet_rescan_panel, rescan_panel, resolve_panel_id,
-    selected_names_for, IntentContext,
+    build_global_selection_patch, build_sources_json, navigate_to, quiet_rescan_panel,
+    rescan_panel, resolve_panel_id, selected_names_for, IntentContext,
 };
 
 pub(crate) async fn handle(name: &str, scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
@@ -653,6 +655,9 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
         "delete" => FileOpType::Delete,
         _ => FileOpType::Copy,
     };
+    if handle_global_selection_file_op(&parsed, &op_type, ctx).await {
+        return;
+    }
     let conflict_policy = match parsed.conflict_policy.as_str() {
         "skip" => ConflictPolicy::Skip,
         "overwrite" => ConflictPolicy::Overwrite,
@@ -1434,8 +1439,181 @@ async fn resume_job(args: &Value, ctx: &mut IntentContext<'_>) {
         .await;
 }
 
+async fn handle_global_selection_file_op(
+    parsed: &StartFileOpArgs,
+    op_type: &FileOpType,
+    ctx: &mut IntentContext<'_>,
+) -> bool {
+    let (is_global, selection_name, paths) = {
+        let state_guard = ctx.state.lock().await;
+        let Some(panel) = state_guard.panels.get(&parsed.source_panel) else {
+            return false;
+        };
+        if !is_global_selection_source(&panel.source_id) {
+            return false;
+        }
+        if *op_type != FileOpType::Delete || panel.path.is_empty() {
+            drop(state_guard);
+            let _ = send_error(
+                ctx,
+                "OP_NOT_SUPPORTED",
+                "Only deleting references inside a global selection is supported.".to_string(),
+            )
+            .await;
+            return true;
+        }
+        let paths = if parsed.files.is_empty() {
+            let indices = if panel.selection.is_empty() {
+                vec![panel.cursor]
+            } else {
+                panel.selection.clone()
+            };
+            indices
+                .iter()
+                .filter_map(|index| panel.entries.get(*index))
+                .filter_map(|entry| {
+                    entry
+                        .source_path
+                        .clone()
+                        .or_else(|| Some(entry.name.clone()))
+                })
+                .collect::<Vec<_>>()
+        } else {
+            parsed
+                .files
+                .iter()
+                .filter_map(|file| file.source_path.clone().or_else(|| Some(file.name.clone())))
+                .collect::<Vec<_>>()
+        };
+        (true, panel.path.clone(), paths)
+    };
+    if !is_global {
+        return false;
+    }
+    if paths.is_empty() {
+        let _ = send_error(
+            ctx,
+            "OP_NOT_SUPPORTED",
+            "No global selection references were selected.".to_string(),
+        )
+        .await;
+        return true;
+    }
+
+    let patch_result: Result<ServerMessage, String> = {
+        let state_guard = ctx.state.lock().await;
+        let store_result = {
+            let store_arc = std::sync::Arc::clone(&state_guard.global_selections);
+            let result = match store_arc.lock() {
+                Ok(mut store) => store.remove_items_by_paths(&selection_name, &paths),
+                Err(_) => Err("Global selection store is unavailable.".to_string()),
+            };
+            result
+        };
+        match store_result {
+            Ok(_) => Ok(build_global_selection_patch(&state_guard)),
+            Err(message) => Err(message),
+        }
+    };
+    let patch = match patch_result {
+        Ok(patch) => patch,
+        Err(message) => {
+            let _ = send_error(ctx, "OP_NOT_SUPPORTED", message).await;
+            return true;
+        }
+    };
+    let _ = ctx.tx.send(patch).await;
+    crate::ws::intents::global_selection::rescan_global_selection_panels(ctx).await;
+    true
+}
+
+async fn rename_global_selection_if_needed(
+    parsed: &RenameArgs,
+    ctx: &mut IntentContext<'_>,
+) -> bool {
+    let (is_global, panel_path) = {
+        let state_guard = ctx.state.lock().await;
+        let Some(panel) = state_guard.panels.get(&parsed.source_panel) else {
+            return false;
+        };
+        if !is_global_selection_source(&panel.source_id) {
+            return false;
+        }
+        (true, panel.path.clone())
+    };
+    if !is_global {
+        return false;
+    }
+    if !panel_path.is_empty() {
+        let _ = send_error(
+            ctx,
+            "RENAME_FAILED",
+            "Cannot rename global selection entries.".to_string(),
+        )
+        .await;
+        return true;
+    }
+    if parsed.dest_name.contains('/') || parsed.dest_name.contains('\\') {
+        let _ = send_error(
+            ctx,
+            "RENAME_FAILED",
+            "Selection name cannot contain path separators.".to_string(),
+        )
+        .await;
+        return true;
+    }
+
+    let old_name = parsed.source_path.trim_start_matches('/').to_string();
+    let new_name = parsed.dest_name.trim().to_string();
+    let patch_result: Result<ServerMessage, String> = {
+        let mut state_guard = ctx.state.lock().await;
+        let store_result = {
+            let store_arc = std::sync::Arc::clone(&state_guard.global_selections);
+            let result = match store_arc.lock() {
+                Ok(mut store) => store.rename_selection(&old_name, &new_name),
+                Err(_) => Err("Global selection store is unavailable.".to_string()),
+            };
+            result
+        };
+        match store_result {
+            Ok(_) => {
+                for panel in state_guard.panels.values_mut() {
+                    if panel.source_id == crate::vfs::global_selection::SOURCE_ID
+                        && panel.path == old_name
+                    {
+                        panel.path = new_name.clone();
+                    }
+                }
+                Ok(build_global_selection_patch(&state_guard))
+            }
+            Err(message) => Err(message),
+        }
+    };
+    let patch = match patch_result {
+        Ok(patch) => patch,
+        Err(message) => {
+            let _ = send_error(ctx, "RENAME_FAILED", message).await;
+            return true;
+        }
+    };
+    let _ = ctx
+        .tx
+        .send(ServerMessage::RenameOk {
+            timestamp: now(),
+            panel_id: parsed.source_panel.clone(),
+        })
+        .await;
+    let _ = ctx.tx.send(patch).await;
+    crate::ws::intents::global_selection::rescan_global_selection_panels(ctx).await;
+    true
+}
+
 async fn rename_file(args: &Value, ctx: &mut IntentContext<'_>) {
     let parsed = RenameArgs::from_args(args);
+
+    if rename_global_selection_if_needed(&parsed, ctx).await {
+        return;
+    }
 
     // Block rename inside shadow sources (zip archives).
     {

@@ -13,6 +13,7 @@ import { MkDirModal } from "./MkDirModal";
 import { TouchModal } from "./TouchModal";
 import { NoEditorModal } from "./NoEditorModal";
 import { GoToPathModal } from "./GoToPathModal";
+import { GlobalSelectionModal } from "./GlobalSelectionModal";
 import { PanelHistoryModal } from "./PanelHistoryModal";
 import { JobsModal } from "./JobsModal";
 import { CommandPaletteModal } from "./CommandPaletteModal";
@@ -424,7 +425,7 @@ export function Layout({ client, jobsViewOpen, onCloseJobsView, onOpenJobsView }
   }
 
   const activeJob = state.activeJobId ? state.jobs[state.activeJobId] ?? null : null;
-  const modalActive = state.pendingOp !== null || state.activeJobId !== null || state.pendingQuit !== null || state.pendingRename !== null || state.pendingAttributes !== null || state.pendingInfo !== null || state.pendingMkdir !== null || state.pendingTouch !== null || state.pendingNoEditor !== null || state.pendingGoToPath !== null || state.pendingPanelHistory !== null || state.pendingDryRun !== null || state.pendingContextMenu !== null || state.pendingOpenWith !== null || state.pendingBro !== null || state.pendingInput !== null || state.pendingSearch !== null || state.pendingSettings !== null || state.commandPaletteOpen || jobsViewOpen;
+  const modalActive = state.pendingOp !== null || state.activeJobId !== null || state.pendingQuit !== null || state.pendingRename !== null || state.pendingAttributes !== null || state.pendingInfo !== null || state.pendingMkdir !== null || state.pendingTouch !== null || state.pendingNoEditor !== null || state.pendingGoToPath !== null || state.pendingPanelHistory !== null || state.pendingDryRun !== null || state.pendingContextMenu !== null || state.pendingGlobalSelectionAdd !== null || state.pendingOpenWith !== null || state.pendingBro !== null || state.pendingInput !== null || state.pendingSearch !== null || state.pendingSettings !== null || state.commandPaletteOpen || jobsViewOpen;
 
   const dragCursorClass = dragOutInProgress
     ? "layout--drag-out"
@@ -561,6 +562,9 @@ export function Layout({ client, jobsViewOpen, onCloseJobsView, onOpenJobsView }
       )}
       {state.pendingContextMenu && (
         <ContextMenu client={client} menu={state.pendingContextMenu} />
+      )}
+      {state.pendingGlobalSelectionAdd && (
+        <GlobalSelectionModal client={client} add={state.pendingGlobalSelectionAdd} />
       )}
       {state.pendingOpenWith && (
         <OpenWithModal client={client} openWith={state.pendingOpenWith} />

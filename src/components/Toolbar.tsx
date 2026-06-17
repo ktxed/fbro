@@ -12,7 +12,7 @@ import {
   TOOLBAR_COMMAND_IDS,
 } from "../commands/interactive";
 import { modKey } from "../utils/platform";
-import { isArchiveSourceId } from "../utils/sourceId";
+import { isArchiveSourceId, isGlobalSelectionSourceId } from "../utils/sourceId";
 import { applyZoom, nextZoomSize, DEFAULT_FONT_SIZE } from "../utils/zoom";
 import {
   IconPencil,
@@ -72,7 +72,7 @@ export function Toolbar({ client, jobsViewOpen, onOpenJobsView }: { client: WsCl
       if (modKey(e) && e.key === "-")                    { e.preventDefault(); const s = nextZoomSize(state.fontSize, -1); applyZoom(s); client.sendIntent("SetFontSize", undefined, { value: s }); return; }
       if (modKey(e) && e.key === "0")                    { e.preventDefault(); applyZoom(DEFAULT_FONT_SIZE); client.sendIntent("SetFontSize", undefined, { value: DEFAULT_FONT_SIZE }); return; }
 
-      const blockingModalActive = state.pendingOp || state.activeJobId || state.pendingQuit || state.pendingRename || state.pendingInfo || state.pendingMkdir || state.pendingTouch || state.pendingNoEditor || state.pendingGoToPath || state.pendingPanelHistory || state.pendingDryRun || state.pendingContextMenu || state.pendingOpenWith || state.pendingBro || state.pendingInput || state.pendingSettings || jobsViewOpen;
+      const blockingModalActive = state.pendingOp || state.activeJobId || state.pendingQuit || state.pendingRename || state.pendingInfo || state.pendingMkdir || state.pendingTouch || state.pendingNoEditor || state.pendingGoToPath || state.pendingPanelHistory || state.pendingDryRun || state.pendingContextMenu || state.pendingGlobalSelectionAdd || state.pendingOpenWith || state.pendingBro || state.pendingInput || state.pendingSettings || jobsViewOpen;
       const paletteCommand = getCommand(state.commands, COMMAND_PALETTE_COMMAND_ID);
       if (!blockingModalActive && paletteCommand && paletteCommand.bindings.some((binding) => bindingMatches(e, binding))) {
         e.preventDefault();
@@ -128,7 +128,13 @@ export function Toolbar({ client, jobsViewOpen, onOpenJobsView }: { client: WsCl
         const command = getCommand(state.commands, commandId);
         const key = formatPrimaryBinding(command);
         const cap = COMMAND_CAP[commandId];
-        const isDisabled = cap !== undefined && !sourceSupports.includes(cap);
+        const globalSelectionRoot = !!focusedPanel && isGlobalSelectionSourceId(focusedPanel.sourceId) && focusedPanel.path === "";
+        const globalSelectionAny = !!focusedPanel && isGlobalSelectionSourceId(focusedPanel.sourceId);
+        const globalBlocked =
+          (globalSelectionAny && (commandId === "file.view" || commandId === "file.edit" || commandId === "file.copy" || commandId === "file.move" || commandId === "file.mkdir" || commandId === "app.open_terminal"))
+          || (globalSelectionRoot && commandId === "file.delete")
+          || (globalSelectionAny && !globalSelectionRoot && commandId === "file.rename");
+        const isDisabled = globalBlocked || (cap !== undefined && !sourceSupports.includes(cap));
         const label = isArchive && commandId === "file.copy" ? "Extract" : TOOLBAR_LABELS[commandId];
         const detail = command?.title ?? label;
         const icon = TOOLBAR_ICONS[commandId];

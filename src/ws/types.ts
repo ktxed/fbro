@@ -42,6 +42,13 @@ export interface SourcePeer {
   os?: string;
 }
 
+export interface GlobalSelectionSummary {
+  id: string;
+  name: string;
+  itemCount: number;
+  createdAt: string;
+}
+
 // ─── Remote-fbro: discovery / pairing / sharing ──────────────────────────────
 
 export interface DiscoveredPeer {
@@ -511,13 +518,14 @@ export interface StateSnapshotMessage {
     settings?: SettingsState;
     discoveredPeers?: DiscoveredPeer[];
     shareConfig?: ShareConfig;
+    globalSelections?: GlobalSelectionSummary[];
   };
 }
 
 export interface StatePatchMessage {
   type: "StatePatch";
   timestamp: number;
-  domain: "panels" | "layout" | "slots" | "focus" | "selections" | "jobs" | "sources" | "dirSizeQueue" | "bookmarks" | "procs" | "settings" | "discoveredPeers" | "shareConfig";
+  domain: "panels" | "layout" | "slots" | "focus" | "selections" | "jobs" | "sources" | "dirSizeQueue" | "bookmarks" | "procs" | "settings" | "discoveredPeers" | "shareConfig" | "globalSelections";
   entityId?: string;
   version: number;
   patch: {

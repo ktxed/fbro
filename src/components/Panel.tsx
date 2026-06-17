@@ -9,18 +9,20 @@ import {
   PANEL_SHORTCUT_COMMAND_IDS,
 } from "../commands/interactive";
 import { useAppDispatch, useAppState } from "../store";
-import { IconChevronDown, IconChevronUp, IconChevronRight, IconChevronLeft, IconArrowUpRight, IconX, IconAlertTriangle, IconActivity, IconLock, IconNetwork } from "@tabler/icons-react";
+import { IconChevronDown, IconChevronUp, IconChevronRight, IconChevronLeft, IconArrowUpRight, IconX, IconAlertTriangle, IconActivity, IconLock, IconNetwork, IconListCheck } from "@tabler/icons-react";
 
 // Maps Source.iconName (BE-provided) to a Tabler icon component for rendering
 // in the volume bar. Sources with an iconName render the icon in place of
 // their text label; unknown names fall back to the text label.
 const SOURCE_ICONS: Record<string, React.ComponentType<{ size?: number }>> = {
   activity: IconActivity,
+  "list-check": IconListCheck,
 };
 import { BookmarksPopover } from "./BookmarksPopover";
 import { PanelTabBar } from "./PanelTabBar";
 import { PanelTerminal } from "./PanelTerminal";
 import { EntryThumb } from "./EntryThumb";
+import { isGlobalSelectionSourceId } from "../utils/sourceId";
 
 const ROW_HEIGHT = 22;
 const GRID_THUMB_SIZE = 128;
@@ -466,9 +468,12 @@ function formatBytes(s: number): string {
   return `${(s / (1024 * 1024 * 1024)).toFixed(1)}G`;
 }
 
-function formatSize(entry: VFSEntry, calcSet: ReadonlySet<string>): string {
+function formatSize(entry: VFSEntry, calcSet: ReadonlySet<string>, directorySizeAsCount = false): string {
   if (entry.kind === "directory") {
     if (calcSet.has(entry.name)) return "⏳";
+    if (directorySizeAsCount && entry.size !== undefined) {
+      return `${entry.size} item${entry.size === 1 ? "" : "s"}`;
+    }
     if (entry.size !== undefined) return formatBytes(entry.size);
     return "<DIR>";
   }
@@ -900,7 +905,7 @@ export function Panel({
 
   const openContextMenuForEntry = useCallback((entry: VFSEntry, absIndex: number, rect: DOMRect) => {
     const dirPath = panel.path.replace(/[/\\]+$/, "");
-    const fullPath = entry.name === ".." ? dirPath : `${dirPath}/${entry.name}`;
+    const fullPath = entry.sourcePath ?? (entry.name === ".." ? dirPath : `${dirPath}/${entry.name}`);
     if (entry.name === "..") return;
 
     if (!isFocused) {
@@ -1069,14 +1074,17 @@ export function Panel({
     e.stopPropagation();
   };
 
+  const isGlobalSelectionsRoot = isGlobalSelectionSourceId(panel.sourceId) && panel.path === "";
   const itemCount = isWindowed ? totalCount : panel.entries.length;
   // In non-windowed mode recompute total from live entries so calculated dir sizes are included.
-  const totalSize = !isWindowed
-    ? panel.entries.reduce((sum, e) => e.size !== undefined ? sum + e.size : sum, 0)
-    : panel.totalSize;
+  const totalSize = isGlobalSelectionsRoot
+    ? undefined
+    : !isWindowed
+      ? panel.entries.reduce((sum, e) => e.size !== undefined ? sum + e.size : sum, 0)
+      : panel.totalSize;
   const selCount = panel.selection.length;
   // In windowed mode entries outside the window aren't available on the FE, so skip sel size.
-  const selSize = !isWindowed && selCount > 0
+  const selSize = !isGlobalSelectionsRoot && !isWindowed && selCount > 0
     ? panel.selection.reduce((sum, i) => {
         const e = panel.entries[i];
         return e && e.size !== undefined ? sum + e.size : sum;
@@ -1296,7 +1304,7 @@ export function Panel({
           <div className={`panel__card-name${colorClass ? ` ${colorClass}` : ""}`} title={entry.name}>{entry.name}</div>
         )}
         <div className="panel__card-meta">
-          <span className="panel__card-size">{formatSize(entry, calcSet)}</span>
+          <span className="panel__card-size">{formatSize(entry, calcSet, isGlobalSelectionsRoot)}</span>
           <span className="panel__card-date">{formatMtime(entry.mtime)}</span>
         </div>
       </div>
@@ -1426,7 +1434,7 @@ export function Panel({
             </span>
           );
         })()}
-        <span className="panel__size">{formatSize(entry, calcSet)}</span>
+        <span className="panel__size">{formatSize(entry, calcSet, isGlobalSelectionsRoot)}</span>
         <span className="panel__mtime">{formatMtime(entry.mtime)}</span>
       </div>
     );

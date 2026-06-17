@@ -4,7 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { isMac } from "../utils/platform";
 import type { AppAction, AppState } from "../store";
 import { markHistoryNavPending } from "../store";
-import { isSearchSourceId } from "../utils/sourceId";
+import { isGlobalSelectionSourceId, isSearchSourceId } from "../utils/sourceId";
 import type { WsClient } from "../ws/client";
 import type {
   FileOpFile,
@@ -362,6 +362,7 @@ export function executeTargetedCommand(
     name: target.name,
     size: target.size,
     kind: target.kind,
+    sourcePath: target.fullPath,
   };
 
   switch (commandId) {
@@ -599,16 +600,20 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
       client.sendIntent("Refresh", focused.panelId);
       return true;
     case "panel.pass_to_bro":
+      if (focused && isGlobalSelectionSourceId(focused.panel.sourceId) && focused.panel.path !== "") return false;
       return focused ? openPassToBro(state, dispatch, client, focused.panel) : false;
     case "file.info":
       return focused ? openInfo(dispatch, focused.panel, state) : false;
     case "file.rename":
       if (!focused || !sourceCapability("Rename")) return false;
+      if (isGlobalSelectionSourceId(focused.panel.sourceId) && focused.panel.path !== "") return false;
       return openRename(dispatch, focused.panel);
     case "file.view":
+      if (focused && isGlobalSelectionSourceId(focused.panel.sourceId)) return false;
       return focused ? openViewerIntent(client, focused.panel, "ViewFile") : false;
     case "file.edit":
       if (!focused || !sourceCapability("Edit")) return false;
+      if (isGlobalSelectionSourceId(focused.panel.sourceId)) return false;
       return openViewerIntent(client, focused.panel, "EditFile");
     case "file.copy":
       if (!focused || !sourceCapability("CopySelection")) return false;
@@ -663,6 +668,7 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
       return true;
     case "file.delete":
       if (!focused || !sourceCapability("DeleteSelection")) return false;
+      if (isGlobalSelectionSourceId(focused.panel.sourceId) && focused.panel.path === "") return false;
       return openFileOp(state, dispatch, focused.panel, "delete");
     case "app.open_terminal":
       if (!focused || !sourceCapability("OpenShell")) return false;
@@ -860,6 +866,7 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
       const entry = currentEntry(focused.panel);
       if (!entry || entry.name === "..") return false;
       const dirPath = focused.panel.path.replace(/[/\\]+$/, "");
+      const fullPath = entry.sourcePath ?? `${dirPath}/${entry.name}`;
       dispatch({
         type: "OPEN_CONTEXT_MENU",
         menu: {
@@ -869,7 +876,7 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
           kind: entry.kind,
           size: entry.size,
           dirPath,
-          fullPath: `${dirPath}/${entry.name}`,
+          fullPath,
           anchorLeft: rect.left,
           anchorRight: rect.right,
           anchorTop: rect.top,

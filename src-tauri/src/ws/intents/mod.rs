@@ -2,6 +2,7 @@ mod app;
 mod bookmarks;
 pub(crate) mod bro;
 mod cache;
+pub(crate) mod global_selection;
 mod history;
 mod jobs;
 mod navigation;
@@ -62,6 +63,9 @@ pub async fn dispatch(name: &str, scope: &Value, args: &Value, ctx: &mut IntentC
         | "NavigateToHistoryEntry" => navigation::handle(name, scope, args, ctx).await,
         "ListBros" | "LaunchBro" | "KillProcess" | "SaveSyncReport" => {
             bro::handle(name, scope, args, ctx).await
+        }
+        "AddToGlobalSelection" | "RemoveGlobalSelectionItems" => {
+            global_selection::handle(name, scope, args, ctx).await
         }
         "StartFileOp"
         | "PasteExternalClipboard"
@@ -138,6 +142,10 @@ pub(crate) fn is_history_source(source_id: &str) -> bool {
 
 pub(crate) fn is_procs_source(source_id: &str) -> bool {
     source_id == "procs"
+}
+
+pub(crate) fn is_global_selection_source(source_id: &str) -> bool {
+    source_id == crate::vfs::global_selection::SOURCE_ID
 }
 
 /// Strips the archive prefix ("zip:" or "7z:") and returns the filesystem path.

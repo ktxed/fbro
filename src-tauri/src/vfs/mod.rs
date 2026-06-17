@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 pub mod bookmarks;
+pub mod global_selection;
 pub mod history;
 pub mod local;
 pub mod procs;
@@ -91,7 +92,8 @@ pub fn hash_local_file_blake3(
     }
     // SAFETY: mmap of a regular file. Concurrent truncation of the mapped file
     // could raise SIGBUS — an accepted risk for a local integrity tool.
-    let mmap = unsafe { memmap2::Mmap::map(&file) }.map_err(|e| VfsError::IOError(e.to_string()))?;
+    let mmap =
+        unsafe { memmap2::Mmap::map(&file) }.map_err(|e| VfsError::IOError(e.to_string()))?;
     let len = mmap.len();
     let mut offset = 0usize;
     while offset < len {

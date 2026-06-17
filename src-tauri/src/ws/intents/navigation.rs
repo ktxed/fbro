@@ -8,7 +8,9 @@ use serde_json::Value;
 use crate::state::{Panel, PanelStatus, PanelViewMode, ShadowSource, Source, TabKind};
 use crate::vfs::VfsDriver;
 use crate::watcher::WatcherCommand;
-use crate::ws::intents::{archive_file_path, arg_str, is_archive_source, is_search_source};
+use crate::ws::intents::{
+    archive_file_path, arg_str, is_archive_source, is_global_selection_source, is_search_source,
+};
 use crate::ws::protocol::{now, OpenWithAppSchema, ServerMessage};
 use crate::ws::runtime::{
     build_sources_json, navigate_to, rescan_panel, resolve_panel_id, IntentContext,
@@ -341,7 +343,7 @@ impl RevealArgs {
 
 async fn open_entry(scope: &Value, ctx: &mut IntentContext<'_>) {
     let panel_id = resolve_panel_id(scope, ctx.state).await;
-    let (entry_kind, entry_name, new_path, is_in_shadow, source_id) = {
+    let (entry_kind, entry_name, new_path, is_in_shadow, source_id, current_path) = {
         let state_guard = ctx.state.lock().await;
         if let Some(panel) = state_guard.panels.get(&panel_id) {
             if let Some(entry) = panel.entries.get(panel.cursor) {
@@ -352,6 +354,7 @@ async fn open_entry(scope: &Value, ctx: &mut IntentContext<'_>) {
                     driver.resolve_child(&panel.path, &entry.name),
                     panel.shadow_source.is_some(),
                     panel.source_id.clone(),
+                    panel.path.clone(),
                 )
             } else {
                 return;
@@ -360,6 +363,24 @@ async fn open_entry(scope: &Value, ctx: &mut IntentContext<'_>) {
             return;
         }
     };
+
+    if entry_kind == "directory"
+        && is_global_selection_source(&source_id)
+        && !current_path.is_empty()
+    {
+        let _ = ctx
+            .tx
+            .send(ServerMessage::Error {
+                timestamp: now(),
+                code: "NAVIGATE_FAILED".to_string(),
+                message: "Global selection entries are references and cannot be opened."
+                    .to_string(),
+                recoverable: true,
+                extra: Some(serde_json::json!({ "panelId": panel_id })),
+            })
+            .await;
+        return;
+    }
 
     if entry_kind == "directory" {
         // Virtual sources whose entries point to real filesystem paths must

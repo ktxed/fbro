@@ -3,7 +3,7 @@ import type { WsClient } from "../ws/client";
 import type { PendingOp, Job, ConflictPolicy, VerificationPolicy, FileOpFile, SyncBroResult } from "../ws/types";
 import { useAppDispatch, useAppState } from "../store";
 import type { AppState, PendingDryRun } from "../store";
-import { isArchiveSourceId } from "../utils/sourceId";
+import { isArchiveSourceId, isGlobalSelectionSourceId } from "../utils/sourceId";
 import { IconAlertTriangle, IconCopy } from "@tabler/icons-react";
 
 interface OperationModalProps {
@@ -481,6 +481,10 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
     const isDelete = pending.opType === "delete";
     const sourcePanelState = state.panels[pending.sourcePanel];
     const isArchiveSource = !!sourcePanelState?.shadowSource && isArchiveSourceId(sourcePanelState.sourceId);
+    const isGlobalSelectionDelete = isDelete
+      && !!sourcePanelState
+      && isGlobalSelectionSourceId(sourcePanelState.sourceId)
+      && !!sourcePanelState.path;
     const label = isArchiveSource && pending.opType === "copy" ? "Extract" : opLabel(pending.opType);
     const canStartInBackground = !dryMode;
     const canSuggestResume = canSuggestResumeForPending(state, pending);
@@ -495,6 +499,15 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
     const startOp = (background: boolean) => {
       if (!canSubmitPending) return;
       setSubmitted(true);
+      if (isGlobalSelectionDelete && sourcePanelState) {
+        client.sendIntent("RemoveGlobalSelectionItems", undefined, {
+          panelId: pending.sourcePanel,
+          selectionName: sourcePanelState.path,
+          paths: pending.files.map((file) => file.sourcePath ?? file.name),
+        });
+        close();
+        return;
+      }
       client.sendIntent("StartFileOp", undefined, {
         opType: pending.opType,
         files: pending.files,

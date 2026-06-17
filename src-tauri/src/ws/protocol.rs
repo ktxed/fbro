@@ -312,6 +312,8 @@ pub struct StateDomains {
     pub discovered_peers: Vec<crate::remote::discovery::DiscoveredPeerSchema>,
     #[serde(rename = "shareConfig")]
     pub share_config: serde_json::Value,
+    #[serde(rename = "globalSelections")]
+    pub global_selections: Vec<crate::vfs::global_selection::GlobalSelectionSummary>,
 }
 
 #[derive(Serialize, Clone, Debug)]

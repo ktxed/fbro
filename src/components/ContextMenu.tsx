@@ -12,6 +12,7 @@ import { bindingMatches, executeTargetedCommand } from "../commands/interactive"
 import { buildContextMenuItems } from "../contextMenu";
 import { useAppDispatch, useAppState, type PendingContextMenu } from "../store";
 import type { WsClient } from "../ws/client";
+import { isGlobalSelectionSourceId } from "../utils/sourceId";
 
 interface ContextMenuProps {
   client: WsClient;
@@ -25,8 +26,37 @@ export function ContextMenu({ client, menu }: ContextMenuProps) {
   const [highlightedIndex, setHighlightedIndex] = useState(0);
 
   const items = useMemo(
-    () => buildContextMenuItems(state.commands, menu.fullPath, menu.name, menu.kind, menu.isShadow),
-    [state.commands, menu.fullPath, menu.name, menu.kind, menu.isShadow],
+    () => {
+      const panel = state.panels[menu.panelId];
+      const source = panel ? state.sources[panel.sourceId] : undefined;
+      const isLocalFilesystem = !!source
+        && source.kind === "filesystem"
+        && !menu.isShadow
+        && !source.shadow
+        && source.mounted;
+      const isGlobalSelection = !!panel && isGlobalSelectionSourceId(panel.sourceId);
+      const isGlobalRoot = isGlobalSelection && panel.path === "";
+      const isGlobalInside = isGlobalSelection && panel.path !== "";
+      const supports = source?.supports ?? [];
+      return buildContextMenuItems(
+        state.commands,
+        menu.fullPath,
+        menu.name,
+        menu.kind,
+        {
+          isShadow: menu.isShadow,
+          canPlatform: isLocalFilesystem,
+          canOpenWith: isLocalFilesystem,
+          canPassToBro: isLocalFilesystem || isGlobalRoot,
+          canAddToGlobalSelection: isLocalFilesystem,
+          canCopy: !!menu.isShadow || (isLocalFilesystem && supports.includes("CopySelection")),
+          canRename: (isLocalFilesystem && supports.includes("Rename")) || isGlobalRoot,
+          canDelete: (isLocalFilesystem && supports.includes("DeleteSelection")) || isGlobalInside,
+          canCopyFullPath: isLocalFilesystem || isGlobalInside,
+        },
+      );
+    },
+    [menu.fullPath, menu.kind, menu.name, menu.isShadow, menu.panelId, state.commands, state.panels, state.sources],
   );
   const selectableItems = items.filter((item) => item.kind !== "separator");
 
@@ -168,6 +198,25 @@ export function ContextMenu({ client, menu }: ContextMenuProps) {
         targetPath: menu.fullPath,
         suggestedOutputDir,
       });
+      return;
+    }
+
+    if (item.kind === "globalSelection") {
+      if (state.globalSelections.length === 0) {
+        client.sendIntent("AddToGlobalSelection", menu.panelId, {
+          panelId: menu.panelId,
+          targetPath: menu.fullPath,
+        });
+      } else {
+        dispatch({
+          type: "OPEN_GLOBAL_SELECTION_ADD",
+          add: {
+            panelId: menu.panelId,
+            targetPath: menu.fullPath,
+            targetName: menu.name,
+          },
+        });
+      }
       return;
     }
 

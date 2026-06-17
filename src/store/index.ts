@@ -39,6 +39,7 @@ import type {
   ShareConfig,
   PendingPairing,
   RemoteSourceStatus,
+  GlobalSelectionSummary,
 } from "../ws/types";
 
 // ─── State ───────────────────────────────────────────────────────────────────
@@ -123,6 +124,12 @@ export interface PendingContextMenu {
   anchorTop: number;
   anchorBottom: number;
   isShadow?: boolean;
+}
+
+export interface PendingGlobalSelectionAdd {
+  panelId: string;
+  targetPath: string;
+  targetName: string;
 }
 
 export interface PendingOpenWith {
@@ -213,6 +220,7 @@ export interface AppState {
   pendingPanelHistory: PendingPanelHistory | null;
   pendingDryRun: PendingDryRun | null;
   pendingContextMenu: PendingContextMenu | null;
+  pendingGlobalSelectionAdd: PendingGlobalSelectionAdd | null;
   pendingOpenWith: PendingOpenWith | null;
   pendingBro: PendingBro | null;
   pendingInput: PendingInput | null;
@@ -241,6 +249,7 @@ export interface AppState {
   bookmarksOpen: { panelId: string } | null;
   maximizedTerminalPanelId: string | null;
   childProcesses: Record<number, ChildProcess>;
+  globalSelections: GlobalSelectionSummary[];
   fontSize: number;
   settings: SettingsState;
 }
@@ -270,6 +279,7 @@ const initialState: AppState = {
   pendingPanelHistory: null,
   pendingDryRun: null,
   pendingContextMenu: null,
+  pendingGlobalSelectionAdd: null,
   pendingOpenWith: null,
   pendingBro: null,
   pendingInput: null,
@@ -290,6 +300,7 @@ const initialState: AppState = {
   bookmarksOpen: null,
   maximizedTerminalPanelId: null,
   childProcesses: {},
+  globalSelections: [],
   fontSize: 13,
   settings: {
     general: { showHiddenDefault: false, rememberWindowState: true, preserveAttributes: true, autoResumeCopies: true, ludicrousMode: false, maxImageSizeMb: 512, savePanelViewMode: false, enableVideoThumbnails: true, thumbnailMaxImageSizeMb: 100, thumbnailVideoFrameSkip: 5, streamThumbnails: true, sessionPath: "", bookmarksPath: "", thumbnailCacheDir: "", thumbnailCacheItemCount: 0, thumbnailCacheSizeBytes: 0, persistPanelTabs: true, procTreeMode: false, colorScheme: "fbro-dark", sevenzipExtractor: "auto", sevenzipCustomPath: "", sevenzipResolvedPath: "" },
@@ -323,6 +334,8 @@ export type AppAction =
   | { type: "CLOSE_DRY_RUN" }
   | { type: "OPEN_CONTEXT_MENU"; menu: PendingContextMenu }
   | { type: "CLOSE_CONTEXT_MENU" }
+  | { type: "OPEN_GLOBAL_SELECTION_ADD"; add: PendingGlobalSelectionAdd }
+  | { type: "CLOSE_GLOBAL_SELECTION_ADD" }
   | { type: "OPEN_OPEN_WITH"; openWith: PendingOpenWith }
   | { type: "CLOSE_OPEN_WITH" }
   | { type: "OPEN_BRO"; bro: PendingBro }
@@ -416,6 +429,9 @@ function applySnapshot(state: AppState, msg: StateSnapshotMessage): AppState {
   }
   if (domains.shareConfig !== undefined) {
     next.shareConfig = domains.shareConfig;
+  }
+  if (domains.globalSelections !== undefined) {
+    next.globalSelections = domains.globalSelections;
   }
   return next;
 }
@@ -619,11 +635,12 @@ function applyPatch(state: AppState, msg: StatePatchMessage): AppState {
       || (msg.patch.sourceId !== undefined && updated.sourceId !== panel.sourceId);
 
     if (locationChanged) {
-      // Bookmarks, history, and procs are navigation/virtual tools, not real filesystem
+      // Bookmarks, history, procs, and global selections are navigation/virtual tools, not real filesystem
       // locations — entering or exiting them must not create a history entry.
       if (updated.sourceId === "bookmarks" || panel.sourceId === "bookmarks"
        || updated.sourceId === "history"  || panel.sourceId === "history"
-       || updated.sourceId === "procs"    || panel.sourceId === "procs") {
+       || updated.sourceId === "procs"    || panel.sourceId === "procs"
+       || updated.sourceId === "global-selections" || panel.sourceId === "global-selections") {
         return { ...state, panels: { ...state.panels, [panelId]: updated } };
       }
       if (pendingHistoryNavPanels.has(panelId)) {
@@ -775,6 +792,13 @@ function applyPatch(state: AppState, msg: StatePatchMessage): AppState {
         pairedPeers: pairedPeers ?? state.shareConfig.pairedPeers,
         fingerprint: fingerprint ?? state.shareConfig.fingerprint,
       },
+    };
+  }
+
+  if (msg.domain === "globalSelections") {
+    return {
+      ...state,
+      globalSelections: (msg.patch.globalSelections as GlobalSelectionSummary[]) ?? [],
     };
   }
 
@@ -1402,6 +1426,10 @@ function reducer(state: AppState, action: AppAction): AppState {
       return { ...state, pendingContextMenu: action.menu };
     case "CLOSE_CONTEXT_MENU":
       return { ...state, pendingContextMenu: null };
+    case "OPEN_GLOBAL_SELECTION_ADD":
+      return { ...state, pendingContextMenu: null, pendingGlobalSelectionAdd: action.add };
+    case "CLOSE_GLOBAL_SELECTION_ADD":
+      return { ...state, pendingGlobalSelectionAdd: null };
     case "OPEN_OPEN_WITH":
       return { ...state, pendingContextMenu: null, pendingOpenWith: action.openWith };
     case "CLOSE_OPEN_WITH":

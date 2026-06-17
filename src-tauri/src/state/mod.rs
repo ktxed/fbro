@@ -12,6 +12,7 @@ use crate::jobs::search::SearchResultStore;
 use crate::jobs::JobStore;
 use crate::platform::{Platform, ResolvedOpenWithApp};
 use crate::thumb_pool::ThumbPool;
+use crate::vfs::global_selection::{GlobalSelectionStore, SharedGlobalSelectionStore};
 use crate::vfs::VfsDriver;
 use crate::ws::protocol::{EntrySchema, FilterSpec, ServerMessage, SortSpec};
 
@@ -471,6 +472,7 @@ pub struct AppState {
     pub layout_slots: Vec<String>,
     pub sources: HashMap<String, Source>,
     pub drivers: HashMap<String, Arc<dyn VfsDriver>>,
+    pub global_selections: SharedGlobalSelectionStore,
     pub focus: String,
     pub platform: Arc<dyn Platform>,
     pub job_store: JobStore,
@@ -561,6 +563,7 @@ pub struct BroRequest {
     pub result_panel_id: Option<String>,
     /// Stored so inputs can be re-resolved in full at launch time.
     pub target_path: Option<String>,
+    pub resolved_inputs: Option<Vec<crate::bro::BroInputItem>>,
     pub bros: Vec<ResolvedBro>,
 }
 
@@ -739,6 +742,8 @@ impl AppState {
 
         let mut sources = HashMap::new();
         let mut drivers: HashMap<String, Arc<dyn VfsDriver>> = HashMap::new();
+        let global_selections: SharedGlobalSelectionStore =
+            Arc::new(std::sync::Mutex::new(GlobalSelectionStore::default()));
 
         for vol in vols {
             let source = Source {
@@ -808,6 +813,12 @@ impl AppState {
                 hierarchical: loaded_settings.general.proc_tree_mode,
             }),
         );
+        drivers.insert(
+            crate::vfs::global_selection::SOURCE_ID.to_string(),
+            Arc::new(crate::vfs::global_selection::GlobalSelectionDriver::new(
+                Arc::clone(&global_selections),
+            )),
+        );
 
         let share_config = {
             // Best-effort load from `~/.config/fbro/peers.json`. A missing
@@ -843,6 +854,7 @@ impl AppState {
             layout_slots,
             sources,
             drivers,
+            global_selections,
             focus: "left".to_string(),
             platform,
             job_store: JobStore::new(),

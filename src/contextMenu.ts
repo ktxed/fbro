@@ -6,13 +6,25 @@ export type ContextMenuItem =
   | { id: string; kind: "separator" }
   | {
       id: string;
-      kind: "command" | "clipboard" | "platform" | "openWith" | "bro";
+      kind: "command" | "clipboard" | "platform" | "openWith" | "bro" | "globalSelection";
       label: string;
       shortcut?: string;
       commandId?: string;
       clipboardText?: string;
       actionId?: string;
     };
+
+export interface ContextMenuOptions {
+  isShadow?: boolean;
+  canPlatform?: boolean;
+  canOpenWith?: boolean;
+  canPassToBro?: boolean;
+  canAddToGlobalSelection?: boolean;
+  canCopy?: boolean;
+  canRename?: boolean;
+  canDelete?: boolean;
+  canCopyFullPath?: boolean;
+}
 
 function commandItem(
   commandId: string,
@@ -59,24 +71,29 @@ export function buildContextMenuItems(
   fullPath: string,
   name: string,
   kind: string,
-  isShadow?: boolean,
+  options: ContextMenuOptions = {},
 ): ContextMenuItem[] {
-  const openWithItem: ContextMenuItem | null = !isShadow && (kind === "file" || kind === "directory")
+  const isShadow = !!options.isShadow;
+  const openWithItem: ContextMenuItem | null = options.canOpenWith && (kind === "file" || kind === "directory")
     ? { id: "platform.open_with", kind: "openWith", label: "Open With..." }
     : null;
-  const broItem: ContextMenuItem | null = !isShadow && (kind === "file" || kind === "directory")
+  const broItem: ContextMenuItem | null = options.canPassToBro && (kind === "file" || kind === "directory")
     ? { id: "platform.pass_to_bro", kind: "bro", label: "Pass to Bro..." }
+    : null;
+  const globalSelectionItem: ContextMenuItem | null = options.canAddToGlobalSelection && (kind === "file" || kind === "directory")
+    ? { id: "selection.to_global", kind: "globalSelection", label: "To global selection" }
     : null;
 
   return [
-    ...(!isShadow ? [platformItem()] : []),
+    ...(options.canPlatform ? [platformItem()] : []),
     ...(broItem ? [broItem] : []),
+    ...(globalSelectionItem ? [globalSelectionItem] : []),
     ...(openWithItem ? [openWithItem] : []),
-    commandItem("file.copy", isShadow ? "Extract" : "Copy", commands),
-    ...(!isShadow ? [commandItem("file.rename", "Rename", commands)] : []),
-    ...(!isShadow ? [commandItem("file.delete", "Delete", commands)] : []),
+    ...(options.canCopy ? [commandItem("file.copy", isShadow ? "Extract" : "Copy", commands)] : []),
+    ...(options.canRename ? [commandItem("file.rename", "Rename", commands)] : []),
+    ...(options.canDelete ? [commandItem("file.delete", "Delete", commands)] : []),
     { id: "separator.clipboard", kind: "separator" },
     { id: "clipboard.name", kind: "clipboard", label: "Copy name", clipboardText: name },
-    ...(!isShadow ? [{ id: "clipboard.fullPath", kind: "clipboard", label: "Copy full path", clipboardText: fullPath } as ContextMenuItem] : []),
+    ...(options.canCopyFullPath ? [{ id: "clipboard.fullPath", kind: "clipboard", label: "Copy full path", clipboardText: fullPath } as ContextMenuItem] : []),
   ];
 }

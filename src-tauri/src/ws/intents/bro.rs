@@ -19,7 +19,7 @@ use crate::jobs::integrity_compare::{
 };
 use crate::jobs::{AppJob, FileOpProgress, FpBroJobMeta, JobKind, JobState, SyncBroJobMeta};
 use crate::state::ChildProcessEntry;
-use crate::ws::intents::arg_str;
+use crate::ws::intents::{arg_str, is_global_selection_source};
 use crate::ws::protocol::{
     now, BroInputSchema, BroOutputSchema, BroParamSchema, BroPreSchema, BroSchema,
     FileOpFileSchema, JobStartSchema, ServerMessage, SyncBroResultSchema,
@@ -45,7 +45,8 @@ async fn save_sync_report(args: &Value, ctx: &mut IntentContext<'_>) {
     {
         Some(result) => result,
         None => {
-            send_save_report_error(ctx, &job_id, "missing or invalid sync result".to_string()).await;
+            send_save_report_error(ctx, &job_id, "missing or invalid sync result".to_string())
+                .await;
             return;
         }
     };
@@ -260,7 +261,7 @@ async fn list_bros_for_request(scope: &Value, args: &Value, ctx: &mut IntentCont
         return;
     }
 
-    let (ranking_inputs, result_panel_id, panel_source_id, sync_available) = {
+    let (ranking_inputs, result_panel_id, panel_source_id, sync_available, resolved_inputs) = {
         let state_guard = ctx.state.lock().await;
         let result_panel_id =
             Some(other_panel_id(&state_guard, &panel_id).unwrap_or_else(|| panel_id.clone()));
@@ -271,6 +272,9 @@ async fn list_bros_for_request(scope: &Value, args: &Value, ctx: &mut IntentCont
             .get(&panel_id)
             .map(|p| p.source_id.clone());
         let result = match state_guard.panels.get(&panel_id) {
+            Some(panel) if is_global_selection_source(&panel.source_id) => {
+                resolve_global_selection_inputs(&state_guard, panel, parsed.target_path.as_deref())
+            }
             Some(panel) => match state_guard.drivers.get(&panel.source_id) {
                 Some(driver) => {
                     resolve_ranking_inputs(panel, driver.as_ref(), parsed.target_path.as_deref())
@@ -279,7 +283,19 @@ async fn list_bros_for_request(scope: &Value, args: &Value, ctx: &mut IntentCont
             },
             None => Err("Panel not found.".to_string()),
         };
-        (result, result_panel_id, panel_source_id, sync_available)
+        let resolved_inputs =
+            if panel_source_id.as_deref() == Some(crate::vfs::global_selection::SOURCE_ID) {
+                result.as_ref().ok().cloned()
+            } else {
+                None
+            };
+        (
+            result,
+            result_panel_id,
+            panel_source_id,
+            sync_available,
+            resolved_inputs,
+        )
     };
 
     let ranking_inputs = match ranking_inputs {
@@ -374,6 +390,7 @@ async fn list_bros_for_request(scope: &Value, args: &Value, ctx: &mut IntentCont
                 source_panel_id: panel_id,
                 result_panel_id,
                 target_path: parsed.target_path.clone(),
+                resolved_inputs,
                 bros,
             },
         );
@@ -452,64 +469,15 @@ async fn launch_selected_bro(args: &Value, ctx: &mut IntentContext<'_>) {
     // driver Arc under a brief lock, then build the BroInputItems (path resolution) outside
     // the lock so large selections don't block panel intents.
     type RawEntry = (String, String); // (name, kind)
-    let raw_inputs: Result<
-        (
-            std::sync::Arc<dyn crate::vfs::VfsDriver>,
-            String,
-            Vec<RawEntry>,
-        ),
-        String,
-    > = {
-        let state_guard = ctx.state.lock().await;
-        match state_guard.panels.get(&request.source_panel_id) {
-            Some(panel) => match state_guard.drivers.get(&panel.source_id) {
-                Some(driver) => {
-                    let driver = driver.clone();
-                    let panel_path = panel.path.clone();
-                    let raw: Vec<RawEntry> = if let Some(tp) = request.target_path.as_deref() {
-                        panel
-                            .entries
-                            .iter()
-                            .find(|e| {
-                                e.name != ".." && driver.resolve_child(&panel_path, &e.name) == tp
-                            })
-                            .map(|e| vec![(e.name.clone(), e.kind.clone())])
-                            .unwrap_or_default()
-                    } else if panel.selection.is_empty() {
-                        panel
-                            .entries
-                            .get(panel.cursor)
-                            .filter(|e| e.name != "..")
-                            .map(|e| vec![(e.name.clone(), e.kind.clone())])
-                            .unwrap_or_default()
-                    } else {
-                        panel
-                            .selection
-                            .iter()
-                            .filter_map(|&i| panel.entries.get(i))
-                            .filter(|e| e.name != "..")
-                            .map(|e| (e.name.clone(), e.kind.clone()))
-                            .collect()
-                    };
-                    Ok((driver, panel_path, raw))
-                }
-                None => Err(format!(
-                    "Source driver not available for source_id={}",
-                    panel.source_id
-                )),
-            },
-            None => Err(format!("Panel not found: {}", request.source_panel_id)),
-        }
-    }; // state lock released here — path resolution happens below without the lock
-    let inputs = match raw_inputs {
-        Err(message) => {
-            eprintln!("[bro] input resolution failed: {message}");
+    let inputs = if let Some(inputs) = request.resolved_inputs.clone() {
+        if inputs.is_empty() {
+            eprintln!("[bro] no valid entries in global selection");
             let _ = ctx
                 .tx
                 .send(ServerMessage::Error {
                     timestamp: now(),
                     code: "BRO_LAUNCH_FAILED".to_string(),
-                    message,
+                    message: "No valid input entries are selected.".to_string(),
                     recoverable: true,
                     extra: Some(serde_json::json!({
                         "requestId": parsed.request_id,
@@ -519,15 +487,67 @@ async fn launch_selected_bro(args: &Value, ctx: &mut IntentContext<'_>) {
                 .await;
             return;
         }
-        Ok((driver, panel_path, raw)) => {
-            if raw.is_empty() {
-                eprintln!("[bro] no valid entries in selection");
+        inputs
+    } else {
+        let raw_inputs: Result<
+            (
+                std::sync::Arc<dyn crate::vfs::VfsDriver>,
+                String,
+                Vec<RawEntry>,
+            ),
+            String,
+        > = {
+            let state_guard = ctx.state.lock().await;
+            match state_guard.panels.get(&request.source_panel_id) {
+                Some(panel) => match state_guard.drivers.get(&panel.source_id) {
+                    Some(driver) => {
+                        let driver = driver.clone();
+                        let panel_path = panel.path.clone();
+                        let raw: Vec<RawEntry> = if let Some(tp) = request.target_path.as_deref() {
+                            panel
+                                .entries
+                                .iter()
+                                .find(|e| {
+                                    e.name != ".."
+                                        && driver.resolve_child(&panel_path, &e.name) == tp
+                                })
+                                .map(|e| vec![(e.name.clone(), e.kind.clone())])
+                                .unwrap_or_default()
+                        } else if panel.selection.is_empty() {
+                            panel
+                                .entries
+                                .get(panel.cursor)
+                                .filter(|e| e.name != "..")
+                                .map(|e| vec![(e.name.clone(), e.kind.clone())])
+                                .unwrap_or_default()
+                        } else {
+                            panel
+                                .selection
+                                .iter()
+                                .filter_map(|&i| panel.entries.get(i))
+                                .filter(|e| e.name != "..")
+                                .map(|e| (e.name.clone(), e.kind.clone()))
+                                .collect()
+                        };
+                        Ok((driver, panel_path, raw))
+                    }
+                    None => Err(format!(
+                        "Source driver not available for source_id={}",
+                        panel.source_id
+                    )),
+                },
+                None => Err(format!("Panel not found: {}", request.source_panel_id)),
+            }
+        }; // state lock released here — path resolution happens below without the lock
+        match raw_inputs {
+            Err(message) => {
+                eprintln!("[bro] input resolution failed: {message}");
                 let _ = ctx
                     .tx
                     .send(ServerMessage::Error {
                         timestamp: now(),
                         code: "BRO_LAUNCH_FAILED".to_string(),
-                        message: "No valid input entries are selected.".to_string(),
+                        message,
                         recoverable: true,
                         extra: Some(serde_json::json!({
                             "requestId": parsed.request_id,
@@ -537,18 +557,37 @@ async fn launch_selected_bro(args: &Value, ctx: &mut IntentContext<'_>) {
                     .await;
                 return;
             }
-            let items = tokio::task::spawn_blocking(move || {
-                raw.into_iter()
-                    .map(|(name, kind)| BroInputItem {
-                        path: driver.resolve_child(&panel_path, &name),
-                        name,
-                        kind,
-                    })
-                    .collect::<Vec<BroInputItem>>()
-            })
-            .await
-            .unwrap_or_default();
-            items
+            Ok((driver, panel_path, raw)) => {
+                if raw.is_empty() {
+                    eprintln!("[bro] no valid entries in selection");
+                    let _ = ctx
+                        .tx
+                        .send(ServerMessage::Error {
+                            timestamp: now(),
+                            code: "BRO_LAUNCH_FAILED".to_string(),
+                            message: "No valid input entries are selected.".to_string(),
+                            recoverable: true,
+                            extra: Some(serde_json::json!({
+                                "requestId": parsed.request_id,
+                                "broId": parsed.bro_id,
+                            })),
+                        })
+                        .await;
+                    return;
+                }
+                let items = tokio::task::spawn_blocking(move || {
+                    raw.into_iter()
+                        .map(|(name, kind)| BroInputItem {
+                            path: driver.resolve_child(&panel_path, &name),
+                            name,
+                            kind,
+                        })
+                        .collect::<Vec<BroInputItem>>()
+                })
+                .await
+                .unwrap_or_default();
+                items
+            }
         }
     };
 
@@ -1238,6 +1277,67 @@ fn resolve_ranking_inputs(
 }
 
 const RANKING_SAMPLE_LIMIT: usize = 100;
+
+fn resolve_global_selection_inputs(
+    state: &crate::state::AppState,
+    panel: &crate::state::Panel,
+    target_path: Option<&str>,
+) -> Result<Vec<BroInputItem>, String> {
+    if !panel.path.is_empty() {
+        return Err("Pass to Bro is only available from the global selections root.".to_string());
+    }
+
+    let selection_names: Vec<String> = if let Some(target_path) = target_path {
+        let target = target_path.trim_start_matches('/');
+        panel
+            .entries
+            .iter()
+            .find(|entry| entry.name != ".." && entry.name == target)
+            .map(|entry| vec![entry.name.clone()])
+            .unwrap_or_default()
+    } else if panel.selection.is_empty() {
+        panel
+            .entries
+            .get(panel.cursor)
+            .filter(|entry| entry.name != "..")
+            .map(|entry| vec![entry.name.clone()])
+            .unwrap_or_default()
+    } else {
+        panel
+            .selection
+            .iter()
+            .filter_map(|index| panel.entries.get(*index))
+            .filter(|entry| entry.name != "..")
+            .map(|entry| entry.name.clone())
+            .collect()
+    };
+
+    if selection_names.len() != 1 {
+        return Err("Choose one global selection to pass to Bro.".to_string());
+    }
+
+    let store = state
+        .global_selections
+        .lock()
+        .map_err(|_| "Global selection store is unavailable.".to_string())?;
+    let selection = store
+        .selection_by_name(&selection_names[0])
+        .ok_or_else(|| "Global selection not found.".to_string())?;
+    let inputs = selection
+        .items
+        .iter()
+        .map(|item| BroInputItem {
+            path: item.path.clone(),
+            name: item.name.clone(),
+            kind: item.kind.clone(),
+        })
+        .collect::<Vec<_>>();
+    if inputs.is_empty() {
+        Err("No valid input entries are selected.".to_string())
+    } else {
+        Ok(inputs)
+    }
+}
 
 fn resolve_inputs(
     panel: &crate::state::Panel,
