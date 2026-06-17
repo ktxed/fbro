@@ -540,6 +540,8 @@ export function Panel({
     entry: VFSEntry;
     absIndex: number;
     rect: DOMRect;
+    targetScope: "entry" | "selection";
+    targetCount: number;
   }>(null);
   const suppressNextContextMenuRef = useRef(false);
   const calcSet = new Set(panel.calculatingSize ?? []);
@@ -903,11 +905,19 @@ export function Panel({
   }, [panel.cursor, panel.viewMode, panel.supportsThumbnails, gridMetrics, isWindowed, handleScroll]);
 
 
-  const openContextMenuForEntry = useCallback((entry: VFSEntry, absIndex: number, rect: DOMRect) => {
+  const openContextMenuForEntry = useCallback((
+    entry: VFSEntry,
+    absIndex: number,
+    rect: DOMRect,
+    explicitTarget?: { targetScope: "entry" | "selection"; targetCount: number },
+  ) => {
     const dirPath = panel.path.replace(/[/\\]+$/, "");
     const fullPath = entry.sourcePath ?? (entry.name === ".." ? dirPath : `${dirPath}/${entry.name}`);
     if (entry.name === "..") return;
-    const targetsSelection = panel.selection.includes(absIndex);
+    const targetsSelection = explicitTarget
+      ? explicitTarget.targetScope === "selection"
+      : panel.selection.includes(absIndex);
+    const targetCount = explicitTarget?.targetCount ?? (targetsSelection ? panel.selection.length : 1);
 
     if (!isFocused) {
       client.sendIntent("SwitchFocus", undefined, { to: panelId });
@@ -931,7 +941,7 @@ export function Panel({
         anchorBottom: rect.bottom,
         isShadow: !!panel.shadowSource,
         targetScope: targetsSelection ? "selection" : "entry",
-        targetCount: targetsSelection ? panel.selection.length : 1,
+        targetCount,
       },
     });
   }, [client, dispatch, isFocused, panel.path, panel.selection, panel.shadowSource, panelId]);
@@ -976,7 +986,10 @@ export function Panel({
         const pending = contextMenuPendingRef.current;
         if (pending && heldLongEnough && !rightDrag.current.everMoved) {
           suppressNextContextMenuRef.current = true;
-          openContextMenuForEntry(pending.entry, pending.absIndex, pending.rect);
+          openContextMenuForEntry(pending.entry, pending.absIndex, pending.rect, {
+            targetScope: pending.targetScope,
+            targetCount: pending.targetCount,
+          });
         }
         rightDrag.current.active = false;
         contextMenuHoldStartRef.current = 0;
@@ -1185,10 +1198,17 @@ export function Panel({
           });
           if (!isFocused) client.sendIntent("SwitchFocus", undefined, { to: panelId });
           const mode = selectionSet.has(absIndex) ? "deselect" : "select";
+          const targetsSelection = selectionSet.has(absIndex);
           rightDrag.current = { active: true, everMoved: false, startRow: absIndex, mode, preSelection: [...panel.selection] };
           contextMenuOpenRef.current = false;
           contextMenuHoldStartRef.current = Date.now();
-          contextMenuPendingRef.current = entry.name === ".." ? null : { entry, absIndex, rect };
+          contextMenuPendingRef.current = entry.name === ".." ? null : {
+            entry,
+            absIndex,
+            rect,
+            targetScope: targetsSelection ? "selection" : "entry",
+            targetCount: targetsSelection ? panel.selection.length : 1,
+          };
           focusDivRef.current?.focus();
           return;
         }
@@ -1227,6 +1247,9 @@ export function Panel({
         }
         if (suppressNextContextMenuRef.current) {
           suppressNextContextMenuRef.current = false;
+          return;
+        }
+        if (contextMenuHoldStartRef.current > 0 && Date.now() - contextMenuHoldStartRef.current >= 400) {
           return;
         }
         if (!rightDrag.current.everMoved) {
@@ -1363,10 +1386,17 @@ export function Panel({
             });
             if (!isFocused) client.sendIntent("SwitchFocus", undefined, { to: panelId });
             const mode = selectionSet.has(absIndex) ? "deselect" : "select";
+            const targetsSelection = selectionSet.has(absIndex);
             rightDrag.current = { active: true, everMoved: false, startRow: absIndex, mode, preSelection: [...panel.selection] };
             contextMenuOpenRef.current = false;
             contextMenuHoldStartRef.current = Date.now();
-            contextMenuPendingRef.current = entry.name === ".." ? null : { entry, absIndex, rect };
+            contextMenuPendingRef.current = entry.name === ".." ? null : {
+              entry,
+              absIndex,
+              rect,
+              targetScope: targetsSelection ? "selection" : "entry",
+              targetCount: targetsSelection ? panel.selection.length : 1,
+            };
             focusDivRef.current?.focus();
             return;
           }
@@ -1405,6 +1435,9 @@ export function Panel({
           }
           if (suppressNextContextMenuRef.current) {
             suppressNextContextMenuRef.current = false;
+            return;
+          }
+          if (contextMenuHoldStartRef.current > 0 && Date.now() - contextMenuHoldStartRef.current >= 400) {
             return;
           }
           if (!rightDrag.current.everMoved) {
