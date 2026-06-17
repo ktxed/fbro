@@ -124,12 +124,15 @@ export interface PendingContextMenu {
   anchorTop: number;
   anchorBottom: number;
   isShadow?: boolean;
+  targetScope: "entry" | "selection";
+  targetCount: number;
 }
 
 export interface PendingGlobalSelectionAdd {
   panelId: string;
-  targetPath: string;
+  targetPath?: string;
   targetName: string;
+  targetCount: number;
 }
 
 export interface PendingOpenWith {

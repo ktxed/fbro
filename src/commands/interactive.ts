@@ -867,6 +867,7 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
       if (!entry || entry.name === "..") return false;
       const dirPath = focused.panel.path.replace(/[/\\]+$/, "");
       const fullPath = entry.sourcePath ?? `${dirPath}/${entry.name}`;
+      const targetsSelection = focused.panel.selection.length > 0;
       dispatch({
         type: "OPEN_CONTEXT_MENU",
         menu: {
@@ -882,6 +883,8 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
           anchorTop: rect.top,
           anchorBottom: rect.bottom,
           isShadow: !!focused.panel.shadowSource,
+          targetScope: targetsSelection ? "selection" : "entry",
+          targetCount: targetsSelection ? focused.panel.selection.length : 1,
         },
       });
       const panelDiv = document.querySelector<HTMLElement>(`[data-panel-id="${focused.panelId}"]`);

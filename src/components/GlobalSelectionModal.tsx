@@ -28,6 +28,9 @@ export function GlobalSelectionModal({ add, client }: GlobalSelectionModalProps)
   const inputRef = useRef<HTMLInputElement>(null);
 
   const creating = target === CREATE_NEW;
+  const summaryName = add.targetPath
+    ? add.targetName
+    : `${add.targetCount} selected ${add.targetCount === 1 ? "entry" : "entries"}`;
 
   useEffect(() => {
     if (creating) inputRef.current?.focus();
@@ -51,7 +54,7 @@ export function GlobalSelectionModal({ add, client }: GlobalSelectionModalProps)
 
     client.sendIntent("AddToGlobalSelection", add.panelId, {
       panelId: add.panelId,
-      targetPath: add.targetPath,
+      ...(add.targetPath ? { targetPath: add.targetPath } : {}),
       ...(creating ? { name: trimmed } : { selectionId: target }),
     });
     close();
@@ -88,7 +91,7 @@ export function GlobalSelectionModal({ add, client }: GlobalSelectionModalProps)
         <div className="modal__header">To global selection</div>
         <div className="modal__body">
           <p className="modal__summary">
-            Add <strong>{add.targetName}</strong>
+            Add <strong>{summaryName}</strong>
           </p>
           <div className="modal__rename-row">
             <label className="modal__rename-label">Selection:</label>

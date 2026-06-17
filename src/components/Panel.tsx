@@ -907,6 +907,7 @@ export function Panel({
     const dirPath = panel.path.replace(/[/\\]+$/, "");
     const fullPath = entry.sourcePath ?? (entry.name === ".." ? dirPath : `${dirPath}/${entry.name}`);
     if (entry.name === "..") return;
+    const targetsSelection = panel.selection.includes(absIndex);
 
     if (!isFocused) {
       client.sendIntent("SwitchFocus", undefined, { to: panelId });
@@ -929,9 +930,11 @@ export function Panel({
         anchorTop: rect.top,
         anchorBottom: rect.bottom,
         isShadow: !!panel.shadowSource,
+        targetScope: targetsSelection ? "selection" : "entry",
+        targetCount: targetsSelection ? panel.selection.length : 1,
       },
     });
-  }, [client, dispatch, isFocused, panel.path, panel.shadowSource, panelId]);
+  }, [client, dispatch, isFocused, panel.path, panel.selection, panel.shadowSource, panelId]);
 
   const openContextMenuAtCursor = useCallback(() => {
     const entry = panel.entries[panel.cursor - (panel.windowStart ?? 0)];
@@ -940,8 +943,29 @@ export function Panel({
     const row = listRef.current?.querySelector<HTMLElement>(`[data-abs-index="${panel.cursor}"]`);
     const rect = row?.getBoundingClientRect() ?? focusDivRef.current?.getBoundingClientRect();
     if (!rect) return;
-    openContextMenuForEntry(entry, panel.cursor, rect);
-  }, [openContextMenuForEntry, panel]);
+    const dirPath = panel.path.replace(/[/\\]+$/, "");
+    const fullPath = entry.sourcePath ?? `${dirPath}/${entry.name}`;
+    const targetsSelection = panel.selection.length > 0;
+    dispatch({
+      type: "OPEN_CONTEXT_MENU",
+      menu: {
+        panelId,
+        absIndex: panel.cursor,
+        name: entry.name,
+        kind: entry.kind,
+        size: entry.size,
+        dirPath,
+        fullPath,
+        anchorLeft: rect.left,
+        anchorRight: rect.right,
+        anchorTop: rect.top,
+        anchorBottom: rect.bottom,
+        isShadow: !!panel.shadowSource,
+        targetScope: targetsSelection ? "selection" : "entry",
+        targetCount: targetsSelection ? panel.selection.length : 1,
+      },
+    });
+  }, [dispatch, panel, panelId]);
 
   // End right-drag on mouse up anywhere; if the right button was held long
   // enough without becoming a drag, open the contextual menu on release.

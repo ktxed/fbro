@@ -202,18 +202,23 @@ export function ContextMenu({ client, menu }: ContextMenuProps) {
     }
 
     if (item.kind === "globalSelection") {
+      const targetPath = menu.targetScope === "selection" ? undefined : menu.fullPath;
+      const targetName = menu.targetScope === "selection"
+        ? `${menu.targetCount} selected ${menu.targetCount === 1 ? "entry" : "entries"}`
+        : menu.name;
       if (state.globalSelections.length === 0) {
         client.sendIntent("AddToGlobalSelection", menu.panelId, {
           panelId: menu.panelId,
-          targetPath: menu.fullPath,
+          ...(targetPath ? { targetPath } : {}),
         });
       } else {
         dispatch({
           type: "OPEN_GLOBAL_SELECTION_ADD",
           add: {
             panelId: menu.panelId,
-            targetPath: menu.fullPath,
-            targetName: menu.name,
+            ...(targetPath ? { targetPath } : {}),
+            targetName,
+            targetCount: menu.targetCount,
           },
         });
       }
