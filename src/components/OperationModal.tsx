@@ -483,8 +483,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
     const isArchiveSource = !!sourcePanelState?.shadowSource && isArchiveSourceId(sourcePanelState.sourceId);
     const isGlobalSelectionDelete = isDelete
       && !!sourcePanelState
-      && isGlobalSelectionSourceId(sourcePanelState.sourceId)
-      && !!sourcePanelState.path;
+      && isGlobalSelectionSourceId(sourcePanelState.sourceId);
     const label = isArchiveSource && pending.opType === "copy" ? "Extract" : opLabel(pending.opType);
     const canStartInBackground = !dryMode;
     const canSuggestResume = canSuggestResumeForPending(state, pending);
@@ -500,11 +499,17 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
       if (!canSubmitPending) return;
       setSubmitted(true);
       if (isGlobalSelectionDelete && sourcePanelState) {
-        client.sendIntent("RemoveGlobalSelectionItems", undefined, {
-          panelId: pending.sourcePanel,
-          selectionName: sourcePanelState.path,
-          paths: pending.files.map((file) => file.sourcePath ?? file.name),
-        });
+        if (sourcePanelState.path) {
+          client.sendIntent("RemoveGlobalSelectionItems", undefined, {
+            panelId: pending.sourcePanel,
+            selectionName: sourcePanelState.path,
+            paths: pending.files.map((file) => file.sourcePath ?? file.name),
+          });
+        } else {
+          client.sendIntent("RemoveGlobalSelections", undefined, {
+            names: pending.files.map((file) => file.name),
+          });
+        }
         close();
         return;
       }

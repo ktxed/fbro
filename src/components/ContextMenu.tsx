@@ -51,7 +51,7 @@ export function ContextMenu({ client, menu }: ContextMenuProps) {
           canAddToGlobalSelection: isLocalFilesystem,
           canCopy: !!menu.isShadow || (isLocalFilesystem && supports.includes("CopySelection")),
           canRename: (isLocalFilesystem && supports.includes("Rename")) || isGlobalRoot,
-          canDelete: (isLocalFilesystem && supports.includes("DeleteSelection")) || isGlobalInside,
+          canDelete: (isLocalFilesystem && supports.includes("DeleteSelection")) || isGlobalSelection,
           canCopyFullPath: isLocalFilesystem || isGlobalInside,
         },
       );

@@ -106,6 +106,8 @@ slots
 focus
 selections
 jobs
+sources
+globalSelections
 ```
 
 The `slots` domain groups panels into **tab groups**. Each slot owns one or more
@@ -357,6 +359,52 @@ Intents represent **user intent**, not UI actions.
 
 ---
 
+### 9.4 Global Selection Deletion
+
+Global selections are virtual state, not filesystem ownership. Deleting from the
+global selections source mutates only the global selection store.
+
+Root-level deletion removes named global selection records:
+
+```json
+{
+  "type": "Intent",
+  "name": "RemoveGlobalSelections",
+  "args": {
+    "names": ["Selection 1", "Build artifacts"]
+  }
+}
+```
+
+Deletion inside a named global selection removes references by their stored
+source paths:
+
+```json
+{
+  "type": "Intent",
+  "name": "RemoveGlobalSelectionItems",
+  "args": {
+    "panelId": "left",
+    "selectionName": "Selection 1",
+    "paths": ["/home/user/a.txt", "/home/user/b.txt"]
+  }
+}
+```
+
+Backend behavior:
+
+* `RemoveGlobalSelections` removes only virtual selection records.
+* `RemoveGlobalSelectionItems` removes only virtual item references.
+* Neither intent deletes, moves, truncates, or otherwise mutates referenced
+  filesystem paths.
+* The BE emits `StatePatch` messages for `globalSelections`, `sources` when
+  source visibility changes, and rescanned global-selection panels.
+* `StartFileOp` with `opType: "delete"` from the global selections source is
+  treated as a defensive compatibility path and resolves to the same virtual
+  store mutations, not a filesystem delete job.
+
+---
+
 ## 10. Panel Filtering
 
 Filtering is semantic and BE-owned.
@@ -522,4 +570,3 @@ Explicitly out of scope:
 * UI, TUI all speak the same protocol
 
 ---
-

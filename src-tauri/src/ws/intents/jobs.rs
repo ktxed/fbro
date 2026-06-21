@@ -21,8 +21,8 @@ use crate::ws::intents::{
 use crate::ws::protocol::SearchParamsSchema;
 use crate::ws::protocol::{now, FileOpFileSchema, JobStartSchema, ServerMessage};
 use crate::ws::runtime::{
-    build_global_selection_patch, build_sources_json, navigate_to, quiet_rescan_panel,
-    rescan_panel, resolve_panel_id, selected_names_for, IntentContext,
+    build_global_selection_patch, build_sources_json, ensure_global_selection_source, navigate_to,
+    quiet_rescan_panel, rescan_panel, resolve_panel_id, selected_names_for, IntentContext,
 };
 
 pub(crate) async fn handle(name: &str, scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
@@ -1444,7 +1444,7 @@ async fn handle_global_selection_file_op(
     op_type: &FileOpType,
     ctx: &mut IntentContext<'_>,
 ) -> bool {
-    let (is_global, selection_name, paths) = {
+    let (is_global, selection_name, selection_names, paths) = {
         let state_guard = ctx.state.lock().await;
         let Some(panel) = state_guard.panels.get(&parsed.source_panel) else {
             return false;
@@ -1452,17 +1452,43 @@ async fn handle_global_selection_file_op(
         if !is_global_selection_source(&panel.source_id) {
             return false;
         }
-        if *op_type != FileOpType::Delete || panel.path.is_empty() {
+        if *op_type != FileOpType::Delete {
             drop(state_guard);
             let _ = send_error(
                 ctx,
                 "OP_NOT_SUPPORTED",
-                "Only deleting references inside a global selection is supported.".to_string(),
+                "Only deleting global selection references is supported.".to_string(),
             )
             .await;
             return true;
         }
-        let paths = if parsed.files.is_empty() {
+        let indices = || {
+            if panel.selection.is_empty() {
+                vec![panel.cursor]
+            } else {
+                panel.selection.clone()
+            }
+        };
+        let selection_names = if panel.path.is_empty() {
+            if parsed.files.is_empty() {
+                indices()
+                    .iter()
+                    .filter_map(|index| panel.entries.get(*index))
+                    .map(|entry| entry.name.clone())
+                    .collect::<Vec<_>>()
+            } else {
+                parsed
+                    .files
+                    .iter()
+                    .map(|file| file.name.clone())
+                    .collect::<Vec<_>>()
+            }
+        } else {
+            Vec::new()
+        };
+        let paths = if panel.path.is_empty() {
+            Vec::new()
+        } else if parsed.files.is_empty() {
             let indices = if panel.selection.is_empty() {
                 vec![panel.cursor]
             } else {
@@ -1485,12 +1511,21 @@ async fn handle_global_selection_file_op(
                 .filter_map(|file| file.source_path.clone().or_else(|| Some(file.name.clone())))
                 .collect::<Vec<_>>()
         };
-        (true, panel.path.clone(), paths)
+        (true, panel.path.clone(), selection_names, paths)
     };
     if !is_global {
         return false;
     }
-    if paths.is_empty() {
+    if selection_name.is_empty() && selection_names.is_empty() {
+        let _ = send_error(
+            ctx,
+            "OP_NOT_SUPPORTED",
+            "No global selections were selected.".to_string(),
+        )
+        .await;
+        return true;
+    }
+    if !selection_name.is_empty() && paths.is_empty() {
         let _ = send_error(
             ctx,
             "OP_NOT_SUPPORTED",
@@ -1500,28 +1535,56 @@ async fn handle_global_selection_file_op(
         return true;
     }
 
-    let patch_result: Result<ServerMessage, String> = {
-        let state_guard = ctx.state.lock().await;
+    let patch_result: Result<(Option<Vec<serde_json::Value>>, ServerMessage), String> = {
+        let mut state_guard = ctx.state.lock().await;
         let store_result = {
             let store_arc = std::sync::Arc::clone(&state_guard.global_selections);
             let result = match store_arc.lock() {
-                Ok(mut store) => store.remove_items_by_paths(&selection_name, &paths),
+                Ok(mut store) => {
+                    if selection_name.is_empty() {
+                        store.remove_selections_by_names(&selection_names)
+                    } else {
+                        store.remove_items_by_paths(&selection_name, &paths)
+                    }
+                }
                 Err(_) => Err("Global selection store is unavailable.".to_string()),
             };
             result
         };
         match store_result {
-            Ok(_) => Ok(build_global_selection_patch(&state_guard)),
+            Ok(_) => {
+                if selection_name.is_empty() {
+                    ensure_global_selection_source(&mut state_guard);
+                    Ok((
+                        Some(build_sources_json(&state_guard)),
+                        build_global_selection_patch(&state_guard),
+                    ))
+                } else {
+                    Ok((None, build_global_selection_patch(&state_guard)))
+                }
+            }
             Err(message) => Err(message),
         }
     };
-    let patch = match patch_result {
-        Ok(patch) => patch,
+    let (sources_json, patch) = match patch_result {
+        Ok(patches) => patches,
         Err(message) => {
             let _ = send_error(ctx, "OP_NOT_SUPPORTED", message).await;
             return true;
         }
     };
+    if let Some(sources_json) = sources_json {
+        let _ = ctx
+            .tx
+            .send(ServerMessage::StatePatch {
+                timestamp: now(),
+                domain: "sources".to_string(),
+                entity_id: None,
+                version: 0,
+                patch: serde_json::json!({ "sources": sources_json }),
+            })
+            .await;
+    }
     let _ = ctx.tx.send(patch).await;
     crate::ws::intents::global_selection::rescan_global_selection_panels(ctx).await;
     true

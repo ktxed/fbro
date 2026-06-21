@@ -182,6 +182,25 @@ impl GlobalSelectionStore {
         Ok(before - selection.items.len())
     }
 
+    pub fn remove_selections_by_names(&mut self, names: &[String]) -> Result<usize, String> {
+        let keys: HashSet<&str> = names
+            .iter()
+            .map(|name| name.as_str())
+            .filter(|name| !name.is_empty())
+            .collect();
+        if keys.is_empty() {
+            return Err("No global selections were selected.".to_string());
+        }
+        let before = self.selections.len();
+        self.selections
+            .retain(|selection| !keys.contains(selection.name.as_str()));
+        let removed = before - self.selections.len();
+        if removed == 0 {
+            return Err("Global selection not found.".to_string());
+        }
+        Ok(removed)
+    }
+
     pub fn rename_selection(&mut self, old_name: &str, new_name: &str) -> Result<(), String> {
         validate_selection_name(new_name, self)?;
         let selection = self
@@ -419,7 +438,12 @@ mod tests {
     fn deduplicates_by_normalized_path() {
         let mut store = GlobalSelectionStore::default();
         let id = store.create_selection(None).unwrap();
-        assert!(store.selection_by_id(&id).unwrap().created_at.parse::<u64>().is_ok());
+        assert!(store
+            .selection_by_id(&id)
+            .unwrap()
+            .created_at
+            .parse::<u64>()
+            .is_ok());
         assert_eq!(
             store
                 .add_items(&id, vec![item("/tmp/a"), item("/tmp/a")])
@@ -434,6 +458,90 @@ mod tests {
         let mut store = GlobalSelectionStore::default();
         store.create_selection(Some("A")).unwrap();
         assert!(store.create_selection(Some("A")).is_err());
+    }
+
+    #[test]
+    fn removes_selections_by_name() {
+        let mut store = GlobalSelectionStore::default();
+        let a = store.create_selection(Some("A")).unwrap();
+        let b = store.create_selection(Some("B")).unwrap();
+        store.add_items(&a, vec![item("/tmp/a")]).unwrap();
+        store.add_items(&b, vec![item("/tmp/b")]).unwrap();
+
+        let names = vec!["A".to_string()];
+        assert_eq!(store.remove_selections_by_names(&names).unwrap(), 1);
+        assert!(store.selection_by_name("A").is_none());
+        assert!(store.selection_by_name("B").is_some());
+    }
+
+    #[test]
+    fn removes_multiple_selections_by_name() {
+        let mut store = GlobalSelectionStore::default();
+        store.create_selection(Some("A")).unwrap();
+        store.create_selection(Some("B")).unwrap();
+        store.create_selection(Some("C")).unwrap();
+
+        let names = vec!["A".to_string(), "C".to_string()];
+        assert_eq!(store.remove_selections_by_names(&names).unwrap(), 2);
+        assert_eq!(
+            store
+                .summaries()
+                .iter()
+                .map(|s| s.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["B"]
+        );
+    }
+
+    #[test]
+    fn removing_unknown_selection_name_fails() {
+        let mut store = GlobalSelectionStore::default();
+        store.create_selection(Some("A")).unwrap();
+
+        let names = vec!["Missing".to_string()];
+        assert_eq!(
+            store.remove_selections_by_names(&names).unwrap_err(),
+            "Global selection not found."
+        );
+    }
+
+    #[test]
+    fn driver_delete_hooks_do_not_delete_referenced_files() {
+        let unique = format!(
+            "fbro-global-selection-delete-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let dir_path = std::env::temp_dir().join(unique);
+        std::fs::create_dir(&dir_path).unwrap();
+        let file_path = dir_path.join("referenced-file.txt");
+        std::fs::write(&file_path, b"keep").unwrap();
+        let file_path_str = file_path.to_string_lossy().to_string();
+
+        let store = Arc::new(Mutex::new(GlobalSelectionStore::default()));
+        {
+            let mut guard = store.lock().unwrap();
+            let id = guard.create_selection(Some("A")).unwrap();
+            guard.add_items(&id, vec![item(&file_path_str)]).unwrap();
+        }
+        let driver = GlobalSelectionDriver::new(store);
+
+        assert!(matches!(
+            driver.remove_file(&file_path_str),
+            Err(VfsError::NotSupported(_))
+        ));
+        assert!(file_path.exists());
+        assert!(matches!(
+            driver.remove_dir_all(&file_path_str),
+            Err(VfsError::NotSupported(_))
+        ));
+        assert!(file_path.exists());
+
+        std::fs::remove_file(file_path).unwrap();
+        std::fs::remove_dir(dir_path).unwrap();
     }
 
     #[test]

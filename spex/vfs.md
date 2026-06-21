@@ -99,6 +99,32 @@ Two related-but-orthogonal "transient" concepts exist alongside `kind`:
 
 Both are independent of `kind` and of `InternalNavigation`. Search results, for example, are `kind: "virtual"` + `shadow: true` on the source + `shadow_source: Some(...)` on the panel, but *do not* advertise `InternalNavigation` — opening a directory entry hands off to the local FS just like bookmarks.
 
+### 2.4 Global selections source
+
+The global selections source (`global-selections`) is a virtual navigation and
+selection tool. It is not an owner of the files it references.
+
+Layout:
+
+* Path `""` lists named global selections as directory entries.
+* Path `"<selection name>"` lists that selection's referenced filesystem paths.
+* Entries inside a selection carry the original absolute local filesystem path
+  as `source_path`.
+
+Deletion semantics are virtual-only:
+
+* Deleting at path `""` removes selected global selection records.
+* Deleting inside a named selection removes selected references from that
+  selection.
+* Neither operation deletes, moves, truncates, or otherwise mutates the
+  referenced filesystem paths.
+* The driver-level file delete hooks return `NotSupported`; global selection
+  deletion is handled by explicit BE intents and store mutations.
+
+The source advertises `DeleteSelection` so the UI can expose deletion of virtual
+records and references. That capability must not be interpreted as permission to
+delete the referenced real files.
+
 ---
 
 ## 3. Paths & entries
@@ -213,6 +239,12 @@ delete(path: VFSPath): Promise<void>
 ```
 
 Recursive behavior is driver-defined (but must be documented).
+
+For virtual reference sources such as global selections, `DeleteSelection` can
+mean "delete the virtual record/reference" rather than "delete the referenced
+filesystem object". Such drivers must document this distinction and return
+`NotSupported` from raw file delete hooks if invoking them could be mistaken for
+deleting real files.
 
 ---
 

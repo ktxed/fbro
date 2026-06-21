@@ -13,6 +13,7 @@ use crate::ws::runtime::{
 pub(crate) async fn handle(name: &str, scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
     match name {
         "AddToGlobalSelection" => add_to_global_selection(scope, args, ctx).await,
+        "RemoveGlobalSelections" => remove_global_selections(args, ctx).await,
         "RemoveGlobalSelectionItems" => remove_global_selection_items(args, ctx).await,
         _ => {}
     }
@@ -52,6 +53,27 @@ impl RemoveArgs {
             selection_name: arg_str(args, "selectionName").unwrap_or("").to_string(),
             paths: args
                 .get("paths")
+                .and_then(Value::as_array)
+                .map(|values| {
+                    values
+                        .iter()
+                        .filter_map(|value| value.as_str().map(str::to_string))
+                        .collect()
+                })
+                .unwrap_or_default(),
+        }
+    }
+}
+
+struct RemoveSelectionsArgs {
+    names: Vec<String>,
+}
+
+impl RemoveSelectionsArgs {
+    fn from_args(args: &Value) -> Self {
+        Self {
+            names: args
+                .get("names")
                 .and_then(Value::as_array)
                 .map(|values| {
                     values
@@ -162,6 +184,47 @@ async fn add_to_global_selection(scope: &Value, args: &Value, ctx: &mut IntentCo
         };
         match store_result {
             Ok(()) => {
+                ensure_global_selection_source(&mut state_guard);
+                Ok((
+                    build_sources_json(&state_guard),
+                    build_global_selection_patch(&state_guard),
+                ))
+            }
+            Err(message) => Err(message),
+        }
+    };
+    let (sources_json, selection_patch) = match mutation {
+        Ok(value) => value,
+        Err(message) => {
+            send_error(ctx, &message).await;
+            return;
+        }
+    };
+
+    send_sources_patch(ctx, sources_json).await;
+    let _ = ctx.tx.send(selection_patch).await;
+    rescan_global_selection_panels(ctx).await;
+}
+
+async fn remove_global_selections(args: &Value, ctx: &mut IntentContext<'_>) {
+    let parsed = RemoveSelectionsArgs::from_args(args);
+    if parsed.names.is_empty() {
+        send_error(ctx, "No global selections were selected.").await;
+        return;
+    }
+
+    let mutation: Result<(Vec<serde_json::Value>, ServerMessage), String> = {
+        let mut state_guard = ctx.state.lock().await;
+        let store_result = {
+            let store_arc = std::sync::Arc::clone(&state_guard.global_selections);
+            let result = match store_arc.lock() {
+                Ok(mut store) => store.remove_selections_by_names(&parsed.names),
+                Err(_) => Err("Global selection store is unavailable.".to_string()),
+            };
+            result
+        };
+        match store_result {
+            Ok(_) => {
                 ensure_global_selection_source(&mut state_guard);
                 Ok((
                     build_sources_json(&state_guard),

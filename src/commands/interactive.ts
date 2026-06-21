@@ -668,7 +668,6 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
       return true;
     case "file.delete":
       if (!focused || !sourceCapability("DeleteSelection")) return false;
-      if (isGlobalSelectionSourceId(focused.panel.sourceId) && focused.panel.path === "") return false;
       return openFileOp(state, dispatch, focused.panel, "delete");
     case "app.open_terminal":
       if (!focused || !sourceCapability("OpenShell")) return false;

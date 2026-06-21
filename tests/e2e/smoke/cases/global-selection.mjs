@@ -91,6 +91,36 @@ export async function runGlobalSelectionFlow(browser, observer) {
   await expectGlobalSelectionSummary(browser, "Add 2 selected entries");
   await confirmGlobalSelectionModal(browser);
   await observer.waitForGlobalSelection("Selection 1", 5);
+
+  observer.sendIntent("NavigateToSource", "left", { sourceId: GLOBAL_SOURCE_ID });
+  await waitForPanelSource(observer, "left", GLOBAL_SOURCE_ID);
+  await observer.waitForPanelPath("left", "");
+  await reloadBrowserApp(browser, observer.name);
+  await waitForPanelSource(observer, "left", GLOBAL_SOURCE_ID);
+  await observer.waitForPanelPath("left", "");
+  await observer.waitForEntry("left", "Selection 1", "directory");
+  await clickEntry(browser, "left", "Selection 1");
+  await clickCommand(browser, "file.delete");
+  await confirmOperation(browser, "file.delete.confirm");
+  let lastSnapshotRequest = 0;
+  await waitFor(() => {
+    if (!observer.state.globalSelections.some((selection) => selection.name === "Selection 1")) return true;
+    const now = Date.now();
+    if (now - lastSnapshotRequest > 500) {
+      lastSnapshotRequest = now;
+      observer.sendIntent("RequestStateSnapshot");
+    }
+    return false;
+  }, {
+    timeout: 10_000,
+    label: `${observer.name} Selection 1 removed`,
+  });
+  await observer.waitForNoEntry("left", "Selection 1");
+  for (const file of Object.values(files)) {
+    if (!fs.existsSync(hostPath(file))) {
+      throw new Error(`global selection root delete removed real filesystem file ${file}`);
+    }
+  }
 }
 
 async function selectEntries(browser, observer, panelId, names) {

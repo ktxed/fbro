@@ -132,7 +132,6 @@ export function Toolbar({ client, jobsViewOpen, onOpenJobsView }: { client: WsCl
         const globalSelectionAny = !!focusedPanel && isGlobalSelectionSourceId(focusedPanel.sourceId);
         const globalBlocked =
           (globalSelectionAny && (commandId === "file.view" || commandId === "file.edit" || commandId === "file.copy" || commandId === "file.move" || commandId === "file.mkdir" || commandId === "app.open_terminal"))
-          || (globalSelectionRoot && commandId === "file.delete")
           || (globalSelectionAny && !globalSelectionRoot && commandId === "file.rename");
         const isDisabled = globalBlocked || (cap !== undefined && !sourceSupports.includes(cap));
         const label = isArchive && commandId === "file.copy" ? "Extract" : TOOLBAR_LABELS[commandId];
