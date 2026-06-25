@@ -516,7 +516,7 @@ custom job.
 
 Fedup Bro is the built-in duplicate finder. It is intentionally the most
 stateful built-in bro because it scans trees, hashes files, aggregates
-structured results, and can later grow mutation actions such as move/delete.
+structured results, and exposes reviewable follow-up actions.
 
 #### Discovery and invocation
 
@@ -667,21 +667,72 @@ On success BE sends:
 
 FE stores the saved path on the job and shows the normal transient save hint.
 
+#### Delete dry-run
+
+When a completed Fedup Bro job has duplicate files, FE offers
+`Generate delete dry-run`. This action does not delete files. It asks BE to
+materialize a reviewable shell script plus a manifest from the structured
+Fedup result:
+
+```json
+{
+  "type": "Intent",
+  "name": "GenerateFedupDeleteDryRun",
+  "args": {
+    "jobId": "job-12",
+    "result": { "...": "FedupBroResult payload" }
+  }
+}
+```
+
+BE validates that the job is a Fedup Bro job and writes both files beside the
+Fedup report destination:
+
+* `fbro-fedup-delete-dry-run.sh`
+* `fbro-fedup-delete-manifest.txt`
+
+The script contains one quoted `delete_candidate <path>` call per duplicate
+candidate and comment context for the duplicate group, hash, size, and keeper.
+Running the script without arguments prints the candidate `rm -f -- <path>`
+commands and does not delete anything. Running it with `--apply` executes those
+commands. Keeper files are never emitted as delete candidates. On Unix, BE
+marks the script executable.
+
+The manifest is plain text review material containing summary counts,
+reclaimable bytes, group hashes, keeper paths, duplicate paths, sizes, mtimes,
+and hashes. It is intended to be inspected before anyone runs or edits the
+script.
+
+On success BE sends:
+
+```json
+{
+  "type": "FedupDeleteDryRunReady",
+  "jobId": "job-12",
+  "scriptPath": "/home/user/Documents/fbro-fedup-delete-dry-run.sh",
+  "manifestPath": "/home/user/Documents/fbro-fedup-delete-manifest.txt",
+  "scriptDir": "/home/user/Documents"
+}
+```
+
+FE opens the dry-run modal and lets the user reveal or copy both generated
+paths.
+
 #### Current limits
 
-Phase 1 is report-only.
+Fedup Bro currently supports reporting and delete dry-run generation.
 
 Not implemented yet:
 
 * moving duplicates to a destination folder
-* deleting duplicates
+* deleting duplicates directly from fbro
 * user-selectable keeper policy
 * directory picker or bro param UI for Fedup actions
 * remote/archive/global-VFS mutation support
 * automatic report writing
 
-Future move/delete modes must be implemented as explicit mutation actions, not
-as side effects of report mode.
+Any future direct mutation mode must be implemented as an explicit action, not
+as a side effect of report mode.
 
 ---
 

@@ -497,12 +497,15 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
   // ── Dry run result ──────────────────────────────────────────────────────
   if (pendingDryRun) {
     const otherPanel = panelIds.find(id => id !== pendingDryRun.sourcePanel) ?? panelIds[0] ?? "";
+    const title = pendingDryRun.manifestPath ? "Fedup Delete Dry-Run Generated" : "Dry Run Script Generated";
     return (
       <div className="modal-overlay" ref={modalRef} tabIndex={-1} onKeyDown={(e) => { if (e.key === "Escape") closeDryRun(); if (e.key === "Tab") e.preventDefault(); }}>
-        <div className="modal modal--fixed" role="dialog" aria-label="Dry Run Script Generated" data-testid="dry-run-dialog" onClick={(e) => e.stopPropagation()}>
-          <div className="modal__header">Dry Run Script Generated</div>
+        <div className="modal modal--fixed" role="dialog" aria-label={title} data-testid="dry-run-dialog" onClick={(e) => e.stopPropagation()}>
+          <div className="modal__header">{title}</div>
           <div className="modal__body">
-            <p className="modal__summary">Script saved to your home folder:</p>
+            <p className="modal__summary">
+              {pendingDryRun.manifestPath ? "Script and manifest saved:" : "Script saved to your home folder:"}
+            </p>
             <div className="modal__job-params">
               <span className="modal__job-param-label">Script:</span>
               <button
@@ -524,6 +527,30 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
                 onClick={() => navigator.clipboard.writeText(pendingDryRun.scriptPath)}
                 title="Copy path"
               ><IconCopy size={14} /></button>
+              {pendingDryRun.manifestPath && pendingDryRun.manifestName && (
+                <>
+                  <span className="modal__job-param-label">Manifest:</span>
+                  <button
+                    className="modal__dry-run-name"
+                    title={pendingDryRun.manifestPath}
+                    onClick={() => {
+                      if (otherPanel) {
+                        client.sendIntent("NavigatePanelTo", undefined, {
+                          panelId: otherPanel,
+                          path: pendingDryRun.scriptDir,
+                          cursorHint: pendingDryRun.manifestName,
+                        });
+                      }
+                      closeDryRun();
+                    }}
+                  >{pendingDryRun.manifestName}</button>
+                  <button
+                    className="modal__job-param-copy"
+                    onClick={() => navigator.clipboard.writeText(pendingDryRun.manifestPath!)}
+                    title="Copy path"
+                  ><IconCopy size={14} /></button>
+                </>
+              )}
             </div>
           </div>
           <div className="modal__actions">
@@ -875,6 +902,14 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
     const saveFedupReport = () => {
       if (!fedupResult) return;
       client.sendIntent("SaveFedupReport", undefined, {
+        jobId: activeJob.jobId,
+        result: fedupResult,
+      });
+    };
+
+    const generateFedupDeleteDryRun = () => {
+      if (!fedupResult) return;
+      client.sendIntent("GenerateFedupDeleteDryRun", undefined, {
         jobId: activeJob.jobId,
         result: fedupResult,
       });
@@ -1247,6 +1282,11 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
                 {isFedupBro && activeJob.state === "Completed" && fedupResult && !activeJob.reportSavedPath && (
                   <button className="modal__btn" data-command-id="job.save-report" onClick={saveFedupReport}>
                     Save report…
+                  </button>
+                )}
+                {isFedupBro && activeJob.state === "Completed" && fedupResult && fedupResult.duplicateFiles > 0 && (
+                  <button className="modal__btn" data-command-id="job.fedup-delete-dry-run" onClick={generateFedupDeleteDryRun}>
+                    Generate delete dry-run
                   </button>
                 )}
                 {isBroResult && activeJob.state === "Completed" && effectiveResultPath && (

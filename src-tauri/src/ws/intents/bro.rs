@@ -13,7 +13,11 @@ use crate::bro::{
     launch_bro, list_bros, BroInputItem, BroLaunchInputKind, BroOption, BroPre, BroProtocol,
     BroSource, LaunchRecipe, ResolvedBro,
 };
-use crate::jobs::fedup::{format_fedup_report_from_schema, run_fedup_bro, FEDUP_REPORT_NAME};
+use crate::jobs::fedup::{
+    format_fedup_delete_dry_run_script, format_fedup_delete_manifest,
+    format_fedup_report_from_schema, run_fedup_bro, FEDUP_DELETE_DRY_RUN_MANIFEST_NAME,
+    FEDUP_DELETE_DRY_RUN_SCRIPT_NAME, FEDUP_REPORT_NAME,
+};
 use crate::jobs::fp_bro::run_fp_bro;
 use crate::jobs::integrity_compare::{
     format_sync_report_from_schema, run_sync_bro, SYNC_REPORT_NAME,
@@ -36,8 +40,117 @@ pub(crate) async fn handle(name: &str, scope: &Value, args: &Value, ctx: &mut In
         "KillProcess" => kill_process(args, ctx).await,
         "SaveSyncReport" => save_sync_report(args, ctx).await,
         "SaveFedupReport" => save_fedup_report(args, ctx).await,
+        "GenerateFedupDeleteDryRun" => generate_fedup_delete_dry_run(args, ctx).await,
         _ => {}
     }
+}
+
+async fn generate_fedup_delete_dry_run(args: &Value, ctx: &mut IntentContext<'_>) {
+    let job_id = arg_str(args, "jobId").unwrap_or("").to_string();
+    let result: FedupBroResultSchema = match args
+        .get("result")
+        .cloned()
+        .and_then(|value| serde_json::from_value(value).ok())
+    {
+        Some(result) => result,
+        None => {
+            send_generate_fedup_delete_dry_run_error(
+                ctx,
+                &job_id,
+                "missing or invalid fedup result".to_string(),
+            )
+            .await;
+            return;
+        }
+    };
+
+    let output_dir = {
+        let state_guard = ctx.state.lock().await;
+        match state_guard.job_store.jobs.get(&job_id).map(|job| &job.kind) {
+            Some(JobKind::FedupBro(meta)) => {
+                Path::new(&meta.report_path).parent().map(Path::to_path_buf)
+            }
+            _ => None,
+        }
+    };
+    let Some(output_dir) = output_dir else {
+        send_generate_fedup_delete_dry_run_error(
+            ctx,
+            &job_id,
+            "fedup job is no longer available".to_string(),
+        )
+        .await;
+        return;
+    };
+
+    let script_path = output_dir.join(FEDUP_DELETE_DRY_RUN_SCRIPT_NAME);
+    let manifest_path = output_dir.join(FEDUP_DELETE_DRY_RUN_MANIFEST_NAME);
+    let script_path_for_worker = script_path.clone();
+    let manifest_path_for_worker = manifest_path.clone();
+    let write_result = tokio::task::spawn_blocking(move || {
+        let script = format_fedup_delete_dry_run_script(&result)?;
+        let manifest = format_fedup_delete_manifest(&result)?;
+        std::fs::write(&script_path_for_worker, script).map_err(|error| {
+            format!(
+                "Cannot write delete dry-run script {}: {error}",
+                script_path_for_worker.display()
+            )
+        })?;
+        std::fs::write(&manifest_path_for_worker, manifest).map_err(|error| {
+            format!(
+                "Cannot write delete manifest {}: {error}",
+                manifest_path_for_worker.display()
+            )
+        })?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut permissions = std::fs::metadata(&script_path_for_worker)
+                .map_err(|error| format!("Cannot read script metadata: {error}"))?
+                .permissions();
+            permissions.set_mode(0o755);
+            std::fs::set_permissions(&script_path_for_worker, permissions)
+                .map_err(|error| format!("Cannot make script executable: {error}"))?;
+        }
+        Ok::<(), String>(())
+    })
+    .await;
+
+    match write_result {
+        Ok(Ok(())) => {
+            let _ = ctx
+                .tx
+                .send(ServerMessage::FedupDeleteDryRunReady {
+                    timestamp: now(),
+                    job_id,
+                    script_path: script_path.to_string_lossy().to_string(),
+                    manifest_path: manifest_path.to_string_lossy().to_string(),
+                    script_dir: output_dir.to_string_lossy().to_string(),
+                })
+                .await;
+        }
+        Ok(Err(error)) => send_generate_fedup_delete_dry_run_error(ctx, &job_id, error).await,
+        Err(error) => {
+            send_generate_fedup_delete_dry_run_error(ctx, &job_id, error.to_string()).await
+        }
+    }
+}
+
+async fn send_generate_fedup_delete_dry_run_error(
+    ctx: &IntentContext<'_>,
+    job_id: &str,
+    message: String,
+) {
+    let _ = ctx
+        .tx
+        .send(ServerMessage::Error {
+            timestamp: now(),
+            code: "GENERATE_FEDUP_DELETE_DRY_RUN_FAILED".to_string(),
+            message: format!("Could not generate Fedup delete dry-run: {message}"),
+            recoverable: true,
+            extra: Some(serde_json::json!({ "jobId": job_id })),
+        })
+        .await;
 }
 
 async fn save_fedup_report(args: &Value, ctx: &mut IntentContext<'_>) {

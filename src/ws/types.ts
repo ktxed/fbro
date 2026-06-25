@@ -447,6 +447,15 @@ export interface FedupReportSavedMessage {
   path: string;
 }
 
+export interface FedupDeleteDryRunReadyMessage {
+  type: "FedupDeleteDryRunReady";
+  timestamp: number;
+  jobId: string;
+  scriptPath: string;
+  manifestPath: string;
+  scriptDir: string;
+}
+
 export interface SyncReportSavedMessage {
   type: "SyncReportSaved";
   timestamp: number;
@@ -822,6 +831,7 @@ export type BEMessage =
   | SyncBroResultMessage
   | FedupBroResultMessage
   | FedupReportSavedMessage
+  | FedupDeleteDryRunReadyMessage
   | SyncReportSavedMessage
   | ExternalClipboardReadyMessage
   | ExternalClipboardWrittenMessage

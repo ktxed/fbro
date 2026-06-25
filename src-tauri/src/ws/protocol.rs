@@ -119,6 +119,17 @@ pub enum ServerMessage {
         job_id: String,
         path: String,
     },
+    FedupDeleteDryRunReady {
+        timestamp: u64,
+        #[serde(rename = "jobId")]
+        job_id: String,
+        #[serde(rename = "scriptPath")]
+        script_path: String,
+        #[serde(rename = "manifestPath")]
+        manifest_path: String,
+        #[serde(rename = "scriptDir")]
+        script_dir: String,
+    },
     SyncReportSaved {
         timestamp: u64,
         #[serde(rename = "jobId")]

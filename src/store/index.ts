@@ -19,6 +19,7 @@ import type {
   QuitConfirmRequiredMessage,
   VFSEntry,
   DryRunReadyMessage,
+  FedupDeleteDryRunReadyMessage,
   OpenWithAppItem,
   OpenWithOptionsFailedMessage,
   OpenWithOptionsReadyMessage,
@@ -108,6 +109,8 @@ export interface PendingDryRun {
   scriptPath: string;
   scriptDir: string;
   scriptName: string;
+  manifestPath?: string;
+  manifestName?: string;
   sourcePanel: string;
 }
 
@@ -1229,6 +1232,28 @@ function reducer(state: AppState, action: AppAction): AppState {
               scriptDir: m.scriptDir,
               scriptName,
               sourcePanel: state.pendingOp?.sourcePanel ?? "",
+            },
+            transientHint: { message: `Saved dry-run script to ${m.scriptPath}`, token: m.timestamp },
+          };
+        }
+        case "FedupDeleteDryRunReady": {
+          const m = msg as FedupDeleteDryRunReadyMessage;
+          const job = state.jobs[m.jobId];
+          const scriptName = m.scriptPath.replace(/\\/g, "/").split("/").filter(Boolean).pop() ?? m.scriptPath;
+          const manifestName = m.manifestPath.replace(/\\/g, "/").split("/").filter(Boolean).pop() ?? m.manifestPath;
+          return {
+            ...state,
+            pendingDryRun: {
+              scriptPath: m.scriptPath,
+              scriptDir: m.scriptDir,
+              scriptName,
+              manifestPath: m.manifestPath,
+              manifestName,
+              sourcePanel: job?.sourcePanel ?? "",
+            },
+            transientHint: {
+              message: `Saved Fedup delete dry-run script to ${m.scriptPath}`,
+              token: m.timestamp,
             },
           };
         }
