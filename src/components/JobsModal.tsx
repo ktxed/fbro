@@ -54,6 +54,8 @@ function JobRow({ job, client }: { job: Job; client: WsClient }) {
     ? "Remote Sync Hashing"
     : job.kind === "sync-bro"
     ? "Sync Bro"
+    : job.kind === "fedup-bro"
+    ? "Fedup Bro"
     : job.type.charAt(0).toUpperCase() + job.type.slice(1);
 
   const stateLabel: Record<string, string> = {
@@ -129,6 +131,12 @@ function JobRow({ job, client }: { job: Job; client: WsClient }) {
                 Remote: {job.destPath}
               </span>
             )}
+          </>
+        ) : job.kind === "fedup-bro" ? (
+          <>
+            <span className="jobs-modal__path" title={job.sourcePath}>
+              Inputs: {job.sourcePath}
+            </span>
           </>
         ) : job.kind === "fp-bro" ? (
           <>
@@ -271,7 +279,7 @@ export function JobsModal({ onClose, client }: { onClose: () => void; client: Ws
   const jobs = Object.values(state.jobs).sort(byNewest);
   const fileJobs = jobs.filter((job) => job.kind === "file-op");
   const outgoingJobs = jobs.filter((job) => job.kind === "outgoing-transfer");
-  const broJobs = jobs.filter((job) => job.kind === "fp-bro" || job.kind === "sync-bro" || job.kind === "remote-manifest");
+  const broJobs = jobs.filter((job) => job.kind === "fp-bro" || job.kind === "sync-bro" || job.kind === "fedup-bro" || job.kind === "remote-manifest");
   const activeFileJobs = fileJobs.filter(
     (job) => job.state === "Queued" || job.state === "Running" || job.state === "AwaitingDecision"
   );

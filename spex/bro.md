@@ -395,6 +395,7 @@ Linux:
 * native `vlc`
 * Flatpak `io.mpv.Mpv`
 * Flatpak `org.videolan.VLC`
+* built-in `Fedup Bro`
 * native `7z`
 * native `tar`
 
@@ -402,6 +403,7 @@ macOS:
 
 * native `mpv` from `PATH`
 * native `mpv` from discovered `.app` bundles
+* built-in `Fedup Bro`
 * native `7z`
 * native `tar`
 
@@ -427,6 +429,7 @@ selection shape:
 
 * media bros rank high for obvious media selections
 * archive bros rank high for multi-file or directory-heavy selections
+* Fedup Bro ranks high for global selections with multiple files or folders
 * weak fits are still shown with a lower score and an explanatory reason
 
 ---
@@ -462,6 +465,7 @@ Current launch forms:
 * Flatpak `mpv` / `VLC`: `flatpak run --file-forwarding <APP_ID> @@ <paths...> @@`
 * native `tar`: `tar -cf <outputPath> <entry names...>` with working directory set to the parent directory of the selected inputs
 * native `7z`: `7z a -mx<level> [-p<password>] <outputPath> -- <entry names...>` with working directory set to the parent directory of the selected inputs
+* built-in `Fedup Bro`: backend job that scans a global selection for exact duplicate files and returns a structured report
 
 ### 6.3 `fnf` contract
 
@@ -496,7 +500,192 @@ Current built-in `fp` bro:
 
 ---
 
-## 7. Backend Responsibilities
+## 7. Built-In Operation Bros
+
+Some built-in bros are shown in the bro modal but are not simple command
+launchers and are not `fp` archive-style reducers. They are backend operation
+bros: FE launches them through the same `LaunchBro` intent, then BE creates a
+first-class job and sends job/result messages.
+
+In the current wire shape these bros may still advertise `protocol: "fnf"` so
+the v0 modal can launch them without first-class output fields. The launch
+recipe, not the public protocol string alone, decides whether BE starts a
+custom job.
+
+### 7.1 Fedup Bro
+
+Fedup Bro is the built-in duplicate finder. It is intentionally the most
+stateful built-in bro because it scans trees, hashes files, aggregates
+structured results, and can later grow mutation actions such as move/delete.
+
+#### Discovery and invocation
+
+Fedup Bro is exposed only from the global selections source in v1.
+
+Expected workflow:
+
+* user adds one or more folders/files to a global selection
+* user invokes `Pass to Bro` from the global selections root
+* BE resolves exactly one selected global selection to its referenced paths
+* Fedup Bro appears as `builtin:fedup`
+* launching it starts a `fedup-bro` job
+
+The restriction to global selections is deliberate. It matches the target
+workflow and avoids implying that the first implementation is fully VFS-aware
+for arbitrary panel sources.
+
+#### Scan semantics
+
+Fedup Bro report mode:
+
+* recursively walks local directory inputs
+* accepts local file inputs
+* ignores non-file entries
+* ignores zero-byte files
+* records unreadable paths as per-path errors instead of failing the whole job
+* buckets files by byte size
+* hashes only size buckets containing more than one file
+* uses full-file BLAKE3 hashes, not sample hashes
+* groups files with identical size and identical BLAKE3 hash
+* chooses one keeper per group using oldest modification time, with path order
+  as deterministic tie-break
+
+The full-file hash is the safety boundary for any future mutation action.
+Approximate/sample hashing may be added later only as an explicit fast mode,
+and destructive actions must still verify exact content.
+
+#### Job and progress
+
+Launching Fedup Bro sends a normal `JobStarted` message:
+
+```json
+{
+  "kind": "fedup-bro",
+  "opType": "Fedup Bro",
+  "initialState": "Running",
+  "supportsPause": false
+}
+```
+
+Progress is sent through normal `JobEvent { event: "Progress" }` messages.
+During scanning, progress is coarse. During hashing, progress includes the
+current file and byte-level progress for that file when available.
+
+Cancellation uses the regular `CancelJob` intent and terminates the job with a
+normal `JobEvent { event: "Cancelled" }`.
+
+#### Result shape
+
+Fedup Bro sends a bro-specific result before terminal completion:
+
+```json
+{
+  "type": "FedupBroResult",
+  "jobId": "job-12",
+  "result": {
+    "duplicateGroups": 1,
+    "duplicateFiles": 2,
+    "reclaimableBytes": 1048576,
+    "scannedFiles": 24,
+    "scannedBytes": 93218422,
+    "groups": [
+      {
+        "hash": "b23f...",
+        "size": 524288,
+        "keeper": {
+          "path": "/home/user/Documents/a.txt",
+          "size": 524288,
+          "mtime": 1710000000,
+          "hash": "b23f..."
+        },
+        "duplicates": [
+          {
+            "path": "/home/user/Documents/copy/a.txt",
+            "size": 524288,
+            "mtime": 1710000300,
+            "hash": "b23f..."
+          }
+        ]
+      }
+    ],
+    "errors": [
+      {
+        "path": "/home/user/Documents/private",
+        "message": "Cannot read directory: Permission denied"
+      }
+    ]
+  }
+}
+```
+
+FE stores this result on the job and renders a report view with:
+
+* duplicate group count
+* duplicate file count
+* reclaimable bytes
+* scanned file count
+* scan/hash errors
+* keeper and duplicate paths for the first result groups
+
+#### Saving reports
+
+Fedup Bro does not write a report automatically on completion. The completed
+job modal offers `Save report...`, which sends:
+
+```json
+{
+  "type": "Intent",
+  "name": "SaveFedupReport",
+  "args": {
+    "jobId": "job-12",
+    "result": { "...": "FedupBroResult payload" }
+  }
+}
+```
+
+BE formats the current result as text and writes `fbro-fedup-report.txt`.
+
+Default destination:
+
+* if the first resolved input is a directory, save inside that directory
+* otherwise save beside the first resolved file
+
+Examples:
+
+* first input `/home/user/Documents` -> `/home/user/Documents/fbro-fedup-report.txt`
+* first input `/home/user/Documents/a.txt` -> `/home/user/Documents/fbro-fedup-report.txt`
+
+On success BE sends:
+
+```json
+{
+  "type": "FedupReportSaved",
+  "jobId": "job-12",
+  "path": "/home/user/Documents/fbro-fedup-report.txt"
+}
+```
+
+FE stores the saved path on the job and shows the normal transient save hint.
+
+#### Current limits
+
+Phase 1 is report-only.
+
+Not implemented yet:
+
+* moving duplicates to a destination folder
+* deleting duplicates
+* user-selectable keeper policy
+* directory picker or bro param UI for Fedup actions
+* remote/archive/global-VFS mutation support
+* automatic report writing
+
+Future move/delete modes must be implemented as explicit mutation actions, not
+as side effects of report mode.
+
+---
+
+## 8. Backend Responsibilities
 
 For bro requests, BE is responsible for:
 
@@ -509,12 +698,15 @@ For bro requests, BE is responsible for:
 * validating bro-declared params for bros that declare them
 * dispatching `fnf` bros to direct launch
 * dispatching `fp` bros into the FP bro queue and job flow
+* dispatching built-in operation bros such as Fedup Bro into their custom job
+  flow
+* preserving BE-authoritative input resolution for global selections
 
 FE must not reimplement selection semantics or derive its own input set.
 
 ---
 
-## 8. Future Extensions
+## 9. Future Extensions
 
 The v0 design intentionally leaves room for richer bro protocols later.
 

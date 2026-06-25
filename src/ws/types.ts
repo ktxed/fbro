@@ -201,7 +201,7 @@ export interface SearchProgress {
 
 export interface Job {
   jobId: string;
-  kind: "file-op" | "fp-bro" | "search" | "outgoing-transfer" | "sync-bro" | "remote-manifest";
+  kind: "file-op" | "fp-bro" | "search" | "outgoing-transfer" | "sync-bro" | "fedup-bro" | "remote-manifest";
   type: string;
   state: "Queued" | "Running" | "AwaitingDecision" | "Completed" | "Cancelled" | "Failed";
   paused: boolean;
@@ -227,6 +227,8 @@ export interface Job {
   // Sync Bro-specific fields
   syncResult?: SyncBroResult;
   reportSavedPath?: string;
+  // Fedup Bro-specific fields
+  fedupResult?: FedupBroResult;
 }
 
 export interface SyncBroDiff {
@@ -250,6 +252,35 @@ export interface SyncBroResult {
   unverified: string[];
   localErrors: SyncBroError[];
   remoteErrors: SyncBroError[];
+}
+
+export interface FedupBroFile {
+  path: string;
+  size: number;
+  mtime?: number;
+  hash: string;
+}
+
+export interface FedupBroGroup {
+  hash: string;
+  size: number;
+  keeper: FedupBroFile;
+  duplicates: FedupBroFile[];
+}
+
+export interface FedupBroError {
+  path: string;
+  message: string;
+}
+
+export interface FedupBroResult {
+  duplicateGroups: number;
+  duplicateFiles: number;
+  reclaimableBytes: number;
+  scannedFiles: number;
+  scannedBytes: number;
+  groups: FedupBroGroup[];
+  errors: FedupBroError[];
 }
 
 export interface DirSizeTask {
@@ -357,7 +388,7 @@ export interface BroItem {
 
 export interface JobStart {
   jobId: string;
-  kind: "file-op" | "fp-bro" | "search" | "outgoing-transfer" | "sync-bro" | "remote-manifest";
+  kind: "file-op" | "fp-bro" | "search" | "outgoing-transfer" | "sync-bro" | "fedup-bro" | "remote-manifest";
   opType: string;
   files: FileOpFile[];
   sourcePanel: string;
@@ -400,6 +431,20 @@ export interface SyncBroResultMessage {
   timestamp: number;
   jobId: string;
   result: SyncBroResult;
+}
+
+export interface FedupBroResultMessage {
+  type: "FedupBroResult";
+  timestamp: number;
+  jobId: string;
+  result: FedupBroResult;
+}
+
+export interface FedupReportSavedMessage {
+  type: "FedupReportSaved";
+  timestamp: number;
+  jobId: string;
+  path: string;
 }
 
 export interface SyncReportSavedMessage {
@@ -775,6 +820,8 @@ export type BEMessage =
   | SetPermissionsOkMessage
   | NavigateOkMessage
   | SyncBroResultMessage
+  | FedupBroResultMessage
+  | FedupReportSavedMessage
   | SyncReportSavedMessage
   | ExternalClipboardReadyMessage
   | ExternalClipboardWrittenMessage

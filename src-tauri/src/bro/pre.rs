@@ -45,9 +45,37 @@ fn evaluate_bro(inputs: &[BroInputItem], bro: &BroOption) -> BroPre {
         return evaluate_extract_bro(inputs);
     }
 
+    if is_fedup_bro(bro) {
+        return evaluate_fedup_bro(inputs);
+    }
+
     BroPre {
         score: 50,
         reason: "Available for this selection".to_string(),
+    }
+}
+
+fn is_fedup_bro(bro: &BroOption) -> bool {
+    bro.id == "builtin:fedup" || bro.name.eq_ignore_ascii_case("fedup bro")
+}
+
+fn evaluate_fedup_bro(inputs: &[BroInputItem]) -> BroPre {
+    let summary = summarize_inputs(inputs);
+    if summary.total_inputs == 0 {
+        return BroPre {
+            score: 0,
+            reason: "No input entries resolved".to_string(),
+        };
+    }
+    if summary.directory_inputs > 0 || summary.total_inputs > 1 {
+        return BroPre {
+            score: 97,
+            reason: "Find duplicates in this selection".to_string(),
+        };
+    }
+    BroPre {
+        score: 30,
+        reason: "Needs multiple files or folders to find duplicates".to_string(),
     }
 }
 

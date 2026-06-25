@@ -64,6 +64,8 @@ export function JobsBar({ client }: { client: WsClient }) {
           ? "Remote Sync"
           : job.kind === "sync-bro"
           ? "Sync Bro"
+          : job.kind === "fedup-bro"
+          ? "Fedup Bro"
           : job.type.charAt(0).toUpperCase() + job.type.slice(1);
         const searchPct = job.kind === "search" && job.searchMatched !== undefined
           ? `${job.searchMatched} hits`

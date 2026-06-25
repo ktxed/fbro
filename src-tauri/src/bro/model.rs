@@ -104,6 +104,7 @@ pub(crate) enum LaunchRecipe {
     BuiltInCopyPaths,
     BuiltInKillProc,
     BuiltInSyncBro,
+    BuiltInFedupBro,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -208,7 +209,8 @@ impl ResolvedBro {
             | LaunchRecipe::BuiltInZipExtract
             | LaunchRecipe::BuiltInCopyPaths
             | LaunchRecipe::BuiltInKillProc
-            | LaunchRecipe::BuiltInSyncBro => Err(
+            | LaunchRecipe::BuiltInSyncBro
+            | LaunchRecipe::BuiltInFedupBro => Err(
                 "This bro uses a built-in runtime and cannot be launched as a command".to_string(),
             ),
         }

@@ -107,6 +107,18 @@ pub enum ServerMessage {
         job_id: String,
         result: SyncBroResultSchema,
     },
+    FedupBroResult {
+        timestamp: u64,
+        #[serde(rename = "jobId")]
+        job_id: String,
+        result: FedupBroResultSchema,
+    },
+    FedupReportSaved {
+        timestamp: u64,
+        #[serde(rename = "jobId")]
+        job_id: String,
+        path: String,
+    },
     SyncReportSaved {
         timestamp: u64,
         #[serde(rename = "jobId")]
@@ -754,6 +766,43 @@ pub struct SyncBroResultSchema {
     pub unverified: Vec<String>,
     pub local_errors: Vec<SyncBroErrorSchema>,
     pub remote_errors: Vec<SyncBroErrorSchema>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct FedupBroFileSchema {
+    pub path: String,
+    pub size: u64,
+    pub mtime: Option<u64>,
+    pub hash: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct FedupBroGroupSchema {
+    pub hash: String,
+    pub size: u64,
+    pub keeper: FedupBroFileSchema,
+    pub duplicates: Vec<FedupBroFileSchema>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct FedupBroErrorSchema {
+    pub path: String,
+    pub message: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct FedupBroResultSchema {
+    pub duplicate_groups: usize,
+    pub duplicate_files: usize,
+    pub reclaimable_bytes: u64,
+    pub scanned_files: usize,
+    pub scanned_bytes: u64,
+    pub groups: Vec<FedupBroGroupSchema>,
+    pub errors: Vec<FedupBroErrorSchema>,
 }
 
 // ─── Incoming (FE → BE) ───────────────────────────────────────────────────────

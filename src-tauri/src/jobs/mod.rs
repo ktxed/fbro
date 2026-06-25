@@ -1,5 +1,6 @@
 pub mod dirsize;
 pub mod extract_archive;
+pub mod fedup;
 pub mod file_ops;
 pub mod fp_bro;
 pub mod integrity_compare;
@@ -150,6 +151,7 @@ pub enum JobKind {
     Search(SearchJobMeta),
     OutgoingTransfer(OutgoingTransferJobMeta),
     SyncBro(SyncBroJobMeta),
+    FedupBro(FedupBroJobMeta),
     RemoteManifest(RemoteManifestJobMeta),
 }
 
@@ -189,6 +191,12 @@ pub struct SyncBroJobMeta {
     pub remote_panel: String,
     pub local_root: String,
     pub remote_root: String,
+    pub report_path: String,
+}
+
+#[allow(dead_code)]
+pub struct FedupBroJobMeta {
+    pub inputs: Vec<BroInputItem>,
     pub report_path: String,
 }
 

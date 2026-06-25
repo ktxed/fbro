@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import type { WsClient } from "../ws/client";
-import type { PendingOp, Job, ConflictPolicy, VerificationPolicy, FileOpFile, SyncBroResult } from "../ws/types";
+import type { PendingOp, Job, ConflictPolicy, VerificationPolicy, FileOpFile, SyncBroResult, FedupBroResult } from "../ws/types";
 import { useAppDispatch, useAppState } from "../store";
 import type { AppState, PendingDryRun } from "../store";
 import { isArchiveSourceId, isGlobalSelectionSourceId } from "../utils/sourceId";
@@ -90,6 +90,65 @@ function SyncBroResultsView({ result }: { result: SyncBroResult }) {
             <h4>Hash errors</h4>
             {[...result.localErrors, ...result.remoteErrors].map((e) => (
               <div key={e.path} className="modal__sync-row" title={`${e.path}: ${e.message}`}>
+                <span className="modal__sync-path">{e.path}</span>
+                <span className="modal__sync-detail modal__sync-detail--err">{e.message}</span>
+              </div>
+            ))}
+          </section>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function FedupBroResultsView({ result }: { result: FedupBroResult }) {
+  const counts: { label: string; value: string; cc?: string }[] = [
+    { label: "Groups", value: String(result.duplicateGroups), cc: result.duplicateGroups ? "warn" : "ok" },
+    { label: "Duplicate files", value: String(result.duplicateFiles), cc: result.duplicateFiles ? "warn" : "ok" },
+    { label: "Reclaimable", value: formatBytes(result.reclaimableBytes), cc: result.reclaimableBytes ? "warn" : undefined },
+    { label: "Scanned", value: String(result.scannedFiles) },
+    { label: "Errors", value: String(result.errors.length), cc: result.errors.length ? "err" : undefined },
+  ];
+  const shownGroups = result.groups.slice(0, 20);
+  return (
+    <div className="modal__sync-results">
+      <div className="modal__sync-counts">
+        {counts.map((c) => (
+          <div key={c.label} className={`modal__sync-count${c.cc ? ` modal__sync-count--${c.cc}` : ""}`}>
+            <span className="modal__sync-count-value">{c.value}</span>
+            <span className="modal__sync-count-label">{c.label}</span>
+          </div>
+        ))}
+      </div>
+      <div className="modal__sync-lists">
+        {shownGroups.length > 0 && (
+          <section className="modal__sync-section">
+            <h4>Duplicate groups</h4>
+            {shownGroups.map((group) => (
+              <div key={`${group.hash}:${group.keeper.path}`} className="modal__sync-row" title={group.keeper.path}>
+                <span className="modal__sync-path">Keep: {group.keeper.path}</span>
+                <span className="modal__sync-detail">
+                  {group.duplicates.length} duplicate{group.duplicates.length === 1 ? "" : "s"} · {formatBytes(group.size)} each
+                </span>
+                {group.duplicates.map((file) => (
+                  <span key={file.path} className="modal__sync-detail" title={file.path}>
+                    Move/delete candidate: {file.path}
+                  </span>
+                ))}
+              </div>
+            ))}
+            {result.groups.length > shownGroups.length && (
+              <div className="modal__sync-row">
+                <span className="modal__sync-detail">{result.groups.length - shownGroups.length} more groups not shown.</span>
+              </div>
+            )}
+          </section>
+        )}
+        {result.errors.length > 0 && (
+          <section className="modal__sync-section">
+            <h4>Scan errors</h4>
+            {result.errors.map((e) => (
+              <div key={`${e.path}:${e.message}`} className="modal__sync-row" title={`${e.path}: ${e.message}`}>
                 <span className="modal__sync-path">{e.path}</span>
                 <span className="modal__sync-detail modal__sync-detail--err">{e.message}</span>
               </div>
@@ -707,13 +766,15 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
     const isDecision = activeJob.state === "AwaitingDecision";
     const isQueued = activeJob.state === "Queued";
     const isProgress = activeJob.state === "Running";
-    const isBroResult = activeJob.kind === "fp-bro" || activeJob.kind === "sync-bro";
+    const isBroResult = activeJob.kind === "fp-bro" || activeJob.kind === "sync-bro" || activeJob.kind === "fedup-bro";
     const isSyncBro = activeJob.kind === "sync-bro";
+    const isFedupBro = activeJob.kind === "fedup-bro";
     const syncResult = activeJob.syncResult;
+    const fedupResult = activeJob.fedupResult;
     // For Sync Bro the report file is written only on demand; the result path
     // exists only once the user has saved it. fp-bro produces a file directly.
-    const effectiveResultPath = isSyncBro ? activeJob.reportSavedPath : activeJob.resultPath;
-    const requiresExplicitClose = activeJob.kind === "sync-bro";
+    const effectiveResultPath = isSyncBro || isFedupBro ? activeJob.reportSavedPath : activeJob.resultPath;
+    const requiresExplicitClose = activeJob.kind === "sync-bro" || activeJob.kind === "fedup-bro";
     const isOutgoing = activeJob.kind === "outgoing-transfer";
     const activeSourcePanel = state.panels[activeJob.sourcePanel];
     const activeSource = activeSourcePanel ? state.sources[activeSourcePanel.sourceId] : undefined;
@@ -811,6 +872,14 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
       });
     };
 
+    const saveFedupReport = () => {
+      if (!fedupResult) return;
+      client.sendIntent("SaveFedupReport", undefined, {
+        jobId: activeJob.jobId,
+        result: fedupResult,
+      });
+    };
+
     const handleActiveJobKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
       if (e.key === "Tab") {
         e.preventDefault();
@@ -872,7 +941,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
 
     return (
       <div className="modal-overlay" ref={modalRef} tabIndex={-1} onClick={isTerminal && !requiresExplicitClose ? close : undefined} onKeyDown={handleActiveJobKeyDown}>
-        <div className={`modal modal--fixed${isSyncBro ? " modal--sync" : ""}`} role="dialog" aria-label={`${label} ${activeJob.state}`} data-testid="job-dialog" onClick={(e) => e.stopPropagation()}>
+        <div className={`modal modal--fixed${isSyncBro || isFedupBro ? " modal--sync" : ""}`} role="dialog" aria-label={`${label} ${activeJob.state}`} data-testid="job-dialog" onClick={(e) => e.stopPropagation()}>
           <div className="modal__header">{label} — {activeJob.state}</div>
           <div className="modal__body">
             <div className="modal__job-params">
@@ -1115,16 +1184,19 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
             {isTerminal && (
               <>
                 <p className="modal__terminal">
-                  {activeJob.state === "Completed" && (isOutgoing ? "Outgoing transfer completed." : isBroResult ? "Bro completed successfully." : "Operation completed successfully.")}
+                {activeJob.state === "Completed" && (isOutgoing ? "Outgoing transfer completed." : isFedupBro ? "Fedup Bro report completed." : isBroResult ? "Bro completed successfully." : "Operation completed successfully.")}
                   {activeJob.state === "Cancelled" && (isOutgoing ? "Outgoing transfer was cancelled." : isBroResult ? "Bro job was cancelled." : "Operation was cancelled.")}
                   {activeJob.state === "Failed" && (isOutgoing ? `Outgoing transfer failed: ${activeJob.error ?? "unknown error"}` : isBroResult ? `Bro failed: ${activeJob.error ?? "unknown error"}` : `Operation failed: ${activeJob.error ?? "unknown error"}`)}
                 </p>
                 {isSyncBro && activeJob.state === "Completed" && syncResult && (
                   <SyncBroResultsView result={syncResult} />
                 )}
+                {isFedupBro && activeJob.state === "Completed" && fedupResult && (
+                  <FedupBroResultsView result={fedupResult} />
+                )}
                 {isBroResult && activeJob.state === "Completed" && effectiveResultPath && (
                   <div className="modal__job-params">
-                    <span className="modal__job-param-label">{isSyncBro ? "Saved:" : "Output:"}</span>
+                    <span className="modal__job-param-label">{isSyncBro || isFedupBro ? "Saved:" : "Output:"}</span>
                     <button
                       className="modal__dry-run-name"
                       title={effectiveResultPath}
@@ -1169,6 +1241,11 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
               <>
                 {isSyncBro && activeJob.state === "Completed" && syncResult && !activeJob.reportSavedPath && (
                   <button className="modal__btn" data-command-id="job.save-report" onClick={saveSyncReport}>
+                    Save report…
+                  </button>
+                )}
+                {isFedupBro && activeJob.state === "Completed" && fedupResult && !activeJob.reportSavedPath && (
+                  <button className="modal__btn" data-command-id="job.save-report" onClick={saveFedupReport}>
                     Save report…
                   </button>
                 )}

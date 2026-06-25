@@ -932,7 +932,7 @@ function applyJobEvent(state: AppState, msg: JobEventMessage): AppState {
               ? "Outgoing transfer completed"
               : job.kind === "remote-manifest"
                 ? "Remote Sync hashing completed"
-              : job.kind === "fp-bro" || job.kind === "sync-bro"
+              : job.kind === "fp-bro" || job.kind === "sync-bro" || job.kind === "fedup-bro"
                 ? "Bro completed successfully"
                 : "Operation completed successfully",
             currentFileBytesCopied: job.progress.currentFileBytesTotal || job.progress.currentFileBytesCopied,
@@ -1041,6 +1041,23 @@ function reducer(state: AppState, action: AppAction): AppState {
           return {
             ...state,
             jobs: { ...state.jobs, [msg.jobId]: { ...job, syncResult: msg.result } },
+          };
+        }
+        case "FedupBroResult": {
+          const job = state.jobs[msg.jobId];
+          if (!job) return state;
+          return {
+            ...state,
+            jobs: { ...state.jobs, [msg.jobId]: { ...job, fedupResult: msg.result } },
+          };
+        }
+        case "FedupReportSaved": {
+          const job = state.jobs[msg.jobId];
+          if (!job) return state;
+          return {
+            ...state,
+            jobs: { ...state.jobs, [msg.jobId]: { ...job, reportSavedPath: msg.path } },
+            transientHint: { message: `Saved Fedup report to ${msg.path}`, token: msg.timestamp },
           };
         }
         case "SyncReportSaved": {

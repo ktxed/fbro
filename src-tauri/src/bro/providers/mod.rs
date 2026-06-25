@@ -2,6 +2,7 @@ use crate::bro::model::{BroInputItem, ResolvedBro};
 
 pub mod copy_paths;
 pub mod extract;
+pub mod fedup;
 pub mod kill_proc;
 #[cfg(target_os = "linux")]
 pub mod linux_media;
@@ -28,6 +29,7 @@ pub fn builtin_providers() -> Vec<Box<dyn BroProvider>> {
     let mut providers: Vec<Box<dyn BroProvider>> = Vec::new();
 
     providers.push(Box::new(copy_paths::CopyPathsProvider));
+    providers.push(Box::new(fedup::FedupProvider));
     providers.push(Box::new(kill_proc::KillProcProvider));
     #[cfg(target_os = "linux")]
     providers.push(Box::new(linux_media::LinuxMediaProvider));
