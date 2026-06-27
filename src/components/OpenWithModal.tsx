@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useAppDispatch, useAppState, type PendingOpenWith } from "../store";
 import type { WsClient } from "../ws/client";
+import { ResizableModal } from "./ResizableModal";
 
 interface OpenWithModalProps {
   client: WsClient;
@@ -98,15 +99,17 @@ export function OpenWithModal({ client, openWith }: OpenWithModalProps) {
 
   return (
     <div className="modal-overlay" onClick={close}>
-      <div
+      <ResizableModal
         ref={dialogRef}
-        className="modal command-palette open-with"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Open With"
+        modalId="open-with"
+        client={client}
+        className="command-palette open-with"
+        ariaModal
+        ariaLabel="Open With"
         tabIndex={-1}
-        onClick={(e) => e.stopPropagation()}
         onKeyDown={onKeyDown}
+        defaultSize={{ width: 560, height: 420 }}
+        minSize={{ width: 420, height: 300 }}
       >
         <div className="modal__header">Open With...</div>
         <div className="modal__body open-with__body">
@@ -147,7 +150,7 @@ export function OpenWithModal({ client, openWith }: OpenWithModalProps) {
             })}
           </div>
         </div>
-      </div>
+      </ResizableModal>
     </div>
   );
 }

@@ -9,6 +9,7 @@ import {
 import { useAppDispatch, useAppState } from "../store";
 import type { WsClient } from "../ws/client";
 import type { InteractiveCommand } from "../ws/types";
+import { ResizableModal } from "./ResizableModal";
 
 interface CommandPaletteModalProps {
   client: WsClient;
@@ -112,13 +113,15 @@ export function CommandPaletteModal({ client, onOpenJobsView }: CommandPaletteMo
 
   return (
     <div className="modal-overlay" onClick={close}>
-      <div
-        className="modal command-palette"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Command Palette"
-        onClick={(e) => e.stopPropagation()}
+      <ResizableModal
+        modalId="command-palette"
+        client={client}
+        className="command-palette"
+        ariaModal
+        ariaLabel="Command Palette"
         onKeyDown={onKeyDown}
+        defaultSize={{ width: 560, height: 420 }}
+        minSize={{ width: 420, height: 300 }}
       >
         <div className="modal__header">Command Palette</div>
         <div className="modal__body command-palette__body">
@@ -161,7 +164,7 @@ export function CommandPaletteModal({ client, onOpenJobsView }: CommandPaletteMo
             )}
           </div>
         </div>
-      </div>
+      </ResizableModal>
     </div>
   );
 }

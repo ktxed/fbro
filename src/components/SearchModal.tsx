@@ -7,6 +7,7 @@ import { IconX, IconFolder, IconFile } from "@tabler/icons-react";
 import { useInputHistory } from "../hooks/useInputHistory";
 import { InputHistoryDropdown } from "./InputHistoryDropdown";
 import { DateTimeInput } from "./DateTimeInput";
+import { ResizableModal } from "./ResizableModal";
 
 function MnemonicLabel({ text, mnemonic }: { text: string; mnemonic: string }) {
   const idx = text.toLowerCase().indexOf(mnemonic.toLowerCase());
@@ -383,14 +384,16 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
       tabIndex={-1}
       onKeyDown={handleOverlayKeyDown}
     >
-      <div
+      <ResizableModal
         ref={modalRef}
-        className="modal modal--wide"
-        role="dialog"
-        aria-label="Search"
-        data-testid="search-dialog"
+        modalId="search"
+        client={client}
+        className="modal--wide"
+        ariaLabel="Search"
+        testId="search-dialog"
         tabIndex={-1}
-        onClick={(e) => e.stopPropagation()}
+        defaultSize={{ width: 640, height: 520 }}
+        minSize={{ width: 520, height: 360 }}
       >
         <div className="modal__header">Search</div>
 
@@ -915,7 +918,7 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
             <MnemonicLabel text="Close" mnemonic="c" />
           </button>
         </div>
-      </div>
+      </ResizableModal>
     </div>
   );
 }

@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use serde_json::Value;
 
+use crate::state::settings::ModalSizePreference;
 use crate::vfs::VfsDriver;
 use crate::ws::protocol::{now, ServerMessage};
 use crate::ws::runtime::{rescan_panel, selected_names_for, IntentContext};
@@ -9,6 +10,7 @@ use crate::ws::runtime::{rescan_panel, selected_names_for, IntentContext};
 pub(crate) async fn handle(name: &str, args: &Value, ctx: &mut IntentContext<'_>) {
     match name {
         "SetGeneralOption" => set_general_option(args, ctx).await,
+        "SetModalSizePreference" => set_modal_size_preference(args, ctx).await,
         "ClearThumbnailCache" => clear_thumbnail_cache(ctx).await,
         _ => {}
     }
@@ -24,6 +26,68 @@ async fn bad_setting(tx: &tokio::sync::mpsc::Sender<ServerMessage>, msg: &str) {
             extra: None,
         })
         .await;
+}
+
+async fn set_modal_size_preference(args: &Value, ctx: &mut IntentContext<'_>) {
+    let Some(modal_id) = args.get("modalId").and_then(Value::as_str) else {
+        bad_setting(ctx.tx, "modalId must be a string").await;
+        return;
+    };
+    if modal_id.is_empty()
+        || modal_id.len() > 80
+        || !modal_id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == ':')
+    {
+        bad_setting(ctx.tx, "modalId contains unsupported characters").await;
+        return;
+    }
+
+    let reset = args.get("reset").and_then(Value::as_bool).unwrap_or(false);
+    let (modal_sizes, gui_senders) = {
+        let mut state_guard = ctx.state.lock().await;
+        if reset {
+            state_guard.settings.modal_sizes.remove(modal_id);
+        } else {
+            let Some(width) = args.get("width").and_then(Value::as_u64) else {
+                drop(state_guard);
+                bad_setting(ctx.tx, "width must be a positive integer").await;
+                return;
+            };
+            let Some(height) = args.get("height").and_then(Value::as_u64) else {
+                drop(state_guard);
+                bad_setting(ctx.tx, "height must be a positive integer").await;
+                return;
+            };
+            state_guard.settings.modal_sizes.insert(
+                modal_id.to_string(),
+                ModalSizePreference {
+                    width: width.clamp(240, 2400) as u32,
+                    height: height.clamp(160, 1600) as u32,
+                },
+            );
+        }
+
+        if let Err(e) = crate::state::settings::save(&state_guard.settings) {
+            eprintln!("[fbro] Failed to save modal size preference: {e}");
+        }
+        (
+            state_guard.settings.modal_sizes.clone(),
+            state_guard.gui_senders.clone(),
+        )
+    };
+
+    let patch = ServerMessage::StatePatch {
+        timestamp: now(),
+        domain: "settings".to_string(),
+        entity_id: None,
+        version: 0,
+        patch: serde_json::json!({ "modalSizes": modal_sizes }),
+    };
+    for sender in &gui_senders {
+        let _ = sender.send(patch.clone()).await;
+    }
+    let _ = ctx.tx.send(patch).await;
 }
 
 async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {

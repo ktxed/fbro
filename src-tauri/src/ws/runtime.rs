@@ -15,8 +15,9 @@ use crate::watcher::WatcherCommand;
 use crate::ws::commands::build_interactive_commands;
 use crate::ws::protocol::{
     now, DirSizeQueueSnapshot, DirSizeTaskSchema, FileOpFileSchema, GeneralSettingsSchema,
-    LayoutDomain, PanelSlotSchema, PanelSnapshot, ServerMessage, SettingsSnapshot,
-    ShadowSourceSchema, SourceCapabilities, SourcePeerSchema, SourceSchema, StateDomains,
+    LayoutDomain, ModalSizePreferenceSchema, PanelSlotSchema, PanelSnapshot, ServerMessage,
+    SettingsSnapshot, ShadowSourceSchema, SourceCapabilities, SourcePeerSchema, SourceSchema,
+    StateDomains,
 };
 
 pub(crate) struct IntentContext<'a> {
@@ -160,6 +161,20 @@ pub(crate) fn build_state_snapshot(
                     .map(|p| p.to_string_lossy().to_string())
                     .unwrap_or_default(),
                 },
+                modal_sizes: state
+                    .settings
+                    .modal_sizes
+                    .iter()
+                    .map(|(id, size)| {
+                        (
+                            id.clone(),
+                            ModalSizePreferenceSchema {
+                                width: size.width,
+                                height: size.height,
+                            },
+                        )
+                    })
+                    .collect(),
             },
             discovered_peers: build_discovered_peers(state),
             share_config: build_share_config(state),

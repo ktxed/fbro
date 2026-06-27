@@ -98,7 +98,9 @@ pub async fn dispatch(name: &str, scope: &Value, args: &Value, ctx: &mut IntentC
         "EnterHistorySource" => history::handle(name, scope, args, ctx).await,
         "EnterProcsSource" => procs::handle(name, scope, args, ctx).await,
         "Quit" | "ConfirmQuit" | "SetFontSize" => app::handle(name, args, ctx).await,
-        "SetGeneralOption" | "ClearThumbnailCache" => settings::handle(name, args, ctx).await,
+        "SetGeneralOption" | "SetModalSizePreference" | "ClearThumbnailCache" => {
+            settings::handle(name, args, ctx).await
+        }
         "OpenPanelTerminal" | "ResizeTerminal" | "ClosePanelTerminal" => {
             terminal::handle(name, scope, args, ctx).await
         }

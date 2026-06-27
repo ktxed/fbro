@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useAppDispatch, useAppState, type PendingBro } from "../store";
 import type { WsClient } from "../ws/client";
 import type { BroParamItem } from "../ws/types";
+import { ResizableModal } from "./ResizableModal";
 
 interface BroModalProps {
   client: WsClient;
@@ -248,15 +249,17 @@ export function BroModal({ client, bro }: BroModalProps) {
 
   return (
     <div className="modal-overlay" onClick={close}>
-      <div
+      <ResizableModal
         ref={dialogRef}
-        className="modal command-palette open-with"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Pass To Bro"
+        modalId="bro"
+        client={client}
+        className="command-palette open-with"
+        ariaModal
+        ariaLabel="Pass To Bro"
         tabIndex={-1}
-        onClick={(e) => e.stopPropagation()}
         onKeyDown={onKeyDown}
+        defaultSize={{ width: 560, height: 420 }}
+        minSize={{ width: 420, height: 320 }}
       >
         <div className="modal__header">Pass To Bro...</div>
         <div className="modal__body open-with__body">
@@ -385,7 +388,7 @@ export function BroModal({ client, bro }: BroModalProps) {
             Cancel
           </button>
         </div>
-      </div>
+      </ResizableModal>
     </div>
   );
 }

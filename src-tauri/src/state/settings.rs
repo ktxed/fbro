@@ -9,6 +9,15 @@ pub struct Settings {
     /// honoured when `general.save_panel_view_mode` is true.
     #[serde(default)]
     pub panel_view_modes: HashMap<String, String>,
+    /// Per-modal preferred dimensions, keyed by stable frontend modal id.
+    #[serde(default)]
+    pub modal_sizes: HashMap<String, ModalSizePreference>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct ModalSizePreference {
+    pub width: u32,
+    pub height: u32,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -170,4 +179,48 @@ pub fn save(settings: &Settings) -> std::io::Result<()> {
     std::fs::write(&tmp, content)?;
     std::fs::rename(tmp, path)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn modal_sizes_default_when_missing_from_settings_file() {
+        let settings = Settings {
+            general: GeneralSettings::default(),
+            panel_view_modes: HashMap::new(),
+            modal_sizes: HashMap::new(),
+        };
+        let mut value = serde_json::to_value(settings).unwrap();
+        value.as_object_mut().unwrap().remove("modal_sizes");
+
+        let decoded: Settings = serde_json::from_value(value).unwrap();
+
+        assert!(decoded.modal_sizes.is_empty());
+    }
+
+    #[test]
+    fn modal_sizes_round_trip_through_settings_file() {
+        let mut modal_sizes = HashMap::new();
+        modal_sizes.insert(
+            "jobs".to_string(),
+            ModalSizePreference {
+                width: 720,
+                height: 520,
+            },
+        );
+        let settings = Settings {
+            general: GeneralSettings::default(),
+            panel_view_modes: HashMap::new(),
+            modal_sizes,
+        };
+
+        let encoded = serde_json::to_string(&settings).unwrap();
+        let decoded: Settings = serde_json::from_str(&encoded).unwrap();
+
+        let size = decoded.modal_sizes.get("jobs").unwrap();
+        assert_eq!(size.width, 720);
+        assert_eq!(size.height, 520);
+    }
 }

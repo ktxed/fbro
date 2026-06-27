@@ -5,6 +5,7 @@ import { useAppDispatch, useAppState } from "../store";
 import type { AppState, PendingDryRun } from "../store";
 import { isArchiveSourceId, isGlobalSelectionSourceId } from "../utils/sourceId";
 import { IconAlertTriangle, IconCopy } from "@tabler/icons-react";
+import { ResizableModal } from "./ResizableModal";
 
 interface OperationModalProps {
   pending: PendingOp | null;
@@ -500,7 +501,15 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
     const title = pendingDryRun.manifestPath ? "Fedup Delete Dry-Run Generated" : "Dry Run Script Generated";
     return (
       <div className="modal-overlay" ref={modalRef} tabIndex={-1} onKeyDown={(e) => { if (e.key === "Escape") closeDryRun(); if (e.key === "Tab") e.preventDefault(); }}>
-        <div className="modal modal--fixed" role="dialog" aria-label={title} data-testid="dry-run-dialog" onClick={(e) => e.stopPropagation()}>
+        <ResizableModal
+          modalId="operation:dry-run"
+          client={client}
+          className="modal--fixed"
+          ariaLabel={title}
+          testId="dry-run-dialog"
+          defaultSize={{ width: 560, height: 380 }}
+          minSize={{ width: 420, height: 280 }}
+        >
           <div className="modal__header">{title}</div>
           <div className="modal__body">
             <p className="modal__summary">
@@ -556,7 +565,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
           <div className="modal__actions">
             <button className="modal__btn modal__btn--primary" data-command-id="dry-run.close" onClick={closeDryRun}>Close</button>
           </div>
-        </div>
+        </ResizableModal>
       </div>
     );
   }
@@ -665,7 +674,15 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
 
     return (
       <div className="modal-overlay" ref={modalRef} tabIndex={-1} onClick={close} onKeyDown={handlePendingKeyDown}>
-        <div className="modal modal--fixed" role="dialog" aria-label={label} data-testid="operation-dialog" onClick={(e) => e.stopPropagation()}>
+        <ResizableModal
+          modalId={`operation:${pending.opType}`}
+          client={client}
+          className="modal--fixed"
+          ariaLabel={label}
+          testId="operation-dialog"
+          defaultSize={{ width: 560, height: 380 }}
+          minSize={{ width: 420, height: 280 }}
+        >
           <div className="modal__header">{label}</div>
           <div className="modal__body">
             <p className="modal__summary">
@@ -782,7 +799,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
               Cancel
             </button>
           </div>
-        </div>
+        </ResizableModal>
       </div>
     );
   }
@@ -976,7 +993,15 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
 
     return (
       <div className="modal-overlay" ref={modalRef} tabIndex={-1} onClick={isTerminal && !requiresExplicitClose ? close : undefined} onKeyDown={handleActiveJobKeyDown}>
-        <div className={`modal modal--fixed${isSyncBro || isFedupBro ? " modal--sync" : ""}`} role="dialog" aria-label={`${label} ${activeJob.state}`} data-testid="job-dialog" onClick={(e) => e.stopPropagation()}>
+        <ResizableModal
+          modalId={isSyncBro || isFedupBro ? `operation:${activeJob.kind}:result` : `operation:${activeJob.kind}`}
+          client={client}
+          className={`modal--fixed${isSyncBro || isFedupBro ? " modal--sync" : ""}`}
+          ariaLabel={`${label} ${activeJob.state}`}
+          testId="job-dialog"
+          defaultSize={isSyncBro || isFedupBro ? { width: 640, height: 460 } : { width: 560, height: 380 }}
+          minSize={isSyncBro || isFedupBro ? { width: 520, height: 340 } : { width: 420, height: 280 }}
+        >
           <div className="modal__header">{label} — {activeJob.state}</div>
           <div className="modal__body">
             <div className="modal__job-params">
@@ -985,7 +1010,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
                   <span className="modal__job-param-label">From:</span>
                   <span className="modal__job-param-value" title={activeJob.sourcePath}>{activeJob.sourcePath}</span>
                   <span className="modal__job-param-label">To:</span>
-                  <span className="modal__job-param-value">Remote fbro destination unavailable</span>
+                  <span className="modal__job-param-value">Destination selected on the receiving fbro</span>
                 </>
               ) : isBroResult ? (
                 <>
@@ -1329,7 +1354,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
               </>
             )}
           </div>
-        </div>
+        </ResizableModal>
       </div>
     );
   }

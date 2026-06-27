@@ -5,6 +5,7 @@ import { SettingsGeneralTab } from "./SettingsGeneralTab";
 import { SettingsDisplayTab } from "./SettingsDisplayTab";
 import { SettingsSharingTab } from "./SettingsSharingTab";
 import type { WsClient } from "../ws/client";
+import { ResizableModal } from "./ResizableModal";
 
 const TABS: { id: SettingsTab; label: string }[] = [
   { id: "general", label: "General" },
@@ -41,12 +42,14 @@ export function SettingsModal({ client }: SettingsModalProps) {
       onKeyDown={handleKeyDown}
       // Trap focus: prevent Tab from escaping
     >
-      <div
-        className="modal modal--settings"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Settings"
-        onClick={(e) => e.stopPropagation()}
+      <ResizableModal
+        modalId="settings"
+        client={client}
+        className="modal--settings"
+        ariaModal
+        ariaLabel="Settings"
+        defaultSize={{ width: 820, height: 560 }}
+        minSize={{ width: 620, height: 420 }}
       >
         <div className="modal__header">Settings</div>
         <div className="settings-modal__layout">
@@ -92,7 +95,7 @@ export function SettingsModal({ client }: SettingsModalProps) {
             Close
           </button>
         </div>
-      </div>
+      </ResizableModal>
     </div>
   );
 }

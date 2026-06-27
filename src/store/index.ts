@@ -310,6 +310,7 @@ const initialState: AppState = {
   fontSize: 13,
   settings: {
     general: { showHiddenDefault: false, rememberWindowState: true, preserveAttributes: true, autoResumeCopies: true, ludicrousMode: false, maxImageSizeMb: 512, savePanelViewMode: false, enableVideoThumbnails: true, thumbnailMaxImageSizeMb: 100, thumbnailVideoFrameSkip: 5, streamThumbnails: true, sessionPath: "", bookmarksPath: "", thumbnailCacheDir: "", thumbnailCacheItemCount: 0, thumbnailCacheSizeBytes: 0, persistPanelTabs: true, procTreeMode: false, colorScheme: "fbro-dark", sevenzipExtractor: "auto", sevenzipCustomPath: "", sevenzipResolvedPath: "" },
+    modalSizes: {},
   },
 };
 
@@ -428,7 +429,10 @@ function applySnapshot(state: AppState, msg: StateSnapshotMessage): AppState {
     next.fontSize = domains.fontSize;
   }
   if (domains.settings !== undefined) {
-    next.settings = domains.settings;
+    next.settings = {
+      ...domains.settings,
+      modalSizes: domains.settings.modalSizes ?? {},
+    };
   }
   if (domains.discoveredPeers !== undefined) {
     next.discoveredPeers = domains.discoveredPeers;
@@ -767,9 +771,13 @@ function applyPatch(state: AppState, msg: StatePatchMessage): AppState {
   if (msg.domain === "settings") {
     const fontSize = msg.patch.fontSize as number | undefined;
     const general = msg.patch.general as GeneralSettings | undefined;
+    const modalSizes = msg.patch.modalSizes as SettingsState["modalSizes"] | undefined;
     let next = fontSize !== undefined ? { ...state, fontSize } : state;
     if (general !== undefined) {
       next = { ...next, settings: { ...next.settings, general: { ...next.settings.general, ...general } } };
+    }
+    if (modalSizes !== undefined) {
+      next = { ...next, settings: { ...next.settings, modalSizes } };
     }
     return next;
   }

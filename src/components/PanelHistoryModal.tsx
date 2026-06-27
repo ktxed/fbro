@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { useAppDispatch, useAppState, markHistoryNavPending, type PendingPanelHistory } from "../store";
 import type { WsClient } from "../ws/client";
 import { archiveFilePath, isArchiveSourceId, isSearchSourceId } from "../utils/sourceId";
+import { ResizableModal } from "./ResizableModal";
 
 interface PanelHistoryModalProps {
   client: WsClient;
@@ -97,15 +98,17 @@ export function PanelHistoryModal({ client, panelHistory }: PanelHistoryModalPro
 
   return (
     <div className="modal-overlay" onClick={close}>
-      <div
+      <ResizableModal
         ref={dialogRef}
-        className="modal command-palette open-with panel-history"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Navigation History"
+        modalId="panel-history"
+        client={client}
+        className="command-palette open-with panel-history"
+        ariaModal
+        ariaLabel="Navigation History"
         tabIndex={-1}
-        onClick={(e) => e.stopPropagation()}
         onKeyDown={onKeyDown}
+        defaultSize={{ width: 560, height: 420 }}
+        minSize={{ width: 420, height: 300 }}
       >
         <div className="modal__header">Navigation History</div>
         <div className="modal__body open-with__body">
@@ -145,7 +148,7 @@ export function PanelHistoryModal({ client, panelHistory }: PanelHistoryModalPro
             })}
           </div>
         </div>
-      </div>
+      </ResizableModal>
     </div>
   );
 }

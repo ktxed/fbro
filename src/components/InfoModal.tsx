@@ -1,10 +1,13 @@
 import { useRef, useEffect } from "react";
 import { useAppDispatch } from "../store";
 import type { PendingInfo } from "../store";
+import type { WsClient } from "../ws/client";
 import { IconCopy } from "@tabler/icons-react";
+import { ResizableModal } from "./ResizableModal";
 
 interface InfoModalProps {
   info: PendingInfo;
+  client: WsClient;
 }
 
 function formatSize(size: number | undefined): string {
@@ -43,7 +46,7 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
-export function InfoModal({ info }: InfoModalProps) {
+export function InfoModal({ info, client }: InfoModalProps) {
   const dispatch = useAppDispatch();
   const overlayRef = useRef<HTMLDivElement>(null);
 
@@ -70,7 +73,13 @@ export function InfoModal({ info }: InfoModalProps) {
 
   return (
     <div className="modal-overlay" ref={overlayRef} tabIndex={-1} onClick={close} onKeyDown={handleKeyDown}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+      <ResizableModal
+        modalId="info"
+        client={client}
+        ariaLabel="Info"
+        defaultSize={{ width: 560, height: 420 }}
+        minSize={{ width: 420, height: 280 }}
+      >
         <div className="modal__header">Info</div>
         <div className="modal__body">
           <table className="modal__info-table">
@@ -136,7 +145,7 @@ export function InfoModal({ info }: InfoModalProps) {
         <div className="modal__actions">
           <button className="modal__btn modal__btn--primary" onClick={close}>Close</button>
         </div>
-      </div>
+      </ResizableModal>
     </div>
   );
 }

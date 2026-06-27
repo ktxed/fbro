@@ -342,6 +342,14 @@ pub struct StateDomains {
 #[derive(Serialize, Clone, Debug)]
 pub struct SettingsSnapshot {
     pub general: GeneralSettingsSchema,
+    #[serde(rename = "modalSizes")]
+    pub modal_sizes: std::collections::HashMap<String, ModalSizePreferenceSchema>,
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct ModalSizePreferenceSchema {
+    pub width: u32,
+    pub height: u32,
 }
 
 #[derive(Serialize, Clone, Debug)]

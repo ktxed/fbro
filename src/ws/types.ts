@@ -544,8 +544,14 @@ export interface GeneralSettings {
   sevenzipResolvedPath: string;
 }
 
+export interface ModalSizePreference {
+  width: number;
+  height: number;
+}
+
 export interface SettingsState {
   general: GeneralSettings;
+  modalSizes: Record<string, ModalSizePreference>;
 }
 
 export interface ChildProcess {

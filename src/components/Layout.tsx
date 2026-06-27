@@ -537,7 +537,7 @@ export function Layout({ client, jobsViewOpen, onCloseJobsView, onOpenJobsView }
         <RenameModal rename={state.pendingRename} client={client} />
       )}
       {state.pendingInfo && (
-        <InfoModal info={state.pendingInfo} />
+        <InfoModal info={state.pendingInfo} client={client} />
       )}
       {state.pendingAttributes && (
         <AttributesModal attributes={state.pendingAttributes} client={client} />

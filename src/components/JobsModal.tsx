@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { useAppState } from "../store";
+import { useAppDispatch, useAppState } from "../store";
 import type { ChildProcess, DirSizeTask, FileOpProgress, Job, PrefetchCacheStatus } from "../ws/types";
 import type { WsClient } from "../ws/client";
-import { IconPlayerPlay, IconPlayerPause, IconX } from "@tabler/icons-react";
+import { IconEye, IconPlayerPlay, IconPlayerPause, IconX } from "@tabler/icons-react";
 import { cancelJobWithPartialPrompt } from "../utils/jobCancel";
+import { ResizableModal } from "./ResizableModal";
 
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -14,6 +15,77 @@ function formatBytes(n: number): string {
 
 function jobShortId(jobId: string) {
   return jobId.replace(/^job-/, "#");
+}
+
+function isTerminalJob(job: Job) {
+  return job.state === "Completed" || job.state === "Cancelled" || job.state === "Failed";
+}
+
+function completedFileCount(job: Job) {
+  return job.progress?.completedFiles || job.progress?.totalFiles || job.files.length;
+}
+
+function completedBytes(job: Job) {
+  return job.progress?.totalBytesCopied || job.progress?.totalBytesTotal || job.files.reduce((sum, file) => sum + (file.size ?? 0), 0);
+}
+
+function SummaryChip({ label, value }: { label: string; value: string }) {
+  return (
+    <span className="jobs-modal__summary-chip">
+      <span className="jobs-modal__summary-label">{label}</span>
+      <span className="jobs-modal__summary-value">{value}</span>
+    </span>
+  );
+}
+
+function JobSummary({ job }: { job: Job }) {
+  if (!isTerminalJob(job)) return null;
+
+  if (job.kind === "sync-bro" && job.syncResult) {
+    const differing = job.syncResult.differing.length
+      + job.syncResult.localOnly.length
+      + job.syncResult.remoteOnly.length
+      + job.syncResult.unverified.length;
+    const errors = job.syncResult.localErrors.length + job.syncResult.remoteErrors.length;
+    return (
+      <div className="jobs-modal__summary">
+        <SummaryChip label="Matched" value={String(job.syncResult.matched)} />
+        <SummaryChip label="Differences" value={String(differing)} />
+        <SummaryChip label="Errors" value={String(errors)} />
+      </div>
+    );
+  }
+
+  if (job.kind === "fedup-bro" && job.fedupResult) {
+    return (
+      <div className="jobs-modal__summary">
+        <SummaryChip label="Groups" value={String(job.fedupResult.duplicateGroups)} />
+        <SummaryChip label="Duplicates" value={String(job.fedupResult.duplicateFiles)} />
+        <SummaryChip label="Reclaimable" value={formatBytes(job.fedupResult.reclaimableBytes)} />
+        <SummaryChip label="Errors" value={String(job.fedupResult.errors.length)} />
+      </div>
+    );
+  }
+
+  if (job.kind === "outgoing-transfer") {
+    return (
+      <div className="jobs-modal__summary">
+        <SummaryChip label="Sent files" value={String(completedFileCount(job))} />
+        <SummaryChip label="Bytes" value={formatBytes(completedBytes(job))} />
+      </div>
+    );
+  }
+
+  if (job.kind === "file-op" || job.kind === "fp-bro" || job.kind === "remote-manifest") {
+    return (
+      <div className="jobs-modal__summary">
+        <SummaryChip label="Files" value={String(completedFileCount(job))} />
+        <SummaryChip label="Bytes" value={formatBytes(completedBytes(job))} />
+      </div>
+    );
+  }
+
+  return null;
 }
 
 function ProgressBar({ p }: { p: FileOpProgress }) {
@@ -45,9 +117,11 @@ function ProgressBar({ p }: { p: FileOpProgress }) {
   );
 }
 
-function JobRow({ job, client }: { job: Job; client: WsClient }) {
+function JobRow({ job, client, onClose }: { job: Job; client: WsClient; onClose: () => void }) {
   const state = useAppState();
+  const dispatch = useAppDispatch();
   const isActive = job.state === "Queued" || job.state === "Running" || job.state === "AwaitingDecision";
+  const isTerminal = isTerminalJob(job);
   const typeLabel = job.kind === "outgoing-transfer"
     ? `Outgoing ${jobShortId(job.jobId)}`
     : job.kind === "remote-manifest"
@@ -102,6 +176,18 @@ function JobRow({ job, client }: { job: Job; client: WsClient }) {
                 <IconX size={12} /> Cancel
               </button>
           </>
+        )}
+        {isTerminal && (
+          <button
+            className="jobs-modal__action"
+            title="Show job details"
+            onClick={() => {
+              dispatch({ type: "SET_ACTIVE_JOB", jobId: job.jobId });
+              onClose();
+            }}
+          >
+            <IconEye size={12} /> Details
+          </button>
         )}
       </div>
 
@@ -164,6 +250,8 @@ function JobRow({ job, client }: { job: Job; client: WsClient }) {
       </div>
 
       {job.progress && isActive && <ProgressBar p={job.progress} />}
+
+      <JobSummary job={job} />
 
       {job.error && (
         <div className="jobs-modal__error">{job.error}</div>
@@ -309,7 +397,14 @@ export function JobsModal({ onClose, client }: { onClose: () => void; client: Ws
 
   return (
     <div className="modal-overlay" ref={overlayRef} onClick={onOverlayClick}>
-      <div className="modal jobs-modal" role="dialog" aria-label="Jobs">
+      <ResizableModal
+        modalId="jobs"
+        client={client}
+        className="jobs-modal"
+        ariaLabel="Jobs"
+        defaultSize={{ width: 640, height: 520 }}
+        minSize={{ width: 520, height: 340 }}
+      >
         <div className="modal__header">Jobs</div>
 
         <div className="jobs-modal__tabs">
@@ -343,21 +438,21 @@ export function JobsModal({ onClose, client }: { onClose: () => void; client: Ws
               {activeFileJobs.length > 0 && (
                 <section>
                   <div className="jobs-modal__section-title">Active File Jobs</div>
-                  {activeFileJobs.map(j => <JobRow key={j.jobId} job={j} client={client} />)}
+                  {activeFileJobs.map(j => <JobRow key={j.jobId} job={j} client={client} onClose={onClose} />)}
                 </section>
               )}
 
               {broJobs.length > 0 && (
                 <section>
                   <div className="jobs-modal__section-title">Bro Jobs</div>
-                  {broJobs.map(j => <JobRow key={j.jobId} job={j} client={client} />)}
+                  {broJobs.map(j => <JobRow key={j.jobId} job={j} client={client} onClose={onClose} />)}
                 </section>
               )}
 
               {outgoingJobs.length > 0 && (
                 <section>
                   <div className="jobs-modal__section-title">Outgoing Transfers</div>
-                  {outgoingJobs.map(j => <JobRow key={j.jobId} job={j} client={client} />)}
+                  {outgoingJobs.map(j => <JobRow key={j.jobId} job={j} client={client} onClose={onClose} />)}
                 </section>
               )}
 
@@ -377,7 +472,7 @@ export function JobsModal({ onClose, client }: { onClose: () => void; client: Ws
               {finishedFileJobs.length > 0 && (
                 <section>
                   <div className="jobs-modal__section-title">Finished File Jobs</div>
-                  {finishedFileJobs.map(j => <JobRow key={j.jobId} job={j} client={client} />)}
+                  {finishedFileJobs.map(j => <JobRow key={j.jobId} job={j} client={client} onClose={onClose} />)}
                 </section>
               )}
             </>
@@ -410,7 +505,7 @@ export function JobsModal({ onClose, client }: { onClose: () => void; client: Ws
         <div className="modal__actions">
           <button className="modal__btn" onClick={onClose}>Close <kbd>j</kbd></button>
         </div>
-      </div>
+      </ResizableModal>
     </div>
   );
 }

@@ -1713,6 +1713,95 @@ body {
   flex-direction: column;
 }
 
+.modal--resizable {
+  position: relative;
+  box-sizing: border-box;
+  max-width: calc(100vw - 48px);
+  max-height: calc(100vh - 48px);
+  resize: none;
+}
+
+.modal__resize-handle {
+  position: absolute;
+  z-index: 2;
+  touch-action: none;
+}
+
+.modal__resize-handle--n,
+.modal__resize-handle--s {
+  left: 10px;
+  right: 10px;
+  height: 10px;
+  cursor: ns-resize;
+}
+
+.modal__resize-handle--n {
+  top: -5px;
+}
+
+.modal__resize-handle--s {
+  bottom: -5px;
+}
+
+.modal__resize-handle--e,
+.modal__resize-handle--w {
+  top: 10px;
+  bottom: 10px;
+  width: 10px;
+  cursor: ew-resize;
+}
+
+.modal__resize-handle--e {
+  right: -5px;
+}
+
+.modal__resize-handle--w {
+  left: -5px;
+}
+
+.modal__resize-handle--ne,
+.modal__resize-handle--nw,
+.modal__resize-handle--se,
+.modal__resize-handle--sw {
+  width: 16px;
+  height: 16px;
+}
+
+.modal__resize-handle--ne,
+.modal__resize-handle--sw {
+  cursor: nesw-resize;
+}
+
+.modal__resize-handle--nw,
+.modal__resize-handle--se {
+  cursor: nwse-resize;
+}
+
+.modal__resize-handle--ne {
+  top: -6px;
+  right: -6px;
+}
+
+.modal__resize-handle--nw {
+  top: -6px;
+  left: -6px;
+}
+
+.modal__resize-handle--se {
+  right: -6px;
+  bottom: -6px;
+}
+
+.modal__resize-handle--sw {
+  left: -6px;
+  bottom: -6px;
+}
+
+.modal-resize-active,
+.modal-resize-active * {
+  user-select: none;
+}
+
 .modal__header {
   padding: 8px 12px;
   font-weight: bold;
@@ -1978,9 +2067,17 @@ body {
   height: 380px;
 }
 
+.modal--resizable.modal--fixed {
+  height: auto;
+}
+
 /* Sync Bro needs more room for the results lists. */
 .modal--sync {
   height: 460px;
+}
+
+.modal--resizable.modal--sync {
+  height: auto;
 }
 
 .modal__sync-current {
@@ -2112,6 +2209,12 @@ body {
   max-height: min(70vh, 640px);
 }
 
+.modal--resizable.command-palette {
+  min-width: 0;
+  max-width: calc(100vw - 48px);
+  max-height: calc(100vh - 48px);
+}
+
 .command-palette__body {
   display: flex;
   flex-direction: column;
@@ -2144,6 +2247,11 @@ body {
   border: 1px solid var(--border);
   border-radius: 4px;
   background: var(--bg);
+}
+
+.modal--resizable .command-palette__list {
+  flex: 1;
+  max-height: none;
 }
 
 .command-palette__item {
@@ -2207,6 +2315,10 @@ body {
   min-width: 520px;
 }
 
+.modal--resizable.open-with {
+  min-width: 0;
+}
+
 .open-with__body {
   display: flex;
   flex-direction: column;
@@ -2223,6 +2335,10 @@ body {
 
 .open-with__list {
   max-height: min(52vh, 440px);
+}
+
+.modal--resizable .open-with__list {
+  max-height: none;
 }
 
 /* Progress */
@@ -2589,6 +2705,11 @@ body {
   flex-direction: column;
 }
 
+.modal--resizable.jobs-modal {
+  width: auto;
+  height: auto;
+}
+
 .jobs-modal__body {
   overflow-y: auto;
   display: flex;
@@ -2671,6 +2792,26 @@ body {
   background: rgba(224, 80, 80, 0.15);
 }
 
+.jobs-modal__action {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 3px;
+  padding: 2px 8px;
+  cursor: pointer;
+  font-size: var(--font-size);
+}
+
+.jobs-modal__action:hover {
+  border-color: var(--border-focus);
+  color: var(--accent);
+  background: rgba(74, 158, 255, 0.12);
+}
+
 .jobs-modal__paths {
   display: flex;
   flex-direction: column;
@@ -2725,6 +2866,34 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.jobs-modal__summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.jobs-modal__summary-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  min-height: 20px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 1px 6px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.jobs-modal__summary-label {
+  font-size: 0.72em;
+  color: var(--text-dim);
+}
+
+.jobs-modal__summary-value {
+  font-size: 0.78em;
+  color: var(--text);
 }
 
 .jobs-modal__error {
@@ -3304,6 +3473,11 @@ body {
   width: 90vw;
 }
 
+.modal--resizable.modal--wide {
+  max-width: calc(100vw - 48px);
+  width: auto;
+}
+
 .modal--wide .modal__body {
   max-height: 420px;
   overflow-y: auto;
@@ -3321,6 +3495,12 @@ body {
 
 .modal--wide .modal__body {
   min-height: 420px;
+}
+
+.modal--resizable.modal--wide .modal__body {
+  height: auto;
+  min-height: 0;
+  max-height: none;
 }
 
 .search-modal__section {
@@ -3979,10 +4159,15 @@ body {
   width: 90%;
 }
 
+.modal--resizable.modal--settings {
+  max-width: calc(100vw - 48px);
+  width: auto;
+}
+
 .settings-modal__layout {
   display: flex;
   flex-direction: row;
-  height: min(68vh, 560px);
+  flex: 1;
   min-height: 360px;
   border-bottom: 1px solid var(--border);
 }
