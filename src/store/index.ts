@@ -1054,7 +1054,8 @@ function reducer(state: AppState, action: AppAction): AppState {
             jobs: { ...state.jobs, [msg.jobId]: { ...job, syncResult: msg.result } },
           };
         }
-        case "FedupBroResult": {
+        case "FedupBroResult":
+        case "FedupBroResultPage": {
           const job = state.jobs[msg.jobId];
           if (!job) return state;
           return {

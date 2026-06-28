@@ -18,6 +18,7 @@ use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 
 use crate::bro::{BroInputItem, ResolvedBro};
+use crate::ws::protocol::FedupBroResultSchema;
 
 // ─── Scan handle (existing) ─────────────────────────────────────────────────
 
@@ -198,6 +199,7 @@ pub struct SyncBroJobMeta {
 pub struct FedupBroJobMeta {
     pub inputs: Vec<BroInputItem>,
     pub report_path: String,
+    pub result: Option<Arc<FedupBroResultSchema>>,
 }
 
 #[allow(dead_code)]

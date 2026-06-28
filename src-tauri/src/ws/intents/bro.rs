@@ -14,9 +14,9 @@ use crate::bro::{
     BroSource, LaunchRecipe, ResolvedBro,
 };
 use crate::jobs::fedup::{
-    format_fedup_delete_dry_run_script, format_fedup_delete_manifest,
+    fedup_result_page, format_fedup_delete_dry_run_script, format_fedup_delete_manifest,
     format_fedup_report_from_schema, run_fedup_bro, FEDUP_DELETE_DRY_RUN_MANIFEST_NAME,
-    FEDUP_DELETE_DRY_RUN_SCRIPT_NAME, FEDUP_REPORT_NAME,
+    FEDUP_DELETE_DRY_RUN_SCRIPT_NAME, FEDUP_REPORT_NAME, FEDUP_RESULT_PAGE_SIZE,
 };
 use crate::jobs::fp_bro::run_fp_bro;
 use crate::jobs::integrity_compare::{
@@ -26,7 +26,7 @@ use crate::jobs::{
     AppJob, FedupBroJobMeta, FileOpProgress, FpBroJobMeta, JobKind, JobState, SyncBroJobMeta,
 };
 use crate::state::ChildProcessEntry;
-use crate::ws::intents::{arg_str, is_global_selection_source};
+use crate::ws::intents::{arg_str, arg_u64, is_global_selection_source};
 use crate::ws::protocol::{
     now, BroInputSchema, BroOutputSchema, BroParamSchema, BroPreSchema, BroSchema,
     FedupBroResultSchema, FileOpFileSchema, JobStartSchema, ServerMessage, SyncBroResultSchema,
@@ -41,43 +41,25 @@ pub(crate) async fn handle(name: &str, scope: &Value, args: &Value, ctx: &mut In
         "SaveSyncReport" => save_sync_report(args, ctx).await,
         "SaveFedupReport" => save_fedup_report(args, ctx).await,
         "GenerateFedupDeleteDryRun" => generate_fedup_delete_dry_run(args, ctx).await,
+        "GetFedupResultPage" => get_fedup_result_page(args, ctx).await,
         _ => {}
     }
 }
 
 async fn generate_fedup_delete_dry_run(args: &Value, ctx: &mut IntentContext<'_>) {
     let job_id = arg_str(args, "jobId").unwrap_or("").to_string();
-    let result: FedupBroResultSchema = match args
-        .get("result")
-        .cloned()
-        .and_then(|value| serde_json::from_value(value).ok())
-    {
-        Some(result) => result,
-        None => {
-            send_generate_fedup_delete_dry_run_error(
-                ctx,
-                &job_id,
-                "missing or invalid fedup result".to_string(),
-            )
-            .await;
+    let (report_path, result) = match fedup_report_state(ctx, &job_id).await {
+        Ok(state) => state,
+        Err(error) => {
+            send_generate_fedup_delete_dry_run_error(ctx, &job_id, error).await;
             return;
         }
     };
-
-    let output_dir = {
-        let state_guard = ctx.state.lock().await;
-        match state_guard.job_store.jobs.get(&job_id).map(|job| &job.kind) {
-            Some(JobKind::FedupBro(meta)) => {
-                Path::new(&meta.report_path).parent().map(Path::to_path_buf)
-            }
-            _ => None,
-        }
-    };
-    let Some(output_dir) = output_dir else {
+    let Some(output_dir) = Path::new(&report_path).parent().map(Path::to_path_buf) else {
         send_generate_fedup_delete_dry_run_error(
             ctx,
             &job_id,
-            "fedup job is no longer available".to_string(),
+            "fedup report destination has no parent directory".to_string(),
         )
         .await;
         return;
@@ -155,34 +137,12 @@ async fn send_generate_fedup_delete_dry_run_error(
 
 async fn save_fedup_report(args: &Value, ctx: &mut IntentContext<'_>) {
     let job_id = arg_str(args, "jobId").unwrap_or("").to_string();
-    let result: FedupBroResultSchema = match args
-        .get("result")
-        .cloned()
-        .and_then(|value| serde_json::from_value(value).ok())
-    {
-        Some(result) => result,
-        None => {
-            send_save_fedup_report_error(
-                ctx,
-                &job_id,
-                "missing or invalid fedup result".to_string(),
-            )
-            .await;
+    let (report_path, result) = match fedup_report_state(ctx, &job_id).await {
+        Ok(state) => state,
+        Err(error) => {
+            send_save_fedup_report_error(ctx, &job_id, error).await;
             return;
         }
-    };
-
-    let report_path = {
-        let state_guard = ctx.state.lock().await;
-        match state_guard.job_store.jobs.get(&job_id).map(|job| &job.kind) {
-            Some(JobKind::FedupBro(meta)) => Some(meta.report_path.clone()),
-            _ => None,
-        }
-    };
-    let Some(report_path) = report_path else {
-        send_save_fedup_report_error(ctx, &job_id, "fedup job is no longer available".to_string())
-            .await;
-        return;
     };
 
     let write_path = report_path.clone();
@@ -220,6 +180,74 @@ async fn send_save_fedup_report_error(ctx: &IntentContext<'_>, job_id: &str, mes
             extra: Some(serde_json::json!({ "jobId": job_id })),
         })
         .await;
+}
+
+async fn get_fedup_result_page(args: &Value, ctx: &mut IntentContext<'_>) {
+    let job_id = arg_str(args, "jobId").unwrap_or("").to_string();
+    let group_offset = arg_u64(args, "groupOffset", 0) as usize;
+    let group_limit = arg_u64(args, "groupLimit", FEDUP_RESULT_PAGE_SIZE as u64) as usize;
+    let error_offset = arg_u64(args, "errorOffset", 0) as usize;
+    let error_limit = arg_u64(args, "errorLimit", FEDUP_RESULT_PAGE_SIZE as u64) as usize;
+
+    let result = {
+        let state_guard = ctx.state.lock().await;
+        match state_guard.job_store.jobs.get(&job_id).map(|job| &job.kind) {
+            Some(JobKind::FedupBro(meta)) => meta.result.clone(),
+            _ => None,
+        }
+    };
+    let Some(result) = result else {
+        send_get_fedup_result_page_error(
+            ctx,
+            &job_id,
+            "fedup result is no longer available".to_string(),
+        )
+        .await;
+        return;
+    };
+
+    let _ = ctx
+        .tx
+        .send(ServerMessage::FedupBroResultPage {
+            timestamp: now(),
+            job_id,
+            result: fedup_result_page(
+                &result,
+                group_offset,
+                group_limit,
+                error_offset,
+                error_limit,
+            ),
+        })
+        .await;
+}
+
+async fn send_get_fedup_result_page_error(ctx: &IntentContext<'_>, job_id: &str, message: String) {
+    let _ = ctx
+        .tx
+        .send(ServerMessage::Error {
+            timestamp: now(),
+            code: "GET_FEDUP_RESULT_PAGE_FAILED".to_string(),
+            message: format!("Could not load Fedup result page: {message}"),
+            recoverable: true,
+            extra: Some(serde_json::json!({ "jobId": job_id })),
+        })
+        .await;
+}
+
+async fn fedup_report_state(
+    ctx: &IntentContext<'_>,
+    job_id: &str,
+) -> Result<(String, Arc<FedupBroResultSchema>), String> {
+    let state_guard = ctx.state.lock().await;
+    match state_guard.job_store.jobs.get(job_id).map(|job| &job.kind) {
+        Some(JobKind::FedupBro(meta)) => meta
+            .result
+            .clone()
+            .map(|result| (meta.report_path.clone(), result))
+            .ok_or_else(|| "fedup result is no longer available".to_string()),
+        _ => Err("fedup job is no longer available".to_string()),
+    }
 }
 
 async fn save_sync_report(args: &Value, ctx: &mut IntentContext<'_>) {
@@ -1247,10 +1275,42 @@ async fn launch_fedup_bro(
         .map(|dir| dir.join(FEDUP_REPORT_NAME).to_string_lossy().to_string())
         .unwrap_or_else(|| FEDUP_REPORT_NAME.to_string());
     let file_schemas = bro_input_files(&inputs);
+    let source_panel_id = request.source_panel_id.clone();
     let job_id = {
         let mut state_guard = ctx.state.lock().await;
         state_guard.job_store.next_job_id()
     };
+    let (cancel_tx, cancel_rx) = watch::channel(false);
+    let (pause_tx, _pause_rx) = watch::channel(false);
+
+    {
+        let mut state_guard = ctx.state.lock().await;
+        state_guard.job_store.jobs.insert(
+            job_id.clone(),
+            AppJob {
+                job_id: job_id.clone(),
+                kind: JobKind::FedupBro(FedupBroJobMeta {
+                    inputs: inputs.clone(),
+                    report_path: report_path.clone(),
+                    result: None,
+                }),
+                source_panel: source_panel_id.clone(),
+                dest_panel: None,
+                source_path: source_path.clone(),
+                dest_path: None,
+                state: JobState::Running,
+                progress: FileOpProgress::default(),
+                decision: None,
+                error: None,
+                background: false,
+                paused: false,
+                handle: None,
+                cancel_tx,
+                pause_tx,
+                keep_partial_files_on_cancel: Arc::new(AtomicBool::new(false)),
+            },
+        );
+    }
 
     let _ = ctx
         .tx
@@ -1261,7 +1321,7 @@ async fn launch_fedup_bro(
                 kind: "fedup-bro".to_string(),
                 op_type: "Fedup Bro".to_string(),
                 files: file_schemas,
-                source_panel: request.source_panel_id.clone(),
+                source_panel: source_panel_id.clone(),
                 source_path: source_path.clone(),
                 dest_panel: None,
                 dest_path: None,
@@ -1271,7 +1331,7 @@ async fn launch_fedup_bro(
                 background: false,
                 supports_pause: false,
                 result_path: None,
-                result_panel_id: Some(request.source_panel_id.clone()),
+                result_panel_id: Some(source_panel_id),
                 request_id: None,
                 search_source_id: None,
                 search_params: None,
@@ -1279,40 +1339,18 @@ async fn launch_fedup_bro(
         })
         .await;
 
-    let (cancel_tx, cancel_rx) = watch::channel(false);
-    let (pause_tx, _pause_rx) = watch::channel(false);
     let handle = tokio::spawn(run_fedup_bro(
         job_id.clone(),
         inputs.clone(),
+        Arc::clone(ctx.state),
         ctx.tx.clone(),
         cancel_rx,
     ));
 
     let mut state_guard = ctx.state.lock().await;
-    state_guard.job_store.jobs.insert(
-        job_id.clone(),
-        AppJob {
-            job_id,
-            kind: JobKind::FedupBro(FedupBroJobMeta {
-                inputs,
-                report_path,
-            }),
-            source_panel: request.source_panel_id,
-            dest_panel: None,
-            source_path,
-            dest_path: None,
-            state: JobState::Running,
-            progress: FileOpProgress::default(),
-            decision: None,
-            error: None,
-            background: false,
-            paused: false,
-            handle: Some(handle),
-            cancel_tx,
-            pause_tx,
-            keep_partial_files_on_cancel: Arc::new(AtomicBool::new(false)),
-        },
-    );
+    if let Some(job) = state_guard.job_store.jobs.get_mut(&job_id) {
+        job.handle = Some(handle);
+    }
 
     Ok(())
 }

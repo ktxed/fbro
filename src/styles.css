@@ -1819,6 +1819,7 @@ body {
   color: var(--text);
   flex: 1;
   overflow-y: auto;
+  scrollbar-gutter: stable;
   min-height: 0;
 }
 
@@ -2063,6 +2064,11 @@ body {
   flex-shrink: 0;
 }
 
+.modal__actions--inline {
+  padding: 6px 0 0;
+  border-top: 0;
+}
+
 .modal--fixed {
   height: 380px;
 }
@@ -2121,6 +2127,12 @@ body {
   font-family: var(--font);
   font-size: var(--font-size);
   cursor: pointer;
+}
+
+.modal__btn--compact {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  font-size: calc(var(--font-size) * 0.9);
 }
 
 .modal__btn:hover {
@@ -2542,6 +2554,13 @@ body {
   gap: 10px;
   max-height: 320px;
   overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.modal__sync-results--fedup .modal__sync-lists {
+  max-height: none;
+  overflow: visible;
+  padding-right: 8px;
 }
 
 .modal__sync-section h4 {
@@ -2558,7 +2577,22 @@ body {
   border-bottom: 1px solid var(--border);
 }
 
+.modal__sync-row--stacked {
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px 0 6px;
+}
+
+.modal__sync-row-main {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
 .modal__sync-path {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2576,6 +2610,34 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 50%;
+}
+
+.modal__fedup-file-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px 0 2px 12px;
+}
+
+.modal__fedup-file-row {
+  display: grid;
+  grid-template-columns: 82px auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.modal__fedup-file-role {
+  color: var(--text-dim);
+  font-size: calc(var(--font-size) * 0.85);
+}
+
+.modal__fedup-file-path {
+  min-width: 0;
+  color: var(--text-path);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Rename modal */

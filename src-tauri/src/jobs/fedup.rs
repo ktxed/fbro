@@ -9,15 +9,19 @@ use std::time::UNIX_EPOCH;
 use tokio::sync::{mpsc, watch};
 
 use crate::bro::BroInputItem;
+use crate::jobs::JobKind;
+use crate::state::SharedState;
 use crate::vfs::hash_local_file_blake3;
 use crate::ws::protocol::{
-    now, FedupBroErrorSchema, FedupBroFileSchema, FedupBroGroupSchema, FedupBroResultSchema,
-    FileOpProgressSchema, ServerMessage,
+    now, FedupBroErrorSchema, FedupBroFileSchema, FedupBroGroupSchema, FedupBroResultPageSchema,
+    FedupBroResultSchema, FileOpProgressSchema, ServerMessage,
 };
 
 pub const FEDUP_REPORT_NAME: &str = "fbro-fedup-report.txt";
 pub const FEDUP_DELETE_DRY_RUN_SCRIPT_NAME: &str = "fbro-fedup-delete-dry-run.sh";
 pub const FEDUP_DELETE_DRY_RUN_MANIFEST_NAME: &str = "fbro-fedup-delete-manifest.txt";
+pub const FEDUP_RESULT_PAGE_SIZE: usize = 20;
+pub const FEDUP_RESULT_MAX_PAGE_SIZE: usize = 100;
 
 #[derive(Clone, Debug)]
 struct Candidate {
@@ -43,6 +47,7 @@ struct ScanBuild {
 pub async fn run_fedup_bro(
     job_id: String,
     inputs: Vec<BroInputItem>,
+    state: SharedState,
     tx: mpsc::Sender<ServerMessage>,
     cancel_rx: watch::Receiver<bool>,
 ) {
@@ -69,11 +74,26 @@ pub async fn run_fedup_bro(
 
     match result {
         Ok(Ok(result)) => {
+            let result = Arc::new(result);
+            {
+                let mut state_guard = state.lock().await;
+                if let Some(job) = state_guard.job_store.jobs.get_mut(&job_id) {
+                    if let JobKind::FedupBro(meta) = &mut job.kind {
+                        meta.result = Some(Arc::clone(&result));
+                    }
+                }
+            }
             let _ = tx
                 .send(ServerMessage::FedupBroResult {
                     timestamp: now(),
                     job_id: job_id.clone(),
-                    result,
+                    result: fedup_result_page(
+                        &result,
+                        0,
+                        FEDUP_RESULT_PAGE_SIZE,
+                        0,
+                        FEDUP_RESULT_PAGE_SIZE,
+                    ),
                 })
                 .await;
             let _ = send_terminal(&tx, &job_id, "Completed", None).await;
@@ -270,6 +290,45 @@ fn run_fedup_report_blocking(
         groups,
         errors: build.errors,
     })
+}
+
+pub fn fedup_result_page(
+    result: &FedupBroResultSchema,
+    group_offset: usize,
+    group_limit: usize,
+    error_offset: usize,
+    error_limit: usize,
+) -> FedupBroResultPageSchema {
+    let group_limit = clamp_page_limit(group_limit);
+    let error_limit = clamp_page_limit(error_limit);
+    let group_offset = group_offset.min(result.groups.len());
+    let error_offset = error_offset.min(result.errors.len());
+    let group_end = group_offset
+        .saturating_add(group_limit)
+        .min(result.groups.len());
+    let error_end = error_offset
+        .saturating_add(error_limit)
+        .min(result.errors.len());
+
+    FedupBroResultPageSchema {
+        duplicate_groups: result.duplicate_groups,
+        duplicate_files: result.duplicate_files,
+        reclaimable_bytes: result.reclaimable_bytes,
+        scanned_files: result.scanned_files,
+        scanned_bytes: result.scanned_bytes,
+        groups: result.groups[group_offset..group_end].to_vec(),
+        errors: result.errors[error_offset..error_end].to_vec(),
+        group_offset,
+        group_limit,
+        group_total: result.groups.len(),
+        error_offset,
+        error_limit,
+        error_total: result.errors.len(),
+    }
+}
+
+fn clamp_page_limit(limit: usize) -> usize {
+    limit.clamp(1, FEDUP_RESULT_MAX_PAGE_SIZE)
 }
 
 fn scan_path(path: &Path, build: &mut ScanBuild, cancel: &AtomicBool) -> Result<(), String> {
@@ -607,6 +666,62 @@ mod tests {
         assert_eq!(result.duplicate_groups, 0);
         assert_eq!(result.duplicate_files, 0);
         assert_eq!(result.reclaimable_bytes, 0);
+    }
+
+    #[test]
+    fn result_page_slices_groups_and_errors_with_clamped_limits() {
+        let groups = (0..5)
+            .map(|index| FedupBroGroupSchema {
+                hash: format!("hash-{index}"),
+                size: 4,
+                keeper: FedupBroFileSchema {
+                    path: format!("/tmp/keep-{index}.txt"),
+                    size: 4,
+                    mtime: Some(index),
+                    hash: format!("hash-{index}"),
+                },
+                duplicates: vec![FedupBroFileSchema {
+                    path: format!("/tmp/delete-{index}.txt"),
+                    size: 4,
+                    mtime: Some(index + 1),
+                    hash: format!("hash-{index}"),
+                }],
+            })
+            .collect::<Vec<_>>();
+        let errors = (0..3)
+            .map(|index| FedupBroErrorSchema {
+                path: format!("/tmp/error-{index}.txt"),
+                message: "cannot read".to_string(),
+            })
+            .collect::<Vec<_>>();
+        let result = FedupBroResultSchema {
+            duplicate_groups: 5,
+            duplicate_files: 5,
+            reclaimable_bytes: 20,
+            scanned_files: 12,
+            scanned_bytes: 48,
+            groups,
+            errors,
+        };
+
+        let page = fedup_result_page(&result, 2, 2, 1, 50);
+        assert_eq!(page.group_offset, 2);
+        assert_eq!(page.group_limit, 2);
+        assert_eq!(page.group_total, 5);
+        assert_eq!(page.groups.len(), 2);
+        assert_eq!(page.groups[0].hash, "hash-2");
+        assert_eq!(page.error_offset, 1);
+        assert_eq!(page.error_limit, 50);
+        assert_eq!(page.error_total, 3);
+        assert_eq!(page.errors.len(), 2);
+
+        let clamped = fedup_result_page(&result, 50, 0, 50, usize::MAX);
+        assert_eq!(clamped.group_offset, 5);
+        assert_eq!(clamped.group_limit, 1);
+        assert!(clamped.groups.is_empty());
+        assert_eq!(clamped.error_offset, 3);
+        assert_eq!(clamped.error_limit, FEDUP_RESULT_MAX_PAGE_SIZE);
+        assert!(clamped.errors.is_empty());
     }
 
     #[test]

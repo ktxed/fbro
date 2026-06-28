@@ -102,17 +102,37 @@ function SyncBroResultsView({ result }: { result: SyncBroResult }) {
   );
 }
 
-function FedupBroResultsView({ result }: { result: FedupBroResult }) {
+function FedupBroResultsView({ jobId, result, client }: { jobId: string; result: FedupBroResult; client: WsClient }) {
+  const [expandedGroupKey, setExpandedGroupKey] = useState<string | null>(null);
   const counts: { label: string; value: string; cc?: string }[] = [
     { label: "Groups", value: String(result.duplicateGroups), cc: result.duplicateGroups ? "warn" : "ok" },
     { label: "Duplicate files", value: String(result.duplicateFiles), cc: result.duplicateFiles ? "warn" : "ok" },
     { label: "Reclaimable", value: formatBytes(result.reclaimableBytes), cc: result.reclaimableBytes ? "warn" : undefined },
     { label: "Scanned", value: String(result.scannedFiles) },
-    { label: "Errors", value: String(result.errors.length), cc: result.errors.length ? "err" : undefined },
+    { label: "Errors", value: String(result.errorTotal), cc: result.errorTotal ? "err" : undefined },
   ];
-  const shownGroups = result.groups.slice(0, 20);
+  const requestPage = (groupOffset: number, errorOffset: number) => {
+    client.sendIntent("GetFedupResultPage", undefined, {
+      jobId,
+      groupOffset,
+      groupLimit: result.groupLimit,
+      errorOffset,
+      errorLimit: result.errorLimit,
+    });
+  };
+  const groupStart = result.groupTotal === 0 ? 0 : result.groupOffset + 1;
+  const groupEnd = Math.min(result.groupOffset + result.groups.length, result.groupTotal);
+  const errorStart = result.errorTotal === 0 ? 0 : result.errorOffset + 1;
+  const errorEnd = Math.min(result.errorOffset + result.errors.length, result.errorTotal);
+  const canPrevGroups = result.groupOffset > 0;
+  const canNextGroups = result.groupOffset + result.groupLimit < result.groupTotal;
+  const canPrevErrors = result.errorOffset > 0;
+  const canNextErrors = result.errorOffset + result.errorLimit < result.errorTotal;
+  const copyPath = (path: string) => {
+    void navigator.clipboard.writeText(path);
+  };
   return (
-    <div className="modal__sync-results">
+    <div className="modal__sync-results modal__sync-results--fedup">
       <div className="modal__sync-counts">
         {counts.map((c) => (
           <div key={c.label} className={`modal__sync-count${c.cc ? ` modal__sync-count--${c.cc}` : ""}`}>
@@ -122,38 +142,96 @@ function FedupBroResultsView({ result }: { result: FedupBroResult }) {
         ))}
       </div>
       <div className="modal__sync-lists">
-        {shownGroups.length > 0 && (
+        {result.groupTotal > 0 && (
           <section className="modal__sync-section">
-            <h4>Duplicate groups</h4>
-            {shownGroups.map((group) => (
-              <div key={`${group.hash}:${group.keeper.path}`} className="modal__sync-row" title={group.keeper.path}>
-                <span className="modal__sync-path">Keep: {group.keeper.path}</span>
-                <span className="modal__sync-detail">
-                  {group.duplicates.length} duplicate{group.duplicates.length === 1 ? "" : "s"} · {formatBytes(group.size)} each
-                </span>
-                {group.duplicates.map((file) => (
-                  <span key={file.path} className="modal__sync-detail" title={file.path}>
-                    Move/delete candidate: {file.path}
-                  </span>
-                ))}
-              </div>
-            ))}
-            {result.groups.length > shownGroups.length && (
-              <div className="modal__sync-row">
-                <span className="modal__sync-detail">{result.groups.length - shownGroups.length} more groups not shown.</span>
+            <h4>Duplicate groups {groupStart}-{groupEnd} of {result.groupTotal}</h4>
+            {result.groups.map((group) => {
+              const groupKey = `${group.hash}:${group.keeper.path}`;
+              const expanded = expandedGroupKey === groupKey;
+              return (
+                <div key={groupKey} className="modal__sync-row modal__sync-row--stacked" title={group.keeper.path}>
+                  <div className="modal__sync-row-main">
+                    <span className="modal__sync-path">Keep: {group.keeper.path}</span>
+                    <span className="modal__sync-detail">
+                      {group.duplicates.length} duplicate{group.duplicates.length === 1 ? "" : "s"} · {formatBytes(group.size)} each
+                    </span>
+                    <button
+                      className="modal__btn modal__btn--compact"
+                      onClick={() => setExpandedGroupKey(expanded ? null : groupKey)}
+                    >
+                      {expanded ? "Collapse list" : "Expand list"}
+                    </button>
+                  </div>
+                  {expanded && (
+                    <div className="modal__fedup-file-list">
+                      <div className="modal__fedup-file-row">
+                        <span className="modal__fedup-file-role">Keep</span>
+                        <button className="modal__job-param-copy" onClick={() => copyPath(group.keeper.path)} title="Copy path">
+                          <IconCopy size={14} />
+                        </button>
+                        <span className="modal__fedup-file-path" title={group.keeper.path}>{group.keeper.path}</span>
+                      </div>
+                      {group.duplicates.map((file) => (
+                        <div key={file.path} className="modal__fedup-file-row">
+                          <span className="modal__fedup-file-role">Candidate</span>
+                          <button className="modal__job-param-copy" onClick={() => copyPath(file.path)} title="Copy path">
+                            <IconCopy size={14} />
+                          </button>
+                          <span className="modal__fedup-file-path" title={file.path}>{file.path}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            {(canPrevGroups || canNextGroups) && (
+              <div className="modal__actions modal__actions--inline">
+                <button
+                  className="modal__btn"
+                  disabled={!canPrevGroups}
+                  onClick={() => requestPage(Math.max(0, result.groupOffset - result.groupLimit), result.errorOffset)}
+                >
+                  Previous groups
+                </button>
+                <button
+                  className="modal__btn"
+                  disabled={!canNextGroups}
+                  onClick={() => requestPage(result.groupOffset + result.groupLimit, result.errorOffset)}
+                >
+                  Next groups
+                </button>
               </div>
             )}
           </section>
         )}
-        {result.errors.length > 0 && (
+        {result.errorTotal > 0 && (
           <section className="modal__sync-section">
-            <h4>Scan errors</h4>
+            <h4>Scan errors {errorStart}-{errorEnd} of {result.errorTotal}</h4>
             {result.errors.map((e) => (
               <div key={`${e.path}:${e.message}`} className="modal__sync-row" title={`${e.path}: ${e.message}`}>
                 <span className="modal__sync-path">{e.path}</span>
                 <span className="modal__sync-detail modal__sync-detail--err">{e.message}</span>
               </div>
             ))}
+            {(canPrevErrors || canNextErrors) && (
+              <div className="modal__actions modal__actions--inline">
+                <button
+                  className="modal__btn"
+                  disabled={!canPrevErrors}
+                  onClick={() => requestPage(result.groupOffset, Math.max(0, result.errorOffset - result.errorLimit))}
+                >
+                  Previous errors
+                </button>
+                <button
+                  className="modal__btn"
+                  disabled={!canNextErrors}
+                  onClick={() => requestPage(result.groupOffset, result.errorOffset + result.errorLimit)}
+                >
+                  Next errors
+                </button>
+              </div>
+            )}
           </section>
         )}
       </div>
@@ -920,7 +998,6 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
       if (!fedupResult) return;
       client.sendIntent("SaveFedupReport", undefined, {
         jobId: activeJob.jobId,
-        result: fedupResult,
       });
     };
 
@@ -928,7 +1005,6 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
       if (!fedupResult) return;
       client.sendIntent("GenerateFedupDeleteDryRun", undefined, {
         jobId: activeJob.jobId,
-        result: fedupResult,
       });
     };
 
@@ -1252,7 +1328,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
                   <SyncBroResultsView result={syncResult} />
                 )}
                 {isFedupBro && activeJob.state === "Completed" && fedupResult && (
-                  <FedupBroResultsView result={fedupResult} />
+                  <FedupBroResultsView jobId={activeJob.jobId} result={fedupResult} client={client} />
                 )}
                 {isBroResult && activeJob.state === "Completed" && effectiveResultPath && (
                   <div className="modal__job-params">

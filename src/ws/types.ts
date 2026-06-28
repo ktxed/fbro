@@ -281,6 +281,12 @@ export interface FedupBroResult {
   scannedBytes: number;
   groups: FedupBroGroup[];
   errors: FedupBroError[];
+  groupOffset: number;
+  groupLimit: number;
+  groupTotal: number;
+  errorOffset: number;
+  errorLimit: number;
+  errorTotal: number;
 }
 
 export interface DirSizeTask {
@@ -435,6 +441,13 @@ export interface SyncBroResultMessage {
 
 export interface FedupBroResultMessage {
   type: "FedupBroResult";
+  timestamp: number;
+  jobId: string;
+  result: FedupBroResult;
+}
+
+export interface FedupBroResultPageMessage {
+  type: "FedupBroResultPage";
   timestamp: number;
   jobId: string;
   result: FedupBroResult;
@@ -836,6 +849,7 @@ export type BEMessage =
   | NavigateOkMessage
   | SyncBroResultMessage
   | FedupBroResultMessage
+  | FedupBroResultPageMessage
   | FedupReportSavedMessage
   | FedupDeleteDryRunReadyMessage
   | SyncReportSavedMessage

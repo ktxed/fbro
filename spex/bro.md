@@ -576,7 +576,9 @@ normal `JobEvent { event: "Cancelled" }`.
 
 #### Result shape
 
-Fedup Bro sends a bro-specific result before terminal completion:
+Fedup Bro keeps the complete structured result in backend job state and sends
+only a paged result view to FE before terminal completion. The first page uses
+`groupOffset: 0`, `groupLimit: 20`, `errorOffset: 0`, and `errorLimit: 20`.
 
 ```json
 {
@@ -588,6 +590,12 @@ Fedup Bro sends a bro-specific result before terminal completion:
     "reclaimableBytes": 1048576,
     "scannedFiles": 24,
     "scannedBytes": 93218422,
+    "groupOffset": 0,
+    "groupLimit": 20,
+    "groupTotal": 1,
+    "errorOffset": 0,
+    "errorLimit": 20,
+    "errorTotal": 1,
     "groups": [
       {
         "hash": "b23f...",
@@ -618,14 +626,33 @@ Fedup Bro sends a bro-specific result before terminal completion:
 }
 ```
 
-FE stores this result on the job and renders a report view with:
+FE stores the current result page on the job and renders a report view with:
 
 * duplicate group count
 * duplicate file count
 * reclaimable bytes
 * scanned file count
-* scan/hash errors
-* keeper and duplicate paths for the first result groups
+* total scan/hash errors
+* keeper and duplicate paths for the current page
+
+To fetch another page, FE sends:
+
+```json
+{
+  "type": "Intent",
+  "name": "GetFedupResultPage",
+  "args": {
+    "jobId": "job-12",
+    "groupOffset": 20,
+    "groupLimit": 20,
+    "errorOffset": 0,
+    "errorLimit": 20
+  }
+}
+```
+
+BE responds with `FedupBroResultPage`, using the same `result` shape as
+`FedupBroResult`. Requested page limits are clamped to a backend maximum.
 
 #### Saving reports
 
@@ -637,13 +664,13 @@ job modal offers `Save report...`, which sends:
   "type": "Intent",
   "name": "SaveFedupReport",
   "args": {
-    "jobId": "job-12",
-    "result": { "...": "FedupBroResult payload" }
+    "jobId": "job-12"
   }
 }
 ```
 
-BE formats the current result as text and writes `fbro-fedup-report.txt`.
+BE formats the backend-owned full result as text and writes
+`fbro-fedup-report.txt`.
 
 Default destination:
 
@@ -672,15 +699,14 @@ FE stores the saved path on the job and shows the normal transient save hint.
 When a completed Fedup Bro job has duplicate files, FE offers
 `Generate delete dry-run`. This action does not delete files. It asks BE to
 materialize a reviewable shell script plus a manifest from the structured
-Fedup result:
+backend-owned Fedup result:
 
 ```json
 {
   "type": "Intent",
   "name": "GenerateFedupDeleteDryRun",
   "args": {
-    "jobId": "job-12",
-    "result": { "...": "FedupBroResult payload" }
+    "jobId": "job-12"
   }
 }
 ```

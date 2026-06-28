@@ -62,7 +62,7 @@ function JobSummary({ job }: { job: Job }) {
         <SummaryChip label="Groups" value={String(job.fedupResult.duplicateGroups)} />
         <SummaryChip label="Duplicates" value={String(job.fedupResult.duplicateFiles)} />
         <SummaryChip label="Reclaimable" value={formatBytes(job.fedupResult.reclaimableBytes)} />
-        <SummaryChip label="Errors" value={String(job.fedupResult.errors.length)} />
+        <SummaryChip label="Errors" value={String(job.fedupResult.errorTotal)} />
       </div>
     );
   }

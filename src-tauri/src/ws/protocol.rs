@@ -111,7 +111,13 @@ pub enum ServerMessage {
         timestamp: u64,
         #[serde(rename = "jobId")]
         job_id: String,
-        result: FedupBroResultSchema,
+        result: FedupBroResultPageSchema,
+    },
+    FedupBroResultPage {
+        timestamp: u64,
+        #[serde(rename = "jobId")]
+        job_id: String,
+        result: FedupBroResultPageSchema,
     },
     FedupReportSaved {
         timestamp: u64,
@@ -822,6 +828,24 @@ pub struct FedupBroResultSchema {
     pub scanned_bytes: u64,
     pub groups: Vec<FedupBroGroupSchema>,
     pub errors: Vec<FedupBroErrorSchema>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct FedupBroResultPageSchema {
+    pub duplicate_groups: usize,
+    pub duplicate_files: usize,
+    pub reclaimable_bytes: u64,
+    pub scanned_files: usize,
+    pub scanned_bytes: u64,
+    pub groups: Vec<FedupBroGroupSchema>,
+    pub errors: Vec<FedupBroErrorSchema>,
+    pub group_offset: usize,
+    pub group_limit: usize,
+    pub group_total: usize,
+    pub error_offset: usize,
+    pub error_limit: usize,
+    pub error_total: usize,
 }
 
 // ─── Incoming (FE → BE) ───────────────────────────────────────────────────────
