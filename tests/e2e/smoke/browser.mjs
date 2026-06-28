@@ -242,12 +242,14 @@ export async function confirmOperation(browser, commandId) {
   await clickCommand(browser, commandId);
 }
 
-export async function closeTerminalJobDialog(browser) {
+export async function closeTerminalJobDialog(browser, timeout = 5_000) {
   const close = await waitFor(async () => {
     const el = await browser.$('[data-command-id="job.close"]');
     return await el.isExisting() ? el : false;
-  }, { timeout: 5_000, interval: 100, label: "terminal job close button" }).catch(() => null);
+  }, { timeout, interval: 100, label: "terminal job close button" }).catch(() => null);
   if (close) {
+    await close.waitForClickable({ timeout: 5_000 });
     await close.click();
   }
+  return !!close;
 }

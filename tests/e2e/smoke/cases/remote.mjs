@@ -179,10 +179,26 @@ export async function runRemoteFlow(browserA, observerA, browserB, observerB) {
   await closeTerminalJobDialog(browserB);
 
   observerB.sendIntent("NavigateToSource", "left", { sourceId: remoteSource.id });
-  await observerB.waitForPanelPath("left", "");
-  const syncEntry = await observerB.waitForEntry("left", "SyncBro", "directory", 20_000);
-  observerB.sendIntent("SetCursor", "left", { index: observerB.state.panels.left.entries.indexOf(syncEntry) });
-  observerB.sendIntent("OpenEntry", "left");
+  await waitFor(() => {
+    const panel = observerB.state.panels.left;
+    const index = panel?.entries?.findIndex((entry) =>
+      entry.name === "SyncBro" && entry.kind === "directory"
+    ) ?? -1;
+    return panel?.sourceId === remoteSource.id
+      && panel.path === ""
+      && panel.status === "ready"
+      && index >= 0
+      ? index + 1
+      : false;
+  }, {
+    timeout: 20_000,
+    label: "remote root SyncBro entry ready",
+  });
+  observerB.sendIntent("NavigateToHistoryEntry", undefined, {
+    panelId: "left",
+    sourceId: remoteSource.id,
+    path: "SyncBro",
+  });
   await observerB.waitForPanelPath("left", "SyncBro");
   await observerB.waitForEntry("left", "sync.txt", "file", 20_000);
   observerB.navigatePanelToPath("right", bSync);

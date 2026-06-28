@@ -296,6 +296,7 @@ export function BroModal({ client, bro }: BroModalProps) {
         className="command-palette open-with"
         ariaModal
         ariaLabel="Pass To Bro"
+        testId="bro-dialog"
         tabIndex={-1}
         onKeyDown={onKeyDown}
         defaultSize={{ width: 560, height: 500 }}
@@ -321,6 +322,8 @@ export function BroModal({ client, bro }: BroModalProps) {
                   key={item.id}
                   type="button"
                   className={`command-palette__item${selected ? " command-palette__item--selected" : ""}`}
+                  data-testid="bro-option"
+                  data-bro-id={item.id}
                   data-selected={selected ? "true" : "false"}
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={() => {
@@ -353,6 +356,7 @@ export function BroModal({ client, bro }: BroModalProps) {
                   <label className="bro-modal__fedup-checkbox">
                     <input
                       type="checkbox"
+                      data-testid="fedup-default-ignores-input"
                       checked={fedupUseDefaultIgnores}
                       onChange={(e) => setFedupUseDefaultIgnores(e.target.checked)}
                     />
@@ -364,6 +368,7 @@ export function BroModal({ client, bro }: BroModalProps) {
                     placeholder="*.mp4, *.mkv"
                     disabled={!!fedupExcludePatterns.trim()}
                     inputRef={firstFieldRef}
+                    testId="fedup-include-patterns-input"
                     history={fedupIncludeHistory}
                     onChange={updateFedupIncludePatterns}
                     onSubmit={launchSelected}
@@ -374,6 +379,7 @@ export function BroModal({ client, bro }: BroModalProps) {
                     value={fedupExcludePatterns}
                     placeholder=".git, node_modules, *.tmp"
                     disabled={!!fedupIncludePatterns.trim()}
+                    testId="fedup-exclude-patterns-input"
                     history={fedupExcludeHistory}
                     onChange={updateFedupExcludePatterns}
                     onSubmit={launchSelected}
@@ -451,6 +457,7 @@ export function BroModal({ client, bro }: BroModalProps) {
         <div className="modal__actions">
           <button
             className="modal__btn modal__btn--primary"
+            data-testid="bro-launch-button"
             disabled={
               bro.status !== "ready"
               || !selectedBro
@@ -486,6 +493,7 @@ interface FedupPatternFieldProps {
   placeholder: string;
   disabled?: boolean;
   inputRef?: React.RefObject<HTMLInputElement | null>;
+  testId?: string;
   history: InputHistory;
   onChange: (value: string) => void;
   onSubmit: () => void;
@@ -498,6 +506,7 @@ function FedupPatternField({
   placeholder,
   disabled,
   inputRef,
+  testId,
   history,
   onChange,
   onSubmit,
@@ -532,6 +541,7 @@ function FedupPatternField({
           }
         }}
         className="search-modal__mask-input"
+        data-testid={testId}
         type="text"
         value={value}
         disabled={disabled}

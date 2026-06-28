@@ -22,6 +22,7 @@ import {
   writeLaunchWrapper,
 } from "./processes.mjs";
 import { runArchiveFlow } from "./cases/archive.mjs";
+import { runFedupFlow } from "./cases/fedup.mjs";
 import { runGlobalSelectionFlow } from "./cases/global-selection.mjs";
 import { runLocalFlow } from "./cases/local.mjs";
 import { runRemoteFlow } from "./cases/remote.mjs";
@@ -58,6 +59,7 @@ async function main() {
 
     await runLocalFlow(browserA, observerA);
     await runGlobalSelectionFlow(browserA, observerA);
+    await runFedupFlow(browserA, observerA);
     await runArchiveFlow(browserA, observerA);
     await runSearchFlow(browserA, observerA);
     await runDatetimeSearchFlow(browserA, observerA);

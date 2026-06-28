@@ -318,6 +318,18 @@ export class FbroObserver {
       const job = this.state.jobs[msg.jobId];
       if (job) job.syncResult = msg.result;
     }
+    if (msg.type === "FedupBroResult" || msg.type === "FedupBroResultPage") {
+      const job = this.state.jobs[msg.jobId];
+      if (job) job.fedupResult = msg.result;
+    }
+    if (msg.type === "FedupReportSaved") {
+      const job = this.state.jobs[msg.jobId];
+      if (job) job.fedupReportSavedPath = msg.path;
+    }
+    if (msg.type === "FedupDeleteDryRunReady") {
+      const job = this.state.jobs[msg.jobId];
+      if (job) job.fedupDeleteDryRun = msg;
+    }
     if (msg.type === "SyncReportSaved") {
       const job = this.state.jobs[msg.jobId];
       if (job) job.reportSavedPath = msg.path;
