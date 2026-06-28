@@ -7,7 +7,8 @@ import {
   useFloating,
 } from "@floating-ui/react";
 import { useEffect, useLayoutEffect, useRef } from "react";
-import { useAppDispatch } from "../store";
+import { useAppDispatch, useAppState } from "../store";
+import { resolveColorScheme } from "../theme/colorSchemes";
 import type { BookmarkEntry } from "../ws/types";
 import type { WsClient } from "../ws/client";
 
@@ -26,8 +27,10 @@ export function BookmarksPopover({
   bookmarks,
   client,
 }: BookmarksPopoverProps) {
+  const state = useAppState();
   const dispatch = useAppDispatch();
   const popoverRef = useRef<HTMLDivElement>(null);
+  const colorScheme = resolveColorScheme(state.settings.general.colorScheme);
 
   const close = () => dispatch({ type: "CLOSE_BOOKMARKS" });
 
@@ -92,11 +95,12 @@ export function BookmarksPopover({
   return (
     <FloatingPortal>
       <div
+        data-color-scheme={colorScheme.id}
         ref={(node) => {
           refs.setFloating(node);
           (popoverRef as React.MutableRefObject<HTMLDivElement | null>).current = node;
         }}
-        style={floatingStyles}
+        style={{ ...floatingStyles, colorScheme: colorScheme.mode }}
         className="bookmarks-popover"
         onMouseDown={(e) => e.preventDefault()}
       >

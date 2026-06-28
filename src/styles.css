@@ -35,7 +35,7 @@
   --text-cursor:  #ffffff;
   --text-cursor-unfocused: #979797;
   --bg-cursor-unfocused: #2d2d2d;
-  --bg-cursor-focused: #2d228a;
+  --bg-cursor-focused: #1f4f8f;
   --text-selected:#f0d060;
   --bg-selected-cursor: #4caf50;
   --text-selected-cursor: #000000;
@@ -199,7 +199,7 @@ body {
   flex: 1;
   display: flex;
   flex-direction: column;
-  background: var(--bg-focused);
+  background: var(--bg-panel);
   border: 1px solid var(--border);
   outline: none;
   min-width: 0;
@@ -208,6 +208,14 @@ body {
 
 .panel--focused {
   border-color: var(--border-focus);
+  background: var(--bg-focused);
+}
+
+[data-color-scheme="daylight"] .panel {
+  background: #e3e9f0;
+}
+
+[data-color-scheme="daylight"] .panel--focused {
   background: var(--bg-panel);
 }
 
@@ -410,8 +418,8 @@ body {
   align-items: center;
   gap: 4px;
   flex-shrink: 0;
-  background: none;
-  border: 1px solid transparent;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
   border-radius: 3px;
   color: var(--text-dim);
   font-family: var(--font);
@@ -424,13 +432,30 @@ body {
 
 .panel__tab:hover {
   color: var(--text);
-  border-color: var(--border);
+  border-color: var(--border-strong);
+  background: var(--bg-hover);
+}
+
+.panel--focused .panel__tab:not(.panel__tab--active) {
+  background: color-mix(in srgb, var(--bg-panel) 70%, var(--bg-focused));
 }
 
 .panel__tab--active {
   color: var(--text-path);
   border-color: var(--border-focus);
-  background: rgba(74, 124, 191, 0.15);
+  background: var(--bg-focused);
+}
+
+[data-color-scheme="daylight"] .panel__tab {
+  background: #dbe3ec;
+}
+
+[data-color-scheme="daylight"] .panel--focused .panel__tab:not(.panel__tab--active) {
+  background: #e7edf4;
+}
+
+[data-color-scheme="daylight"] .panel__tab--active {
+  background: var(--bg-panel);
 }
 
 .panel__tab-label {

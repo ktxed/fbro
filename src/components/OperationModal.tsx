@@ -972,6 +972,11 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
       client.sendIntent("PauseJob", undefined, { jobId: activeJobId });
     };
 
+    const closeActiveJob = () => {
+      client.sendIntent("RefreshPanels");
+      close();
+    };
+
     const showResult = () => {
       if (!effectiveResultPath) return;
       const { parent, name } = splitParentAndName(effectiveResultPath);
@@ -1060,10 +1065,15 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
           return;
         }
       }
-      if (!isTerminal || requiresExplicitClose) return;
       if (e.key === "Escape" || e.key === "Enter") {
         e.preventDefault();
-        close();
+        if (isTerminal) {
+          if (requiresExplicitClose) {
+            closeActiveJob();
+          } else {
+            close();
+          }
+        }
       }
     };
 
@@ -1400,10 +1410,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
                     Copy Path
                   </button>
                 )}
-                <button className="modal__btn modal__btn--primary" data-command-id="job.close" onClick={() => {
-                  client.sendIntent("RefreshPanels");
-                  close();
-                }}>
+                <button className="modal__btn modal__btn--primary" data-command-id="job.close" onClick={closeActiveJob}>
                   Close
                 </button>
               </>

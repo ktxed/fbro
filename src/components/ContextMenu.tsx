@@ -11,8 +11,9 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { bindingMatches, executeTargetedCommand } from "../commands/interactive";
 import { buildContextMenuItems } from "../contextMenu";
 import { useAppDispatch, useAppState, type PendingContextMenu } from "../store";
-import type { WsClient } from "../ws/client";
+import { resolveColorScheme } from "../theme/colorSchemes";
 import { isGlobalSelectionSourceId } from "../utils/sourceId";
+import type { WsClient } from "../ws/client";
 
 interface ContextMenuProps {
   client: WsClient;
@@ -24,6 +25,7 @@ export function ContextMenu({ client, menu }: ContextMenuProps) {
   const dispatch = useAppDispatch();
   const menuRef = useRef<HTMLDivElement>(null);
   const [highlightedIndex, setHighlightedIndex] = useState(0);
+  const colorScheme = resolveColorScheme(state.settings.general.colorScheme);
 
   const items = useMemo(
     () => {
@@ -292,7 +294,13 @@ export function ContextMenu({ client, menu }: ContextMenuProps) {
 
   return (
     <FloatingPortal>
-      <div className="context-menu__overlay" onMouseDown={close} onContextMenu={(e) => e.preventDefault()}>
+      <div
+        className="context-menu__overlay"
+        data-color-scheme={colorScheme.id}
+        style={{ colorScheme: colorScheme.mode }}
+        onMouseDown={close}
+        onContextMenu={(e) => e.preventDefault()}
+      >
         <div
           className="context-menu"
           ref={(node) => {
