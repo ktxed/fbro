@@ -284,6 +284,15 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
                 };
                 state_guard.settings.general.sevenzip_custom_path = v.trim().to_string();
             }
+            "fedupDefaultIgnorePatterns" => {
+                let Some(v) = value.as_str() else {
+                    drop(state_guard);
+                    bad_setting(ctx.tx, "fedupDefaultIgnorePatterns must be a string").await;
+                    return;
+                };
+                state_guard.settings.general.fedup_default_ignore_patterns =
+                    normalize_fedup_ignore_patterns(v);
+            }
             _ => {
                 let msg = format!("Unknown setting key: {key}");
                 drop(state_guard);
@@ -412,13 +421,12 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
         state_guard.settings.general.clone()
     };
 
-    let sevenzip_resolved =
-        crate::jobs::extract_archive::resolve_sevenzip_binary(
-            general.sevenzip_extractor,
-            &general.sevenzip_custom_path,
-        )
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_default();
+    let sevenzip_resolved = crate::jobs::extract_archive::resolve_sevenzip_binary(
+        general.sevenzip_extractor,
+        &general.sevenzip_custom_path,
+    )
+    .map(|p| p.to_string_lossy().to_string())
+    .unwrap_or_default();
 
     let patch = ServerMessage::StatePatch {
         timestamp: now(),
@@ -443,6 +451,7 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
                 "sevenzipExtractor": general.sevenzip_extractor.as_str(),
                 "sevenzipCustomPath": general.sevenzip_custom_path,
                 "sevenzipResolvedPath": sevenzip_resolved,
+                "fedupDefaultIgnorePatterns": general.fedup_default_ignore_patterns,
             }
         }),
     };
@@ -453,6 +462,10 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
         let _ = sender.send(patch.clone()).await;
     }
     let _ = ctx.tx.send(patch).await;
+}
+
+fn normalize_fedup_ignore_patterns(value: &str) -> String {
+    crate::jobs::fedup::parse_fedup_patterns(value).join("\n")
 }
 
 async fn clear_thumbnail_cache(ctx: &mut IntentContext<'_>) {

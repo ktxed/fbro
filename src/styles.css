@@ -2685,6 +2685,49 @@ body {
   color: #ff6060;
 }
 
+.bro-modal__fedup-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.bro-modal__fedup-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+  font-size: var(--font-size);
+  user-select: none;
+}
+
+.bro-modal__fedup-checkbox input {
+  accent-color: var(--accent);
+}
+
+.bro-modal__fedup-options .modal__rename-row {
+  align-items: center;
+}
+
+.bro-modal__fedup-options .modal__rename-label {
+  width: 96px;
+}
+
+.bro-modal__fedup-options .search-modal__mask-input:disabled {
+  opacity: 0.5;
+}
+
+.bro-modal__fedup-options .search-modal__mask-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.bro-modal__fedup-hint {
+  color: var(--text-dim);
+  font-size: var(--font-size-sm);
+  line-height: 1.35;
+}
+
 /* Info modal */
 
 .modal__info-table {

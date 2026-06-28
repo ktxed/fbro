@@ -528,6 +528,7 @@ Expected workflow:
 * user invokes `Pass to Bro` from the global selections root
 * BE resolves exactly one selected global selection to its referenced paths
 * Fedup Bro appears as `builtin:fedup`
+* FE shows Fedup-specific launch options for ignore/include/exclude patterns
 * launching it starts a `fedup-bro` job
 
 The restriction to global selections is deliberate. It matches the target
@@ -543,6 +544,10 @@ Fedup Bro report mode:
 * ignores non-file entries
 * ignores zero-byte files
 * records unreadable paths as per-path errors instead of failing the whole job
+* can skip default ignore patterns configured in General settings
+* can skip custom exclude patterns matched against file and directory names
+* can include only custom file-name patterns, while still traversing
+  non-excluded directories
 * buckets files by byte size
 * hashes only size buckets containing more than one file
 * uses full-file BLAKE3 hashes, not sample hashes
@@ -553,6 +558,22 @@ Fedup Bro report mode:
 The full-file hash is the safety boundary for any future mutation action.
 Approximate/sample hashing may be added later only as an explicit fast mode,
 and destructive actions must still verify exact content.
+
+Fedup launch params:
+
+```json
+{
+  "useDefaultIgnores": "true",
+  "includePatterns": "",
+  "excludePatterns": "*.tmp, node_modules"
+}
+```
+
+Pattern params are comma/newline separated wildcard name or relative-path
+patterns. Matching is case-insensitive and supports `*` and `?`. Include and
+exclude params are mutually exclusive for custom patterns. Default ignores are
+independent and may be enabled together with an include filter so known
+metadata/build folders and files are still pruned before scanning.
 
 #### Job and progress
 
@@ -753,7 +774,7 @@ Not implemented yet:
 * moving duplicates to a destination folder
 * deleting duplicates directly from fbro
 * user-selectable keeper policy
-* directory picker or bro param UI for Fedup actions
+* directory picker for Fedup actions
 * remote/archive/global-VFS mutation support
 * automatic report writing
 

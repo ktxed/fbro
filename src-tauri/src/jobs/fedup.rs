@@ -6,6 +6,7 @@ use std::sync::{
 };
 use std::time::UNIX_EPOCH;
 
+use regex::Regex;
 use tokio::sync::{mpsc, watch};
 
 use crate::bro::BroInputItem;
@@ -22,6 +23,34 @@ pub const FEDUP_DELETE_DRY_RUN_SCRIPT_NAME: &str = "fbro-fedup-delete-dry-run.sh
 pub const FEDUP_DELETE_DRY_RUN_MANIFEST_NAME: &str = "fbro-fedup-delete-manifest.txt";
 pub const FEDUP_RESULT_PAGE_SIZE: usize = 20;
 pub const FEDUP_RESULT_MAX_PAGE_SIZE: usize = 100;
+
+#[derive(Clone, Debug, Default)]
+pub struct FedupScanOptions {
+    pub exclude_patterns: Vec<String>,
+    pub include_patterns: Vec<String>,
+}
+
+struct PatternMatcher {
+    name_regex: Regex,
+    path_regex: Regex,
+}
+
+impl FedupScanOptions {
+    pub fn new(exclude_patterns: Vec<String>, include_patterns: Vec<String>) -> Self {
+        Self {
+            exclude_patterns,
+            include_patterns,
+        }
+    }
+
+    fn exclude_matchers(&self) -> Vec<PatternMatcher> {
+        compile_wildcard_patterns(&self.exclude_patterns)
+    }
+
+    fn include_matchers(&self) -> Vec<PatternMatcher> {
+        compile_wildcard_patterns(&self.include_patterns)
+    }
+}
 
 #[derive(Clone, Debug)]
 struct Candidate {
@@ -47,6 +76,7 @@ struct ScanBuild {
 pub async fn run_fedup_bro(
     job_id: String,
     inputs: Vec<BroInputItem>,
+    options: FedupScanOptions,
     state: SharedState,
     tx: mpsc::Sender<ServerMessage>,
     cancel_rx: watch::Receiver<bool>,
@@ -67,7 +97,13 @@ pub async fn run_fedup_bro(
     let worker_tx = tx.clone();
     let worker_cancel = Arc::clone(&cancel);
     let result = tokio::task::spawn_blocking(move || {
-        run_fedup_report_blocking(&worker_job_id, &inputs, &worker_tx, &worker_cancel)
+        run_fedup_report_blocking(
+            &worker_job_id,
+            &inputs,
+            &options,
+            &worker_tx,
+            &worker_cancel,
+        )
     })
     .await;
     cancel_task.abort();
@@ -119,6 +155,7 @@ pub async fn run_fedup_bro(
 fn run_fedup_report_blocking(
     job_id: &str,
     inputs: &[BroInputItem],
+    options: &FedupScanOptions,
     tx: &mpsc::Sender<ServerMessage>,
     cancel: &AtomicBool,
 ) -> Result<FedupBroResultSchema, String> {
@@ -140,12 +177,21 @@ fn run_fedup_report_blocking(
     );
 
     let mut build = ScanBuild::default();
+    let exclude_matchers = options.exclude_matchers();
+    let include_matchers = options.include_matchers();
     for input in inputs {
         if cancel.load(Ordering::SeqCst) {
             return Err("Cancelled".to_string());
         }
         let path = PathBuf::from(&input.path);
-        scan_path(&path, &mut build, cancel)?;
+        scan_path(
+            &path,
+            &path,
+            &mut build,
+            &exclude_matchers,
+            &include_matchers,
+            cancel,
+        )?;
     }
 
     let candidate_count = build
@@ -331,9 +377,25 @@ fn clamp_page_limit(limit: usize) -> usize {
     limit.clamp(1, FEDUP_RESULT_MAX_PAGE_SIZE)
 }
 
-fn scan_path(path: &Path, build: &mut ScanBuild, cancel: &AtomicBool) -> Result<(), String> {
+fn scan_path(
+    root: &Path,
+    path: &Path,
+    build: &mut ScanBuild,
+    exclude_matchers: &[PatternMatcher],
+    include_matchers: &[PatternMatcher],
+    cancel: &AtomicBool,
+) -> Result<(), String> {
     if cancel.load(Ordering::SeqCst) {
         return Err("Cancelled".to_string());
+    }
+    let name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let relative_path = relative_pattern_path(root, path);
+    let full_path = path.to_string_lossy().replace('\\', "/");
+    if matches_any(exclude_matchers, &name, &relative_path, &full_path) {
+        return Ok(());
     }
     let metadata = match std::fs::metadata(path) {
         Ok(metadata) => metadata,
@@ -361,7 +423,14 @@ fn scan_path(path: &Path, build: &mut ScanBuild, cancel: &AtomicBool) -> Result<
                 return Err("Cancelled".to_string());
             }
             match entry {
-                Ok(entry) => scan_path(&entry.path(), build, cancel)?,
+                Ok(entry) => scan_path(
+                    root,
+                    &entry.path(),
+                    build,
+                    exclude_matchers,
+                    include_matchers,
+                    cancel,
+                )?,
                 Err(error) => build.errors.push(FedupBroErrorSchema {
                     path: path.to_string_lossy().to_string(),
                     message: format!("Cannot read directory entry: {error}"),
@@ -374,6 +443,11 @@ fn scan_path(path: &Path, build: &mut ScanBuild, cancel: &AtomicBool) -> Result<
         return Ok(());
     }
     if metadata.len() == 0 {
+        return Ok(());
+    }
+    if !include_matchers.is_empty()
+        && !matches_any(include_matchers, &name, &relative_path, &full_path)
+    {
         return Ok(());
     }
 
@@ -395,6 +469,56 @@ fn scan_path(path: &Path, build: &mut ScanBuild, cancel: &AtomicBool) -> Result<
         .or_default()
         .push(candidate);
     Ok(())
+}
+
+pub fn parse_fedup_patterns(input: &str) -> Vec<String> {
+    input
+        .split(|c| c == '\n' || c == '\r' || c == ',')
+        .map(str::trim)
+        .filter(|pattern| !pattern.is_empty())
+        .map(ToString::to_string)
+        .collect()
+}
+
+fn compile_wildcard_patterns(patterns: &[String]) -> Vec<PatternMatcher> {
+    patterns
+        .iter()
+        .filter_map(|pattern| compile_wildcard_pattern(pattern))
+        .collect()
+}
+
+fn compile_wildcard_pattern(pattern: &str) -> Option<PatternMatcher> {
+    let normalized = pattern.replace('\\', "/");
+    let escaped = regex::escape(&normalized);
+    let pattern = escaped.replace("\\*", ".*").replace("\\?", ".");
+    let name_regex = Regex::new(&format!("(?i)^{}$", pattern)).ok()?;
+    let path_regex = Regex::new(&format!("(?i)(?:^|.*/){}(?:/.*)?$", pattern)).ok()?;
+    Some(PatternMatcher {
+        name_regex,
+        path_regex,
+    })
+}
+
+fn matches_any(
+    matchers: &[PatternMatcher],
+    name: &str,
+    relative_path: &str,
+    full_path: &str,
+) -> bool {
+    matchers.iter().any(|matcher| {
+        matcher.name_regex.is_match(name)
+            || matcher.path_regex.is_match(relative_path)
+            || matcher.path_regex.is_match(full_path)
+    })
+}
+
+fn relative_pattern_path(root: &Path, path: &Path) -> String {
+    path.strip_prefix(root)
+        .ok()
+        .filter(|relative| !relative.as_os_str().is_empty())
+        .unwrap_or(path)
+        .to_string_lossy()
+        .replace('\\', "/")
 }
 
 fn group_to_schema(group: &[HashedCandidate]) -> FedupBroGroupSchema {
@@ -627,6 +751,7 @@ mod tests {
                 name: "duplicates".to_string(),
                 kind: "directory".to_string(),
             }],
+            &FedupScanOptions::default(),
             &tx,
             &cancel,
         )
@@ -657,6 +782,7 @@ mod tests {
                 name: "empty".to_string(),
                 kind: "directory".to_string(),
             }],
+            &FedupScanOptions::default(),
             &tx,
             &cancel,
         )
@@ -666,6 +792,199 @@ mod tests {
         assert_eq!(result.duplicate_groups, 0);
         assert_eq!(result.duplicate_files, 0);
         assert_eq!(result.reclaimable_bytes, 0);
+    }
+
+    #[test]
+    fn parses_patterns_from_lines_and_commas() {
+        assert_eq!(
+            parse_fedup_patterns(" .git\nnode_modules,  *.tmp\r\n\n.DS_Store "),
+            vec![".git", "node_modules", "*.tmp", ".DS_Store"]
+        );
+    }
+
+    #[test]
+    fn wildcard_matchers_are_case_insensitive() {
+        let matchers = compile_wildcard_patterns(&["*.MP4".to_string(), "._*".to_string()]);
+
+        assert!(matches_any(
+            &matchers,
+            "movie.mp4",
+            "clips/movie.mp4",
+            "/tmp/clips/movie.mp4"
+        ));
+        assert!(matches_any(
+            &matchers,
+            "._clip.mov",
+            "clips/._clip.mov",
+            "/tmp/clips/._clip.mov"
+        ));
+        assert!(!matches_any(
+            &matchers,
+            "movie.mkv",
+            "clips/movie.mkv",
+            "/tmp/clips/movie.mkv"
+        ));
+    }
+
+    #[test]
+    fn scan_excludes_special_directories_and_macos_metadata() {
+        let dir = TempDir::new("exclude-patterns");
+        std::fs::write(dir.path.join("a.txt"), b"same").unwrap();
+        std::fs::write(dir.path.join("b.txt"), b"same").unwrap();
+        std::fs::write(dir.path.join("._movie.mp4"), b"xxxx").unwrap();
+        std::fs::create_dir_all(dir.path.join(".git")).unwrap();
+        std::fs::write(dir.path.join(".git").join("hidden-a.bin"), b"same").unwrap();
+        std::fs::create_dir_all(dir.path.join("node_modules")).unwrap();
+        std::fs::write(dir.path.join("node_modules").join("hidden-b.bin"), b"same").unwrap();
+
+        let (tx, _rx) = mpsc::channel(64);
+        let cancel = AtomicBool::new(false);
+        let result = run_fedup_report_blocking(
+            "job-test",
+            &[BroInputItem {
+                path: dir.path.to_string_lossy().to_string(),
+                name: "exclude-patterns".to_string(),
+                kind: "directory".to_string(),
+            }],
+            &FedupScanOptions::new(
+                vec![
+                    ".git".to_string(),
+                    "node_modules".to_string(),
+                    "._*".to_string(),
+                ],
+                Vec::new(),
+            ),
+            &tx,
+            &cancel,
+        )
+        .unwrap();
+
+        assert_eq!(result.scanned_files, 2);
+        assert_eq!(result.duplicate_groups, 1);
+        assert!(result.groups[0].keeper.path.ends_with("a.txt"));
+        assert!(result.groups[0].duplicates[0].path.ends_with("b.txt"));
+    }
+
+    #[test]
+    fn scan_include_patterns_filter_files_only() {
+        let dir = TempDir::new("include-patterns");
+        std::fs::write(dir.path.join("a.mp4"), b"same").unwrap();
+        std::fs::write(dir.path.join("b.MP4"), b"same").unwrap();
+        std::fs::write(dir.path.join("a.txt"), b"text").unwrap();
+        std::fs::write(dir.path.join("b.txt"), b"text").unwrap();
+
+        let (tx, _rx) = mpsc::channel(64);
+        let cancel = AtomicBool::new(false);
+        let result = run_fedup_report_blocking(
+            "job-test",
+            &[BroInputItem {
+                path: dir.path.to_string_lossy().to_string(),
+                name: "include-patterns".to_string(),
+                kind: "directory".to_string(),
+            }],
+            &FedupScanOptions::new(Vec::new(), vec!["*.mp4".to_string()]),
+            &tx,
+            &cancel,
+        )
+        .unwrap();
+
+        assert_eq!(result.scanned_files, 2);
+        assert_eq!(result.duplicate_groups, 1);
+        assert_eq!(result.groups[0].duplicates.len(), 1);
+        assert!(result.groups[0].keeper.path.ends_with("a.mp4"));
+        assert!(result.groups[0].duplicates[0].path.ends_with("b.MP4"));
+    }
+
+    #[test]
+    fn scan_excludes_relative_path_patterns() {
+        let dir = TempDir::new("relative-exclude-patterns");
+        std::fs::write(dir.path.join("a.bin"), b"same").unwrap();
+        std::fs::write(dir.path.join("b.bin"), b"same").unwrap();
+        std::fs::create_dir_all(dir.path.join("target").join("debug")).unwrap();
+        std::fs::write(
+            dir.path.join("target").join("debug").join("debug-a.bin"),
+            b"same",
+        )
+        .unwrap();
+        std::fs::create_dir_all(dir.path.join("dist").join("assets")).unwrap();
+        std::fs::write(
+            dir.path.join("dist").join("assets").join("asset-a.bin"),
+            b"same",
+        )
+        .unwrap();
+
+        let (tx, _rx) = mpsc::channel(64);
+        let cancel = AtomicBool::new(false);
+        let result = run_fedup_report_blocking(
+            "job-test",
+            &[BroInputItem {
+                path: dir.path.to_string_lossy().to_string(),
+                name: "relative-exclude-patterns".to_string(),
+                kind: "directory".to_string(),
+            }],
+            &FedupScanOptions::new(
+                vec!["target/debug".to_string(), "dist/assets".to_string()],
+                Vec::new(),
+            ),
+            &tx,
+            &cancel,
+        )
+        .unwrap();
+
+        assert_eq!(result.scanned_files, 2);
+        assert_eq!(result.duplicate_groups, 1);
+        assert!(result.groups[0].keeper.path.ends_with("a.bin"));
+        assert!(result.groups[0].duplicates[0].path.ends_with("b.bin"));
+    }
+
+    #[test]
+    fn scan_excludes_absolute_paths_under_ignored_path_pattern() {
+        let dir = TempDir::new("absolute-exclude-patterns");
+        std::fs::write(dir.path.join("a.bin"), b"same").unwrap();
+        std::fs::write(dir.path.join("b.bin"), b"same").unwrap();
+        let ignored_dir = dir
+            .path
+            .join("artifacts")
+            .join("e2e")
+            .join("fbro-a")
+            .join("state")
+            .join("home")
+            .join(".cache")
+            .join("dconf");
+        std::fs::create_dir_all(&ignored_dir).unwrap();
+        std::fs::write(ignored_dir.join("user"), b"same").unwrap();
+
+        let (tx, _rx) = mpsc::channel(64);
+        let cancel = AtomicBool::new(false);
+        let result = run_fedup_report_blocking(
+            "job-test",
+            &[
+                BroInputItem {
+                    path: dir.path.join("a.bin").to_string_lossy().to_string(),
+                    name: "a.bin".to_string(),
+                    kind: "file".to_string(),
+                },
+                BroInputItem {
+                    path: dir.path.join("b.bin").to_string_lossy().to_string(),
+                    name: "b.bin".to_string(),
+                    kind: "file".to_string(),
+                },
+                BroInputItem {
+                    path: ignored_dir.join("user").to_string_lossy().to_string(),
+                    name: "user".to_string(),
+                    kind: "file".to_string(),
+                },
+            ],
+            &FedupScanOptions::new(vec!["artifacts/e2e".to_string()], Vec::new()),
+            &tx,
+            &cancel,
+        )
+        .unwrap();
+
+        assert_eq!(result.scanned_files, 2);
+        assert_eq!(result.duplicate_groups, 1);
+        assert!(result.groups[0].keeper.path.ends_with("a.bin"));
+        assert!(result.groups[0].duplicates[0].path.ends_with("b.bin"));
     }
 
     #[test]

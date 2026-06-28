@@ -555,6 +555,8 @@ export interface GeneralSettings {
   sevenzipCustomPath: string;
   /** Absolute path the backend resolved given the mode + custom path; empty if it'll fall back to the in-process extractor. */
   sevenzipResolvedPath: string;
+  /** Newline-separated wildcard names Fedup Bro ignores when default ignores are enabled. */
+  fedupDefaultIgnorePatterns: string;
 }
 
 export interface ModalSizePreference {

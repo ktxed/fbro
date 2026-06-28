@@ -679,7 +679,7 @@ async fn launch_selected_bro(args: &Value, ctx: &mut IntentContext<'_>) {
         return;
     }
     if matches!(bro.launch, LaunchRecipe::BuiltInFedupBro) {
-        if let Err(message) = launch_fedup_bro(request, ctx).await {
+        if let Err(message) = launch_fedup_bro(request, parsed.params.clone(), ctx).await {
             let _ = ctx
                 .tx
                 .send(ServerMessage::Error {
@@ -1245,6 +1245,7 @@ async fn launch_sync_bro(
 
 async fn launch_fedup_bro(
     request: crate::state::BroRequest,
+    launch_params: HashMap<String, String>,
     ctx: &mut IntentContext<'_>,
 ) -> Result<(), String> {
     let inputs = request
@@ -1276,6 +1277,7 @@ async fn launch_fedup_bro(
         .unwrap_or_else(|| FEDUP_REPORT_NAME.to_string());
     let file_schemas = bro_input_files(&inputs);
     let source_panel_id = request.source_panel_id.clone();
+    let scan_options = fedup_scan_options(&launch_params, ctx).await?;
     let job_id = {
         let mut state_guard = ctx.state.lock().await;
         state_guard.job_store.next_job_id()
@@ -1342,6 +1344,7 @@ async fn launch_fedup_bro(
     let handle = tokio::spawn(run_fedup_bro(
         job_id.clone(),
         inputs.clone(),
+        scan_options,
         Arc::clone(ctx.state),
         ctx.tx.clone(),
         cancel_rx,
@@ -1353,6 +1356,42 @@ async fn launch_fedup_bro(
     }
 
     Ok(())
+}
+
+async fn fedup_scan_options(
+    launch_params: &HashMap<String, String>,
+    ctx: &IntentContext<'_>,
+) -> Result<crate::jobs::fedup::FedupScanOptions, String> {
+    let use_default_ignores = launch_params
+        .get("useDefaultIgnores")
+        .map(|value| matches!(value.trim(), "1" | "true" | "yes" | "on"))
+        .unwrap_or(true);
+    let include_patterns = crate::jobs::fedup::parse_fedup_patterns(
+        launch_params
+            .get("includePatterns")
+            .map_or("", String::as_str),
+    );
+    let mut exclude_patterns = crate::jobs::fedup::parse_fedup_patterns(
+        launch_params
+            .get("excludePatterns")
+            .map_or("", String::as_str),
+    );
+    if !include_patterns.is_empty() && !exclude_patterns.is_empty() {
+        return Err("Fedup include and exclude patterns are mutually exclusive.".to_string());
+    }
+    if use_default_ignores {
+        let default_patterns = {
+            let state_guard = ctx.state.lock().await;
+            crate::jobs::fedup::parse_fedup_patterns(
+                &state_guard.settings.general.fedup_default_ignore_patterns,
+            )
+        };
+        exclude_patterns.extend(default_patterns);
+    }
+    Ok(crate::jobs::fedup::FedupScanOptions::new(
+        exclude_patterns,
+        include_patterns,
+    ))
 }
 
 pub(crate) async fn maybe_start_next_fp_job(

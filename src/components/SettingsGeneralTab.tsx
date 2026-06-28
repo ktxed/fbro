@@ -26,12 +26,18 @@ export function SettingsGeneralTab({ general, client }: SettingsGeneralTabProps)
   const [commandBusy, setCommandBusy] = useState(false);
   const [commandProbing, setCommandProbing] = useState(true);
   const [sevenzipPathDraft, setSevenzipPathDraft] = useState(general.sevenzipCustomPath);
+  const [fedupIgnoreDraft, setFedupIgnoreDraft] = useState(general.fedupDefaultIgnorePatterns);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sevenzipPathDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fedupIgnoreDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     setSevenzipPathDraft(general.sevenzipCustomPath);
   }, [general.sevenzipCustomPath]);
+
+  useEffect(() => {
+    setFedupIgnoreDraft(general.fedupDefaultIgnorePatterns);
+  }, [general.fedupDefaultIgnorePatterns]);
 
   useEffect(() => {
     setMaxImageDraft(general.maxImageSizeMb);
@@ -52,6 +58,12 @@ export function SettingsGeneralTab({ general, client }: SettingsGeneralTabProps)
 
   useEffect(() => {
     void probeCommand();
+  }, []);
+
+  useEffect(() => () => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (sevenzipPathDebounce.current) clearTimeout(sevenzipPathDebounce.current);
+    if (fedupIgnoreDebounce.current) clearTimeout(fedupIgnoreDebounce.current);
   }, []);
 
   const onMaxImageChange = (raw: string) => {
@@ -167,6 +179,27 @@ export function SettingsGeneralTab({ general, client }: SettingsGeneralTabProps)
           />
           <span>Restore all panel tabs across sessions (otherwise only the active tab returns)</span>
         </label>
+        <div className="settings-tab__option" style={{ flexDirection: "column", alignItems: "flex-start", gap: 6 }}>
+          <span>Fedup default ignore patterns</span>
+          <textarea
+            value={fedupIgnoreDraft}
+            onChange={(e) => {
+              setFedupIgnoreDraft(e.target.value);
+              if (fedupIgnoreDebounce.current) clearTimeout(fedupIgnoreDebounce.current);
+              const v = e.target.value;
+              fedupIgnoreDebounce.current = setTimeout(() => send("fedupDefaultIgnorePatterns", v), 350);
+            }}
+            spellCheck={false}
+            autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="off"
+            rows={5}
+            style={{ width: "100%", maxWidth: 480, boxSizing: "border-box" }}
+          />
+          <div className="settings-tab__hint">
+            One wildcard name pattern per line. Fedup can use these to skip files and folders before scanning.
+          </div>
+        </div>
       </div>
       <div className="settings-tab__section">
         <h3 className="settings-tab__section-title">Process panel</h3>

@@ -79,6 +79,11 @@ pub struct GeneralSettings {
     /// is `Custom`. Empty by default.
     #[serde(default)]
     pub sevenzip_custom_path: String,
+    /// Default wildcard name patterns Fedup Bro ignores when requested.
+    /// Newline or comma separated. Matched case-insensitively against file and
+    /// directory names.
+    #[serde(default = "default_fedup_ignore_patterns")]
+    pub fedup_default_ignore_patterns: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -133,6 +138,47 @@ fn default_color_scheme() -> String {
     "fbro-dark".to_string()
 }
 
+pub fn default_fedup_ignore_patterns() -> String {
+    [
+        ".git",
+        ".idea",
+        ".vscode",
+        ".venv",
+        "node_modules",
+        "__MACOSX",
+        "._*",
+        ".DS_Store",
+        "artifacts/e2e",
+        "dist/assets",
+        "target/debug",
+        "target/release",
+        "target/bundle",
+        ".m2",
+    ]
+    .join("\n")
+}
+
+fn legacy_fedup_ignore_patterns() -> String {
+    [".git", "node_modules", "__MACOSX", "._*", ".DS_Store"].join("\n")
+}
+
+fn normalize_fedup_ignore_patterns(value: &str) -> String {
+    value
+        .split(|c| c == '\n' || c == '\r' || c == ',')
+        .map(str::trim)
+        .filter(|pattern| !pattern.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn migrate_settings(settings: &mut Settings) {
+    if normalize_fedup_ignore_patterns(&settings.general.fedup_default_ignore_patterns)
+        == legacy_fedup_ignore_patterns()
+    {
+        settings.general.fedup_default_ignore_patterns = default_fedup_ignore_patterns();
+    }
+}
+
 impl Default for GeneralSettings {
     fn default() -> Self {
         Self {
@@ -152,6 +198,7 @@ impl Default for GeneralSettings {
             color_scheme: default_color_scheme(),
             sevenzip_extractor: SevenzipExtractorMode::default(),
             sevenzip_custom_path: String::new(),
+            fedup_default_ignore_patterns: default_fedup_ignore_patterns(),
         }
     }
 }
@@ -165,7 +212,9 @@ pub fn load() -> Settings {
     let Ok(content) = std::fs::read_to_string(&path) else {
         return Settings::default();
     };
-    serde_json::from_str(&content).unwrap_or_default()
+    let mut settings: Settings = serde_json::from_str(&content).unwrap_or_default();
+    migrate_settings(&mut settings);
+    settings
 }
 
 pub fn save(settings: &Settings) -> std::io::Result<()> {
@@ -222,5 +271,41 @@ mod tests {
         let size = decoded.modal_sizes.get("jobs").unwrap();
         assert_eq!(size.width, 720);
         assert_eq!(size.height, 520);
+    }
+
+    #[test]
+    fn old_fedup_default_ignore_patterns_migrate_to_current_default() {
+        let mut settings = Settings {
+            general: GeneralSettings {
+                fedup_default_ignore_patterns: legacy_fedup_ignore_patterns(),
+                ..GeneralSettings::default()
+            },
+            panel_view_modes: HashMap::new(),
+            modal_sizes: HashMap::new(),
+        };
+
+        migrate_settings(&mut settings);
+
+        assert_eq!(
+            settings.general.fedup_default_ignore_patterns,
+            default_fedup_ignore_patterns()
+        );
+    }
+
+    #[test]
+    fn customized_fedup_ignore_patterns_do_not_migrate() {
+        let custom = format!("{}\ncustom-cache", legacy_fedup_ignore_patterns());
+        let mut settings = Settings {
+            general: GeneralSettings {
+                fedup_default_ignore_patterns: custom.clone(),
+                ..GeneralSettings::default()
+            },
+            panel_view_modes: HashMap::new(),
+            modal_sizes: HashMap::new(),
+        };
+
+        migrate_settings(&mut settings);
+
+        assert_eq!(settings.general.fedup_default_ignore_patterns, custom);
     }
 }

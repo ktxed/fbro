@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { useInputHistory, type InputHistory } from "../hooks/useInputHistory";
 import { useAppDispatch, useAppState, type PendingBro } from "../store";
 import type { WsClient } from "../ws/client";
 import type { BroParamItem } from "../ws/types";
+import { InputHistoryDropdown } from "./InputHistoryDropdown";
 import { ResizableModal } from "./ResizableModal";
 
 interface BroModalProps {
@@ -18,6 +20,10 @@ function formatTarget(inputs: PendingBro["inputs"]) {
 
 function selectedBroParams(item: PendingBro["bros"][number] | undefined) {
   return item?.params ?? [];
+}
+
+function isFedupBro(item: PendingBro["bros"][number] | undefined) {
+  return item?.id === "builtin:fedup";
 }
 
 function broMetaLine(item: PendingBro["bros"][number]) {
@@ -37,9 +43,26 @@ export function BroModal({ client, bro }: BroModalProps) {
   const [outputs, setOutputs] = useState<Record<string, string>>({});
   const [params, setParams] = useState<Record<string, string>>({});
   const [focusFieldsTick, setFocusFieldsTick] = useState(0);
+  const [fedupUseDefaultIgnores, setFedupUseDefaultIgnores] = useState(true);
+  const [fedupIncludePatterns, setFedupIncludePatterns] = useState("");
+  const [fedupExcludePatterns, setFedupExcludePatterns] = useState("");
 
   const bros = bro.bros;
   const broParams = selectedBroParams(bros[selectedIndex]);
+  const updateFedupIncludePatterns = useCallback((value: string) => {
+    setFedupIncludePatterns(value);
+    if (value.trim()) {
+      setFedupExcludePatterns("");
+    }
+  }, []);
+  const updateFedupExcludePatterns = useCallback((value: string) => {
+    setFedupExcludePatterns(value);
+    if (value.trim()) {
+      setFedupIncludePatterns("");
+    }
+  }, []);
+  const fedupIncludeHistory = useInputHistory("fedup.includePatterns", updateFedupIncludePatterns);
+  const fedupExcludeHistory = useInputHistory("fedup.excludePatterns", updateFedupExcludePatterns);
 
   useEffect(() => {
     dialogRef.current?.focus();
@@ -94,7 +117,7 @@ export function BroModal({ client, bro }: BroModalProps) {
   useEffect(() => {
     if (focusFieldsTick === 0) return;
     const selectedBro = bros[selectedIndex];
-    if (!selectedBro || (!selectedBro.output && broParams.length === 0)) return;
+    if (!selectedBro || (!selectedBro.output && broParams.length === 0 && !isFedupBro(selectedBro))) return;
     firstFieldRef.current?.focus();
     if (firstFieldRef.current instanceof HTMLInputElement) {
       firstFieldRef.current.select();
@@ -118,7 +141,11 @@ export function BroModal({ client, bro }: BroModalProps) {
     () => bros.find((item) => item.id === activeFormBroId),
     [activeFormBroId, bros],
   );
-  const selectedBroHasLaunchInputs = !!selectedBro && (!!selectedBro.output || selectedBroParams(selectedBro).length > 0);
+  const selectedBroIsFedup = isFedupBro(selectedBro);
+  const activeFormBroIsFedup = isFedupBro(activeFormBro);
+  const selectedBroHasLaunchInputs = !!selectedBro && (
+    !!selectedBro.output || selectedBroParams(selectedBro).length > 0 || selectedBroIsFedup
+  );
   const selectedBroIsActivated = !!selectedBro && activeFormBro?.id === selectedBro.id;
 
   const selectedInputValues = useMemo(() => {
@@ -148,6 +175,9 @@ export function BroModal({ client, bro }: BroModalProps) {
 
   const paramError = useMemo(() => {
     if (!activeFormBro) return undefined;
+    if (activeFormBroIsFedup && fedupIncludePatterns.trim() && fedupExcludePatterns.trim()) {
+      return "Fedup include and exclude patterns are mutually exclusive.";
+    }
     if (missingRequiredParam) return `${missingRequiredParam.label} is required.`;
     for (const input of selectedBroParams(activeFormBro)) {
       if (input.kind !== "int") continue;
@@ -163,7 +193,7 @@ export function BroModal({ client, bro }: BroModalProps) {
       }
     }
     return undefined;
-  }, [activeFormBro, missingRequiredParam, selectedInputValues]);
+  }, [activeFormBro, activeFormBroIsFedup, fedupExcludePatterns, fedupIncludePatterns, missingRequiredParam, selectedInputValues]);
 
   const launchBro = (broId: string, output?: string, launchParams: Record<string, string> = {}) => {
     close();
@@ -186,11 +216,21 @@ export function BroModal({ client, bro }: BroModalProps) {
       return;
     }
     if (outputError || paramError) return;
+    if (selectedBroIsFedup) {
+      if (fedupIncludePatterns.trim()) fedupIncludeHistory.addToHistory(fedupIncludePatterns);
+      if (fedupExcludePatterns.trim()) fedupExcludeHistory.addToHistory(fedupExcludePatterns);
+      launchBro(selectedBro.id, undefined, {
+        useDefaultIgnores: fedupUseDefaultIgnores ? "true" : "false",
+        includePatterns: fedupIncludePatterns,
+        excludePatterns: fedupExcludePatterns,
+      });
+      return;
+    }
     launchBro(selectedBro.id, selectedBro.output ? selectedOutputValue : undefined, selectedInputValues);
   };
 
   const activateBroForm = (bro: PendingBro["bros"][number] | undefined, options?: { focusFields?: boolean }) => {
-    if (!bro || (!bro.output && selectedBroParams(bro).length === 0)) {
+    if (!bro || (!bro.output && selectedBroParams(bro).length === 0 && !isFedupBro(bro))) {
       setActiveFormBroId(null);
       return;
     }
@@ -235,7 +275,7 @@ export function BroModal({ client, bro }: BroModalProps) {
     if (e.key === "Enter") {
       e.preventDefault();
       if (!selectedBro) return;
-      if (!selectedBro.output && selectedBroParams(selectedBro).length === 0) {
+      if (!selectedBro.output && selectedBroParams(selectedBro).length === 0 && !selectedBroIsFedup) {
         launchBro(selectedBro.id);
         return;
       }
@@ -258,7 +298,7 @@ export function BroModal({ client, bro }: BroModalProps) {
         ariaLabel="Pass To Bro"
         tabIndex={-1}
         onKeyDown={onKeyDown}
-        defaultSize={{ width: 560, height: 420 }}
+        defaultSize={{ width: 560, height: 500 }}
         minSize={{ width: 420, height: 320 }}
       >
         <div className="modal__header">Pass To Bro...</div>
@@ -285,7 +325,7 @@ export function BroModal({ client, bro }: BroModalProps) {
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={() => {
                     selectBro(index);
-                    if (!item.output && selectedBroParams(item).length === 0) {
+                    if (!item.output && selectedBroParams(item).length === 0 && !isFedupBro(item)) {
                       launchBro(item.id);
                       return;
                     }
@@ -304,8 +344,46 @@ export function BroModal({ client, bro }: BroModalProps) {
               );
             })}
           </div>
-          {bro.status === "ready" && selectedBroIsActivated && activeFormBro && (activeFormBro.output || selectedBroParams(activeFormBro).length > 0) && (
+          {bro.status === "ready" && selectedBroIsActivated && activeFormBro && (
+            activeFormBro.output || selectedBroParams(activeFormBro).length > 0 || activeFormBroIsFedup
+          ) && (
             <div className="modal__body" style={{ padding: "12px 0 0" }}>
+              {activeFormBroIsFedup && (
+                <div className="bro-modal__fedup-options">
+                  <label className="bro-modal__fedup-checkbox">
+                    <input
+                      type="checkbox"
+                      checked={fedupUseDefaultIgnores}
+                      onChange={(e) => setFedupUseDefaultIgnores(e.target.checked)}
+                    />
+                    Use default ignore patterns
+                  </label>
+                  <FedupPatternField
+                    label="Include only"
+                    value={fedupIncludePatterns}
+                    placeholder="*.mp4, *.mkv"
+                    disabled={!!fedupExcludePatterns.trim()}
+                    inputRef={firstFieldRef}
+                    history={fedupIncludeHistory}
+                    onChange={updateFedupIncludePatterns}
+                    onSubmit={launchSelected}
+                    onCancel={close}
+                  />
+                  <FedupPatternField
+                    label="Exclude"
+                    value={fedupExcludePatterns}
+                    placeholder=".git, node_modules, *.tmp"
+                    disabled={!!fedupIncludePatterns.trim()}
+                    history={fedupExcludeHistory}
+                    onChange={updateFedupExcludePatterns}
+                    onSubmit={launchSelected}
+                    onCancel={close}
+                  />
+                  <div className="bro-modal__fedup-hint">
+                    Wildcard names are comma-separated. Exclude patterns skip matching files and folders; include patterns match files only.
+                  </div>
+                </div>
+              )}
               {activeFormBro.output && (
                 <div className="modal__rename-row">
                   <label className="modal__rename-label">{activeFormBro.output.label}:</label>
@@ -400,6 +478,82 @@ interface BroParamFieldProps {
   onChange: (value: string) => void;
   onSubmit: () => void;
   onCancel: () => void;
+}
+
+interface FedupPatternFieldProps {
+  label: string;
+  value: string;
+  placeholder: string;
+  disabled?: boolean;
+  inputRef?: React.RefObject<HTMLInputElement | null>;
+  history: InputHistory;
+  onChange: (value: string) => void;
+  onSubmit: () => void;
+  onCancel: () => void;
+}
+
+function FedupPatternField({
+  label,
+  value,
+  placeholder,
+  disabled,
+  inputRef,
+  history,
+  onChange,
+  onSubmit,
+  onCancel,
+}: FedupPatternFieldProps) {
+  const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    history.onKeyDown(e);
+    if (e.defaultPrevented) return;
+    if (e.key === "ArrowUp" || e.key === "ArrowDown" || e.key === "Tab") {
+      e.stopPropagation();
+    }
+    if (e.key === "Enter") {
+      e.preventDefault();
+      e.stopPropagation();
+      onSubmit();
+    }
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      onCancel();
+    }
+  };
+
+  return (
+    <div className="modal__rename-row">
+      <label className="modal__rename-label">{label}:</label>
+      <input
+        ref={(node) => {
+          (history.inputRef as React.MutableRefObject<HTMLInputElement | null>).current = node;
+          if (inputRef) {
+            (inputRef as React.MutableRefObject<HTMLInputElement | null>).current = node;
+          }
+        }}
+        className="search-modal__mask-input"
+        type="text"
+        value={value}
+        disabled={disabled}
+        placeholder={placeholder}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={onKeyDown}
+        spellCheck={false}
+        autoComplete="off"
+        autoCorrect="off"
+        autoCapitalize="off"
+      />
+      {history.isOpen && (
+        <InputHistoryDropdown
+          anchorEl={history.inputRef.current}
+          items={history.items}
+          activeIndex={history.activeIndex}
+          onSelect={history.selectItem}
+          onClose={history.close}
+        />
+      )}
+    </div>
+  );
 }
 
 function BroParamField({ input, value, inputRef, onChange, onSubmit, onCancel }: BroParamFieldProps) {

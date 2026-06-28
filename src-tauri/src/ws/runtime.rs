@@ -160,6 +160,11 @@ pub(crate) fn build_state_snapshot(
                     )
                     .map(|p| p.to_string_lossy().to_string())
                     .unwrap_or_default(),
+                    fedup_default_ignore_patterns: state
+                        .settings
+                        .general
+                        .fedup_default_ignore_patterns
+                        .clone(),
                 },
                 modal_sizes: state
                     .settings

@@ -387,6 +387,7 @@ pub struct GeneralSettingsSchema {
     /// so the settings UI can show "Found at <path>" / "Not found" without
     /// re-running probe logic in the FE.
     pub sevenzip_resolved_path: String,
+    pub fedup_default_ignore_patterns: String,
 }
 
 #[derive(Serialize, Clone, Debug)]
