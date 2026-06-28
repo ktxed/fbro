@@ -68,7 +68,7 @@ pub async fn dispatch(name: &str, scope: &Value, args: &Value, ctx: &mut IntentC
         | "SaveFedupReport"
         | "GenerateFedupDeleteDryRun"
         | "GetFedupResultPage" => bro::handle(name, scope, args, ctx).await,
-        "AddToGlobalSelection" | "RemoveGlobalSelectionItems" => {
+        "AddToGlobalSelection" | "RemoveGlobalSelections" | "RemoveGlobalSelectionItems" => {
             global_selection::handle(name, scope, args, ctx).await
         }
         "StartFileOp"

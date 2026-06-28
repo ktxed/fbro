@@ -119,7 +119,7 @@ export async function runRemoteFlow(browserA, observerA, browserB, observerB) {
   await observerB.waitForEntry("left", "deep.txt", "file", 20_000);
   observerB.sendIntent("NavigateUp", "left");
   await observerB.waitForPanelPath("left", "Projects");
-  observerB.sendIntent("NavigateUp", "left");
+  observerB.sendIntent("NavigateToSource", "left", { sourceId: remoteSource.id });
   await observerB.waitForPanelPath("left", "");
   const downloadsEntry = await observerB.waitForEntry("left", "Downloads", "directory", 20_000);
   const downloadsIndex = observerB.state.panels.left.entries.indexOf(downloadsEntry);
@@ -178,7 +178,7 @@ export async function runRemoteFlow(browserA, observerA, browserB, observerB) {
   if (copied !== "remote payload\n") throw new Error("remote copied file content mismatch");
   await closeTerminalJobDialog(browserB);
 
-  observerB.sendIntent("NavigateUp", "left");
+  observerB.sendIntent("NavigateToSource", "left", { sourceId: remoteSource.id });
   await observerB.waitForPanelPath("left", "");
   const syncEntry = await observerB.waitForEntry("left", "SyncBro", "directory", 20_000);
   observerB.sendIntent("SetCursor", "left", { index: observerB.state.panels.left.entries.indexOf(syncEntry) });
