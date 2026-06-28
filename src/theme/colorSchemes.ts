@@ -30,7 +30,7 @@ export const COLOR_SCHEMES: ColorScheme[] = [
   },
   {
     id: "daylight",
-    label: "Daylight",
+    label: "fbro Light",
     description: "Light neutral scheme",
     mode: "light",
     terminal: {

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useInputHistory, type InputHistory } from "../hooks/useInputHistory";
 import { useAppDispatch, useAppState, type PendingBro } from "../store";
+import { stepNumberInputOnWheel } from "../utils/numberInputWheel";
 import type { WsClient } from "../ws/client";
 import type { BroParamItem } from "../ws/types";
 import { InputHistoryDropdown } from "./InputHistoryDropdown";
@@ -612,6 +613,7 @@ function BroParamField({ input, value, inputRef, onChange, onSubmit, onCancel }:
       value={value}
       onChange={(e) => onChange(e.target.value)}
       onKeyDown={onKeyDown}
+      onWheel={stepNumberInputOnWheel}
       spellCheck={false}
       autoComplete="off"
       autoCorrect="off"

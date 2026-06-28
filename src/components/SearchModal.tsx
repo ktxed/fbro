@@ -8,6 +8,7 @@ import { useInputHistory } from "../hooks/useInputHistory";
 import { InputHistoryDropdown } from "./InputHistoryDropdown";
 import { DateTimeInput } from "./DateTimeInput";
 import { ResizableModal } from "./ResizableModal";
+import { stepNumberInputOnWheel } from "../utils/numberInputWheel";
 
 function MnemonicLabel({ text, mnemonic }: { text: string; mnemonic: string }) {
   const idx = text.toLowerCase().indexOf(mnemonic.toLowerCase());
@@ -646,6 +647,7 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
                         aria-label="File size value"
                         value={sizeValue}
                         onChange={(e) => setSizeValue(e.target.value)}
+                        onWheel={stepNumberInputOnWheel}
                         min="0"
                         placeholder="Value"
                       />
@@ -656,6 +658,7 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
                           aria-label="File size max"
                           value={sizeMax}
                           onChange={(e) => setSizeMax(e.target.value)}
+                          onWheel={stepNumberInputOnWheel}
                           min="0"
                           placeholder="Max"
                         />
@@ -723,6 +726,7 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
                           aria-label="Relative time amount"
                           value={timeRelativeNum}
                           onChange={(e) => setTimeRelativeNum(e.target.value)}
+                          onWheel={stepNumberInputOnWheel}
                           min="1"
                           onClick={() => setTimeOp("relative")}
                         />

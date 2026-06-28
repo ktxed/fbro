@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { GeneralSettings } from "../ws/types";
 import type { WsClient } from "../ws/client";
+import { stepNumberInputOnWheel } from "../utils/numberInputWheel";
 
 interface SettingsGeneralTabProps {
   general: GeneralSettings;
@@ -181,21 +182,23 @@ export function SettingsGeneralTab({ general, client }: SettingsGeneralTabProps)
         </label>
         <div className="settings-tab__option" style={{ flexDirection: "column", alignItems: "flex-start", gap: 6 }}>
           <span>Fedup default ignore patterns</span>
-          <textarea
-            value={fedupIgnoreDraft}
-            onChange={(e) => {
-              setFedupIgnoreDraft(e.target.value);
-              if (fedupIgnoreDebounce.current) clearTimeout(fedupIgnoreDebounce.current);
-              const v = e.target.value;
-              fedupIgnoreDebounce.current = setTimeout(() => send("fedupDefaultIgnorePatterns", v), 350);
-            }}
-            spellCheck={false}
-            autoComplete="off"
-            autoCorrect="off"
-            autoCapitalize="off"
-            rows={5}
-            style={{ width: "100%", maxWidth: 480, boxSizing: "border-box" }}
-          />
+          <div className="settings-tab__fedup-ignore-editor">
+            <textarea
+              className="settings-tab__fedup-ignore-input"
+              value={fedupIgnoreDraft}
+              onChange={(e) => {
+                setFedupIgnoreDraft(e.target.value);
+                if (fedupIgnoreDebounce.current) clearTimeout(fedupIgnoreDebounce.current);
+                const v = e.target.value;
+                fedupIgnoreDebounce.current = setTimeout(() => send("fedupDefaultIgnorePatterns", v), 350);
+              }}
+              spellCheck={false}
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
+              rows={5}
+            />
+          </div>
           <div className="settings-tab__hint">
             One wildcard name pattern per line. Fedup can use these to skip files and folders before scanning.
           </div>
@@ -318,6 +321,7 @@ export function SettingsGeneralTab({ general, client }: SettingsGeneralTabProps)
             value={maxImageDraft}
             disabled={!general.ludicrousMode}
             onChange={(e) => onMaxImageChange(e.target.value)}
+            onWheel={stepNumberInputOnWheel}
             style={{ width: 90 }}
           />
         </label>

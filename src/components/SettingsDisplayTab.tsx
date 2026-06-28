@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { GeneralSettings } from "../ws/types";
 import type { WsClient } from "../ws/client";
 import { isLinux } from "../utils/platform";
+import { stepNumberInputOnWheel } from "../utils/numberInputWheel";
 import { COLOR_SCHEMES, resolveColorScheme } from "../theme/colorSchemes";
 
 function formatBytes(bytes: number): string {
@@ -139,6 +140,7 @@ export function SettingsDisplayTab({ general, client }: SettingsDisplayTabProps)
             step={1}
             value={maxImageDraft}
             onChange={(e) => onMaxImageChange(e.target.value)}
+            onWheel={stepNumberInputOnWheel}
             style={{ width: 90 }}
           />
         </label>
@@ -155,6 +157,7 @@ export function SettingsDisplayTab({ general, client }: SettingsDisplayTabProps)
             value={frameSkipDraft}
             disabled={!general.enableVideoThumbnails}
             onChange={(e) => onFrameSkipChange(e.target.value)}
+            onWheel={stepNumberInputOnWheel}
             style={{ width: 90 }}
           />
         </label>
