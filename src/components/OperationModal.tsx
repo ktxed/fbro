@@ -505,6 +505,9 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
   const modalRef = useRef<HTMLDivElement>(null);
   const destNameInputRef = useRef<HTMLInputElement>(null);
   const selectedDestNameConflictRef = useRef<string | null>(null);
+  // The modal stays mounted between operations, so a repeated identical copy
+  // must not inherit the previous operation's "Starting..." state.
+  const submittedPendingRef = useRef<PendingOp | null>(null);
   const p = activeJob?.progress;
   const isTransferTerminal = activeJob?.state === "Completed" || activeJob?.state === "Cancelled" || activeJob?.state === "Failed";
   const { speed, samples: speedSamples } = useJobTransferSpeed(activeJobId, p?.totalBytesCopied ?? 0, isTransferTerminal);
@@ -521,7 +524,12 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
     ? saveDigestFileState.value
     : defaultSaveDigestFile;
 
-  const close = () => { setSubmitted(false); setDryMode(false); dispatch({ type: "CLOSE_OPERATION" }); };
+  const close = () => {
+    submittedPendingRef.current = null;
+    setSubmitted(false);
+    setDryMode(false);
+    dispatch({ type: "CLOSE_OPERATION" });
+  };
   const closeDryRun = () => { setSubmitted(false); setDryMode(false); dispatch({ type: "CLOSE_DRY_RUN" }); };
 
   // Re-focus when the modal appears or changes phase so terminal/decision states
@@ -552,9 +560,12 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
 
   useEffect(() => {
     if (!pending) return;
+    submittedPendingRef.current = null;
+    setSubmitted(false);
+    setDryMode(false);
     setConflictPolicy(shouldDefaultResumeForPending(state, pending) ? "resume" : pending.conflictPolicy);
     setDestName(supportsCopyDestName(pending) ? pending.files[0].name : "");
-  }, [pendingKey]);
+  }, [pending]);
 
   useEffect(() => {
     if (!pendingDestNameConflictKey) {
@@ -666,10 +677,12 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
     const selectedConflictPolicy = conflictPolicies.includes(conflictPolicy) ? conflictPolicy : "ask";
     const showDestNameInput = supportsCopyDestName(pending);
     const destNameWarning = showDestNameInput ? pendingDestNameIssue?.message ?? null : null;
-    const canSubmitPending = !submitted && !destNameWarning;
+    const isSubmitted = submitted && submittedPendingRef.current === pending;
+    const canSubmitPending = !isSubmitted && !destNameWarning;
 
     const startOp = (background: boolean) => {
       if (!canSubmitPending) return;
+      submittedPendingRef.current = pending;
       setSubmitted(true);
       if (isGlobalSelectionDelete && sourcePanelState) {
         if (sourcePanelState.path) {
@@ -707,7 +720,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
     };
 
     const cycleConflictPolicy = () => {
-      if (isDelete || submitted) return;
+      if (isDelete || isSubmitted) return;
       const index = conflictPolicies.indexOf(selectedConflictPolicy);
       const next = conflictPolicies[(index + 1 + conflictPolicies.length) % conflictPolicies.length];
       setConflictPolicy(next);
@@ -729,12 +742,12 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
         startOp(false);
         return;
       }
-      if ((e.key === "d" || e.key === "D") && !submitted) {
+      if ((e.key === "d" || e.key === "D") && !isSubmitted) {
         e.preventDefault();
         setDryMode((current) => !current);
         return;
       }
-      if ((e.key === "p" || e.key === "P") && canStartInBackground && !submitted) {
+      if ((e.key === "p" || e.key === "P") && canStartInBackground && !isSubmitted) {
         e.preventDefault();
         setStartPaused((current) => !current);
         return;
@@ -866,7 +879,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
           </div>
           <div className="modal__actions">
             <button className="modal__btn modal__btn--primary" data-command-id={`file.${pending.opType}.confirm`} disabled={!canSubmitPending} onClick={() => startOp(false)}>
-              {submitted ? "Starting…" : label}
+              {isSubmitted ? "Starting…" : label}
             </button>
             {canStartInBackground && (
               <button className="modal__btn" data-command-id={`file.${pending.opType}.background`} disabled={!canSubmitPending} onClick={() => startOp(true)}>
