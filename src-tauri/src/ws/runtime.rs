@@ -477,6 +477,7 @@ pub(crate) async fn navigate_to(
         filter,
         show_hidden,
         version,
+        panel_epoch,
         driver,
         shadow_source_schema,
         source_id,
@@ -484,13 +485,14 @@ pub(crate) async fn navigate_to(
         view_mode,
     ) = {
         let mut state_guard = state.lock().await;
-        let (source_id, sort, filter, show_hidden, version, shadow_schema) =
+        let (source_id, sort, filter, show_hidden, version, panel_epoch, shadow_schema) =
             if let Some(panel) = state_guard.panels.get_mut(panel_id) {
                 let source_id = panel.source_id.clone();
                 panel.path = new_path.to_string();
                 panel.entries.clear();
                 panel.cursor = 0;
                 panel.selection.clear();
+                panel.calculating_size.clear();
                 panel.status = PanelStatus::Loading;
                 panel.windowed = false;
                 panel.window_start = 0;
@@ -498,6 +500,7 @@ pub(crate) async fn navigate_to(
                 panel.filter = None;
                 panel.filter_mode_active = false;
                 panel.version += 1;
+                panel.panel_epoch += 1;
                 let shadow_schema = panel.shadow_source.as_ref().map(|ss| ShadowSourceSchema {
                     parent_source_id: ss.parent_source_id.clone(),
                     parent_path: ss.parent_path.clone(),
@@ -510,6 +513,7 @@ pub(crate) async fn navigate_to(
                     panel.filter.clone(),
                     panel.show_hidden,
                     panel.version,
+                    panel.panel_epoch,
                     shadow_schema,
                 )
             } else {
@@ -549,6 +553,7 @@ pub(crate) async fn navigate_to(
             filter,
             show_hidden,
             version,
+            panel_epoch,
             driver,
             shadow_schema,
             source_id,
@@ -566,6 +571,7 @@ pub(crate) async fn navigate_to(
             patch: serde_json::json!({
                 "path": new_path,
                 "sourceId": source_id,
+                "panelEpoch": panel_epoch,
                 "entries": [],
                 "cursor": 0,
                 "selection": [],
@@ -603,6 +609,8 @@ pub(crate) async fn navigate_to(
 
     let handle = spawn_scan(
         panel_id.to_string(),
+        source_id,
+        panel_epoch,
         new_path.to_string(),
         sort,
         filter,
@@ -642,6 +650,7 @@ pub(crate) async fn rescan_panel(
         filter_mode_active,
         show_hidden,
         version,
+        panel_epoch,
         driver,
         source_id,
         shadow_source_schema,
@@ -657,6 +666,7 @@ pub(crate) async fn rescan_panel(
             filter_mode_active,
             show_hidden,
             version,
+            panel_epoch,
             shadow_schema,
         ) = if let Some(panel) = state_guard.panels.get_mut(panel_id) {
             let source_id = panel.source_id.clone();
@@ -681,6 +691,7 @@ pub(crate) async fn rescan_panel(
                 panel.filter_mode_active,
                 panel.show_hidden,
                 panel.version,
+                panel.panel_epoch,
                 shadow_schema,
             )
         } else {
@@ -720,6 +731,7 @@ pub(crate) async fn rescan_panel(
             filter_mode_active,
             show_hidden,
             version,
+            panel_epoch,
             driver,
             source_id,
             shadow_schema,
@@ -737,6 +749,7 @@ pub(crate) async fn rescan_panel(
             patch: serde_json::json!({
                 "path": path,
                 "sourceId": source_id,
+                "panelEpoch": panel_epoch,
                 "entries": [],
                 "cursor": 0,
                 "selection": [],
@@ -757,6 +770,8 @@ pub(crate) async fn rescan_panel(
 
     let handle = spawn_scan(
         panel_id.to_string(),
+        source_id,
+        panel_epoch,
         path,
         sort,
         filter,
@@ -784,17 +799,32 @@ pub(crate) async fn quiet_rescan_panel(
     dir_size_queue: &Arc<DirSizeQueue>,
     watcher_cmd_tx: &mpsc::Sender<WatcherCommand>,
 ) {
+    {
+        let state_guard = state.lock().await;
+        if state_guard
+            .panels
+            .get(panel_id)
+            .map(|panel| matches!(panel.status, PanelStatus::Loading))
+            .unwrap_or(false)
+        {
+            eprintln!("[scan] quiet rescan skipped: panel={panel_id} already_loading");
+            return;
+        }
+    }
+
     if let Some(handle) = scan_handles.remove(panel_id) {
+        eprintln!("[scan] quiet rescan aborting active scan: panel={panel_id}");
         handle.abort();
     }
 
-    let (path, sort, filter, show_hidden, version, driver) = {
+    let (source_id, panel_epoch, path, sort, filter, show_hidden, version, driver) = {
         let mut state_guard = state.lock().await;
-        let (source_id, path, sort, filter, show_hidden, version) =
+        let (source_id, panel_epoch, path, sort, filter, show_hidden, version) =
             if let Some(panel) = state_guard.panels.get_mut(panel_id) {
                 panel.version += 1;
                 (
                     panel.source_id.clone(),
+                    panel.panel_epoch,
                     panel.path.clone(),
                     panel.sort.clone(),
                     panel.filter.clone(),
@@ -820,7 +850,16 @@ pub(crate) async fn quiet_rescan_panel(
             }
             return;
         };
-        (path, sort, filter, show_hidden, version, driver)
+        (
+            source_id,
+            panel_epoch,
+            path,
+            sort,
+            filter,
+            show_hidden,
+            version,
+            driver,
+        )
     };
 
     let cursor_hint = {
@@ -835,6 +874,8 @@ pub(crate) async fn quiet_rescan_panel(
 
     let handle = spawn_scan_atomic(
         panel_id.to_string(),
+        source_id,
+        panel_epoch,
         path,
         sort,
         filter,
@@ -972,7 +1013,7 @@ pub(crate) async fn send_window(
     state: &SharedState,
     tx: &mpsc::Sender<ServerMessage>,
 ) {
-    let (window_entries, window_start, total, version, window_version) = {
+    let (window_entries, window_start, total, version, window_version, panel_epoch) = {
         let mut state_guard = state.lock().await;
         let result = {
             let panel = match state_guard.panels.get_mut(panel_id) {
@@ -996,6 +1037,7 @@ pub(crate) async fn send_window(
                 total,
                 panel.version,
                 panel.window_version,
+                panel.panel_epoch,
             )
         };
         // Window slice changed → refresh thumb-pool visibility while still
@@ -1012,6 +1054,7 @@ pub(crate) async fn send_window(
             version,
             patch: serde_json::json!({
                 "totalCount": total,
+                "panelEpoch": panel_epoch,
                 "windowStart": window_start,
                 "windowEntries": window_entries,
                 "windowVersion": window_version,
@@ -1182,6 +1225,15 @@ pub(crate) async fn update_panel_from_patch(
 ) {
     let mut state_guard = state.lock().await;
     if let Some(panel) = state_guard.panels.get_mut(panel_id) {
+        if let Some(panel_epoch) = patch.get("panelEpoch").and_then(|value| value.as_u64()) {
+            if panel_epoch != panel.panel_epoch {
+                eprintln!(
+                    "[panel] stale patch skipped: panel={panel_id} patch_epoch={panel_epoch} current_epoch={} version={version}",
+                    panel.panel_epoch
+                );
+                return;
+            }
+        }
         // Treat null-valued fields (sent by rescan/navigate to *clear* state) as
         // "not present" — those patches are structural resets, not window slices.
         let has_total = patch.get("totalCount").is_some_and(|v| !v.is_null());
@@ -1291,6 +1343,7 @@ fn build_panel_snapshot(panel: &Panel, supports_thumbnails: bool) -> PanelSnapsh
         selected_entries: selected_entries_for_panel(panel),
         entries: panel.entries.clone(),
         version: panel.version,
+        panel_epoch: panel.panel_epoch,
         calculating_size,
         total_count: None,
         window_start: None,
@@ -1307,6 +1360,8 @@ fn build_panel_snapshot(panel: &Panel, supports_thumbnails: bool) -> PanelSnapsh
 
 fn spawn_scan(
     panel_id: String,
+    source_id: String,
+    panel_epoch: u64,
     path: String,
     sort: crate::ws::protocol::SortSpec,
     filter: Option<crate::ws::protocol::FilterSpec>,
@@ -1324,6 +1379,8 @@ fn spawn_scan(
 ) -> ScanHandle {
     let handle = tokio::spawn(run_scan(
         panel_id,
+        source_id,
+        panel_epoch,
         path,
         sort,
         filter,
@@ -1345,6 +1402,8 @@ fn spawn_scan(
 
 fn spawn_scan_atomic(
     panel_id: String,
+    source_id: String,
+    panel_epoch: u64,
     path: String,
     sort: crate::ws::protocol::SortSpec,
     filter: Option<crate::ws::protocol::FilterSpec>,
@@ -1360,6 +1419,8 @@ fn spawn_scan_atomic(
 ) -> ScanHandle {
     let handle = tokio::spawn(run_scan(
         panel_id,
+        source_id,
+        panel_epoch,
         path,
         sort,
         filter,

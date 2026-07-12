@@ -27,7 +27,7 @@ pub(crate) async fn handle(name: &str, scope: &Value, args: &Value, ctx: &mut In
         "NavigateToSource" => navigate_to_source(scope, args, ctx).await,
         "MountSource" => mount_source(scope, args, ctx).await,
         "OpenPathInRightPanel" => open_path_in_right_panel(args, ctx).await,
-        "NavigateUp" => navigate_up(scope, ctx).await,
+        "NavigateUp" => navigate_up(scope, args, ctx).await,
         "RevealInFileManager" => reveal_in_file_manager(args, ctx).await,
         "ListOpenWithApps" => list_open_with_apps(args, ctx).await,
         "LaunchOpenWithApp" => launch_open_with_app(args, ctx).await,
@@ -135,9 +135,23 @@ fn source_for_local_path(state: &crate::state::AppState, path: &str) -> Option<S
     )
 }
 
+fn remembered_path_for_source(
+    source_paths: &std::collections::HashMap<String, String>,
+    source_id: &str,
+    root_path: &str,
+) -> Option<String> {
+    source_paths
+        .get(source_id)
+        .filter(|path| Path::new(path.as_str()).is_dir())
+        .filter(|path| root_path.is_empty() || path_starts_with(path, root_path))
+        .cloned()
+}
+
 #[cfg(test)]
 mod tests {
-    use super::most_specific_source_for_path;
+    use std::collections::HashMap;
+
+    use super::{most_specific_source_for_path, remembered_path_for_source};
 
     fn pick_source<'a>(sources: &'a [(&'a String, &'a str)], path: &str) -> Option<String> {
         most_specific_source_for_path(sources.iter().copied(), path)
@@ -175,6 +189,17 @@ mod tests {
             Some("vol-home".to_string())
         );
         assert_eq!(pick_source(&sources, "/home/user2"), None);
+    }
+
+    #[test]
+    fn remembered_source_path_must_stay_inside_source_root() {
+        let mut paths = HashMap::new();
+        paths.insert("vol-mnt-six".to_string(), "/home/ktx/work".to_string());
+
+        assert_eq!(
+            remembered_path_for_source(&paths, "vol-mnt-six", "/mnt/six"),
+            None
+        );
     }
 }
 
@@ -221,6 +246,7 @@ async fn broadcast_slot_change(
                     "tabTitle": p.tab_title_override,
                     "path": p.path,
                     "sourceId": p.source_id,
+                    "panelEpoch": p.panel_epoch,
                     "status": p.status.as_str(),
                     "sort": p.sort,
                     "showHidden": p.show_hidden,
@@ -408,6 +434,8 @@ async fn open_entry(scope: &Value, ctx: &mut IntentContext<'_>) {
                 if let Some(panel) = state_guard.panels.get_mut(&panel_id) {
                     panel.source_id = real_source_id;
                     panel.shadow_source = None;
+                    panel.panel_epoch += 1;
+                    panel.calculating_size.clear();
                     // Search sources persist until explicitly removed; all other
                     // virtual sources are transient and cleaned up when unused.
                     if !is_search_source(&source_id) {
@@ -559,6 +587,8 @@ async fn enter_7z_archive(
             panel.shadow_source = Some(shadow);
             panel.source_id = source_id.clone();
             panel.path = String::new();
+            panel.panel_epoch += 1;
+            panel.calculating_size.clear();
             panel.cursor = 0;
             panel.selection.clear();
             panel.filter = None;
@@ -686,6 +716,8 @@ async fn enter_zip_archive(
             panel.shadow_source = Some(shadow);
             panel.source_id = source_id.clone();
             panel.path = String::new(); // archive root
+            panel.panel_epoch += 1;
+            panel.calculating_size.clear();
             panel.cursor = 0;
             panel.selection.clear();
             panel.filter = None;
@@ -738,6 +770,8 @@ pub(crate) async fn teardown_shadow_source(
         // Restore parent context.
         panel.source_id = shadow.parent_source_id.clone();
         panel.path = shadow.parent_path.clone();
+        panel.panel_epoch += 1;
+        panel.calculating_size.clear();
         panel.cursor = 0;
         panel.selection.clear();
         panel.filter = None;
@@ -993,6 +1027,8 @@ async fn reuse_right_listing_panel(
                 .insert(panel.source_id.clone(), panel.path.clone());
             panel.source_id = source_id.to_string();
             panel.shadow_source = None;
+            panel.panel_epoch += 1;
+            panel.calculating_size.clear();
             panel.tab_kind = TabKind::Listing;
             panel.terminal_session = None;
         }
@@ -1060,6 +1096,7 @@ async fn create_right_listing_tab(
             selection: vec![],
             entries: vec![],
             version: 0,
+            panel_epoch: 0,
             calculating_size: Default::default(),
             windowed: false,
             window_start: 0,
@@ -1265,6 +1302,8 @@ async fn navigate_panel_to(args: &Value, ctx: &mut IntentContext<'_>) {
                     let previous_path = panel.path.clone();
                     panel.source_paths.insert(previous_source_id, previous_path);
                     panel.source_id = target_source_id;
+                    panel.panel_epoch += 1;
+                    panel.calculating_size.clear();
                     panel.selection.clear();
                     panel.filter = None;
                     panel.filter_mode_active = false;
@@ -1564,15 +1603,14 @@ async fn navigate_to_source(scope: &Value, args: &Value, ctx: &mut IntentContext
                     .source_paths
                     .insert(panel.source_id.clone(), panel.path.clone());
 
-                let target_path = panel
-                    .source_paths
-                    .get(&parsed.source_id)
-                    .filter(|path| Path::new(path.as_str()).is_dir())
-                    .cloned()
-                    .unwrap_or(root_path);
+                let target_path =
+                    remembered_path_for_source(&panel.source_paths, &parsed.source_id, &root_path)
+                        .unwrap_or(root_path);
 
                 panel.source_id = parsed.source_id;
                 panel.path = target_path.clone();
+                panel.panel_epoch += 1;
+                panel.calculating_size.clear();
                 panel.cursor = 0;
                 panel.selection.clear();
                 panel.filter = None;
@@ -1670,6 +1708,8 @@ async fn mount_source(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) 
                             .insert(panel.source_id.clone(), panel.path.clone());
                         panel.source_id = parsed.source_id.clone();
                         panel.path = mount_point.clone();
+                        panel.panel_epoch += 1;
+                        panel.calculating_size.clear();
                         panel.cursor = 0;
                         panel.selection.clear();
                         panel.filter = None;
@@ -1724,11 +1764,34 @@ async fn mount_source(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) 
     }
 }
 
-async fn navigate_up(scope: &Value, ctx: &mut IntentContext<'_>) {
+async fn navigate_up(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
     let panel_id = resolve_panel_id(scope, ctx.state).await;
     let (current_path, parent_path, has_shadow) = {
         let state_guard = ctx.state.lock().await;
         if let Some(panel) = state_guard.panels.get(&panel_id) {
+            let requested_source_id = arg_str(args, "sourceId");
+            let requested_path = arg_str(args, "path");
+            let requested_epoch = args.get("panelEpoch").and_then(Value::as_u64);
+            let source_mismatch =
+                requested_source_id.is_some_and(|source_id| source_id != panel.source_id);
+            let path_mismatch = requested_path.is_some_and(|path| path != panel.path);
+            let epoch_mismatch_without_location = requested_source_id.is_none()
+                && requested_path.is_none()
+                && requested_epoch.is_some_and(|epoch| epoch != panel.panel_epoch);
+            if source_mismatch || path_mismatch || epoch_mismatch_without_location {
+                eprintln!(
+                    "[nav] NavigateUp ignored stale context: panel={panel_id} current_source={} current_path={} current_epoch={} request_source={} request_path={} request_epoch={}",
+                    panel.source_id,
+                    panel.path,
+                    panel.panel_epoch,
+                    requested_source_id.unwrap_or(""),
+                    requested_path.unwrap_or(""),
+                    requested_epoch
+                        .map(|epoch| epoch.to_string())
+                        .unwrap_or_default()
+                );
+                return;
+            }
             let driver = state_guard.drivers.get(&panel.source_id).unwrap();
             (
                 Some(panel.path.clone()),
@@ -1957,6 +2020,8 @@ async fn navigate_to_history_entry(args: &Value, ctx: &mut IntentContext<'_>) {
                 None => return,
             };
             panel.source_id = target_source_id.clone();
+            panel.panel_epoch += 1;
+            panel.calculating_size.clear();
             panel.shadow_source = Some(ShadowSource {
                 parent_source_id,
                 parent_path,
@@ -2005,6 +2070,8 @@ async fn navigate_to_history_entry(args: &Value, ctx: &mut IntentContext<'_>) {
                 None => return,
             };
             panel.source_id = target_source_id.clone();
+            panel.panel_epoch += 1;
+            panel.calculating_size.clear();
             panel.shadow_source = Some(ShadowSource {
                 parent_source_id,
                 parent_path,
@@ -2045,6 +2112,8 @@ async fn navigate_to_history_entry(args: &Value, ctx: &mut IntentContext<'_>) {
                 None => return,
             };
             panel.source_id = target_source_id.clone();
+            panel.panel_epoch += 1;
+            panel.calculating_size.clear();
             panel.shadow_source = None;
         }
         navigate_to(

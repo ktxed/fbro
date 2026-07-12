@@ -174,6 +174,7 @@ export interface PanelState {
   selectedEntries: FileOpFile[];
   entries: VFSEntry[];
   version: number;
+  panelEpoch: number;
   calculatingSize: string[];
   totalCount?: number;
   totalSize?: number;

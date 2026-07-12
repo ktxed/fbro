@@ -31,9 +31,11 @@ fn should_recover_scan_error(error: &VfsError) -> bool {
 }
 
 struct RecoveryScan {
+    source_id: String,
     path: String,
     sort: SortSpec,
     version: u64,
+    panel_epoch: u64,
     driver: Arc<dyn VfsDriver>,
     show_hidden: bool,
 }
@@ -46,7 +48,17 @@ async fn prepare_panel_home_recovery(
     watcher_cmd_tx: &mpsc::Sender<WatcherCommand>,
 ) -> Option<RecoveryScan> {
     let reason = reason.into();
-    let (path, sort, show_hidden, version, driver, source_id, supports_thumbs, view_mode) = {
+    let (
+        path,
+        sort,
+        show_hidden,
+        version,
+        panel_epoch,
+        driver,
+        source_id,
+        supports_thumbs,
+        view_mode,
+    ) = {
         let mut state_guard = state.lock().await;
         let fallback_source_id = state_guard.fallback_source_id_for_home()?;
         let home = state_guard.platform.home_dir();
@@ -67,6 +79,7 @@ async fn prepare_panel_home_recovery(
         panel.filter_mode_active = false;
         panel.shadow_source = None;
         panel.version += 1;
+        panel.panel_epoch += 1;
         if !supports_thumbs {
             panel.view_mode = crate::state::PanelViewMode::List;
         }
@@ -76,6 +89,7 @@ async fn prepare_panel_home_recovery(
             panel.sort.clone(),
             panel.show_hidden,
             panel.version,
+            panel.panel_epoch,
             driver,
             fallback_source_id,
             supports_thumbs,
@@ -92,6 +106,7 @@ async fn prepare_panel_home_recovery(
             patch: serde_json::json!({
                 "path": path,
                 "sourceId": source_id,
+                "panelEpoch": panel_epoch,
                 "entries": [],
                 "cursor": 0,
                 "selection": [],
@@ -140,9 +155,11 @@ async fn prepare_panel_home_recovery(
     }
 
     Some(RecoveryScan {
+        source_id,
         path,
         sort,
         version,
+        panel_epoch,
         driver,
         show_hidden,
     })
@@ -159,6 +176,8 @@ pub async fn recover_panel_to_home(
     let recovery = prepare_panel_home_recovery(panel_id, reason, tx, state, watcher_cmd_tx).await?;
     let handle = tokio::spawn(run_scan(
         panel_id.to_string(),
+        recovery.source_id,
+        recovery.panel_epoch,
         recovery.path,
         recovery.sort,
         None,
@@ -180,6 +199,8 @@ pub async fn recover_panel_to_home(
 
 pub async fn run_scan(
     panel_id: String,
+    mut source_id: String,
+    mut panel_epoch: u64,
     mut path: String,
     mut sort: SortSpec,
     mut filter: Option<FilterSpec>,
@@ -196,6 +217,9 @@ pub async fn run_scan(
     watcher_cmd_tx: mpsc::Sender<WatcherCommand>,
     mut allow_recovery: bool,
 ) {
+    eprintln!(
+        "[scan] started: panel={panel_id} source={source_id} path={path} epoch={panel_epoch} version_base={version_base} atomic={atomic}"
+    );
     let entries = loop {
         let path_clone = path.clone();
         let sort_clone = sort.clone();
@@ -207,7 +231,13 @@ pub async fn run_scan(
         .await;
 
         match result {
-            Ok(Ok(e)) => break e,
+            Ok(Ok(e)) => {
+                eprintln!(
+                    "[scan] listed: panel={panel_id} source={source_id} path={path} epoch={panel_epoch} entries={}",
+                    e.len()
+                );
+                break e;
+            }
             Ok(Err(err)) => {
                 if allow_recovery && should_recover_scan_error(&err) {
                     if let Some(recovery) = prepare_panel_home_recovery(
@@ -220,6 +250,8 @@ pub async fn run_scan(
                     .await
                     {
                         path = recovery.path;
+                        source_id = recovery.source_id;
+                        panel_epoch = recovery.panel_epoch;
                         sort = recovery.sort;
                         filter = None;
                         version_base = recovery.version;
@@ -238,7 +270,11 @@ pub async fn run_scan(
                         domain: "panels".to_string(),
                         entity_id: Some(panel_id.clone()),
                         version: version_base + 1,
-                        patch: serde_json::json!({ "status": "error", "error": err.to_string() }),
+                        patch: serde_json::json!({
+                            "panelEpoch": panel_epoch,
+                            "status": "error",
+                            "error": err.to_string()
+                        }),
                     })
                     .await;
                 return;
@@ -348,6 +384,18 @@ pub async fn run_scan(
         let (window_start, window_json, window_version) = {
             let mut s = state.lock().await;
             if let Some(panel) = s.panels.get_mut(&panel_id) {
+                if panel.panel_epoch != panel_epoch
+                    || panel.source_id != source_id
+                    || panel.path != path
+                {
+                    eprintln!(
+                        "[scan] stale windowed scan skipped: panel={panel_id} source={source_id} path={path} epoch={panel_epoch} current_source={} current_path={} current_epoch={}",
+                        panel.source_id,
+                        panel.path,
+                        panel.panel_epoch
+                    );
+                    return;
+                }
                 let existing_start = panel.window_start;
                 let window_start = if existing_start > 0 && existing_start <= max_start {
                     existing_start
@@ -376,10 +424,11 @@ pub async fn run_scan(
             .send(ServerMessage::StatePatch {
                 timestamp: crate::ws::protocol::now(),
                 domain: "panels".to_string(),
-                entity_id: Some(panel_id),
+                entity_id: Some(panel_id.clone()),
                 version: version_base + 1,
                 patch: serde_json::json!({
                     "status": "ready",
+                    "panelEpoch": panel_epoch,
                     "totalCount": total,
                     "totalSize": total_file_size,
                     "windowStart": window_start,
@@ -392,6 +441,10 @@ pub async fn run_scan(
                 }),
             })
             .await;
+        eprintln!(
+            "[scan] ready sent: panel={panel_id} source={source_id} path={path} epoch={panel_epoch} version={} mode=windowed total={total}",
+            version_base + 1
+        );
     } else if atomic {
         // ── Mode A-atomic: single replacement (no flash for watcher rescans) ─
         let version = version_base + 1;
@@ -400,6 +453,18 @@ pub async fn run_scan(
         {
             let mut s = state.lock().await;
             if let Some(panel) = s.panels.get_mut(&panel_id) {
+                if panel.panel_epoch != panel_epoch
+                    || panel.source_id != source_id
+                    || panel.path != path
+                {
+                    eprintln!(
+                        "[scan] stale atomic scan skipped: panel={panel_id} source={source_id} path={path} epoch={panel_epoch} current_source={} current_path={} current_epoch={}",
+                        panel.source_id,
+                        panel.path,
+                        panel.panel_epoch
+                    );
+                    return;
+                }
                 panel.entries = schema_entries.clone();
                 panel.cursor = cursor;
                 panel.selection = selection.clone();
@@ -410,13 +475,14 @@ pub async fn run_scan(
             }
         }
 
-        let _ = tx
+        let sent = tx
             .send(ServerMessage::StatePatch {
                 timestamp: crate::ws::protocol::now(),
                 domain: "panels".to_string(),
-                entity_id: Some(panel_id),
+                entity_id: Some(panel_id.clone()),
                 version,
                 patch: serde_json::json!({
+                    "panelEpoch": panel_epoch,
                     "entries": schema_entries,
                     "status": "ready",
                     "total": total,
@@ -428,13 +494,21 @@ pub async fn run_scan(
                 }),
             })
             .await;
+        match sent {
+            Ok(()) => eprintln!(
+                "[scan] ready sent: panel={panel_id} source={source_id} path={path} epoch={panel_epoch} version={version} mode=atomic total={total}"
+            ),
+            Err(error) => eprintln!(
+                "[scan] ready send failed: panel={panel_id} source={source_id} path={path} epoch={panel_epoch} version={version} mode=atomic error={error}"
+            ),
+        }
     } else {
         // ── Mode A: full list (streamed) ─────────────────────────────────
         let mut version = version_base;
 
         for (batch_idx, chunk) in schema_entries.chunks(BATCH_SIZE).enumerate() {
             version += 1;
-            let patch = serde_json::json!({ "appendEntries": chunk });
+            let patch = serde_json::json!({ "panelEpoch": panel_epoch, "appendEntries": chunk });
             if tx
                 .send(ServerMessage::StatePatch {
                     timestamp: crate::ws::protocol::now(),
@@ -456,17 +530,14 @@ pub async fn run_scan(
 
         version += 1;
         let selected_entries = build_selected_entries(&schema_entries, &selection);
-        {
-            let mut s = state.lock().await;
-            if let Some(panel) = s.panels.get_mut(&panel_id) { panel.git = git_status.clone(); }
-        }
-        let _ = tx
+        let sent = tx
             .send(ServerMessage::StatePatch {
                 timestamp: crate::ws::protocol::now(),
                 domain: "panels".to_string(),
-                entity_id: Some(panel_id),
+                entity_id: Some(panel_id.clone()),
                 version,
                 patch: serde_json::json!({
+                    "panelEpoch": panel_epoch,
                     "status": "ready",
                     "total": total,
                     "totalSize": total_file_size,
@@ -477,5 +548,13 @@ pub async fn run_scan(
                 }),
             })
             .await;
+        match sent {
+            Ok(()) => eprintln!(
+                "[scan] ready sent: panel={panel_id} source={source_id} path={path} epoch={panel_epoch} version={version} mode=streamed total={total}"
+            ),
+            Err(error) => eprintln!(
+                "[scan] ready send failed: panel={panel_id} source={source_id} path={path} epoch={panel_epoch} version={version} mode=streamed error={error}"
+            ),
+        }
     }
 }

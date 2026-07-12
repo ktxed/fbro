@@ -214,7 +214,7 @@ async fn handle_connection(
     } else {
         // First connection: incremental scan so entries appear progressively.
         for panel_id in &panel_ids {
-            let (path, sort, filter, show_hidden, version_base, driver) = {
+            let (source_id, panel_epoch, path, sort, filter, show_hidden, version_base, driver) = {
                 let state_guard = state.lock().await;
                 let Some(panel) = state_guard.panels.get(panel_id) else {
                     continue;
@@ -226,6 +226,8 @@ async fn handle_connection(
                     continue;
                 };
                 (
+                    panel.source_id.clone(),
+                    panel.panel_epoch,
                     panel.path.clone(),
                     panel.sort.clone(),
                     panel.filter.clone(),
@@ -238,6 +240,8 @@ async fn handle_connection(
             let handle = ScanHandle {
                 handle: tokio::spawn(crate::jobs::scan::run_scan(
                     panel_id.clone(),
+                    source_id,
+                    panel_epoch,
                     path,
                     sort,
                     filter,

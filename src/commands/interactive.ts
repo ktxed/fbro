@@ -770,7 +770,12 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
       client.sendIntent("OpenEntry", "focused-panel");
       return true;
     case "panel.navigate_up":
-      client.sendIntent("NavigateUp", "focused-panel");
+      if (!focused) return false;
+      client.sendIntent("NavigateUp", "focused-panel", {
+        sourceId: focused.panel.sourceId,
+        path: focused.panel.path,
+        panelEpoch: focused.panel.panelEpoch,
+      });
       return true;
     case "panel.navigate_home":
       client.sendIntent("NavigateHome", "focused-panel");

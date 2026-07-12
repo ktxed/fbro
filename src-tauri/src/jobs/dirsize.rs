@@ -49,6 +49,9 @@ struct TrackedTask {
 struct DirSizeWorkItem {
     task_id: u64,
     panel_id: String,
+    panel_path: String,
+    source_id: String,
+    panel_epoch: u64,
     entry_name: String,
     full_path: String,
     enqueued_at: u64,
@@ -253,6 +256,9 @@ impl DirSizeQueue {
     pub async fn enqueue(
         &self,
         panel_id: String,
+        panel_path: String,
+        source_id: String,
+        panel_epoch: u64,
         entry_name: String,
         full_path: String,
         state: SharedState,
@@ -299,6 +305,23 @@ impl DirSizeQueue {
         let panel_patch = {
             let mut s = state.lock().await;
             if let Some(panel) = s.panels.get_mut(&panel_id) {
+                if panel.path != panel_path
+                    || panel.source_id != source_id
+                    || panel.panel_epoch != panel_epoch
+                {
+                    eprintln!(
+                        "[dirsize] enqueue abandoned: task={task_id} panel={panel_id} entry={entry_name} stale_context current_source={} current_path={} current_epoch={} task_source={source_id} task_path={panel_path} task_epoch={panel_epoch}",
+                        panel.source_id,
+                        panel.path,
+                        panel.panel_epoch
+                    );
+                    {
+                        let mut tasks = self.tasks.lock().await;
+                        tasks.remove(&(panel_id.clone(), entry_name.clone()));
+                    }
+                    emit_queue_patch(&self.tasks, &tx).await;
+                    return;
+                }
                 panel.calculating_size.insert(entry_name.clone());
                 panel.version += 1;
                 let calc = calculating_vec(&panel.calculating_size);
@@ -308,7 +331,10 @@ impl DirSizeQueue {
                     domain: "panels".to_string(),
                     entity_id: Some(panel_id.clone()),
                     version: v,
-                    patch: serde_json::json!({ "calculatingSize": calc }),
+                    patch: serde_json::json!({
+                        "panelEpoch": panel_epoch,
+                        "calculatingSize": calc
+                    }),
                 })
             } else {
                 eprintln!(
@@ -342,6 +368,9 @@ impl DirSizeQueue {
             pending.push_back(DirSizeWorkItem {
                 task_id,
                 panel_id: panel_id.clone(),
+                panel_path,
+                source_id,
+                panel_epoch,
                 entry_name: entry_name.clone(),
                 full_path: full_path.clone(),
                 enqueued_at,
@@ -417,15 +446,15 @@ fn spawn_worker_loop(
                 is_current_task(&tasks, &item.panel_id, &item.entry_name, item.task_id).await;
             if !current {
                 eprintln!(
-                    "[dirsize] worker skip stale pending: worker={worker_id} task={} panel={} entry={}",
-                    item.task_id, item.panel_id, item.entry_name
+                    "[dirsize] worker skip stale pending: worker={worker_id} task={} panel={} path={} source={} entry={}",
+                    item.task_id, item.panel_id, item.panel_path, item.source_id, item.entry_name
                 );
                 continue;
             }
 
             eprintln!(
-                "[dirsize] worker dequeued: worker={worker_id} task={} panel={} entry={} path={}",
-                item.task_id, item.panel_id, item.entry_name, item.full_path
+                "[dirsize] worker dequeued: worker={worker_id} task={} panel={} panel_path={} source={} entry={} path={}",
+                item.task_id, item.panel_id, item.panel_path, item.source_id, item.entry_name, item.full_path
             );
             run_work_item(worker_id, item, &tasks, &cache).await;
         }
@@ -441,6 +470,9 @@ async fn run_work_item(
     let DirSizeWorkItem {
         task_id,
         panel_id,
+        panel_path,
+        source_id,
+        panel_epoch,
         entry_name,
         full_path,
         enqueued_at,
@@ -463,7 +495,16 @@ async fn run_work_item(
         let owned_task = remove_task_if_matches(tasks, &panel_id, &entry_name, task_id).await;
         emit_queue_patch(tasks, &tx).await;
         if owned_task {
-            patch_remove_calculating(&state, &tx, &panel_id, &entry_name).await;
+            patch_remove_calculating(
+                &state,
+                &tx,
+                &panel_id,
+                &panel_path,
+                &source_id,
+                panel_epoch,
+                &entry_name,
+            )
+            .await;
         }
         return;
     }
@@ -702,24 +743,38 @@ async fn run_work_item(
             let panel_patch = {
                 let mut s = state.lock().await;
                 if let Some(panel) = s.panels.get_mut(&panel_id) {
-                    if let Some(e) = panel.entries.iter_mut().find(|e| e.name == entry_name) {
-                        e.size = Some(size);
-                    }
-                    panel.calculating_size.remove(&entry_name);
-                    panel.version += 1;
-                    let calc = calculating_vec(&panel.calculating_size);
+                    if panel.path != panel_path
+                        || panel.source_id != source_id
+                        || panel.panel_epoch != panel_epoch
+                    {
+                        eprintln!(
+                            "[dirsize] finish panel patch skipped: worker={worker_id} task={task_id} panel={panel_id} entry={entry_name} stale_context current_source={} current_path={} current_epoch={} task_source={source_id} task_path={panel_path} task_epoch={panel_epoch}",
+                            panel.source_id,
+                            panel.path,
+                            panel.panel_epoch
+                        );
+                        None
+                    } else {
+                        if let Some(e) = panel.entries.iter_mut().find(|e| e.name == entry_name) {
+                            e.size = Some(size);
+                        }
+                        panel.calculating_size.remove(&entry_name);
+                        panel.version += 1;
+                        let calc = calculating_vec(&panel.calculating_size);
 
-                    let version = panel.version;
-                    Some(ServerMessage::StatePatch {
-                        timestamp: now(),
-                        domain: "panels".to_string(),
-                        entity_id: Some(panel_id.clone()),
-                        version,
-                        patch: serde_json::json!({
-                            "calculatingSize": calc,
-                            "updateEntrySize": { "name": entry_name, "size": size }
-                        }),
-                    })
+                        let version = panel.version;
+                        Some(ServerMessage::StatePatch {
+                            timestamp: now(),
+                            domain: "panels".to_string(),
+                            entity_id: Some(panel_id.clone()),
+                            version,
+                            patch: serde_json::json!({
+                                "panelEpoch": panel_epoch,
+                                "calculatingSize": calc,
+                                "updateEntrySize": { "name": entry_name, "size": size }
+                            }),
+                        })
+                    }
                 } else {
                     eprintln!(
                         "[dirsize] finish state skipped: worker={worker_id} task={task_id} panel={panel_id} entry={entry_name} missing_panel"
@@ -755,7 +810,16 @@ async fn run_work_item(
                 latest_progress.current_path.as_deref().unwrap_or("")
             );
             if owned_task {
-                patch_remove_calculating(&state, &tx, &panel_id, &entry_name).await;
+                patch_remove_calculating(
+                    &state,
+                    &tx,
+                    &panel_id,
+                    &panel_path,
+                    &source_id,
+                    panel_epoch,
+                    &entry_name,
+                )
+                .await;
             }
         }
         DirSizeOutcome::Panicked => {
@@ -763,7 +827,16 @@ async fn run_work_item(
                 "[dirsize] error: worker={worker_id} task={task_id} panel={panel_id} entry={entry_name} worker panicked"
             );
             if owned_task {
-                patch_remove_calculating(&state, &tx, &panel_id, &entry_name).await;
+                patch_remove_calculating(
+                    &state,
+                    &tx,
+                    &panel_id,
+                    &panel_path,
+                    &source_id,
+                    panel_epoch,
+                    &entry_name,
+                )
+                .await;
             }
         }
         DirSizeOutcome::TimedOut => {
@@ -778,7 +851,16 @@ async fn run_work_item(
                 latest_progress.current_path.as_deref().unwrap_or("")
             );
             if owned_task {
-                patch_remove_calculating(&state, &tx, &panel_id, &entry_name).await;
+                patch_remove_calculating(
+                    &state,
+                    &tx,
+                    &panel_id,
+                    &panel_path,
+                    &source_id,
+                    panel_epoch,
+                    &entry_name,
+                )
+                .await;
             }
         }
     }
@@ -1003,22 +1085,41 @@ async fn patch_remove_calculating(
     state: &SharedState,
     tx: &mpsc::Sender<ServerMessage>,
     panel_id: &str,
+    panel_path: &str,
+    source_id: &str,
+    panel_epoch: u64,
     entry_name: &str,
 ) {
     let panel_patch = {
         let mut s = state.lock().await;
         if let Some(panel) = s.panels.get_mut(panel_id) {
-            panel.calculating_size.remove(entry_name);
-            panel.version += 1;
-            let calc = calculating_vec(&panel.calculating_size);
-            let version = panel.version;
-            Some(ServerMessage::StatePatch {
-                timestamp: now(),
-                domain: "panels".to_string(),
-                entity_id: Some(panel_id.to_string()),
-                version,
-                patch: serde_json::json!({ "calculatingSize": calc }),
-            })
+            if panel.path != panel_path
+                || panel.source_id != source_id
+                || panel.panel_epoch != panel_epoch
+            {
+                eprintln!(
+                    "[dirsize] panel calculating remove skipped: panel={panel_id} entry={entry_name} stale_context current_source={} current_path={} current_epoch={} task_source={source_id} task_path={panel_path} task_epoch={panel_epoch}",
+                    panel.source_id,
+                    panel.path,
+                    panel.panel_epoch
+                );
+                None
+            } else {
+                panel.calculating_size.remove(entry_name);
+                panel.version += 1;
+                let calc = calculating_vec(&panel.calculating_size);
+                let version = panel.version;
+                Some(ServerMessage::StatePatch {
+                    timestamp: now(),
+                    domain: "panels".to_string(),
+                    entity_id: Some(panel_id.to_string()),
+                    version,
+                    patch: serde_json::json!({
+                        "panelEpoch": panel_epoch,
+                        "calculatingSize": calc
+                    }),
+                })
+            }
         } else {
             eprintln!(
                 "[dirsize] panel calculating remove skipped: panel={panel_id} entry={entry_name} missing_panel"

@@ -400,7 +400,7 @@ function applySnapshot(state: AppState, msg: StateSnapshotMessage): AppState {
   if (domains.panels) {
     const panels: Record<string, PanelState> = {};
     for (const [id, p] of Object.entries(domains.panels)) {
-      panels[id] = { ...p, panelId: id, entries: p.entries ?? [], selection: p.selection ?? [], selectedEntries: p.selectedEntries ?? [], version: p.version ?? 0, calculatingSize: p.calculatingSize ?? [], totalCount: p.totalCount, totalSize: p.totalSize, windowStart: p.windowStart, filterModeActive: p.filterModeActive ?? false, showHidden: p.showHidden ?? false, viewMode: p.viewMode ?? "list", supportsThumbnails: p.supportsThumbnails ?? false };
+      panels[id] = { ...p, panelId: id, entries: p.entries ?? [], selection: p.selection ?? [], selectedEntries: p.selectedEntries ?? [], version: p.version ?? 0, panelEpoch: p.panelEpoch ?? 0, calculatingSize: p.calculatingSize ?? [], totalCount: p.totalCount, totalSize: p.totalSize, windowStart: p.windowStart, filterModeActive: p.filterModeActive ?? false, showHidden: p.showHidden ?? false, viewMode: p.viewMode ?? "list", supportsThumbnails: p.supportsThumbnails ?? false };
     }
     next.panels = panels;
     next.panelHistory = Object.fromEntries(
@@ -459,7 +459,7 @@ function applySnapshot(state: AppState, msg: StateSnapshotMessage): AppState {
 function applyPatch(state: AppState, msg: StatePatchMessage): AppState {
   if (msg.domain === "panels" && msg.entityId) {
     const panelId = msg.entityId;
-    const panel = state.panels[panelId];
+    let panel = state.panels[panelId];
     if (!panel) {
       // Unknown panel id — accept it iff this patch is a "create" payload
       // carrying enough fields to seed a PanelState. The BE emits one of
@@ -486,6 +486,7 @@ function applyPatch(state: AppState, msg: StatePatchMessage): AppState {
         selectedEntries: [],
         entries: [],
         version: msg.version ?? 0,
+        panelEpoch: p.panelEpoch ?? 0,
         calculatingSize: [],
         shadowSource: p.shadowSource,
         terminalSessionId: p.terminalSessionId,
@@ -499,6 +500,17 @@ function applyPatch(state: AppState, msg: StatePatchMessage): AppState {
           [panelId]: { entries: [{ path: fresh.path, sourceId: fresh.sourceId }], cursor: 0 },
         },
       };
+    }
+
+    const incomingEpoch = typeof msg.patch.panelEpoch === "number" ? msg.patch.panelEpoch : undefined;
+    const locationPatch = msg.patch.path !== undefined || msg.patch.sourceId !== undefined;
+    const currentEpoch = panel.panelEpoch ?? 0;
+    const epochAdvances = incomingEpoch !== undefined && incomingEpoch > currentEpoch;
+    if (incomingEpoch !== undefined) {
+      if ((!locationPatch && incomingEpoch !== currentEpoch)
+       || (locationPatch && incomingEpoch < currentEpoch)) {
+        return state;
+      }
     }
 
     // Some fields are applied before the version guard because a dirsize try_send
@@ -557,14 +569,21 @@ function applyPatch(state: AppState, msg: StatePatchMessage): AppState {
     }
     if (preGuardPanel !== panel) {
       state = { ...state, panels: { ...state.panels, [panelId]: preGuardPanel } };
+      panel = preGuardPanel;
     }
 
     // Version guard — drop structurally stale patches (old scan data arriving
     // after a newer scan has already produced results).
-    if (msg.version <= panel.version && msg.version !== 0) return state;
+    if (msg.version <= panel.version && msg.version !== 0 && !epochAdvances) return state;
 
-    let updated = { ...panel, version: msg.version };
+    let updated = {
+      ...panel,
+      version: epochAdvances ? msg.version : Math.max(panel.version, msg.version),
+    };
 
+    if (incomingEpoch !== undefined) {
+      updated = { ...updated, panelEpoch: incomingEpoch };
+    }
     if (msg.patch.appendEntries) {
       updated = { ...updated, entries: [...updated.entries, ...msg.patch.appendEntries] };
     }

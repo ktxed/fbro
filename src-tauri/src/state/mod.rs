@@ -427,6 +427,9 @@ pub struct Panel {
     pub selection: Vec<usize>,
     pub entries: Vec<EntrySchema>,
     pub version: u64,
+    /// Monotonic navigation context. Background panel work captures this value
+    /// when it starts and must not mutate the panel after it changes.
+    pub panel_epoch: u64,
     pub calculating_size: HashSet<String>,
     /// When true, this panel is in windowed mode (Mode B) — FE receives only a
     /// slice of entries rather than the full list.
@@ -672,6 +675,7 @@ impl AppState {
             selection: vec![],
             entries: vec![],
             version: 0,
+            panel_epoch: 0,
             calculating_size: HashSet::new(),
             windowed: false,
             window_start: 0,
@@ -700,6 +704,7 @@ impl AppState {
             selection: vec![],
             entries: vec![],
             version: 0,
+            panel_epoch: 0,
             calculating_size: HashSet::new(),
             windowed: false,
             window_start: 0,
@@ -1149,6 +1154,7 @@ pub fn restore_tabs_from_session(
                 selection: vec![],
                 entries: vec![],
                 version: 0,
+                panel_epoch: 0,
                 calculating_size: HashSet::new(),
                 windowed: false,
                 window_start: 0,

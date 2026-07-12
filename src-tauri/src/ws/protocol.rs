@@ -477,6 +477,8 @@ pub struct PanelSnapshot {
     pub selected_entries: Vec<FileOpFileSchema>,
     pub entries: Vec<EntrySchema>,
     pub version: u64,
+    #[serde(rename = "panelEpoch")]
+    pub panel_epoch: u64,
     #[serde(rename = "calculatingSize")]
     pub calculating_size: Vec<String>,
     #[serde(rename = "totalCount", skip_serializing_if = "Option::is_none")]

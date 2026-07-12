@@ -188,6 +188,7 @@ async fn new_tab(args: &Value, ctx: &mut IntentContext<'_>) {
             selection: vec![],
             entries: vec![],
             version: 0,
+            panel_epoch: 0,
             calculating_size: Default::default(),
             windowed: false,
             window_start: 0,
@@ -259,6 +260,8 @@ async fn new_tab(args: &Value, ctx: &mut IntentContext<'_>) {
         let _ = supports_thumbs;
         let handle = tokio::spawn(run_scan(
             new_panel.panel_id.clone(),
+            new_panel.source_id.clone(),
+            new_panel.panel_epoch,
             new_panel.path.clone(),
             sort,
             filter,
@@ -398,6 +401,7 @@ async fn promote_terminal(args: &Value, ctx: &mut IntentContext<'_>) {
             selection: vec![],
             entries: vec![],
             version: 0,
+            panel_epoch: 0,
             calculating_size: Default::default(),
             windowed: false,
             window_start: 0,

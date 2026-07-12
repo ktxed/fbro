@@ -889,7 +889,7 @@ async fn calculate_size(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>
     let panel_id = resolve_panel_id(scope, ctx.state).await;
     let parsed = NameArgs::from_args(args);
 
-    let (full_path, is_shadow, source_id) = {
+    let (panel_path, full_path, is_shadow, source_id, panel_epoch) = {
         let state_guard = ctx.state.lock().await;
         match state_guard.panels.get(&panel_id).and_then(|panel| {
             panel
@@ -903,9 +903,11 @@ async fn calculate_size(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>
                         format!("{}/{}", panel.path.trim_end_matches('/'), parsed.name)
                     };
                     (
+                        panel.path.clone(),
                         dir_path,
                         panel.shadow_source.is_some(),
                         panel.source_id.clone(),
+                        panel.panel_epoch,
                     )
                 })
         }) {
@@ -933,14 +935,14 @@ async fn calculate_size(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>
         };
         if let Some(size) = size {
             // Update the entry size directly.
-            let version = {
+            let (version, panel_epoch) = {
                 let mut state_guard = ctx.state.lock().await;
                 if let Some(panel) = state_guard.panels.get_mut(&panel_id) {
                     if let Some(entry) = panel.entries.iter_mut().find(|e| e.name == parsed.name) {
                         entry.size = Some(size);
                     }
                     panel.version += 1;
-                    panel.version
+                    (panel.version, panel.panel_epoch)
                 } else {
                     return;
                 }
@@ -949,7 +951,10 @@ async fn calculate_size(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>
                 ctx,
                 panel_id.clone(),
                 version,
-                serde_json::json!({ "updateEntrySize": { "name": parsed.name, "size": size } }),
+                serde_json::json!({
+                    "panelEpoch": panel_epoch,
+                    "updateEntrySize": { "name": parsed.name, "size": size }
+                }),
             )
             .await;
         }
@@ -960,6 +965,9 @@ async fn calculate_size(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>
     ctx.dir_size_queue
         .enqueue(
             panel_id,
+            panel_path,
+            source_id,
+            panel_epoch,
             parsed.name,
             full_path,
             std::sync::Arc::clone(ctx.state),
@@ -975,7 +983,7 @@ async fn cancel_size_calculation(scope: &Value, args: &Value, ctx: &mut IntentCo
         .cancel(&panel_id, &parsed.name, ctx.tx)
         .await;
 
-    let (calculating_size, version) = {
+    let (calculating_size, version, panel_epoch) = {
         let mut state_guard = ctx.state.lock().await;
         if let Some(panel) = state_guard.panels.get_mut(&panel_id) {
             panel.calculating_size.remove(&parsed.name);
@@ -983,7 +991,7 @@ async fn cancel_size_calculation(scope: &Value, args: &Value, ctx: &mut IntentCo
             let mut calculating_size: Vec<String> =
                 panel.calculating_size.iter().cloned().collect();
             calculating_size.sort();
-            (calculating_size, panel.version)
+            (calculating_size, panel.version, panel.panel_epoch)
         } else {
             return;
         }
@@ -993,7 +1001,10 @@ async fn cancel_size_calculation(scope: &Value, args: &Value, ctx: &mut IntentCo
         ctx,
         panel_id,
         version,
-        serde_json::json!({ "calculatingSize": calculating_size }),
+        serde_json::json!({
+            "panelEpoch": panel_epoch,
+            "calculatingSize": calculating_size
+        }),
     )
     .await;
 }
