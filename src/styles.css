@@ -7,6 +7,14 @@
   padding: 0;
 }
 
+/* fbro communicates focus through its panel cursor and modal state. Suppress
+ * the browser/WebView focus ring, which otherwise leaks onto background
+ * controls while a modal is handling keyboard input. */
+*:focus,
+*:focus-visible {
+  outline: none;
+}
+
 :root {
   --bg:           #0d0d0d;
   --bg-panel:     #111111;

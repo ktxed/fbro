@@ -41,7 +41,10 @@ const SORT_COLUMNS = [
 
 function computeGridMetrics(listEl: HTMLElement | null) {
   if (!listEl) return { cols: 1, cardWidth: GRID_CARD_MIN_WIDTH, cardHeight: 168, pageRows: 1 };
-  const inner = Math.max(GRID_CARD_MIN_WIDTH, listEl.clientWidth - GRID_PADDING);
+  // A tab or layout can be briefly hidden while it is being swapped. Avoid
+  // turning that transient measurement into invalid absolute card positions.
+  const width = listEl.getBoundingClientRect().width || listEl.clientWidth;
+  const inner = Math.max(GRID_CARD_MIN_WIDTH, Number.isFinite(width) ? width - GRID_PADDING : GRID_CARD_MIN_WIDTH);
   const cols = Math.max(1, Math.floor((inner + GRID_GAP) / (GRID_CARD_MIN_WIDTH + GRID_GAP)));
   const cardWidth = Math.floor((inner - (cols - 1) * GRID_GAP) / cols);
   // Card height = thumb (4:3 from card width)
@@ -561,6 +564,7 @@ export function Panel({
   const isWindowed = panel.totalCount !== undefined && panel.totalCount > panel.entries.length;
   const totalCount = panel.totalCount ?? panel.entries.length;
   const windowStart = panel.windowStart ?? 0;
+  const isGrid = panel.viewMode === "grid" && panel.supportsThumbnails;
   const selectionSet = useMemo(() => new Set(panel.selection), [panel.selection]);
 
   const [filterInput, setFilterInput] = useState(panel.filter?.value ?? "");
@@ -666,6 +670,24 @@ export function Panel({
     ro.observe(list);
     return () => ro.disconnect();
   }, []);
+
+  // `g` changes the rendering mode without necessarily resizing this element,
+  // so ResizeObserver alone can leave a stale column count in place. Refresh
+  // before the first grid paint to keep the row/column coordinates coherent.
+  useLayoutEffect(() => {
+    if (!isGrid) return;
+    const list = listRef.current;
+    if (!list) return;
+    const metrics = computeGridMetrics(list);
+    setGridMetrics((previous) =>
+      previous.cols === metrics.cols
+        && previous.cardWidth === metrics.cardWidth
+        && previous.cardHeight === metrics.cardHeight
+        && previous.pageRows === metrics.pageRows
+        ? previous
+        : metrics,
+    );
+  }, [isGrid, panelId]);
 
   // Cursor-dwell tooltip: in grid mode, after the listing cursor stays on a
   // card for 2 s and that card has any ellipsed text, render an expanded
@@ -1150,8 +1172,6 @@ export function Panel({
     client.sendIntent("ClearSelection", panelId);
     focusDivRef.current?.focus();
   }
-
-  const isGrid = panel.viewMode === "grid" && panel.supportsThumbnails;
 
   const entryPathFor = (entry: VFSEntry): string | null => {
     if (entry.sourcePath) return entry.sourcePath;
