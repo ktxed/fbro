@@ -8,6 +8,7 @@ mod drag_out;
 mod fileserver;
 #[cfg(target_os = "linux")]
 mod input_history;
+mod journal;
 mod jobs;
 mod persistence;
 mod platform;

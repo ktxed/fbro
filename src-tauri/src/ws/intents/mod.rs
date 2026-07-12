@@ -20,6 +20,18 @@ use serde_json::Value;
 use crate::ws::runtime::IntentContext;
 
 pub async fn dispatch(name: &str, scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
+    // The journal observes semantic commands, not frontend/backend chatter.
+    // Its own source is explicitly excluded to prevent recursive audit events.
+    if should_record_command(name)
+        && args.get("sourceId").and_then(Value::as_str) != Some(crate::journal::SOURCE_ID)
+    {
+        crate::journal::record_command(
+            name,
+            scope,
+            args,
+            args.get("sourceId").and_then(Value::as_str),
+        );
+    }
     match name {
         "RefreshPanels"
         | "Refresh"
@@ -124,6 +136,25 @@ pub async fn dispatch(name: &str, scope: &Value, args: &Value, ctx: &mut IntentC
     }
 }
 
+fn should_record_command(name: &str) -> bool {
+    matches!(
+        name,
+        "StartFileOp"
+            | "RenameFile"
+            | "MakeDir"
+            | "TouchFile"
+            | "SetPermissions"
+            | "WriteExternalClipboard"
+            | "PasteExternalClipboard"
+            | "ViewFile"
+            | "EditFile"
+            | "OpenFile"
+            | "LaunchBro"
+            | "KillProcess"
+            | "OpenTerminal"
+    )
+}
+
 pub(crate) fn is_archive_source(source_id: &str) -> bool {
     source_id.starts_with("zip:") || source_id.starts_with("7z:")
 }
@@ -148,6 +179,10 @@ pub(crate) fn is_history_source(source_id: &str) -> bool {
 
 pub(crate) fn is_procs_source(source_id: &str) -> bool {
     source_id == "procs"
+}
+
+pub(crate) fn is_journal_source(source_id: &str) -> bool {
+    source_id == crate::journal::SOURCE_ID
 }
 
 pub(crate) fn is_global_selection_source(source_id: &str) -> bool {

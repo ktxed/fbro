@@ -5,7 +5,7 @@ use serde_json::Value;
 use crate::jobs::viewer_prefetch::PREFETCH_IMAGE_CAP;
 use crate::state::settings::GeneralSettings;
 use crate::vfs::{search::SearchResultsDriver, VfsDriver};
-use crate::ws::intents::{arg_str, arg_u64, is_archive_source, is_procs_source, is_search_source};
+use crate::ws::intents::{arg_str, arg_u64, is_archive_source, is_journal_source, is_procs_source, is_search_source};
 use crate::ws::protocol::{now, ServerMessage};
 use crate::ws::runtime::{url_encode, IntentContext};
 
@@ -167,6 +167,14 @@ async fn view_file(args: &Value, ctx: &mut IntentContext<'_>) {
                 format!("{}/{}", parsed.path.trim_end_matches('/'), parsed.filename),
             )
         }
+    } else if is_journal_source(&parsed.source_id) {
+        let state_guard = ctx.state.lock().await;
+        let inner_path = state_guard
+            .drivers
+            .get(&parsed.source_id)
+            .map(|driver| driver.resolve_child("", &parsed.filename))
+            .unwrap_or_else(|| parsed.filename.clone());
+        (parsed.source_id.clone(), inner_path)
     } else if is_archive_source(&parsed.source_id) || is_procs_source(&parsed.source_id) {
         let inner_path = {
             let p = parsed.path.trim_end_matches('/');
@@ -411,6 +419,13 @@ async fn viewer_navigate(args: &Value, ctx: &mut IntentContext<'_>) {
                                     source_id.clone(),
                                 )
                             })
+                    } else if is_journal_source(&source_id) {
+                        let inner_path = state_guard
+                            .drivers
+                            .get(&source_id)
+                            .map(|driver| driver.resolve_child("", &name))
+                            .unwrap_or(name.clone());
+                        (inner_path, source_id.clone())
                     } else if is_archive_source(&source_id) || is_procs_source(&source_id) {
                         let inner_path = {
                             let p = dir_path.trim_end_matches('/');

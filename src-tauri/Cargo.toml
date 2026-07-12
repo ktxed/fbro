@@ -39,6 +39,7 @@ russh-sftp = "2.1"
 bytes = "1"
 blake3 = { version = "1", features = ["rayon", "mmap"] }
 memmap2 = "0.9"
+rusqlite = { version = "0.32", features = ["bundled"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 png = "0.17"

@@ -1733,6 +1733,10 @@ async fn rename_file(args: &Value, ctx: &mut IntentContext<'_>) {
                 .await;
         match result {
             Ok(Ok(true)) => {
+                crate::journal::record(
+                    "mutation.entry.v1", None, None, None, Some("completed"),
+                    serde_json::json!({ "kind": "rename", "source": parsed.source_path, "destination": dest_path, "undoEligible": false }),
+                );
                 let _ = ctx
                     .tx
                     .send(ServerMessage::RenameOk {
@@ -1810,6 +1814,10 @@ async fn make_dir(args: &Value, ctx: &mut IntentContext<'_>) {
             tokio::task::spawn_blocking(move || driver.create_dir_all(&full_path_clone)).await;
         match result {
             Ok(Ok(())) => {
+                crate::journal::record(
+                    "mutation.entry.v1", None, None, None, Some("completed"),
+                    serde_json::json!({ "kind": "mkdir", "destination": full_path, "undoEligible": false }),
+                );
                 let _ = ctx
                     .tx
                     .send(ServerMessage::MkdirOk {
@@ -1875,6 +1883,10 @@ async fn touch_file(args: &Value, ctx: &mut IntentContext<'_>) {
         match result {
             Ok(Ok(_writer)) => {
                 // writer dropped here — file created as zero bytes
+                crate::journal::record(
+                    "mutation.entry.v1", None, None, None, Some("completed"),
+                    serde_json::json!({ "kind": "touch", "destination": full_path, "undoEligible": false }),
+                );
                 let _ = ctx
                     .tx
                     .send(ServerMessage::TouchFileOk {
@@ -2001,6 +2013,12 @@ async fn set_permissions(args: &Value, ctx: &mut IntentContext<'_>) {
     if let Some(error) = last_error {
         let _ = send_error(ctx, "SET_PERMISSIONS_FAILED", error).await;
     } else {
+        for path in &paths {
+            crate::journal::record(
+                "mutation.entry.v1", None, None, None, Some("completed"),
+                serde_json::json!({ "kind": "permissions", "source": path, "mode": mode, "undoEligible": false }),
+            );
+        }
         let _ = ctx
             .tx
             .send(ServerMessage::SetPermissionsOk {

@@ -449,7 +449,7 @@ function openFocusedEntry(client: WsClient, panel: PanelState, sources: Record<s
   if (entry && entry.kind !== "directory") {
     // Archive files are navigable — treat Enter the same as navigating into a directory.
     const lname = entry.name.toLowerCase();
-    if (sources[panel.sourceId]?.kind === "remote") {
+    if (sources[panel.sourceId]?.kind === "remote" || panel.sourceId === "journal") {
       client.sendIntent("ViewFile", undefined, {
         panelId: panel.panelId,
         path: panel.path,

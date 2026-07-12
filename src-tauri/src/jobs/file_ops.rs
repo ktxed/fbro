@@ -96,6 +96,7 @@ pub async fn run_file_op(
     auto_resume_copies: bool,
     keep_partial_files_on_cancel: Arc<AtomicBool>,
 ) {
+    let op_name = file_op_name(&op_type);
     let job_id_clone = job_id.clone();
     let tx_clone = tx.clone();
     let result = tokio::task::spawn_blocking(move || {
@@ -123,18 +124,30 @@ pub async fn run_file_op(
 
     match result {
         Ok(Ok(())) => {
+            crate::journal::record_operation_finished(&job_id, op_name, "completed", None);
             let _ = tx_event(&tx, &job_id, "Completed", None, None, None).await;
         }
         Ok(Err(err)) => {
             if err == CANCELLED_ERR {
+                crate::journal::record_operation_finished(&job_id, op_name, "cancelled", None);
                 let _ = tx_event(&tx, &job_id, "Cancelled", None, None, None).await;
             } else {
+                crate::journal::record_operation_finished(&job_id, op_name, "failed", Some(&err));
                 let _ = tx_event(&tx, &job_id, "Failed", None, None, Some(err)).await;
             }
         }
         Err(_) => {
+            crate::journal::record_operation_finished(&job_id, op_name, "cancelled", None);
             let _ = tx_event(&tx, &job_id, "Cancelled", None, None, None).await;
         }
+    }
+}
+
+fn file_op_name(op_type: &FileOpType) -> &'static str {
+    match op_type {
+        FileOpType::Copy => "copy",
+        FileOpType::Move => "move",
+        FileOpType::Delete => "delete",
     }
 }
 
@@ -211,8 +224,7 @@ fn run_file_op_blocking(
 
     for entry in files {
         if wait_if_paused(pause_rx, cancel_rx) {
-            send_event_sync(tx, job_id, "Cancelled", None, None, None);
-            return Ok(());
+            return Err(CANCELLED_ERR.to_string());
         }
 
         match op_type {
@@ -250,6 +262,7 @@ fn run_file_op_blocking(
                                 total_bytes_total,
                                 total_bytes_completed,
                             );
+                            crate::journal::record_mutation(job_id, "move", src, Some(&dst_str));
                             continue;
                         }
                         Ok(false) => {
@@ -326,8 +339,7 @@ fn run_file_op_blocking(
                                 continue;
                             }
                             ConflictOutcome::Cancel => {
-                                send_event_sync(tx, job_id, "Cancelled", None, None, None);
-                                return Ok(());
+                                return Err(CANCELLED_ERR.to_string());
                             }
                         }
                     }
@@ -381,6 +393,12 @@ fn run_file_op_blocking(
                         let _ = src_driver.remove_file(src);
                     }
                 }
+                crate::journal::record_mutation(
+                    job_id,
+                    match op_type { FileOpType::Copy => "copy", FileOpType::Move => "move", FileOpType::Delete => unreachable!() },
+                    src,
+                    Some(&dst_str),
+                );
             }
 
             FileOpType::Delete => {
@@ -409,6 +427,7 @@ fn run_file_op_blocking(
                 }
 
                 completed_files += 1;
+                crate::journal::record_mutation(job_id, "delete", src, None);
                 send_progress_sync(
                     tx,
                     job_id,

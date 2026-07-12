@@ -9,13 +9,14 @@ import {
   PANEL_SHORTCUT_COMMAND_IDS,
 } from "../commands/interactive";
 import { useAppDispatch, useAppState } from "../store";
-import { IconChevronDown, IconChevronUp, IconChevronRight, IconChevronLeft, IconArrowUpRight, IconX, IconAlertTriangle, IconActivity, IconLock, IconNetwork, IconListCheck } from "@tabler/icons-react";
+import { IconChevronDown, IconChevronUp, IconChevronRight, IconChevronLeft, IconArrowUpRight, IconX, IconAlertTriangle, IconActivity, IconHistory, IconLock, IconNetwork, IconListCheck } from "@tabler/icons-react";
 
 // Maps Source.iconName (BE-provided) to a Tabler icon component for rendering
 // in the volume bar. Sources with an iconName render the icon in place of
 // their text label; unknown names fall back to the text label.
 const SOURCE_ICONS: Record<string, React.ComponentType<{ size?: number }>> = {
   activity: IconActivity,
+  history: IconHistory,
   "list-check": IconListCheck,
 };
 import { BookmarksPopover } from "./BookmarksPopover";
@@ -1174,7 +1175,7 @@ export function Panel({
       client.sendIntent("OpenEntry", "focused-panel");
       return;
     }
-    if (source?.kind === "remote") {
+    if (source?.kind === "remote" || panel.sourceId === "journal") {
       client.sendIntent("ViewFile", undefined, {
         panelId,
         path: panel.path,

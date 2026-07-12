@@ -813,6 +813,27 @@ impl AppState {
                 hierarchical: loaded_settings.general.proc_tree_mode,
             }),
         );
+        sources.insert(
+            crate::journal::SOURCE_ID.to_string(),
+            Source {
+                id: crate::journal::SOURCE_ID.to_string(),
+                name: "Journal".to_string(),
+                kind: "virtual".to_string(),
+                supports: vec!["ListEntries".to_string(), "InspectItem".to_string()],
+                root_path: String::new(),
+                mounted: true,
+                device_path: None,
+                shadow: false,
+                icon_name: Some("history".to_string()),
+                sort_priority: 1,
+                read_only: true,
+                peer_id: None,
+            },
+        );
+        drivers.insert(
+            crate::journal::SOURCE_ID.to_string(),
+            Arc::new(crate::journal::JournalDriver),
+        );
         drivers.insert(
             crate::vfs::global_selection::SOURCE_ID.to_string(),
             Arc::new(crate::vfs::global_selection::GlobalSelectionDriver::new(
