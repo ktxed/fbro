@@ -16,6 +16,10 @@ export function GitActionsModal({ panelId, git, client, onClose }: Props) {
   const lastGitRef = useRef(git);
   const [activeIndex, setActiveIndex] = useState(0);
   const [activity, setActivity] = useState<{ action: string; message: string } | null>(null);
+  const canPull = git.clean && git.behindCount !== undefined && git.behindCount > 0;
+  const canPush = git.clean && !!git.upstream && git.aheadCount !== undefined && git.aheadCount > 0;
+  const pullDisabledMessage = !git.clean ? "Requires a clean worktree" : !git.upstream ? "No upstream configured" : git.behindCount === 0 ? "Already up to date" : "Remote status unavailable — fetch first";
+  const pushDisabledMessage = !git.clean ? "Requires a clean worktree" : !git.upstream ? "No upstream configured — set an upstream first" : git.aheadCount === 0 ? "No outgoing commits" : "Remote status unavailable — fetch first";
   const act = (name: string, args: Record<string, unknown> = {}) => {
     client.sendIntent(name, undefined, { panelId, ...args });
   };
@@ -55,8 +59,8 @@ export function GitActionsModal({ panelId, git, client, onClose }: Props) {
       const accelerators: Record<string, () => void> = {
         f: () => runAction("GitFetch", "Fetching remote…"),
         b: () => focusControl(1),
-        l: () => { if (git.clean) runAction("GitPull", "Pulling changes…"); },
-        p: () => { if (git.clean) runAction("GitPush", "Pushing changes…"); },
+        l: () => { if (canPull) runAction("GitPull", "Pulling changes…"); },
+        p: () => { if (canPush) runAction("GitPush", "Pushing changes…"); },
         u: () => { if (!git.upstream && git.clean && !git.detached) runAction("GitSetUpstream", "Setting upstream…", { branch: git.branch }); },
       };
       if (accelerators[key]) {
@@ -76,7 +80,7 @@ export function GitActionsModal({ panelId, git, client, onClose }: Props) {
     };
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [activeIndex, focusControl, git.branch, git.clean, git.detached, git.upstream, onClose]);
+  }, [activeIndex, canPull, canPush, focusControl, git.branch, git.clean, git.detached, git.upstream, onClose]);
 
   const disabledMessage = "Requires a clean worktree";
   return (
@@ -98,11 +102,11 @@ export function GitActionsModal({ panelId, git, client, onClose }: Props) {
               {git.branches.map((branch) => <option key={branch} value={branch}>{branch}</option>)}
             </select>
           </label>
-          <button ref={(el) => { controlRefs.current[2] = el; }} type="button" className={`git-actions-modal__choice${activeIndex === 2 ? " is-keyboard-active" : ""}`} disabled={!git.clean} title={!git.clean ? disabledMessage : undefined} onFocus={() => setActiveIndex(2)} onClick={() => runAction("GitPull", "Pulling changes…")}>
+          <button ref={(el) => { controlRefs.current[2] = el; }} type="button" className={`git-actions-modal__choice${activeIndex === 2 ? " is-keyboard-active" : ""}`} disabled={!canPull} title={!canPull ? pullDisabledMessage : undefined} onFocus={() => setActiveIndex(2)} onClick={() => runAction("GitPull", "Pulling changes…")}>
             <IconArrowDown size={19} /><span><strong>Pull <kbd>L</kbd></strong><small>Bring in remote commits</small></span>
             {git.behindCount !== undefined && <em className="git-actions-modal__badge git-actions-modal__badge--incoming"><IconArrowDown size={13} /> {git.behindCount}</em>}
           </button>
-          <button ref={(el) => { controlRefs.current[3] = el; }} type="button" className={`git-actions-modal__choice${activeIndex === 3 ? " is-keyboard-active" : ""}`} disabled={!git.clean} title={!git.clean ? disabledMessage : undefined} onFocus={() => setActiveIndex(3)} onClick={() => runAction("GitPush", "Pushing changes…")}>
+          <button ref={(el) => { controlRefs.current[3] = el; }} type="button" className={`git-actions-modal__choice${activeIndex === 3 ? " is-keyboard-active" : ""}`} disabled={!canPush} title={!canPush ? pushDisabledMessage : undefined} onFocus={() => setActiveIndex(3)} onClick={() => runAction("GitPush", "Pushing changes…")}>
             <IconArrowUp size={19} /><span><strong>Push <kbd>P</kbd></strong><small>Send local commits to remote</small></span>
             {git.aheadCount !== undefined && <em className="git-actions-modal__badge git-actions-modal__badge--outgoing"><IconArrowUp size={13} /> {git.aheadCount}</em>}
           </button>
