@@ -513,6 +513,8 @@ pub struct EntrySchema {
     pub source_path: Option<String>,
     #[serde(rename = "gitStatus", skip_serializing_if = "Option::is_none")]
     pub git_status: Option<String>,
+    #[serde(rename = "gitDetails", skip_serializing_if = "Option::is_none")]
+    pub git_details: Option<crate::git::GitEntryDetails>,
 }
 
 #[derive(Serialize, Clone, Debug)]

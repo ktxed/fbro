@@ -14,6 +14,10 @@ export interface VFSEntry {
    *  path (e.g. search-result entries). Absent for all normal entries. */
   sourcePath?: string;
   gitStatus?: string;
+  gitDetails?: {
+    changedCount: number;
+    samplePaths: string[];
+  };
 }
 
 export interface GitChange {

@@ -260,6 +260,7 @@ pub async fn run_scan(
             cc: e.cc,
             source_path: e.source_path,
             git_status: None,
+            git_details: None,
         })
         .collect();
 

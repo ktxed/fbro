@@ -11,11 +11,20 @@ export function GitModal({ panelId, git, client, onClose }: { panelId: string; g
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
+        event.stopImmediatePropagation();
         onClose();
+        return;
       }
+      // The panel keeps focus behind this modeless-looking overlay. Treat the
+      // dialog as a real modal boundary so its shortcuts cannot leak into the
+      // file list (for example ArrowUp navigating the underlying panel).
+      const target = event.target;
+      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
     };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [onClose]);
   return <div className="modal-overlay" role="dialog" aria-modal="true"><ResizableModal modalId="git" client={client} className="git-modal" ariaLabel="Git repository" ariaModal defaultSize={{ width: 760, height: 700 }} minSize={{ width: 640, height: 620 }}>
     <div className="git-modal__header"><div><span className="git-modal__eyebrow">REPOSITORY</span><strong>{git.branch}</strong></div><button className="git-modal__close" title="Close" onClick={onClose}>×</button></div>

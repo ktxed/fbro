@@ -581,6 +581,7 @@ export function Panel({
   const totalCount = panel.totalCount ?? panel.entries.length;
   const windowStart = panel.windowStart ?? 0;
   const isGrid = panel.viewMode === "grid" && panel.supportsThumbnails;
+  const gitHeaderState = panel.git ? (panel.git.clean ? "ready" : "warning") : null;
   const selectionSet = useMemo(() => new Set(panel.selection), [panel.selection]);
 
   const [filterInput, setFilterInput] = useState(panel.filter?.value ?? "");
@@ -1407,6 +1408,21 @@ export function Panel({
 
   function renderRow(entry: VFSEntry, absIndex: number) {
     const colorClass = colorClassForEntry(entry);
+    const gitDetails = entry.gitDetails;
+    const gitSummary = gitDetails
+      ? [
+          `${gitDetails.changedCount} changed file${gitDetails.changedCount === 1 ? "" : "s"}`,
+          ...gitDetails.samplePaths,
+          ...(gitDetails.changedCount > gitDetails.samplePaths.length ? ["…"] : []),
+        ].join("\n")
+      : undefined;
+    const gitInline = gitDetails
+      ? entry.kind === "directory" && gitDetails.samplePaths[0]
+        ? `${gitDetails.changedCount} · ${gitDetails.samplePaths[0]}`
+        : entry.gitStatus === "untracked"
+          ? `${gitDetails.changedCount} untracked file${gitDetails.changedCount === 1 ? "" : "s"}`
+          : `${gitDetails.changedCount} change${gitDetails.changedCount === 1 ? "" : "s"}`
+      : undefined;
     return (
       <div
         key={absIndex}
@@ -1535,7 +1551,8 @@ export function Panel({
                   <IconAlertTriangle size={15} />
                 </button>
               )}
-              {entry.gitStatus && <span className="panel__git-status" title={`Git: ${entry.gitStatus}`}>{entry.gitStatus === "untracked" ? "?" : entry.gitStatus === "modified" ? "M" : entry.gitStatus === "deleted" ? "D" : entry.gitStatus === "conflicted" ? "!" : "●"}</span>}
+              {entry.gitStatus && <span className="panel__git-status" data-tooltip-id={`git-summary-${panelId}`} data-tooltip-content={gitSummary ? `Git: ${entry.gitStatus}\n${gitSummary}` : `Git: ${entry.gitStatus}`}>{entry.gitStatus === "untracked" ? "?" : entry.gitStatus === "modified" ? "M" : entry.gitStatus === "deleted" ? "D" : entry.gitStatus === "conflicted" ? "!" : "●"}</span>}
+              {absIndex === panel.cursor && gitInline && <span className="panel__git-bubble" data-tooltip-id={`git-summary-${panelId}`} data-tooltip-content={gitSummary}>{gitInline}</span>}
             </span>
           );
         })()}
@@ -1597,7 +1614,7 @@ export function Panel({
         />
       ) : (
       <>
-      <div className="panel__header">
+      <div className={`panel__header${gitHeaderState ? ` panel__header--git-${gitHeaderState}` : ""}`}>
         <PathBreadcrumbs panelId={panelId} path={panel.path} client={client} shadowSource={panel.shadowSource} />
         <button
           className="panel__home-btn"
@@ -1636,7 +1653,7 @@ export function Panel({
             client={client}
           />
         )}
-        {panel.git && <button className="panel__git-btn" tabIndex={-1} title={`Git ${panel.git.branch}`} onClick={() => setGitOpen(true)}><IconGitBranch size={16} /> {panel.git.branch}</button>}
+        {panel.git && <button className={`panel__git-btn panel__git-btn--${gitHeaderState}`} tabIndex={-1} data-tooltip-id={`git-chip-${panelId}`} data-tooltip-content={panel.git.clean ? `Git ${panel.git.branch}: clean worktree` : `Git ${panel.git.branch}: working tree has changes — commit or stash before switching, pulling, or pushing`} onClick={() => setGitOpen(true)}><IconGitBranch size={16} /><span className="panel__git-btn-label">{panel.git.branch}</span>{!panel.git.clean && <IconAlertTriangle className="panel__git-btn-warning" size={13} />}</button>}
       </div>
 
       {gitOpen && panel.git && <GitModal panelId={panelId} git={panel.git} client={client} onClose={closeGitModal} />}
@@ -1755,6 +1772,8 @@ export function Panel({
         </div>
       </div>
       <Tooltip id="hidden-files" delayShow={0} />
+      <Tooltip id={`git-summary-${panelId}`} className="panel__git-tooltip" delayShow={120} place="bottom" border="1px solid var(--border-focus)" arrowColor="var(--bg-elev)" />
+      <Tooltip id={`git-chip-${panelId}`} className="panel__git-tooltip" delayShow={120} place="bottom" border="1px solid var(--border-focus)" arrowColor="var(--bg-elev)" />
       {panel.terminalSessionId !== undefined && (
         <PanelTerminal
           client={client}

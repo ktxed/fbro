@@ -2,16 +2,26 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::process::Command;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::ws::protocol::EntrySchema;
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GitChange {
     pub path: String,
     pub index_status: String,
     pub worktree_status: String,
+}
+
+/// A small, scan-time summary attached to a listed entry. It deliberately
+/// contains only display-ready data so the frontend never needs to aggregate
+/// the full repository status while rendering a panel.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitEntryDetails {
+    pub changed_count: usize,
+    pub sample_paths: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -105,8 +115,20 @@ pub fn decorate_entries(entries: &mut [EntrySchema], panel_path: &str, status: O
     for entry in entries {
         let rel = if prefix.is_empty() { entry.name.clone() } else { format!("{prefix}/{}", entry.name) };
         let exact = changes.get(rel.as_str()).copied();
-        let nested = entry.kind == "directory" && status.changes.iter().any(|c| c.path.starts_with(&(rel.clone() + "/")));
+        let nested_prefix = format!("{rel}/");
+        let matching: Vec<&GitChange> = status.changes.iter().filter(|change| {
+            change.path == rel || (entry.kind == "directory" && change.path.starts_with(&nested_prefix))
+        }).collect();
+        let nested = matching.iter().any(|change| change.path.starts_with(&nested_prefix));
         entry.git_status = exact.map(status_label).or_else(|| nested.then(|| "changed".to_string()));
+        entry.git_details = (!matching.is_empty()).then(|| GitEntryDetails {
+            changed_count: matching.len(),
+            // For a directory, show paths relative to that directory so the
+            // inline sample remains useful even deep in a repository.
+            sample_paths: matching.iter().take(10).map(|change| {
+                change.path.strip_prefix(&nested_prefix).unwrap_or(&change.path).to_string()
+            }).collect(),
+        });
     }
 }
 
