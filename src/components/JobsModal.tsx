@@ -437,7 +437,44 @@ function QueueJobRow({
   );
 }
 
+function actionLabel(action?: string) {
+  switch (action) {
+    case "spawning_worker":
+      return "Starting worker";
+    case "worker_spawned":
+      return "Worker running";
+    case "read_dir":
+      return "Reading directory";
+    case "scan_entries":
+      return "Scanning entries";
+    case "read_dir_error":
+      return "Directory read failed";
+    case "timeout_waiting_worker_exit":
+      return "Timed out, waiting for worker";
+    case "cancel_waiting_worker_exit":
+      return "Cancelled, waiting for worker";
+    case "complete":
+      return "Finishing";
+    default:
+      return "Starting";
+  }
+}
+
 function DirSizeTaskRow({ task, client }: { task: DirSizeTask; client: WsClient }) {
+  const nowMs = Date.now();
+  const startedAt = task.startedAt ?? task.enqueuedAt;
+  const elapsedSeconds = Math.max(0, Math.floor((nowMs - startedAt) / 1000));
+  const lastProgressAt = task.lastProgressAt ?? task.startedAt ?? task.enqueuedAt;
+  const idleSeconds = Math.max(0, Math.floor((nowMs - lastProgressAt) / 1000));
+  const elapsedLabel = elapsedSeconds < 60
+    ? `${elapsedSeconds}s`
+    : `${Math.floor(elapsedSeconds / 60)}m ${elapsedSeconds % 60}s`;
+  const idleLabel = task.status === "Running" && idleSeconds >= 10 ? `No progress for ${idleSeconds}s` : null;
+  const currentPath = task.status === "Running" ? task.currentPath : null;
+  const currentAction = task.status === "Queued"
+    ? "Waiting for a folder-size slot"
+    : actionLabel(task.currentAction);
+
   return (
     <div className="jobs-modal__row jobs-modal__row--active">
       <div className="jobs-modal__row-header">
@@ -459,9 +496,37 @@ function DirSizeTaskRow({ task, client }: { task: DirSizeTask; client: WsClient 
         <span className="jobs-modal__path" title={task.fullPath}>
           Folder: {task.fullPath}
         </span>
+        <span className="jobs-modal__path" title={currentPath ?? task.fullPath}>
+          Current: {currentAction}{currentPath ? `: ${currentPath}` : ""}
+        </span>
         <span className="jobs-modal__path">
           Panel: {task.panelId}
         </span>
+      </div>
+      <div className="jobs-modal__summary">
+        <span className="jobs-modal__summary-chip">
+          <span className="jobs-modal__summary-label">Elapsed</span>
+          <span className="jobs-modal__summary-value">{elapsedLabel}</span>
+        </span>
+        <span className="jobs-modal__summary-chip">
+          <span className="jobs-modal__summary-label">Folders</span>
+          <span className="jobs-modal__summary-value">{task.dirsScanned.toLocaleString()}</span>
+        </span>
+        <span className="jobs-modal__summary-chip">
+          <span className="jobs-modal__summary-label">Files</span>
+          <span className="jobs-modal__summary-value">{task.filesScanned.toLocaleString()}</span>
+        </span>
+        <span className="jobs-modal__summary-chip">
+          <span className="jobs-modal__summary-label">Size</span>
+          <span className="jobs-modal__summary-value">{formatBytes(task.bytesScanned)}</span>
+        </span>
+        {task.errors > 0 && (
+          <span className="jobs-modal__summary-chip">
+            <span className="jobs-modal__summary-label">Errors</span>
+            <span className="jobs-modal__summary-value">{task.errors.toLocaleString()}</span>
+          </span>
+        )}
+        {idleLabel && <span className="jobs-modal__error">{idleLabel}</span>}
       </div>
     </div>
   );
@@ -541,6 +606,7 @@ export function JobsModal({ onClose, client }: { onClose: () => void; client: Ws
   const [activeTab, setActiveTab] = useState<"jobs" | "procs" | "cache">("jobs");
   const [expandedFileJobs, setExpandedFileJobs] = useState<Record<string, boolean>>({});
   const [filePages, setFilePages] = useState<Record<string, number>>({});
+  const [, setClockTick] = useState(0);
 
   const byNewest = (a: Job, b: Job) => b.startedAt - a.startedAt;
   const jobs = Object.values(state.jobs).sort(byNewest);
@@ -560,6 +626,12 @@ export function JobsModal({ onClose, client }: { onClose: () => void; client: Ws
   );
   const dirSizeTasks = [...state.dirSizeQueue].sort((a, b) => a.enqueuedAt - b.enqueuedAt);
   const childProcs = Object.values(state.childProcesses).sort((a, b) => b.started_at - a.started_at);
+
+  useEffect(() => {
+    if (dirSizeTasks.length === 0) return;
+    const timer = window.setInterval(() => setClockTick((value) => value + 1), 1000);
+    return () => window.clearInterval(timer);
+  }, [dirSizeTasks.length]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {

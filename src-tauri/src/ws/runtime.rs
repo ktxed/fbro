@@ -112,11 +112,20 @@ pub(crate) fn build_state_snapshot(
                 tasks: dir_size_tasks
                     .into_iter()
                     .map(|task| DirSizeTaskSchema {
+                        task_id: task.task_id,
                         panel_id: task.panel_id,
                         entry_name: task.entry_name,
                         full_path: task.full_path,
                         enqueued_at: task.enqueued_at,
+                        started_at: task.started_at,
+                        last_progress_at: task.last_progress_at,
                         status: task.status,
+                        dirs_scanned: task.dirs_scanned,
+                        files_scanned: task.files_scanned,
+                        bytes_scanned: task.bytes_scanned,
+                        errors: task.errors,
+                        current_path: task.current_path,
+                        current_action: task.current_action,
                     })
                     .collect(),
             },

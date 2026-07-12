@@ -324,11 +324,20 @@ export interface FedupBroResult {
 }
 
 export interface DirSizeTask {
+  taskId: number;
   panelId: string;
   entryName: string;
   fullPath: string;
   enqueuedAt: number;
+  startedAt?: number;
+  lastProgressAt?: number;
   status: "Queued" | "Running";
+  dirsScanned: number;
+  filesScanned: number;
+  bytesScanned: number;
+  errors: number;
+  currentPath?: string;
+  currentAction?: string;
 }
 
 export interface FileOpProgress {

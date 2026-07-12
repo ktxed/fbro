@@ -409,11 +409,25 @@ pub struct DirSizeQueueSnapshot {
 #[derive(Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct DirSizeTaskSchema {
+    #[serde(rename = "taskId")]
+    pub task_id: u64,
     pub panel_id: String,
     pub entry_name: String,
     pub full_path: String,
     pub enqueued_at: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub started_at: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_progress_at: Option<u64>,
     pub status: String,
+    pub dirs_scanned: u64,
+    pub files_scanned: u64,
+    pub bytes_scanned: u64,
+    pub errors: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub current_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub current_action: Option<String>,
 }
 
 #[derive(Serialize, Clone, Debug)]
