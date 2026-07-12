@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { resolveWsUrl, WsClient } from "../ws/client";
 import type {
@@ -34,6 +34,7 @@ export function DiffViewerApp({ requestId, windowLabel, initialColorScheme }: Di
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<DiffViewMode>("split");
   const [loading, setLoading] = useState(true);
+  const [activeChangeIndex, setActiveChangeIndex] = useState(0);
   const [colorSchemeId, setColorSchemeId] = useState<ColorSchemeId>(() => (
     resolveColorScheme(initialColorScheme ?? DEFAULT_COLOR_SCHEME_ID).id
   ));
@@ -108,6 +109,50 @@ export function DiffViewerApp({ requestId, windowLabel, initialColorScheme }: Di
     }
   };
 
+  const changedBlocks = useMemo(() => {
+    if (!result) return [];
+    const starts: number[] = [];
+    result.rows.forEach((row, index) => {
+      if (row.kind === "equal") return;
+      if (index === 0 || result.rows[index - 1]?.kind === "equal") {
+        starts.push(index);
+      }
+    });
+    return starts;
+  }, [result]);
+
+  const changeBlockByRow = useMemo(() => {
+    const blocks = new Map<number, number>();
+    if (!result) return blocks;
+    let blockIndex = -1;
+    result.rows.forEach((row, index) => {
+      if (row.kind === "equal") return;
+      if (index === 0 || result.rows[index - 1]?.kind === "equal") {
+        blockIndex += 1;
+      }
+      if (blockIndex >= 0) blocks.set(index, blockIndex);
+    });
+    return blocks;
+  }, [result]);
+
+  useEffect(() => {
+    setActiveChangeIndex(0);
+  }, [result]);
+
+  const jumpChange = useCallback((delta: number) => {
+    setActiveChangeIndex((current) => {
+      if (changedBlocks.length === 0) return 0;
+      return (current + delta + changedBlocks.length) % changedBlocks.length;
+    });
+  }, [changedBlocks.length]);
+
+  useEffect(() => {
+    if (changedBlocks.length === 0) return;
+    const activeRow = changedBlocks[activeChangeIndex] ?? changedBlocks[0];
+    const el = document.querySelector<HTMLElement>(`[data-diff-row="${activeRow}"]`);
+    el?.scrollIntoView({ block: "center", inline: "nearest" });
+  }, [activeChangeIndex, changedBlocks, mode]);
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
@@ -116,10 +161,18 @@ export function DiffViewerApp({ requestId, windowLabel, initialColorScheme }: Di
       }
       if (event.key === "1") setMode("split");
       if (event.key === "2") setMode("unified");
+      if (event.key === "n" || event.key === "j" || event.key === "F7") {
+        event.preventDefault();
+        jumpChange(1);
+      }
+      if (event.key === "p" || event.key === "k" || event.key === "F6") {
+        event.preventDefault();
+        jumpChange(-1);
+      }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  });
+  }, [jumpChange]);
 
   const colorScheme = resolveColorScheme(colorSchemeId);
   const rowCount = result?.rows.length ?? 0;
@@ -145,6 +198,27 @@ export function DiffViewerApp({ requestId, windowLabel, initialColorScheme }: Di
           )}
         </div>
         <div className="diff-viewer__actions">
+          <div className="diff-viewer__jump" aria-label="Change navigation">
+            <button
+              className="diff-viewer__jump-btn"
+              type="button"
+              onClick={() => jumpChange(-1)}
+              disabled={changedBlocks.length === 0}
+            >
+              Prev
+            </button>
+            <span className="diff-viewer__jump-count">
+              {changedBlocks.length === 0 ? "0/0" : `${activeChangeIndex + 1}/${changedBlocks.length}`}
+            </span>
+            <button
+              className="diff-viewer__jump-btn"
+              type="button"
+              onClick={() => jumpChange(1)}
+              disabled={changedBlocks.length === 0}
+            >
+              Next
+            </button>
+          </div>
           <div className="diff-viewer__segmented" role="group" aria-label="Diff view mode">
             <button
               className={mode === "split" ? "diff-viewer__segmented-btn diff-viewer__segmented-btn--active" : "diff-viewer__segmented-btn"}
@@ -181,14 +255,22 @@ export function DiffViewerApp({ requestId, windowLabel, initialColorScheme }: Di
               </div>
               <table className="diff-table diff-table--split">
                 <tbody>
-                  {result.rows.map((row, index) => (
-                    <tr key={index} className={`diff-table__row diff-table__row--${row.kind}`}>
-                      <td className="diff-table__line">{row.leftLine ?? ""}</td>
-                      <td className="diff-table__code">{lineText(row.leftText)}</td>
-                      <td className="diff-table__line">{row.rightLine ?? ""}</td>
-                      <td className="diff-table__code">{lineText(row.rightText)}</td>
-                    </tr>
-                  ))}
+                  {result.rows.map((row, index) => {
+                    const blockIndex = changeBlockByRow.get(index);
+                    const active = blockIndex !== undefined && blockIndex === activeChangeIndex;
+                    return (
+                      <tr
+                        key={index}
+                        className={`diff-table__row diff-table__row--${row.kind}${active ? " diff-table__row--active-change" : ""}`}
+                        data-diff-row={index}
+                      >
+                        <td className="diff-table__line">{row.leftLine ?? ""}</td>
+                        <td className="diff-table__code">{lineText(row.leftText)}</td>
+                        <td className="diff-table__line">{row.rightLine ?? ""}</td>
+                        <td className="diff-table__code">{lineText(row.rightText)}</td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </main>
@@ -199,8 +281,14 @@ export function DiffViewerApp({ requestId, windowLabel, initialColorScheme }: Di
                   {result.rows.map((row, index) => {
                     const prefix = row.kind === "insert" ? "+" : row.kind === "delete" ? "-" : " ";
                     const text = row.kind === "insert" ? row.rightText : row.leftText;
+                    const blockIndex = changeBlockByRow.get(index);
+                    const active = blockIndex !== undefined && blockIndex === activeChangeIndex;
                     return (
-                      <tr key={index} className={`diff-table__row diff-table__row--${row.kind}`}>
+                      <tr
+                        key={index}
+                        className={`diff-table__row diff-table__row--${row.kind}${active ? " diff-table__row--active-change" : ""}`}
+                        data-diff-row={index}
+                      >
                         <td className="diff-table__line">{row.leftLine ?? ""}</td>
                         <td className="diff-table__line">{row.rightLine ?? ""}</td>
                         <td className="diff-table__prefix">{prefix}</td>
