@@ -560,7 +560,6 @@ export function Panel({
     width: number;
   } | null>(null);
   const [tooltipNameClipped, setTooltipNameClipped] = useState(false);
-  const tooltipTimerRef = useRef<number | null>(null);
   const tooltipNameRef = useRef<HTMLDivElement | null>(null);
 
   const restorePanelFocus = useCallback(() => {
@@ -710,51 +709,22 @@ export function Panel({
   // card for 2 s and that card has any ellipsed text, render an expanded
   // clone of the card showing the full content. Hidden the moment the
   // cursor moves, the panel loses focus, or the panel leaves grid mode.
+  // Expanded grid card: clicking a clipped card renders a wider clone with
+  // full metadata. Cursor movement, focus loss, and leaving grid mode hide it.
   const isGridView = panel.viewMode === "grid" && panel.supportsThumbnails;
   useEffect(() => {
-    if (tooltipTimerRef.current) {
-      window.clearTimeout(tooltipTimerRef.current);
-      tooltipTimerRef.current = null;
+    if (!isGridView || !isFocused) {
+      setTooltipCard(null);
     }
+  }, [isGridView, isFocused]);
+
+  useEffect(() => {
+    setTooltipCard((current) => current && current.absIndex !== panel.cursor ? null : current);
+  }, [panel.cursor]);
+
+  useEffect(() => {
     setTooltipCard(null);
-    if (!isGridView || !isFocused) return;
-
-    const TOOLTIP_CARD_SHOW_DELAY = 250;
-    tooltipTimerRef.current = window.setTimeout(() => {
-      const list = listRef.current;
-      if (!list) return;
-      const card = list.querySelector<HTMLElement>(`[data-abs-index="${panel.cursor}"]`);
-      if (!card) return;
-      // Only show when there's actually overflowing content to reveal.
-      const overflowing = Array.from(
-        card.querySelectorAll<HTMLElement>(".panel__card-name, .panel__card-size, .panel__card-date"),
-      ).some((el) => el.scrollWidth > el.clientWidth + 1);
-      if (!overflowing) return;
-
-      const { cols, cardWidth, cardHeight } = gridMetrics;
-      const safeCols = Math.max(1, cols);
-      const row = Math.floor(panel.cursor / safeCols);
-      const col = panel.cursor % safeCols;
-      const innerWidth = Math.max(GRID_CARD_MIN_WIDTH, list.clientWidth - GRID_PADDING);
-      // Tooltip is exactly 2× the card width — but cap at the panel's inner
-      // width so it never overflows the panel.
-      const tooltipWidth = Math.min(cardWidth * 2, innerWidth);
-      const cardLeft = (GRID_PADDING / 2) + col * (cardWidth + GRID_GAP);
-      const cardCenter = cardLeft + cardWidth / 2;
-      const desiredLeft = cardCenter - tooltipWidth / 2;
-      const maxLeft = (GRID_PADDING / 2) + innerWidth - tooltipWidth;
-      const left = Math.max(GRID_PADDING / 2, Math.min(desiredLeft, maxLeft));
-      const top = row * (cardHeight + GRID_GAP);
-      setTooltipCard({ absIndex: panel.cursor, top, left, width: tooltipWidth });
-    }, TOOLTIP_CARD_SHOW_DELAY);
-
-    return () => {
-      if (tooltipTimerRef.current) {
-        window.clearTimeout(tooltipTimerRef.current);
-        tooltipTimerRef.current = null;
-      }
-    };
-  }, [panel.cursor, isGridView, isFocused, gridMetrics, panel.entries]);
+  }, [panel.path, panel.sourceId]);
 
   // After the tooltip mounts/updates, check whether the name is *still*
   // clipped (its 2-line clamp is overflowing). If so, expose an [i] button
@@ -1216,6 +1186,7 @@ export function Panel({
   };
 
   const openEntry = (entry: VFSEntry, absIndex: number) => {
+    setTooltipCard(null);
     dispatch({ type: "CLOSE_CONTEXT_MENU" });
     client.sendIntent("SetCursor", "focused-panel", { index: absIndex });
     if (entry.kind === "directory") {
@@ -1232,6 +1203,36 @@ export function Panel({
       return;
     }
     client.sendIntent("OpenFile", "focused-panel");
+  };
+
+  const showExpandedCardForClick = (absIndex: number) => {
+    if (!isGrid) return;
+    const list = listRef.current;
+    if (!list) return;
+    const card = list.querySelector<HTMLElement>(`[data-abs-index="${absIndex}"]`);
+    if (!card) return;
+
+    const overflowing = Array.from(
+      card.querySelectorAll<HTMLElement>(".panel__card-name, .panel__card-size, .panel__card-date"),
+    ).some((el) => el.scrollWidth > el.clientWidth + 1);
+    if (!overflowing) {
+      setTooltipCard(null);
+      return;
+    }
+
+    const { cols, cardWidth, cardHeight } = gridMetrics;
+    const safeCols = Math.max(1, cols);
+    const row = Math.floor(absIndex / safeCols);
+    const col = absIndex % safeCols;
+    const innerWidth = Math.max(GRID_CARD_MIN_WIDTH, list.clientWidth - GRID_PADDING);
+    const tooltipWidth = Math.min(cardWidth * 2, innerWidth);
+    const cardLeft = (GRID_PADDING / 2) + col * (cardWidth + GRID_GAP);
+    const cardCenter = cardLeft + cardWidth / 2;
+    const desiredLeft = cardCenter - tooltipWidth / 2;
+    const maxLeft = (GRID_PADDING / 2) + innerWidth - tooltipWidth;
+    const left = Math.max(GRID_PADDING / 2, Math.min(desiredLeft, maxLeft));
+    const top = row * (cardHeight + GRID_GAP);
+    setTooltipCard({ absIndex, top, left, width: tooltipWidth });
   };
 
   function rowEventHandlers(entry: VFSEntry, absIndex: number) {
@@ -1306,6 +1307,9 @@ export function Panel({
       },
       onDoubleClick: () => {
         openEntry(entry, absIndex);
+      },
+      onClick: () => {
+        showExpandedCardForClick(absIndex);
       },
     };
   }
