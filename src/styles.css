@@ -1483,9 +1483,11 @@ body {
 .git-actions-modal__choices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; padding: 14px; }
 .git-actions-modal__choice { min-width: 0; min-height: 76px; display: flex; align-items: center; gap: 10px; padding: 10px; border: 1px solid var(--border); border-radius: 5px; background: var(--bg); color: var(--text); text-align: left; font: inherit; cursor: pointer; }
 .git-actions-modal__choice:hover:not(:disabled) { border-color: var(--border-focus); background: var(--bg-hover); }
+.git-actions-modal__choice.is-keyboard-active { border-color: var(--accent); background: var(--bg-hover); }
 .git-actions-modal__choice:disabled, .git-actions-modal__choice.is-disabled { cursor: not-allowed; opacity: .48; }
 .git-actions-modal__choice > span { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .git-actions-modal__choice strong { font-size: var(--font-size); }
+.git-actions-modal__choice kbd { margin-left: 4px; padding: 0 3px; border: 1px solid var(--border); border-radius: 3px; color: var(--text-dim); font: inherit; font-size: calc(var(--font-size) - 4px); }
 .git-actions-modal__choice small { color: var(--text-dim); font-size: calc(var(--font-size) - 3px); line-height: 1.2; }
 .git-actions-modal__choice select { max-width: 100px; min-width: 0; border: 1px solid var(--border); border-radius: 3px; background: var(--bg-elev); color: var(--text); font: inherit; font-size: calc(var(--font-size) - 2px); }
 .git-actions-modal__badge { display: inline-flex; align-items: center; gap: 2px; padding: 2px 5px; border: 1px solid currentColor; border-radius: 10px; font-style: normal; font-size: calc(var(--font-size) - 3px); }
@@ -1493,6 +1495,9 @@ body {
 .git-actions-modal__badge--outgoing { color: var(--text-success); }
 .git-actions-modal footer { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 9px 14px; border-top: 1px solid var(--border); color: var(--text-dim); font-size: calc(var(--font-size) - 2px); }
 .git-actions-modal footer button { padding: 2px 8px; font: inherit; }
+.git-actions-modal__activity { display: inline-flex; align-items: center; gap: 6px; color: var(--text-path); }
+.git-actions-modal__activity svg { animation: git-actions-spin 900ms linear infinite; }
+@keyframes git-actions-spin { to { transform: rotate(360deg); } }
 
 /* ── File-type color classes ──────────────────────────────────────────────── */
 .panel__name.cc-dir     { color: var(--text-dir); }
