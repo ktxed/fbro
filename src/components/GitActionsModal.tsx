@@ -57,6 +57,7 @@ export function GitActionsModal({ panelId, git, client, onClose }: Props) {
         b: () => focusControl(1),
         l: () => { if (git.clean) runAction("GitPull", "Pulling changes…"); },
         p: () => { if (git.clean) runAction("GitPush", "Pushing changes…"); },
+        u: () => { if (!git.upstream && git.clean && !git.detached) runAction("GitSetUpstream", "Setting upstream…", { branch: git.branch }); },
       };
       if (accelerators[key]) {
         event.preventDefault();
@@ -75,7 +76,7 @@ export function GitActionsModal({ panelId, git, client, onClose }: Props) {
     };
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [activeIndex, focusControl, git.clean, onClose]);
+  }, [activeIndex, focusControl, git.branch, git.clean, git.detached, git.upstream, onClose]);
 
   const disabledMessage = "Requires a clean worktree";
   return (
@@ -106,7 +107,7 @@ export function GitActionsModal({ panelId, git, client, onClose }: Props) {
             {git.aheadCount !== undefined && <em className="git-actions-modal__badge git-actions-modal__badge--outgoing"><IconArrowUp size={13} /> {git.aheadCount}</em>}
           </button>
         </div>
-        <footer><span className={activity ? "git-actions-modal__activity" : undefined}>{activity && activity.action !== "complete" && <IconLoader2 size={14} />}{activity?.message ?? (git.upstream ? `Tracking ${git.upstream}` : "No upstream configured")}</span><button type="button" onClick={onClose}>Close</button></footer>
+        <footer><span className={activity ? "git-actions-modal__activity" : undefined}>{activity && activity.action !== "complete" && <IconLoader2 size={14} />}{activity?.message ?? (git.upstream ? `Tracking ${git.upstream}` : "No upstream configured")}</span><div className="git-actions-modal__footer-actions">{!git.upstream && <button type="button" disabled={!git.clean || git.detached} title={!git.clean ? disabledMessage : git.detached ? "A detached HEAD cannot have a branch upstream" : "Push this branch to origin and configure its upstream"} onClick={() => runAction("GitSetUpstream", "Setting upstream…", { branch: git.branch })}>Set upstream <kbd>U</kbd></button>}<button type="button" onClick={onClose}>Close</button></div></footer>
       </div>
     </div>
   );

@@ -1494,7 +1494,9 @@ body {
 .git-actions-modal__badge--incoming { color: var(--accent); }
 .git-actions-modal__badge--outgoing { color: var(--text-success); }
 .git-actions-modal footer { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 9px 14px; border-top: 1px solid var(--border); color: var(--text-dim); font-size: calc(var(--font-size) - 2px); }
+.git-actions-modal__footer-actions { display: flex; align-items: center; gap: 8px; }
 .git-actions-modal footer button { padding: 2px 8px; font: inherit; }
+.git-actions-modal footer kbd { padding: 0 3px; border: 1px solid var(--border); border-radius: 3px; color: var(--text-dim); font: inherit; font-size: calc(var(--font-size) - 4px); }
 .git-actions-modal__activity { display: inline-flex; align-items: center; gap: 6px; color: var(--text-path); }
 .git-actions-modal__activity svg { animation: git-actions-spin 900ms linear infinite; }
 @keyframes git-actions-spin { to { transform: rotate(360deg); } }
