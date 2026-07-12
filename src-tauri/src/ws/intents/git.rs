@@ -24,6 +24,7 @@ pub(crate) async fn handle(name: &str, args: &Value, ctx: &mut IntentContext<'_>
         }),
         "GitPull" => guarded(clean, || crate::git::run(&root, &["pull".into()])),
         "GitPush" => guarded(clean, || crate::git::run(&root, &["push".into()])),
+        "GitFetch" => crate::git::run(&root, &["fetch".into()]),
         "GitRefresh" => Ok(()),
         _ => Ok(()),
     };

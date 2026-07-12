@@ -1451,6 +1451,30 @@ body {
 .git-modal__commit label span { color: var(--text-muted); }
 .git-modal textarea { width: 100%; min-height: 48px; box-sizing: border-box; resize: vertical; }
 
+.git-actions-modal { width: min(520px, calc(100vw - 40px)); border: 1px solid var(--border-focus); border-radius: 7px; background: var(--bg-panel); box-shadow: var(--shadow-modal); overflow: hidden; color: var(--text); }
+.git-actions-modal:focus { outline: none; }
+.git-actions-modal__header { display: flex; justify-content: space-between; align-items: center; padding: 11px 14px; background: var(--bg-header); border-bottom: 1px solid var(--border); }
+.git-actions-modal__header div { display: flex; align-items: baseline; gap: 10px; }
+.git-actions-modal__header span { color: var(--text-dim); font-size: calc(var(--font-size) - 2px); letter-spacing: .1em; }
+.git-actions-modal__header strong { display: inline-flex; align-items: center; gap: 5px; font-size: calc(var(--font-size) + 2px); }
+.git-actions-modal__close { width: 24px; height: 24px; padding: 0; border: 0; background: none; color: var(--text-dim); font: inherit; font-size: 20px; cursor: pointer; }
+.git-actions-modal__close:hover { color: var(--text); background: var(--bg-hover); }
+.git-actions-modal__repo { padding: 7px 14px; border-bottom: 1px solid var(--border); color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(var(--font-size) - 2px); }
+.git-actions-modal__warning { margin: 10px 14px 0; padding: 6px 8px; border: 1px solid color-mix(in srgb, var(--text-warning) 42%, var(--border)); color: var(--text-warning); background: color-mix(in srgb, var(--text-warning) 10%, var(--bg-panel)); }
+.git-actions-modal__choices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; padding: 14px; }
+.git-actions-modal__choice { min-width: 0; min-height: 76px; display: flex; align-items: center; gap: 10px; padding: 10px; border: 1px solid var(--border); border-radius: 5px; background: var(--bg); color: var(--text); text-align: left; font: inherit; cursor: pointer; }
+.git-actions-modal__choice:hover:not(:disabled) { border-color: var(--border-focus); background: var(--bg-hover); }
+.git-actions-modal__choice:disabled, .git-actions-modal__choice.is-disabled { cursor: not-allowed; opacity: .48; }
+.git-actions-modal__choice > span { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.git-actions-modal__choice strong { font-size: var(--font-size); }
+.git-actions-modal__choice small { color: var(--text-dim); font-size: calc(var(--font-size) - 3px); line-height: 1.2; }
+.git-actions-modal__choice select { max-width: 100px; min-width: 0; border: 1px solid var(--border); border-radius: 3px; background: var(--bg-elev); color: var(--text); font: inherit; font-size: calc(var(--font-size) - 2px); }
+.git-actions-modal__badge { display: inline-flex; align-items: center; gap: 2px; padding: 2px 5px; border: 1px solid currentColor; border-radius: 10px; font-style: normal; font-size: calc(var(--font-size) - 3px); }
+.git-actions-modal__badge--incoming { color: var(--accent); }
+.git-actions-modal__badge--outgoing { color: var(--text-success); }
+.git-actions-modal footer { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 9px 14px; border-top: 1px solid var(--border); color: var(--text-dim); font-size: calc(var(--font-size) - 2px); }
+.git-actions-modal footer button { padding: 2px 8px; font: inherit; }
+
 /* ── File-type color classes ──────────────────────────────────────────────── */
 .panel__name.cc-dir     { color: var(--text-dir); }
 .panel__name.cc-link    { color: var(--text-link); }

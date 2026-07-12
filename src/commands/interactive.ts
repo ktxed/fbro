@@ -88,6 +88,7 @@ export const PANEL_SHORTCUT_COMMAND_IDS = [
   "panel.toggle_hidden",
   "panel.toggle_view_mode",
   "panel.sort.open",
+  "panel.git.actions",
   "panel.bookmarks.open",
   "panel.bookmarks.browse",
   "panel.toggle_embedded_terminal",

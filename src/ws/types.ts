@@ -31,6 +31,9 @@ export interface GitRepoStatus {
   modifiedCount: number;
   untrackedCount: number;
   conflictedCount: number;
+  upstream?: string;
+  aheadCount?: number;
+  behindCount?: number;
   branches: string[];
   changes: GitChange[];
 }

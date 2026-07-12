@@ -25,6 +25,12 @@ pub struct GitRepoStatus {
     pub modified_count: usize,
     pub untracked_count: usize,
     pub conflicted_count: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub upstream: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ahead_count: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub behind_count: Option<usize>,
     pub branches: Vec<String>,
     pub changes: Vec<GitChange>,
 }
@@ -75,9 +81,20 @@ pub fn inspect(path: &str) -> Option<GitRepoStatus> {
     let modified_count = changes.iter().filter(|c| c.worktree_status != " " && c.worktree_status != "?").count();
     let untracked_count = changes.iter().filter(|c| c.index_status == "?" && c.worktree_status == "?").count();
     let conflicted_count = changes.iter().filter(|c| c.index_status == "U" || c.worktree_status == "U" || c.index_status == "A" && c.worktree_status == "A").count();
+    let upstream = git(&root, &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"])
+        .ok()
+        .and_then(|value| String::from_utf8(value).ok())
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    let (ahead_count, behind_count) = upstream.as_ref().and_then(|_| {
+        let counts = git(&root, &["rev-list", "--left-right", "--count", "@{upstream}...HEAD"]).ok()?;
+        let counts = String::from_utf8(counts).ok()?;
+        let mut values = counts.split_whitespace().filter_map(|value| value.parse::<usize>().ok());
+        Some((values.next()?, values.next()?))
+    }).map(|(behind, ahead)| (Some(ahead), Some(behind))).unwrap_or((None, None));
     let branches = String::from_utf8(git(&root, &["for-each-ref", "--format=%(refname:short)", "refs/heads"]).unwrap_or_default())
         .unwrap_or_default().lines().map(str::to_string).collect();
-    Some(GitRepoStatus { root, branch, detached, clean: changes.is_empty(), staged_count, modified_count, untracked_count, conflicted_count, branches, changes })
+    Some(GitRepoStatus { root, branch, detached, clean: changes.is_empty(), staged_count, modified_count, untracked_count, conflicted_count, upstream, ahead_count, behind_count, branches, changes })
 }
 
 pub fn decorate_entries(entries: &mut [EntrySchema], panel_path: &str, status: Option<&GitRepoStatus>) {

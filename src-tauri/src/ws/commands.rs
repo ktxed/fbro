@@ -543,6 +543,13 @@ pub(crate) fn build_interactive_commands() -> Vec<InteractiveCommandSchema> {
             None,
         ),
         command(
+            "panel.git.actions",
+            "Panel",
+            "Git Actions…",
+            vec![keybinding_with_modifiers("g", true, false, false, false)],
+            None,
+        ),
+        command(
             "panel.bookmarks.open",
             "Panel",
             "Bookmarks…",

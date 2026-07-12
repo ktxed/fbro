@@ -25,6 +25,7 @@ import { PanelTerminal } from "./PanelTerminal";
 import { EntryThumb } from "./EntryThumb";
 import { isGlobalSelectionSourceId } from "../utils/sourceId";
 import { GitModal } from "./GitModal";
+import { GitActionsModal } from "./GitActionsModal";
 
 const ROW_HEIGHT = 22;
 const GRID_THUMB_SIZE = 128;
@@ -533,6 +534,7 @@ export function Panel({
   const appState = useAppState();
   const dispatch = useAppDispatch();
   const [gitOpen, setGitOpen] = useState(false);
+  const [gitActionsOpen, setGitActionsOpen] = useState(false);
   const [gridMetrics, setGridMetrics] = useState<{ cols: number; cardWidth: number; cardHeight: number; pageRows: number }>({ cols: 1, cardWidth: GRID_CARD_MIN_WIDTH, cardHeight: 168, pageRows: 1 });
   const listRef = useRef<HTMLDivElement>(null);
   const focusDivRef = useRef<HTMLDivElement>(null);
@@ -560,6 +562,20 @@ export function Panel({
   const [tooltipNameClipped, setTooltipNameClipped] = useState(false);
   const tooltipTimerRef = useRef<number | null>(null);
   const tooltipNameRef = useRef<HTMLDivElement | null>(null);
+
+  const restorePanelFocus = useCallback(() => {
+    // The dialog owns focus while it is open. Return it to the panel on the
+    // next frame, after React has removed the dialog from the DOM.
+    requestAnimationFrame(() => focusDivRef.current?.focus());
+  }, []);
+  const closeGitModal = useCallback(() => {
+    setGitOpen(false);
+    restorePanelFocus();
+  }, [restorePanelFocus]);
+  const closeGitActions = useCallback(() => {
+    setGitActionsOpen(false);
+    restorePanelFocus();
+  }, [restorePanelFocus]);
 
   const isWindowed = panel.totalCount !== undefined && panel.totalCount > panel.entries.length;
   const totalCount = panel.totalCount ?? panel.entries.length;
@@ -1037,6 +1053,14 @@ export function Panel({
     }
     if (sortSelectorOpen) {
       handleSortSelectorKeyDown(e);
+      return;
+    }
+    const gitActionsCommand = findMatchingCommand(appState.commands, ["panel.git.actions"], e.nativeEvent, panel.viewMode);
+    if (gitActionsCommand) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (panel.git) setGitActionsOpen(true);
+      else dispatch({ type: "SHOW_TRANSIENT_HINT", message: "Git actions are available inside a local Git repository" });
       return;
     }
     if (panel.filterModeActive && e.key === "Escape") {
@@ -1615,7 +1639,8 @@ export function Panel({
         {panel.git && <button className="panel__git-btn" tabIndex={-1} title={`Git ${panel.git.branch}`} onClick={() => setGitOpen(true)}><IconGitBranch size={16} /> {panel.git.branch}</button>}
       </div>
 
-      {gitOpen && panel.git && <GitModal panelId={panelId} git={panel.git} client={client} onClose={() => setGitOpen(false)} />}
+      {gitOpen && panel.git && <GitModal panelId={panelId} git={panel.git} client={client} onClose={closeGitModal} />}
+      {gitActionsOpen && panel.git && <GitActionsModal panelId={panelId} git={panel.git} client={client} onClose={closeGitActions} />}
 
       <VolumeHeader sources={sources} panel={panel} client={client} onNavigateToSource={(sourceId) => { shouldFocusFilterRef.current = false; client.sendIntent("NavigateToSource", panelId, { sourceId }); }} onMountSource={(sourceId) => { shouldFocusFilterRef.current = false; client.sendIntent("MountSource", panelId, { sourceId }); }} />
 
