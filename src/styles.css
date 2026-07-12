@@ -1467,6 +1467,8 @@ body {
 .git-modal__change span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .git-modal__commit { padding: 10px 16px; }
 .git-modal .modal__actions { padding-inline: 16px; }
+.git-modal__activity { display: inline-flex; align-items: center; gap: 6px; margin-right: auto; color: var(--text-path); font-size: calc(var(--font-size) - 2px); }
+.git-modal__activity svg { animation: git-actions-spin 900ms linear infinite; }
 .git-modal__commit label { display: flex; justify-content: space-between; margin-bottom: 5px; color: var(--text-dim); font-size: calc(var(--font-size) - 1px); }
 .git-modal__commit label span { color: var(--text-muted); }
 .git-modal textarea { width: 100%; min-height: 48px; box-sizing: border-box; padding: 8px 10px; border: 1px solid var(--border); border-radius: 5px; background: var(--bg-input); color: var(--text); font-family: var(--font); font-size: var(--font-size); line-height: 1.4; resize: vertical; }
