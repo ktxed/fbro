@@ -149,7 +149,6 @@ fn should_record_command(name: &str) -> bool {
             | "ViewFile"
             | "EditFile"
             | "OpenFile"
-            | "LaunchBro"
             | "KillProcess"
             | "OpenTerminal"
     )

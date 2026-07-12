@@ -141,6 +141,69 @@ pub struct ResolvedBro {
 }
 
 impl ResolvedBro {
+    /// Describe how resolved inputs are handed to the bro without materializing
+    /// transient artifacts (such as the M3U playlist) or exposing secret
+    /// parameter values. Used by the audit journal at the authoritative launch
+    /// boundary.
+    pub(crate) fn journal_launch_convention(&self) -> serde_json::Value {
+        match &self.launch {
+            LaunchRecipe::Command { program, cwd, args } => {
+                let arguments = args
+                    .iter()
+                    .map(|arg| match arg {
+                        LaunchArg::Literal(value) => {
+                            serde_json::json!({ "kind": "literal", "value": value })
+                        }
+                        LaunchArg::TargetPaths => {
+                            serde_json::json!({ "kind": "target-paths" })
+                        }
+                        LaunchArg::TargetNames => {
+                            serde_json::json!({ "kind": "target-names" })
+                        }
+                        LaunchArg::TargetPlaylistFile { flag } => serde_json::json!({
+                            "kind": "target-playlist-file",
+                            "format": "m3u",
+                            "pathEncoding": "file-uri",
+                            "flag": flag,
+                        }),
+                        LaunchArg::OutputPath => {
+                            serde_json::json!({ "kind": "output-path" })
+                        }
+                        LaunchArg::PrefixedParam { id, prefix } => serde_json::json!({
+                            "kind": "parameter",
+                            "id": id,
+                            "prefix": prefix,
+                            "required": true,
+                        }),
+                        LaunchArg::OptionalPrefixedParam { id, prefix } => serde_json::json!({
+                            "kind": "parameter",
+                            "id": id,
+                            "prefix": prefix,
+                            "required": false,
+                        }),
+                    })
+                    .collect::<Vec<_>>();
+                serde_json::json!({
+                    "kind": "command",
+                    "program": program,
+                    "workingDirectory": match cwd {
+                        Some(LaunchCwd::FirstInputParent) => "first-input-parent",
+                        None => "inherited",
+                    },
+                    "arguments": arguments,
+                })
+            }
+            LaunchRecipe::BuiltInSevenZip => serde_json::json!({ "kind": "built-in", "name": "seven-zip" }),
+            LaunchRecipe::BuiltInZip => serde_json::json!({ "kind": "built-in", "name": "zip" }),
+            LaunchRecipe::BuiltInSevenZipExtract => serde_json::json!({ "kind": "built-in", "name": "seven-zip-extract" }),
+            LaunchRecipe::BuiltInZipExtract => serde_json::json!({ "kind": "built-in", "name": "zip-extract" }),
+            LaunchRecipe::BuiltInCopyPaths => serde_json::json!({ "kind": "built-in", "name": "copy-paths" }),
+            LaunchRecipe::BuiltInKillProc => serde_json::json!({ "kind": "built-in", "name": "kill-process" }),
+            LaunchRecipe::BuiltInSyncBro => serde_json::json!({ "kind": "built-in", "name": "sync" }),
+            LaunchRecipe::BuiltInFedupBro => serde_json::json!({ "kind": "built-in", "name": "fedup" }),
+        }
+    }
+
     pub(crate) fn build_command(
         &self,
         target_inputs: &[BroInputItem],

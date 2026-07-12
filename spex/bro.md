@@ -460,9 +460,9 @@ For `fp` bros:
 
 Current launch forms:
 
-* native `mpv`: `mpv -- <paths...>`
-* native `vlc`: `vlc <paths...>`
-* Flatpak `mpv` / `VLC`: `flatpak run --file-forwarding <APP_ID> @@ <paths...> @@`
+* native `mpv`: fbro writes the resolved inputs as `file:///` entries in an M3U playlist, then launches `mpv --playlist=<playlistPath>`
+* native `vlc`: fbro writes the resolved inputs as `file:///` entries in an M3U playlist, then launches `vlc <playlistPath>`
+* Flatpak `mpv` / `VLC`: fbro writes the same M3U playlist, then passes it to the selected Flatpak application using its player-specific playlist argument
 * native `tar`: `tar -cf <outputPath> <entry names...>` with working directory set to the parent directory of the selected inputs
 * native `7z`: `7z a -mx<level> [-p<password>] <outputPath> -- <entry names...>` with working directory set to the parent directory of the selected inputs
 * built-in `Fedup Bro`: backend job that scans a global selection for exact duplicate files and returns a structured report

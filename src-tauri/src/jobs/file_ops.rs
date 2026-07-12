@@ -218,9 +218,14 @@ fn run_file_op_blocking(
         other => Some(other),
     });
 
-    // For move: check if source and dest share the same driver (ptr equality).
-    // If they do, try_rename may succeed as an O(1) operation.
-    let same_driver = dst_driver.map_or(false, |d| std::ptr::eq(src_driver, d));
+    // Independently registered volume aliases each have their own driver Arc,
+    // even when both paths belong to the same local filesystem. Local drivers
+    // can safely attempt rename across those aliases: the OS returns EXDEV and
+    // LocalFsDriver falls back to copy + delete when they are truly on separate
+    // filesystems. Non-local drivers still require identical driver identity.
+    let can_try_rename = dst_driver.is_some_and(|dst| {
+        std::ptr::eq(src_driver, dst) || (src_driver.is_local() && dst.is_local())
+    });
 
     for entry in files {
         if wait_if_paused(pause_rx, cancel_rx) {
@@ -239,10 +244,10 @@ fn run_file_op_blocking(
                     return Err(format!("Cannot copy {src} onto itself"));
                 }
 
-                // For move with same driver: only use O(1) rename when the
-                // destination entry does not already exist. Existing targets
-                // must go through the regular conflict-aware copy+delete path.
-                if *op_type == FileOpType::Move && same_driver && !dst_drv.exists(&dst_str) {
+                // Try O(1) rename when the drivers can address the same local
+                // filesystem and the destination does not exist. Existing
+                // targets still use the conflict-aware copy+delete path.
+                if *op_type == FileOpType::Move && can_try_rename && !dst_drv.exists(&dst_str) {
                     match src_driver.try_rename(src, &dst_str) {
                         Ok(true) => {
                             // Rename succeeded — we can't know inner file count without

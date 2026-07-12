@@ -661,6 +661,11 @@ async fn launch_selected_bro(args: &Value, ctx: &mut IntentContext<'_>) {
     };
 
     if matches!(bro.launch, LaunchRecipe::BuiltInSyncBro) {
+        journal_resolved_bro_launch(
+            &parsed,
+            &bro,
+            request.resolved_inputs.as_deref().unwrap_or(&[]),
+        );
         if let Err(message) = launch_sync_bro(request, ctx).await {
             let _ = ctx
                 .tx
@@ -679,6 +684,11 @@ async fn launch_selected_bro(args: &Value, ctx: &mut IntentContext<'_>) {
         return;
     }
     if matches!(bro.launch, LaunchRecipe::BuiltInFedupBro) {
+        journal_resolved_bro_launch(
+            &parsed,
+            &bro,
+            request.resolved_inputs.as_deref().unwrap_or(&[]),
+        );
         if let Err(message) = launch_fedup_bro(request, parsed.params.clone(), ctx).await {
             let _ = ctx
                 .tx
@@ -822,6 +832,8 @@ async fn launch_selected_bro(args: &Value, ctx: &mut IntentContext<'_>) {
             }
         }
     };
+
+    journal_resolved_bro_launch(&parsed, &bro, &inputs);
 
     match bro.option.protocol {
         BroProtocol::Fnf => {
@@ -993,6 +1005,61 @@ async fn launch_selected_bro(args: &Value, ctx: &mut IntentContext<'_>) {
             }
         }
     }
+}
+
+fn journal_resolved_bro_launch(
+    request: &LaunchBroArgs,
+    bro: &ResolvedBro,
+    inputs: &[BroInputItem],
+) {
+    let inputs = inputs
+        .iter()
+        .map(|input| {
+            serde_json::json!({
+                "path": input.path,
+                "name": input.name,
+                "kind": input.kind,
+            })
+        })
+        .collect::<Vec<_>>();
+    let params = bro
+        .option
+        .params
+        .iter()
+        .filter_map(|declared| {
+            request.params.get(&declared.id).map(|value| {
+                let value = match declared.kind {
+                    BroLaunchInputKind::Password => "<redacted>".to_string(),
+                    BroLaunchInputKind::Int => value.clone(),
+                };
+                (declared.id.clone(), Value::String(value))
+            })
+        })
+        .collect::<serde_json::Map<String, Value>>();
+
+    crate::journal::record(
+        "intent.command.v1",
+        Some(&request.request_id),
+        None,
+        None,
+        None,
+        serde_json::json!({
+            "command": "LaunchBro",
+            "requestId": request.request_id,
+            "bro": {
+                "id": bro.option.id,
+                "name": bro.option.name,
+                "version": bro.option.version,
+                "source": bro.option.source.as_str(),
+                "protocol": bro.option.protocol.as_str(),
+            },
+            "inputs": inputs,
+            "inputCount": inputs.len(),
+            "output": request.output,
+            "params": params,
+            "launchConvention": bro.journal_launch_convention(),
+        }),
+    );
 }
 
 async fn launch_fp_bro(
