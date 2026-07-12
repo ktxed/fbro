@@ -6,11 +6,17 @@ import { IconEye, IconPlayerPlay, IconPlayerPause, IconX } from "@tabler/icons-r
 import { cancelJobWithPartialPrompt } from "../utils/jobCancel";
 import { ResizableModal } from "./ResizableModal";
 
+const FILE_LIST_PAGE_SIZE = 25;
+
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KiB`;
   if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MiB`;
   return `${(n / (1024 * 1024 * 1024)).toFixed(1)} GiB`;
+}
+
+function fileSizeLabel(size?: number) {
+  return size === undefined || size === null ? "—" : formatBytes(size);
 }
 
 function jobShortId(jobId: string) {
@@ -25,21 +31,75 @@ function completedFileCount(job: Job) {
   return job.progress?.completedFiles || job.progress?.totalFiles || job.files.length;
 }
 
+function listedFileCount(job: Job) {
+  return job.files.length || job.progress?.totalFiles || completedFileCount(job);
+}
+
 function completedBytes(job: Job) {
   return job.progress?.totalBytesCopied || job.progress?.totalBytesTotal || job.files.reduce((sum, file) => sum + (file.size ?? 0), 0);
 }
 
-function SummaryChip({ label, value }: { label: string; value: string }) {
-  return (
-    <span className="jobs-modal__summary-chip">
+function SummaryChip({
+  label,
+  value,
+  onClick,
+  active = false,
+}: {
+  label: string;
+  value: string;
+  onClick?: () => void;
+  active?: boolean;
+}) {
+  const content = (
+    <>
       <span className="jobs-modal__summary-label">{label}</span>
       <span className="jobs-modal__summary-value">{value}</span>
+    </>
+  );
+  if (onClick) {
+    return (
+      <span className={`jobs-modal__summary-chip jobs-modal__summary-chip--expandable${active ? " jobs-modal__summary-chip--active" : ""}`}>
+        {content}
+        <button
+          className="jobs-modal__summary-chip-action"
+          onClick={onClick}
+          title={active ? "Collapse File List" : "Expand File List"}
+          aria-label={active ? "Collapse File List" : "Expand File List"}
+        >
+          {active ? "-" : "+"}
+        </button>
+      </span>
+    );
+  }
+  return (
+    <span className="jobs-modal__summary-chip">
+      {content}
     </span>
   );
 }
 
-function JobSummary({ job }: { job: Job }) {
-  if (!isTerminalJob(job)) return null;
+function JobSummary({
+  job,
+  canExpandFiles,
+  filesExpanded,
+  onToggleFiles,
+}: {
+  job: Job;
+  canExpandFiles: boolean;
+  filesExpanded: boolean;
+  onToggleFiles?: () => void;
+}) {
+  const fileChip = canExpandFiles ? (
+    <SummaryChip
+      label="Files"
+      value={String(listedFileCount(job))}
+      onClick={onToggleFiles}
+      active={filesExpanded}
+    />
+  ) : null;
+  if (!isTerminalJob(job)) {
+    return fileChip ? <div className="jobs-modal__summary">{fileChip}</div> : null;
+  }
 
   if (job.kind === "sync-bro" && job.syncResult) {
     const differing = job.syncResult.differing.length
@@ -49,6 +109,7 @@ function JobSummary({ job }: { job: Job }) {
     const errors = job.syncResult.localErrors.length + job.syncResult.remoteErrors.length;
     return (
       <div className="jobs-modal__summary">
+        {fileChip}
         <SummaryChip label="Matched" value={String(job.syncResult.matched)} />
         <SummaryChip label="Differences" value={String(differing)} />
         <SummaryChip label="Errors" value={String(errors)} />
@@ -59,6 +120,7 @@ function JobSummary({ job }: { job: Job }) {
   if (job.kind === "fedup-bro" && job.fedupResult) {
     return (
       <div className="jobs-modal__summary">
+        {fileChip}
         <SummaryChip label="Groups" value={String(job.fedupResult.duplicateGroups)} />
         <SummaryChip label="Duplicates" value={String(job.fedupResult.duplicateFiles)} />
         <SummaryChip label="Reclaimable" value={formatBytes(job.fedupResult.reclaimableBytes)} />
@@ -70,8 +132,8 @@ function JobSummary({ job }: { job: Job }) {
   if (job.kind === "outgoing-transfer") {
     return (
       <div className="jobs-modal__summary">
-        <SummaryChip label="Sent files" value={String(completedFileCount(job))} />
-        <SummaryChip label="Bytes" value={formatBytes(completedBytes(job))} />
+        {canExpandFiles ? fileChip : <SummaryChip label="Files" value={String(completedFileCount(job))} />}
+        <SummaryChip label="Size" value={formatBytes(completedBytes(job))} />
       </div>
     );
   }
@@ -79,10 +141,14 @@ function JobSummary({ job }: { job: Job }) {
   if (job.kind === "file-op" || job.kind === "fp-bro" || job.kind === "remote-manifest") {
     return (
       <div className="jobs-modal__summary">
-        <SummaryChip label="Files" value={String(completedFileCount(job))} />
-        <SummaryChip label="Bytes" value={formatBytes(completedBytes(job))} />
+        {canExpandFiles ? fileChip : <SummaryChip label="Files" value={String(completedFileCount(job))} />}
+        <SummaryChip label="Size" value={formatBytes(completedBytes(job))} />
       </div>
     );
+  }
+
+  if (fileChip) {
+    return <div className="jobs-modal__summary">{fileChip}</div>;
   }
 
   return null;
@@ -124,6 +190,10 @@ function JobRow({
   prefix,
   queueActions,
   suppressActiveActions = false,
+  filesExpanded = false,
+  filePage = 0,
+  onToggleFiles,
+  onFilePageChange,
 }: {
   job: Job;
   client: WsClient;
@@ -131,6 +201,10 @@ function JobRow({
   prefix?: ReactNode;
   queueActions?: ReactNode;
   suppressActiveActions?: boolean;
+  filesExpanded?: boolean;
+  filePage?: number;
+  onToggleFiles?: () => void;
+  onFilePageChange?: (page: number) => void;
 }) {
   const state = useAppState();
   const dispatch = useAppDispatch();
@@ -154,6 +228,12 @@ function JobRow({
     Cancelled: "Cancelled",
     Failed: "Failed",
   };
+  const canExpandFiles = job.files.length > 0 && !!onToggleFiles && !!onFilePageChange;
+  const maxFilePage = Math.max(0, Math.ceil(job.files.length / FILE_LIST_PAGE_SIZE) - 1);
+  const clampedFilePage = Math.min(filePage, maxFilePage);
+  const fileStart = clampedFilePage * FILE_LIST_PAGE_SIZE;
+  const fileEnd = Math.min(fileStart + FILE_LIST_PAGE_SIZE, job.files.length);
+  const visibleFiles = filesExpanded ? job.files.slice(fileStart, fileEnd) : [];
 
   return (
     <div className={`jobs-modal__row${isActive ? " jobs-modal__row--active" : ""}`}>
@@ -267,10 +347,49 @@ function JobRow({
 
       {job.progress && isActive && <ProgressBar p={job.progress} />}
 
-      <JobSummary job={job} />
+      <JobSummary
+        job={job}
+        canExpandFiles={canExpandFiles}
+        filesExpanded={filesExpanded}
+        onToggleFiles={onToggleFiles}
+      />
 
       {job.error && (
         <div className="jobs-modal__error">{job.error}</div>
+      )}
+
+      {canExpandFiles && filesExpanded && (
+        <div className="jobs-modal__file-list">
+          <div className="jobs-modal__file-list-header">
+            <span>Files {fileStart + 1}-{fileEnd} of {job.files.length}</span>
+            <div className="jobs-modal__file-list-pager">
+              <button
+                disabled={clampedFilePage === 0}
+                onClick={() => onFilePageChange(clampedFilePage - 1)}
+              >
+                Previous
+              </button>
+              <button
+                disabled={clampedFilePage >= maxFilePage}
+                onClick={() => onFilePageChange(clampedFilePage + 1)}
+              >
+                Next
+              </button>
+            </div>
+          </div>
+          <div className="jobs-modal__file-list-body">
+            {visibleFiles.map((file, index) => {
+              const path = file.sourcePath ?? file.name;
+              return (
+                <div key={`${path}:${fileStart + index}`} className="jobs-modal__file-row" title={path}>
+                  <span className="jobs-modal__file-name">{file.name}</span>
+                  <span className="jobs-modal__file-kind">{file.kind}</span>
+                  <span className="jobs-modal__file-size">{fileSizeLabel(file.size)}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
       )}
     </div>
   );
@@ -282,12 +401,17 @@ function QueueJobRow({
   active,
   client,
   onClose,
+  fileListProps,
 }: {
   job: Job;
   order: number;
   active: boolean;
   client: WsClient;
   onClose: () => void;
+  fileListProps: Pick<
+    Parameters<typeof JobRow>[0],
+    "filesExpanded" | "filePage" | "onToggleFiles" | "onFilePageChange"
+  >;
 }) {
   const queueActions = active ? null : (
     <div className="jobs-modal__queue-actions">
@@ -308,6 +432,7 @@ function QueueJobRow({
       prefix={<span className="jobs-modal__queue-order">{order}</span>}
       queueActions={queueActions}
       suppressActiveActions={!active}
+      {...fileListProps}
     />
   );
 }
@@ -414,6 +539,8 @@ export function JobsModal({ onClose, client }: { onClose: () => void; client: Ws
   const state = useAppState();
   const overlayRef = useRef<HTMLDivElement>(null);
   const [activeTab, setActiveTab] = useState<"jobs" | "procs" | "cache">("jobs");
+  const [expandedFileJobs, setExpandedFileJobs] = useState<Record<string, boolean>>({});
+  const [filePages, setFilePages] = useState<Record<string, number>>({});
 
   const byNewest = (a: Job, b: Job) => b.startedAt - a.startedAt;
   const jobs = Object.values(state.jobs).sort(byNewest);
@@ -451,6 +578,17 @@ export function JobsModal({ onClose, client }: { onClose: () => void; client: Ws
   const onOverlayClick = (e: React.MouseEvent) => {
     if (e.target === overlayRef.current) onClose();
   };
+  const fileListProps = (job: Job) => ({
+    filesExpanded: !!expandedFileJobs[job.jobId],
+    filePage: filePages[job.jobId] ?? 0,
+    onToggleFiles: () => {
+      setExpandedFileJobs((current) => ({ ...current, [job.jobId]: !current[job.jobId] }));
+      setFilePages((current) => ({ ...current, [job.jobId]: 0 }));
+    },
+    onFilePageChange: (page: number) => {
+      setFilePages((current) => ({ ...current, [job.jobId]: Math.max(0, page) }));
+    },
+  });
 
   return (
     <div className="modal-overlay" ref={overlayRef} onClick={onOverlayClick}>
@@ -505,6 +643,7 @@ export function JobsModal({ onClose, client }: { onClose: () => void; client: Ws
                       active={job.jobId === state.jobQueue.activeJobId}
                       client={client}
                       onClose={onClose}
+                      fileListProps={fileListProps(job)}
                     />
                   ))}
                 </section>
@@ -513,21 +652,21 @@ export function JobsModal({ onClose, client }: { onClose: () => void; client: Ws
               {activeFileJobs.length > 0 && (
                 <section>
                   <div className="jobs-modal__section-title">Active File Jobs</div>
-                  {activeFileJobs.map(j => <JobRow key={j.jobId} job={j} client={client} onClose={onClose} />)}
+                  {activeFileJobs.map(j => <JobRow key={j.jobId} job={j} client={client} onClose={onClose} {...fileListProps(j)} />)}
                 </section>
               )}
 
               {broJobs.length > 0 && (
                 <section>
                   <div className="jobs-modal__section-title">Bro Jobs</div>
-                  {broJobs.map(j => <JobRow key={j.jobId} job={j} client={client} onClose={onClose} />)}
+                  {broJobs.map(j => <JobRow key={j.jobId} job={j} client={client} onClose={onClose} {...fileListProps(j)} />)}
                 </section>
               )}
 
               {outgoingJobs.length > 0 && (
                 <section>
                   <div className="jobs-modal__section-title">Outgoing Transfers</div>
-                  {outgoingJobs.map(j => <JobRow key={j.jobId} job={j} client={client} onClose={onClose} />)}
+                  {outgoingJobs.map(j => <JobRow key={j.jobId} job={j} client={client} onClose={onClose} {...fileListProps(j)} />)}
                 </section>
               )}
 
@@ -547,7 +686,7 @@ export function JobsModal({ onClose, client }: { onClose: () => void; client: Ws
               {finishedFileJobs.length > 0 && (
                 <section>
                   <div className="jobs-modal__section-title">Finished File Jobs</div>
-                  {finishedFileJobs.map(j => <JobRow key={j.jobId} job={j} client={client} onClose={onClose} />)}
+                  {finishedFileJobs.map(j => <JobRow key={j.jobId} job={j} client={client} onClose={onClose} {...fileListProps(j)} />)}
                 </section>
               )}
             </>
