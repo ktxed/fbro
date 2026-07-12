@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { IconArrowDown, IconArrowUp } from "@tabler/icons-react";
 import type { GitRepoStatus } from "../ws/types";
 import type { WsClient } from "../ws/client";
 import { ResizableModal } from "./ResizableModal";
@@ -11,6 +12,8 @@ export function GitModal({ panelId, git, client, onClose }: { panelId: string; g
   const branchRef = useRef<HTMLSelectElement>(null);
   const commitRef = useRef<HTMLButtonElement>(null);
   const canCommit = message.trim().length > 0 && staged.length > 0;
+  const canPull = git.clean && git.behindCount !== undefined && git.behindCount > 0;
+  const canPush = git.clean && !!git.upstream && git.aheadCount !== undefined && git.aheadCount > 0;
   const act = (name: string, args: Record<string, unknown> = {}) => client.sendIntent(name, undefined, { panelId, ...args });
   useEffect(() => {
     const frame = requestAnimationFrame(() => closeRef.current?.focus());
@@ -47,8 +50,8 @@ export function GitModal({ panelId, git, client, onClose }: { panelId: string; g
       if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) return;
       const accelerators: Record<string, () => void> = {
         b: () => branchRef.current?.focus(),
-        l: () => { if (git.clean) act("GitPull"); },
-        p: () => { if (git.clean) act("GitPush"); },
+        l: () => { if (canPull) act("GitPull"); },
+        p: () => { if (canPush) act("GitPush"); },
         r: () => act("GitRefresh"),
         c: () => { if (canCommit) commitRef.current?.click(); },
       };
@@ -61,12 +64,12 @@ export function GitModal({ panelId, git, client, onClose }: { panelId: string; g
     };
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [canCommit, git.clean, onClose]);
+  }, [canCommit, canPull, canPush, onClose]);
   return <div className="modal-overlay" role="dialog" aria-modal="true" onKeyDown={(event) => event.stopPropagation()} onKeyUp={(event) => event.stopPropagation()}><ResizableModal ref={modalRef} modalId="git" client={client} className="git-modal" ariaLabel="Git repository" ariaModal defaultSize={{ width: 760, height: 700 }} minSize={{ width: 640, height: 620 }}>
     <div className="git-modal__header"><div><span className="git-modal__eyebrow">REPOSITORY</span><strong>{git.branch}</strong></div><button ref={closeRef} className="git-modal__close" title="Close (Esc)" onClick={onClose}>×</button></div>
     <div className="git-modal__summary" title={git.root}><span className="git-modal__path">{git.root}</span><span className="git-modal__stat">{git.stagedCount} staged</span><span className="git-modal__stat">{git.modifiedCount} modified</span><span className="git-modal__stat">{git.untrackedCount} untracked</span></div>
     {!git.clean && <div className="git-modal__warning">Working tree has changes. Branch switch, pull, and push are disabled; use another Git tool to stash or resolve them.</div>}
-    <div className="git-modal__toolbar"><select ref={branchRef} value={git.branch} disabled={!git.clean} onChange={e => act("GitSwitchBranch", { branch: e.target.value })}>{git.branches.map(branch => <option key={branch} value={branch}>{branch}</option>)}</select><kbd>B</kbd><span className="git-modal__toolbar-spacer" /><button disabled={!git.clean} onClick={() => act("GitPull")}>Pull <kbd>L</kbd></button><button disabled={!git.clean} onClick={() => act("GitPush")}>Push <kbd>P</kbd></button><button onClick={() => act("GitRefresh")}>Refresh <kbd>R</kbd></button></div>
+    <div className="git-modal__toolbar"><select ref={branchRef} value={git.branch} disabled={!git.clean} onChange={e => act("GitSwitchBranch", { branch: e.target.value })}>{git.branches.map(branch => <option key={branch} value={branch}>{branch}</option>)}</select><kbd>B</kbd><span className="git-modal__toolbar-spacer" /><button disabled={!canPull} title={!canPull ? "No incoming commits to pull" : undefined} onClick={() => act("GitPull")}>Pull <kbd>L</kbd>{git.behindCount !== undefined && git.behindCount > 0 && <em className="git-actions-modal__badge git-actions-modal__badge--incoming"><IconArrowDown size={13} /> {git.behindCount}</em>}</button><button disabled={!canPush} title={!canPush ? "No outgoing commits to push" : undefined} onClick={() => act("GitPush")}>Push <kbd>P</kbd>{git.aheadCount !== undefined && git.aheadCount > 0 && <em className="git-actions-modal__badge git-actions-modal__badge--outgoing"><IconArrowUp size={13} /> {git.aheadCount}</em>}</button><button onClick={() => act("GitRefresh")}>Refresh <kbd>R</kbd></button></div>
     <div className="git-modal__section-title">Changes <span>{git.changes.length}</span></div>
     <div className="git-modal__changes">{git.changes.map(change => { const isStaged = change.indexStatus !== " " && change.indexStatus !== "?"; return <div className="git-modal__change" key={change.path}><code className={isStaged ? "git-modal__change-state--staged" : ""}>{change.indexStatus}{change.worktreeStatus}</code><span title={change.path}>{change.path}</span><button onClick={() => act(isStaged ? "GitUnstagePaths" : "GitStagePaths", { paths: [change.path] })}>{isStaged ? "Unstage" : "Stage"}</button></div>; })}</div>
     <div className="git-modal__commit"><label htmlFor="git-commit-message">Commit message <span>{staged.length} staged</span></label><textarea id="git-commit-message" value={message} onChange={e => setMessage(e.target.value)} placeholder="Describe this change" rows={2} /></div>

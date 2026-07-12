@@ -1455,6 +1455,7 @@ body {
 .git-modal__warning { margin: 8px 12px 0; padding: 6px 8px; border: 1px solid color-mix(in srgb, var(--text-warning) 42%, var(--border)); background: color-mix(in srgb, var(--text-warning) 10%, var(--bg-panel)); color: var(--text-warning); font-size: calc(var(--font-size) - 1px); line-height: 1.35; }
 .git-modal__toolbar { display: flex; align-items: center; gap: 8px; padding: 10px 16px; }
 .git-modal__toolbar select, .git-modal__toolbar button, .git-modal__change button, .git-modal .modal__actions button { font: inherit; font-size: calc(var(--font-size) - 1px); margin-inline: 5px; padding-inline: 8px; }
+.git-modal__toolbar .git-actions-modal__badge { margin-left: 5px; vertical-align: middle; }
 .git-modal kbd { display: inline-block; margin-left: 3px; padding: 0 3px; border: 1px solid var(--border); border-radius: 3px; color: var(--text-dim); font: inherit; font-size: calc(var(--font-size) - 4px); line-height: 1.3; vertical-align: 1px; }
 .git-modal__toolbar-spacer { flex: 1; }
 .git-modal__section-title { display: flex; justify-content: space-between; padding: 5px 12px; color: var(--text-dim); background: var(--bg-header); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); font-size: calc(var(--font-size) - 2px); text-transform: uppercase; letter-spacing: .06em; }
