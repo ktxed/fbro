@@ -8,9 +8,10 @@ interface Props {
   git: GitRepoStatus;
   client: WsClient;
   onClose: () => void;
+  onOpenRepository: () => void;
 }
 
-export function GitActionsModal({ panelId, git, client, onClose }: Props) {
+export function GitActionsModal({ panelId, git, client, onClose, onOpenRepository }: Props) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const controlRefs = useRef<Array<HTMLButtonElement | HTMLSelectElement | null>>([]);
   const lastGitRef = useRef(git);
@@ -51,6 +52,12 @@ export function GitActionsModal({ panelId, git, client, onClose }: Props) {
         onClose();
         return;
       }
+      if (event.shiftKey && event.key.toLowerCase() === "g") {
+        event.preventDefault();
+        event.stopPropagation();
+        onOpenRepository();
+        return;
+      }
       const key = event.key.toLowerCase();
       const isBranchPicker = event.target instanceof HTMLSelectElement;
       // Textual branch selection remains native, but arrows always navigate
@@ -80,7 +87,7 @@ export function GitActionsModal({ panelId, git, client, onClose }: Props) {
     };
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [activeIndex, canPull, canPush, focusControl, git.branch, git.clean, git.detached, git.upstream, onClose]);
+  }, [activeIndex, canPull, canPush, focusControl, git.branch, git.clean, git.detached, git.upstream, onClose, onOpenRepository]);
 
   const disabledMessage = "Requires a clean worktree";
   return (

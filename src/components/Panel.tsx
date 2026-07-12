@@ -1657,7 +1657,7 @@ export function Panel({
       </div>
 
       {gitOpen && panel.git && <GitModal panelId={panelId} git={panel.git} client={client} onClose={closeGitModal} />}
-      {gitActionsOpen && panel.git && <GitActionsModal panelId={panelId} git={panel.git} client={client} onClose={closeGitActions} />}
+      {gitActionsOpen && panel.git && <GitActionsModal panelId={panelId} git={panel.git} client={client} onClose={closeGitActions} onOpenRepository={() => { setGitActionsOpen(false); setGitOpen(true); }} />}
 
       <VolumeHeader sources={sources} panel={panel} client={client} onNavigateToSource={(sourceId) => { shouldFocusFilterRef.current = false; client.sendIntent("NavigateToSource", panelId, { sourceId }); }} onMountSource={(sourceId) => { shouldFocusFilterRef.current = false; client.sendIntent("MountSource", panelId, { sourceId }); }} />
 
