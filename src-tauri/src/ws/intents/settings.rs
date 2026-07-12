@@ -293,6 +293,40 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
                 state_guard.settings.general.fedup_default_ignore_patterns =
                     normalize_fedup_ignore_patterns(v);
             }
+            "compareMaxFileSizeMb" => {
+                let Some(v) = value.as_u64() else {
+                    drop(state_guard);
+                    bad_setting(ctx.tx, "compareMaxFileSizeMb must be a positive integer").await;
+                    return;
+                };
+                state_guard.settings.general.compare_max_file_size_mb = v.clamp(1, 1024);
+            }
+            "compareDifferMode" => {
+                let Some(v) = value.as_str() else {
+                    drop(state_guard);
+                    bad_setting(ctx.tx, "compareDifferMode must be a string").await;
+                    return;
+                };
+                match crate::state::settings::CompareDifferMode::from_str(v) {
+                    Some(mode) => {
+                        state_guard.settings.general.compare_differ_mode = mode;
+                    }
+                    None => {
+                        let msg = format!("Unknown compareDifferMode: {v}");
+                        drop(state_guard);
+                        bad_setting(ctx.tx, &msg).await;
+                        return;
+                    }
+                }
+            }
+            "compareExternalCommand" => {
+                let Some(v) = value.as_str() else {
+                    drop(state_guard);
+                    bad_setting(ctx.tx, "compareExternalCommand must be a string").await;
+                    return;
+                };
+                state_guard.settings.general.compare_external_command = v.trim().to_string();
+            }
             _ => {
                 let msg = format!("Unknown setting key: {key}");
                 drop(state_guard);
@@ -452,6 +486,9 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
                 "sevenzipCustomPath": general.sevenzip_custom_path,
                 "sevenzipResolvedPath": sevenzip_resolved,
                 "fedupDefaultIgnorePatterns": general.fedup_default_ignore_patterns,
+                "compareMaxFileSizeMb": general.compare_max_file_size_mb,
+                "compareDifferMode": general.compare_differ_mode.as_str(),
+                "compareExternalCommand": general.compare_external_command,
             }
         }),
     };

@@ -10,14 +10,55 @@ import {
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { bindingMatches, executeTargetedCommand } from "../commands/interactive";
 import { buildContextMenuItems } from "../contextMenu";
-import { useAppDispatch, useAppState, type PendingContextMenu } from "../store";
+import { useAppDispatch, useAppState, type AppState, type PendingContextMenu } from "../store";
 import { resolveColorScheme } from "../theme/colorSchemes";
 import { isGlobalSelectionSourceId } from "../utils/sourceId";
 import type { WsClient } from "../ws/client";
+import type { PanelState, VFSEntry } from "../ws/types";
 
 interface ContextMenuProps {
   client: WsClient;
   menu: PendingContextMenu;
+}
+
+function entryAt(panel: PanelState, absIndex: number): VFSEntry | undefined {
+  return panel.entries[absIndex - (panel.windowStart ?? 0)];
+}
+
+function cursorFile(panel?: PanelState): VFSEntry | undefined {
+  if (!panel) return undefined;
+  const entry = entryAt(panel, panel.cursor);
+  return entry?.kind === "file" && entry.name !== ".." ? entry : undefined;
+}
+
+function selectedFiles(panel?: PanelState): VFSEntry[] {
+  if (!panel) return [];
+  return panel.selection
+    .map((index) => entryAt(panel, index))
+    .filter((entry): entry is VFSEntry => !!entry && entry.kind === "file" && entry.name !== "..");
+}
+
+function canCompareFromMenu(state: AppState, menu: PendingContextMenu) {
+  if (menu.kind !== "file") return false;
+  const panel = state.panels[menu.panelId];
+  if (!panel) return false;
+  const currentSelected = selectedFiles(panel);
+  if (currentSelected.length === 2) {
+    return menu.targetScope === "selection" || currentSelected.some((entry) => entry.name === menu.name);
+  }
+  const targetName = menu.name;
+  if (currentSelected.length === 1) {
+    const cursor = cursorFile(panel);
+    if (cursor && cursor.name !== currentSelected[0].name) return true;
+    if (targetName !== currentSelected[0].name) return true;
+  }
+
+  const panelIds = state.layout.panels.length > 0 ? state.layout.panels : Object.keys(state.panels);
+  const otherPanel = state.panels[panelIds.find((id) => id !== menu.panelId) ?? ""];
+  const thisCandidates = currentSelected.length === 1 ? currentSelected : [{ name: targetName, kind: "file" } as VFSEntry];
+  const otherSelected = selectedFiles(otherPanel);
+  const otherCandidates = otherSelected.length === 1 ? otherSelected : otherSelected.length === 0 ? [cursorFile(otherPanel)].filter(Boolean) as VFSEntry[] : [];
+  return thisCandidates.length === 1 && otherCandidates.length === 1;
 }
 
 export function ContextMenu({ client, menu }: ContextMenuProps) {
@@ -49,7 +90,8 @@ export function ContextMenu({ client, menu }: ContextMenuProps) {
           isShadow: menu.isShadow,
           canPlatform: isLocalFilesystem,
           canOpenWith: isLocalFilesystem,
-          canPassToBro: isLocalFilesystem || isGlobalRoot,
+          canPassToBro: isLocalFilesystem || isGlobalRoot || canCompareFromMenu(state, menu),
+          canCompare: canCompareFromMenu(state, menu),
           canAddToGlobalSelection: isLocalFilesystem,
           canCopy: !!menu.isShadow || (isLocalFilesystem && supports.includes("CopySelection")),
           canRename: (isLocalFilesystem && supports.includes("Rename")) || isGlobalRoot,

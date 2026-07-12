@@ -1,6 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { App } from "./App";
+import { DiffViewerApp } from "./components/DiffViewerApp";
 import { ViewerApp } from "./components/ViewerApp";
 import "./styles.css";
 
@@ -8,7 +9,17 @@ const params = new URLSearchParams(window.location.search);
 
 const root = ReactDOM.createRoot(document.getElementById("root")!);
 
-if (params.get("viewer") === "1") {
+if (params.get("diff") === "1") {
+  root.render(
+    <React.StrictMode>
+      <DiffViewerApp
+        requestId={params.get("request") ?? ""}
+        windowLabel={params.get("label") ?? ""}
+        initialColorScheme={params.get("colorScheme")}
+      />
+    </React.StrictMode>,
+  );
+} else if (params.get("viewer") === "1") {
   const sizeParam = params.get("size");
   root.render(
     <React.StrictMode>

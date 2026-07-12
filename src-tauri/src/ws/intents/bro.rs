@@ -413,6 +413,26 @@ fn sync_bro() -> ResolvedBro {
     }
 }
 
+fn compare_files_bro() -> ResolvedBro {
+    ResolvedBro {
+        option: BroOption {
+            id: "builtin.compare_files".to_string(),
+            name: "Compare files".to_string(),
+            version: "1".to_string(),
+            source: BroSource::Native,
+            detail: Some("Compare two text files".to_string()),
+            protocol: BroProtocol::Fnf,
+            output: None,
+            params: Vec::new(),
+            pre: BroPre {
+                score: 100,
+                reason: "Two text files selected".to_string(),
+            },
+        },
+        launch: LaunchRecipe::BuiltInCompareFiles,
+    }
+}
+
 fn sync_roots_for_panels(
     state: &crate::state::AppState,
     panel_id: &str,
@@ -475,12 +495,24 @@ async fn list_bros_for_request(scope: &Value, args: &Value, ctx: &mut IntentCont
         return;
     }
 
-    let (ranking_inputs, result_panel_id, panel_source_id, sync_available, resolved_inputs) = {
+    let (
+        ranking_inputs,
+        result_panel_id,
+        panel_source_id,
+        sync_available,
+        compare_available,
+        resolved_inputs,
+    ) = {
         let state_guard = ctx.state.lock().await;
         let result_panel_id =
             Some(other_panel_id(&state_guard, &panel_id).unwrap_or_else(|| panel_id.clone()));
         let sync_available = parsed.target_path.is_none()
             && sync_roots_for_panels(&state_guard, &panel_id, result_panel_id.as_deref()).is_ok();
+        let compare_available = super::compare::can_compare_from_state(
+            &state_guard,
+            &panel_id,
+            parsed.target_path.as_deref(),
+        );
         let panel_source_id = state_guard
             .panels
             .get(&panel_id)
@@ -508,6 +540,7 @@ async fn list_bros_for_request(scope: &Value, args: &Value, ctx: &mut IntentCont
             result_panel_id,
             panel_source_id,
             sync_available,
+            compare_available,
             resolved_inputs,
         )
     };
@@ -553,6 +586,9 @@ async fn list_bros_for_request(scope: &Value, args: &Value, ctx: &mut IntentCont
     };
     if sync_available {
         bros.insert(0, sync_bro());
+    }
+    if compare_available {
+        bros.insert(0, compare_files_bro());
     }
     let input_schemas = ranking_inputs
         .iter()
@@ -690,6 +726,30 @@ async fn launch_selected_bro(args: &Value, ctx: &mut IntentContext<'_>) {
             request.resolved_inputs.as_deref().unwrap_or(&[]),
         );
         if let Err(message) = launch_fedup_bro(request, parsed.params.clone(), ctx).await {
+            let _ = ctx
+                .tx
+                .send(ServerMessage::Error {
+                    timestamp: now(),
+                    code: "BRO_LAUNCH_FAILED".to_string(),
+                    message,
+                    recoverable: true,
+                    extra: Some(serde_json::json!({
+                        "requestId": parsed.request_id,
+                        "broId": parsed.bro_id,
+                    })),
+                })
+                .await;
+        }
+        return;
+    }
+    if matches!(bro.launch, LaunchRecipe::BuiltInCompareFiles) {
+        if let Err(message) = super::compare::launch_compare_for_panel(
+            &request.source_panel_id,
+            request.target_path.as_deref(),
+            ctx,
+        )
+        .await
+        {
             let _ = ctx
                 .tx
                 .send(ServerMessage::Error {

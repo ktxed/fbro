@@ -175,6 +175,18 @@ pub(crate) fn build_state_snapshot(
                         .general
                         .fedup_default_ignore_patterns
                         .clone(),
+                    compare_max_file_size_mb: state.settings.general.compare_max_file_size_mb,
+                    compare_differ_mode: state
+                        .settings
+                        .general
+                        .compare_differ_mode
+                        .as_str()
+                        .to_string(),
+                    compare_external_command: state
+                        .settings
+                        .general
+                        .compare_external_command
+                        .clone(),
                 },
                 modal_sizes: state
                     .settings

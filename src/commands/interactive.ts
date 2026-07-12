@@ -39,6 +39,7 @@ export const GLOBAL_SHORTCUT_COMMAND_IDS = [
   "panel.viewer.embed",
   "panel.navigate_source_root",
   "file.info",
+  "file.compare",
   "file.set_permissions",
   "panel.toggle_hidden",
   "file.copy_external",
@@ -97,6 +98,7 @@ export const PANEL_SHORTCUT_COMMAND_IDS = [
   "panel.tab.next",
   "panel.tab.prev",
   "file.touch",
+  "file.compare",
 ] as const;
 
 export const COMMAND_PALETTE_COMMAND_IDS = [
@@ -371,6 +373,12 @@ export function executeTargetedCommand(
       return context.state.panels[target.panelId]
         ? openPassToBro(context.state, context.dispatch, context.client, context.state.panels[target.panelId], target.fullPath)
         : false;
+    case "file.compare":
+      context.client.sendIntent("CompareFiles", target.panelId, {
+        panelId: target.panelId,
+        targetPath: target.fullPath,
+      });
+      return true;
     case "file.copy":
       return openFileOpForEntries(context.state, context.dispatch, target.panelId, [file], "copy");
     case "file.move":
@@ -603,6 +611,10 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
     case "panel.pass_to_bro":
       if (focused && isGlobalSelectionSourceId(focused.panel.sourceId) && focused.panel.path !== "") return false;
       return focused ? openPassToBro(state, dispatch, client, focused.panel) : false;
+    case "file.compare":
+      if (!focused) return false;
+      client.sendIntent("CompareFiles", focused.panelId, { panelId: focused.panelId });
+      return true;
     case "file.info":
       return focused ? openInfo(dispatch, focused.panel, state) : false;
     case "file.rename":

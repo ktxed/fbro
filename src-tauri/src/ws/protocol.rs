@@ -309,6 +309,53 @@ pub enum ServerMessage {
         #[serde(rename = "nextRetryAt", skip_serializing_if = "Option::is_none")]
         next_retry_at: Option<u64>,
     },
+    CompareDiffReady {
+        timestamp: u64,
+        #[serde(rename = "requestId")]
+        request_id: String,
+        result: CompareDiffResultSchema,
+    },
+    CompareDiffFailed {
+        timestamp: u64,
+        #[serde(rename = "requestId")]
+        request_id: String,
+        message: String,
+    },
+}
+
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct CompareDiffResultSchema {
+    pub left: CompareTargetSchema,
+    pub right: CompareTargetSchema,
+    pub rows: Vec<CompareDiffRowSchema>,
+    pub unified: String,
+    pub identical: bool,
+}
+
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct CompareTargetSchema {
+    pub panel_id: String,
+    pub source_id: String,
+    pub path: String,
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub size: Option<u64>,
+}
+
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct CompareDiffRowSchema {
+    pub kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub left_line: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub right_line: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub left_text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub right_text: Option<String>,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -399,6 +446,9 @@ pub struct GeneralSettingsSchema {
     /// re-running probe logic in the FE.
     pub sevenzip_resolved_path: String,
     pub fedup_default_ignore_patterns: String,
+    pub compare_max_file_size_mb: u64,
+    pub compare_differ_mode: String,
+    pub compare_external_command: String,
 }
 
 #[derive(Serialize, Clone, Debug)]

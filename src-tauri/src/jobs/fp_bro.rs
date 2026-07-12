@@ -107,7 +107,8 @@ pub async fn run_fp_bro(
         LaunchRecipe::BuiltInCopyPaths
         | LaunchRecipe::BuiltInKillProc
         | LaunchRecipe::BuiltInSyncBro
-        | LaunchRecipe::BuiltInFedupBro => {}
+        | LaunchRecipe::BuiltInFedupBro
+        | LaunchRecipe::BuiltInCompareFiles => {}
     }
 }
 

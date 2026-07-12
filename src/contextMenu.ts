@@ -19,6 +19,7 @@ export interface ContextMenuOptions {
   canPlatform?: boolean;
   canOpenWith?: boolean;
   canPassToBro?: boolean;
+  canCompare?: boolean;
   canAddToGlobalSelection?: boolean;
   canCopy?: boolean;
   canRename?: boolean;
@@ -80,12 +81,16 @@ export function buildContextMenuItems(
   const broItem: ContextMenuItem | null = options.canPassToBro && (kind === "file" || kind === "directory")
     ? { id: "platform.pass_to_bro", kind: "bro", label: "Pass to Bro..." }
     : null;
+  const compareItem: ContextMenuItem | null = options.canCompare && kind === "file"
+    ? commandItem("file.compare", "Compare", commands)
+    : null;
   const globalSelectionItem: ContextMenuItem | null = options.canAddToGlobalSelection && (kind === "file" || kind === "directory")
     ? { id: "selection.to_global", kind: "globalSelection", label: "To global selection" }
     : null;
 
   return [
     ...(options.canPlatform ? [platformItem()] : []),
+    ...(compareItem ? [compareItem] : []),
     ...(broItem ? [broItem] : []),
     ...(globalSelectionItem ? [globalSelectionItem] : []),
     ...(openWithItem ? [openWithItem] : []),

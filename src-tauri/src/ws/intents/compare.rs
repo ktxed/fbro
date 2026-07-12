@@ -1,0 +1,657 @@
+use std::collections::HashSet;
+use std::process::Command;
+use std::sync::Arc;
+
+use serde_json::Value;
+use similar::{ChangeTag, TextDiff};
+
+use crate::state::settings::CompareDifferMode;
+use crate::state::{AppState, CompareSession, Panel};
+use crate::vfs::{search::SearchResultsDriver, VfsDriver};
+use crate::ws::intents::{arg_str, is_archive_source, is_procs_source, is_search_source};
+use crate::ws::protocol::{
+    now, CompareDiffResultSchema, CompareDiffRowSchema, CompareTargetSchema, EntrySchema,
+    ServerMessage,
+};
+use crate::ws::runtime::{resolve_panel_id, url_encode, IntentContext};
+
+const TEXT_READ_CHUNK: usize = 64 * 1024;
+
+#[derive(Clone)]
+struct CompareTarget {
+    panel_id: String,
+    source_id: String,
+    path: String,
+    name: String,
+    size: Option<u64>,
+    local_path: Option<String>,
+    driver: Arc<dyn VfsDriver>,
+}
+
+impl CompareTarget {
+    fn schema(&self) -> CompareTargetSchema {
+        CompareTargetSchema {
+            panel_id: self.panel_id.clone(),
+            source_id: self.source_id.clone(),
+            path: self.path.clone(),
+            name: self.name.clone(),
+            size: self.size,
+        }
+    }
+}
+
+pub(crate) async fn handle(name: &str, scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
+    match name {
+        "CompareFiles" => compare_files(scope, args, ctx).await,
+        "GetCompareDiff" => get_compare_diff(args, ctx).await,
+        "CloseCompareWindow" => close_compare_window(args, ctx).await,
+        _ => {}
+    }
+}
+
+async fn compare_files(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
+    let panel_id = match arg_str(args, "panelId") {
+        Some(panel_id) => panel_id.to_string(),
+        None => resolve_panel_id(scope, ctx.state).await,
+    };
+    let target_path = arg_str(args, "targetPath").map(str::to_string);
+    if let Err(message) = launch_compare_for_panel(&panel_id, target_path.as_deref(), ctx).await {
+        send_compare_error(ctx, message, None).await;
+    }
+}
+
+pub(crate) async fn launch_compare_for_panel(
+    panel_id: &str,
+    target_path: Option<&str>,
+    ctx: &mut IntentContext<'_>,
+) -> Result<(), String> {
+    let targets = {
+        let state_guard = ctx.state.lock().await;
+        resolve_compare_targets(&state_guard, panel_id, target_path)?
+    };
+    launch_compare_targets(targets, ctx).await
+}
+
+pub(crate) fn can_compare_from_state(
+    state: &AppState,
+    panel_id: &str,
+    target_path: Option<&str>,
+) -> bool {
+    resolve_compare_targets(state, panel_id, target_path).is_ok()
+}
+
+async fn launch_compare_targets(
+    targets: [CompareTarget; 2],
+    ctx: &mut IntentContext<'_>,
+) -> Result<(), String> {
+    let (mode, external_command, max_file_size_mb, color_scheme, viewer_bg) = {
+        let state_guard = ctx.state.lock().await;
+        let color_scheme = state_guard.settings.general.color_scheme.clone();
+        let viewer_bg = match color_scheme.as_str() {
+            "daylight" => tauri::webview::Color(244, 246, 248, 255),
+            _ => tauri::webview::Color(13, 13, 13, 255),
+        };
+        (
+            state_guard.settings.general.compare_differ_mode,
+            state_guard
+                .settings
+                .general
+                .compare_external_command
+                .clone(),
+            state_guard.settings.general.compare_max_file_size_mb,
+            color_scheme,
+            viewer_bg,
+        )
+    };
+
+    if mode != CompareDifferMode::Internal {
+        match launch_external_differ(&targets, &external_command).await {
+            Ok(()) => return Ok(()),
+            Err(error) if mode == CompareDifferMode::External => return Err(error),
+            Err(error) => {
+                eprintln!("[compare] external differ unavailable, falling back internal: {error}");
+            }
+        }
+    }
+
+    let max_bytes = max_file_size_mb.saturating_mul(1024 * 1024);
+    let result = build_diff(&targets[0], &targets[1], max_bytes).await?;
+    let request_id = uuid::Uuid::new_v4().to_string();
+    {
+        let mut state_guard = ctx.state.lock().await;
+        state_guard.compare_sessions.insert(
+            request_id.clone(),
+            CompareSession {
+                result: Ok(result.clone()),
+            },
+        );
+        while state_guard.compare_sessions.len() > 16 {
+            if let Some(oldest) = state_guard.compare_sessions.keys().next().cloned() {
+                state_guard.compare_sessions.remove(&oldest);
+            } else {
+                break;
+            }
+        }
+    }
+
+    let label = format!("diff-{request_id}");
+    let title = format!("{} ↔ {} — fbro compare", targets[0].name, targets[1].name);
+    let query = format!(
+        "?diff=1&request={}&label={}&colorScheme={}",
+        url_encode(&request_id),
+        url_encode(&label),
+        url_encode(&color_scheme),
+    );
+    let app_handle = ctx.app_handle.clone();
+    tokio::task::spawn_blocking(move || {
+        let _ = tauri::WebviewWindowBuilder::new(
+            &app_handle,
+            label,
+            tauri::WebviewUrl::App(query.into()),
+        )
+        .title(title)
+        .inner_size(1200.0, 760.0)
+        .resizable(true)
+        .devtools(true)
+        .background_color(viewer_bg)
+        .build();
+    });
+
+    Ok(())
+}
+
+async fn launch_external_differ(
+    targets: &[CompareTarget; 2],
+    external_command: &str,
+) -> Result<(), String> {
+    let command = external_command.trim();
+    if command.is_empty() {
+        return Err("External differ command is empty.".to_string());
+    }
+    let left = targets[0]
+        .local_path
+        .as_ref()
+        .ok_or_else(|| {
+            "External differ requires both files to be local filesystem paths.".to_string()
+        })?
+        .clone();
+    let right = targets[1]
+        .local_path
+        .as_ref()
+        .ok_or_else(|| {
+            "External differ requires both files to be local filesystem paths.".to_string()
+        })?
+        .clone();
+    let command = command.to_string();
+    tokio::task::spawn_blocking(move || {
+        Command::new(&command)
+            .arg(left)
+            .arg(right)
+            .spawn()
+            .map(|_| ())
+            .map_err(|error| format!("Could not launch external differ {command}: {error}"))
+    })
+    .await
+    .map_err(|error| format!("External differ launch task failed: {error}"))?
+}
+
+async fn build_diff(
+    left: &CompareTarget,
+    right: &CompareTarget,
+    max_bytes: u64,
+) -> Result<CompareDiffResultSchema, String> {
+    let left_text = read_text_file(left, max_bytes).await?;
+    let right_text = read_text_file(right, max_bytes).await?;
+    let diff = TextDiff::from_lines(&left_text, &right_text);
+    let mut rows = Vec::new();
+    let mut unified = String::new();
+    let mut identical = true;
+
+    for change in diff.iter_all_changes() {
+        let text = trim_diff_line(change.value());
+        match change.tag() {
+            ChangeTag::Equal => {
+                rows.push(CompareDiffRowSchema {
+                    kind: "equal".to_string(),
+                    left_line: change.old_index().map(|n| (n + 1) as u32),
+                    right_line: change.new_index().map(|n| (n + 1) as u32),
+                    left_text: Some(text.clone()),
+                    right_text: Some(text.clone()),
+                });
+                unified.push(' ');
+            }
+            ChangeTag::Delete => {
+                identical = false;
+                rows.push(CompareDiffRowSchema {
+                    kind: "delete".to_string(),
+                    left_line: change.old_index().map(|n| (n + 1) as u32),
+                    right_line: None,
+                    left_text: Some(text.clone()),
+                    right_text: None,
+                });
+                unified.push('-');
+            }
+            ChangeTag::Insert => {
+                identical = false;
+                rows.push(CompareDiffRowSchema {
+                    kind: "insert".to_string(),
+                    left_line: None,
+                    right_line: change.new_index().map(|n| (n + 1) as u32),
+                    left_text: None,
+                    right_text: Some(text.clone()),
+                });
+                unified.push('+');
+            }
+        }
+        unified.push_str(&text);
+        unified.push('\n');
+    }
+
+    Ok(CompareDiffResultSchema {
+        left: left.schema(),
+        right: right.schema(),
+        rows,
+        unified,
+        identical,
+    })
+}
+
+fn trim_diff_line(value: &str) -> String {
+    value.trim_end_matches(['\r', '\n']).to_string()
+}
+
+async fn read_text_file(target: &CompareTarget, max_bytes: u64) -> Result<String, String> {
+    if let Some(size) = target.size {
+        if size > max_bytes {
+            return Err(format!(
+                "{} is larger than the compare limit ({} MiB).",
+                target.name,
+                max_bytes / 1024 / 1024
+            ));
+        }
+    }
+
+    let driver = target.driver.clone();
+    let path = target.path.clone();
+    let cap = max_bytes as usize;
+    let bytes = tokio::task::spawn_blocking(move || read_all_capped(driver, path, cap))
+        .await
+        .map_err(|error| format!("Compare read task failed: {error}"))??;
+    validate_utf8_text(&target.name, bytes)
+}
+
+fn read_all_capped(
+    driver: Arc<dyn VfsDriver>,
+    path: String,
+    cap: usize,
+) -> Result<Vec<u8>, String> {
+    let mut out = Vec::new();
+    let mut offset = 0u64;
+    loop {
+        let remaining = cap.saturating_add(1).saturating_sub(out.len());
+        if remaining == 0 {
+            return Err("File exceeds compare size limit.".to_string());
+        }
+        let to_read = remaining.min(TEXT_READ_CHUNK);
+        let chunk = driver
+            .read_chunk(&path, offset, to_read)
+            .map_err(|error| format!("Could not read {path}: {error}"))?;
+        if chunk.is_empty() {
+            break;
+        }
+        offset += chunk.len() as u64;
+        out.extend_from_slice(&chunk);
+        if out.len() > cap {
+            return Err("File exceeds compare size limit.".to_string());
+        }
+        if chunk.len() < to_read {
+            break;
+        }
+    }
+    Ok(out)
+}
+
+fn validate_utf8_text(name: &str, mut bytes: Vec<u8>) -> Result<String, String> {
+    if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
+        bytes.drain(..3);
+    }
+    if bytes.contains(&0) {
+        return Err(format!("{name} is not a text file."));
+    }
+    let non_text = bytes
+        .iter()
+        .filter(|&&b| b < 9 || (b > 13 && b < 32) || b == 127)
+        .count();
+    if !bytes.is_empty() && non_text * 10 > bytes.len() * 3 {
+        return Err(format!("{name} is not a text file."));
+    }
+    String::from_utf8(bytes).map_err(|_| format!("{name} is not valid UTF-8 text."))
+}
+
+fn resolve_compare_targets(
+    state: &AppState,
+    panel_id: &str,
+    target_path: Option<&str>,
+) -> Result<[CompareTarget; 2], String> {
+    let panel = state
+        .panels
+        .get(panel_id)
+        .ok_or_else(|| "Compare panel is unavailable.".to_string())?;
+
+    if let Ok(targets) = resolve_same_panel_targets(state, panel, target_path) {
+        return Ok(targets);
+    }
+
+    let other_panel_id = active_other_panel_id(state, panel_id).ok_or_else(|| {
+        "Compare requires another visible panel or two files in one panel.".to_string()
+    })?;
+    let other_panel = state
+        .panels
+        .get(&other_panel_id)
+        .ok_or_else(|| "Other compare panel is unavailable.".to_string())?;
+    let left = resolve_single_panel_target(state, panel, target_path)?;
+    let right = resolve_single_panel_target(state, other_panel, None)?;
+    ensure_distinct(&left, &right)?;
+    Ok([left, right])
+}
+
+fn resolve_same_panel_targets(
+    state: &AppState,
+    panel: &Panel,
+    target_path: Option<&str>,
+) -> Result<[CompareTarget; 2], String> {
+    let driver = state
+        .drivers
+        .get(&panel.source_id)
+        .ok_or_else(|| "Compare source driver is unavailable.".to_string())?;
+    let selected = selected_file_entries(panel);
+    let mut entries: Vec<&EntrySchema> = Vec::new();
+    if selected.len() == 2
+        && target_path
+            .map(|path| {
+                selected
+                    .iter()
+                    .any(|entry| driver.resolve_child(&panel.path, &entry.name) == path)
+            })
+            .unwrap_or(true)
+    {
+        entries.extend(selected);
+    } else if selected.len() == 1 {
+        entries.push(selected[0]);
+        let cursor_entry = target_path
+            .and_then(|path| entry_for_path(panel, driver.as_ref(), path))
+            .or_else(|| entry_at_cursor(panel));
+        if let Some(cursor_entry) = cursor_entry {
+            if cursor_entry.name != entries[0].name || target_path.is_some() {
+                entries.push(cursor_entry);
+            }
+        }
+    } else if selected.is_empty() && target_path.is_some() {
+        if let Some(target_entry) =
+            target_path.and_then(|path| entry_for_path(panel, driver.as_ref(), path))
+        {
+            entries.push(target_entry);
+        }
+        if let Some(cursor_entry) = entry_at_cursor(panel) {
+            if entries
+                .first()
+                .map(|entry| entry.name != cursor_entry.name)
+                .unwrap_or(true)
+            {
+                entries.push(cursor_entry);
+            }
+        }
+    }
+
+    if entries.len() != 2 {
+        return Err("Choose exactly two files to compare.".to_string());
+    }
+    let left = target_for_entry(state, panel, entries[0])?;
+    let right = target_for_entry(state, panel, entries[1])?;
+    ensure_distinct(&left, &right)?;
+    Ok([left, right])
+}
+
+fn resolve_single_panel_target(
+    state: &AppState,
+    panel: &Panel,
+    target_path: Option<&str>,
+) -> Result<CompareTarget, String> {
+    let driver = state
+        .drivers
+        .get(&panel.source_id)
+        .ok_or_else(|| "Compare source driver is unavailable.".to_string())?;
+    if let Some(path) = target_path {
+        let entry = entry_for_path(panel, driver.as_ref(), path)
+            .ok_or_else(|| "The requested compare file is no longer available.".to_string())?;
+        return target_for_entry(state, panel, entry);
+    }
+
+    let selected = selected_file_entries(panel);
+    if selected.len() > 1 {
+        return Err("Choose only one file per panel for cross-panel compare.".to_string());
+    }
+    let entry = selected
+        .first()
+        .copied()
+        .or_else(|| entry_at_cursor(panel))
+        .ok_or_else(|| "Choose one file in each panel to compare.".to_string())?;
+    target_for_entry(state, panel, entry)
+}
+
+fn selected_file_entries(panel: &Panel) -> Vec<&EntrySchema> {
+    panel
+        .selection
+        .iter()
+        .filter_map(|index| panel.entries.get(*index))
+        .filter(|entry| entry.name != ".." && entry.kind == "file")
+        .collect()
+}
+
+fn entry_at_cursor(panel: &Panel) -> Option<&EntrySchema> {
+    panel
+        .entries
+        .get(panel.cursor)
+        .filter(|entry| entry.name != ".." && entry.kind == "file")
+}
+
+fn entry_for_path<'a>(
+    panel: &'a Panel,
+    driver: &dyn VfsDriver,
+    path: &str,
+) -> Option<&'a EntrySchema> {
+    panel.entries.iter().find(|entry| {
+        entry.name != ".."
+            && entry.kind == "file"
+            && (entry.source_path.as_deref() == Some(path)
+                || driver.resolve_child(&panel.path, &entry.name) == path)
+    })
+}
+
+fn target_for_entry(
+    state: &AppState,
+    panel: &Panel,
+    entry: &EntrySchema,
+) -> Result<CompareTarget, String> {
+    let base_driver = state
+        .drivers
+        .get(&panel.source_id)
+        .cloned()
+        .ok_or_else(|| "Compare source driver is unavailable.".to_string())?;
+    let (source_id, path) = effective_source_and_path(state, panel, entry, base_driver.as_ref())?;
+    let driver = state
+        .drivers
+        .get(&source_id)
+        .cloned()
+        .ok_or_else(|| "Compare target driver is unavailable.".to_string())?;
+    let size = entry.size.or_else(|| driver.file_size(&path));
+    let local_path = driver
+        .local_path(&path)
+        .map(|path| path.to_string_lossy().to_string());
+    Ok(CompareTarget {
+        panel_id: panel.panel_id.clone(),
+        source_id,
+        path,
+        name: entry.name.clone(),
+        size,
+        local_path,
+        driver,
+    })
+}
+
+fn effective_source_and_path(
+    state: &AppState,
+    panel: &Panel,
+    entry: &EntrySchema,
+    base_driver: &dyn VfsDriver,
+) -> Result<(String, String), String> {
+    if is_search_source(&panel.source_id) {
+        let resolved = state
+            .drivers
+            .get(&panel.source_id)
+            .and_then(|drv| drv.as_any().downcast_ref::<SearchResultsDriver>())
+            .and_then(|sd| {
+                entry
+                    .source_path
+                    .as_deref()
+                    .and_then(|path| sd.resolve_real_info_by_path(path))
+                    .or_else(|| sd.resolve_real_info(&entry.name))
+            });
+        if let Some((real_path, real_source)) = resolved {
+            return Ok((real_source, real_path));
+        }
+    }
+
+    if is_archive_source(&panel.source_id) || is_procs_source(&panel.source_id) {
+        let p = panel.path.trim_end_matches('/');
+        let path = if p.is_empty() {
+            entry.name.clone()
+        } else {
+            format!("{p}/{}", entry.name)
+        };
+        return Ok((panel.source_id.clone(), path));
+    }
+
+    Ok((
+        panel.source_id.clone(),
+        base_driver.resolve_child(&panel.path, &entry.name),
+    ))
+}
+
+fn active_other_panel_id(state: &AppState, panel_id: &str) -> Option<String> {
+    state
+        .layout_slots
+        .iter()
+        .filter_map(|slot_id| state.slots.get(slot_id))
+        .map(|slot| slot.active_panel_id.as_str())
+        .find(|id| *id != panel_id)
+        .map(str::to_string)
+}
+
+fn ensure_distinct(left: &CompareTarget, right: &CompareTarget) -> Result<(), String> {
+    let mut seen = HashSet::new();
+    seen.insert((left.source_id.as_str(), left.path.as_str()));
+    if !seen.insert((right.source_id.as_str(), right.path.as_str())) {
+        return Err("Choose two different files to compare.".to_string());
+    }
+    Ok(())
+}
+
+async fn get_compare_diff(args: &Value, ctx: &mut IntentContext<'_>) {
+    let request_id = arg_str(args, "requestId").unwrap_or("").to_string();
+    if request_id.is_empty() {
+        return;
+    }
+    let result = {
+        let state_guard = ctx.state.lock().await;
+        state_guard
+            .compare_sessions
+            .get(&request_id)
+            .map(|session| session.result.clone())
+    };
+    match result {
+        Some(Ok(result)) => {
+            let _ = ctx
+                .tx
+                .send(ServerMessage::CompareDiffReady {
+                    timestamp: now(),
+                    request_id,
+                    result,
+                })
+                .await;
+        }
+        Some(Err(message)) => {
+            let _ = ctx
+                .tx
+                .send(ServerMessage::CompareDiffFailed {
+                    timestamp: now(),
+                    request_id,
+                    message,
+                })
+                .await;
+        }
+        None => {
+            let _ = ctx
+                .tx
+                .send(ServerMessage::CompareDiffFailed {
+                    timestamp: now(),
+                    request_id,
+                    message: "Compare session is no longer available.".to_string(),
+                })
+                .await;
+        }
+    }
+}
+
+async fn close_compare_window(args: &Value, ctx: &mut IntentContext<'_>) {
+    let request_id = arg_str(args, "requestId").unwrap_or("").to_string();
+    let label = arg_str(args, "label").unwrap_or("").to_string();
+    if !request_id.is_empty() {
+        let mut state_guard = ctx.state.lock().await;
+        state_guard.compare_sessions.remove(&request_id);
+    }
+    if !label.is_empty() {
+        use tauri::Manager;
+        if let Some(window) = ctx.app_handle.get_webview_window(&label) {
+            let _ = window.close();
+        }
+    }
+}
+
+async fn send_compare_error(
+    ctx: &mut IntentContext<'_>,
+    message: String,
+    extra: Option<serde_json::Value>,
+) {
+    let _ = ctx
+        .tx
+        .send(ServerMessage::Error {
+            timestamp: now(),
+            code: "COMPARE_FAILED".to_string(),
+            message,
+            recoverable: true,
+            extra,
+        })
+        .await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_utf8_text;
+
+    #[test]
+    fn strict_text_accepts_utf8_bom() {
+        let text = validate_utf8_text("a.txt", vec![0xEF, 0xBB, 0xBF, b'a']).unwrap();
+        assert_eq!(text, "a");
+    }
+
+    #[test]
+    fn strict_text_rejects_nul_bytes() {
+        assert!(validate_utf8_text("a.bin", vec![b'a', 0, b'b']).is_err());
+    }
+
+    #[test]
+    fn strict_text_rejects_invalid_utf8() {
+        assert!(validate_utf8_text("a.bin", vec![0xff]).is_err());
+    }
+}

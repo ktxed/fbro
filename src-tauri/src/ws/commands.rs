@@ -141,6 +141,13 @@ pub(crate) fn build_interactive_commands() -> Vec<InteractiveCommandSchema> {
             Some("ListBros"),
         ),
         command(
+            "file.compare",
+            "File",
+            "Compare",
+            vec![],
+            Some("CompareFiles"),
+        ),
+        command(
             "file.view",
             "File",
             "View",

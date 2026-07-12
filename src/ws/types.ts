@@ -601,6 +601,10 @@ export interface GeneralSettings {
   sevenzipResolvedPath: string;
   /** Newline-separated wildcard names Fedup Bro ignores when default ignores are enabled. */
   fedupDefaultIgnorePatterns: string;
+  compareMaxFileSizeMb: number;
+  /** "internal" | "external" | "auto" */
+  compareDifferMode: string;
+  compareExternalCommand: string;
 }
 
 export interface ModalSizePreference {
@@ -878,6 +882,44 @@ export interface RemoteSourceStatus {
   nextRetryAt?: number;
 }
 
+export interface CompareTarget {
+  panelId: string;
+  sourceId: string;
+  path: string;
+  name: string;
+  size?: number;
+}
+
+export interface CompareDiffRow {
+  kind: "equal" | "delete" | "insert";
+  leftLine?: number;
+  rightLine?: number;
+  leftText?: string;
+  rightText?: string;
+}
+
+export interface CompareDiffResult {
+  left: CompareTarget;
+  right: CompareTarget;
+  rows: CompareDiffRow[];
+  unified: string;
+  identical: boolean;
+}
+
+export interface CompareDiffReadyMessage {
+  type: "CompareDiffReady";
+  timestamp: number;
+  requestId: string;
+  result: CompareDiffResult;
+}
+
+export interface CompareDiffFailedMessage {
+  type: "CompareDiffFailed";
+  timestamp: number;
+  requestId: string;
+  message: string;
+}
+
 // ─── Union types ─────────────────────────────────────────────────────────────
 
 export type BEMessage =
@@ -916,6 +958,8 @@ export type BEMessage =
   | PairingResolvedMessage
   | RemoteSessionStartedMessage
   | RemoteSessionEndedMessage
-  | RemoteSourceStatusMessage;
+  | RemoteSourceStatusMessage
+  | CompareDiffReadyMessage
+  | CompareDiffFailedMessage;
 
 export type FEMessage = HelloMessage | IntentMessage;

@@ -5353,3 +5353,214 @@ body {
   z-index: 900;
   border-top: none;
 }
+
+.settings-tab__text-input {
+  flex: 1;
+  min-width: 180px;
+  padding: 6px 8px;
+  border: 1px solid var(--border, #31314c);
+  border-radius: 4px;
+  background: var(--surface-2, #141423);
+  color: var(--text, #d7d7e6);
+  font: inherit;
+}
+
+.settings-tab__text-input:focus {
+  outline: 1px solid var(--accent, #4b8df7);
+}
+
+.diff-viewer {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg, #0d0d13);
+  color: var(--text, #d7d7e6);
+  font-family: var(--font-mono, "JetBrains Mono", "SFMono-Regular", Consolas, monospace);
+  overflow: hidden;
+}
+
+.diff-viewer__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border, #2b2b44);
+  background: var(--surface, #171728);
+  flex: 0 0 auto;
+}
+
+.diff-viewer__titles {
+  min-width: 0;
+}
+
+.diff-viewer__title {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.diff-viewer__subtitle {
+  margin-top: 4px;
+  color: var(--muted, #8d8da8);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.diff-viewer__subtitle span {
+  color: var(--text-dim, #6f6f8e);
+  margin: 0 8px;
+}
+
+.diff-viewer__actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+}
+
+.diff-viewer__segmented {
+  display: inline-flex;
+  border: 1px solid var(--border, #31314c);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.diff-viewer__segmented-btn,
+.diff-viewer__close {
+  min-height: 32px;
+  padding: 0 12px;
+  border: 0;
+  background: var(--surface-2, #141423);
+  color: var(--text, #d7d7e6);
+  font: inherit;
+  cursor: pointer;
+}
+
+.diff-viewer__segmented-btn + .diff-viewer__segmented-btn {
+  border-left: 1px solid var(--border, #31314c);
+}
+
+.diff-viewer__segmented-btn--active {
+  background: var(--accent-soft, rgba(75, 141, 247, 0.22));
+  color: var(--accent, #68a0ff);
+}
+
+.diff-viewer__close {
+  border: 1px solid var(--border, #31314c);
+  border-radius: 6px;
+}
+
+.diff-viewer__meta {
+  display: flex;
+  gap: 16px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border, #2b2b44);
+  color: var(--muted, #8d8da8);
+  background: var(--surface-2, #11111d);
+  flex: 0 0 auto;
+}
+
+.diff-viewer__status {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  color: var(--muted, #8d8da8);
+  font-size: 18px;
+}
+
+.diff-viewer__status--error {
+  color: var(--danger, #ff6666);
+  padding: 24px;
+  text-align: center;
+}
+
+.diff-viewer__body {
+  flex: 1;
+  overflow: auto;
+  background: var(--bg, #0d0d13);
+}
+
+.diff-viewer__body--split {
+  display: flex;
+  flex-direction: column;
+}
+
+.diff-viewer__file-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  border-bottom: 1px solid var(--border, #2b2b44);
+  background: var(--surface, #171728);
+}
+
+.diff-viewer__file-header span {
+  padding: 8px 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text, #d7d7e6);
+}
+
+.diff-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.diff-table--split {
+  min-width: 960px;
+}
+
+.diff-table--split .diff-table__line {
+  width: 58px;
+}
+
+.diff-table--split .diff-table__code {
+  width: calc((100% - 116px) / 2);
+}
+
+.diff-table--unified .diff-table__line {
+  width: 58px;
+}
+
+.diff-table--unified .diff-table__prefix {
+  width: 24px;
+  text-align: center;
+  color: var(--muted, #8d8da8);
+}
+
+.diff-table__line {
+  padding: 0 8px;
+  text-align: right;
+  color: var(--text-dim, #6f6f8e);
+  user-select: none;
+  border-right: 1px solid var(--border, #26263d);
+  vertical-align: top;
+}
+
+.diff-table__code {
+  padding: 0 10px;
+  white-space: pre;
+  overflow: hidden;
+  text-overflow: clip;
+  vertical-align: top;
+}
+
+.diff-table__row--equal .diff-table__code {
+  color: var(--text, #d7d7e6);
+}
+
+.diff-table__row--delete .diff-table__code,
+.diff-table__row--delete .diff-table__prefix {
+  background: rgba(255, 83, 83, 0.16);
+}
+
+.diff-table__row--insert .diff-table__code,
+.diff-table__row--insert .diff-table__prefix {
+  background: rgba(70, 190, 120, 0.16);
+}

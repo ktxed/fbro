@@ -312,7 +312,7 @@ const initialState: AppState = {
   globalSelections: [],
   fontSize: 13,
   settings: {
-    general: { showHiddenDefault: false, rememberWindowState: true, preserveAttributes: true, autoResumeCopies: true, ludicrousMode: false, maxImageSizeMb: 512, savePanelViewMode: false, enableVideoThumbnails: true, thumbnailMaxImageSizeMb: 100, thumbnailVideoFrameSkip: 5, streamThumbnails: true, sessionPath: "", bookmarksPath: "", thumbnailCacheDir: "", thumbnailCacheItemCount: 0, thumbnailCacheSizeBytes: 0, persistPanelTabs: true, procTreeMode: false, colorScheme: "fbro-dark", sevenzipExtractor: "auto", sevenzipCustomPath: "", sevenzipResolvedPath: "", fedupDefaultIgnorePatterns: ".git\n.idea\n.vscode\n.venv\nnode_modules\n__MACOSX\n._*\n.DS_Store\nartifacts/e2e\ndist/assets\ntarget/debug\ntarget/release\ntarget/bundle\n.m2" },
+    general: { showHiddenDefault: false, rememberWindowState: true, preserveAttributes: true, autoResumeCopies: true, ludicrousMode: false, maxImageSizeMb: 512, savePanelViewMode: false, enableVideoThumbnails: true, thumbnailMaxImageSizeMb: 100, thumbnailVideoFrameSkip: 5, streamThumbnails: true, sessionPath: "", bookmarksPath: "", thumbnailCacheDir: "", thumbnailCacheItemCount: 0, thumbnailCacheSizeBytes: 0, persistPanelTabs: true, procTreeMode: false, colorScheme: "fbro-dark", sevenzipExtractor: "auto", sevenzipCustomPath: "", sevenzipResolvedPath: "", fedupDefaultIgnorePatterns: ".git\n.idea\n.vscode\n.venv\nnode_modules\n__MACOSX\n._*\n.DS_Store\nartifacts/e2e\ndist/assets\ntarget/debug\ntarget/release\ntarget/bundle\n.m2", compareMaxFileSizeMb: 10, compareDifferMode: "internal", compareExternalCommand: "" },
     modalSizes: {},
   },
 };

@@ -3,6 +3,7 @@ mod bookmarks;
 pub(crate) mod bro;
 mod cache;
 mod git;
+mod compare;
 pub(crate) mod global_selection;
 mod history;
 pub(crate) mod jobs;
@@ -108,6 +109,9 @@ pub async fn dispatch(name: &str, scope: &Value, args: &Value, ctx: &mut IntentC
         | "ViewerNavigate"
         | "ReadFileChunk"
         | "SetEmbeddedViewerActive" => viewer::handle(name, args, ctx).await,
+        "CompareFiles" | "GetCompareDiff" | "CloseCompareWindow" => {
+            compare::handle(name, scope, args, ctx).await
+        }
         "QueryCacheStatus" | "ClearCache" => cache::handle(name, args, ctx).await,
         "AddBookmark" | "RemoveBookmark" | "EnterBookmarkSource" => {
             bookmarks::handle(name, scope, args, ctx).await

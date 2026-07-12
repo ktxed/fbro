@@ -84,6 +84,15 @@ pub struct GeneralSettings {
     /// directory names.
     #[serde(default = "default_fedup_ignore_patterns")]
     pub fedup_default_ignore_patterns: String,
+    /// Maximum size per text file for the built-in differ.
+    #[serde(default = "default_compare_max_file_size_mb")]
+    pub compare_max_file_size_mb: u64,
+    /// Which differ to use for Compare files.
+    #[serde(default)]
+    pub compare_differ_mode: CompareDifferMode,
+    /// External differ executable. fbro passes the two local file paths as args.
+    #[serde(default)]
+    pub compare_external_command: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -97,6 +106,34 @@ pub enum SevenzipExtractorMode {
     Custom,
     /// Always use the in-process Rust extractor (sevenz-rust2).
     Internal,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum CompareDifferMode {
+    #[default]
+    Internal,
+    External,
+    Auto,
+}
+
+impl CompareDifferMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Internal => "internal",
+            Self::External => "external",
+            Self::Auto => "auto",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "internal" => Some(Self::Internal),
+            "external" => Some(Self::External),
+            "auto" => Some(Self::Auto),
+            _ => None,
+        }
+    }
 }
 
 impl SevenzipExtractorMode {
@@ -136,6 +173,10 @@ fn default_thumb_video_frame_skip() -> u32 {
 
 fn default_color_scheme() -> String {
     "fbro-dark".to_string()
+}
+
+fn default_compare_max_file_size_mb() -> u64 {
+    10
 }
 
 pub fn default_fedup_ignore_patterns() -> String {
@@ -199,6 +240,9 @@ impl Default for GeneralSettings {
             sevenzip_extractor: SevenzipExtractorMode::default(),
             sevenzip_custom_path: String::new(),
             fedup_default_ignore_patterns: default_fedup_ignore_patterns(),
+            compare_max_file_size_mb: default_compare_max_file_size_mb(),
+            compare_differ_mode: CompareDifferMode::default(),
+            compare_external_command: String::new(),
         }
     }
 }

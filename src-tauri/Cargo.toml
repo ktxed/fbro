@@ -19,6 +19,7 @@ uuid = { version = "1", features = ["v4"] }
 toml = "0.8"
 http = "1"
 regex = "1"
+similar = "2"
 async-channel = "2"
 futures = "0.3"
 notify = { version = "7", features = ["macos_fsevent"] }

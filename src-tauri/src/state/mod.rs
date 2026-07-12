@@ -14,7 +14,9 @@ use crate::platform::{Platform, ResolvedOpenWithApp};
 use crate::thumb_pool::ThumbPool;
 use crate::vfs::global_selection::{GlobalSelectionStore, SharedGlobalSelectionStore};
 use crate::vfs::VfsDriver;
-use crate::ws::protocol::{EntrySchema, FilterSpec, ServerMessage, SortSpec};
+use crate::ws::protocol::{
+    CompareDiffResultSchema, EntrySchema, FilterSpec, ServerMessage, SortSpec,
+};
 
 // ─── Source ───────────────────────────────────────────────────────────────────
 
@@ -482,6 +484,7 @@ pub struct AppState {
     pub job_store: JobStore,
     pub open_with_requests: HashMap<String, OpenWithRequest>,
     pub bro_requests: HashMap<String, BroRequest>,
+    pub compare_sessions: HashMap<String, CompareSession>,
     /// Live search result stores, keyed by source_id ("search:<job_id>").
     pub search_stores: HashMap<String, Arc<Mutex<SearchResultStore>>>,
     /// Senders for all connected GUI clients — used to broadcast state updates
@@ -569,6 +572,11 @@ pub struct BroRequest {
     pub target_path: Option<String>,
     pub resolved_inputs: Option<Vec<crate::bro::BroInputItem>>,
     pub bros: Vec<ResolvedBro>,
+}
+
+#[derive(Clone, Debug)]
+pub struct CompareSession {
+    pub result: Result<CompareDiffResultSchema, String>,
 }
 
 impl AppState {
@@ -889,6 +897,7 @@ impl AppState {
             job_store: JobStore::new(),
             open_with_requests: HashMap::new(),
             bro_requests: HashMap::new(),
+            compare_sessions: HashMap::new(),
             search_stores: HashMap::new(),
             gui_senders: Vec::new(),
             viewer_senders: Vec::new(),
