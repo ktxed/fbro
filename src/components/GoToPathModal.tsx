@@ -70,6 +70,7 @@ export function GoToPathModal({ goToPath, client }: GoToPathModalProps) {
             <input
               ref={history.inputRef as React.RefObject<HTMLInputElement>}
               className="modal__rename-input"
+              data-testid="goto-path-input"
               value={value}
               onChange={(e) => setValue(e.target.value)}
               onKeyDown={handleKeyDown}

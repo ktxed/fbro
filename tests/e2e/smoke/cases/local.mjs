@@ -11,6 +11,7 @@ import {
   createFile,
   doubleClickEntry,
   expectCheckboxSelected,
+  goToPanelPath,
   openSortSelector,
   setTextInputValue,
 } from "../browser.mjs";
@@ -31,8 +32,7 @@ export async function runLocalFlow(browser, observer) {
   fs.writeFileSync(hostPath(path.posix.join(aSrc, "alpha/note.txt")), "renamed payload\n");
   fs.writeFileSync(hostPath(path.posix.join(aSrc, "alpha/remove.txt")), "delete me\n");
 
-  observer.sendIntent("NavigatePanelTo", undefined, { panelId: "left", path: aSrc, cursorHint: "alpha" });
-  await observer.waitForPanelPath("left", aSrc);
+  await goToPanelPath(browser, observer, "left", aSrc);
   await observer.waitForEntry("left", "alpha", "directory");
   await clickEntry(browser, "left", "alpha");
   await clickCommand(browser, "file.copy");
@@ -102,8 +102,7 @@ export async function runLocalFlow(browser, observer) {
 
   // ── Sort validation ──────────────────────────────────────────────────────
 
-  observer.sendIntent("NavigatePanelTo", undefined, { panelId: "left", path: aSrc });
-  await observer.waitForPanelPath("left", aSrc);
+  await goToPanelPath(browser, observer, "left", aSrc);
   await createDirectory(browser, observer, "left", "sort-test");
   await doubleClickEntry(browser, "left", "sort-test");
   const sortDir = path.posix.join(aSrc, "sort-test");
@@ -119,8 +118,7 @@ export async function runLocalFlow(browser, observer) {
   fs.utimesSync(path.join(hostSortDir, "baby.txt"), nowSec, nowSec - 1800);
   fs.utimesSync(path.join(hostSortDir, "zebra.txt"), nowSec, nowSec);
 
-  observer.sendIntent("NavigatePanelTo", undefined, { panelId: "left", path: aSrc });
-  await observer.waitForPanelPath("left", aSrc);
+  await goToPanelPath(browser, observer, "left", aSrc);
   await doubleClickEntry(browser, "left", "sort-test");
   await observer.waitForPanelPath("left", sortDir);
   const sortFiles = ["aardvark.txt", "zebra.txt", "baby.txt"];

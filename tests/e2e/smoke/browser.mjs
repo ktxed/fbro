@@ -88,10 +88,64 @@ export async function expectCheckboxSelected(browser, selector, expected, label)
 }
 
 export async function clickEntry(browser, panelId, name) {
-  const el = await browser.$(`[data-testid="panel-${panelId}"] [data-testid="panel-entry"][data-entry-name="${cssString(name)}"]`);
-  await el.waitForClickable({ timeout: 10_000 });
+  const selector = `[data-testid="panel-${panelId}"] [data-testid="panel-entry"][data-entry-name="${cssString(name)}"]`;
+  const el = await waitFor(async () => {
+    const candidate = await browser.$(selector);
+    return await candidate.isDisplayed() ? candidate : false;
+  }, {
+    timeout: 10_000,
+    label: `visible ${panelId} entry ${name}`,
+  }).catch(async (error) => {
+    throw new Error(`${error.message}; ${await panelDebug(browser, panelId)}`);
+  });
+  await el.scrollIntoView();
+  await el.waitForClickable({ timeout: 10_000 }).catch(async (error) => {
+    throw new Error(`${error.message}; ${await panelDebug(browser, panelId)}`);
+  });
   await el.click();
   return el;
+}
+
+async function panelDebug(browser, panelId) {
+  return await browser.execute((panelId) => {
+    const panel = document.querySelector(`[data-testid="panel-${panelId}"]`);
+    const path = panel?.querySelector(".panel__path")?.getAttribute("title") ?? "<unknown>";
+    const entries = Array.from(panel?.querySelectorAll('[data-testid="panel-entry"]') ?? [])
+      .slice(0, 20)
+      .map((entry) => entry.getAttribute("data-entry-name"));
+    return `panel=${panelId} path=${path} entries=[${entries.join(", ")}]`;
+  }, panelId);
+}
+
+export async function waitForBrowserPanelPath(browser, panelId, expectedPath, timeout = 10_000) {
+  return waitFor(async () => {
+    const actualPath = await browser.execute((panelId) => {
+      const panel = document.querySelector(`[data-testid="panel-${panelId}"]`);
+      const pathEl = panel?.querySelector(".panel__path");
+      return pathEl?.getAttribute("title") ?? "";
+    }, panelId);
+    return actualPath === expectedPath ? actualPath : false;
+  }, { timeout, label: `browser panel ${panelId} path ${expectedPath}` });
+}
+
+export async function goToPanelPath(browser, observer, panelId, targetPath) {
+  await browser.execute((panelId) => document.querySelector(`[data-testid="panel-${panelId}"]`)?.focus(), panelId);
+  await browser.performActions([{
+    type: "key",
+    id: "keyboard",
+    actions: [
+      { type: "keyDown", value: "\uE009" },
+      { type: "keyDown", value: "g" },
+      { type: "keyUp", value: "g" },
+      { type: "keyUp", value: "\uE009" },
+    ],
+  }]);
+  await browser.releaseActions();
+  await setTextInputValue(browser, '[data-testid="goto-path-input"]', targetPath);
+  await browser.keys("Enter");
+  await observer.waitForPanelPath(panelId, targetPath);
+  await observer.waitForPanelReady(panelId);
+  await waitForBrowserPanelPath(browser, panelId, targetPath);
 }
 
 export async function clickContextMenuItem(browser, label) {
