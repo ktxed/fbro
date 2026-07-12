@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useAppDispatch, useAppState } from "../store";
 import type { ChildProcess, DirSizeTask, FileOpProgress, Job, PrefetchCacheStatus } from "../ws/types";
 import type { WsClient } from "../ws/client";
@@ -117,7 +117,21 @@ function ProgressBar({ p }: { p: FileOpProgress }) {
   );
 }
 
-function JobRow({ job, client, onClose }: { job: Job; client: WsClient; onClose: () => void }) {
+function JobRow({
+  job,
+  client,
+  onClose,
+  prefix,
+  queueActions,
+  suppressActiveActions = false,
+}: {
+  job: Job;
+  client: WsClient;
+  onClose: () => void;
+  prefix?: ReactNode;
+  queueActions?: ReactNode;
+  suppressActiveActions?: boolean;
+}) {
   const state = useAppState();
   const dispatch = useAppDispatch();
   const isActive = job.state === "Queued" || job.state === "Running" || job.state === "AwaitingDecision";
@@ -144,12 +158,13 @@ function JobRow({ job, client, onClose }: { job: Job; client: WsClient; onClose:
   return (
     <div className={`jobs-modal__row${isActive ? " jobs-modal__row--active" : ""}`}>
       <div className="jobs-modal__row-header">
+        {prefix}
         <span className="jobs-modal__type">{typeLabel}</span>
         <span className="jobs-modal__timestamp">{new Date(job.startedAt).toLocaleTimeString()}</span>
         <span className={`jobs-modal__state jobs-modal__state--${job.state.toLowerCase()}${job.paused ? " jobs-modal__state--paused" : ""}`}>
           {job.paused ? "Paused" : (stateLabel[job.state] ?? job.state)}
         </span>
-        {isActive && (
+        {!suppressActiveActions && isActive && (
           <>
             {job.supportsPause && job.paused ? (
               <button
@@ -177,6 +192,7 @@ function JobRow({ job, client, onClose }: { job: Job; client: WsClient; onClose:
               </button>
           </>
         )}
+        {queueActions}
         {isTerminal && (
           <button
             className="jobs-modal__action"
@@ -257,6 +273,42 @@ function JobRow({ job, client, onClose }: { job: Job; client: WsClient; onClose:
         <div className="jobs-modal__error">{job.error}</div>
       )}
     </div>
+  );
+}
+
+function QueueJobRow({
+  job,
+  order,
+  active,
+  client,
+  onClose,
+}: {
+  job: Job;
+  order: number;
+  active: boolean;
+  client: WsClient;
+  onClose: () => void;
+}) {
+  const queueActions = active ? null : (
+    <div className="jobs-modal__queue-actions">
+      <button title="Move up" onClick={() => client.sendIntent("ReorderQueuedJob", undefined, { jobId: job.jobId, action: "up" })}>Up</button>
+      <button title="Move down" onClick={() => client.sendIntent("ReorderQueuedJob", undefined, { jobId: job.jobId, action: "down" })}>Down</button>
+      <button title="Promote to next in line" onClick={() => client.sendIntent("ReorderQueuedJob", undefined, { jobId: job.jobId, action: "next" })}>Next</button>
+      <button title="Move to last in line" onClick={() => client.sendIntent("ReorderQueuedJob", undefined, { jobId: job.jobId, action: "last" })}>Last</button>
+      <button title="Delete queued job" onClick={() => client.sendIntent("DeleteQueuedJob", undefined, { jobId: job.jobId })}>
+        <IconX size={12} />
+      </button>
+    </div>
+  );
+  return (
+    <JobRow
+      job={job}
+      client={client}
+      onClose={onClose}
+      prefix={<span className="jobs-modal__queue-order">{order}</span>}
+      queueActions={queueActions}
+      suppressActiveActions={!active}
+    />
   );
 }
 
@@ -365,11 +417,16 @@ export function JobsModal({ onClose, client }: { onClose: () => void; client: Ws
 
   const byNewest = (a: Job, b: Job) => b.startedAt - a.startedAt;
   const jobs = Object.values(state.jobs).sort(byNewest);
+  const queuedJobIds = new Set(state.jobQueue.jobIds);
+  const queuedJobs = state.jobQueue.jobIds
+    .map((jobId) => state.jobs[jobId])
+    .filter((job): job is Job => !!job);
   const fileJobs = jobs.filter((job) => job.kind === "file-op");
   const outgoingJobs = jobs.filter((job) => job.kind === "outgoing-transfer");
   const broJobs = jobs.filter((job) => job.kind === "fp-bro" || job.kind === "sync-bro" || job.kind === "fedup-bro" || job.kind === "remote-manifest");
   const activeFileJobs = fileJobs.filter(
-    (job) => job.state === "Queued" || job.state === "Running" || job.state === "AwaitingDecision"
+    (job) => !queuedJobIds.has(job.jobId)
+      && (job.state === "Queued" || job.state === "Running" || job.state === "AwaitingDecision")
   );
   const finishedFileJobs = fileJobs.filter(
     (job) => job.state !== "Queued" && job.state !== "Running" && job.state !== "AwaitingDecision"
@@ -431,8 +488,26 @@ export function JobsModal({ onClose, client }: { onClose: () => void; client: Ws
         <div className="modal__body jobs-modal__body">
           {activeTab === "jobs" && (
             <>
-              {fileJobs.length === 0 && outgoingJobs.length === 0 && broJobs.length === 0 && dirSizeTasks.length === 0 && (
+              {fileJobs.length === 0 && outgoingJobs.length === 0 && broJobs.length === 0 && dirSizeTasks.length === 0 && queuedJobs.length === 0 && (
                 <div className="jobs-modal__empty">No jobs.</div>
+              )}
+
+              {queuedJobs.length > 0 && (
+                <section>
+                  <div className="jobs-modal__section-title">
+                    Copy Queue {state.jobQueue.completedCount + 1} / {state.jobQueue.completedCount + queuedJobs.length}
+                  </div>
+                  {queuedJobs.map((job, index) => (
+                    <QueueJobRow
+                      key={job.jobId}
+                      job={job}
+                      order={state.jobQueue.completedCount + index + 1}
+                      active={job.jobId === state.jobQueue.activeJobId}
+                      client={client}
+                      onClose={onClose}
+                    />
+                  ))}
+                </section>
               )}
 
               {activeFileJobs.length > 0 && (

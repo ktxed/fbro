@@ -8,6 +8,7 @@ import type {
   SearchResult,
   Source,
   Job,
+  JobQueue,
   DirSizeTask,
   BEMessage,
   InteractiveCommand,
@@ -212,6 +213,7 @@ export interface AppState {
   sources: Record<string, Source>;
   focus: string;
   jobs: Record<string, Job>;
+  jobQueue: JobQueue;
   dirSizeQueue: DirSizeTask[];
   commands: Record<string, InteractiveCommand>;
   pendingOp: PendingOp | null;
@@ -271,6 +273,7 @@ const initialState: AppState = {
   sources: {},
   focus: "",
   jobs: {},
+  jobQueue: { jobIds: [], completedCount: 0 },
   dirSizeQueue: [],
   commands: {},
   pendingOp: null,
@@ -413,6 +416,13 @@ function applySnapshot(state: AppState, msg: StateSnapshotMessage): AppState {
     const jobs: Record<string, Job> = {};
     for (const j of domains.jobs) jobs[j.jobId] = j;
     next.jobs = jobs;
+  }
+  if (domains.jobQueue) {
+    next.jobQueue = {
+      activeJobId: domains.jobQueue.activeJobId,
+      jobIds: domains.jobQueue.jobIds ?? [],
+      completedCount: domains.jobQueue.completedCount ?? 0,
+    };
   }
   if (domains.dirSizeQueue) {
     next.dirSizeQueue = domains.dirSizeQueue.tasks ?? [];
@@ -830,6 +840,17 @@ function applyPatch(state: AppState, msg: StatePatchMessage): AppState {
   if (msg.domain === "jobs" && msg.patch.removeJobId) {
     const { [msg.patch.removeJobId as string]: _removed, ...remainingJobs } = state.jobs;
     return { ...state, jobs: remainingJobs };
+  }
+
+  if (msg.domain === "jobQueue") {
+    return {
+      ...state,
+      jobQueue: {
+        activeJobId: msg.patch.activeJobId as string | undefined,
+        jobIds: (msg.patch.jobIds as string[]) ?? [],
+        completedCount: (msg.patch.completedCount as number) ?? 0,
+      },
+    };
   }
 
   return state;

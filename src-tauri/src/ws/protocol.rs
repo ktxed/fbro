@@ -330,6 +330,8 @@ pub struct StateDomains {
     pub sources: Vec<SourceSchema>,
     pub focus: String,
     pub jobs: Vec<serde_json::Value>,
+    #[serde(rename = "jobQueue")]
+    pub job_queue: JobQueueSchema,
     #[serde(rename = "dirSizeQueue")]
     pub dir_size_queue: DirSizeQueueSnapshot,
     pub commands: Vec<InteractiveCommandSchema>,
@@ -343,6 +345,15 @@ pub struct StateDomains {
     pub share_config: serde_json::Value,
     #[serde(rename = "globalSelections")]
     pub global_selections: Vec<crate::vfs::global_selection::GlobalSelectionSummary>,
+}
+
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct JobQueueSchema {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub active_job_id: Option<String>,
+    pub job_ids: Vec<String>,
+    pub completed_count: usize,
 }
 
 #[derive(Serialize, Clone, Debug)]

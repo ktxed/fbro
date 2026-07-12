@@ -5,7 +5,7 @@ mod cache;
 mod git;
 pub(crate) mod global_selection;
 mod history;
-mod jobs;
+pub(crate) mod jobs;
 mod navigation;
 mod panel;
 mod procs;
@@ -92,6 +92,8 @@ pub async fn dispatch(name: &str, scope: &Value, args: &Value, ctx: &mut IntentC
         | "SkipCurrentFile"
         | "PauseJob"
         | "ResumeJob"
+        | "DeleteQueuedJob"
+        | "ReorderQueuedJob"
         | "RenameFile"
         | "MakeDir"
         | "TouchFile"

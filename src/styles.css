@@ -1815,6 +1815,12 @@ body {
   color: var(--text);
 }
 
+.jobs-bar__job--queue {
+  border-color: var(--border-focus);
+  color: var(--text);
+  max-width: 300px;
+}
+
 .jobs-bar__job-label {
   flex: 1;
   min-width: 0;
@@ -1842,6 +1848,11 @@ body {
 .jobs-bar__job-close:hover {
   color: #ff6060;
   background: rgba(255, 80, 80, 0.15);
+}
+
+.jobs-bar__job-open:hover {
+  color: var(--accent);
+  background: rgba(74, 158, 255, 0.12);
 }
 
 /* ── Modal ───────────────────────────────────────────────────────────────── */
@@ -3008,6 +3019,19 @@ body {
   border-color: var(--border-focus);
 }
 
+.jobs-modal__queue-order {
+  flex-shrink: 0;
+  min-width: 22px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text-dim);
+  font-size: 0.78em;
+}
+
 .jobs-modal__row-header {
   display: flex;
   align-items: center;
@@ -3072,6 +3096,42 @@ body {
   border-color: var(--border-focus);
   color: var(--accent);
   background: rgba(74, 158, 255, 0.12);
+}
+
+.jobs-modal__queue-actions {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.jobs-modal__row:hover .jobs-modal__queue-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.jobs-modal__queue-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 22px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-family: var(--font);
+  font-size: 0.75em;
+  padding: 0 5px;
+}
+
+.jobs-modal__queue-actions button:hover {
+  border-color: var(--border-focus);
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .jobs-modal__paths {

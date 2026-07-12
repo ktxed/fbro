@@ -18,6 +18,7 @@ use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 
 use crate::bro::{BroInputItem, ResolvedBro};
+use crate::vfs::VfsDriver;
 use crate::ws::protocol::FedupBroResultSchema;
 
 // ─── Scan handle (existing) ─────────────────────────────────────────────────
@@ -218,7 +219,29 @@ pub struct JobStore {
     pub jobs: HashMap<String, AppJob>,
     pub fp_queue: VecDeque<String>,
     pub fp_running: Option<String>,
+    pub file_queue: VecDeque<String>,
+    pub file_queue_running: Option<String>,
+    pub file_queue_completed: usize,
+    pub queued_file_ops: HashMap<String, QueuedFileOpLaunch>,
     next_id: u64,
+}
+
+pub struct QueuedFileOpLaunch {
+    pub op_type: FileOpType,
+    pub files: Vec<FileOpEntry>,
+    pub dest_path: Option<String>,
+    pub conflict_policy: ConflictPolicy,
+    pub verification_policy: VerificationPolicy,
+    pub save_digest_file: bool,
+    pub src_driver: Arc<dyn VfsDriver>,
+    pub dst_driver: Option<Arc<dyn VfsDriver>>,
+    pub preserve_attributes: bool,
+    pub auto_resume_copies: bool,
+    pub cancel_rx: watch::Receiver<bool>,
+    pub pause_rx: watch::Receiver<bool>,
+    pub decision_rx: DecisionRx,
+    pub skip_current_file: Arc<AtomicBool>,
+    pub keep_partial_files_on_cancel: Arc<AtomicBool>,
 }
 
 impl JobStore {
@@ -227,6 +250,10 @@ impl JobStore {
             jobs: HashMap::new(),
             fp_queue: VecDeque::new(),
             fp_running: None,
+            file_queue: VecDeque::new(),
+            file_queue_running: None,
+            file_queue_completed: 0,
+            queued_file_ops: HashMap::new(),
             next_id: 1,
         }
     }
@@ -242,7 +269,54 @@ impl JobStore {
             self.fp_queue.remove(index);
         }
     }
+
+    pub fn remove_from_file_queue(&mut self, job_id: &str) {
+        if let Some(index) = self.file_queue.iter().position(|queued| queued == job_id) {
+            self.file_queue.remove(index);
+        }
+        self.queued_file_ops.remove(job_id);
+        if self.file_queue_running.as_deref() == Some(job_id) {
+            self.file_queue_running = None;
+        }
+        if self.file_queue.is_empty() {
+            self.file_queue_completed = 0;
+        }
+    }
 }
 
 /// Channel type for the file_ops worker to receive decisions.
 pub type DecisionRx = mpsc::Receiver<DecisionResponse>;
+
+#[cfg(test)]
+mod tests {
+    use super::JobStore;
+
+    #[test]
+    fn removing_last_file_queue_job_resets_completed_count() {
+        let mut store = JobStore::new();
+        store.file_queue.push_back("job-1".to_string());
+        store.file_queue_running = Some("job-1".to_string());
+        store.file_queue_completed = 2;
+
+        store.remove_from_file_queue("job-1");
+
+        assert!(store.file_queue.is_empty());
+        assert_eq!(store.file_queue_running, None);
+        assert_eq!(store.file_queue_completed, 0);
+    }
+
+    #[test]
+    fn removing_pending_file_queue_job_keeps_active_job() {
+        let mut store = JobStore::new();
+        store.file_queue.push_back("job-1".to_string());
+        store.file_queue.push_back("job-2".to_string());
+        store.file_queue_running = Some("job-1".to_string());
+        store.file_queue_completed = 1;
+
+        store.remove_from_file_queue("job-2");
+
+        assert_eq!(store.file_queue.iter().cloned().collect::<Vec<_>>(), vec!["job-1"]);
+        assert_eq!(store.file_queue_running.as_deref(), Some("job-1"));
+        assert_eq!(store.file_queue_completed, 1);
+    }
+}

@@ -15,9 +15,9 @@ use crate::watcher::WatcherCommand;
 use crate::ws::commands::build_interactive_commands;
 use crate::ws::protocol::{
     now, DirSizeQueueSnapshot, DirSizeTaskSchema, FileOpFileSchema, GeneralSettingsSchema,
-    LayoutDomain, ModalSizePreferenceSchema, PanelSlotSchema, PanelSnapshot, ServerMessage,
-    SettingsSnapshot, ShadowSourceSchema, SourceCapabilities, SourcePeerSchema, SourceSchema,
-    StateDomains,
+    JobQueueSchema, LayoutDomain, ModalSizePreferenceSchema, PanelSlotSchema, PanelSnapshot,
+    ServerMessage, SettingsSnapshot, ShadowSourceSchema, SourceCapabilities, SourcePeerSchema,
+    SourceSchema, StateDomains,
 };
 
 pub(crate) struct IntentContext<'a> {
@@ -107,6 +107,7 @@ pub(crate) fn build_state_snapshot(
             sources: build_sources(state),
             focus: state.focus.clone(),
             jobs: vec![],
+            job_queue: build_job_queue(state),
             dir_size_queue: DirSizeQueueSnapshot {
                 tasks: dir_size_tasks
                     .into_iter()
@@ -185,6 +186,14 @@ pub(crate) fn build_state_snapshot(
             share_config: build_share_config(state),
             global_selections: build_global_selection_summaries(state),
         },
+    }
+}
+
+pub(crate) fn build_job_queue(state: &AppState) -> JobQueueSchema {
+    JobQueueSchema {
+        active_job_id: state.job_store.file_queue_running.clone(),
+        job_ids: state.job_store.file_queue.iter().cloned().collect(),
+        completed_count: state.job_store.file_queue_completed,
     }
 }
 

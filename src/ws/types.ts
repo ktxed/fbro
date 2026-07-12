@@ -259,6 +259,12 @@ export interface Job {
   fedupResult?: FedupBroResult;
 }
 
+export interface JobQueue {
+  activeJobId?: string;
+  jobIds: string[];
+  completedCount: number;
+}
+
 export interface SyncBroDiff {
   path: string;
   localSize: number;
@@ -614,6 +620,7 @@ export interface StateSnapshotMessage {
     sources?: Source[];
     focus?: string;
     jobs?: Job[];
+    jobQueue?: JobQueue;
     dirSizeQueue?: { tasks: DirSizeTask[] };
     commands?: InteractiveCommand[];
     bookmarks?: BookmarkEntry[];
@@ -628,7 +635,7 @@ export interface StateSnapshotMessage {
 export interface StatePatchMessage {
   type: "StatePatch";
   timestamp: number;
-  domain: "panels" | "layout" | "slots" | "focus" | "selections" | "jobs" | "sources" | "dirSizeQueue" | "bookmarks" | "procs" | "settings" | "discoveredPeers" | "shareConfig" | "globalSelections";
+  domain: "panels" | "layout" | "slots" | "focus" | "selections" | "jobs" | "jobQueue" | "sources" | "dirSizeQueue" | "bookmarks" | "procs" | "settings" | "discoveredPeers" | "shareConfig" | "globalSelections";
   entityId?: string;
   version: number;
   patch: {

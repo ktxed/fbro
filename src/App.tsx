@@ -75,7 +75,7 @@ export function App() {
         style={{ colorScheme: colorScheme.mode }}
       >
         {client && <Layout client={client} jobsViewOpen={jobsViewOpen} onCloseJobsView={() => setJobsViewOpen(false)} onOpenJobsView={() => setJobsViewOpen(true)} />}
-        {client && <JobsBar client={client} />}
+        {client && <JobsBar client={client} onOpenJobsView={() => setJobsViewOpen(true)} />}
         {client && <Toolbar client={client} jobsViewOpen={jobsViewOpen} onOpenJobsView={() => setJobsViewOpen(true)} />}
         {client && <PairingRequestModal client={client} />}
       </div>

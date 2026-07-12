@@ -359,6 +359,10 @@ async fn handle_connection(
                                 &watcher_cmd_tx,
                             ).await;
                         }
+                        let _ = crate::ws::intents::jobs::maybe_start_next_queued_file_op(
+                            job_id, &state, &tx,
+                        )
+                        .await;
                         let _ = crate::ws::intents::bro::maybe_start_next_fp_job(&state, &tx).await;
                     }
                 }

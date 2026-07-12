@@ -10,7 +10,7 @@ use crate::jobs::search::{
 };
 use crate::jobs::{
     AppJob, ConflictPolicy, DecisionResponse, FileOpEntry, FileOpJobMeta, FileOpType, JobKind,
-    JobState, SearchJobMeta, VerificationPolicy,
+    JobState, QueuedFileOpLaunch, SearchJobMeta, VerificationPolicy,
 };
 use crate::platform::{ExternalClipboardOp, ExternalClipboardPayload};
 use crate::state::{ShadowSource, Source};
@@ -19,10 +19,13 @@ use crate::ws::intents::{
     arg_bool, arg_str, arg_u64, is_global_selection_source, is_search_source,
 };
 use crate::ws::protocol::SearchParamsSchema;
-use crate::ws::protocol::{now, FileOpFileSchema, JobStartSchema, ServerMessage};
+use crate::ws::protocol::{
+    now, FileOpFileSchema, FileOpProgressSchema, JobStartSchema, ServerMessage,
+};
 use crate::ws::runtime::{
-    build_global_selection_patch, build_sources_json, ensure_global_selection_source, navigate_to,
-    quiet_rescan_panel, rescan_panel, resolve_panel_id, selected_names_for, IntentContext,
+    build_global_selection_patch, build_job_queue, build_sources_json,
+    ensure_global_selection_source, navigate_to, quiet_rescan_panel, rescan_panel,
+    resolve_panel_id, selected_names_for, IntentContext,
 };
 
 pub(crate) async fn handle(name: &str, scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
@@ -35,6 +38,8 @@ pub(crate) async fn handle(name: &str, scope: &Value, args: &Value, ctx: &mut In
         "SkipCurrentFile" => skip_current_file(args, ctx).await,
         "PauseJob" => pause_job(args, ctx).await,
         "ResumeJob" => resume_job(args, ctx).await,
+        "DeleteQueuedJob" => delete_queued_job(args, ctx).await,
+        "ReorderQueuedJob" => reorder_queued_job(args, ctx).await,
         "RenameFile" => rename_file(args, ctx).await,
         "MakeDir" => make_dir(args, ctx).await,
         "TouchFile" => touch_file(args, ctx).await,
@@ -58,6 +63,7 @@ struct StartFileOpArgs {
     save_digest_file: bool,
     background: bool,
     start_paused: bool,
+    enqueue: bool,
     dry_mode: bool,
     files: Vec<FileOpFileSchema>,
 }
@@ -87,6 +93,7 @@ impl StartFileOpArgs {
             save_digest_file: arg_bool(args, "saveDigestFile", true),
             background: arg_bool(args, "background", false),
             start_paused: arg_bool(args, "startPaused", false),
+            enqueue: arg_bool(args, "enqueue", false),
             dry_mode: arg_bool(args, "dryMode", false),
             files: args
                 .get("files")
@@ -906,6 +913,13 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
         }
     }
 
+    if parsed.enqueue {
+        if let Err(error) = validate_queued_file_op_support(&parsed, ctx).await {
+            let _ = send_error(ctx, "START_FILE_OP_FAILED", error).await;
+            return;
+        }
+    }
+
     if parsed.dry_mode {
         let home = {
             #[cfg(unix)]
@@ -992,6 +1006,119 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
             source_path: Some(file.source_path.clone()),
         })
         .collect();
+
+    if parsed.enqueue {
+        let total_bytes_total: u64 = files.iter().map(|file| file.size.unwrap_or(0)).sum();
+        let total_files_for_job = files.len();
+        let should_start_now = {
+            let mut state_guard = ctx.state.lock().await;
+            let should_start = state_guard.job_store.file_queue_running.is_none();
+            let initial_state = if should_start {
+                state_guard.job_store.file_queue_running = Some(job_id.clone());
+                JobState::Running
+            } else {
+                JobState::Queued
+            };
+            state_guard.job_store.file_queue.push_back(job_id.clone());
+            state_guard.job_store.queued_file_ops.insert(
+                job_id.clone(),
+                QueuedFileOpLaunch {
+                    op_type: op_type.clone(),
+                    files: files.clone(),
+                    dest_path: dest_path.clone(),
+                    conflict_policy: conflict_policy.clone(),
+                    verification_policy: verification_policy.clone(),
+                    save_digest_file: parsed.save_digest_file,
+                    src_driver: Arc::clone(&src_driver),
+                    dst_driver: dst_driver.as_ref().map(Arc::clone),
+                    preserve_attributes,
+                    auto_resume_copies,
+                    cancel_rx,
+                    pause_rx,
+                    decision_rx,
+                    skip_current_file: Arc::clone(&skip_current_file),
+                    keep_partial_files_on_cancel: Arc::clone(&keep_partial_files_on_cancel),
+                },
+            );
+            state_guard.job_store.jobs.insert(
+                job_id.clone(),
+                AppJob {
+                    job_id: job_id.clone(),
+                    kind: JobKind::FileOp(FileOpJobMeta {
+                        op_type,
+                        files,
+                        conflict_policy,
+                        apply_to_all_decision: None,
+                    }),
+                    source_panel: parsed.source_panel.clone(),
+                    dest_panel: parsed.dest_panel.clone(),
+                    source_path: source_path.clone(),
+                    dest_path: dest_path.clone(),
+                    state: initial_state,
+                    progress: crate::jobs::FileOpProgress {
+                        total_files: total_files_for_job,
+                        completed_files: 0,
+                        current_file: None,
+                        status_text: None,
+                        current_file_bytes_total: 0,
+                        current_file_bytes_copied: 0,
+                        total_bytes_total,
+                        total_bytes_copied: 0,
+                        current_file_percent: None,
+                        overall_percent: None,
+                    },
+                    decision: None,
+                    error: None,
+                    background: true,
+                    paused: false,
+                    handle: None,
+                    cancel_tx,
+                    pause_tx,
+                    skip_current_file,
+                    keep_partial_files_on_cancel,
+                },
+            );
+            should_start
+        };
+
+        let _ = ctx
+            .tx
+            .send(ServerMessage::JobStarted {
+                timestamp: now(),
+                job: JobStartSchema {
+                    job_id: job_id.clone(),
+                    kind: "file-op".to_string(),
+                    op_type: parsed.op_type.clone(),
+                    files: file_schemas,
+                    source_panel: parsed.source_panel,
+                    source_path,
+                    dest_panel: parsed.dest_panel,
+                    dest_path,
+                    initial_state: if should_start_now {
+                        "Running".to_string()
+                    } else {
+                        "Queued".to_string()
+                    },
+                    total_files: total_files_for_job,
+                    total_bytes_total,
+                    background: true,
+                    supports_pause: true,
+                    result_path: None,
+                    result_panel_id: None,
+                    request_id: None,
+                    search_source_id: None,
+                    search_params: None,
+                },
+            })
+            .await;
+
+        ctx.decision_senders.insert(job_id.clone(), decision_tx);
+        send_job_queue_patch(ctx.state, ctx.tx).await;
+        if should_start_now {
+            let _ = start_queued_file_op(job_id, ctx.state, ctx.tx).await;
+        }
+        return;
+    }
 
     // Archive-source Copy → batch streaming extraction. The generic file-op
     // worker calls `src_driver.open_read(path)` per file, which on a 7z source
@@ -1301,8 +1428,19 @@ async fn provide_job_decision(args: &Value, ctx: &mut IntentContext<'_>) {
 async fn cancel_job(args: &Value, ctx: &mut IntentContext<'_>) {
     let parsed = JobIdArgs::from_args(args);
     let mut send_cancelled_event = false;
+    let mut queue_changed = false;
     {
         let mut state_guard = ctx.state.lock().await;
+        let file_queued_pending = state_guard
+            .job_store
+            .file_queue
+            .iter()
+            .any(|job_id| job_id == &parsed.job_id)
+            && state_guard.job_store.file_queue_running.as_deref() != Some(parsed.job_id.as_str());
+        if file_queued_pending {
+            state_guard.job_store.remove_from_file_queue(&parsed.job_id);
+            queue_changed = true;
+        }
         let fp_queued = state_guard
             .job_store
             .jobs
@@ -1316,6 +1454,12 @@ async fn cancel_job(args: &Value, ctx: &mut IntentContext<'_>) {
         if let Some(job) = state_guard.job_store.jobs.get_mut(&parsed.job_id) {
             job.set_keep_partial_files_on_cancel(parsed.keep_partial_files);
             match &job.kind {
+                JobKind::FileOp(_) if file_queued_pending => {
+                    job.state = JobState::Cancelled;
+                    job.paused = false;
+                    job.decision = None;
+                    send_cancelled_event = true;
+                }
                 JobKind::FpBro(_)
                     if job.state == JobState::Queued || job.state == JobState::AwaitingDecision =>
                 {
@@ -1379,6 +1523,9 @@ async fn cancel_job(args: &Value, ctx: &mut IntentContext<'_>) {
                 result_panel_id: None,
             })
             .await;
+    }
+    if queue_changed {
+        send_job_queue_patch(ctx.state, ctx.tx).await;
     }
 }
 
@@ -1463,6 +1610,314 @@ async fn resume_job(args: &Value, ctx: &mut IntentContext<'_>) {
             result_panel_id: None,
         })
         .await;
+}
+
+async fn send_job_queue_patch(
+    state: &crate::state::SharedState,
+    tx: &tokio::sync::mpsc::Sender<ServerMessage>,
+) {
+    let queue = {
+        let state_guard = state.lock().await;
+        build_job_queue(&state_guard)
+    };
+    let _ = tx
+        .send(ServerMessage::StatePatch {
+            timestamp: now(),
+            domain: "jobQueue".to_string(),
+            entity_id: None,
+            version: 0,
+            patch: serde_json::json!(queue),
+        })
+        .await;
+}
+
+fn job_progress_schema(job: &AppJob) -> FileOpProgressSchema {
+    FileOpProgressSchema {
+        total_files: job.progress.total_files,
+        completed_files: job.progress.completed_files,
+        current_file: job.progress.current_file.clone(),
+        status_text: job.progress.status_text.clone(),
+        current_file_bytes_total: job.progress.current_file_bytes_total,
+        current_file_bytes_copied: job.progress.current_file_bytes_copied,
+        total_bytes_total: job.progress.total_bytes_total,
+        total_bytes_copied: job.progress.total_bytes_copied,
+        current_file_percent: job.progress.current_file_percent,
+        overall_percent: job.progress.overall_percent,
+    }
+}
+
+async fn start_queued_file_op(
+    job_id: String,
+    state: &crate::state::SharedState,
+    tx: &tokio::sync::mpsc::Sender<ServerMessage>,
+) -> Result<(), String> {
+    let launch = {
+        let mut state_guard = state.lock().await;
+        let Some(job) = state_guard.job_store.jobs.get_mut(&job_id) else {
+            return Err("Queued copy job no longer exists.".to_string());
+        };
+        if !matches!(job.kind, JobKind::FileOp(_)) {
+            return Err("Queued job is not a file operation.".to_string());
+        }
+        job.state = JobState::Running;
+        job.paused = false;
+        job.error = None;
+        job.decision = None;
+        state_guard.job_store.queued_file_ops.remove(&job_id)
+    };
+    let Some(launch) = launch else {
+        return Ok(());
+    };
+
+    let state_for_patch = state.clone();
+    let tx_for_patch = tx.clone();
+    let job_id_spawn = job_id.clone();
+    let handle = tokio::spawn(async move {
+        run_file_op(
+            job_id_spawn,
+            launch.op_type,
+            launch.files,
+            launch.dest_path,
+            launch.conflict_policy,
+            tx_for_patch.clone(),
+            launch.cancel_rx,
+            launch.pause_rx,
+            launch.decision_rx,
+            launch.src_driver,
+            launch.dst_driver,
+            launch.preserve_attributes,
+            launch.verification_policy,
+            launch.save_digest_file,
+            launch.auto_resume_copies,
+            launch.skip_current_file,
+            launch.keep_partial_files_on_cancel,
+        )
+        .await;
+
+        let sources_json = {
+            let state = state_for_patch.lock().await;
+            build_sources_json(&state)
+        };
+        let _ = tx_for_patch
+            .send(ServerMessage::StatePatch {
+                timestamp: now(),
+                domain: "sources".to_string(),
+                entity_id: None,
+                version: 0,
+                patch: serde_json::json!({ "sources": sources_json }),
+            })
+            .await;
+    });
+
+    let progress = {
+        let mut state_guard = state.lock().await;
+        if let Some(job) = state_guard.job_store.jobs.get_mut(&job_id) {
+            job.handle = Some(handle);
+            Some(job_progress_schema(job))
+        } else {
+            None
+        }
+    };
+
+    let _ = tx
+        .send(ServerMessage::JobEvent {
+            timestamp: now(),
+            job_id,
+            event: "Progress".to_string(),
+            files: None,
+            progress,
+            search_progress: None,
+            decision: None,
+            error: None,
+            result_path: None,
+            result_panel_id: None,
+        })
+        .await;
+
+    Ok(())
+}
+
+pub(crate) async fn maybe_start_next_queued_file_op(
+    completed_job_id: &str,
+    state: &crate::state::SharedState,
+    tx: &tokio::sync::mpsc::Sender<ServerMessage>,
+) -> Result<(), String> {
+    let next_job_id = {
+        let mut state_guard = state.lock().await;
+        if state_guard.job_store.file_queue_running.as_deref() == Some(completed_job_id) {
+            state_guard.job_store.file_queue_running = None;
+            state_guard
+                .job_store
+                .remove_from_file_queue(completed_job_id);
+            if !state_guard.job_store.file_queue.is_empty() {
+                state_guard.job_store.file_queue_completed += 1;
+            }
+        } else {
+            state_guard
+                .job_store
+                .remove_from_file_queue(completed_job_id);
+        }
+
+        if state_guard.job_store.file_queue_running.is_some() {
+            None
+        } else {
+            let next = state_guard.job_store.file_queue.front().cloned();
+            if let Some(job_id) = &next {
+                state_guard.job_store.file_queue_running = Some(job_id.clone());
+            }
+            next
+        }
+    };
+
+    if let Some(job_id) = next_job_id {
+        start_queued_file_op(job_id, state, tx).await?;
+    }
+    send_job_queue_patch(state, tx).await;
+    Ok(())
+}
+
+async fn validate_queued_file_op_support(
+    parsed: &StartFileOpArgs,
+    ctx: &mut IntentContext<'_>,
+) -> Result<(), String> {
+    if parsed.op_type != "copy" {
+        return Err("Only copy jobs can be queued.".to_string());
+    }
+    if parsed.dry_mode {
+        return Err("Dry-run jobs cannot be queued.".to_string());
+    }
+    let Some(dest_panel_id) = parsed.dest_panel.as_deref() else {
+        return Err("Queued copies require a destination panel.".to_string());
+    };
+
+    let state_guard = ctx.state.lock().await;
+    let Some(source_panel) = state_guard.panels.get(&parsed.source_panel) else {
+        return Err("Source panel is unavailable.".to_string());
+    };
+    let Some(dest_panel) = state_guard.panels.get(dest_panel_id) else {
+        return Err("Destination panel is unavailable.".to_string());
+    };
+    let Some(source) = state_guard.sources.get(&source_panel.source_id) else {
+        return Err("Source is unavailable.".to_string());
+    };
+    let Some(destination) = state_guard.sources.get(&dest_panel.source_id) else {
+        return Err("Destination is unavailable.".to_string());
+    };
+    if source.kind != "filesystem"
+        || source.shadow
+        || destination.kind != "filesystem"
+        || destination.shadow
+    {
+        return Err("Only local filesystem copies can be queued.".to_string());
+    }
+    let Some(src_driver) = state_guard.drivers.get(&source_panel.source_id) else {
+        return Err("Source driver is unavailable.".to_string());
+    };
+    let Some(dst_driver) = state_guard.drivers.get(&dest_panel.source_id) else {
+        return Err("Destination driver is unavailable.".to_string());
+    };
+    if !src_driver.is_local() || !dst_driver.is_local() {
+        return Err("Only local filesystem copies can be queued.".to_string());
+    }
+    Ok(())
+}
+
+async fn delete_queued_job(args: &Value, ctx: &mut IntentContext<'_>) {
+    let parsed = JobIdArgs::from_args(args);
+    let mut should_send = false;
+    {
+        let mut state_guard = ctx.state.lock().await;
+        let is_running =
+            state_guard.job_store.file_queue_running.as_deref() == Some(parsed.job_id.as_str());
+        if is_running {
+            return;
+        }
+        if !state_guard
+            .job_store
+            .file_queue
+            .iter()
+            .any(|job_id| job_id == &parsed.job_id)
+        {
+            return;
+        }
+        state_guard.job_store.remove_from_file_queue(&parsed.job_id);
+        if let Some(job) = state_guard.job_store.jobs.get_mut(&parsed.job_id) {
+            job.state = JobState::Cancelled;
+            job.paused = false;
+            job.decision = None;
+            should_send = true;
+        }
+    }
+    if should_send {
+        ctx.decision_senders.remove(&parsed.job_id);
+        let _ = ctx
+            .tx
+            .send(ServerMessage::JobEvent {
+                timestamp: now(),
+                job_id: parsed.job_id,
+                event: "Cancelled".to_string(),
+                files: None,
+                progress: None,
+                search_progress: None,
+                decision: None,
+                error: None,
+                result_path: None,
+                result_panel_id: None,
+            })
+            .await;
+        send_job_queue_patch(ctx.state, ctx.tx).await;
+    }
+}
+
+async fn reorder_queued_job(args: &Value, ctx: &mut IntentContext<'_>) {
+    let parsed = JobIdArgs::from_args(args);
+    let action = arg_str(args, "action").unwrap_or("");
+    let changed = {
+        let mut state_guard = ctx.state.lock().await;
+        if state_guard.job_store.file_queue_running.as_deref() == Some(parsed.job_id.as_str()) {
+            return;
+        }
+        let Some(index) = state_guard
+            .job_store
+            .file_queue
+            .iter()
+            .position(|job_id| job_id == &parsed.job_id)
+        else {
+            return;
+        };
+        let active_offset = usize::from(state_guard.job_store.file_queue_running.is_some());
+        let min_index = active_offset;
+        match action {
+            "up" if index > min_index => {
+                state_guard.job_store.file_queue.swap(index, index - 1);
+                true
+            }
+            "down" if index + 1 < state_guard.job_store.file_queue.len() => {
+                state_guard.job_store.file_queue.swap(index, index + 1);
+                true
+            }
+            "next" if index > min_index => {
+                if let Some(job_id) = state_guard.job_store.file_queue.remove(index) {
+                    state_guard.job_store.file_queue.insert(min_index, job_id);
+                    true
+                } else {
+                    false
+                }
+            }
+            "last" if index + 1 < state_guard.job_store.file_queue.len() => {
+                if let Some(job_id) = state_guard.job_store.file_queue.remove(index) {
+                    state_guard.job_store.file_queue.push_back(job_id);
+                    true
+                } else {
+                    false
+                }
+            }
+            _ => false,
+        }
+    };
+    if changed {
+        send_job_queue_patch(ctx.state, ctx.tx).await;
+    }
 }
 
 async fn handle_global_selection_file_op(

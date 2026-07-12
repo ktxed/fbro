@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useAppState, useAppDispatch } from "../store";
 import type { WsClient } from "../ws/client";
-import { IconChevronLeft, IconChevronRight, IconX } from "@tabler/icons-react";
+import { IconChevronLeft, IconChevronRight, IconListDetails, IconX } from "@tabler/icons-react";
 import { cancelJobWithPartialPrompt } from "../utils/jobCancel";
 
 const VISIBLE = 5;
@@ -10,21 +10,26 @@ function jobShortId(jobId: string) {
   return jobId.replace(/^job-/, "#");
 }
 
-export function JobsBar({ client }: { client: WsClient }) {
+export function JobsBar({ client, onOpenJobsView }: { client: WsClient; onOpenJobsView: () => void }) {
   const state = useAppState();
   const dispatch = useAppDispatch();
   const [scrollIndex, setScrollIndex] = useState(0);
+  const queuedJobIds = new Set(state.jobQueue.jobIds);
+  const queueActiveJob = state.jobQueue.activeJobId ? state.jobs[state.jobQueue.activeJobId] : undefined;
+  const queueTotal = state.jobQueue.completedCount + state.jobQueue.jobIds.length;
+  const queueCurrent = queueTotal > 0 ? state.jobQueue.completedCount + 1 : 0;
 
   const activeJobs = Object.values(state.jobs).filter(
     (j) =>
-      j.state === "Queued" ||
+      !queuedJobIds.has(j.jobId) &&
+      (j.state === "Queued" ||
       j.state === "Running" ||
       j.state === "AwaitingDecision" ||
       (j.kind === "search" &&
-        (j.state === "Completed" || j.state === "Cancelled" || j.state === "Failed"))
+        (j.state === "Completed" || j.state === "Cancelled" || j.state === "Failed")))
   );
 
-  if (activeJobs.length === 0) return null;
+  if (activeJobs.length === 0 && queueTotal === 0) return null;
 
   const clamped = Math.min(scrollIndex, Math.max(0, activeJobs.length - VISIBLE));
   const visible = activeJobs.slice(clamped, clamped + VISIBLE);
@@ -47,6 +52,43 @@ export function JobsBar({ client }: { client: WsClient }) {
       >
         <IconChevronLeft size={14} />
       </button>
+
+      {queueTotal > 0 && (
+        <button
+          className="jobs-bar__job jobs-bar__job--queue"
+          onClick={() => {
+            if (queueActiveJob) dispatch({ type: "SET_ACTIVE_JOB", jobId: queueActiveJob.jobId });
+          }}
+          title="Open current queued job"
+        >
+          <span className="jobs-bar__job-label">
+            Queue{queueActiveJob ? `: ${queueActiveJob.type.charAt(0).toUpperCase() + queueActiveJob.type.slice(1)}` : ""}
+          </span>
+          <span className="jobs-bar__job-pct">{queueCurrent} / {queueTotal}</span>
+          <span
+            className="jobs-bar__job-close"
+            role="button"
+            title="Abort current queued job"
+            onClick={(e) => {
+              e.stopPropagation();
+              if (queueActiveJob) cancelJobWithPartialPrompt(client, state, queueActiveJob);
+            }}
+          >
+            <IconX size={12} />
+          </span>
+          <span
+            className="jobs-bar__job-close jobs-bar__job-open"
+            role="button"
+            title="Manage queue"
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpenJobsView();
+            }}
+          >
+            <IconListDetails size={12} />
+          </span>
+        </button>
+      )}
 
       {visible.map((job) => {
         const isActive = job.jobId === state.activeJobId;

@@ -403,6 +403,23 @@ function supportsCopyDestName(pending: PendingOp) {
   return kind === "file" || kind === "directory";
 }
 
+function supportsQueuedLocalCopy(state: AppState, pending: PendingOp, dryMode: boolean) {
+  if (dryMode || pending.opType !== "copy" || !pending.destPanel) return false;
+  const sourcePanel = state.panels[pending.sourcePanel];
+  const destPanel = state.panels[pending.destPanel];
+  if (!sourcePanel || !destPanel) return false;
+  const source = state.sources[sourcePanel.sourceId];
+  const destination = state.sources[destPanel.sourceId];
+  return !!source
+    && !!destination
+    && source.kind === "filesystem"
+    && destination.kind === "filesystem"
+    && !source.shadow
+    && !destination.shadow
+    && !sourcePanel.shadowSource
+    && !destPanel.shadowSource;
+}
+
 function destinationPanelShowsTargetPath(
   pending: PendingOp,
   destPanelState: AppState["panels"][string] | undefined,
@@ -670,6 +687,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
       && isGlobalSelectionSourceId(sourcePanelState.sourceId);
     const label = isArchiveSource && pending.opType === "copy" ? "Extract" : opLabel(pending.opType);
     const canStartInBackground = !dryMode;
+    const canQueue = supportsQueuedLocalCopy(state, pending, dryMode);
     const canSuggestResume = canSuggestResumeForPending(state, pending);
     const conflictPolicies: ConflictPolicy[] = canSuggestResume
       ? ["ask", "resume", "overwrite", "skip"]
@@ -680,7 +698,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
     const isSubmitted = submitted && submittedPendingRef.current === pending;
     const canSubmitPending = !isSubmitted && !destNameWarning;
 
-    const startOp = (background: boolean) => {
+    const startOp = (background: boolean, enqueue = false) => {
       if (!canSubmitPending) return;
       submittedPendingRef.current = pending;
       setSubmitted(true);
@@ -709,11 +727,12 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
         conflictPolicy: selectedConflictPolicy,
         verificationPolicy,
         saveDigestFile,
-        background,
+        background: background || enqueue,
+        ...(enqueue ? { enqueue: true } : {}),
         ...(background && startPaused ? { startPaused: true } : {}),
         ...(dryMode ? { dryMode: true } : {}),
       });
-      if (background) {
+      if (background || enqueue) {
         close();
       }
       // The reducer will transition to activeJobId when JobStarted arrives
@@ -884,6 +903,11 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
             {canStartInBackground && (
               <button className="modal__btn" data-command-id={`file.${pending.opType}.background`} disabled={!canSubmitPending} onClick={() => startOp(true)}>
                 <MnemonicLabel text="Background" mnemonic="b" />
+              </button>
+            )}
+            {canQueue && (
+              <button className="modal__btn" data-command-id={`file.${pending.opType}.queue`} disabled={!canSubmitPending} onClick={() => startOp(false, true)}>
+                Queue
               </button>
             )}
             <button className="modal__btn" data-command-id={`file.${pending.opType}.cancel`} onClick={close}>
