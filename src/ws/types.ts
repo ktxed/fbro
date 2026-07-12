@@ -13,6 +13,26 @@ export interface VFSEntry {
   /** Real absolute path when the entry's logical name differs from its filesystem
    *  path (e.g. search-result entries). Absent for all normal entries. */
   sourcePath?: string;
+  gitStatus?: string;
+}
+
+export interface GitChange {
+  path: string;
+  indexStatus: string;
+  worktreeStatus: string;
+}
+
+export interface GitRepoStatus {
+  root: string;
+  branch: string;
+  detached: boolean;
+  clean: boolean;
+  stagedCount: number;
+  modifiedCount: number;
+  untrackedCount: number;
+  conflictedCount: number;
+  branches: string[];
+  changes: GitChange[];
 }
 
 export interface Source {
@@ -158,6 +178,7 @@ export interface PanelState {
   shadowSource?: ShadowSource;
   /** When set, this panel is hosting an embedded terminal split with this PTY session id. */
   terminalSessionId?: number;
+  git?: GitRepoStatus;
 }
 
 export interface LayoutDomain {

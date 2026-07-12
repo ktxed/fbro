@@ -6,6 +6,7 @@ mod bro;
 mod config;
 mod drag_out;
 mod fileserver;
+mod git;
 #[cfg(target_os = "linux")]
 mod input_history;
 mod journal;

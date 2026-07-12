@@ -1397,6 +1397,16 @@ body {
 
 .panel__name-warn:hover { color: #e8c84a; }
 
+.panel__git-btn { margin-left: 6px; border: 1px solid var(--border); border-radius: 4px; background: transparent; color: var(--text-muted); display: inline-flex; align-items: center; gap: 4px; font: inherit; }
+.panel__git-status { margin-left: 6px; color: var(--text-warning); font-size: 12px; font-weight: 700; }
+.git-modal { width: min(720px, 92vw); }
+.git-modal__summary { color: var(--text-muted); margin-bottom: 10px; overflow-wrap: anywhere; }
+.git-modal__actions { display: flex; gap: 8px; align-items: center; margin: 10px 0; }
+.git-modal__changes { max-height: 340px; overflow: auto; border: 1px solid var(--border); }
+.git-modal__change { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+.git-modal__change span { flex: 1; overflow-wrap: anywhere; }
+.git-modal textarea { width: 100%; box-sizing: border-box; }
+
 /* ── File-type color classes ──────────────────────────────────────────────── */
 .panel__name.cc-dir     { color: var(--text-dir); }
 .panel__name.cc-link    { color: var(--text-link); }

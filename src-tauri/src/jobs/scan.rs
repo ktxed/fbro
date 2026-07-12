@@ -259,8 +259,15 @@ pub async fn run_scan(
             icon_name: e.icon_name,
             cc: e.cc,
             source_path: e.source_path,
+            git_status: None,
         })
         .collect();
+
+    let git_status = if driver.is_local() {
+        let path = path.clone();
+        tokio::task::spawn_blocking(move || crate::git::inspect(&path)).await.ok().flatten()
+    } else { None };
+    crate::git::decorate_entries(&mut schema_entries, &path, git_status.as_ref());
 
     let total = schema_entries.len();
 
@@ -356,6 +363,7 @@ pub async fn run_scan(
                 panel.window_count = window_count;
                 panel.window_version += 1;
                 panel.status = crate::state::PanelStatus::Ready;
+                panel.git = git_status.clone();
                 panel.version = version_base + 1;
                 (window_start, window_json, panel.window_version)
             } else {
@@ -379,6 +387,7 @@ pub async fn run_scan(
                     "cursor": cursor,
                     "selection": selection,
                     "selectedEntries": selected_entries,
+                    "git": git_status,
                 }),
             })
             .await;
@@ -396,6 +405,7 @@ pub async fn run_scan(
                 panel.windowed = false;
                 panel.status = crate::state::PanelStatus::Ready;
                 panel.version = version;
+                panel.git = git_status.clone();
             }
         }
 
@@ -413,6 +423,7 @@ pub async fn run_scan(
                     "cursor": cursor,
                     "selection": selection,
                     "selectedEntries": build_selected_entries(&schema_entries, &selection),
+                    "git": git_status,
                 }),
             })
             .await;
@@ -444,6 +455,10 @@ pub async fn run_scan(
 
         version += 1;
         let selected_entries = build_selected_entries(&schema_entries, &selection);
+        {
+            let mut s = state.lock().await;
+            if let Some(panel) = s.panels.get_mut(&panel_id) { panel.git = git_status.clone(); }
+        }
         let _ = tx
             .send(ServerMessage::StatePatch {
                 timestamp: crate::ws::protocol::now(),
@@ -457,6 +472,7 @@ pub async fn run_scan(
                     "cursor": cursor,
                     "selection": selection,
                     "selectedEntries": selected_entries,
+                    "git": git_status,
                 }),
             })
             .await;

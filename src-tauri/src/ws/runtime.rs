@@ -1196,6 +1196,7 @@ pub(crate) async fn update_panel_from_patch(
                         icon_name: entry["iconName"].as_str().map(String::from),
                         cc: entry["cc"].as_str().map(String::from),
                         source_path: entry["sourcePath"].as_str().map(String::from),
+                        git_status: entry["gitStatus"].as_str().map(String::from),
                     });
                 }
             }
@@ -1281,6 +1282,7 @@ fn build_panel_snapshot(panel: &Panel, supports_thumbnails: bool) -> PanelSnapsh
             cursor_hint: ss.cursor_hint.clone(),
         }),
         terminal_session_id: panel.terminal_session,
+        git: panel.git.clone(),
     }
 }
 

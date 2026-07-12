@@ -196,6 +196,7 @@ async fn new_tab(args: &Value, ctx: &mut IntentContext<'_>) {
             source_paths: source.source_paths.clone(),
             shadow_source: None,
             terminal_session: None,
+            git: source.git.clone(),
         };
 
         let driver = state_guard.drivers.get(&source.source_id).cloned();
@@ -405,6 +406,7 @@ async fn promote_terminal(args: &Value, ctx: &mut IntentContext<'_>) {
             source_paths: source.source_paths.clone(),
             shadow_source: None,
             terminal_session: Some(sid),
+            git: source.git.clone(),
         };
 
         // Detach the PTY from the source panel.

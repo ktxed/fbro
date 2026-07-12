@@ -2,6 +2,7 @@ mod app;
 mod bookmarks;
 pub(crate) mod bro;
 mod cache;
+mod git;
 pub(crate) mod global_selection;
 mod history;
 mod jobs;
@@ -109,6 +110,7 @@ pub async fn dispatch(name: &str, scope: &Value, args: &Value, ctx: &mut IntentC
             bookmarks::handle(name, scope, args, ctx).await
         }
         "EnterHistorySource" => history::handle(name, scope, args, ctx).await,
+        "GitRefresh" | "GitStagePaths" | "GitUnstagePaths" | "GitCommit" | "GitSwitchBranch" | "GitPull" | "GitPush" => git::handle(name, args, ctx).await,
         "EnterProcsSource" => procs::handle(name, scope, args, ctx).await,
         "Quit" | "ConfirmQuit" | "SetFontSize" => app::handle(name, args, ctx).await,
         "SetGeneralOption" | "SetModalSizePreference" | "ClearThumbnailCache" => {
@@ -151,6 +153,7 @@ fn should_record_command(name: &str) -> bool {
             | "OpenFile"
             | "KillProcess"
             | "OpenTerminal"
+            | "GitStagePaths" | "GitUnstagePaths" | "GitCommit" | "GitSwitchBranch" | "GitPull" | "GitPush"
     )
 }
 

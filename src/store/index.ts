@@ -479,6 +479,7 @@ function applyPatch(state: AppState, msg: StatePatchMessage): AppState {
         calculatingSize: [],
         shadowSource: p.shadowSource,
         terminalSessionId: p.terminalSessionId,
+        git: p.git,
       };
       return {
         ...state,
@@ -639,6 +640,9 @@ function applyPatch(state: AppState, msg: StatePatchMessage): AppState {
     }
     if (msg.patch.terminalSessionId !== undefined) {
       updated = { ...updated, terminalSessionId: msg.patch.terminalSessionId === null ? undefined : msg.patch.terminalSessionId as number };
+    }
+    if (msg.patch.git !== undefined) {
+      updated = { ...updated, git: msg.patch.git === null ? undefined : msg.patch.git as PanelState["git"] };
     }
 
     const locationChanged = updated.path !== panel.path

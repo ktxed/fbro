@@ -462,6 +462,8 @@ pub struct PanelSnapshot {
     pub shadow_source: Option<ShadowSourceSchema>,
     #[serde(rename = "terminalSessionId", skip_serializing_if = "Option::is_none")]
     pub terminal_session_id: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub git: Option<crate::git::GitRepoStatus>,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -509,6 +511,8 @@ pub struct EntrySchema {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(rename = "sourcePath")]
     pub source_path: Option<String>,
+    #[serde(rename = "gitStatus", skip_serializing_if = "Option::is_none")]
+    pub git_status: Option<String>,
 }
 
 #[derive(Serialize, Clone, Debug)]

@@ -1071,6 +1071,7 @@ async fn create_right_listing_tab(
                 .unwrap_or_default(),
             shadow_source: None,
             terminal_session: None,
+            git: base.as_ref().and_then(|panel| panel.git.clone()),
         };
 
         state_guard.panels.insert(panel_id.clone(), panel);

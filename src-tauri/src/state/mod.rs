@@ -443,6 +443,7 @@ pub struct Panel {
     pub shadow_source: Option<ShadowSource>,
     /// Set when the panel hosts an embedded terminal split. Holds the PTY session id.
     pub terminal_session: Option<u32>,
+    pub git: Option<crate::git::GitRepoStatus>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -679,6 +680,7 @@ impl AppState {
             source_paths: HashMap::new(),
             shadow_source: None,
             terminal_session: None,
+            git: None,
         };
 
         let right = Panel {
@@ -706,6 +708,7 @@ impl AppState {
             source_paths: HashMap::new(),
             shadow_source: None,
             terminal_session: None,
+            git: None,
         };
 
         let mut panels = HashMap::new();
@@ -1152,8 +1155,9 @@ pub fn restore_tabs_from_session(
                 window_count: 0,
                 window_version: 0,
                 source_paths: HashMap::new(),
-                shadow_source: None,
-                terminal_session: None,
+            shadow_source: None,
+            terminal_session: None,
+            git: None,
             };
             state.panels.insert(new_panel_id.clone(), new_panel);
             added_ids.push(new_panel_id);

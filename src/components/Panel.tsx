@@ -9,7 +9,7 @@ import {
   PANEL_SHORTCUT_COMMAND_IDS,
 } from "../commands/interactive";
 import { useAppDispatch, useAppState } from "../store";
-import { IconChevronDown, IconChevronUp, IconChevronRight, IconChevronLeft, IconArrowUpRight, IconX, IconAlertTriangle, IconActivity, IconHistory, IconLock, IconNetwork, IconListCheck } from "@tabler/icons-react";
+import { IconChevronDown, IconChevronUp, IconChevronRight, IconChevronLeft, IconArrowUpRight, IconX, IconAlertTriangle, IconActivity, IconHistory, IconGitBranch, IconLock, IconNetwork, IconListCheck } from "@tabler/icons-react";
 
 // Maps Source.iconName (BE-provided) to a Tabler icon component for rendering
 // in the volume bar. Sources with an iconName render the icon in place of
@@ -24,6 +24,7 @@ import { PanelTabBar } from "./PanelTabBar";
 import { PanelTerminal } from "./PanelTerminal";
 import { EntryThumb } from "./EntryThumb";
 import { isGlobalSelectionSourceId } from "../utils/sourceId";
+import { GitModal } from "./GitModal";
 
 const ROW_HEIGHT = 22;
 const GRID_THUMB_SIZE = 128;
@@ -528,6 +529,7 @@ export function Panel({
 }: PanelProps) {
   const appState = useAppState();
   const dispatch = useAppDispatch();
+  const [gitOpen, setGitOpen] = useState(false);
   const [gridMetrics, setGridMetrics] = useState<{ cols: number; cardWidth: number; cardHeight: number; pageRows: number }>({ cols: 1, cardWidth: GRID_CARD_MIN_WIDTH, cardHeight: 168, pageRows: 1 });
   const listRef = useRef<HTMLDivElement>(null);
   const focusDivRef = useRef<HTMLDivElement>(null);
@@ -1489,6 +1491,7 @@ export function Panel({
                   <IconAlertTriangle size={15} />
                 </button>
               )}
+              {entry.gitStatus && <span className="panel__git-status" title={`Git: ${entry.gitStatus}`}>{entry.gitStatus === "untracked" ? "?" : entry.gitStatus === "modified" ? "M" : entry.gitStatus === "deleted" ? "D" : entry.gitStatus === "conflicted" ? "!" : "●"}</span>}
             </span>
           );
         })()}
@@ -1589,7 +1592,10 @@ export function Panel({
             client={client}
           />
         )}
+        {panel.git && <button className="panel__git-btn" tabIndex={-1} title={`Git ${panel.git.branch}`} onClick={() => setGitOpen(true)}><IconGitBranch size={16} /> {panel.git.branch}</button>}
       </div>
+
+      {gitOpen && panel.git && <GitModal panelId={panelId} git={panel.git} client={client} onClose={() => setGitOpen(false)} />}
 
       <VolumeHeader sources={sources} panel={panel} client={client} onNavigateToSource={(sourceId) => { shouldFocusFilterRef.current = false; client.sendIntent("NavigateToSource", panelId, { sourceId }); }} onMountSource={(sourceId) => { shouldFocusFilterRef.current = false; client.sendIntent("MountSource", panelId, { sourceId }); }} />
 
