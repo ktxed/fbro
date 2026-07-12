@@ -5599,9 +5599,39 @@ body {
 .diff-table__row--active-change .diff-table__line,
 .diff-table__row--active-change .diff-table__prefix,
 .diff-table__row--active-change .diff-table__code {
-  box-shadow: inset 0 1px 0 rgba(104, 160, 255, 0.65), inset 0 -1px 0 rgba(104, 160, 255, 0.65);
+  background-image: linear-gradient(rgba(104, 160, 255, 0.11), rgba(104, 160, 255, 0.11));
 }
 
 .diff-table__row--active-change .diff-table__line:first-child {
-  box-shadow: inset 3px 0 0 var(--accent, #68a0ff), inset 0 1px 0 rgba(104, 160, 255, 0.65), inset 0 -1px 0 rgba(104, 160, 255, 0.65);
+  box-shadow: inset 3px 0 0 var(--accent, #68a0ff);
+}
+
+.diff-table__row--active-change-start .diff-table__line,
+.diff-table__row--active-change-start .diff-table__prefix,
+.diff-table__row--active-change-start .diff-table__code {
+  box-shadow: inset 0 1px 0 rgba(104, 160, 255, 0.45);
+}
+
+.diff-table__row--active-change-end .diff-table__line,
+.diff-table__row--active-change-end .diff-table__prefix,
+.diff-table__row--active-change-end .diff-table__code {
+  box-shadow: inset 0 -1px 0 rgba(104, 160, 255, 0.45);
+}
+
+.diff-table__row--active-change-start.diff-table__row--active-change-end .diff-table__line,
+.diff-table__row--active-change-start.diff-table__row--active-change-end .diff-table__prefix,
+.diff-table__row--active-change-start.diff-table__row--active-change-end .diff-table__code {
+  box-shadow: inset 0 1px 0 rgba(104, 160, 255, 0.45), inset 0 -1px 0 rgba(104, 160, 255, 0.45);
+}
+
+.diff-table__row--active-change-start .diff-table__line:first-child {
+  box-shadow: inset 3px 0 0 var(--accent, #68a0ff), inset 0 1px 0 rgba(104, 160, 255, 0.45);
+}
+
+.diff-table__row--active-change-end .diff-table__line:first-child {
+  box-shadow: inset 3px 0 0 var(--accent, #68a0ff), inset 0 -1px 0 rgba(104, 160, 255, 0.45);
+}
+
+.diff-table__row--active-change-start.diff-table__row--active-change-end .diff-table__line:first-child {
+  box-shadow: inset 3px 0 0 var(--accent, #68a0ff), inset 0 1px 0 rgba(104, 160, 255, 0.45), inset 0 -1px 0 rgba(104, 160, 255, 0.45);
 }

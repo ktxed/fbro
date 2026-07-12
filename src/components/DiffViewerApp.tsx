@@ -5,6 +5,7 @@ import type {
   BEMessage,
   CompareDiffReadyMessage,
   CompareDiffResult,
+  CompareDiffRow,
   StatePatchMessage,
   StateSnapshotMessage,
 } from "../ws/types";
@@ -27,6 +28,19 @@ function shortPath(path: string) {
 
 function lineText(value?: string) {
   return value === "" ? "\u00A0" : value ?? "";
+}
+
+function diffRowClassName(
+  kind: CompareDiffRow["kind"],
+  active: boolean,
+  activeBlockStart: boolean,
+  activeBlockEnd: boolean,
+) {
+  const classes = ["diff-table__row", `diff-table__row--${kind}`];
+  if (active) classes.push("diff-table__row--active-change");
+  if (activeBlockStart) classes.push("diff-table__row--active-change-start");
+  if (activeBlockEnd) classes.push("diff-table__row--active-change-end");
+  return classes.join(" ");
 }
 
 export function DiffViewerApp({ requestId, windowLabel, initialColorScheme }: DiffViewerAppProps) {
@@ -258,10 +272,12 @@ export function DiffViewerApp({ requestId, windowLabel, initialColorScheme }: Di
                   {result.rows.map((row, index) => {
                     const blockIndex = changeBlockByRow.get(index);
                     const active = blockIndex !== undefined && blockIndex === activeChangeIndex;
+                    const activeBlockStart = active && changeBlockByRow.get(index - 1) !== blockIndex;
+                    const activeBlockEnd = active && changeBlockByRow.get(index + 1) !== blockIndex;
                     return (
                       <tr
                         key={index}
-                        className={`diff-table__row diff-table__row--${row.kind}${active ? " diff-table__row--active-change" : ""}`}
+                        className={diffRowClassName(row.kind, active, activeBlockStart, activeBlockEnd)}
                         data-diff-row={index}
                       >
                         <td className="diff-table__line">{row.leftLine ?? ""}</td>
@@ -283,10 +299,12 @@ export function DiffViewerApp({ requestId, windowLabel, initialColorScheme }: Di
                     const text = row.kind === "insert" ? row.rightText : row.leftText;
                     const blockIndex = changeBlockByRow.get(index);
                     const active = blockIndex !== undefined && blockIndex === activeChangeIndex;
+                    const activeBlockStart = active && changeBlockByRow.get(index - 1) !== blockIndex;
+                    const activeBlockEnd = active && changeBlockByRow.get(index + 1) !== blockIndex;
                     return (
                       <tr
                         key={index}
-                        className={`diff-table__row diff-table__row--${row.kind}${active ? " diff-table__row--active-change" : ""}`}
+                        className={diffRowClassName(row.kind, active, activeBlockStart, activeBlockEnd)}
                         data-diff-row={index}
                       >
                         <td className="diff-table__line">{row.leftLine ?? ""}</td>
