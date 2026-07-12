@@ -937,6 +937,15 @@ function applyJobEvent(state: AppState, msg: JobEventMessage): AppState {
     case "Resumed":
       updated = { ...job, files, paused: false };
       break;
+    case "FileSkipped":
+      updated = {
+        ...job,
+        files,
+        state: "Running",
+        paused: false,
+        decision: undefined,
+      };
+      break;
     case "Completed":
       const completedProgress = job.progress
         ? {
@@ -995,6 +1004,16 @@ function applyJobEvent(state: AppState, msg: JobEventMessage): AppState {
   }
 
   let next = { ...state, jobs: { ...state.jobs, [msg.jobId]: updated } };
+  if (msg.event === "FileSkipped") {
+    const fileName = msg.error ?? job.progress?.currentFile ?? "file";
+    next = {
+      ...next,
+      transientHint: {
+        message: `Skipped copying file ${fileName}`,
+        token: msg.timestamp,
+      },
+    };
+  }
 
   // Sync search progress/status into pendingSearch if it belongs to this search job
   if (job.kind === "search" && state.pendingSearch?.jobId === msg.jobId) {

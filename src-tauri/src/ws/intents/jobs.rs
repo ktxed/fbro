@@ -32,6 +32,7 @@ pub(crate) async fn handle(name: &str, scope: &Value, args: &Value, ctx: &mut In
         "WriteExternalClipboard" => write_external_clipboard(args, ctx).await,
         "ProvideJobDecision" => provide_job_decision(args, ctx).await,
         "CancelJob" => cancel_job(args, ctx).await,
+        "SkipCurrentFile" => skip_current_file(args, ctx).await,
         "PauseJob" => pause_job(args, ctx).await,
         "ResumeJob" => resume_job(args, ctx).await,
         "RenameFile" => rename_file(args, ctx).await,
@@ -969,6 +970,7 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
     let (cancel_tx, cancel_rx) = watch::channel(false);
     let (pause_tx, pause_rx) = watch::channel(parsed.start_paused);
     let (decision_tx, decision_rx) = mpsc::channel::<DecisionResponse>(4);
+    let skip_current_file = Arc::new(AtomicBool::new(false));
     let keep_partial_files_on_cancel = Arc::new(AtomicBool::new(false));
 
     let (job_id, preserve_attributes, auto_resume_copies, sevenzip_mode, sevenzip_custom) = {
@@ -1127,6 +1129,7 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
     let conflict_policy_spawn = conflict_policy.clone();
     let verification_policy_spawn = verification_policy.clone();
     let save_digest_file_spawn = parsed.save_digest_file;
+    let skip_current_file_spawn = Arc::clone(&skip_current_file);
     let keep_partial_files_on_cancel_spawn = Arc::clone(&keep_partial_files_on_cancel);
 
     let handle = if let Some((targets, total)) = archive_extract {
@@ -1183,6 +1186,7 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
                 verification_policy_spawn,
                 save_digest_file_spawn,
                 auto_resume_copies,
+                skip_current_file_spawn,
                 keep_partial_files_on_cancel_spawn,
             )
             .await;
@@ -1228,6 +1232,7 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
                 handle: Some(handle),
                 cancel_tx,
                 pause_tx,
+                skip_current_file,
                 keep_partial_files_on_cancel,
             },
         );
@@ -1375,6 +1380,27 @@ async fn cancel_job(args: &Value, ctx: &mut IntentContext<'_>) {
             })
             .await;
     }
+}
+
+async fn skip_current_file(args: &Value, ctx: &mut IntentContext<'_>) {
+    let parsed = JobIdArgs::from_args(args);
+    let mut state_guard = ctx.state.lock().await;
+    let Some(job) = state_guard.job_store.jobs.get_mut(&parsed.job_id) else {
+        return;
+    };
+    if job.state != JobState::Running || job.paused {
+        return;
+    }
+    if !matches!(
+        &job.kind,
+        JobKind::FileOp(FileOpJobMeta {
+            op_type: FileOpType::Copy,
+            ..
+        })
+    ) {
+        return;
+    }
+    job.request_skip_current_file();
 }
 
 async fn pause_job(args: &Value, ctx: &mut IntentContext<'_>) {
@@ -2233,6 +2259,7 @@ async fn start_search(args: &Value, ctx: &mut IntentContext<'_>) {
             handle: None,
             cancel_tx,
             pause_tx: watch::channel(false).0,
+            skip_current_file: Arc::new(AtomicBool::new(false)),
             keep_partial_files_on_cancel: Arc::new(AtomicBool::new(false)),
         };
         state.job_store.jobs.insert(job_id.clone(), job);

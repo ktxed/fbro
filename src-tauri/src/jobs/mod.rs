@@ -136,6 +136,7 @@ pub struct AppJob {
     pub handle: Option<JoinHandle<()>>,
     pub cancel_tx: watch::Sender<bool>,
     pub pause_tx: watch::Sender<bool>,
+    pub skip_current_file: Arc<AtomicBool>,
     pub keep_partial_files_on_cancel: Arc<AtomicBool>,
 }
 
@@ -143,6 +144,10 @@ impl AppJob {
     pub fn set_keep_partial_files_on_cancel(&self, keep: bool) {
         self.keep_partial_files_on_cancel
             .store(keep, Ordering::Relaxed);
+    }
+
+    pub fn request_skip_current_file(&self) {
+        self.skip_current_file.store(true, Ordering::SeqCst);
     }
 }
 

@@ -1090,6 +1090,7 @@ async fn start_outgoing_transfer(state: &SharedState, peer_fp: &str) -> Option<O
                 handle: None,
                 cancel_tx,
                 pause_tx,
+                skip_current_file: Arc::new(AtomicBool::new(false)),
                 keep_partial_files_on_cancel: Arc::new(AtomicBool::new(false)),
             },
         );
@@ -1253,6 +1254,7 @@ async fn start_remote_manifest_job(
                 handle: None,
                 cancel_tx,
                 pause_tx,
+                skip_current_file: Arc::new(AtomicBool::new(false)),
                 keep_partial_files_on_cancel: Arc::new(AtomicBool::new(false)),
             },
         );

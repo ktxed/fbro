@@ -94,6 +94,7 @@ pub async fn run_file_op(
     verification_policy: VerificationPolicy,
     save_digest_file: bool,
     auto_resume_copies: bool,
+    skip_current_file: Arc<AtomicBool>,
     keep_partial_files_on_cancel: Arc<AtomicBool>,
 ) {
     let op_name = file_op_name(&op_type);
@@ -117,6 +118,7 @@ pub async fn run_file_op(
             &verification_policy,
             save_digest_file,
             auto_resume_copies,
+            skip_current_file,
             keep_partial_files_on_cancel,
         )
     })
@@ -198,6 +200,7 @@ fn run_file_op_blocking(
     verification_policy: &VerificationPolicy,
     save_digest_file: bool,
     auto_resume_copies: bool,
+    skip_current_file: Arc<AtomicBool>,
     keep_partial_files_on_cancel: Arc<AtomicBool>,
 ) -> Result<(), String> {
     // Totals grow as directories are discovered (no pre-scan — VFS may be remote)
@@ -301,6 +304,7 @@ fn run_file_op_blocking(
                         verification_policy,
                         save_digest_file,
                         auto_resume_copies,
+                        Arc::clone(&skip_current_file),
                         Arc::clone(&keep_partial_files_on_cancel),
                     )?;
                 } else {
@@ -367,6 +371,7 @@ fn run_file_op_blocking(
                         verification_policy,
                         save_digest_file,
                         auto_resume_copies,
+                        Arc::clone(&skip_current_file),
                         resume_requested,
                         Arc::clone(&keep_partial_files_on_cancel),
                     )?;
@@ -647,6 +652,7 @@ fn copy_file_with_progress(
     verification_policy: &VerificationPolicy,
     save_digest_file: bool,
     auto_resume_copies: bool,
+    skip_current_file: Arc<AtomicBool>,
     resume_requested: bool,
     keep_partial_files_on_cancel: Arc<AtomicBool>,
 ) -> Result<bool, String> {
@@ -676,9 +682,15 @@ fn copy_file_with_progress(
             &src_name,
             save_digest_file,
             resume_next_attempt,
+            Arc::clone(&skip_current_file),
             Arc::clone(&keep_partial_files_on_cancel),
         ) {
             Ok(()) => return Ok(true),
+            Err(CopyFileError::Skipped(file_name)) => {
+                skip_current_file.store(false, Ordering::SeqCst);
+                send_event_sync(tx, job_id, "FileSkipped", None, None, Some(file_name));
+                return Ok(false);
+            }
             Err(CopyFileError::Fatal(e)) => return Err(e),
             Err(CopyFileError::Recoverable(e)) => {
                 if !auto_resume_copies || !can_resume {
@@ -738,6 +750,7 @@ fn copy_file_with_progress(
 enum CopyFileError {
     Fatal(String),
     Recoverable(String),
+    Skipped(String),
     Verification(String),
 }
 
@@ -758,6 +771,7 @@ fn copy_file_once_with_progress(
     src_name: &str,
     save_digest_file: bool,
     resume_requested: bool,
+    skip_current_file: Arc<AtomicBool>,
     keep_partial_files_on_cancel: Arc<AtomicBool>,
 ) -> Result<(), CopyFileError> {
     let file_size = if total_bytes > 0 {
@@ -787,6 +801,13 @@ fn copy_file_once_with_progress(
             total_bytes_completed + resume_offset,
             Some(format!("Resuming from byte {resume_offset}")),
         );
+    }
+
+    if skip_current_file.load(Ordering::SeqCst) {
+        if resume_offset == 0 {
+            let _ = dst_driver.remove_file(dst);
+        }
+        return Err(CopyFileError::Skipped(src_name.to_string()));
     }
 
     let mut reader = if resume_offset > 0 {
@@ -829,6 +850,14 @@ fn copy_file_once_with_progress(
         hash_existing_prefix(dst_driver, dst, resume_offset).map_err(CopyFileError::Fatal)?;
     let mut last_progress_at = Instant::now();
     loop {
+        if skip_current_file.load(Ordering::SeqCst) {
+            drop(writer);
+            if resume_offset == 0 {
+                let _ = dst_driver.remove_file(dst);
+            }
+            return Err(CopyFileError::Skipped(src_name.to_string()));
+        }
+
         if wait_if_paused(pause_rx, cancel_rx) {
             drop(writer);
             if resume_offset == 0 && !keep_partial_files_on_cancel.load(Ordering::Relaxed) {
@@ -1083,6 +1112,7 @@ fn copy_dir_recursive(
     verification_policy: &VerificationPolicy,
     save_digest_file: bool,
     auto_resume_copies: bool,
+    skip_current_file: Arc<AtomicBool>,
     keep_partial_files_on_cancel: Arc<AtomicBool>,
 ) -> Result<(), String> {
     dst_driver
@@ -1135,6 +1165,7 @@ fn copy_dir_recursive(
                 verification_policy,
                 save_digest_file,
                 auto_resume_copies,
+                Arc::clone(&skip_current_file),
                 Arc::clone(&keep_partial_files_on_cancel),
             )?;
         } else {
@@ -1196,6 +1227,7 @@ fn copy_dir_recursive(
                 verification_policy,
                 save_digest_file,
                 auto_resume_copies,
+                Arc::clone(&skip_current_file),
                 resume_requested,
                 Arc::clone(&keep_partial_files_on_cancel),
             )?;
@@ -1455,7 +1487,7 @@ async fn tx_event(
 mod tests {
     use super::*;
     use crate::vfs::{DirChild, VfsEntry, VfsError};
-    use crate::ws::protocol::{FilterSpec, SortSpec};
+    use crate::ws::protocol::{FilterSpec, ServerMessage, SortSpec};
     use std::any::Any;
     use std::fs;
     use std::io::{Read, Seek, SeekFrom, Write};
@@ -1688,6 +1720,7 @@ mod tests {
             &VerificationPolicy::Fail,
             false,
             true,
+            Arc::new(AtomicBool::new(false)),
             false,
             Arc::new(AtomicBool::new(false)),
         )
@@ -1731,6 +1764,7 @@ mod tests {
             &VerificationPolicy::Fail,
             false,
             true,
+            Arc::new(AtomicBool::new(false)),
             true,
             Arc::new(AtomicBool::new(false)),
         )
@@ -1774,6 +1808,7 @@ mod tests {
             &VerificationPolicy::Fail,
             false,
             true,
+            Arc::new(AtomicBool::new(false)),
             true,
             Arc::new(AtomicBool::new(false)),
         )
@@ -1819,6 +1854,7 @@ mod tests {
             &VerificationPolicy::Fail,
             false,
             true,
+            Arc::new(AtomicBool::new(false)),
             false,
             Arc::new(AtomicBool::new(false)),
         )
@@ -1845,12 +1881,185 @@ mod tests {
             &VerificationPolicy::Fail,
             false,
             true,
+            Arc::new(AtomicBool::new(false)),
             false,
             Arc::new(AtomicBool::new(true)),
         )
         .unwrap_err();
         assert_eq!(err, CANCELLED_ERR);
         assert!(dst_keep.exists());
+    }
+
+    #[test]
+    fn skip_fresh_copy_removes_partial_destination_and_emits_event() {
+        let dir = TestDir::new("skip-fresh");
+        let src = dir.path.join("source.bin");
+        let dst = dir.path.join("dest.bin");
+        let data = bytes(1024);
+        fs::write(&src, &data).unwrap();
+        fs::write(&dst, b"old partial").unwrap();
+
+        let src_driver = FlakyReadDriver::new(None);
+        let dst_driver = crate::vfs::local::LocalFsDriver;
+        let (tx, mut rx) = mpsc::channel(64);
+        let (_cancel_tx, cancel_rx) = watch::channel(false);
+        let (_pause_tx, pause_rx) = watch::channel(false);
+        let (_decision_tx, mut decision_rx) = mpsc::channel(1);
+        let skip_current_file = Arc::new(AtomicBool::new(true));
+
+        let copied = copy_file_with_progress(
+            "job-test",
+            &src.to_string_lossy(),
+            &dst.to_string_lossy(),
+            data.len() as u64,
+            &tx,
+            &cancel_rx,
+            &pause_rx,
+            1,
+            0,
+            data.len() as u64,
+            0,
+            &src_driver,
+            &dst_driver,
+            &mut decision_rx,
+            &VerificationPolicy::Fail,
+            false,
+            false,
+            Arc::clone(&skip_current_file),
+            false,
+            Arc::new(AtomicBool::new(false)),
+        )
+        .unwrap();
+
+        assert!(!copied);
+        assert!(!skip_current_file.load(Ordering::SeqCst));
+        assert!(!dst.exists());
+        assert_eq!(skipped_event_file_name(&mut rx).as_deref(), Some("source.bin"));
+    }
+
+    #[test]
+    fn skip_resumed_copy_preserves_existing_partial_destination() {
+        let dir = TestDir::new("skip-resume");
+        let src = dir.path.join("source.bin");
+        let dst = dir.path.join("dest.bin");
+        let data = bytes(2 * 1024 * 1024 + 113);
+        let partial_len = 1536 * 1024;
+        fs::write(&src, &data).unwrap();
+        fs::write(&dst, &data[..partial_len]).unwrap();
+
+        let src_driver = FlakyReadDriver::new(None);
+        let dst_driver = crate::vfs::local::LocalFsDriver;
+        let (tx, _rx) = mpsc::channel(64);
+        let (_cancel_tx, cancel_rx) = watch::channel(false);
+        let (_pause_tx, pause_rx) = watch::channel(false);
+        let (_decision_tx, mut decision_rx) = mpsc::channel(1);
+        let skip_current_file = Arc::new(AtomicBool::new(true));
+
+        let copied = copy_file_with_progress(
+            "job-test",
+            &src.to_string_lossy(),
+            &dst.to_string_lossy(),
+            data.len() as u64,
+            &tx,
+            &cancel_rx,
+            &pause_rx,
+            1,
+            0,
+            data.len() as u64,
+            0,
+            &src_driver,
+            &dst_driver,
+            &mut decision_rx,
+            &VerificationPolicy::Fail,
+            false,
+            false,
+            Arc::clone(&skip_current_file),
+            true,
+            Arc::new(AtomicBool::new(false)),
+        )
+        .unwrap();
+
+        assert!(!copied);
+        assert!(!skip_current_file.load(Ordering::SeqCst));
+        assert_eq!(fs::metadata(&dst).unwrap().len(), partial_len as u64);
+        assert_eq!(fs::read(dst).unwrap(), data[..partial_len]);
+    }
+
+    #[test]
+    fn skip_current_file_continues_to_next_file() {
+        let dir = TestDir::new("skip-continues");
+        let src_dir = dir.path.join("src");
+        let dst_dir = dir.path.join("dst");
+        fs::create_dir_all(&src_dir).unwrap();
+        fs::create_dir_all(&dst_dir).unwrap();
+        let first = src_dir.join("first.bin");
+        let second = src_dir.join("second.bin");
+        fs::write(&first, b"first").unwrap();
+        fs::write(&second, b"second").unwrap();
+
+        let driver = crate::vfs::local::LocalFsDriver;
+        let (tx, mut rx) = mpsc::channel(64);
+        let (_cancel_tx, cancel_rx) = watch::channel(false);
+        let (_pause_tx, pause_rx) = watch::channel(false);
+        let (_decision_tx, mut decision_rx) = mpsc::channel(1);
+        let skip_current_file = Arc::new(AtomicBool::new(true));
+        let entries = vec![
+            FileOpEntry {
+                name: "first.bin".to_string(),
+                dest_name: None,
+                source_path: first.to_string_lossy().to_string(),
+                size: Some(5),
+                kind: "file".to_string(),
+                mtime: None,
+                permissions: None,
+            },
+            FileOpEntry {
+                name: "second.bin".to_string(),
+                dest_name: None,
+                source_path: second.to_string_lossy().to_string(),
+                size: Some(6),
+                kind: "file".to_string(),
+                mtime: None,
+                permissions: None,
+            },
+        ];
+
+        run_file_op_blocking(
+            "job-test",
+            &FileOpType::Copy,
+            &entries,
+            Some(&dst_dir.to_string_lossy()),
+            &ConflictPolicy::Overwrite,
+            &tx,
+            &cancel_rx,
+            &pause_rx,
+            &mut decision_rx,
+            &driver,
+            Some(&driver),
+            false,
+            &VerificationPolicy::Fail,
+            false,
+            false,
+            Arc::clone(&skip_current_file),
+            Arc::new(AtomicBool::new(false)),
+        )
+        .unwrap();
+
+        assert!(!skip_current_file.load(Ordering::SeqCst));
+        assert!(!dst_dir.join("first.bin").exists());
+        assert_eq!(fs::read_to_string(dst_dir.join("second.bin")).unwrap(), "second");
+        assert_eq!(skipped_event_file_name(&mut rx).as_deref(), Some("first.bin"));
+    }
+
+    fn skipped_event_file_name(rx: &mut mpsc::Receiver<ServerMessage>) -> Option<String> {
+        while let Ok(message) = rx.try_recv() {
+            if let ServerMessage::JobEvent { event, error, .. } = message {
+                if event == "FileSkipped" {
+                    return error;
+                }
+            }
+        }
+        None
     }
 
     #[test]
@@ -1894,6 +2103,7 @@ mod tests {
             &VerificationPolicy::Fail,
             false,
             false,
+            Arc::new(AtomicBool::new(false)),
             Arc::new(AtomicBool::new(false)),
         )
         .unwrap();
@@ -1947,6 +2157,7 @@ mod tests {
             false,
             false,
             Arc::new(AtomicBool::new(false)),
+            Arc::new(AtomicBool::new(false)),
         )
         .unwrap();
 
@@ -1995,6 +2206,7 @@ mod tests {
             &VerificationPolicy::Fail,
             false,
             false,
+            Arc::new(AtomicBool::new(false)),
             Arc::new(AtomicBool::new(false)),
         )
         .unwrap_err();

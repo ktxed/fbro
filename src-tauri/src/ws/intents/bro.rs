@@ -1169,6 +1169,7 @@ async fn launch_fp_bro(
                 handle: None,
                 cancel_tx,
                 pause_tx,
+                skip_current_file: Arc::new(AtomicBool::new(false)),
                 keep_partial_files_on_cancel: Arc::new(AtomicBool::new(false)),
             },
         );
@@ -1303,6 +1304,7 @@ async fn launch_sync_bro(
             handle: Some(handle),
             cancel_tx,
             pause_tx,
+            skip_current_file: Arc::new(AtomicBool::new(false)),
             keep_partial_files_on_cancel: Arc::new(AtomicBool::new(false)),
         },
     );
@@ -1376,6 +1378,7 @@ async fn launch_fedup_bro(
                 handle: None,
                 cancel_tx,
                 pause_tx,
+                skip_current_file: Arc::new(AtomicBool::new(false)),
                 keep_partial_files_on_cancel: Arc::new(AtomicBool::new(false)),
             },
         );

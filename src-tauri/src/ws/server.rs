@@ -711,6 +711,12 @@ async fn apply_job_event_to_state(state: &SharedState, msg: &ServerMessage) {
                 job.state = JobState::Running;
                 job.paused = false;
             }
+            "FileSkipped" => {
+                job.state = JobState::Running;
+                job.paused = false;
+                job.decision = None;
+                job.error = None;
+            }
             "Completed" => {
                 job.state = JobState::Completed;
                 job.paused = false;

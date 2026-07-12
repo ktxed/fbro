@@ -89,6 +89,7 @@ pub async fn dispatch(name: &str, scope: &Value, args: &Value, ctx: &mut IntentC
         | "WriteExternalClipboard"
         | "ProvideJobDecision"
         | "CancelJob"
+        | "SkipCurrentFile"
         | "PauseJob"
         | "ResumeJob"
         | "RenameFile"

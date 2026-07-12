@@ -657,7 +657,7 @@ export interface JobEventMessage {
   type: "JobEvent";
   timestamp: number;
   jobId: string;
-  event: "Queued" | "Progress" | "DecisionRequired" | "Completed" | "Failed" | "Cancelled" | "Paused" | "Resumed";
+  event: "Queued" | "Progress" | "DecisionRequired" | "Completed" | "Failed" | "Cancelled" | "Paused" | "Resumed" | "FileSkipped";
   files?: FileOpFile[];
   progress?: FileOpProgress;
   searchProgress?: SearchProgress;

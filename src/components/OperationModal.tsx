@@ -945,6 +945,12 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
     const showOverallProgress = totalFileCount > 1;
     const shouldConfirmCancel = (isQueued || isProgress)
       && (isRemoteCopy || (p?.currentFileBytesTotal ?? 0) > LARGE_CANCEL_THRESHOLD);
+    const canSkipCurrentFile = isProgress
+      && activeJob.kind === "file-op"
+      && activeJob.type === "copy"
+      && !activeSourcePanel?.shadowSource
+      && !activeJob.paused
+      && !!p?.currentFile;
     const graph = speedGraphData(speedSamples);
     const showSpeedGraph = !!graph
       && speed !== null
@@ -965,6 +971,11 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
       client.sendIntent("CancelJob", undefined, { jobId: activeJobId, keepPartialFiles });
       setApplyToAll(false);
       setConfirmingCancel(false);
+    };
+
+    const skipCurrentFile = () => {
+      if (!activeJobId || !canSkipCurrentFile) return;
+      client.sendIntent("SkipCurrentFile", undefined, { jobId: activeJobId });
     };
 
     const requestCancelJob = () => {
@@ -1386,6 +1397,11 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
                     Pause
                   </button>
                 ) : null}
+                {canSkipCurrentFile && (
+                  <button className="modal__btn" data-command-id="job.skip-current-file" onClick={skipCurrentFile}>
+                    Skip
+                  </button>
+                )}
                 <button className="modal__btn" data-command-id="job.cancel" onClick={requestCancelJob}>
                   Cancel
                 </button>
