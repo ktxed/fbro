@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -23,6 +24,7 @@ pub const FEDUP_DELETE_DRY_RUN_SCRIPT_NAME: &str = "fbro-fedup-delete-dry-run.sh
 pub const FEDUP_DELETE_DRY_RUN_MANIFEST_NAME: &str = "fbro-fedup-delete-manifest.txt";
 pub const FEDUP_RESULT_PAGE_SIZE: usize = 20;
 pub const FEDUP_RESULT_MAX_PAGE_SIZE: usize = 100;
+const FEDUP_FINGERPRINT_BYTES: u64 = 1024 * 1024;
 
 #[derive(Clone, Debug, Default)]
 pub struct FedupScanOptions {
@@ -63,6 +65,18 @@ struct Candidate {
 struct HashedCandidate {
     candidate: Candidate,
     hash: String,
+}
+
+#[derive(Clone, Debug)]
+struct FingerprintedCandidate {
+    candidate: Candidate,
+    full_hash: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+struct FedupFingerprint {
+    key: String,
+    full_hash: Option<String>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -200,8 +214,9 @@ fn run_fedup_report_blocking(
         .filter(|bucket| bucket.len() > 1)
         .map(Vec::len)
         .sum::<usize>();
-    let mut hashed_count = 0usize;
     let mut groups = Vec::new();
+    let mut fingerprinted_count = 0usize;
+    let mut fingerprint_groups = Vec::new();
 
     for bucket in build.buckets.values() {
         if cancel.load(Ordering::SeqCst) {
@@ -211,81 +226,182 @@ fn run_fedup_report_blocking(
             continue;
         }
 
-        let mut by_hash: HashMap<String, Vec<HashedCandidate>> = HashMap::new();
+        let mut by_fingerprint: HashMap<String, Vec<FingerprintedCandidate>> = HashMap::new();
         for candidate in bucket {
             if cancel.load(Ordering::SeqCst) {
                 return Err("Cancelled".to_string());
             }
             let path_text = candidate.path.to_string_lossy().to_string();
+            let fingerprint_bytes = candidate
+                .size
+                .min(FEDUP_FINGERPRINT_BYTES.saturating_mul(2));
             send_progress_sync(
                 tx,
                 job_id,
                 FileOpProgressSchema {
                     total_files: candidate_count,
-                    completed_files: hashed_count,
+                    completed_files: fingerprinted_count,
                     current_file: Some(path_text.clone()),
-                    status_text: Some("Hashing potential duplicates".to_string()),
-                    current_file_bytes_total: candidate.size,
+                    status_text: Some("Fingerprinting potential duplicates".to_string()),
+                    current_file_bytes_total: fingerprint_bytes,
                     current_file_bytes_copied: 0,
                     total_bytes_total: 0,
                     total_bytes_copied: 0,
                     current_file_percent: None,
                     overall_percent: if candidate_count > 0 {
-                        Some(((hashed_count * 100) / candidate_count) as u8)
+                        Some(((fingerprinted_count * 100) / candidate_count) as u8)
                     } else {
                         None
                     },
                 },
             );
 
-            match hash_local_file_blake3(
-                &candidate.path,
-                &|| cancel.load(Ordering::SeqCst),
-                |hashed| {
-                    send_progress_sync(
-                        tx,
-                        job_id,
-                        FileOpProgressSchema {
-                            total_files: candidate_count,
-                            completed_files: hashed_count,
-                            current_file: Some(path_text.clone()),
-                            status_text: Some("Hashing potential duplicates".to_string()),
-                            current_file_bytes_total: candidate.size,
-                            current_file_bytes_copied: hashed,
-                            total_bytes_total: 0,
-                            total_bytes_copied: 0,
-                            current_file_percent: if candidate.size > 0 {
-                                Some(((hashed.saturating_mul(100)) / candidate.size).min(100) as u8)
-                            } else {
-                                Some(100)
-                            },
-                            overall_percent: if candidate_count > 0 {
-                                Some(((hashed_count * 100) / candidate_count) as u8)
-                            } else {
-                                None
-                            },
+            match hash_fedup_fingerprint(candidate, &|| cancel.load(Ordering::SeqCst), |hashed| {
+                send_progress_sync(
+                    tx,
+                    job_id,
+                    FileOpProgressSchema {
+                        total_files: candidate_count,
+                        completed_files: fingerprinted_count,
+                        current_file: Some(path_text.clone()),
+                        status_text: Some("Fingerprinting potential duplicates".to_string()),
+                        current_file_bytes_total: fingerprint_bytes,
+                        current_file_bytes_copied: hashed,
+                        total_bytes_total: 0,
+                        total_bytes_copied: 0,
+                        current_file_percent: if fingerprint_bytes > 0 {
+                            Some(((hashed.saturating_mul(100)) / fingerprint_bytes).min(100) as u8)
+                        } else {
+                            Some(100)
+                        },
+                        overall_percent: if candidate_count > 0 {
+                            Some(((fingerprinted_count * 100) / candidate_count) as u8)
+                        } else {
+                            None
+                        },
+                    },
+                );
+            }) {
+                Ok(fingerprint) => {
+                    by_fingerprint.entry(fingerprint.key).or_default().push(
+                        FingerprintedCandidate {
+                            candidate: candidate.clone(),
+                            full_hash: fingerprint.full_hash,
                         },
                     );
-                },
-            ) {
-                Ok(hash) => {
-                    by_hash
-                        .entry(hash.clone())
-                        .or_default()
-                        .push(HashedCandidate {
-                            candidate: candidate.clone(),
-                            hash,
-                        });
                 }
-                Err(error) if error.to_string().contains("Cancelled") => {
+                Err(error) if error.contains("Cancelled") => {
                     return Err("Cancelled".to_string());
                 }
                 Err(error) => build.errors.push(FedupBroErrorSchema {
                     path: path_text,
-                    message: format!("Cannot hash file: {error}"),
+                    message: format!("Cannot fingerprint file: {error}"),
                 }),
             }
-            hashed_count += 1;
+            fingerprinted_count += 1;
+        }
+
+        fingerprint_groups.extend(by_fingerprint.into_values().filter(|group| group.len() > 1));
+    }
+
+    let full_hash_count = fingerprint_groups
+        .iter()
+        .flat_map(|group| group.iter())
+        .filter(|candidate| candidate.full_hash.is_none())
+        .count();
+    let mut full_hashed_count = 0usize;
+
+    for fingerprint_group in fingerprint_groups {
+        if cancel.load(Ordering::SeqCst) {
+            return Err("Cancelled".to_string());
+        }
+
+        let mut by_hash: HashMap<String, Vec<HashedCandidate>> = HashMap::new();
+        for candidate in fingerprint_group {
+            if cancel.load(Ordering::SeqCst) {
+                return Err("Cancelled".to_string());
+            }
+            let path_text = candidate.candidate.path.to_string_lossy().to_string();
+            let hash = if let Some(hash) = candidate.full_hash.clone() {
+                hash
+            } else {
+                send_progress_sync(
+                    tx,
+                    job_id,
+                    FileOpProgressSchema {
+                        total_files: full_hash_count,
+                        completed_files: full_hashed_count,
+                        current_file: Some(path_text.clone()),
+                        status_text: Some("Hashing matching fingerprints".to_string()),
+                        current_file_bytes_total: candidate.candidate.size,
+                        current_file_bytes_copied: 0,
+                        total_bytes_total: 0,
+                        total_bytes_copied: 0,
+                        current_file_percent: None,
+                        overall_percent: if full_hash_count > 0 {
+                            Some(((full_hashed_count * 100) / full_hash_count) as u8)
+                        } else {
+                            None
+                        },
+                    },
+                );
+                match hash_local_file_blake3(
+                    &candidate.candidate.path,
+                    &|| cancel.load(Ordering::SeqCst),
+                    |hashed| {
+                        send_progress_sync(
+                            tx,
+                            job_id,
+                            FileOpProgressSchema {
+                                total_files: full_hash_count,
+                                completed_files: full_hashed_count,
+                                current_file: Some(path_text.clone()),
+                                status_text: Some("Hashing matching fingerprints".to_string()),
+                                current_file_bytes_total: candidate.candidate.size,
+                                current_file_bytes_copied: hashed,
+                                total_bytes_total: 0,
+                                total_bytes_copied: 0,
+                                current_file_percent: if candidate.candidate.size > 0 {
+                                    Some(
+                                        ((hashed.saturating_mul(100)) / candidate.candidate.size)
+                                            .min(100) as u8,
+                                    )
+                                } else {
+                                    Some(100)
+                                },
+                                overall_percent: if full_hash_count > 0 {
+                                    Some(((full_hashed_count * 100) / full_hash_count) as u8)
+                                } else {
+                                    None
+                                },
+                            },
+                        );
+                    },
+                ) {
+                    Ok(hash) => {
+                        full_hashed_count += 1;
+                        hash
+                    }
+                    Err(error) if error.to_string().contains("Cancelled") => {
+                        return Err("Cancelled".to_string());
+                    }
+                    Err(error) => {
+                        build.errors.push(FedupBroErrorSchema {
+                            path: path_text,
+                            message: format!("Cannot hash file: {error}"),
+                        });
+                        full_hashed_count += 1;
+                        continue;
+                    }
+                }
+            };
+            by_hash
+                .entry(hash.clone())
+                .or_default()
+                .push(HashedCandidate {
+                    candidate: candidate.candidate,
+                    hash,
+                });
         }
 
         for group in by_hash.values() {
@@ -375,6 +491,57 @@ pub fn fedup_result_page(
 
 fn clamp_page_limit(limit: usize) -> usize {
     limit.clamp(1, FEDUP_RESULT_MAX_PAGE_SIZE)
+}
+
+fn hash_fedup_fingerprint(
+    candidate: &Candidate,
+    cancel: &dyn Fn() -> bool,
+    mut progress: impl FnMut(u64),
+) -> Result<FedupFingerprint, String> {
+    if cancel() {
+        return Err("Cancelled".to_string());
+    }
+
+    let mut file = std::fs::File::open(&candidate.path).map_err(|error| error.to_string())?;
+    let mut hasher = blake3::Hasher::new();
+    if candidate.size <= FEDUP_FINGERPRINT_BYTES.saturating_mul(2) {
+        let mut buffer = Vec::new();
+        file.read_to_end(&mut buffer)
+            .map_err(|error| error.to_string())?;
+        if cancel() {
+            return Err("Cancelled".to_string());
+        }
+        hasher.update(&buffer);
+        progress(buffer.len() as u64);
+        let hash = hasher.finalize().to_hex().to_string();
+        return Ok(FedupFingerprint {
+            key: format!("full:{hash}"),
+            full_hash: Some(hash),
+        });
+    }
+
+    let chunk_len = FEDUP_FINGERPRINT_BYTES as usize;
+    let mut head = vec![0u8; chunk_len];
+    file.read_exact(&mut head)
+        .map_err(|error| error.to_string())?;
+    hasher.update(&head);
+    progress(FEDUP_FINGERPRINT_BYTES);
+    if cancel() {
+        return Err("Cancelled".to_string());
+    }
+
+    file.seek(SeekFrom::End(-(FEDUP_FINGERPRINT_BYTES as i64)))
+        .map_err(|error| error.to_string())?;
+    let mut tail = vec![0u8; chunk_len];
+    file.read_exact(&mut tail)
+        .map_err(|error| error.to_string())?;
+    hasher.update(&tail);
+    progress(FEDUP_FINGERPRINT_BYTES.saturating_mul(2));
+
+    Ok(FedupFingerprint {
+        key: format!("partial:{}:{}", candidate.size, hasher.finalize().to_hex()),
+        full_hash: None,
+    })
 }
 
 fn scan_path(
@@ -764,6 +931,51 @@ mod tests {
         assert!(result.errors.is_empty());
         assert!(result.groups[0].keeper.path.ends_with("a.txt"));
         assert!(result.groups[0].duplicates[0].path.ends_with("b.txt"));
+    }
+
+    #[test]
+    fn report_uses_full_hash_after_matching_large_fingerprints() {
+        let dir = TempDir::new("large-fingerprint-collision");
+        let mut a = Vec::new();
+        a.extend(vec![b'h'; FEDUP_FINGERPRINT_BYTES as usize]);
+        a.extend(vec![b'a'; 1024]);
+        a.extend(vec![b't'; FEDUP_FINGERPRINT_BYTES as usize]);
+        let mut b = Vec::new();
+        b.extend(vec![b'h'; FEDUP_FINGERPRINT_BYTES as usize]);
+        b.extend(vec![b'b'; 1024]);
+        b.extend(vec![b't'; FEDUP_FINGERPRINT_BYTES as usize]);
+
+        std::fs::write(dir.path.join("a.bin"), &a).unwrap();
+        std::fs::write(dir.path.join("b.bin"), &b).unwrap();
+        std::fs::write(dir.path.join("c.bin"), &a).unwrap();
+
+        let (tx, _rx) = mpsc::channel(64);
+        let cancel = AtomicBool::new(false);
+        let result = run_fedup_report_blocking(
+            "job-test",
+            &[BroInputItem {
+                path: dir.path.to_string_lossy().to_string(),
+                name: "large-fingerprint-collision".to_string(),
+                kind: "directory".to_string(),
+            }],
+            &FedupScanOptions::default(),
+            &tx,
+            &cancel,
+        )
+        .unwrap();
+
+        assert_eq!(result.scanned_files, 3);
+        assert_eq!(result.duplicate_groups, 1);
+        assert_eq!(result.duplicate_files, 1);
+        let group_paths = result.groups[0]
+            .duplicates
+            .iter()
+            .map(|file| file.path.as_str())
+            .chain(std::iter::once(result.groups[0].keeper.path.as_str()))
+            .collect::<Vec<_>>();
+        assert!(group_paths.iter().any(|path| path.ends_with("a.bin")));
+        assert!(group_paths.iter().any(|path| path.ends_with("c.bin")));
+        assert!(!group_paths.iter().any(|path| path.ends_with("b.bin")));
     }
 
     #[test]
