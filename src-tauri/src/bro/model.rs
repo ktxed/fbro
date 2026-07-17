@@ -202,6 +202,7 @@ impl ResolvedBro {
             LaunchRecipe::BuiltInKillProc => serde_json::json!({ "kind": "built-in", "name": "kill-process" }),
             LaunchRecipe::BuiltInSyncBro => serde_json::json!({ "kind": "built-in", "name": "sync" }),
             LaunchRecipe::BuiltInFedupBro => serde_json::json!({ "kind": "built-in", "name": "fedup" }),
+            LaunchRecipe::BuiltInCompareFiles => serde_json::json!({ "kind": "built-in", "name": "compare-files" }),
         }
     }
 
