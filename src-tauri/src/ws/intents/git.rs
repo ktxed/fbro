@@ -40,7 +40,7 @@ pub(crate) async fn handle(name: &str, args: &Value, ctx: &mut IntentContext<'_>
 }
 
 fn guarded(clean: bool, action: impl FnOnce() -> Result<(), String>) -> Result<(), String> {
-    if clean { action() } else { Err("This action requires a clean worktree. Commit or stash your changes, or continue in VS Code/another Git tool.".to_string()) }
+    if clean { action() } else { Err("This action requires no staged changes. Commit or unstage them before continuing.".to_string()) }
 }
 
 fn run_paths(root: &str, action: &str, args: &Value, staged: bool) -> Result<(), String> {

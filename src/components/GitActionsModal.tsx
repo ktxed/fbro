@@ -19,8 +19,8 @@ export function GitActionsModal({ panelId, git, client, onClose, onOpenRepositor
   const [activity, setActivity] = useState<{ action: string; message: string } | null>(null);
   const canPull = git.clean && git.behindCount !== undefined && git.behindCount > 0;
   const canPush = git.clean && !!git.upstream && git.aheadCount !== undefined && git.aheadCount > 0;
-  const pullDisabledMessage = !git.clean ? "Requires a clean worktree" : !git.upstream ? "No upstream configured" : git.behindCount === 0 ? "Already up to date" : "Remote status unavailable — fetch first";
-  const pushDisabledMessage = !git.clean ? "Requires a clean worktree" : !git.upstream ? "No upstream configured — set an upstream first" : git.aheadCount === 0 ? "No outgoing commits" : "Remote status unavailable — fetch first";
+  const pullDisabledMessage = !git.clean ? "Requires no staged changes" : !git.upstream ? "No upstream configured" : git.behindCount === 0 ? "Already up to date" : "Remote status unavailable — fetch first";
+  const pushDisabledMessage = !git.clean ? "Requires no staged changes" : !git.upstream ? "No upstream configured — set an upstream first" : git.aheadCount === 0 ? "No outgoing commits" : "Remote status unavailable — fetch first";
   const act = (name: string, args: Record<string, unknown> = {}) => {
     client.sendIntent(name, undefined, { panelId, ...args });
   };
@@ -89,7 +89,7 @@ export function GitActionsModal({ panelId, git, client, onClose, onOpenRepositor
     return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [activeIndex, canPull, canPush, focusControl, git.branch, git.clean, git.detached, git.upstream, onClose, onOpenRepository]);
 
-  const disabledMessage = "Requires a clean worktree";
+  const disabledMessage = "Requires no staged changes";
   return (
     <div className="modal-overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <div ref={dialogRef} className="git-actions-modal" role="dialog" aria-modal="true" aria-label="Git actions" tabIndex={-1} onKeyDown={(event) => event.stopPropagation()}>
@@ -98,13 +98,13 @@ export function GitActionsModal({ panelId, git, client, onClose, onOpenRepositor
           <button type="button" className="git-actions-modal__close" onClick={onClose} title="Close">×</button>
         </header>
         <div className="git-actions-modal__repo" title={git.root}>{git.root}</div>
-        {!git.clean && <div className="git-actions-modal__warning">Working tree has changes. Switch, pull, and push require a clean worktree.</div>}
+        {!git.clean && <div className="git-actions-modal__warning">Staged changes are present. Switch, pull, and push require no staged changes.</div>}
         <div className="git-actions-modal__choices">
           <button ref={(el) => { controlRefs.current[0] = el; }} type="button" className={`git-actions-modal__choice${activeIndex === 0 ? " is-keyboard-active" : ""}`} onFocus={() => setActiveIndex(0)} onClick={() => runAction("GitFetch", "Fetching remote…")}>
             <IconRefresh size={19} /><span><strong>Fetch <kbd>F</kbd></strong><small>Update remote branch information</small></span>
           </button>
           <label className={`git-actions-modal__choice git-actions-modal__choice--branch${!git.clean ? " is-disabled" : ""}${activeIndex === 1 ? " is-keyboard-active" : ""}`} title={!git.clean ? disabledMessage : undefined}>
-            <IconGitBranch size={19} /><span><strong>Switch branch <kbd>B</kbd></strong><small>Requires a clean worktree</small></span>
+            <IconGitBranch size={19} /><span><strong>Switch branch <kbd>B</kbd></strong><small>Requires no staged changes</small></span>
             <select ref={(el) => { controlRefs.current[1] = el; }} value={git.branch} disabled={!git.clean} onFocus={() => setActiveIndex(1)} onChange={(event) => runAction("GitSwitchBranch", "Switching branch…", { branch: event.target.value })}>
               {git.branches.map((branch) => <option key={branch} value={branch}>{branch}</option>)}
             </select>

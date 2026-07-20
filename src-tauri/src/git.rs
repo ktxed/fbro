@@ -87,10 +87,7 @@ pub fn inspect(path: &str) -> Option<GitRepoStatus> {
         if index == 'R' || index == 'C' { let _ = records.next(); }
         changes.push(GitChange { path, index_status: index.to_string(), worktree_status: worktree.to_string() });
     }
-    let staged_count = changes.iter().filter(|c| c.index_status != " " && c.index_status != "?").count();
-    let modified_count = changes.iter().filter(|c| c.worktree_status != " " && c.worktree_status != "?").count();
-    let untracked_count = changes.iter().filter(|c| c.index_status == "?" && c.worktree_status == "?").count();
-    let conflicted_count = changes.iter().filter(|c| c.index_status == "U" || c.worktree_status == "U" || c.index_status == "A" && c.worktree_status == "A").count();
+    let (staged_count, modified_count, untracked_count, conflicted_count) = status_counts(&changes);
     let upstream = git(&root, &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"])
         .ok()
         .and_then(|value| String::from_utf8(value).ok())
@@ -104,7 +101,21 @@ pub fn inspect(path: &str) -> Option<GitRepoStatus> {
     }).map(|(behind, ahead)| (Some(ahead), Some(behind))).unwrap_or((None, None));
     let branches = String::from_utf8(git(&root, &["for-each-ref", "--format=%(refname:short)", "refs/heads"]).unwrap_or_default())
         .unwrap_or_default().lines().map(str::to_string).collect();
-    Some(GitRepoStatus { root, branch, detached, clean: changes.is_empty(), staged_count, modified_count, untracked_count, conflicted_count, upstream, ahead_count, behind_count, branches, changes })
+    // fbro considers a work area dirty only when it contains staged changes.
+    // Untracked and unstaged changes remain visible, but do not gate Git actions.
+    Some(GitRepoStatus { root, branch, detached, clean: has_no_staged_changes(staged_count), staged_count, modified_count, untracked_count, conflicted_count, upstream, ahead_count, behind_count, branches, changes })
+}
+
+fn has_no_staged_changes(staged_count: usize) -> bool {
+    staged_count == 0
+}
+
+fn status_counts(changes: &[GitChange]) -> (usize, usize, usize, usize) {
+    let staged_count = changes.iter().filter(|c| c.index_status != " " && c.index_status != "?").count();
+    let modified_count = changes.iter().filter(|c| c.worktree_status != " " && c.worktree_status != "?").count();
+    let untracked_count = changes.iter().filter(|c| c.index_status == "?" && c.worktree_status == "?").count();
+    let conflicted_count = changes.iter().filter(|c| c.index_status == "U" || c.worktree_status == "U" || c.index_status == "A" && c.worktree_status == "A").count();
+    (staged_count, modified_count, untracked_count, conflicted_count)
 }
 
 pub fn decorate_entries(entries: &mut [EntrySchema], panel_path: &str, status: Option<&GitRepoStatus>) {
@@ -145,4 +156,28 @@ fn status_label(change: &GitChange) -> String {
 pub fn run(root: &str, args: &[String]) -> Result<(), String> {
     let output = Command::new("git").arg("-C").arg(root).args(args).output().map_err(|e| e.to_string())?;
     if output.status.success() { Ok(()) } else { Err(String::from_utf8_lossy(&output.stderr).trim().to_string()) }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{has_no_staged_changes, status_counts, GitChange};
+
+    fn change(index_status: &str, worktree_status: &str) -> GitChange {
+        GitChange { path: "file".into(), index_status: index_status.into(), worktree_status: worktree_status.into() }
+    }
+
+    #[test]
+    fn only_staged_entries_make_a_work_area_dirty() {
+        let untracked = vec![change("?", "?")];
+        let unstaged = vec![change(" ", "M")];
+        let staged = vec![change("M", " ")];
+        let mixed = vec![change("M", " "), change("?", "?")];
+        let conflicted = vec![change("U", "U")];
+
+        assert!(has_no_staged_changes(status_counts(&untracked).0));
+        assert!(has_no_staged_changes(status_counts(&unstaged).0));
+        assert!(!has_no_staged_changes(status_counts(&staged).0));
+        assert!(!has_no_staged_changes(status_counts(&mixed).0));
+        assert!(!has_no_staged_changes(status_counts(&conflicted).0));
+    }
 }
