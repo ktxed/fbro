@@ -22,6 +22,9 @@ export function GitModal({ panelId, git, client, onClose }: { panelId: string; g
     act(name, args);
   };
   useEffect(() => {
+    runAction("GitRefresh", "Refreshing Git status…");
+  }, [client, panelId]);
+  useEffect(() => {
     if (activity && git !== lastGitRef.current) {
       setActivity({ action: "complete", message: `${activity.message.replace(/…$/, "")} complete` });
     }
