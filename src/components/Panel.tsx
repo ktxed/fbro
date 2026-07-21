@@ -1657,7 +1657,7 @@ export function Panel({
             client={client}
           />
         )}
-        {panel.git && <button className={`panel__git-btn panel__git-btn--${gitHeaderState}`} tabIndex={-1} data-tooltip-id={`git-chip-${panelId}`} data-tooltip-content={panel.git.clean ? `Git ${panel.git.branch}: no staged changes` : `Git ${panel.git.branch}: staged changes present — commit or unstage before switching, pulling, or pushing`} onClick={() => setGitOpen(true)}><IconGitBranch size={16} /><span className="panel__git-btn-label">{panel.git.branch}</span>{!panel.git.clean && <IconAlertTriangle className="panel__git-btn-warning" size={13} />}</button>}
+        {panel.git && <button className={`panel__git-btn panel__git-btn--${gitHeaderState}`} tabIndex={-1} data-tooltip-id={`git-chip-${panelId}`} data-tooltip-content={panel.git.clean ? `Git ${panel.git.branch}: no staged changes` : `Git ${panel.git.branch}: staged changes present — commit or unstage before switching or pulling`} onClick={() => setGitOpen(true)}><IconGitBranch size={16} /><span className="panel__git-btn-label">{panel.git.branch}</span>{!panel.git.clean && <IconAlertTriangle className="panel__git-btn-warning" size={13} />}</button>}
       </div>
 
       {gitOpen && panel.git && <GitModal panelId={panelId} git={panel.git} client={client} onClose={closeGitModal} />}

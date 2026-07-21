@@ -23,7 +23,7 @@ pub(crate) async fn handle(name: &str, args: &Value, ctx: &mut IntentContext<'_>
             else { crate::git::run(&root, &["switch".into(), branch.into()]) }
         }),
         "GitPull" => guarded(clean, || crate::git::run(&root, &["pull".into()])),
-        "GitPush" => guarded(clean, || crate::git::run(&root, &["push".into()])),
+        "GitPush" => crate::git::run(&root, &["push".into()]),
         "GitSetUpstream" => guarded(clean, || {
             let branch = args.get("branch").and_then(Value::as_str).unwrap_or("").trim();
             if branch.is_empty() { Err("A local branch is required to set an upstream.".to_string()) }

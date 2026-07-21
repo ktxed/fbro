@@ -18,9 +18,9 @@ export function GitActionsModal({ panelId, git, client, onClose, onOpenRepositor
   const [activeIndex, setActiveIndex] = useState(0);
   const [activity, setActivity] = useState<{ action: string; message: string } | null>(null);
   const canPull = git.clean && git.behindCount !== undefined && git.behindCount > 0;
-  const canPush = git.clean && !!git.upstream && git.aheadCount !== undefined && git.aheadCount > 0;
+  const canPush = !!git.upstream && git.aheadCount !== undefined && git.aheadCount > 0;
   const pullDisabledMessage = !git.clean ? "Requires no staged changes" : !git.upstream ? "No upstream configured" : git.behindCount === 0 ? "Already up to date" : "Remote status unavailable — fetch first";
-  const pushDisabledMessage = !git.clean ? "Requires no staged changes" : !git.upstream ? "No upstream configured — set an upstream first" : git.aheadCount === 0 ? "No outgoing commits" : "Remote status unavailable — fetch first";
+  const pushDisabledMessage = !git.upstream ? "No upstream configured — set an upstream first" : git.aheadCount === 0 ? "No outgoing commits" : "Remote status unavailable — fetch first";
   const act = (name: string, args: Record<string, unknown> = {}) => {
     client.sendIntent(name, undefined, { panelId, ...args });
   };
@@ -102,7 +102,7 @@ export function GitActionsModal({ panelId, git, client, onClose, onOpenRepositor
           <button type="button" className="git-actions-modal__close" onClick={onClose} title="Close">×</button>
         </header>
         <div className="git-actions-modal__repo" title={git.root}>{git.root}</div>
-        {!git.clean && <div className="git-actions-modal__warning">Staged changes are present. Switch, pull, and push require no staged changes.</div>}
+        {!git.clean && <div className="git-actions-modal__warning">Staged changes are present. Switch and pull require no staged changes; pushing commits remains available.</div>}
         <div className="git-actions-modal__choices">
           <button ref={(el) => { controlRefs.current[0] = el; }} type="button" className={`git-actions-modal__choice${activeIndex === 0 ? " is-keyboard-active" : ""}`} onFocus={() => setActiveIndex(0)} onClick={() => runAction("GitFetch", "Fetching remote…")}>
             <IconRefresh size={19} /><span><strong>Fetch <kbd>F</kbd></strong><small>Update remote branch information</small></span>
