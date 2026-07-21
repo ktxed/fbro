@@ -93,6 +93,41 @@ pub struct GeneralSettings {
     /// External differ executable. fbro passes the two local file paths as args.
     #[serde(default)]
     pub compare_external_command: String,
+    /// Terminal editor used by Quick Edit on Linux and macOS.
+    #[serde(default)]
+    pub quick_terminal_editor: QuickTerminalEditor,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum QuickTerminalEditor {
+    #[default]
+    Nano,
+    Vim,
+}
+
+impl QuickTerminalEditor {
+    pub fn program(self) -> &'static str {
+        match self {
+            Self::Nano => "nano",
+            Self::Vim => "vim",
+        }
+    }
+
+    pub fn with_fallback(self) -> [Self; 2] {
+        match self {
+            Self::Nano => [Self::Nano, Self::Vim],
+            Self::Vim => [Self::Vim, Self::Nano],
+        }
+    }
+
+    pub fn from_str(value: &str) -> Option<Self> {
+        match value {
+            "nano" => Some(Self::Nano),
+            "vim" => Some(Self::Vim),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -243,6 +278,7 @@ impl Default for GeneralSettings {
             compare_max_file_size_mb: default_compare_max_file_size_mb(),
             compare_differ_mode: CompareDifferMode::default(),
             compare_external_command: String::new(),
+            quick_terminal_editor: QuickTerminalEditor::default(),
         }
     }
 }
@@ -351,5 +387,20 @@ mod tests {
         migrate_settings(&mut settings);
 
         assert_eq!(settings.general.fedup_default_ignore_patterns, custom);
+    }
+
+    #[test]
+    fn quick_terminal_editor_uses_the_other_supported_editor_as_fallback() {
+        assert_eq!(
+            QuickTerminalEditor::Nano.with_fallback(),
+            [QuickTerminalEditor::Nano, QuickTerminalEditor::Vim]
+        );
+        assert_eq!(
+            QuickTerminalEditor::Vim.with_fallback(),
+            [QuickTerminalEditor::Vim, QuickTerminalEditor::Nano]
+        );
+        assert_eq!(QuickTerminalEditor::from_str("nano"), Some(QuickTerminalEditor::Nano));
+        assert_eq!(QuickTerminalEditor::from_str("vim"), Some(QuickTerminalEditor::Vim));
+        assert_eq!(QuickTerminalEditor::from_str("emacs"), None);
     }
 }

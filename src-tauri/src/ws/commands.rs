@@ -76,7 +76,7 @@ fn command(
 }
 
 pub(crate) fn build_interactive_commands() -> Vec<InteractiveCommandSchema> {
-    vec![
+    let mut commands = vec![
         command(
             "app.command_palette",
             "App",
@@ -618,5 +618,19 @@ pub(crate) fn build_interactive_commands() -> Vec<InteractiveCommandSchema> {
             vec![keybinding_with_modifiers("j", true, false, false, false)],
             None,
         ),
-    ]
+    ];
+    if !cfg!(target_os = "windows") {
+        commands.push(command(
+            "file.quick_edit",
+            "File",
+            "Quick Edit",
+            vec![if is_macos() {
+                keybinding_with_modifiers("4", false, false, false, true)
+            } else {
+                keybinding_with_modifiers("F4", false, true, false, false)
+            }],
+            Some("QuickEditFile"),
+        ));
+    }
+    commands
 }

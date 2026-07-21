@@ -1,7 +1,7 @@
 import type { Dispatch } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
-import { isMac } from "../utils/platform";
+import { isMac, isWindows } from "../utils/platform";
 import type { AppAction, AppState } from "../store";
 import { markHistoryNavPending } from "../store";
 import { isGlobalSelectionSourceId, isSearchSourceId } from "../utils/sourceId";
@@ -98,6 +98,7 @@ export const PANEL_SHORTCUT_COMMAND_IDS = [
   "panel.tab.next",
   "panel.tab.prev",
   "file.touch",
+  "file.quick_edit",
   "file.compare",
 ] as const;
 
@@ -628,6 +629,13 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
       if (!focused || !sourceCapability("Edit")) return false;
       if (isGlobalSelectionSourceId(focused.panel.sourceId)) return false;
       return openViewerIntent(client, focused.panel, "EditFile");
+    case "file.quick_edit": {
+      if (isWindows || !focused || !sourceCapability("Edit") || !sourceCapability("OpenShell")) return false;
+      const entry = currentEntry(focused.panel);
+      if (!entry || entry.kind !== "file" || focused.panel.terminalSessionId !== undefined || focused.panel.shadowSource) return false;
+      client.sendIntent("QuickEditFile", focused.panelId);
+      return true;
+    }
     case "file.copy":
       if (!focused || !sourceCapability("CopySelection")) return false;
       return openFileOp(state, dispatch, focused.panel, "copy");

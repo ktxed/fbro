@@ -605,6 +605,8 @@ export interface GeneralSettings {
   /** "internal" | "external" | "auto" */
   compareDifferMode: string;
   compareExternalCommand: string;
+  /** "nano" | "vim" */
+  quickTerminalEditor: string;
 }
 
 export interface ModalSizePreference {

@@ -449,6 +449,7 @@ pub struct GeneralSettingsSchema {
     pub compare_max_file_size_mb: u64,
     pub compare_differ_mode: String,
     pub compare_external_command: String,
+    pub quick_terminal_editor: String,
 }
 
 #[derive(Serialize, Clone, Debug)]

@@ -327,6 +327,22 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
                 };
                 state_guard.settings.general.compare_external_command = v.trim().to_string();
             }
+            "quickTerminalEditor" => {
+                let Some(v) = value.as_str() else {
+                    drop(state_guard);
+                    bad_setting(ctx.tx, "quickTerminalEditor must be a string").await;
+                    return;
+                };
+                match crate::state::settings::QuickTerminalEditor::from_str(v) {
+                    Some(editor) => state_guard.settings.general.quick_terminal_editor = editor,
+                    None => {
+                        let msg = format!("Unknown quickTerminalEditor: {v}");
+                        drop(state_guard);
+                        bad_setting(ctx.tx, &msg).await;
+                        return;
+                    }
+                }
+            }
             _ => {
                 let msg = format!("Unknown setting key: {key}");
                 drop(state_guard);
@@ -489,6 +505,7 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
                 "compareMaxFileSizeMb": general.compare_max_file_size_mb,
                 "compareDifferMode": general.compare_differ_mode.as_str(),
                 "compareExternalCommand": general.compare_external_command,
+                "quickTerminalEditor": general.quick_terminal_editor.program(),
             }
         }),
     };

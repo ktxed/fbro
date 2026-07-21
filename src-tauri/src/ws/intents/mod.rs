@@ -123,7 +123,7 @@ pub async fn dispatch(name: &str, scope: &Value, args: &Value, ctx: &mut IntentC
         "SetGeneralOption" | "SetModalSizePreference" | "ClearThumbnailCache" => {
             settings::handle(name, args, ctx).await
         }
-        "OpenPanelTerminal" | "ResizeTerminal" | "ClosePanelTerminal" => {
+        "OpenPanelTerminal" | "QuickEditFile" | "ResizeTerminal" | "ClosePanelTerminal" => {
             terminal::handle(name, scope, args, ctx).await
         }
         "panel.tab.new" | "panel.tab.close" | "panel.tab.switch" | "panel.terminal.promote" => {
@@ -157,6 +157,7 @@ fn should_record_command(name: &str) -> bool {
             | "PasteExternalClipboard"
             | "ViewFile"
             | "EditFile"
+            | "QuickEditFile"
             | "OpenFile"
             | "KillProcess"
             | "OpenTerminal"

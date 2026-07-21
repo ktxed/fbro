@@ -84,6 +84,35 @@ impl PtyManager {
         state: SharedState,
         self_arc: Arc<Self>,
     ) -> Result<u32, PtyError> {
+        self.open_command(
+            panel_id,
+            cwd,
+            cols,
+            rows,
+            &default_shell(),
+            &["-l".to_string()],
+            tx,
+            state,
+            self_arc,
+        )
+    }
+
+    /// Spawn a command rooted at `cwd` in an embedded panel terminal.
+    /// Arguments are passed directly to the executable rather than through a
+    /// shell, which keeps file paths (including spaces and shell metacharacters)
+    /// safe for quick-edit sessions.
+    pub fn open_command(
+        &self,
+        panel_id: String,
+        cwd: &str,
+        cols: u16,
+        rows: u16,
+        program: &str,
+        args: &[String],
+        tx: mpsc::Sender<ServerMessage>,
+        state: SharedState,
+        self_arc: Arc<Self>,
+    ) -> Result<u32, PtyError> {
         let pty_system = native_pty_system();
         let pair = pty_system
             .openpty(PtySize {
@@ -94,8 +123,10 @@ impl PtyManager {
             })
             .map_err(|e| PtyError::Spawn(e.to_string()))?;
 
-        let mut cmd = CommandBuilder::new(default_shell());
-        cmd.arg("-l");
+        let mut cmd = CommandBuilder::new(program);
+        for arg in args {
+            cmd.arg(arg);
+        }
         cmd.cwd(cwd);
         cmd.env("TERM", "xterm-256color");
 

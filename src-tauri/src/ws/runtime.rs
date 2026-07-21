@@ -187,6 +187,12 @@ pub(crate) fn build_state_snapshot(
                         .general
                         .compare_external_command
                         .clone(),
+                    quick_terminal_editor: state
+                        .settings
+                        .general
+                        .quick_terminal_editor
+                        .program()
+                        .to_string(),
                 },
                 modal_sizes: state
                     .settings
