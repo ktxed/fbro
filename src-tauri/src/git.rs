@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Component, Path};
 use std::process::Command;
 
 use serde::{Deserialize, Serialize};
@@ -10,8 +10,17 @@ use crate::ws::protocol::EntrySchema;
 #[serde(rename_all = "camelCase")]
 pub struct GitChange {
     pub path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub old_path: Option<String>,
     pub index_status: String,
     pub worktree_status: String,
+}
+
+pub struct GitDiffContent {
+    pub head_path: String,
+    pub worktree_path: String,
+    pub head: Vec<u8>,
+    pub worktree: Vec<u8>,
 }
 
 /// A small, scan-time summary attached to a listed entry. It deliberately
@@ -68,13 +77,21 @@ pub fn inspect(path: &str) -> Option<GitRepoStatus> {
         .ok()?
         .trim()
         .to_string();
-    let detached = branch.is_empty();
+    let has_head = git(&root, &["rev-parse", "--verify", "--quiet", "HEAD"]).is_ok();
+    let detached = branch.is_empty() && has_head;
     let branch = if detached {
         String::from_utf8(git(&root, &["rev-parse", "--short", "HEAD"]).ok()?)
             .ok()?
             .trim()
             .to_string()
-    } else { branch };
+    } else if branch.is_empty() {
+        String::from_utf8(git(&root, &["symbolic-ref", "--quiet", "--short", "HEAD"]).unwrap_or_default())
+            .unwrap_or_default()
+            .trim()
+            .to_string()
+    } else {
+        branch
+    };
     let status = git(&root, &["status", "--porcelain=v1", "-z"]).ok()?;
     let mut changes = Vec::new();
     let mut records = status.split(|b| *b == 0);
@@ -84,8 +101,12 @@ pub fn inspect(path: &str) -> Option<GitRepoStatus> {
         let worktree = record[1] as char;
         let path = String::from_utf8_lossy(&record[3..]).to_string();
         // Porcelain v1 rename/copy output has a second NUL-separated source path.
-        if index == 'R' || index == 'C' { let _ = records.next(); }
-        changes.push(GitChange { path, index_status: index.to_string(), worktree_status: worktree.to_string() });
+        let old_path = if matches!(index, 'R' | 'C') || matches!(worktree, 'R' | 'C') {
+            records.next().map(|value| String::from_utf8_lossy(value).to_string())
+        } else {
+            None
+        };
+        changes.push(GitChange { path, old_path, index_status: index.to_string(), worktree_status: worktree.to_string() });
     }
     let (staged_count, modified_count, untracked_count, conflicted_count) = status_counts(&changes);
     let upstream = git(&root, &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"])
@@ -158,12 +179,104 @@ pub fn run(root: &str, args: &[String]) -> Result<(), String> {
     if output.status.success() { Ok(()) } else { Err(String::from_utf8_lossy(&output.stderr).trim().to_string()) }
 }
 
+pub fn read_diff_content(root: &str, target_path: &str, max_bytes: u64) -> Result<GitDiffContent, String> {
+    let repo_path = normalize_repo_path(root, target_path)?;
+    let status = inspect(root).ok_or_else(|| "No Git repository is available for this panel.".to_string())?;
+    let change = status
+        .changes
+        .iter()
+        .find(|change| change.path == repo_path)
+        .ok_or_else(|| "The requested path has no Git changes.".to_string())?;
+    let head_path = change.old_path.as_deref().unwrap_or(&change.path).to_string();
+    let head = read_head_file(root, &head_path, max_bytes)?;
+    let worktree_path = Path::new(root).join(&change.path);
+    let worktree = match std::fs::metadata(&worktree_path) {
+        Ok(metadata) if metadata.len() > max_bytes => {
+            return Err(format!("{} exceeds the compare size limit ({} MiB).", change.path, max_bytes / 1024 / 1024));
+        }
+        Ok(_) => std::fs::read(&worktree_path).map_err(|error| format!("Could not read {}: {error}", change.path))?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+        Err(error) => return Err(format!("Could not inspect {}: {error}", change.path)),
+    };
+    Ok(GitDiffContent {
+        head_path,
+        worktree_path: change.path.clone(),
+        head,
+        worktree,
+    })
+}
+
+fn normalize_repo_path(root: &str, target_path: &str) -> Result<String, String> {
+    let root = Path::new(root);
+    let target = Path::new(target_path);
+    let relative = if target.is_absolute() {
+        target
+            .strip_prefix(root)
+            .map_err(|_| "The requested path is outside this Git repository.".to_string())?
+    } else {
+        target
+    };
+    if relative.as_os_str().is_empty()
+        || relative.components().any(|component| matches!(component, Component::ParentDir | Component::RootDir))
+    {
+        return Err("The requested Git path is invalid.".to_string());
+    }
+    Ok(relative.to_string_lossy().replace('\\', "/"))
+}
+
+fn read_head_file(root: &str, path: &str, max_bytes: u64) -> Result<Vec<u8>, String> {
+    let has_head = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["rev-parse", "--verify", "--quiet", "HEAD"])
+        .output()
+        .map_err(|error| format!("Git is unavailable: {error}"))?
+        .status
+        .success();
+    if !has_head {
+        return Ok(Vec::new());
+    }
+    let object = format!("HEAD:{path}");
+    let size = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["cat-file", "-s", &object])
+        .output()
+        .map_err(|error| format!("Git is unavailable: {error}"))?;
+    if !size.status.success() {
+        return Ok(Vec::new());
+    }
+    let size = String::from_utf8_lossy(&size.stdout).trim().parse::<u64>()
+        .map_err(|error| format!("Could not read Git object size: {error}"))?;
+    if size > max_bytes {
+        return Err(format!("{path} exceeds the compare size limit ({} MiB).", max_bytes / 1024 / 1024));
+    }
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .arg("show")
+        .arg(object)
+        .output()
+        .map_err(|error| format!("Git is unavailable: {error}"))?;
+    if output.status.success() {
+        Ok(output.stdout)
+    } else {
+        // A path absent from HEAD is the expected baseline for new files.
+        Ok(Vec::new())
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{has_no_staged_changes, status_counts, GitChange};
+    use std::fs;
+    use std::path::{Path, PathBuf};
+    use std::process::Command;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use super::{has_no_staged_changes, read_diff_content, status_counts, GitChange};
 
     fn change(index_status: &str, worktree_status: &str) -> GitChange {
-        GitChange { path: "file".into(), index_status: index_status.into(), worktree_status: worktree_status.into() }
+        GitChange { path: "file".into(), old_path: None, index_status: index_status.into(), worktree_status: worktree_status.into() }
     }
 
     #[test]
@@ -179,5 +292,89 @@ mod tests {
         assert!(!has_no_staged_changes(status_counts(&staged).0));
         assert!(!has_no_staged_changes(status_counts(&mixed).0));
         assert!(!has_no_staged_changes(status_counts(&conflicted).0));
+    }
+
+    #[test]
+    fn git_diff_reads_head_and_worktree_content() {
+        with_test_repo(|repo| {
+            fs::write(repo.join("tracked.txt"), "working\n").unwrap();
+
+            let diff = read_diff_content(repo.to_str().unwrap(), &repo.join("tracked.txt").to_string_lossy(), 1024).unwrap();
+
+            assert_eq!(diff.head_path, "tracked.txt");
+            assert_eq!(diff.worktree_path, "tracked.txt");
+            assert_eq!(diff.head, b"base\n");
+            assert_eq!(diff.worktree, b"working\n");
+        });
+    }
+
+    #[test]
+    fn git_diff_uses_empty_content_for_added_and_deleted_paths() {
+        with_test_repo(|repo| {
+            fs::write(repo.join("new.txt"), "new\n").unwrap();
+            fs::remove_file(repo.join("removed.txt")).unwrap();
+
+            let added = read_diff_content(repo.to_str().unwrap(), "new.txt", 1024).unwrap();
+            assert!(added.head.is_empty());
+            assert_eq!(added.worktree, b"new\n");
+
+            let deleted = read_diff_content(repo.to_str().unwrap(), "removed.txt", 1024).unwrap();
+            assert_eq!(deleted.head, b"remove\n");
+            assert!(deleted.worktree.is_empty());
+        });
+    }
+
+    #[test]
+    fn git_diff_supports_an_unborn_repository() {
+        let repo = temp_repo_path();
+        fs::create_dir_all(&repo).unwrap();
+        git(&repo, &["init", "-q"]);
+        fs::write(repo.join("new.txt"), "new\n").unwrap();
+
+        let diff = read_diff_content(repo.to_str().unwrap(), "new.txt", 1024).unwrap();
+
+        assert!(diff.head.is_empty());
+        assert_eq!(diff.worktree, b"new\n");
+        fs::remove_dir_all(repo).unwrap();
+    }
+
+    #[test]
+    fn git_diff_uses_rename_source_from_head() {
+        with_test_repo(|repo| {
+            fs::rename(repo.join("old.txt"), repo.join("renamed.txt")).unwrap();
+            git(repo, &["add", "-A"]);
+
+            let diff = read_diff_content(repo.to_str().unwrap(), "renamed.txt", 1024).unwrap();
+
+            assert_eq!(diff.head_path, "old.txt");
+            assert_eq!(diff.worktree_path, "renamed.txt");
+            assert_eq!(diff.head, b"old\n");
+            assert_eq!(diff.worktree, b"old\n");
+        });
+    }
+
+    fn with_test_repo(test: impl FnOnce(&Path)) {
+        let repo = temp_repo_path();
+        fs::create_dir_all(&repo).unwrap();
+        git(&repo, &["init", "-q"]);
+        git(&repo, &["config", "user.email", "fbro-tests@example.invalid"]);
+        git(&repo, &["config", "user.name", "fbro tests"]);
+        fs::write(repo.join("tracked.txt"), "base\n").unwrap();
+        fs::write(repo.join("removed.txt"), "remove\n").unwrap();
+        fs::write(repo.join("old.txt"), "old\n").unwrap();
+        git(&repo, &["add", "."]);
+        git(&repo, &["commit", "-qm", "initial"]);
+        test(&repo);
+        fs::remove_dir_all(repo).unwrap();
+    }
+
+    fn temp_repo_path() -> PathBuf {
+        let stamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        std::env::temp_dir().join(format!("fbro-git-test-{}-{stamp}", std::process::id()))
+    }
+
+    fn git(repo: &Path, args: &[&str]) {
+        let output = Command::new("git").arg("-C").arg(repo).args(args).output().unwrap();
+        assert!(output.status.success(), "git {:?}: {}", args, String::from_utf8_lossy(&output.stderr));
     }
 }

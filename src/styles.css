@@ -1462,9 +1462,12 @@ body {
 .git-modal__changes { flex: 1; min-height: 0; overflow: auto; }
 .git-modal__change { display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 3px 16px; border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent); }
 .git-modal__change:hover { background: var(--bg-hover); }
+.git-modal__change--active, .git-modal__change:focus { background: var(--bg-hover); outline: 1px solid var(--border-focus); outline-offset: -1px; }
 .git-modal__change code { width: 22px; color: var(--text-warning); font-weight: 700; }
 .git-modal__change-state--staged { color: var(--text-success, #73c991) !important; }
 .git-modal__change span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.git-modal__change-action { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-width: 100px; }
+.git-modal__change-action svg { flex: 0 0 auto; }
 .git-modal__commit { padding: 10px 16px; }
 .git-modal .modal__actions { padding-inline: 16px; }
 .git-modal__activity { display: inline-flex; align-items: center; gap: 6px; margin-right: auto; color: var(--text-path); font-size: calc(var(--font-size) - 2px); }

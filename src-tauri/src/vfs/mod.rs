@@ -2,6 +2,7 @@
 
 pub mod bookmarks;
 pub mod global_selection;
+pub mod git_diff;
 pub mod history;
 pub mod local;
 pub mod procs;

@@ -81,6 +81,7 @@ export function ContextMenu({ client, menu }: ContextMenuProps) {
       const isGlobalRoot = isGlobalSelection && panel.path === "";
       const isGlobalInside = isGlobalSelection && panel.path !== "";
       const supports = source?.supports ?? [];
+      const targetEntry = panel ? entryAt(panel, menu.absIndex) : undefined;
       return buildContextMenuItems(
         state.commands,
         menu.fullPath,
@@ -92,6 +93,7 @@ export function ContextMenu({ client, menu }: ContextMenuProps) {
           canOpenWith: isLocalFilesystem,
           canPassToBro: isLocalFilesystem || isGlobalRoot || canCompareFromMenu(state, menu),
           canCompare: canCompareFromMenu(state, menu),
+          canGitDiff: isLocalFilesystem && menu.kind === "file" && !!targetEntry?.gitStatus,
           canAddToGlobalSelection: isLocalFilesystem,
           canCopy: !!menu.isShadow || (isLocalFilesystem && supports.includes("CopySelection")),
           canRename: (isLocalFilesystem && supports.includes("Rename")) || isGlobalRoot,
@@ -100,7 +102,7 @@ export function ContextMenu({ client, menu }: ContextMenuProps) {
         },
       );
     },
-    [menu.fullPath, menu.kind, menu.name, menu.isShadow, menu.panelId, state.commands, state.panels, state.sources],
+    [menu.absIndex, menu.fullPath, menu.kind, menu.name, menu.isShadow, menu.panelId, state.commands, state.panels, state.sources],
   );
   const selectableItems = items.filter((item) => item.kind !== "separator");
 
@@ -193,6 +195,14 @@ export function ContextMenu({ client, menu }: ContextMenuProps) {
 
     if (item.kind === "clipboard" && item.clipboardText) {
       await navigator.clipboard.writeText(item.clipboardText);
+      return;
+    }
+
+    if (item.kind === "gitDiff") {
+      client.sendIntent("GitViewDiff", undefined, {
+        panelId: menu.panelId,
+        targetPath: menu.fullPath,
+      });
       return;
     }
 

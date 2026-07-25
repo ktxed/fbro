@@ -6,7 +6,7 @@ export type ContextMenuItem =
   | { id: string; kind: "separator" }
   | {
       id: string;
-      kind: "command" | "clipboard" | "platform" | "openWith" | "bro" | "globalSelection";
+      kind: "command" | "clipboard" | "platform" | "openWith" | "bro" | "globalSelection" | "gitDiff";
       label: string;
       shortcut?: string;
       commandId?: string;
@@ -20,6 +20,7 @@ export interface ContextMenuOptions {
   canOpenWith?: boolean;
   canPassToBro?: boolean;
   canCompare?: boolean;
+  canGitDiff?: boolean;
   canAddToGlobalSelection?: boolean;
   canCopy?: boolean;
   canRename?: boolean;
@@ -84,6 +85,9 @@ export function buildContextMenuItems(
   const compareItem: ContextMenuItem | null = options.canCompare && kind === "file"
     ? commandItem("file.compare", "Compare", commands)
     : null;
+  const gitDiffItem: ContextMenuItem | null = options.canGitDiff && kind === "file"
+    ? { id: "git.view_diff", kind: "gitDiff", label: "View Git diff" }
+    : null;
   const globalSelectionItem: ContextMenuItem | null = options.canAddToGlobalSelection && (kind === "file" || kind === "directory")
     ? { id: "selection.to_global", kind: "globalSelection", label: "To global selection" }
     : null;
@@ -91,6 +95,7 @@ export function buildContextMenuItems(
   return [
     ...(options.canPlatform ? [platformItem()] : []),
     ...(compareItem ? [compareItem] : []),
+    ...(gitDiffItem ? [gitDiffItem] : []),
     ...(broItem ? [broItem] : []),
     ...(globalSelectionItem ? [globalSelectionItem] : []),
     ...(openWithItem ? [openWithItem] : []),

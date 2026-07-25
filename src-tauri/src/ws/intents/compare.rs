@@ -7,7 +7,7 @@ use similar::{ChangeTag, TextDiff};
 
 use crate::state::settings::CompareDifferMode;
 use crate::state::{source_id_for_local_path, AppState, CompareSession, Panel, Source};
-use crate::vfs::{search::SearchResultsDriver, VfsDriver};
+use crate::vfs::{git_diff::GitDiffSnapshotDriver, search::SearchResultsDriver, VfsDriver};
 use crate::ws::intents::{
     arg_str, is_archive_source, is_global_selection_source, is_procs_source, is_search_source,
 };
@@ -45,9 +45,22 @@ impl CompareTarget {
 pub(crate) async fn handle(name: &str, scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
     match name {
         "CompareFiles" => compare_files(scope, args, ctx).await,
+        "GitViewDiff" => git_view_diff(args, ctx).await,
         "GetCompareDiff" => get_compare_diff(args, ctx).await,
         "CloseCompareWindow" => close_compare_window(args, ctx).await,
         _ => {}
+    }
+}
+
+async fn git_view_diff(args: &Value, ctx: &mut IntentContext<'_>) {
+    let panel_id = arg_str(args, "panelId").unwrap_or("");
+    let target_path = arg_str(args, "targetPath").unwrap_or("");
+    if panel_id.is_empty() || target_path.is_empty() {
+        send_compare_error(ctx, "A changed Git file is required.".to_string(), None).await;
+        return;
+    }
+    if let Err(message) = launch_git_diff(panel_id, target_path, ctx).await {
+        send_compare_error(ctx, message, None).await;
     }
 }
 
@@ -71,7 +84,7 @@ pub(crate) async fn launch_compare_for_panel(
         let state_guard = ctx.state.lock().await;
         resolve_compare_targets(&state_guard, panel_id, target_path)?
     };
-    launch_compare_targets(targets, ctx).await
+    launch_compare_targets(targets, true, ctx).await
 }
 
 pub(crate) fn can_compare_from_state(
@@ -84,6 +97,7 @@ pub(crate) fn can_compare_from_state(
 
 async fn launch_compare_targets(
     targets: [CompareTarget; 2],
+    allow_external: bool,
     ctx: &mut IntentContext<'_>,
 ) -> Result<(), String> {
     let (mode, external_command, max_file_size_mb, color_scheme, viewer_bg) = {
@@ -106,7 +120,7 @@ async fn launch_compare_targets(
         )
     };
 
-    if mode != CompareDifferMode::Internal {
+    if allow_external && mode != CompareDifferMode::Internal {
         match launch_external_differ(&targets, &external_command).await {
             Ok(()) => return Ok(()),
             Err(error) if mode == CompareDifferMode::External => return Err(error),
@@ -118,6 +132,86 @@ async fn launch_compare_targets(
 
     let max_bytes = max_file_size_mb.saturating_mul(1024 * 1024);
     let result = build_diff(&targets[0], &targets[1], max_bytes).await?;
+    open_internal_diff(result, color_scheme, viewer_bg, ctx).await
+}
+
+async fn launch_git_diff(
+    panel_id: &str,
+    target_path: &str,
+    ctx: &mut IntentContext<'_>,
+) -> Result<(), String> {
+    let panel_path = {
+        let state_guard = ctx.state.lock().await;
+        let panel = state_guard
+            .panels
+            .get(panel_id)
+            .ok_or_else(|| "Git panel is unavailable.".to_string())?;
+        let is_local = state_guard
+            .drivers
+            .get(&panel.source_id)
+            .map(|driver| driver.is_local())
+            .unwrap_or(false);
+        if !is_local {
+            return Err("Git diffs are only available for local filesystem panels.".to_string());
+        }
+        panel.path.clone()
+    };
+
+    let max_bytes = {
+        let state_guard = ctx.state.lock().await;
+        state_guard
+            .settings
+            .general
+            .compare_max_file_size_mb
+            .saturating_mul(1024 * 1024)
+    };
+    let target_path = target_path.to_string();
+    let content = tokio::task::spawn_blocking(move || {
+        let root = crate::git::inspect(&panel_path)
+            .map(|status| status.root)
+            .ok_or_else(|| "No Git repository is available for this panel.".to_string())?;
+        crate::git::read_diff_content(&root, &target_path, max_bytes)
+    })
+    .await
+    .map_err(|error| format!("Git diff task failed: {error}"))??;
+    let driver = Arc::new(GitDiffSnapshotDriver::new(
+        content.head_path,
+        content.head,
+        content.worktree_path,
+        content.worktree,
+    ));
+    let source_id = format!("git-diff:{}", uuid::Uuid::new_v4());
+    let left_path = driver.head_path().to_string();
+    let right_path = driver.worktree_path().to_string();
+    let targets = [
+        CompareTarget {
+            panel_id: panel_id.to_string(),
+            source_id: source_id.clone(),
+            name: left_path.clone(),
+            size: driver.file_size(&left_path),
+            path: left_path,
+            local_path: None,
+            driver: driver.clone(),
+        },
+        CompareTarget {
+            panel_id: panel_id.to_string(),
+            source_id,
+            name: right_path.clone(),
+            size: driver.file_size(&right_path),
+            path: right_path,
+            local_path: None,
+            driver,
+        },
+    ];
+    launch_compare_targets(targets, false, ctx).await
+}
+
+async fn open_internal_diff(
+    result: CompareDiffResultSchema,
+    color_scheme: String,
+    viewer_bg: tauri::webview::Color,
+    ctx: &mut IntentContext<'_>,
+) -> Result<(), String> {
     let request_id = uuid::Uuid::new_v4().to_string();
     {
         let mut state_guard = ctx.state.lock().await;
@@ -137,7 +231,10 @@ async fn launch_compare_targets(
     }
 
     let label = format!("diff-{request_id}");
-    let title = format!("{} ↔ {} — fbro compare", targets[0].name, targets[1].name);
+    let title = format!(
+        "{} ↔ {} — fbro compare",
+        result.left.name, result.right.name
+    );
     let query = format!(
         "?diff=1&request={}&label={}&colorScheme={}",
         url_encode(&request_id),
@@ -145,19 +242,23 @@ async fn launch_compare_targets(
         url_encode(&color_scheme),
     );
     let app_handle = ctx.app_handle.clone();
-    tokio::task::spawn_blocking(move || {
-        let _ = tauri::WebviewWindowBuilder::new(
-            &app_handle,
-            label,
-            tauri::WebviewUrl::App(query.into()),
-        )
-        .title(title)
-        .inner_size(1200.0, 760.0)
-        .resizable(true)
-        .devtools(true)
-        .background_color(viewer_bg)
-        .build();
-    });
+    let window_result = tokio::task::spawn_blocking(move || {
+        tauri::WebviewWindowBuilder::new(&app_handle, label, tauri::WebviewUrl::App(query.into()))
+            .title(title)
+            .inner_size(1200.0, 760.0)
+            .resizable(true)
+            .devtools(true)
+            .background_color(viewer_bg)
+            .build()
+            .map(|_| ())
+    })
+    .await
+    .map_err(|error| format!("Diff window task failed: {error}"))?;
+
+    if let Err(error) = window_result {
+        ctx.state.lock().await.compare_sessions.remove(&request_id);
+        return Err(format!("Could not open diff window: {error}"));
+    }
 
     Ok(())
 }
@@ -204,6 +305,20 @@ async fn build_diff(
 ) -> Result<CompareDiffResultSchema, String> {
     let left_text = read_text_file(left, max_bytes).await?;
     let right_text = read_text_file(right, max_bytes).await?;
+    Ok(build_diff_from_text(
+        left.schema(),
+        right.schema(),
+        left_text,
+        right_text,
+    ))
+}
+
+fn build_diff_from_text(
+    left: CompareTargetSchema,
+    right: CompareTargetSchema,
+    left_text: String,
+    right_text: String,
+) -> CompareDiffResultSchema {
     let diff = TextDiff::from_lines(&left_text, &right_text);
     let mut rows = Vec::new();
     let mut unified = String::new();
@@ -249,13 +364,13 @@ async fn build_diff(
         unified.push('\n');
     }
 
-    Ok(CompareDiffResultSchema {
-        left: left.schema(),
-        right: right.schema(),
+    CompareDiffResultSchema {
+        left,
+        right,
         rows,
         unified,
         identical,
-    })
+    }
 }
 
 fn trim_diff_line(value: &str) -> String {
@@ -279,7 +394,7 @@ async fn read_text_file(target: &CompareTarget, max_bytes: u64) -> Result<String
     let bytes = tokio::task::spawn_blocking(move || read_all_capped(driver, path, cap))
         .await
         .map_err(|error| format!("Compare read task failed: {error}"))??;
-    validate_utf8_text(&target.name, bytes)
+    validate_text_bytes(&target.name, bytes, max_bytes)
 }
 
 fn read_all_capped(
@@ -313,7 +428,13 @@ fn read_all_capped(
     Ok(out)
 }
 
-fn validate_utf8_text(name: &str, mut bytes: Vec<u8>) -> Result<String, String> {
+fn validate_text_bytes(name: &str, mut bytes: Vec<u8>, max_bytes: u64) -> Result<String, String> {
+    if bytes.len() as u64 > max_bytes {
+        return Err(format!(
+            "{name} exceeds the compare size limit ({} MiB).",
+            max_bytes / 1024 / 1024
+        ));
+    }
     if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
         bytes.drain(..3);
     }
@@ -660,7 +781,7 @@ async fn send_compare_error(
 mod tests {
     use std::collections::HashMap;
 
-    use super::{global_selection_reference_source, validate_utf8_text};
+    use super::{global_selection_reference_source, validate_text_bytes};
     use crate::state::Source;
     use crate::ws::protocol::EntrySchema;
 
@@ -699,18 +820,18 @@ mod tests {
 
     #[test]
     fn strict_text_accepts_utf8_bom() {
-        let text = validate_utf8_text("a.txt", vec![0xEF, 0xBB, 0xBF, b'a']).unwrap();
+        let text = validate_text_bytes("a.txt", vec![0xEF, 0xBB, 0xBF, b'a'], 1024).unwrap();
         assert_eq!(text, "a");
     }
 
     #[test]
     fn strict_text_rejects_nul_bytes() {
-        assert!(validate_utf8_text("a.bin", vec![b'a', 0, b'b']).is_err());
+        assert!(validate_text_bytes("a.bin", vec![b'a', 0, b'b'], 1024).is_err());
     }
 
     #[test]
     fn strict_text_rejects_invalid_utf8() {
-        assert!(validate_utf8_text("a.bin", vec![0xff]).is_err());
+        assert!(validate_text_bytes("a.bin", vec![0xff], 1024).is_err());
     }
 
     #[test]

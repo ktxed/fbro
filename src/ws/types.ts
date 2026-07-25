@@ -22,6 +22,7 @@ export interface VFSEntry {
 
 export interface GitChange {
   path: string;
+  oldPath?: string;
   indexStatus: string;
   worktreeStatus: string;
 }
