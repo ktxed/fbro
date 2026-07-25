@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::process::Command;
 use std::sync::Arc;
 
@@ -6,9 +6,11 @@ use serde_json::Value;
 use similar::{ChangeTag, TextDiff};
 
 use crate::state::settings::CompareDifferMode;
-use crate::state::{AppState, CompareSession, Panel};
+use crate::state::{source_id_for_local_path, AppState, CompareSession, Panel, Source};
 use crate::vfs::{search::SearchResultsDriver, VfsDriver};
-use crate::ws::intents::{arg_str, is_archive_source, is_procs_source, is_search_source};
+use crate::ws::intents::{
+    arg_str, is_archive_source, is_global_selection_source, is_procs_source, is_search_source,
+};
 use crate::ws::protocol::{
     now, CompareDiffResultSchema, CompareDiffRowSchema, CompareTargetSchema, EntrySchema,
     ServerMessage,
@@ -505,6 +507,10 @@ fn effective_source_and_path(
     entry: &EntrySchema,
     base_driver: &dyn VfsDriver,
 ) -> Result<(String, String), String> {
+    if is_global_selection_source(&panel.source_id) {
+        return global_selection_reference_source(&state.sources, entry);
+    }
+
     if is_search_source(&panel.source_id) {
         let resolved = state
             .drivers
@@ -536,6 +542,21 @@ fn effective_source_and_path(
         panel.source_id.clone(),
         base_driver.resolve_child(&panel.path, &entry.name),
     ))
+}
+
+fn global_selection_reference_source(
+    sources: &HashMap<String, Source>,
+    entry: &EntrySchema,
+) -> Result<(String, String), String> {
+    let path = entry
+        .source_path
+        .as_deref()
+        .filter(|path| !path.is_empty())
+        .ok_or_else(|| "Global selection reference has no filesystem path.".to_string())?;
+    let source_id = source_id_for_local_path(sources, path).ok_or_else(|| {
+        "Global selection reference is not available on a mounted local source.".to_string()
+    })?;
+    Ok((source_id, path.to_string()))
 }
 
 fn active_other_panel_id(state: &AppState, panel_id: &str) -> Option<String> {
@@ -637,7 +658,44 @@ async fn send_compare_error(
 
 #[cfg(test)]
 mod tests {
-    use super::validate_utf8_text;
+    use std::collections::HashMap;
+
+    use super::{global_selection_reference_source, validate_utf8_text};
+    use crate::state::Source;
+    use crate::ws::protocol::EntrySchema;
+
+    fn local_source(id: &str, root_path: &str, mounted: bool) -> Source {
+        Source {
+            id: id.to_string(),
+            name: id.to_string(),
+            kind: "filesystem".to_string(),
+            supports: Vec::new(),
+            root_path: root_path.to_string(),
+            mounted,
+            device_path: None,
+            shadow: false,
+            icon_name: None,
+            sort_priority: 100,
+            read_only: false,
+            peer_id: None,
+        }
+    }
+
+    fn global_selection_entry(source_path: Option<&str>) -> EntrySchema {
+        EntrySchema {
+            name: source_path.unwrap_or("missing.txt").to_string(),
+            kind: "file".to_string(),
+            size: Some(1),
+            mtime: None,
+            btime: None,
+            permissions: None,
+            icon_name: None,
+            cc: None,
+            source_path: source_path.map(str::to_string),
+            git_status: None,
+            git_details: None,
+        }
+    }
 
     #[test]
     fn strict_text_accepts_utf8_bom() {
@@ -653,5 +711,55 @@ mod tests {
     #[test]
     fn strict_text_rejects_invalid_utf8() {
         assert!(validate_utf8_text("a.bin", vec![0xff]).is_err());
+    }
+
+    #[test]
+    fn global_selection_reference_uses_owning_local_source() {
+        let mut sources = HashMap::new();
+        sources.insert("root".to_string(), local_source("root", "/", true));
+        sources.insert(
+            "workspace".to_string(),
+            local_source("workspace", "/workspace", true),
+        );
+
+        let resolved = global_selection_reference_source(
+            &sources,
+            &global_selection_entry(Some("/workspace/left.txt")),
+        )
+        .unwrap();
+
+        assert_eq!(
+            resolved,
+            ("workspace".to_string(), "/workspace/left.txt".to_string())
+        );
+    }
+
+    #[test]
+    fn global_selection_reference_requires_an_available_local_source() {
+        let mut sources = HashMap::new();
+        sources.insert(
+            "workspace".to_string(),
+            local_source("workspace", "/workspace", false),
+        );
+
+        let error = global_selection_reference_source(
+            &sources,
+            &global_selection_entry(Some("/workspace/left.txt")),
+        )
+        .unwrap_err();
+
+        assert_eq!(
+            error,
+            "Global selection reference is not available on a mounted local source."
+        );
+    }
+
+    #[test]
+    fn global_selection_reference_requires_a_filesystem_path() {
+        let error =
+            global_selection_reference_source(&HashMap::new(), &global_selection_entry(None))
+                .unwrap_err();
+
+        assert_eq!(error, "Global selection reference has no filesystem path.");
     }
 }

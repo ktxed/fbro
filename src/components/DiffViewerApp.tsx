@@ -175,11 +175,11 @@ export function DiffViewerApp({ requestId, windowLabel, initialColorScheme }: Di
       }
       if (event.key === "1") setMode("split");
       if (event.key === "2") setMode("unified");
-      if (event.key === "n" || event.key === "j" || event.key === "F7") {
+      if (event.key === "n" || event.key === "j" || event.key === "F7" || event.key === "ArrowDown") {
         event.preventDefault();
         jumpChange(1);
       }
-      if (event.key === "p" || event.key === "k" || event.key === "F6") {
+      if (event.key === "p" || event.key === "k" || event.key === "F6" || event.key === "ArrowUp") {
         event.preventDefault();
         jumpChange(-1);
       }
