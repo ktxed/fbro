@@ -4735,14 +4735,6 @@ body {
   max-width: 480px;
   border: 1px solid var(--border-strong);
   border-radius: 4px;
-  background:
-    repeating-linear-gradient(
-      to bottom,
-      color-mix(in srgb, var(--bg-input) 88%, var(--bg-panel)) 0,
-      color-mix(in srgb, var(--bg-input) 88%, var(--bg-panel)) 22px,
-      color-mix(in srgb, var(--bg-focused) 55%, var(--bg-input)) 22px,
-      color-mix(in srgb, var(--bg-focused) 55%, var(--bg-input)) 44px
-    );
   overflow: hidden;
 }
 
@@ -4758,7 +4750,15 @@ body {
   box-sizing: border-box;
   border: 0;
   outline: none;
-  background: transparent;
+  background:
+    repeating-linear-gradient(
+      to bottom,
+      color-mix(in srgb, var(--bg-input) 88%, var(--bg-panel)) 0,
+      color-mix(in srgb, var(--bg-input) 88%, var(--bg-panel)) 22px,
+      color-mix(in srgb, var(--bg-focused) 55%, var(--bg-input)) 22px,
+      color-mix(in srgb, var(--bg-focused) 55%, var(--bg-input)) 44px
+    );
+  background-attachment: local;
   color: var(--text);
   font-family: var(--font);
   font-size: var(--font-size);
