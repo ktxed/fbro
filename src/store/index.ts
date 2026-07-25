@@ -262,6 +262,27 @@ export interface AppState {
   settings: SettingsState;
 }
 
+const MAXIMIZED_TERMINAL_STORAGE_KEY = "fbro.maximizedTerminalPanelId";
+
+function readMaximizedTerminalPanelId(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.sessionStorage.getItem(MAXIMIZED_TERMINAL_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function storeMaximizedTerminalPanelId(panelId: string | null) {
+  if (typeof window === "undefined") return;
+  try {
+    if (panelId === null) window.sessionStorage.removeItem(MAXIMIZED_TERMINAL_STORAGE_KEY);
+    else window.sessionStorage.setItem(MAXIMIZED_TERMINAL_STORAGE_KEY, panelId);
+  } catch {
+    // Session storage can be unavailable in restricted WebViews.
+  }
+}
+
 const initialState: AppState = {
   connected: false,
   sessionId: null,
@@ -307,7 +328,7 @@ const initialState: AppState = {
   cacheStatus: null,
   bookmarks: [],
   bookmarksOpen: null,
-  maximizedTerminalPanelId: null,
+  maximizedTerminalPanelId: readMaximizedTerminalPanelId(),
   childProcesses: {},
   globalSelections: [],
   fontSize: 13,
@@ -452,6 +473,11 @@ function applySnapshot(state: AppState, msg: StateSnapshotMessage): AppState {
   }
   if (domains.globalSelections !== undefined) {
     next.globalSelections = domains.globalSelections;
+  }
+  if (next.maximizedTerminalPanelId
+      && next.panels[next.maximizedTerminalPanelId]?.terminalSessionId === undefined) {
+    storeMaximizedTerminalPanelId(null);
+    next.maximizedTerminalPanelId = null;
   }
   return next;
 }
@@ -1410,6 +1436,9 @@ function reducer(state: AppState, action: AppAction): AppState {
           const closedMsg = msg as TerminalClosedMessage;
           disposeCachedTerminal(closedMsg.sessionId);
           const panelId = closedMsg.panelId;
+          if (panelId && state.maximizedTerminalPanelId === panelId) {
+            storeMaximizedTerminalPanelId(null);
+          }
           if (!panelId || !state.panels[panelId]) return state;
           const panel = state.panels[panelId];
           if (panel.terminalSessionId === undefined && state.maximizedTerminalPanelId !== panelId) return state;
@@ -1540,6 +1569,7 @@ function reducer(state: AppState, action: AppAction): AppState {
     case "CLOSE_SETTINGS":
       return { ...state, pendingSettings: null };
     case "SET_MAXIMIZED_TERMINAL":
+      storeMaximizedTerminalPanelId(action.panelId);
       return { ...state, maximizedTerminalPanelId: action.panelId };
     case "OPEN_CONTEXT_MENU":
       return { ...state, pendingContextMenu: action.menu };
