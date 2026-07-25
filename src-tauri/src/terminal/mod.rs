@@ -10,7 +10,7 @@
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
@@ -29,6 +29,14 @@ pub struct PtySession {
     pub panel_id: Arc<Mutex<String>>,
     /// Sender for the writer thread; dropping it terminates the writer thread.
     writer_tx: Option<mpsc::UnboundedSender<Vec<u8>>>,
+    /// Current GUI connection receiving PTY output. The frontend can reload
+    /// while the child process remains alive, so the reader must not retain
+    /// the sender belonging to the connection that originally opened it.
+    output_tx: Arc<Mutex<mpsc::Sender<ServerMessage>>>,
+    /// Set when output is rebound after a frontend reconnect. The next resize
+    /// must provoke SIGWINCH even if the dimensions did not change, so a
+    /// full-screen child redraws into the replacement xterm.
+    needs_redraw: AtomicBool,
     /// Master PTY handle — kept so we can resize. Wrapped in Arc/Mutex because
     /// resize is a `&self` method but we want to share ownership with the
     /// killer path during `close`.
@@ -148,7 +156,8 @@ impl PtyManager {
             .unwrap()
             .try_clone_reader()
             .map_err(|e| PtyError::Io(e.to_string()))?;
-        spawn_reader(session_id, reader, tx.clone());
+        let output_tx = Arc::new(Mutex::new(tx.clone()));
+        spawn_reader(session_id, reader, output_tx.clone());
 
         // Writer thread: drain mpsc → blocking write to master.
         let writer = master
@@ -277,6 +286,8 @@ impl PtyManager {
             session_id,
             panel_id: panel_id_shared,
             writer_tx: Some(writer_tx),
+            output_tx,
+            needs_redraw: AtomicBool::new(false),
             master,
             killer,
         };
@@ -296,6 +307,24 @@ impl PtyManager {
         let map = self.sessions.lock().unwrap();
         let session = map.get(&sid).ok_or(PtyError::NotFound)?;
         let master = session.master.lock().unwrap();
+        if session.needs_redraw.swap(false, Ordering::SeqCst) {
+            let current = master.get_size().ok();
+            if current.is_some_and(|size| size.cols == cols && size.rows == rows) {
+                let redraw_rows = if rows < u16::MAX {
+                    rows.saturating_add(1)
+                } else {
+                    rows.saturating_sub(1).max(1)
+                };
+                master
+                    .resize(PtySize {
+                        rows: redraw_rows,
+                        cols: cols.max(1),
+                        pixel_width: 0,
+                        pixel_height: 0,
+                    })
+                    .map_err(|e| PtyError::Io(e.to_string()))?;
+            }
+        }
         master
             .resize(PtySize {
                 rows: rows.max(1),
@@ -324,6 +353,16 @@ impl PtyManager {
         let map = self.sessions.lock().unwrap();
         if let Some(s) = map.get(&sid) {
             *s.panel_id.lock().unwrap() = new_panel_id;
+        }
+    }
+
+    /// Route every live PTY to a newly connected GUI. PTYs outlive frontend
+    /// reloads, while the per-connection server channel does not.
+    pub fn rebind_output(&self, tx: mpsc::Sender<ServerMessage>) {
+        let map = self.sessions.lock().unwrap();
+        for session in map.values() {
+            *session.output_tx.lock().unwrap() = tx.clone();
+            session.needs_redraw.store(true, Ordering::SeqCst);
         }
     }
 
@@ -366,7 +405,7 @@ impl Drop for PtyManager {
 fn spawn_reader(
     session_id: u32,
     mut reader: Box<dyn Read + Send>,
-    tx: mpsc::Sender<ServerMessage>,
+    output_tx: Arc<Mutex<mpsc::Sender<ServerMessage>>>,
 ) {
     thread::spawn(move || {
         let mut buf = [0u8; 8192];
@@ -378,9 +417,10 @@ fn spawn_reader(
                         session_id,
                         data: buf[..n].to_vec(),
                     };
-                    if tx.blocking_send(msg).is_err() {
-                        break;
-                    }
+                    // A failed send only means that GUI connection went away.
+                    // Keep draining the PTY so a later connection can rebind it.
+                    let tx = output_tx.lock().unwrap().clone();
+                    let _ = tx.blocking_send(msg);
                 }
                 Err(_) => break,
             }

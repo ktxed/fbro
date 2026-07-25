@@ -122,6 +122,14 @@ async fn handle_connection(
     let is_gui = hello_client.kind == "gui";
     let session_id = uuid::Uuid::new_v4().to_string();
 
+    if is_gui {
+        // Embedded terminals survive a frontend reload. Point their reader
+        // threads at this connection before the snapshot mounts new xterms;
+        // the ensuing resize then redraws full-screen programs such as nano.
+        let pty_manager = state.lock().await.pty_manager.clone();
+        pty_manager.rebind_output(tx.clone());
+    }
+
     let file_server_port = state.lock().await.file_server_port;
     let _ = send_msg(
         &mut ws_tx,
