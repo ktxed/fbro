@@ -1539,6 +1539,8 @@ function reducer(state: AppState, action: AppAction): AppState {
       return { ...state, pendingSettings: { activeTab: action.tab }, pendingContextMenu: null };
     case "CLOSE_SETTINGS":
       return { ...state, pendingSettings: null };
+    case "SET_MAXIMIZED_TERMINAL":
+      return { ...state, maximizedTerminalPanelId: action.panelId };
     case "OPEN_CONTEXT_MENU":
       return { ...state, pendingContextMenu: action.menu };
     case "CLOSE_CONTEXT_MENU":
