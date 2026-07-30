@@ -5376,9 +5376,9 @@ body {
   height: 100vh;
   display: flex;
   flex-direction: column;
-  background: var(--bg, #0d0d13);
-  color: var(--text, #d7d7e6);
-  font-family: var(--font-mono, "JetBrains Mono", "SFMono-Regular", Consolas, monospace);
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
   overflow: hidden;
 }
 
@@ -5388,8 +5388,8 @@ body {
   justify-content: space-between;
   gap: 16px;
   padding: 12px 16px;
-  border-bottom: 1px solid var(--border, #2b2b44);
-  background: var(--surface, #171728);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-header);
   flex: 0 0 auto;
 }
 
@@ -5404,14 +5404,14 @@ body {
 
 .diff-viewer__subtitle {
   margin-top: 4px;
-  color: var(--muted, #8d8da8);
+  color: var(--text-dim);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .diff-viewer__subtitle span {
-  color: var(--text-dim, #6f6f8e);
+  color: var(--text-dim);
   margin: 0 8px;
 }
 
@@ -5424,7 +5424,7 @@ body {
 
 .diff-viewer__segmented {
   display: inline-flex;
-  border: 1px solid var(--border, #31314c);
+  border: 1px solid var(--border);
   border-radius: 6px;
   overflow: hidden;
 }
@@ -5432,7 +5432,7 @@ body {
 .diff-viewer__jump {
   display: inline-flex;
   align-items: center;
-  border: 1px solid var(--border, #31314c);
+  border: 1px solid var(--border);
   border-radius: 6px;
   overflow: hidden;
 }
@@ -5441,23 +5441,23 @@ body {
   min-height: 32px;
   padding: 0 10px;
   border: 0;
-  background: var(--surface-2, #141423);
-  color: var(--text, #d7d7e6);
+  background: var(--bg-elev);
+  color: var(--text);
   font: inherit;
   cursor: pointer;
 }
 
 .diff-viewer__jump-btn:disabled {
-  color: var(--text-dim, #6f6f8e);
+  color: var(--text-dim);
   cursor: default;
 }
 
 .diff-viewer__jump-count {
   min-width: 52px;
   padding: 0 8px;
-  color: var(--muted, #8d8da8);
+  color: var(--text-dim);
   text-align: center;
-  border-inline: 1px solid var(--border, #31314c);
+  border-inline: 1px solid var(--border);
 }
 
 .diff-viewer__segmented-btn,
@@ -5465,23 +5465,23 @@ body {
   min-height: 32px;
   padding: 0 12px;
   border: 0;
-  background: var(--surface-2, #141423);
-  color: var(--text, #d7d7e6);
+  background: var(--bg-elev);
+  color: var(--text);
   font: inherit;
   cursor: pointer;
 }
 
 .diff-viewer__segmented-btn + .diff-viewer__segmented-btn {
-  border-left: 1px solid var(--border, #31314c);
+  border-left: 1px solid var(--border);
 }
 
 .diff-viewer__segmented-btn--active {
-  background: var(--accent-soft, rgba(75, 141, 247, 0.22));
-  color: var(--accent, #68a0ff);
+  background: color-mix(in srgb, var(--accent) 16%, var(--bg-elev));
+  color: var(--accent);
 }
 
 .diff-viewer__close {
-  border: 1px solid var(--border, #31314c);
+  border: 1px solid var(--border);
   border-radius: 6px;
 }
 
@@ -5489,9 +5489,9 @@ body {
   display: flex;
   gap: 16px;
   padding: 8px 16px;
-  border-bottom: 1px solid var(--border, #2b2b44);
-  color: var(--muted, #8d8da8);
-  background: var(--surface-2, #11111d);
+  border-bottom: 1px solid var(--border);
+  color: var(--text-dim);
+  background: var(--bg-footer);
   flex: 0 0 auto;
 }
 
@@ -5499,12 +5499,12 @@ body {
   flex: 1;
   display: grid;
   place-items: center;
-  color: var(--muted, #8d8da8);
+  color: var(--text-dim);
   font-size: 18px;
 }
 
 .diff-viewer__status--error {
-  color: var(--danger, #ff6666);
+  color: var(--text-danger);
   padding: 24px;
   text-align: center;
 }
@@ -5512,7 +5512,7 @@ body {
 .diff-viewer__body {
   flex: 1;
   overflow: auto;
-  background: var(--bg, #0d0d13);
+  background: var(--bg);
 }
 
 .diff-viewer__body--split {
@@ -5526,8 +5526,8 @@ body {
   z-index: 1;
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  border-bottom: 1px solid var(--border, #2b2b44);
-  background: var(--surface, #171728);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-header);
 }
 
 .diff-viewer__file-header span {
@@ -5535,7 +5535,7 @@ body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  color: var(--text, #d7d7e6);
+  color: var(--text);
 }
 
 .diff-table {
@@ -5565,15 +5565,15 @@ body {
 .diff-table--unified .diff-table__prefix {
   width: 24px;
   text-align: center;
-  color: var(--muted, #8d8da8);
+  color: var(--text-dim);
 }
 
 .diff-table__line {
   padding: 0 8px;
   text-align: right;
-  color: var(--text-dim, #6f6f8e);
+  color: var(--text-dim);
   user-select: none;
-  border-right: 1px solid var(--border, #26263d);
+  border-right: 1px solid var(--border);
   vertical-align: top;
 }
 
@@ -5586,55 +5586,58 @@ body {
 }
 
 .diff-table__row--equal .diff-table__code {
-  color: var(--text, #d7d7e6);
+  color: var(--text);
 }
 
 .diff-table__row--delete .diff-table__code,
 .diff-table__row--delete .diff-table__prefix {
-  background: rgba(255, 83, 83, 0.16);
+  background: color-mix(in srgb, var(--text-danger) 16%, transparent);
 }
 
 .diff-table__row--insert .diff-table__code,
 .diff-table__row--insert .diff-table__prefix {
-  background: rgba(70, 190, 120, 0.16);
+  background: color-mix(in srgb, var(--text-success) 16%, transparent);
 }
 
 .diff-table__row--active-change .diff-table__line,
 .diff-table__row--active-change .diff-table__prefix,
 .diff-table__row--active-change .diff-table__code {
-  background-image: linear-gradient(rgba(104, 160, 255, 0.11), rgba(104, 160, 255, 0.11));
+  background-image: linear-gradient(
+    color-mix(in srgb, var(--accent) 11%, transparent),
+    color-mix(in srgb, var(--accent) 11%, transparent)
+  );
 }
 
 .diff-table__row--active-change .diff-table__line:first-child {
-  box-shadow: inset 3px 0 0 var(--accent, #68a0ff);
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 
 .diff-table__row--active-change-start .diff-table__line,
 .diff-table__row--active-change-start .diff-table__prefix,
 .diff-table__row--active-change-start .diff-table__code {
-  box-shadow: inset 0 1px 0 rgba(104, 160, 255, 0.45);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--accent) 45%, transparent);
 }
 
 .diff-table__row--active-change-end .diff-table__line,
 .diff-table__row--active-change-end .diff-table__prefix,
 .diff-table__row--active-change-end .diff-table__code {
-  box-shadow: inset 0 -1px 0 rgba(104, 160, 255, 0.45);
+  box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--accent) 45%, transparent);
 }
 
 .diff-table__row--active-change-start.diff-table__row--active-change-end .diff-table__line,
 .diff-table__row--active-change-start.diff-table__row--active-change-end .diff-table__prefix,
 .diff-table__row--active-change-start.diff-table__row--active-change-end .diff-table__code {
-  box-shadow: inset 0 1px 0 rgba(104, 160, 255, 0.45), inset 0 -1px 0 rgba(104, 160, 255, 0.45);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--accent) 45%, transparent), inset 0 -1px 0 color-mix(in srgb, var(--accent) 45%, transparent);
 }
 
 .diff-table__row--active-change-start .diff-table__line:first-child {
-  box-shadow: inset 3px 0 0 var(--accent, #68a0ff), inset 0 1px 0 rgba(104, 160, 255, 0.45);
+  box-shadow: inset 3px 0 0 var(--accent), inset 0 1px 0 color-mix(in srgb, var(--accent) 45%, transparent);
 }
 
 .diff-table__row--active-change-end .diff-table__line:first-child {
-  box-shadow: inset 3px 0 0 var(--accent, #68a0ff), inset 0 -1px 0 rgba(104, 160, 255, 0.45);
+  box-shadow: inset 3px 0 0 var(--accent), inset 0 -1px 0 color-mix(in srgb, var(--accent) 45%, transparent);
 }
 
 .diff-table__row--active-change-start.diff-table__row--active-change-end .diff-table__line:first-child {
-  box-shadow: inset 3px 0 0 var(--accent, #68a0ff), inset 0 1px 0 rgba(104, 160, 255, 0.45), inset 0 -1px 0 rgba(104, 160, 255, 0.45);
+  box-shadow: inset 3px 0 0 var(--accent), inset 0 1px 0 color-mix(in srgb, var(--accent) 45%, transparent), inset 0 -1px 0 color-mix(in srgb, var(--accent) 45%, transparent);
 }
