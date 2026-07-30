@@ -530,6 +530,25 @@ pub async fn run_scan(
 
         version += 1;
         let selected_entries = build_selected_entries(&schema_entries, &selection);
+        {
+            let mut s = state.lock().await;
+            let Some(panel) = s.panels.get_mut(&panel_id) else {
+                return;
+            };
+            if panel.panel_epoch != panel_epoch
+                || panel.source_id != source_id
+                || panel.path != path
+            {
+                eprintln!(
+                    "[scan] stale streamed scan skipped: panel={panel_id} source={source_id} path={path} epoch={panel_epoch} current_source={} current_path={} current_epoch={}",
+                    panel.source_id,
+                    panel.path,
+                    panel.panel_epoch
+                );
+                return;
+            }
+            panel.git = git_status.clone();
+        }
         let sent = tx
             .send(ServerMessage::StatePatch {
                 timestamp: crate::ws::protocol::now(),

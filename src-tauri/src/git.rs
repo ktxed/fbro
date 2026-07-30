@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path};
 use std::process::Command;
 
@@ -179,6 +179,47 @@ pub fn run(root: &str, args: &[String]) -> Result<(), String> {
     if output.status.success() { Ok(()) } else { Err(String::from_utf8_lossy(&output.stderr).trim().to_string()) }
 }
 
+/// Discard the current local state for the requested status entries. Tracked
+/// paths return to HEAD; additions and untracked paths are removed instead.
+/// Rename source paths are included so rolling back a rename is one action.
+pub fn rollback_paths(root: &str, paths: &[String]) -> Result<(), String> {
+    let status = inspect(root).ok_or_else(|| "No Git repository is available for this panel.".to_string())?;
+    let requested: HashSet<String> = paths
+        .iter()
+        .map(|path| normalize_repo_path(root, path))
+        .collect::<Result<_, _>>()?;
+    if requested.is_empty() { return Err("No paths were provided.".into()); }
+
+    let changes: HashMap<&str, &GitChange> = status.changes.iter().map(|change| (change.path.as_str(), change)).collect();
+    let mut tracked = HashSet::new();
+    let mut added_or_untracked = HashSet::new();
+    for path in requested {
+        let change = changes.get(path.as_str()).ok_or_else(|| format!("The requested Git path has no changes: {path}"))?;
+        if change.index_status == "?" || change.index_status == "A" {
+            added_or_untracked.insert(change.path.clone());
+        } else {
+            tracked.insert(change.path.clone());
+            if let Some(old_path) = &change.old_path { tracked.insert(old_path.clone()); }
+        }
+    }
+
+    if !tracked.is_empty() {
+        let mut command = vec!["restore".into(), "--source=HEAD".into(), "--staged".into(), "--worktree".into(), "--".into()];
+        command.extend(tracked);
+        run(root, &command)?;
+    }
+    if !added_or_untracked.is_empty() {
+        let paths: Vec<String> = added_or_untracked.into_iter().collect();
+        let mut unstage = vec!["rm".into(), "--cached".into(), "--ignore-unmatch".into(), "--".into()];
+        unstage.extend(paths.iter().cloned());
+        run(root, &unstage)?;
+        let mut clean = vec!["clean".into(), "-fd".into(), "--".into()];
+        clean.extend(paths);
+        run(root, &clean)?;
+    }
+    Ok(())
+}
+
 pub fn read_diff_content(root: &str, target_path: &str, max_bytes: u64) -> Result<GitDiffContent, String> {
     let repo_path = normalize_repo_path(root, target_path)?;
     let status = inspect(root).ok_or_else(|| "No Git repository is available for this panel.".to_string())?;
@@ -273,7 +314,7 @@ mod tests {
     use std::process::Command;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use super::{has_no_staged_changes, read_diff_content, status_counts, GitChange};
+    use super::{has_no_staged_changes, read_diff_content, rollback_paths, status_counts, GitChange};
 
     fn change(index_status: &str, worktree_status: &str) -> GitChange {
         GitChange { path: "file".into(), old_path: None, index_status: index_status.into(), worktree_status: worktree_status.into() }
@@ -351,6 +392,56 @@ mod tests {
             assert_eq!(diff.head, b"old\n");
             assert_eq!(diff.worktree, b"old\n");
         });
+    }
+
+    #[test]
+    fn rollback_restores_tracked_and_deleted_paths_and_removes_additions() {
+        with_test_repo(|repo| {
+            fs::write(repo.join("tracked.txt"), "changed\n").unwrap();
+            fs::remove_file(repo.join("removed.txt")).unwrap();
+            fs::write(repo.join("new.txt"), "new\n").unwrap();
+            fs::write(repo.join("untracked.txt"), "untracked\n").unwrap();
+            git(repo, &["add", "tracked.txt", "removed.txt", "new.txt"]);
+
+            rollback_paths(repo.to_str().unwrap(), &[
+                "tracked.txt".into(), "removed.txt".into(), "new.txt".into(), "untracked.txt".into(),
+            ]).unwrap();
+
+            assert_eq!(fs::read_to_string(repo.join("tracked.txt")).unwrap(), "base\n");
+            assert_eq!(fs::read_to_string(repo.join("removed.txt")).unwrap(), "remove\n");
+            assert!(!repo.join("new.txt").exists());
+            assert!(!repo.join("untracked.txt").exists());
+            assert!(super::inspect(repo.to_str().unwrap()).unwrap().changes.is_empty());
+        });
+    }
+
+    #[test]
+    fn rollback_restores_both_sides_of_a_rename() {
+        with_test_repo(|repo| {
+            fs::rename(repo.join("old.txt"), repo.join("renamed.txt")).unwrap();
+            git(repo, &["add", "-A"]);
+
+            rollback_paths(repo.to_str().unwrap(), &["renamed.txt".into()]).unwrap();
+
+            assert_eq!(fs::read_to_string(repo.join("old.txt")).unwrap(), "old\n");
+            assert!(!repo.join("renamed.txt").exists());
+            assert!(super::inspect(repo.to_str().unwrap()).unwrap().changes.is_empty());
+        });
+    }
+
+    #[test]
+    fn rollback_removes_staged_additions_in_an_unborn_repository() {
+        let repo = temp_repo_path();
+        fs::create_dir_all(&repo).unwrap();
+        git(&repo, &["init", "-q"]);
+        fs::write(repo.join("new.txt"), "new\n").unwrap();
+        git(&repo, &["add", "new.txt"]);
+
+        rollback_paths(repo.to_str().unwrap(), &["new.txt".into()]).unwrap();
+
+        assert!(!repo.join("new.txt").exists());
+        assert!(super::inspect(repo.to_str().unwrap()).unwrap().changes.is_empty());
+        fs::remove_dir_all(repo).unwrap();
     }
 
     fn with_test_repo(test: impl FnOnce(&Path)) {

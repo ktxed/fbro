@@ -1,5 +1,5 @@
 import { forwardRef, useEffect, useRef, useState } from "react";
-import type { KeyboardEventHandler, MouseEventHandler, ReactNode, Ref } from "react";
+import type { KeyboardEventHandler, MouseEventHandler, PointerEventHandler, ReactNode, Ref } from "react";
 import { useAppState } from "../store";
 import type { WsClient } from "../ws/client";
 
@@ -24,6 +24,7 @@ interface ResizableModalProps {
   maxViewportMargin?: number;
   onClick?: MouseEventHandler<HTMLDivElement>;
   onKeyDown?: KeyboardEventHandler<HTMLDivElement>;
+  onPointerDownCapture?: PointerEventHandler<HTMLDivElement>;
   children: ReactNode;
 }
 
@@ -67,6 +68,7 @@ export const ResizableModal = forwardRef<HTMLDivElement, ResizableModalProps>(fu
     maxViewportMargin = 48,
     onClick,
     onKeyDown,
+    onPointerDownCapture,
     children,
   },
   forwardedRef,
@@ -175,6 +177,7 @@ export const ResizableModal = forwardRef<HTMLDivElement, ResizableModalProps>(fu
         onClick?.(e);
       }}
       onKeyDown={onKeyDown}
+      onPointerDownCapture={onPointerDownCapture}
     >
       {children}
       {HANDLE_DIRECTIONS.map((direction) => (

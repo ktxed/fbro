@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { backendPath, hostPath } from "../config.mjs";
-import { clickContextMenuItem, clickEntry, goToPanelPath, openPanelContextMenu } from "../browser.mjs";
+import { goToPanelPath } from "../browser.mjs";
 import { waitFor } from "../wait.mjs";
 
 export async function runGitFlow(browser, observer) {
@@ -15,27 +15,30 @@ export async function runGitFlow(browser, observer) {
   git(hostRepo, ["config", "user.name", "fbro tests"]);
   fs.writeFileSync(path.join(hostRepo, "changed.txt"), "before\n");
   fs.writeFileSync(path.join(hostRepo, "stage.txt"), "before stage\n");
-  git(hostRepo, ["add", "changed.txt"]);
-  git(hostRepo, ["add", "stage.txt"]);
+  fs.writeFileSync(path.join(hostRepo, "removed.txt"), "restore me\n");
+  git(hostRepo, ["add", "changed.txt", "stage.txt", "removed.txt"]);
   git(hostRepo, ["commit", "-qm", "initial"]);
   fs.writeFileSync(path.join(hostRepo, "changed.txt"), "after\n");
   fs.writeFileSync(path.join(hostRepo, "stage.txt"), "after stage\n");
+  fs.rmSync(path.join(hostRepo, "removed.txt"));
+  fs.writeFileSync(path.join(hostRepo, "untracked.txt"), "remove me\n");
+  git(hostRepo, ["add", "removed.txt"]);
 
   await goToPanelPath(browser, observer, "left", repo);
   await observer.waitForEntry("left", "changed.txt", "file");
-  await waitFor(() => observer.state.panels.left?.git?.changes?.some((change) => change.path === "changed.txt") || false, {
-    timeout: 10_000,
-    label: "Git change status",
-  });
-
-  await clickEntry(browser, "left", "changed.txt");
-  await openPanelContextMenu(browser, "left");
-  await clickContextMenuItem(browser, "View Git diff");
-  await assertAndCloseDiffWindow(browser, "before", "after");
-
   const gitButton = await browser.$('[data-testid="panel-left"] .panel__git-btn');
   await gitButton.waitForClickable({ timeout: 10_000 });
   await gitButton.click();
+  const gitModal = await browser.$(".git-modal");
+  await gitModal.waitForDisplayed({ timeout: 10_000 });
+  await waitFor(() => gitChangeCode(browser, "changed.txt"), {
+    timeout: 10_000,
+    label: "Git change row",
+  });
+  await waitFor(async () => (await gitChangeCode(browser, "removed.txt")) === "D ", {
+    timeout: 10_000,
+    label: "Staged Git deletion",
+  });
   const panelCursor = observer.state.panels.left?.cursor;
   await browser.keys("ArrowDown");
   await waitFor(async () => (await browser.$('[data-testid="git-change-row"][data-change-index="1"]')).isFocused(), {
@@ -50,47 +53,119 @@ export async function runGitFlow(browser, observer) {
     timeout: 10_000,
     label: "Git change row K navigation",
   });
-  await browser.keys("v");
-  await assertAndCloseDiffWindow(browser, "before", "after");
 
-  await browser.keys("j");
+  await browser.keys(" ");
+  await waitFor(async () => (await gitSelectionCount(browser)) === "1 selected", {
+    timeout: 10_000,
+    label: "Git keyboard selection",
+  });
+  await browser.keys(" ");
+  await waitFor(async () => (await gitSelectionCount(browser)) === "", {
+    timeout: 10_000,
+    label: "Git keyboard deselection",
+  });
+
+  const changeCount = await browser.execute(() => document.querySelectorAll('[data-testid="git-change-row"]').length);
+  await (await browser.$('[data-testid="git-select-all-toggle"]')).click();
+  await waitFor(async () => (await gitSelectionCount(browser)) === `${changeCount} selected`, {
+    timeout: 10_000,
+    label: "Git select all",
+  });
+  await (await browser.$('[data-testid="git-select-all-toggle"]')).click();
+  await waitFor(async () => (await gitSelectionCount(browser)) === "", {
+    timeout: 10_000,
+    label: "Git clear all",
+  });
+
+  await browser.execute(() => {
+    const row = [...document.querySelectorAll('[data-testid="git-change-row"]')]
+      .find((candidate) => candidate.querySelector('span[title="stage.txt"]'));
+    row?.focus();
+  });
   await browser.keys("s");
-  await waitFor(() => observer.state.panels.left?.git?.changes?.some((change) => change.path === "stage.txt" && change.indexStatus === "M") || false, {
+  await waitFor(async () => (await gitChangeCode(browser, "stage.txt")) === "M ", {
     timeout: 10_000,
     label: "Git keyboard stage",
   });
   await browser.keys("s");
-  await waitFor(() => observer.state.panels.left?.git?.changes?.some((change) => change.path === "stage.txt" && change.indexStatus === " ") || false, {
+  await waitFor(async () => (await gitChangeCode(browser, "stage.txt")) === " M", {
     timeout: 10_000,
     label: "Git keyboard unstage",
   });
 
-  const modalDiffButton = await browser.$('[data-testid="git-view-diff"]');
-  await modalDiffButton.waitForClickable({ timeout: 10_000 });
-  await modalDiffButton.click();
-  await assertAndCloseDiffWindow(browser, "before", "after");
+  const rangePaths = await browser.execute(() => [...document.querySelectorAll('[data-testid="git-change-row"] span[title]')]
+    .slice(0, 2)
+    .map((element) => element.getAttribute("title")));
+  if (rangePaths.length !== 2 || rangePaths.some((path) => !path)) {
+    throw new Error("Git range selection requires two visible change rows");
+  }
+  await selectGitChange(browser, rangePaths[0]);
+  await waitFor(async () => (await gitSelectionCount(browser)) === "1 selected", {
+    timeout: 10_000,
+    label: "Git range anchor",
+  });
+  await selectGitChange(browser, rangePaths[1], true);
+  await waitFor(async () => (await gitSelectionCount(browser)) === "2 selected", {
+    timeout: 10_000,
+    label: "Git range selection",
+  });
+  await (await browser.$('[data-testid="git-clear-selection"]')).click();
+  await selectGitChange(browser, "changed.txt");
+  await selectGitChange(browser, "stage.txt");
+  await waitFor(async () => (await gitSelectionCount(browser)) === "2 selected", {
+    timeout: 10_000,
+    label: "Git batch selection",
+  });
+  await (await browser.$('[data-testid="git-stage-selected"]')).click();
+  await waitFor(async () => (await Promise.all(["changed.txt", "stage.txt"].map(gitChangeCode.bind(null, browser)))).every((code) => code === "M "), {
+    timeout: 10_000,
+    label: "Git batch stage",
+  });
+  await (await browser.$('[data-testid="git-unstage-selected"]')).click();
+  await waitFor(async () => (await Promise.all(["changed.txt", "stage.txt"].map(gitChangeCode.bind(null, browser)))).every((code) => code === " M"), {
+    timeout: 10_000,
+    label: "Git batch unstage",
+  });
+  await (await browser.$('[data-testid="git-clear-selection"]')).click();
+
+  await selectGitChange(browser, "removed.txt");
+  await selectGitChange(browser, "untracked.txt");
+  await (await browser.$('[data-testid="git-rollback-selected"]')).click();
+  await waitFor(async () => (await browser.execute(() => document.querySelector('[data-testid="git-rollback-selected"]')?.textContent?.trim())) === "Confirm rollback 2", {
+    timeout: 10_000,
+    label: "Git rollback confirmation",
+  });
+  await (await browser.$('[data-testid="git-rollback-selected"]')).click();
+  await waitFor(async () => !(await gitChangeCode(browser, "removed.txt")) && !(await gitChangeCode(browser, "untracked.txt")), {
+    timeout: 10_000,
+    label: "Git batch rollback",
+  });
+  if (!fs.existsSync(path.join(hostRepo, "removed.txt")) || fs.existsSync(path.join(hostRepo, "untracked.txt"))) {
+    throw new Error("Git rollback did not restore the staged deletion and remove the untracked file");
+  }
 }
 
-async function assertAndCloseDiffWindow(browser, deleted, inserted) {
-  const mainWindow = await browser.getWindowHandle();
-  const diffWindow = await waitFor(async () => {
-    const handles = await browser.getWindowHandles();
-    return handles.find((handle) => handle !== mainWindow) || false;
-  }, { timeout: 10_000, label: "Git diff window" });
-  await browser.switchToWindow(diffWindow);
-  const viewer = await browser.$('[data-testid="diff-viewer"]');
-  await viewer.waitForDisplayed({ timeout: 10_000 });
-  await waitFor(async () => {
-    const rows = await browser.$$('[data-testid="diff-viewer"] [data-diff-row]');
-    const text = await Promise.all(rows.map((row) => row.getText()));
-    return text.some((row) => row.includes(deleted)) && text.some((row) => row.includes(inserted));
-  }, { timeout: 10_000, label: "Git diff rows" });
-  await browser.$('.diff-viewer__close').click();
-  await waitFor(async () => !(await browser.getWindowHandles()).includes(diffWindow), {
-    timeout: 10_000,
-    label: "Git diff window close",
-  });
-  await browser.switchToWindow(mainWindow);
+async function selectGitChange(browser, path, shift = false) {
+  const selector = `[data-testid="git-change-select"][aria-label="Select ${path}"]`;
+  const checkbox = await browser.$(selector);
+  await checkbox.waitForClickable({ timeout: 10_000 });
+  if (shift) {
+    await browser.execute((selector) => document.querySelector(selector)?.dispatchEvent(new MouseEvent("click", { bubbles: true, shiftKey: true })), selector);
+  } else {
+    await checkbox.click();
+  }
+}
+
+async function gitChangeCode(browser, path) {
+  return browser.execute((path) => {
+    const row = [...document.querySelectorAll('[data-testid="git-change-row"]')]
+      .find((candidate) => candidate.querySelector('span[title]')?.getAttribute("title") === path);
+    return row?.querySelector("code")?.textContent ?? null;
+  }, path);
+}
+
+async function gitSelectionCount(browser) {
+  return browser.execute(() => document.querySelector('[data-testid="git-selection-count"]')?.textContent?.trim() ?? "");
 }
 
 function git(cwd, args) {

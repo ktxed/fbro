@@ -12,6 +12,7 @@ pub(crate) async fn handle(name: &str, args: &Value, ctx: &mut IntentContext<'_>
     let result = match name {
         "GitStagePaths" => run_paths(&root, "add", args, false),
         "GitUnstagePaths" => run_paths(&root, "restore", args, true),
+        "GitRollbackPaths" => rollback_paths(&root, args),
         "GitCommit" => {
             let message = args.get("message").and_then(Value::as_str).unwrap_or("").trim();
             if message.is_empty() { Err("A commit message is required.".to_string()) }
@@ -37,6 +38,12 @@ pub(crate) async fn handle(name: &str, args: &Value, ctx: &mut IntentContext<'_>
         Ok(()) => rescan_panel(&panel_id, ctx.state, ctx.tx, ctx.scan_handles, None, None, ctx.dir_size_queue, ctx.watcher_cmd_tx).await,
         Err(message) => send_error(ctx, "GIT_ACTION_FAILED", &message).await,
     }
+}
+
+fn rollback_paths(root: &str, args: &Value) -> Result<(), String> {
+    let paths = args.get("paths").and_then(Value::as_array).ok_or("No paths were provided.")?;
+    let paths = paths.iter().filter_map(Value::as_str).map(str::to_string).collect::<Vec<_>>();
+    crate::git::rollback_paths(root, &paths)
 }
 
 fn guarded(clean: bool, action: impl FnOnce() -> Result<(), String>) -> Result<(), String> {

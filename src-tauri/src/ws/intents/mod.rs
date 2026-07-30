@@ -117,7 +117,7 @@ pub async fn dispatch(name: &str, scope: &Value, args: &Value, ctx: &mut IntentC
             bookmarks::handle(name, scope, args, ctx).await
         }
         "EnterHistorySource" => history::handle(name, scope, args, ctx).await,
-        "GitRefresh" | "GitFetch" | "GitStagePaths" | "GitUnstagePaths" | "GitCommit" | "GitSwitchBranch" | "GitPull" | "GitPush" | "GitSetUpstream" => git::handle(name, args, ctx).await,
+        "GitRefresh" | "GitFetch" | "GitStagePaths" | "GitUnstagePaths" | "GitRollbackPaths" | "GitCommit" | "GitSwitchBranch" | "GitPull" | "GitPush" | "GitSetUpstream" => git::handle(name, args, ctx).await,
         "EnterProcsSource" => procs::handle(name, scope, args, ctx).await,
         "Quit" | "ConfirmQuit" | "SetFontSize" => app::handle(name, args, ctx).await,
         "SetGeneralOption" | "SetModalSizePreference" | "ClearThumbnailCache" => {
@@ -161,7 +161,7 @@ fn should_record_command(name: &str) -> bool {
             | "OpenFile"
             | "KillProcess"
             | "OpenTerminal"
-            | "GitFetch" | "GitStagePaths" | "GitUnstagePaths" | "GitCommit" | "GitSwitchBranch" | "GitPull" | "GitPush" | "GitSetUpstream"
+            | "GitFetch" | "GitStagePaths" | "GitUnstagePaths" | "GitRollbackPaths" | "GitCommit" | "GitSwitchBranch" | "GitPull" | "GitPush" | "GitSetUpstream"
     )
 }
 
