@@ -46,12 +46,16 @@ function GitBubbleActions({
   label,
   staged,
   client,
+  onExitKeyboardMode,
+  onRestoreStageFocus,
 }: {
   panelId: string;
   path: string;
   label: string;
   staged: boolean;
   client: WsClient;
+  onExitKeyboardMode: () => void;
+  onRestoreStageFocus: () => void;
 }) {
   const [rollbackArmed, setRollbackArmed] = useState(false);
   const tooltipId = `git-inline-actions-${panelId}`;
@@ -64,19 +68,53 @@ function GitBubbleActions({
     setRollbackArmed(false);
     client.sendIntent(name, undefined, { panelId, paths: [path] });
   };
-  const runStageAction = () => runPathAction(staged ? "GitUnstagePaths" : "GitStagePaths");
+  const runStageAction = () => {
+    onRestoreStageFocus();
+    runPathAction(staged ? "GitUnstagePaths" : "GitStagePaths");
+  };
   const runRollbackAction = () => {
-    if (rollbackArmed) runPathAction("GitRollbackPaths");
+    if (rollbackArmed) {
+      onExitKeyboardMode();
+      runPathAction("GitRollbackPaths");
+    }
     else setRollbackArmed(true);
   };
   const stopRowInteraction = (event: React.SyntheticEvent) => event.stopPropagation();
+  const handleToolbarKeyDown = (event: React.KeyboardEvent<HTMLSpanElement>) => {
+    const unmodified = !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey;
+    if (unmodified && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
+      const buttons = [...event.currentTarget.querySelectorAll<HTMLButtonElement>("button")];
+      const current = buttons.indexOf(document.activeElement as HTMLButtonElement);
+      if (buttons.length > 0 && current >= 0) {
+        event.preventDefault();
+        event.stopPropagation();
+        const direction = event.key === "ArrowRight" ? 1 : -1;
+        buttons[(current + direction + buttons.length) % buttons.length].focus();
+      }
+      return;
+    }
+    if (event.key === "Enter" || event.key === " ") {
+      event.stopPropagation();
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      onExitKeyboardMode();
+      return;
+    }
+    if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+      onExitKeyboardMode();
+    }
+  };
 
   return (
     <span className="panel__git-bubble panel__git-bubble--actions" data-testid="git-inline-bubble">
       <span className="panel__git-bubble-label">{label}</span>
-      <span className="panel__git-bubble-buttons" role="toolbar" aria-label={`Git actions for ${path}`}>
+      <span className="panel__git-bubble-buttons" role="toolbar" aria-label={`Git actions for ${path}`} onKeyDown={handleToolbarKeyDown}>
         <button
           type="button"
+          tabIndex={-1}
           className="panel__git-bubble-action"
           data-testid="git-inline-view-diff"
           data-tooltip-id={tooltipId}
@@ -94,6 +132,7 @@ function GitBubbleActions({
         </button>
         <button
           type="button"
+          tabIndex={-1}
           className="panel__git-bubble-action"
           data-testid={staged ? "git-inline-unstage" : "git-inline-stage"}
           data-tooltip-id={tooltipId}
@@ -107,6 +146,7 @@ function GitBubbleActions({
         </button>
         <button
           type="button"
+          tabIndex={-1}
           className={`panel__git-bubble-action panel__git-bubble-action--danger${rollbackArmed ? " panel__git-bubble-action--armed" : ""}`}
           data-testid="git-inline-rollback"
           data-tooltip-id={tooltipId}
@@ -621,6 +661,7 @@ export function Panel({
   const [gridMetrics, setGridMetrics] = useState<{ cols: number; cardWidth: number; cardHeight: number; pageRows: number }>({ cols: 1, cardWidth: GRID_CARD_MIN_WIDTH, cardHeight: 168, pageRows: 1 });
   const listRef = useRef<HTMLDivElement>(null);
   const focusDivRef = useRef<HTMLDivElement>(null);
+  const restoreInlineStageFocusRef = useRef(false);
   const bookmarkBtnRef = useRef<HTMLButtonElement>(null);
   const rightDrag = useRef({ active: false, everMoved: false, startRow: -1, mode: "select" as "select" | "deselect", preSelection: [] as number[] });
   const termFocusFnRef = useRef<(() => void) | null>(null);
@@ -688,6 +729,23 @@ export function Panel({
     shouldFocusFilterRef.current = false;
     focusDivRef.current?.focus();
   }, []);
+
+  const requestInlineStageFocusRestore = useCallback(() => {
+    restoreInlineStageFocusRef.current = true;
+  }, []);
+
+  useEffect(() => {
+    if (!restoreInlineStageFocusRef.current) return;
+    const frame = requestAnimationFrame(() => {
+      const cursorRow = listRef.current?.querySelector<HTMLElement>(`[data-abs-index="${panel.cursor}"]`);
+      const stageButton = cursorRow?.querySelector<HTMLButtonElement>('[data-testid="git-inline-stage"], [data-testid="git-inline-unstage"]');
+      if (stageButton) {
+        stageButton.focus();
+        restoreInlineStageFocusRef.current = false;
+      }
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [panel.cursor, panel.entries, panel.status]);
 
   const closeSortSelector = useCallback(() => {
     if (appState.activeSortSelectorPanelId === panelId) {
@@ -1108,6 +1166,17 @@ export function Panel({
     if (sortSelectorOpen) {
       handleSortSelectorKeyDown(e);
       return;
+    }
+    const unmodified = !e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey;
+    if (unmodified && e.key === "ArrowRight" && panel.viewMode === "list") {
+      const cursorRow = listRef.current?.querySelector<HTMLElement>(`[data-abs-index="${panel.cursor}"]`);
+      const diffButton = cursorRow?.querySelector<HTMLButtonElement>('[data-testid="git-inline-view-diff"]');
+      if (diffButton) {
+        e.preventDefault();
+        e.stopPropagation();
+        diffButton.focus();
+        return;
+      }
     }
     const gitActionsCommand = findMatchingCommand(appState.commands, ["panel.git.actions"], e.nativeEvent, panel.viewMode);
     if (gitActionsCommand) {
@@ -1646,7 +1715,7 @@ export function Panel({
               )}
               {entry.gitStatus && <span className="panel__git-status" data-tooltip-id={`git-summary-${panelId}`} data-tooltip-content={gitSummary ? `Git: ${entry.gitStatus}\n${gitSummary}` : `Git: ${entry.gitStatus}`}>{entry.gitStatus === "untracked" ? "?" : entry.gitStatus === "modified" ? "M" : entry.gitStatus === "deleted" ? "D" : entry.gitStatus === "conflicted" ? "!" : "●"}</span>}
               {absIndex === panel.cursor && gitInline && (inlineGitPath && inlineGitChange
-                ? <GitBubbleActions panelId={panelId} path={inlineGitPath} label={gitInline} staged={inlineGitChange.indexStatus !== " " && inlineGitChange.indexStatus !== "?"} client={client} />
+                ? <GitBubbleActions panelId={panelId} path={inlineGitPath} label={gitInline} staged={inlineGitChange.indexStatus !== " " && inlineGitChange.indexStatus !== "?"} client={client} onExitKeyboardMode={focusPanel} onRestoreStageFocus={requestInlineStageFocusRestore} />
                 : <span className="panel__git-bubble" data-tooltip-id={`git-summary-${panelId}`} data-tooltip-content={gitSummary}>{gitInline}</span>)}
             </span>
           );

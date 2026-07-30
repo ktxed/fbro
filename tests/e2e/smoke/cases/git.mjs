@@ -48,7 +48,40 @@ export async function runGitFlow(browser, observer) {
   const iconTooltip = await browser.$(".panel__git-icon-tooltip");
   await iconTooltip.waitForDisplayed({ timeout: 10_000 });
   if ((await iconTooltip.getText()).trim() !== "Stage") throw new Error("Inline Stage tooltip has unexpected text");
-  await inlineStage.click();
+
+  await browser.keys("ArrowRight");
+  await waitFor(async () => (await browser.$('[data-testid="git-inline-view-diff"]')).isFocused(), {
+    timeout: 10_000,
+    label: "inline Git keyboard entry",
+  });
+  const cursorEntry = await browser.execute(() => document.querySelector('[data-testid="panel-left"] .panel__row--cursor')?.getAttribute("data-entry-name"));
+  if (cursorEntry !== "inline.txt") throw new Error(`Inline Git keyboard entry changed the cursor to ${cursorEntry}`);
+
+  await browser.keys("ArrowRight");
+  await waitFor(async () => (await browser.$('[data-testid="git-inline-stage"]')).isFocused(), {
+    timeout: 10_000,
+    label: "inline Git keyboard right navigation",
+  });
+  await browser.keys("ArrowLeft");
+  await waitFor(async () => (await browser.$('[data-testid="git-inline-view-diff"]')).isFocused(), {
+    timeout: 10_000,
+    label: "inline Git keyboard left navigation",
+  });
+  await browser.keys("ArrowLeft");
+  await waitFor(async () => (await browser.$('[data-testid="git-inline-rollback"]')).isFocused(), {
+    timeout: 10_000,
+    label: "inline Git keyboard wrap",
+  });
+  await browser.keys("ArrowRight");
+  await browser.keys("Escape");
+  await waitFor(async () => (await browser.$('[data-testid="panel-left"]')).isFocused(), {
+    timeout: 10_000,
+    label: "inline Git keyboard exit",
+  });
+
+  await browser.keys("ArrowRight");
+  await browser.keys("ArrowRight");
+  await browser.keys("Enter");
   await waitFor(async () => (await panelGitStatus(browser, "inline.txt")) === "●", {
     timeout: 10_000,
     label: "inline Git stage",
@@ -57,15 +90,24 @@ export async function runGitFlow(browser, observer) {
   const inlineUnstage = await browser.$('[data-testid="git-inline-unstage"]');
   await inlineUnstage.waitForDisplayed({ timeout: 10_000 });
   if ((await inlineUnstage.getAttribute("data-tooltip-content")) !== "Unstage") throw new Error("Inline Unstage tooltip has unexpected text");
-  await inlineUnstage.click();
+  await waitFor(async () => (await browser.$('[data-testid="git-inline-unstage"]')).isFocused(), {
+    timeout: 10_000,
+    label: "inline Git focus after stage",
+  });
+  await browser.keys("Enter");
   await waitFor(async () => (await panelGitStatus(browser, "inline.txt")) === "M", {
     timeout: 10_000,
     label: "inline Git unstage",
   });
+  await waitFor(async () => (await browser.$('[data-testid="git-inline-stage"]')).isFocused(), {
+    timeout: 10_000,
+    label: "inline Git focus after unstage",
+  });
 
   inlineRollback = await browser.$('[data-testid="git-inline-rollback"]');
   await inlineRollback.waitForDisplayed({ timeout: 10_000 });
-  await inlineRollback.click();
+  await browser.keys("ArrowRight");
+  await browser.keys("Enter");
   inlineRollback = await browser.$('[data-testid="git-inline-rollback"]');
   await waitFor(async () => (await inlineRollback.getAttribute("aria-label")) === "Confirm rollback inline.txt", {
     timeout: 10_000,
@@ -75,7 +117,7 @@ export async function runGitFlow(browser, observer) {
   if (fs.readFileSync(path.join(hostRepo, "inline.txt"), "utf8") !== "after inline\n") {
     throw new Error("Inline Git rollback changed the file before confirmation");
   }
-  await inlineRollback.click();
+  await browser.keys("Enter");
   await waitFor(async () => (await panelGitStatus(browser, "inline.txt")) === null, {
     timeout: 10_000,
     label: "inline Git rollback",
@@ -83,6 +125,10 @@ export async function runGitFlow(browser, observer) {
   if (fs.readFileSync(path.join(hostRepo, "inline.txt"), "utf8") !== "before inline\n") {
     throw new Error("Inline Git rollback did not restore the committed content");
   }
+  await waitFor(async () => (await browser.$('[data-testid="panel-left"]')).isFocused(), {
+    timeout: 10_000,
+    label: "panel focus after inline Git rollback",
+  });
 
   await clickEntry(browser, "left", "nested");
   const directoryBubbleState = await waitFor(async () => {
@@ -220,7 +266,12 @@ export async function runGitFlow(browser, observer) {
   await clickEntry(browser, "left", "changed.txt");
   const inlineViewDiff = await browser.$('[data-entry-name="changed.txt"] [data-testid="git-inline-view-diff"]');
   await inlineViewDiff.waitForClickable({ timeout: 10_000 });
-  await inlineViewDiff.click();
+  await browser.keys("ArrowRight");
+  await waitFor(async () => (await browser.$('[data-entry-name="changed.txt"] [data-testid="git-inline-view-diff"]')).isFocused(), {
+    timeout: 10_000,
+    label: "inline Git diff keyboard focus",
+  });
+  await browser.keys("Enter");
 
   observer.sendIntent("GitStagePaths", undefined, { panelId: "left", paths: [] });
   observer.sendIntent("GitViewDiff", undefined, { panelId: "left" });
