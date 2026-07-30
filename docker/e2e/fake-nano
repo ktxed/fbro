@@ -1,0 +1,4 @@
+#!/bin/sh
+set -eu
+sleep 0.25
+printf 'quick edit saved\n' >> "$1"

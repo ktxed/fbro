@@ -1,6 +1,6 @@
 # Project context
 
-`fbro` is an n-panel "orthodox" file manager.
+`fbro` is a 2-panel "orthodox" file manager.
 
 The `spex` folder contains the project's specification:
 

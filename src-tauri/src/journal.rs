@@ -82,6 +82,135 @@ pub fn record_command(name: &str, scope: &Value, args: &Value, source_id: Option
     );
 }
 
+#[derive(Clone, Debug)]
+pub struct JournalOperation {
+    operation_id: String,
+    command: String,
+    kind: &'static str,
+    source_id: Option<String>,
+    context: Value,
+}
+
+pub fn new_operation(command: &str, source_id: Option<&str>) -> Option<JournalOperation> {
+    new_operation_with_context(command, source_id, Value::Null)
+}
+
+fn new_operation_with_context(command: &str, source_id: Option<&str>, context: Value) -> Option<JournalOperation> {
+    Some(JournalOperation {
+        operation_id: uuid::Uuid::new_v4().to_string(),
+        command: command.to_string(),
+        kind: command_operation(command)?,
+        source_id: source_id.map(str::to_string),
+        context,
+    })
+}
+
+fn record_correlated_intent(operation: &JournalOperation, scope: Value, args: &Value, context: Value) {
+    let payload = correlated_intent_payload(operation, scope, args, context);
+    record(
+        "intent.command.v1",
+        Some(&operation.operation_id),
+        None,
+        operation.source_id.as_deref(),
+        None,
+        payload,
+    );
+}
+
+fn correlated_intent_payload(operation: &JournalOperation, scope: Value, args: &Value, context: Value) -> Value {
+    let mut payload = json!({
+        "operationId": operation.operation_id,
+        "command": operation.command,
+        "scope": scope,
+        "args": args,
+        "kind": operation.kind,
+    });
+    merge_payload_context(&mut payload, operation.context.clone());
+    merge_payload_context(&mut payload, context);
+    payload
+}
+
+fn record_correlated_result(operation: &JournalOperation, outcome: &str, error: Option<&str>, context: Value) {
+    let payload = correlated_result_payload(operation, outcome, error, context);
+    record(
+        "operation.finished.v1",
+        Some(&operation.operation_id),
+        None,
+        operation.source_id.as_deref(),
+        Some(outcome),
+        payload,
+    );
+}
+
+fn correlated_result_payload(operation: &JournalOperation, outcome: &str, error: Option<&str>, context: Value) -> Value {
+    let mut payload = json!({
+        "operationId": operation.operation_id,
+        "kind": operation.kind,
+        "command": operation.command,
+        "outcome": outcome,
+        "error": error,
+    });
+    merge_payload_context(&mut payload, operation.context.clone());
+    merge_payload_context(&mut payload, context);
+    payload
+}
+
+fn merge_payload_context(payload: &mut Value, context: Value) {
+    let (Some(payload), Value::Object(context)) = (payload.as_object_mut(), context) else { return };
+    payload.extend(context);
+}
+
+pub fn record_git_intent(
+    command: &str,
+    args: &Value,
+    repository: Option<&str>,
+    source_id: Option<&str>,
+) -> Option<JournalOperation> {
+    let operation = new_operation_with_context(command, source_id, json!({ "repository": repository }))?;
+    record_correlated_intent(&operation, Value::Null, args, Value::Null);
+    Some(operation)
+}
+
+pub fn record_git_result(operation: &JournalOperation, outcome: &str, error: Option<&str>) {
+    record_correlated_result(operation, outcome, error, Value::Null);
+}
+
+pub fn record_quick_edit_intent(
+    operation: &JournalOperation,
+    panel_id: &str,
+    path: Option<&str>,
+    requested_editor: Option<&str>,
+    editor_candidates: &[&str],
+) {
+    record_correlated_intent(operation, Value::String(panel_id.to_string()), &Value::Null, json!({
+        "path": path,
+        "requestedEditor": requested_editor,
+        "editorCandidates": editor_candidates,
+    }));
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn record_quick_edit_result(
+    operation: &JournalOperation,
+    path: Option<&str>,
+    editor: Option<&str>,
+    session_id: Option<u32>,
+    outcome: &str,
+    error: Option<&str>,
+    changed: Option<bool>,
+    exit_code: Option<u32>,
+    signal: Option<&str>,
+) {
+    record_correlated_result(operation, outcome, error, json!({
+        "path": path,
+        "editor": editor,
+        "terminalSessionId": session_id,
+        "changed": changed,
+        "exitCode": exit_code,
+        "signal": signal,
+    }));
+}
+
 pub fn record_mutation(job_id: &str, kind: &str, source: &str, destination: Option<&str>) {
     record(
         "mutation.entry.v1",
@@ -144,6 +273,17 @@ fn command_operation(command: &str) -> Option<&'static str> {
         "LaunchBro" => Some("bro"),
         "KillProcess" => Some("kill-process"),
         "OpenTerminal" => Some("terminal"),
+        "QuickEditFile" => Some("quick-edit"),
+        "GitFetch" => Some("git-fetch"),
+        "GitStagePaths" => Some("git-stage"),
+        "GitUnstagePaths" => Some("git-unstage"),
+        "GitRollbackPaths" => Some("git-rollback"),
+        "GitCommit" => Some("git-commit"),
+        "GitSwitchBranch" => Some("git-switch-branch"),
+        "GitPull" => Some("git-pull"),
+        "GitPush" => Some("git-push"),
+        "GitSetUpstream" => Some("git-set-upstream"),
+        "GitViewDiff" => Some("git-view-diff"),
         _ => None,
     }
 }
@@ -217,4 +357,99 @@ impl VfsDriver for JournalDriver {
     fn file_size(&self, path: &str) -> Option<u64> { query_event(path).ok().map(|r| event_detail(&r).len() as u64) }
     fn read_dir_entries(&self, _path: &str) -> Result<Vec<DirChild>, VfsError> { Ok(vec![]) }
     fn read_chunk(&self, path: &str, offset: u64, size: usize) -> Result<Vec<u8>, VfsError> { let bytes = event_detail(&query_event(path)?).into_bytes(); let start = (offset as usize).min(bytes.len()); let end = (start + size).min(bytes.len()); Ok(bytes[start..end].to_vec()) }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{command_operation, correlated_intent_payload, correlated_result_payload, event_name, EventRow, JournalOperation};
+    use serde_json::json;
+
+    #[test]
+    fn maps_semantic_git_operations_without_refresh_noise() {
+        let expected = [
+            ("GitFetch", "git-fetch"),
+            ("GitStagePaths", "git-stage"),
+            ("GitUnstagePaths", "git-unstage"),
+            ("GitRollbackPaths", "git-rollback"),
+            ("GitCommit", "git-commit"),
+            ("GitSwitchBranch", "git-switch-branch"),
+            ("GitPull", "git-pull"),
+            ("GitPush", "git-push"),
+            ("GitSetUpstream", "git-set-upstream"),
+            ("GitViewDiff", "git-view-diff"),
+            ("QuickEditFile", "quick-edit"),
+        ];
+        for (command, operation) in expected {
+            assert_eq!(command_operation(command), Some(operation));
+        }
+        assert_eq!(command_operation("GitRefresh"), None);
+    }
+
+    #[test]
+    fn gives_existing_git_intents_semantic_names() {
+        let row = EventRow {
+            id: "event-id".into(),
+            timestamp_ms: 0,
+            event_type: "intent.command.v1".into(),
+            outcome: None,
+            payload: r#"{"command":"GitStagePaths","args":{"paths":["file.txt"]}}"#.into(),
+        };
+        assert_eq!(event_name(&row), "git-stage_v1_intent_event-id.log");
+    }
+
+    #[test]
+    fn names_git_results_by_outcome() {
+        let row = EventRow {
+            id: "event-id".into(),
+            timestamp_ms: 0,
+            event_type: "operation.finished.v1".into(),
+            outcome: Some("failed".into()),
+            payload: r#"{"kind":"git-push","outcome":"failed"}"#.into(),
+        };
+        assert_eq!(event_name(&row), "git-push_v1_failed_event-id.log");
+    }
+
+    #[test]
+    fn correlates_git_intent_and_result_payloads() {
+        let operation = JournalOperation {
+            operation_id: "operation-id".into(),
+            command: "GitStagePaths".into(),
+            kind: "git-stage",
+            source_id: Some("filesystem".into()),
+            context: json!({ "repository": "/repo" }),
+        };
+        let intent = correlated_intent_payload(&operation, serde_json::Value::Null, &json!({ "paths": ["file.txt"] }), serde_json::Value::Null);
+        let result = correlated_result_payload(&operation, "failed", Some("failure"), serde_json::Value::Null);
+        assert_eq!(intent["operationId"], result["operationId"]);
+        assert_eq!(intent["repository"], "/repo");
+        assert_eq!(result["outcome"], "failed");
+        assert_eq!(result["error"], "failure");
+    }
+
+    #[test]
+    fn builds_correlated_quick_edit_payloads() {
+        let operation = JournalOperation {
+            operation_id: "quick-edit-id".into(),
+            command: "QuickEditFile".into(),
+            kind: "quick-edit",
+            source_id: Some("filesystem".into()),
+            context: serde_json::Value::Null,
+        };
+        let intent = correlated_intent_payload(
+            &operation,
+            json!("left"),
+            &serde_json::Value::Null,
+            json!({ "path": "/repo/file.txt", "requestedEditor": "nano" }),
+        );
+        let result = correlated_result_payload(
+            &operation,
+            "completed",
+            None,
+            json!({ "path": "/repo/file.txt", "editor": "nano", "terminalSessionId": 7, "changed": true }),
+        );
+        assert_eq!(intent["operationId"], result["operationId"]);
+        assert_eq!(intent["kind"], "quick-edit");
+        assert_eq!(result["terminalSessionId"], 7);
+        assert_eq!(result["changed"], true);
+    }
 }

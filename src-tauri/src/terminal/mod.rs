@@ -13,8 +13,9 @@ use std::io::{Read, Write};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::SystemTime;
 
-use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
+use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, ExitStatus, MasterPty, PtySize};
 use tokio::sync::mpsc;
 
 use crate::state::SharedState;
@@ -37,12 +38,60 @@ pub struct PtySession {
     /// must provoke SIGWINCH even if the dimensions did not change, so a
     /// full-screen child redraws into the replacement xterm.
     needs_redraw: AtomicBool,
+    close_requested: Arc<AtomicBool>,
     /// Master PTY handle — kept so we can resize. Wrapped in Arc/Mutex because
     /// resize is a `&self` method but we want to share ownership with the
     /// killer path during `close`.
     master: Arc<Mutex<Box<dyn MasterPty + Send>>>,
     /// Killer for the child process — drop or call `kill` on close.
     killer: Box<dyn ChildKiller + Send + Sync>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum FileFingerprint {
+    Present { size: u64, modified: SystemTime },
+    Missing,
+    Unavailable,
+}
+
+pub(crate) fn file_fingerprint(path: &str) -> FileFingerprint {
+    match std::fs::metadata(path) {
+        Ok(metadata) => match metadata.modified() {
+            Ok(modified) => FileFingerprint::Present { size: metadata.len(), modified },
+            Err(_) => FileFingerprint::Unavailable,
+        },
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => FileFingerprint::Missing,
+        Err(_) => FileFingerprint::Unavailable,
+    }
+}
+
+pub(crate) fn fingerprint_changed(before: &FileFingerprint, after: &FileFingerprint) -> Option<bool> {
+    match (before, after) {
+        (FileFingerprint::Unavailable, _) | (_, FileFingerprint::Unavailable) => None,
+        (FileFingerprint::Missing, FileFingerprint::Missing) => Some(false),
+        (FileFingerprint::Present { .. }, FileFingerprint::Missing)
+        | (FileFingerprint::Missing, FileFingerprint::Present { .. }) => Some(true),
+        (left, right) => Some(left != right),
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct QuickEditCompletion {
+    operation: crate::journal::JournalOperation,
+    path: String,
+    editor: String,
+    before: FileFingerprint,
+}
+
+impl QuickEditCompletion {
+    pub(crate) fn new(
+        operation: crate::journal::JournalOperation,
+        path: String,
+        editor: String,
+        before: FileFingerprint,
+    ) -> Self {
+        Self { operation, path, editor, before }
+    }
 }
 
 #[derive(Debug)]
@@ -102,6 +151,7 @@ impl PtyManager {
             tx,
             state,
             self_arc,
+            None,
         )
     }
 
@@ -120,6 +170,7 @@ impl PtyManager {
         tx: mpsc::Sender<ServerMessage>,
         state: SharedState,
         self_arc: Arc<Self>,
+        quick_edit: Option<QuickEditCompletion>,
     ) -> Result<u32, PtyError> {
         let pty_system = native_pty_system();
         let pair = pty_system
@@ -172,17 +223,35 @@ impl PtyManager {
         // do the same full cleanup as an explicit ClosePanelTerminal intent —
         // remove session, clear panel state, broadcast StatePatch + TerminalClosed.
         let panel_id_shared = Arc::new(Mutex::new(panel_id));
+        let close_requested = Arc::new(AtomicBool::new(false));
+        let session = PtySession {
+            session_id,
+            panel_id: panel_id_shared.clone(),
+            writer_tx: Some(writer_tx),
+            output_tx,
+            needs_redraw: AtomicBool::new(false),
+            close_requested: close_requested.clone(),
+            master,
+            killer,
+        };
+        self.sessions.lock().unwrap().insert(session_id, session);
+
         let tx_exit = tx.clone();
         let panel_id_exit = panel_id_shared.clone();
         thread::spawn(move || {
-            let _ = child.wait();
+            let exit_result = child.wait();
+            let cancelled = close_requested.load(Ordering::SeqCst);
 
             // Re-read owner here — a promote can have moved the session to a
             // different panel since spawn.
             let owner = panel_id_exit.lock().unwrap().clone();
 
             // Remove the dead session from PtyManager so re-opening works.
-            self_arc.close(session_id);
+            self_arc.remove_exited(session_id);
+
+            if let Some(quick_edit) = quick_edit {
+                record_quick_edit_completion(&quick_edit, session_id, cancelled, exit_result);
+            }
 
             // Update AppState. If the owner is a *terminal tab* (created by
             // promoting an embedded terminal), remove the tab entirely; the
@@ -281,17 +350,6 @@ impl PtyManager {
             }
             let _ = tx_exit.blocking_send(closed);
         });
-
-        let session = PtySession {
-            session_id,
-            panel_id: panel_id_shared,
-            writer_tx: Some(writer_tx),
-            output_tx,
-            needs_redraw: AtomicBool::new(false),
-            master,
-            killer,
-        };
-        self.sessions.lock().unwrap().insert(session_id, session);
         Ok(session_id)
     }
 
@@ -339,11 +397,18 @@ impl PtyManager {
     pub fn close(&self, sid: u32) -> Option<String> {
         let mut map = self.sessions.lock().unwrap();
         let mut session = map.remove(&sid)?;
+        session.close_requested.store(true, Ordering::SeqCst);
         // Drop the writer sender first so the writer thread exits cleanly.
         session.writer_tx.take();
         let _ = session.killer.kill();
         let pid = session.panel_id.lock().unwrap().clone();
         Some(pid)
+    }
+
+    fn remove_exited(&self, sid: u32) {
+        if let Some(mut session) = self.sessions.lock().unwrap().remove(&sid) {
+            session.writer_tx.take();
+        }
     }
 
     /// Re-assign the owning panel of a live session. Used when promoting an
@@ -377,6 +442,7 @@ impl PtyManager {
         let mut closed = Vec::new();
         for sid in to_remove {
             if let Some(mut session) = map.remove(&sid) {
+                session.close_requested.store(true, Ordering::SeqCst);
                 session.writer_tx.take();
                 let _ = session.killer.kill();
                 closed.push(sid);
@@ -384,6 +450,51 @@ impl PtyManager {
         }
         closed
     }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct QuickEditExit {
+    outcome: &'static str,
+    error: Option<String>,
+    exit_code: Option<u32>,
+    signal: Option<String>,
+}
+
+fn quick_edit_exit(cancelled: bool, result: &std::io::Result<ExitStatus>) -> QuickEditExit {
+    if cancelled {
+        return QuickEditExit { outcome: "cancelled", error: None, exit_code: result.as_ref().ok().map(ExitStatus::exit_code), signal: result.as_ref().ok().and_then(|status| status.signal().map(str::to_string)) };
+    }
+    match result {
+        Ok(status) if status.success() => QuickEditExit { outcome: "completed", error: None, exit_code: Some(status.exit_code()), signal: None },
+        Ok(status) => {
+            let signal = status.signal().map(str::to_string);
+            let error = signal.as_ref().map(|signal| format!("Editor exited after signal {signal}.")).unwrap_or_else(|| format!("Editor exited with code {}.", status.exit_code()));
+            QuickEditExit { outcome: "failed", error: Some(error), exit_code: Some(status.exit_code()), signal }
+        }
+        Err(error) => QuickEditExit { outcome: "failed", error: Some(format!("Could not wait for editor process: {error}")), exit_code: None, signal: None },
+    }
+}
+
+fn record_quick_edit_completion(
+    completion: &QuickEditCompletion,
+    session_id: u32,
+    cancelled: bool,
+    result: std::io::Result<ExitStatus>,
+) {
+    let exit = quick_edit_exit(cancelled, &result);
+    let after = file_fingerprint(&completion.path);
+    let changed = fingerprint_changed(&completion.before, &after);
+    crate::journal::record_quick_edit_result(
+        &completion.operation,
+        Some(&completion.path),
+        Some(&completion.editor),
+        Some(session_id),
+        exit.outcome,
+        exit.error.as_deref(),
+        changed,
+        exit.exit_code,
+        exit.signal.as_deref(),
+    );
 }
 
 impl Default for PtyManager {
@@ -396,6 +507,7 @@ impl Drop for PtyManager {
     fn drop(&mut self) {
         let mut map = self.sessions.lock().unwrap();
         for (_, mut session) in map.drain() {
+            session.close_requested.store(true, Ordering::SeqCst);
             session.writer_tx.take();
             let _ = session.killer.kill();
         }
@@ -451,4 +563,48 @@ fn default_shell() -> String {
 #[cfg(windows)]
 fn default_shell() -> String {
     std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use portable_pty::ExitStatus;
+
+    use super::{file_fingerprint, fingerprint_changed, quick_edit_exit, FileFingerprint, QuickEditExit};
+
+    #[test]
+    fn detects_quick_edit_file_changes_and_deletion() {
+        let dir = std::env::temp_dir().join(format!("fbro-quick-edit-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("file.txt");
+        fs::write(&path, "before").unwrap();
+        let before = file_fingerprint(path.to_str().unwrap());
+        assert_eq!(fingerprint_changed(&before, &file_fingerprint(path.to_str().unwrap())), Some(false));
+
+        fs::write(&path, "after with a different size").unwrap();
+        let changed = file_fingerprint(path.to_str().unwrap());
+        assert_eq!(fingerprint_changed(&before, &changed), Some(true));
+
+        fs::remove_file(&path).unwrap();
+        assert_eq!(fingerprint_changed(&changed, &file_fingerprint(path.to_str().unwrap())), Some(true));
+        fs::remove_dir(&dir).unwrap();
+    }
+
+    #[test]
+    fn reports_unknown_change_when_metadata_is_unavailable() {
+        assert_eq!(fingerprint_changed(&FileFingerprint::Unavailable, &FileFingerprint::Missing), None);
+    }
+
+    #[test]
+    fn classifies_quick_edit_process_outcomes() {
+        assert_eq!(
+            quick_edit_exit(false, &Ok(ExitStatus::with_exit_code(0))),
+            QuickEditExit { outcome: "completed", error: None, exit_code: Some(0), signal: None },
+        );
+        assert_eq!(quick_edit_exit(false, &Ok(ExitStatus::with_exit_code(7))).outcome, "failed");
+        assert_eq!(quick_edit_exit(false, &Ok(ExitStatus::with_signal("TERM"))).signal.as_deref(), Some("TERM"));
+        assert_eq!(quick_edit_exit(true, &Ok(ExitStatus::with_exit_code(1))).outcome, "cancelled");
+        assert_eq!(quick_edit_exit(false, &Err(std::io::Error::other("wait failed"))).outcome, "failed");
+    }
 }

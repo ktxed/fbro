@@ -5,8 +5,19 @@ use crate::ws::runtime::{rescan_panel, IntentContext};
 
 pub(crate) async fn handle(name: &str, args: &Value, ctx: &mut IntentContext<'_>) {
     let panel_id = args.get("panelId").and_then(Value::as_str).unwrap_or("").to_string();
-    let Some((root, clean)) = panel_repo(&panel_id, ctx).await else {
-        send_error(ctx, "GIT_UNAVAILABLE", "No Git repository is available for this panel.").await;
+    let (source_id, repository) = panel_repo(&panel_id, ctx).await;
+    let operation = crate::journal::record_git_intent(
+        name,
+        args,
+        repository.as_ref().map(|(root, _)| root.as_str()),
+        source_id.as_deref(),
+    );
+    let Some((root, clean)) = repository else {
+        let message = "No Git repository is available for this panel.";
+        if let Some(operation) = operation.as_ref() {
+            crate::journal::record_git_result(operation, "failed", Some(message));
+        }
+        send_error(ctx, "GIT_UNAVAILABLE", message).await;
         return;
     };
     let result = match name {
@@ -35,8 +46,18 @@ pub(crate) async fn handle(name: &str, args: &Value, ctx: &mut IntentContext<'_>
         _ => Ok(()),
     };
     match result {
-        Ok(()) => rescan_panel(&panel_id, ctx.state, ctx.tx, ctx.scan_handles, None, None, ctx.dir_size_queue, ctx.watcher_cmd_tx).await,
-        Err(message) => send_error(ctx, "GIT_ACTION_FAILED", &message).await,
+        Ok(()) => {
+            if let Some(operation) = operation.as_ref() {
+                crate::journal::record_git_result(operation, "completed", None);
+            }
+            rescan_panel(&panel_id, ctx.state, ctx.tx, ctx.scan_handles, None, None, ctx.dir_size_queue, ctx.watcher_cmd_tx).await
+        }
+        Err(message) => {
+            if let Some(operation) = operation.as_ref() {
+                crate::journal::record_git_result(operation, "failed", Some(&message));
+            }
+            send_error(ctx, "GIT_ACTION_FAILED", &message).await
+        }
     }
 }
 
@@ -58,14 +79,19 @@ fn run_paths(root: &str, action: &str, args: &Value, staged: bool) -> Result<(),
     crate::git::run(root, &command)
 }
 
-async fn panel_repo(panel_id: &str, ctx: &IntentContext<'_>) -> Option<(String, bool)> {
-    let (path, local) = {
+async fn panel_repo(panel_id: &str, ctx: &IntentContext<'_>) -> (Option<String>, Option<(String, bool)>) {
+    let Some((path, source_id, local)) = ({
         let state = ctx.state.lock().await;
-        let panel = state.panels.get(panel_id)?;
-        let local = state.drivers.get(&panel.source_id).map(|driver| driver.is_local()).unwrap_or(false);
-        (panel.path.clone(), local)
+        let panel = state.panels.get(panel_id);
+        panel.map(|panel| {
+            let local = state.drivers.get(&panel.source_id).map(|driver| driver.is_local()).unwrap_or(false);
+            (panel.path.clone(), panel.source_id.clone(), local)
+        })
+    }) else {
+        return (None, None);
     };
-    local.then(|| crate::git::inspect(&path)).flatten().map(|status| (status.root, status.clean))
+    let repository = local.then(|| crate::git::inspect(&path)).flatten().map(|status| (status.root, status.clean));
+    (Some(source_id), repository)
 }
 
 async fn send_error(ctx: &IntentContext<'_>, code: &str, message: &str) {

@@ -3,6 +3,7 @@ use std::path::Path;
 use serde_json::Value;
 
 use crate::state::TabKind;
+use crate::terminal::{file_fingerprint, fingerprint_changed, QuickEditCompletion};
 use crate::ws::protocol::{now, ServerMessage};
 use crate::ws::runtime::IntentContext;
 
@@ -23,41 +24,64 @@ pub(crate) async fn handle(name: &str, scope: &Value, args: &Value, ctx: &mut In
 
 async fn quick_edit(panel_id: &str, ctx: &mut IntentContext<'_>) {
     if cfg!(target_os = "windows") {
-        send_quick_edit_error(ctx, "Quick edit is currently available only on Linux and macOS.").await;
+        let message = "Quick edit is currently available only on Linux and macOS.";
+        record_quick_edit_failure(panel_id, None, None, None, &[], message, None);
+        send_quick_edit_error(ctx, message).await;
         return;
     }
 
-    let (cwd, file_path, version, gui_senders, pty_manager, editor) = {
+    let (cwd, file_path, source_id, version, gui_senders, pty_manager, editor) = {
         let state_guard = ctx.state.lock().await;
-        let Some(panel) = state_guard.panels.get(panel_id) else { return };
+        let Some(panel) = state_guard.panels.get(panel_id) else {
+            record_quick_edit_failure(panel_id, None, None, None, &[], "Quick Edit panel is unavailable.", None);
+            return;
+        };
         if panel.tab_kind != TabKind::Listing || panel.shadow_source.is_some() || panel.terminal_session.is_some() {
+            record_quick_edit_failure(panel_id, Some(&panel.source_id), None, Some(state_guard.settings.general.quick_terminal_editor.program()), &[], "Quick Edit is unavailable for this panel state.", None);
             return;
         }
         let Some(driver) = state_guard.drivers.get(&panel.source_id) else {
+            let source_id = panel.source_id.clone();
+            let requested_editor = state_guard.settings.general.quick_terminal_editor.program();
             drop(state_guard);
-            send_quick_edit_error(ctx, "Quick edit requires a local filesystem panel.").await;
+            let message = "Quick edit requires a local filesystem panel.";
+            record_quick_edit_failure(panel_id, Some(&source_id), None, Some(requested_editor), &[], message, None);
+            send_quick_edit_error(ctx, message).await;
             return;
         };
         if !driver.is_local() {
+            let source_id = panel.source_id.clone();
+            let requested_editor = state_guard.settings.general.quick_terminal_editor.program();
             drop(state_guard);
-            send_quick_edit_error(ctx, "Quick edit requires a local filesystem panel.").await;
+            let message = "Quick edit requires a local filesystem panel.";
+            record_quick_edit_failure(panel_id, Some(&source_id), None, Some(requested_editor), &[], message, None);
+            send_quick_edit_error(ctx, message).await;
             return;
         }
         let local_index = panel.cursor.saturating_sub(panel.window_start);
         let Some(entry) = panel.entries.get(local_index) else {
+            let source_id = panel.source_id.clone();
+            let requested_editor = state_guard.settings.general.quick_terminal_editor.program();
             drop(state_guard);
-            send_quick_edit_error(ctx, "Quick edit requires a file under the cursor.").await;
+            let message = "Quick edit requires a file under the cursor.";
+            record_quick_edit_failure(panel_id, Some(&source_id), None, Some(requested_editor), &[], message, None);
+            send_quick_edit_error(ctx, message).await;
             return;
         };
         if entry.kind != "file" || entry.name == ".." {
+            let source_id = panel.source_id.clone();
+            let requested_editor = state_guard.settings.general.quick_terminal_editor.program();
             drop(state_guard);
-            send_quick_edit_error(ctx, "Quick edit is available only for regular files.").await;
+            let message = "Quick edit is available only for regular files.";
+            record_quick_edit_failure(panel_id, Some(&source_id), None, Some(requested_editor), &[], message, None);
+            send_quick_edit_error(ctx, message).await;
             return;
         }
         let file_path = Path::new(&panel.path).join(&entry.name).to_string_lossy().to_string();
         (
             panel.path.clone(),
             file_path,
+            panel.source_id.clone(),
             panel.version,
             state_guard.gui_senders.clone(),
             state_guard.pty_manager.clone(),
@@ -66,6 +90,16 @@ async fn quick_edit(panel_id: &str, ctx: &mut IntentContext<'_>) {
     };
 
     let editors = editor.with_fallback();
+    let editor_candidates = editors.map(|candidate| candidate.program());
+    let operation = crate::journal::new_operation("QuickEditFile", Some(&source_id)).expect("QuickEditFile is a journal operation");
+    crate::journal::record_quick_edit_intent(
+        &operation,
+        panel_id,
+        Some(&file_path),
+        Some(editor.program()),
+        &editor_candidates,
+    );
+    let before = file_fingerprint(&file_path);
     let mut failures = Vec::new();
     let mut session_id = None;
     for editor in editors {
@@ -79,6 +113,7 @@ async fn quick_edit(panel_id: &str, ctx: &mut IntentContext<'_>) {
             ctx.tx.clone(),
             ctx.state.clone(),
             pty_manager.clone(),
+            Some(QuickEditCompletion::new(operation.clone(), file_path.clone(), editor.program().to_string(), before.clone())),
         ) {
             Ok(id) => {
                 session_id = Some(id);
@@ -88,7 +123,10 @@ async fn quick_edit(panel_id: &str, ctx: &mut IntentContext<'_>) {
         }
     }
     let Some(session_id) = session_id else {
-        send_quick_edit_error(ctx, &format!("Could not start nano or vim. {}", failures.join("; "))).await;
+        let message = format!("Could not start nano or vim. {}", failures.join("; "));
+        let changed = fingerprint_changed(&before, &file_fingerprint(&file_path));
+        crate::journal::record_quick_edit_result(&operation, Some(&file_path), None, None, "failed", Some(&message), changed, None, None);
+        send_quick_edit_error(ctx, &message).await;
         return;
     };
 
@@ -115,6 +153,20 @@ async fn quick_edit(panel_id: &str, ctx: &mut IntentContext<'_>) {
     let opened = ServerMessage::TerminalSessionOpened { timestamp: now(), panel_id: panel_id.to_string(), session_id };
     let _ = ctx.tx.send(opened.clone()).await;
     for sender in &gui_senders { let _ = sender.send(opened.clone()).await; }
+}
+
+fn record_quick_edit_failure(
+    panel_id: &str,
+    source_id: Option<&str>,
+    path: Option<&str>,
+    requested_editor: Option<&str>,
+    editor_candidates: &[&str],
+    message: &str,
+    changed: Option<bool>,
+) {
+    let operation = crate::journal::new_operation("QuickEditFile", source_id).expect("QuickEditFile is a journal operation");
+    crate::journal::record_quick_edit_intent(&operation, panel_id, path, requested_editor, editor_candidates);
+    crate::journal::record_quick_edit_result(&operation, path, None, None, "failed", Some(message), changed, None, None);
 }
 
 async fn send_quick_edit_error(ctx: &IntentContext<'_>, message: &str) {

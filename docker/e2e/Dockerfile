@@ -56,6 +56,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /app/src-tauri/target/release/fbro /usr/local/bin/fbro
+COPY --chmod=755 docker/e2e/fake-nano /usr/local/bin/nano
 
 ENV FBRO_APP_BINARY=/usr/local/bin/fbro
 ENV RUST_LOG=info

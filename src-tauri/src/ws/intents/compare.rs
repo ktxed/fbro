@@ -55,12 +55,34 @@ pub(crate) async fn handle(name: &str, scope: &Value, args: &Value, ctx: &mut In
 async fn git_view_diff(args: &Value, ctx: &mut IntentContext<'_>) {
     let panel_id = arg_str(args, "panelId").unwrap_or("");
     let target_path = arg_str(args, "targetPath").unwrap_or("");
-    if panel_id.is_empty() || target_path.is_empty() {
-        send_compare_error(ctx, "A changed Git file is required.".to_string(), None).await;
-        return;
-    }
-    if let Err(message) = launch_git_diff(panel_id, target_path, ctx).await {
-        send_compare_error(ctx, message, None).await;
+    let repository = if panel_id.is_empty() {
+        Err("A changed Git file is required.".to_string())
+    } else {
+        resolve_git_diff_repo(panel_id, ctx).await
+    };
+    let operation = crate::journal::record_git_intent(
+        "GitViewDiff",
+        args,
+        repository.as_ref().ok().map(|(root, _)| root.as_str()),
+        repository.as_ref().ok().map(|(_, source_id)| source_id.as_str()),
+    );
+    let result = match repository {
+        Ok((root, _)) if !target_path.is_empty() => launch_git_diff(panel_id, target_path, root, ctx).await,
+        Ok(_) => Err("A changed Git file is required.".to_string()),
+        Err(message) => Err(message),
+    };
+    match result {
+        Ok(()) => {
+            if let Some(operation) = operation.as_ref() {
+                crate::journal::record_git_result(operation, "completed", None);
+            }
+        }
+        Err(message) => {
+            if let Some(operation) = operation.as_ref() {
+                crate::journal::record_git_result(operation, "failed", Some(&message));
+            }
+            send_compare_error(ctx, message, None).await;
+        }
     }
 }
 
@@ -138,25 +160,9 @@ async fn launch_compare_targets(
 async fn launch_git_diff(
     panel_id: &str,
     target_path: &str,
+    root: String,
     ctx: &mut IntentContext<'_>,
 ) -> Result<(), String> {
-    let panel_path = {
-        let state_guard = ctx.state.lock().await;
-        let panel = state_guard
-            .panels
-            .get(panel_id)
-            .ok_or_else(|| "Git panel is unavailable.".to_string())?;
-        let is_local = state_guard
-            .drivers
-            .get(&panel.source_id)
-            .map(|driver| driver.is_local())
-            .unwrap_or(false);
-        if !is_local {
-            return Err("Git diffs are only available for local filesystem panels.".to_string());
-        }
-        panel.path.clone()
-    };
-
     let max_bytes = {
         let state_guard = ctx.state.lock().await;
         state_guard
@@ -167,9 +173,6 @@ async fn launch_git_diff(
     };
     let target_path = target_path.to_string();
     let content = tokio::task::spawn_blocking(move || {
-        let root = crate::git::inspect(&panel_path)
-            .map(|status| status.root)
-            .ok_or_else(|| "No Git repository is available for this panel.".to_string())?;
         crate::git::read_diff_content(&root, &target_path, max_bytes)
     })
     .await
@@ -204,6 +207,32 @@ async fn launch_git_diff(
         },
     ];
     launch_compare_targets(targets, false, ctx).await
+}
+
+async fn resolve_git_diff_repo(
+    panel_id: &str,
+    ctx: &IntentContext<'_>,
+) -> Result<(String, String), String> {
+    let (panel_path, source_id, local) = {
+        let state_guard = ctx.state.lock().await;
+        let panel = state_guard
+            .panels
+            .get(panel_id)
+            .ok_or_else(|| "Git panel is unavailable.".to_string())?;
+        let local = state_guard
+            .drivers
+            .get(&panel.source_id)
+            .map(|driver| driver.is_local())
+            .unwrap_or(false);
+        (panel.path.clone(), panel.source_id.clone(), local)
+    };
+    if !local {
+        return Err("Git diffs are only available for local filesystem panels.".to_string());
+    }
+    let root = crate::git::inspect(&panel_path)
+        .map(|status| status.root)
+        .ok_or_else(|| "No Git repository is available for this panel.".to_string())?;
+    Ok((root, source_id))
 }
 
 async fn open_internal_diff(

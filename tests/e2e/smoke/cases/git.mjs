@@ -143,6 +143,41 @@ export async function runGitFlow(browser, observer) {
   if (!fs.existsSync(path.join(hostRepo, "removed.txt")) || fs.existsSync(path.join(hostRepo, "untracked.txt"))) {
     throw new Error("Git rollback did not restore the staged deletion and remove the untracked file");
   }
+
+  await browser.keys("Escape");
+  await gitModal.waitForExist({ reverse: true, timeout: 10_000 });
+
+  observer.sendIntent("GitStagePaths", undefined, { panelId: "left", paths: [] });
+  observer.sendIntent("GitViewDiff", undefined, { panelId: "left" });
+  observer.sendIntent("NavigateToSource", "left", { sourceId: "journal" });
+  await waitFor(() => {
+    const panel = observer.state.panels.left;
+    if (panel?.sourceId !== "journal" || panel.status !== "ready") return false;
+    const names = panel.entries.map((entry) => entry.name);
+    const expectedPrefixes = [
+      "git-stage_v1_intent_",
+      "git-stage_v1_completed_",
+      "git-stage_v1_failed_",
+      "git-unstage_v1_intent_",
+      "git-unstage_v1_completed_",
+      "git-rollback_v1_intent_",
+      "git-rollback_v1_completed_",
+      "git-view-diff_v1_intent_",
+      "git-view-diff_v1_failed_",
+    ];
+    return expectedPrefixes.every((prefix) => names.some((name) => name.startsWith(prefix)));
+  }, { timeout: 10_000, label: "semantic Git journal events" });
+
+  const localSourceId = observer.sourceIdForPath(repo);
+  if (!localSourceId) throw new Error(`No local source contains ${repo}`);
+  observer.sendIntent("NavigateToSource", "left", { sourceId: localSourceId });
+  await waitFor(() => observer.state.panels.left?.sourceId === localSourceId, {
+    timeout: 10_000,
+    label: "restore local source after Git journal assertions",
+  });
+  observer.sendIntent("NavigatePanelTo", undefined, { panelId: "left", path: repo });
+  await observer.waitForPanelPath("left", repo);
+  await observer.waitForPanelReady("left");
 }
 
 async function selectGitChange(browser, path, shift = false) {

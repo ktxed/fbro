@@ -157,11 +157,9 @@ fn should_record_command(name: &str) -> bool {
             | "PasteExternalClipboard"
             | "ViewFile"
             | "EditFile"
-            | "QuickEditFile"
             | "OpenFile"
             | "KillProcess"
             | "OpenTerminal"
-            | "GitFetch" | "GitStagePaths" | "GitUnstagePaths" | "GitRollbackPaths" | "GitCommit" | "GitSwitchBranch" | "GitPull" | "GitPush" | "GitSetUpstream"
     )
 }
 

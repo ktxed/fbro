@@ -26,6 +26,7 @@ import { runFedupFlow } from "./cases/fedup.mjs";
 import { runGlobalSelectionFlow } from "./cases/global-selection.mjs";
 import { runGitFlow } from "./cases/git.mjs";
 import { runLocalFlow } from "./cases/local.mjs";
+import { runQuickEditFlow } from "./cases/quick-edit.mjs";
 import { runRemoteFlow } from "./cases/remote.mjs";
 import { runDatetimeSearchFlow, runSearchFlow, runSizeSearchFlow } from "./cases/search.mjs";
 
@@ -59,6 +60,7 @@ async function main() {
     await observerA.connect();
 
     await runLocalFlow(browserA, observerA);
+    await runQuickEditFlow(browserA, observerA);
     await runGlobalSelectionFlow(browserA, observerA);
     await runGitFlow(browserA, observerA);
     await runFedupFlow(browserA, observerA);

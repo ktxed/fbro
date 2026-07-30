@@ -17,5 +17,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     zip \
   && rm -rf /var/lib/apt/lists/*
 
+COPY --chmod=755 docker/e2e/fake-nano /usr/local/bin/nano
+
 ENV FBRO_APP_BINARY=/usr/local/bin/fbro
 ENV RUST_LOG=info
