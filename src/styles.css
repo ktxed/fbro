@@ -1441,7 +1441,16 @@ body {
 .panel__git-status { margin-left: 6px; color: var(--text-warning); font-size: 12px; font-weight: 700; cursor: help; }
 .panel__git-bubble { flex: 0 1 auto; max-width: 42%; margin-left: 6px; padding: 0 5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: 1px solid color-mix(in srgb, var(--text-warning) 55%, var(--border)); border-radius: 9px; background: color-mix(in srgb, var(--text-warning) 12%, transparent); color: var(--text-warning); font-size: calc(var(--font-size) - 3px); line-height: 16px; cursor: help; }
 .panel__row--cursor .panel__git-bubble { color: inherit; border-color: color-mix(in srgb, currentColor 50%, transparent); background: color-mix(in srgb, currentColor 14%, transparent); }
+.panel__git-bubble--actions { display: inline-flex; align-items: center; gap: 2px; padding-right: 1px; cursor: default; }
+.panel__git-bubble-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.panel__git-bubble-buttons { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 1px; }
+.panel__git-bubble-action { display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; width: 16px; height: 16px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: inherit; cursor: pointer; }
+.panel__git-bubble-action:hover, .panel__git-bubble-action:focus-visible { outline: none; background: color-mix(in srgb, currentColor 20%, transparent); }
+.panel__git-bubble-action--danger { color: var(--text-warning); }
+.panel__row--cursor .panel__git-bubble-action--danger { color: inherit; }
+.panel__git-bubble-action--armed { background: color-mix(in srgb, var(--text-warning) 30%, transparent); color: var(--text-warning) !important; }
 .panel__git-tooltip { max-width: min(420px, calc(100vw - 32px)); padding: 7px 9px !important; border: 1px solid var(--border-focus); border-radius: 4px; background: var(--bg-elev) !important; color: var(--text) !important; box-shadow: var(--shadow-modal); white-space: pre-line; font-family: var(--font); font-size: var(--font-size); line-height: 1.35; opacity: 1 !important; }
+.panel__git-icon-tooltip { padding: 4px 6px !important; white-space: nowrap; font-size: calc(var(--font-size) - 2px); }
 .git-modal { width: auto; max-width: calc(100vw - 48px); min-height: 0; overflow: hidden; }
 .git-modal__header { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; border-bottom: 1px solid var(--border); background: var(--bg-header); }
 .git-modal__header > div { display: flex; align-items: baseline; gap: 9px; min-width: 0; }

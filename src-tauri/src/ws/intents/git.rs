@@ -1,7 +1,7 @@
 use serde_json::Value;
 
 use crate::ws::protocol::{now, ServerMessage};
-use crate::ws::runtime::{rescan_panel, IntentContext};
+use crate::ws::runtime::{rescan_panel, selected_names_for, IntentContext};
 
 pub(crate) async fn handle(name: &str, args: &Value, ctx: &mut IntentContext<'_>) {
     let panel_id = args.get("panelId").and_then(Value::as_str).unwrap_or("").to_string();
@@ -50,7 +50,24 @@ pub(crate) async fn handle(name: &str, args: &Value, ctx: &mut IntentContext<'_>
             if let Some(operation) = operation.as_ref() {
                 crate::journal::record_git_result(operation, "completed", None);
             }
-            rescan_panel(&panel_id, ctx.state, ctx.tx, ctx.scan_handles, None, None, ctx.dir_size_queue, ctx.watcher_cmd_tx).await
+            let (cursor_hint, selection_names) = {
+                let state = ctx.state.lock().await;
+                let cursor_hint = state
+                    .panels
+                    .get(&panel_id)
+                    .and_then(|panel| panel.entries.get(panel.cursor).map(|entry| entry.name.clone()));
+                (cursor_hint, selected_names_for(&state, &panel_id))
+            };
+            rescan_panel(
+                &panel_id,
+                ctx.state,
+                ctx.tx,
+                ctx.scan_handles,
+                cursor_hint,
+                selection_names,
+                ctx.dir_size_queue,
+                ctx.watcher_cmd_tx,
+            ).await
         }
         Err(message) => {
             if let Some(operation) = operation.as_ref() {

@@ -9,7 +9,7 @@ import {
   PANEL_SHORTCUT_COMMAND_IDS,
 } from "../commands/interactive";
 import { useAppDispatch, useAppState } from "../store";
-import { IconChevronDown, IconChevronUp, IconChevronRight, IconChevronLeft, IconArrowUpRight, IconX, IconAlertTriangle, IconActivity, IconHistory, IconGitBranch, IconLock, IconNetwork, IconListCheck } from "@tabler/icons-react";
+import { IconChevronDown, IconChevronUp, IconChevronRight, IconChevronLeft, IconArrowUpRight, IconX, IconAlertTriangle, IconActivity, IconHistory, IconGitBranch, IconGitCompare, IconLock, IconMinus, IconNetwork, IconListCheck, IconPlus, IconRestore } from "@tabler/icons-react";
 
 // Maps Source.iconName (BE-provided) to a Tabler icon component for rendering
 // in the volume bar. Sources with an iconName render the icon in place of
@@ -39,6 +39,89 @@ const SORT_COLUMNS = [
   { id: "size", label: "Size" },
   { id: "date", label: "Date" },
 ] as const;
+
+function GitBubbleActions({
+  panelId,
+  path,
+  label,
+  staged,
+  client,
+}: {
+  panelId: string;
+  path: string;
+  label: string;
+  staged: boolean;
+  client: WsClient;
+}) {
+  const [rollbackArmed, setRollbackArmed] = useState(false);
+  const tooltipId = `git-inline-actions-${panelId}`;
+
+  useEffect(() => {
+    setRollbackArmed(false);
+  }, [path, staged]);
+
+  const runPathAction = (name: "GitStagePaths" | "GitUnstagePaths" | "GitRollbackPaths") => {
+    setRollbackArmed(false);
+    client.sendIntent(name, undefined, { panelId, paths: [path] });
+  };
+  const runStageAction = () => runPathAction(staged ? "GitUnstagePaths" : "GitStagePaths");
+  const runRollbackAction = () => {
+    if (rollbackArmed) runPathAction("GitRollbackPaths");
+    else setRollbackArmed(true);
+  };
+  const stopRowInteraction = (event: React.SyntheticEvent) => event.stopPropagation();
+
+  return (
+    <span className="panel__git-bubble panel__git-bubble--actions" data-testid="git-inline-bubble">
+      <span className="panel__git-bubble-label">{label}</span>
+      <span className="panel__git-bubble-buttons" role="toolbar" aria-label={`Git actions for ${path}`}>
+        <button
+          type="button"
+          className="panel__git-bubble-action"
+          data-testid="git-inline-view-diff"
+          data-tooltip-id={tooltipId}
+          data-tooltip-content="View Git diff"
+          aria-label={`View Git diff for ${path}`}
+          onMouseDown={stopRowInteraction}
+          onDoubleClick={stopRowInteraction}
+          onClick={(event) => {
+            event.stopPropagation();
+            setRollbackArmed(false);
+            client.sendIntent("GitViewDiff", undefined, { panelId, targetPath: path });
+          }}
+        >
+          <IconGitCompare size={13} aria-hidden />
+        </button>
+        <button
+          type="button"
+          className="panel__git-bubble-action"
+          data-testid={staged ? "git-inline-unstage" : "git-inline-stage"}
+          data-tooltip-id={tooltipId}
+          data-tooltip-content={staged ? "Unstage" : "Stage"}
+          aria-label={`${staged ? "Unstage" : "Stage"} ${path}`}
+          onMouseDown={stopRowInteraction}
+          onDoubleClick={stopRowInteraction}
+          onClick={(event) => { event.stopPropagation(); runStageAction(); }}
+        >
+          {staged ? <IconMinus size={13} aria-hidden /> : <IconPlus size={13} aria-hidden />}
+        </button>
+        <button
+          type="button"
+          className={`panel__git-bubble-action panel__git-bubble-action--danger${rollbackArmed ? " panel__git-bubble-action--armed" : ""}`}
+          data-testid="git-inline-rollback"
+          data-tooltip-id={tooltipId}
+          data-tooltip-content={rollbackArmed ? "Confirm rollback" : "Rollback"}
+          aria-label={`${rollbackArmed ? "Confirm rollback" : "Rollback"} ${path}`}
+          onMouseDown={stopRowInteraction}
+          onDoubleClick={stopRowInteraction}
+          onClick={(event) => { event.stopPropagation(); runRollbackAction(); }}
+        >
+          {rollbackArmed ? <IconAlertTriangle size={13} aria-hidden /> : <IconRestore size={13} aria-hidden />}
+        </button>
+      </span>
+    </span>
+  );
+}
 
 function computeGridMetrics(listEl: HTMLElement | null) {
   if (!listEl) return { cols: 1, cardWidth: GRID_CARD_MIN_WIDTH, cardHeight: 168, pageRows: 1 };
@@ -1427,6 +1510,12 @@ export function Panel({
           ? `${gitDetails.changedCount} untracked file${gitDetails.changedCount === 1 ? "" : "s"}`
           : `${gitDetails.changedCount} change${gitDetails.changedCount === 1 ? "" : "s"}`
       : undefined;
+    const inlineGitPath = entry.kind === "file" && gitDetails?.changedCount === 1
+      ? gitDetails.samplePaths[0]
+      : undefined;
+    const inlineGitChange = inlineGitPath
+      ? panel.git?.changes.find(change => change.path === inlineGitPath)
+      : undefined;
     return (
       <div
         key={absIndex}
@@ -1556,7 +1645,9 @@ export function Panel({
                 </button>
               )}
               {entry.gitStatus && <span className="panel__git-status" data-tooltip-id={`git-summary-${panelId}`} data-tooltip-content={gitSummary ? `Git: ${entry.gitStatus}\n${gitSummary}` : `Git: ${entry.gitStatus}`}>{entry.gitStatus === "untracked" ? "?" : entry.gitStatus === "modified" ? "M" : entry.gitStatus === "deleted" ? "D" : entry.gitStatus === "conflicted" ? "!" : "●"}</span>}
-              {absIndex === panel.cursor && gitInline && <span className="panel__git-bubble" data-tooltip-id={`git-summary-${panelId}`} data-tooltip-content={gitSummary}>{gitInline}</span>}
+              {absIndex === panel.cursor && gitInline && (inlineGitPath && inlineGitChange
+                ? <GitBubbleActions panelId={panelId} path={inlineGitPath} label={gitInline} staged={inlineGitChange.indexStatus !== " " && inlineGitChange.indexStatus !== "?"} client={client} />
+                : <span className="panel__git-bubble" data-tooltip-id={`git-summary-${panelId}`} data-tooltip-content={gitSummary}>{gitInline}</span>)}
             </span>
           );
         })()}
@@ -1778,6 +1869,7 @@ export function Panel({
       <Tooltip id="hidden-files" delayShow={0} />
       <Tooltip id={`git-summary-${panelId}`} className="panel__git-tooltip" delayShow={120} place="bottom" border="1px solid var(--border-focus)" arrowColor="var(--bg-elev)" />
       <Tooltip id={`git-chip-${panelId}`} className="panel__git-tooltip" delayShow={120} place="bottom" border="1px solid var(--border-focus)" arrowColor="var(--bg-elev)" />
+      <Tooltip id={`git-inline-actions-${panelId}`} className="panel__git-tooltip panel__git-icon-tooltip" delayShow={180} place="bottom" border="1px solid var(--border-focus)" arrowColor="var(--bg-elev)" />
       {panel.terminalSessionId !== undefined && (
         <PanelTerminal
           client={client}
