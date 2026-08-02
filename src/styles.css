@@ -1507,13 +1507,15 @@ body {
   white-space: nowrap;
   color: var(--text);
 }
-/* Branch/tag chips in a stable right column; thin scrollbar when overflowing. */
+/* Branch/tag chips in a stable right column.
+ * overflow:hidden (not auto) so no native scrollbar can paint — wheel pans via JS. */
 .git-modal__log-refs-wrap {
   min-width: 0;
   width: 100%;
   display: flex;
   align-items: center;
   justify-content: flex-end;
+  overflow: hidden;
   overscroll-behavior: contain;
 }
 .git-modal__log-refs {
@@ -1523,20 +1525,8 @@ body {
   align-items: center;
   justify-content: flex-end;
   gap: 4px;
-  overflow-x: auto;
-  overflow-y: hidden;
-  scrollbar-width: thin;
+  overflow: hidden;
   white-space: nowrap;
-}
-.git-modal__log-refs::-webkit-scrollbar {
-  height: 6px;
-}
-.git-modal__log-refs::-webkit-scrollbar-thumb {
-  background: color-mix(in srgb, var(--border) 80%, var(--text-dim));
-  border-radius: 3px;
-}
-.git-modal__log-refs::-webkit-scrollbar-track {
-  background: transparent;
 }
 .git-modal__log-ref {
   flex: 0 0 auto;

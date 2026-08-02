@@ -664,18 +664,20 @@ function formatLogDate(iso: string): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
-/** Horizontally scrollable ref chips (visible thin scrollbar when overflowing). */
+/** Horizontally pannable ref chips. overflow:hidden — no native scrollbar. */
 function LogRefsStrip({ refs }: { refs: GitLogRef[] }) {
   const wrapRef = useRef<HTMLSpanElement>(null);
   const scrollerRef = useRef<HTMLSpanElement>(null);
 
   // While the pointer is over the chip strip, keep wheel events here: map
   // vertical scroll to horizontal chip pan and never bubble to the log list.
+  // scrollLeft works with overflow:hidden (clips without painting a scrollbar).
   useEffect(() => {
     const wrap = wrapRef.current;
     const el = scrollerRef.current;
     if (!wrap || !el) return;
     const onWheel = (event: WheelEvent) => {
+      if (el.scrollWidth <= el.clientWidth) return;
       event.preventDefault();
       event.stopPropagation();
       const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
