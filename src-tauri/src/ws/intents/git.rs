@@ -7,7 +7,7 @@ pub(crate) async fn handle(name: &str, args: &Value, ctx: &mut IntentContext<'_>
     let panel_id = args.get("panelId").and_then(Value::as_str).unwrap_or("").to_string();
     let (source_id, repository) = panel_repo(&panel_id, ctx).await;
 
-    // Read-only log: no journal, no panel rescan.
+    // Read-only log / commit show: no journal, no panel rescan.
     if name == "GitGetLog" {
         let request_id = args
             .get("requestId")
@@ -34,6 +34,38 @@ pub(crate) async fn handle(name: &str, args: &Value, ctx: &mut IntentContext<'_>
                     .await;
             }
             Err(message) => send_error(ctx, "GIT_LOG_FAILED", &message).await,
+        }
+        return;
+    }
+    if name == "GitGetCommitShow" {
+        let request_id = args
+            .get("requestId")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        let hash = args
+            .get("hash")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        let Some((root, _)) = repository else {
+            send_error(ctx, "GIT_UNAVAILABLE", "No Git repository is available for this panel.").await;
+            return;
+        };
+        match crate::git::commit_show(&root, &hash) {
+            Ok(changes) => {
+                let _ = ctx
+                    .tx
+                    .send(ServerMessage::GitCommitShowReady {
+                        timestamp: now(),
+                        panel_id,
+                        request_id,
+                        hash,
+                        changes,
+                    })
+                    .await;
+            }
+            Err(message) => send_error(ctx, "GIT_COMMIT_SHOW_FAILED", &message).await,
         }
         return;
     }

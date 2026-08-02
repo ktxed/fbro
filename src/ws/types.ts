@@ -818,6 +818,15 @@ export interface GitLogReadyMessage {
   hasMore: boolean;
 }
 
+export interface GitCommitShowReadyMessage {
+  type: "GitCommitShowReady";
+  timestamp: number;
+  panelId: string;
+  requestId: string;
+  hash: string;
+  changes: GitChange[];
+}
+
 export interface InputRequiredMessage {
   type: "InputRequired";
   timestamp: number;
@@ -983,6 +992,7 @@ export type BEMessage =
   | BroOptionsReadyMessage
   | BroOptionsFailedMessage
   | GitLogReadyMessage
+  | GitCommitShowReadyMessage
   | InputRequiredMessage
   | CacheStatusReadyMessage
   | TerminalSessionOpenedMessage

@@ -28,8 +28,10 @@ import type {
   BroItem,
   BroOptionsFailedMessage,
   BroOptionsReadyMessage,
+  GitChange,
   GitLogEntry,
   GitLogReadyMessage,
+  GitCommitShowReadyMessage,
   ExternalClipboardReadyMessage,
   ExternalClipboardWrittenMessage,
   CacheStatusReadyMessage,
@@ -167,6 +169,13 @@ export interface PendingBro {
   error?: string;
 }
 
+export interface GitCommitShowCache {
+  status: "loading" | "ready" | "error";
+  requestId: string;
+  changes: GitChange[];
+  error?: string;
+}
+
 export interface PendingGitLog {
   panelId: string;
   requestId: string;
@@ -174,6 +183,10 @@ export interface PendingGitLog {
   commits: GitLogEntry[];
   hasMore: boolean;
   error?: string;
+  /** Accordion: hash of the expanded commit, or null when collapsed. */
+  expandedHash: string | null;
+  /** Lazy-loaded file lists keyed by full commit hash. */
+  commitShows: Record<string, GitCommitShowCache>;
 }
 
 export interface PendingInput {
@@ -388,6 +401,8 @@ export type AppAction =
   | { type: "OPEN_BRO"; bro: PendingBro }
   | { type: "CLOSE_BRO" }
   | { type: "REQUEST_GIT_LOG"; panelId: string; requestId: string; append: boolean }
+  | { type: "REQUEST_GIT_COMMIT_SHOW"; panelId: string; requestId: string; hash: string }
+  | { type: "SET_GIT_LOG_EXPANDED"; hash: string | null }
   | { type: "CLEAR_GIT_LOG" }
   | { type: "OPEN_SEARCH"; search: PendingSearch }
   | { type: "CLOSE_SEARCH" }
@@ -1189,7 +1204,11 @@ function reducer(state: AppState, action: AppAction): AppState {
           };
         }
         case "Error":
-          if ((msg.code === "GIT_LOG_FAILED" || msg.code === "GIT_UNAVAILABLE") && state.pendingGitLog) {
+          if (
+            (msg.code === "GIT_LOG_FAILED" || msg.code === "GIT_UNAVAILABLE")
+            && state.pendingGitLog
+            && state.pendingGitLog.status === "loading"
+          ) {
             return {
               ...state,
               pendingGitLog: {
@@ -1198,6 +1217,27 @@ function reducer(state: AppState, action: AppAction): AppState {
                 error: msg.message,
               },
             };
+          }
+          if (
+            (msg.code === "GIT_COMMIT_SHOW_FAILED" || msg.code === "GIT_UNAVAILABLE")
+            && state.pendingGitLog
+          ) {
+            const shows = state.pendingGitLog.commitShows;
+            // Accordion: at most one expand in flight; mark that loading entry failed.
+            const match = Object.entries(shows).find(([, entry]) => entry.status === "loading");
+            if (match) {
+              const [hash, entry] = match;
+              return {
+                ...state,
+                pendingGitLog: {
+                  ...state.pendingGitLog,
+                  commitShows: {
+                    ...shows,
+                    [hash]: { ...entry, status: "error", error: msg.message },
+                  },
+                },
+              };
+            }
           }
           if (msg.code === "RENAME_FAILED" && state.pendingRename) {
             return { ...state, pendingRename: { ...state.pendingRename, error: msg.message } };
@@ -1459,6 +1499,34 @@ function reducer(state: AppState, action: AppAction): AppState {
                 : ready.commits,
               hasMore: ready.hasMore,
               error: undefined,
+              // Fresh (non-append) log invalidates expand cache.
+              expandedHash: wasLoadMore ? state.pendingGitLog.expandedHash : null,
+              commitShows: wasLoadMore ? state.pendingGitLog.commitShows : {},
+            },
+          };
+        }
+        case "GitCommitShowReady": {
+          const ready = msg as GitCommitShowReadyMessage;
+          if (!state.pendingGitLog || state.pendingGitLog.panelId !== ready.panelId) {
+            return state;
+          }
+          const existing = state.pendingGitLog.commitShows[ready.hash];
+          if (existing && existing.requestId !== ready.requestId) {
+            return state;
+          }
+          return {
+            ...state,
+            pendingGitLog: {
+              ...state.pendingGitLog,
+              commitShows: {
+                ...state.pendingGitLog.commitShows,
+                [ready.hash]: {
+                  status: "ready",
+                  requestId: ready.requestId,
+                  changes: ready.changes,
+                  error: undefined,
+                },
+              },
             },
           };
         }
@@ -1636,9 +1704,8 @@ function reducer(state: AppState, action: AppAction): AppState {
     case "CLOSE_BRO":
       return { ...state, pendingBro: null };
     case "REQUEST_GIT_LOG": {
-      const keep = action.append && state.pendingGitLog?.panelId === action.panelId
-        ? state.pendingGitLog.commits
-        : [];
+      const samePanel = state.pendingGitLog?.panelId === action.panelId;
+      const keep = action.append && samePanel ? state.pendingGitLog!.commits : [];
       return {
         ...state,
         pendingGitLog: {
@@ -1648,6 +1715,50 @@ function reducer(state: AppState, action: AppAction): AppState {
           commits: keep,
           hasMore: action.append ? (state.pendingGitLog?.hasMore ?? false) : false,
           error: undefined,
+          expandedHash: action.append && samePanel ? state.pendingGitLog!.expandedHash : null,
+          commitShows: action.append && samePanel ? state.pendingGitLog!.commitShows : {},
+        },
+      };
+    }
+    case "REQUEST_GIT_COMMIT_SHOW": {
+      if (!state.pendingGitLog || state.pendingGitLog.panelId !== action.panelId) {
+        return state;
+      }
+      const prev = state.pendingGitLog.commitShows[action.hash];
+      // Keep ready cache; only (re)fetch when missing or previously errored.
+      if (prev?.status === "ready" || prev?.status === "loading") {
+        return {
+          ...state,
+          pendingGitLog: {
+            ...state.pendingGitLog,
+            expandedHash: action.hash,
+          },
+        };
+      }
+      return {
+        ...state,
+        pendingGitLog: {
+          ...state.pendingGitLog,
+          expandedHash: action.hash,
+          commitShows: {
+            ...state.pendingGitLog.commitShows,
+            [action.hash]: {
+              status: "loading",
+              requestId: action.requestId,
+              changes: [],
+              error: undefined,
+            },
+          },
+        },
+      };
+    }
+    case "SET_GIT_LOG_EXPANDED": {
+      if (!state.pendingGitLog) return state;
+      return {
+        ...state,
+        pendingGitLog: {
+          ...state.pendingGitLog,
+          expandedHash: action.hash,
         },
       };
     }

@@ -1,11 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { IconArrowDown, IconArrowUp, IconCopy, IconGitCompare, IconLoader2, IconMinus, IconPlus } from "@tabler/icons-react";
 import { useAppDispatch, useAppState } from "../store";
-import type { GitLogRef, GitRepoStatus } from "../ws/types";
+import type { GitChange, GitLogRef, GitRepoStatus } from "../ws/types";
 import type { WsClient } from "../ws/client";
 import { ResizableModal } from "./ResizableModal";
 
 type GitTab = "changes" | "log";
+
+/** Focus target in the Log tab: a commit header or a nested file change. */
+type LogFocus =
+  | { kind: "commit"; index: number }
+  | { kind: "change"; commitIndex: number; changeIndex: number };
 
 const LOG_PAGE_SIZE = 100;
 
@@ -24,12 +29,13 @@ export function GitModal({ panelId, git, client, onClose }: { panelId: string; g
   const selectAllRef = useRef<HTMLInputElement>(null);
   const changeRowRefs = useRef<Array<HTMLDivElement | null>>([]);
   const logRowRefs = useRef<Array<HTMLDivElement | null>>([]);
+  const logChangeRowRefs = useRef<Record<string, Array<HTMLDivElement | null>>>({});
   const logLoadMoreRef = useRef<HTMLDivElement | null>(null);
   const lastGitRef = useRef(git);
   const logLoadedRootRef = useRef<string | null>(null);
   const [activity, setActivity] = useState<{ action: string; message: string } | null>(null);
   const [activeChangeIndex, setActiveChangeIndex] = useState(0);
-  const [activeLogIndex, setActiveLogIndex] = useState(0);
+  const [logFocus, setLogFocus] = useState<LogFocus>({ kind: "commit", index: 0 });
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(() => new Set());
   const [rollbackPaths, setRollbackPaths] = useState<string[] | null>(null);
   const selectionAnchorRef = useRef<number | null>(null);
@@ -46,6 +52,11 @@ export function GitModal({ panelId, git, client, onClose }: { panelId: string; g
   const selectedUnstaged = useMemo(() => selectedChanges.filter(change => !isStaged(change)), [selectedChanges]);
   const allChangesSelected = git.changes.length > 0 && selectedChanges.length === git.changes.length;
   const logCommits = gitLog?.commits ?? [];
+  const expandedHash = gitLog?.expandedHash ?? null;
+  const expandedCommitIndex = useMemo(
+    () => (expandedHash ? logCommits.findIndex((c) => c.hash === expandedHash) : -1),
+    [expandedHash, logCommits],
+  );
 
   const requestLog = useCallback((opts: { skip: number; append: boolean }) => {
     const requestId = crypto.randomUUID();
@@ -57,6 +68,27 @@ export function GitModal({ panelId, git, client, onClose }: { panelId: string; g
       limit: LOG_PAGE_SIZE,
     });
   }, [client, dispatch, panelId]);
+
+  const expandCommit = useCallback((hash: string) => {
+    const existing = gitLog?.commitShows[hash];
+    const requestId = crypto.randomUUID();
+    dispatch({ type: "REQUEST_GIT_COMMIT_SHOW", panelId, requestId, hash });
+    if (!existing || existing.status === "error") {
+      client.sendIntent("GitGetCommitShow", undefined, { panelId, requestId, hash });
+    }
+  }, [client, dispatch, gitLog?.commitShows, panelId]);
+
+  const collapseCommit = useCallback(() => {
+    dispatch({ type: "SET_GIT_LOG_EXPANDED", hash: null });
+  }, [dispatch]);
+
+  const viewCommitDiff = useCallback((hash: string, change: GitChange) => {
+    act("GitViewDiff", {
+      targetPath: change.path,
+      commitHash: hash,
+      ...(change.oldPath ? { oldPath: change.oldPath } : {}),
+    });
+  }, [act]);
 
   const armRollback = (paths: string[]) => {
     const uniquePaths = [...new Set(paths)];
@@ -103,22 +135,72 @@ export function GitModal({ panelId, git, client, onClose }: { panelId: string; g
       row?.scrollIntoView({ block: "nearest" });
     });
   }, [git.changes.length]);
-  const focusLogRow = useCallback((index: number, opts?: { revealLoadMore?: boolean }) => {
+  const focusLogItem = useCallback((focus: LogFocus, opts?: { revealLoadMore?: boolean }) => {
     if (logCommits.length === 0) return;
-    const nextIndex = Math.max(0, Math.min(index, logCommits.length - 1));
-    setActiveLogIndex(nextIndex);
-    requestAnimationFrame(() => {
-      const row = logRowRefs.current[nextIndex];
-      row?.focus();
-      // When landing on the last page of history, also bring the Load more
-      // control into view so End feels like the bottom of the list.
-      if (opts?.revealLoadMore && logLoadMoreRef.current) {
-        logLoadMoreRef.current.scrollIntoView({ block: "nearest" });
+    let next = focus;
+    if (next.kind === "commit") {
+      const index = Math.max(0, Math.min(next.index, logCommits.length - 1));
+      next = { kind: "commit", index };
+    } else {
+      const commitIndex = Math.max(0, Math.min(next.commitIndex, logCommits.length - 1));
+      const hash = logCommits[commitIndex]?.hash;
+      const count = hash && gitLog?.commitShows[hash]?.status === "ready"
+        ? gitLog.commitShows[hash].changes.length
+        : 0;
+      if (count === 0) {
+        next = { kind: "commit", index: commitIndex };
       } else {
+        const changeIndex = Math.max(0, Math.min(next.changeIndex, count - 1));
+        next = { kind: "change", commitIndex, changeIndex };
+      }
+    }
+    setLogFocus(next);
+    requestAnimationFrame(() => {
+      if (next.kind === "commit") {
+        const row = logRowRefs.current[next.index];
+        row?.focus();
+        if (opts?.revealLoadMore && logLoadMoreRef.current) {
+          logLoadMoreRef.current.scrollIntoView({ block: "nearest" });
+        } else {
+          row?.scrollIntoView({ block: "nearest" });
+        }
+      } else {
+        const hash = logCommits[next.commitIndex]?.hash;
+        const row = hash ? logChangeRowRefs.current[hash]?.[next.changeIndex] : null;
+        row?.focus();
         row?.scrollIntoView({ block: "nearest" });
       }
     });
-  }, [logCommits.length]);
+  }, [gitLog?.commitShows, logCommits]);
+
+  /** Flattened log navigation: commits + nested files of the single expanded commit. */
+  const moveLogFocus = useCallback((delta: number) => {
+    if (logCommits.length === 0) return;
+    type Flat = LogFocus;
+    const flat: Flat[] = [];
+    for (let i = 0; i < logCommits.length; i += 1) {
+      flat.push({ kind: "commit", index: i });
+      const hash = logCommits[i].hash;
+      if (expandedHash === hash && gitLog?.commitShows[hash]?.status === "ready") {
+        const changes = gitLog.commitShows[hash].changes;
+        for (let c = 0; c < changes.length; c += 1) {
+          flat.push({ kind: "change", commitIndex: i, changeIndex: c });
+        }
+      }
+    }
+    if (flat.length === 0) return;
+    const currentIdx = flat.findIndex((item) => {
+      if (item.kind !== logFocus.kind) return false;
+      if (item.kind === "commit" && logFocus.kind === "commit") return item.index === logFocus.index;
+      if (item.kind === "change" && logFocus.kind === "change") {
+        return item.commitIndex === logFocus.commitIndex && item.changeIndex === logFocus.changeIndex;
+      }
+      return false;
+    });
+    const from = currentIdx < 0 ? 0 : currentIdx;
+    const to = Math.max(0, Math.min(flat.length - 1, from + delta));
+    focusLogItem(flat[to]);
+  }, [expandedHash, focusLogItem, gitLog?.commitShows, logCommits, logFocus]);
 
   const copyLogHash = useCallback((hash: string) => {
     void navigator.clipboard.writeText(hash);
@@ -166,9 +248,27 @@ export function GitModal({ panelId, git, client, onClose }: { panelId: string; g
   }, [git.changes]);
 
   useEffect(() => {
-    setActiveLogIndex((index) => Math.min(index, Math.max(0, logCommits.length - 1)));
     logRowRefs.current.length = logCommits.length;
-  }, [logCommits.length]);
+    setLogFocus((current) => {
+      if (logCommits.length === 0) return { kind: "commit", index: 0 };
+      if (current.kind === "commit") {
+        return { kind: "commit", index: Math.min(current.index, logCommits.length - 1) };
+      }
+      const commitIndex = Math.min(current.commitIndex, logCommits.length - 1);
+      const hash = logCommits[commitIndex]?.hash;
+      const count = hash && gitLog?.commitShows[hash]?.status === "ready"
+        ? gitLog.commitShows[hash].changes.length
+        : 0;
+      if (count === 0 || expandedHash !== hash) {
+        return { kind: "commit", index: commitIndex };
+      }
+      return {
+        kind: "change",
+        commitIndex,
+        changeIndex: Math.min(current.changeIndex, count - 1),
+      };
+    });
+  }, [expandedHash, gitLog?.commitShows, logCommits]);
 
   // Lazy-load log when switching to the Log tab (or when root changes).
   useEffect(() => {
@@ -195,7 +295,11 @@ export function GitModal({ panelId, git, client, onClose }: { panelId: string; g
         event.preventDefault();
         event.stopImmediatePropagation();
         if (rollbackPaths) setRollbackPaths(null);
-        else handleClose();
+        else if (tab === "log" && expandedHash) {
+          collapseCommit();
+          const idx = expandedCommitIndex >= 0 ? expandedCommitIndex : 0;
+          focusLogItem({ kind: "commit", index: idx });
+        } else handleClose();
         return;
       }
       if (event.key === "Tab") {
@@ -238,20 +342,30 @@ export function GitModal({ panelId, git, client, onClose }: { panelId: string; g
         if (movement) {
           event.preventDefault();
           event.stopImmediatePropagation();
-          if (tab === "log") focusLogRow(activeLogIndex + movement);
+          if (tab === "log") moveLogFocus(movement);
           else focusChangeRow(activeChangeIndex + movement);
           return;
         }
-        // Home / End: first and last row, same semantics as the file listing.
+        // Home / End: first and last visible log item (commit or nested file).
         if (event.key === "Home" || event.key === "End") {
           event.preventDefault();
           event.stopImmediatePropagation();
           if (tab === "log") {
             if (logCommits.length === 0) return;
             if (event.key === "Home") {
-              focusLogRow(0);
+              focusLogItem({ kind: "commit", index: 0 });
             } else {
-              focusLogRow(logCommits.length - 1, { revealLoadMore: !!gitLog?.hasMore });
+              // Last commit; if it is expanded with files, land on last file.
+              const last = logCommits.length - 1;
+              const hash = logCommits[last]?.hash;
+              const changes = hash && expandedHash === hash && gitLog?.commitShows[hash]?.status === "ready"
+                ? gitLog.commitShows[hash].changes
+                : [];
+              if (changes.length > 0) {
+                focusLogItem({ kind: "change", commitIndex: last, changeIndex: changes.length - 1 }, { revealLoadMore: !!gitLog?.hasMore });
+              } else {
+                focusLogItem({ kind: "commit", index: last }, { revealLoadMore: !!gitLog?.hasMore });
+              }
             }
           } else {
             if (git.changes.length === 0) return;
@@ -260,18 +374,68 @@ export function GitModal({ panelId, git, client, onClose }: { panelId: string; g
           return;
         }
         if (tab === "log") {
-          if (event.key === " " && gitLog?.hasMore && gitLog.status !== "loading") {
+          // Right: expand active commit / enter first nested change.
+          if (event.key === "ArrowRight") {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            const commitIndex = logFocus.kind === "commit" ? logFocus.index : logFocus.commitIndex;
+            const commit = logCommits[commitIndex];
+            if (!commit) return;
+            if (expandedHash !== commit.hash) {
+              expandCommit(commit.hash);
+              focusLogItem({ kind: "commit", index: commitIndex });
+              return;
+            }
+            // Already expanded: dive into first file when available.
+            if (logFocus.kind === "commit") {
+              const show = gitLog?.commitShows[commit.hash];
+              if (show?.status === "ready" && show.changes.length > 0) {
+                focusLogItem({ kind: "change", commitIndex, changeIndex: 0 });
+              }
+            }
+            return;
+          }
+          // Left: leave nested change → parent commit; collapse when on header.
+          if (event.key === "ArrowLeft") {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            if (logFocus.kind === "change") {
+              focusLogItem({ kind: "commit", index: logFocus.commitIndex });
+              return;
+            }
+            const commit = logCommits[logFocus.index];
+            if (commit && expandedHash === commit.hash) {
+              collapseCommit();
+              focusLogItem({ kind: "commit", index: logFocus.index });
+            }
+            return;
+          }
+          if (event.key === " " && logFocus.kind === "commit" && gitLog?.hasMore && gitLog.status !== "loading") {
             event.preventDefault();
             event.stopImmediatePropagation();
             requestLog({ skip: logCommits.length, append: true });
             return;
           }
-          const activeCommit = logCommits[activeLogIndex];
-          if (activeCommit && key === "y") {
-            event.preventDefault();
-            event.stopImmediatePropagation();
-            copyLogHash(activeCommit.hash);
-            return;
+          if (logFocus.kind === "commit") {
+            const activeCommit = logCommits[logFocus.index];
+            if (activeCommit && key === "y") {
+              event.preventDefault();
+              event.stopImmediatePropagation();
+              copyLogHash(activeCommit.hash);
+              return;
+            }
+          }
+          if (logFocus.kind === "change" && key === "v") {
+            const commit = logCommits[logFocus.commitIndex];
+            const change = commit && gitLog?.commitShows[commit.hash]?.status === "ready"
+              ? gitLog.commitShows[commit.hash].changes[logFocus.changeIndex]
+              : undefined;
+            if (commit && change) {
+              event.preventDefault();
+              event.stopImmediatePropagation();
+              viewCommitDiff(commit.hash, change);
+              return;
+            }
           }
         } else {
           const activeChange = git.changes[activeChangeIndex];
@@ -314,22 +478,27 @@ export function GitModal({ panelId, git, client, onClose }: { panelId: string; g
     return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [
     activeChangeIndex,
-    activeLogIndex,
     canCommit,
     canPull,
     canPush,
+    collapseCommit,
     copyLogHash,
+    expandCommit,
+    expandedCommitIndex,
+    expandedHash,
     focusChangeRow,
-    focusLogRow,
+    focusLogItem,
     git.changes,
-    gitLog?.hasMore,
-    gitLog?.status,
+    gitLog,
     handleClose,
     logCommits,
+    logFocus,
+    moveLogFocus,
     requestLog,
     rollbackPaths,
     tab,
     toggleSelection,
+    viewCommitDiff,
   ]);
 
   return (
@@ -566,41 +735,109 @@ export function GitModal({ panelId, git, client, onClose }: { panelId: string; g
               {gitLog?.status === "ready" && logCommits.length === 0 && (
                 <div className="git-modal__log-empty">No commits yet.</div>
               )}
-              {logCommits.map((commit, index) => (
-                <div
-                  key={commit.hash}
-                  ref={(element) => { logRowRefs.current[index] = element; }}
-                  className={`git-modal__log-row${index === activeLogIndex ? " git-modal__log-row--active" : ""}`}
-                  role="group"
-                  tabIndex={0}
-                  aria-label={`Commit ${index + 1} of ${logCommits.length}: ${commit.shortHash} ${commit.subject}`}
-                  data-testid="git-log-row"
-                  data-log-index={index}
-                  onFocus={() => setActiveLogIndex(index)}
-                >
-                  <span className="git-modal__log-hash-cell">
-                    <button
-                      type="button"
-                      className="git-modal__log-copy"
-                      title="Copy full hash (Y)"
-                      aria-keyshortcuts="y"
-                      onFocus={() => setActiveLogIndex(index)}
-                      onClick={() => copyLogHash(commit.hash)}
+              {logCommits.map((commit, index) => {
+                const isExpanded = expandedHash === commit.hash;
+                const show = gitLog?.commitShows[commit.hash];
+                const commitActive = logFocus.kind === "commit" && logFocus.index === index;
+                return (
+                  <div key={commit.hash} className={`git-modal__log-entry${isExpanded ? " git-modal__log-entry--expanded" : ""}`}>
+                    <div
+                      ref={(element) => { logRowRefs.current[index] = element; }}
+                      className={`git-modal__log-row${commitActive ? " git-modal__log-row--active" : ""}`}
+                      role="group"
+                      tabIndex={0}
+                      aria-expanded={isExpanded}
+                      aria-label={`Commit ${index + 1} of ${logCommits.length}: ${commit.shortHash} ${commit.subject}`}
+                      data-testid="git-log-row"
+                      data-log-index={index}
+                      onFocus={() => setLogFocus({ kind: "commit", index })}
+                      onDoubleClick={() => {
+                        if (isExpanded) collapseCommit();
+                        else expandCommit(commit.hash);
+                      }}
                     >
-                      <IconCopy size={14} aria-hidden />
-                    </button>
-                    <code className="git-modal__log-hash" title={commit.hash}>{commit.shortHash}</code>
-                  </span>
-                  <span className={`git-modal__log-subject-cell${commit.refs && commit.refs.length > 0 ? " git-modal__log-subject-cell--has-refs" : ""}`}>
-                    <span className="git-modal__log-subject" title={commit.subject}>{commit.subject}</span>
-                    {commit.refs && commit.refs.length > 0 && (
-                      <LogRefsStrip refs={commit.refs} />
+                      <span className="git-modal__log-hash-cell">
+                        <button
+                          type="button"
+                          className="git-modal__log-copy"
+                          title="Copy full hash (Y)"
+                          aria-keyshortcuts="y"
+                          onFocus={() => setLogFocus({ kind: "commit", index })}
+                          onClick={() => copyLogHash(commit.hash)}
+                        >
+                          <IconCopy size={14} aria-hidden />
+                        </button>
+                        <code className="git-modal__log-hash" title={commit.hash}>{commit.shortHash}</code>
+                      </span>
+                      <span className={`git-modal__log-subject-cell${commit.refs && commit.refs.length > 0 ? " git-modal__log-subject-cell--has-refs" : ""}`}>
+                        <span className="git-modal__log-subject" title={commit.subject}>{commit.subject}</span>
+                        {commit.refs && commit.refs.length > 0 && (
+                          <LogRefsStrip refs={commit.refs} />
+                        )}
+                      </span>
+                      <span className="git-modal__log-author" title={commit.authorEmail || commit.authorName}>{commit.authorName}</span>
+                      <span className="git-modal__log-date" title={commit.authorDate}>{formatLogDate(commit.authorDate)}</span>
+                    </div>
+                    {isExpanded && (
+                      <div className="git-modal__log-show" data-testid="git-log-commit-show" aria-label={`Changes in ${commit.shortHash}`}>
+                        {show?.status === "loading" && (
+                          <div className="git-modal__log-show-status">
+                            <IconLoader2 size={14} className="git-modal__log-spinner" /> Loading changes…
+                          </div>
+                        )}
+                        {show?.status === "error" && (
+                          <div className="git-modal__log-show-status git-modal__log-show-status--error">
+                            {show.error ?? "Could not load commit changes."}
+                          </div>
+                        )}
+                        {show?.status === "ready" && show.changes.length === 0 && (
+                          <div className="git-modal__log-show-status">No file changes.</div>
+                        )}
+                        {show?.status === "ready" && show.changes.map((change, changeIndex) => {
+                          const changeActive = logFocus.kind === "change"
+                            && logFocus.commitIndex === index
+                            && logFocus.changeIndex === changeIndex;
+                          const pathLabel = change.oldPath
+                            ? `${change.oldPath} → ${change.path}`
+                            : change.path;
+                          return (
+                            <div
+                              key={`${change.path}:${changeIndex}`}
+                              ref={(element) => {
+                                if (!logChangeRowRefs.current[commit.hash]) {
+                                  logChangeRowRefs.current[commit.hash] = [];
+                                }
+                                logChangeRowRefs.current[commit.hash][changeIndex] = element;
+                              }}
+                              className={`git-modal__log-change${changeActive ? " git-modal__log-change--active" : ""}`}
+                              role="group"
+                              tabIndex={0}
+                              aria-label={`Change ${changeIndex + 1} of ${show.changes.length}: ${pathLabel}`}
+                              data-testid="git-log-change-row"
+                              data-change-index={changeIndex}
+                              onFocus={() => setLogFocus({ kind: "change", commitIndex: index, changeIndex })}
+                            >
+                              <code className="git-modal__log-change-state">{change.indexStatus}</code>
+                              <span className="git-modal__log-change-path" title={pathLabel}>{pathLabel}</span>
+                              <button
+                                type="button"
+                                className="git-modal__change-action"
+                                data-testid="git-log-view-diff"
+                                title="View diff (V)"
+                                aria-keyshortcuts="v"
+                                onFocus={() => setLogFocus({ kind: "change", commitIndex: index, changeIndex })}
+                                onClick={() => viewCommitDiff(commit.hash, change)}
+                              >
+                                <IconGitCompare size={15} aria-hidden />View diff <kbd>V</kbd>
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
                     )}
-                  </span>
-                  <span className="git-modal__log-author" title={commit.authorEmail || commit.authorName}>{commit.authorName}</span>
-                  <span className="git-modal__log-date" title={commit.authorDate}>{formatLogDate(commit.authorDate)}</span>
-                </div>
-              ))}
+                  </div>
+                );
+              })}
               {gitLog?.hasMore && (
                 <div className="git-modal__log-more" ref={logLoadMoreRef}>
                   <button

@@ -1483,9 +1483,55 @@ body {
 .git-modal__tab--active { color: var(--text); border-bottom-color: var(--accent); }
 .git-modal__tab kbd { margin-left: 6px; }
 .git-modal__log { flex: 1; min-height: 0; overflow: auto; }
-.git-modal__log-row { display: flex; align-items: center; gap: 10px; min-height: 28px; padding: 3px 16px; border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent); }
+.git-modal__log-entry { border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent); }
+.git-modal__log-entry--expanded { background: color-mix(in srgb, var(--bg-elev) 55%, transparent); }
+.git-modal__log-row { display: flex; align-items: center; gap: 10px; min-height: 28px; padding: 3px 16px; }
 .git-modal__log-row:hover { background: var(--bg-hover); }
 .git-modal__log-row--active, .git-modal__log-row:focus { background: var(--bg-hover); outline: 1px solid var(--border-focus); outline-offset: -1px; }
+.git-modal__log-show {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin: 0 12px 8px 28px;
+  border-left: 2px solid color-mix(in srgb, var(--border) 85%, var(--accent));
+  padding-left: 8px;
+}
+.git-modal__log-show-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  color: var(--text-dim);
+  font-size: calc(var(--font-size) - 1px);
+}
+.git-modal__log-show-status--error { color: var(--text-warning); }
+.git-modal__log-change {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 26px;
+  padding: 2px 8px;
+  border-radius: 3px;
+}
+.git-modal__log-change:hover { background: var(--bg-hover); }
+.git-modal__log-change--active, .git-modal__log-change:focus {
+  background: var(--bg-hover);
+  outline: 1px solid var(--border-focus);
+  outline-offset: -1px;
+}
+.git-modal__log-change-state {
+  flex: 0 0 1.5rem;
+  color: var(--text-path);
+  font-weight: 600;
+}
+.git-modal__log-change-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
 .git-modal__log-hash-cell { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 2px; min-width: 5.5rem; }
 .git-modal__log-hash { color: var(--text-path); font-weight: 600; }
 /* Name column: subject fills; optional fixed refs track on the trailing edge (≤20%). */

@@ -55,6 +55,8 @@ pub(crate) async fn handle(name: &str, scope: &Value, args: &Value, ctx: &mut In
 async fn git_view_diff(args: &Value, ctx: &mut IntentContext<'_>) {
     let panel_id = arg_str(args, "panelId").unwrap_or("");
     let target_path = arg_str(args, "targetPath").unwrap_or("");
+    let commit_hash = arg_str(args, "commitHash").map(str::to_string);
+    let old_path = arg_str(args, "oldPath").map(str::to_string);
     let repository = if panel_id.is_empty() {
         Err("A changed Git file is required.".to_string())
     } else {
@@ -67,7 +69,9 @@ async fn git_view_diff(args: &Value, ctx: &mut IntentContext<'_>) {
         repository.as_ref().ok().map(|(_, source_id)| source_id.as_str()),
     );
     let result = match repository {
-        Ok((root, _)) if !target_path.is_empty() => launch_git_diff(panel_id, target_path, root, ctx).await,
+        Ok((root, _)) if !target_path.is_empty() => {
+            launch_git_diff(panel_id, target_path, root, commit_hash, old_path, ctx).await
+        }
         Ok(_) => Err("A changed Git file is required.".to_string()),
         Err(message) => Err(message),
     };
@@ -161,6 +165,8 @@ async fn launch_git_diff(
     panel_id: &str,
     target_path: &str,
     root: String,
+    commit_hash: Option<String>,
+    old_path: Option<String>,
     ctx: &mut IntentContext<'_>,
 ) -> Result<(), String> {
     let max_bytes = {
@@ -173,7 +179,13 @@ async fn launch_git_diff(
     };
     let target_path = target_path.to_string();
     let content = tokio::task::spawn_blocking(move || {
-        crate::git::read_diff_content(&root, &target_path, max_bytes)
+        crate::git::read_diff_content(
+            &root,
+            &target_path,
+            max_bytes,
+            commit_hash.as_deref(),
+            old_path.as_deref(),
+        )
     })
     .await
     .map_err(|error| format!("Git diff task failed: {error}"))??;

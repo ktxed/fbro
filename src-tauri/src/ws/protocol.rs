@@ -217,6 +217,16 @@ pub enum ServerMessage {
         #[serde(rename = "hasMore")]
         has_more: bool,
     },
+    /// File list for one expanded commit in the repository modal Log tab.
+    GitCommitShowReady {
+        timestamp: u64,
+        #[serde(rename = "panelId")]
+        panel_id: String,
+        #[serde(rename = "requestId")]
+        request_id: String,
+        hash: String,
+        changes: Vec<crate::git::GitChange>,
+    },
     /// Request text input from the FE (e.g. archive password).
     InputRequired {
         timestamp: u64,

@@ -304,6 +304,69 @@ fn parse_log_decorations(raw: &str) -> Vec<GitLogRef> {
         .collect()
 }
 
+/// File list for a single commit (name-status vs first parent).
+///
+/// Reuses [`GitChange`] so the Log expand UI can share row layout with the
+/// Changes tab. `index_status` holds the name-status letter (`M`/`A`/`D`/`R`/…);
+/// `worktree_status` is always `" "`.
+pub fn commit_show(root: &str, hash: &str) -> Result<Vec<GitChange>, String> {
+    let hash = hash.trim();
+    if hash.is_empty() {
+        return Err("A commit hash is required.".into());
+    }
+    // Resolve to a full object so short hashes and tags still work.
+    let resolved = String::from_utf8(git(root, &["rev-parse", "--verify", &format!("{hash}^{{commit}}")])?)
+        .map_err(|e| format!("Invalid commit hash encoding: {e}"))?
+        .trim()
+        .to_string();
+    if resolved.is_empty() {
+        return Err("Could not resolve the commit hash.".into());
+    }
+
+    // --first-parent: merge commits list the first-parent diff only.
+    // -z: NUL-separated records (status, path[, path2 for renames/copies]).
+    let output = git(
+        root,
+        &[
+            "show",
+            "--pretty=format:",
+            "--name-status",
+            "--first-parent",
+            "-z",
+            &resolved,
+        ],
+    )?;
+    Ok(parse_name_status_z(&output))
+}
+
+/// Parse `git … -z --name-status` output into [`GitChange`] rows.
+fn parse_name_status_z(raw: &[u8]) -> Vec<GitChange> {
+    let text = String::from_utf8_lossy(raw);
+    let mut parts = text.split('\0').filter(|p| !p.is_empty()).peekable();
+    let mut changes = Vec::new();
+    while let Some(status_field) = parts.next() {
+        // Status is like "M", "A", "D", "T", "R100", "C080".
+        let letter = status_field.chars().next().unwrap_or('M');
+        let Some(path1) = parts.next() else { break };
+        let (path, old_path) = if matches!(letter, 'R' | 'C') {
+            let path2 = parts.next().unwrap_or("");
+            (path2.to_string(), Some(path1.to_string()))
+        } else {
+            (path1.to_string(), None)
+        };
+        if path.is_empty() {
+            continue;
+        }
+        changes.push(GitChange {
+            path,
+            old_path,
+            index_status: letter.to_string(),
+            worktree_status: " ".into(),
+        });
+    }
+    changes
+}
+
 /// Discard the current local state for the requested status entries. Tracked
 /// paths return to HEAD; additions and untracked paths are removed instead.
 /// Rename source paths are included so rolling back a rename is one action.
@@ -345,7 +408,22 @@ pub fn rollback_paths(root: &str, paths: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-pub fn read_diff_content(root: &str, target_path: &str, max_bytes: u64) -> Result<GitDiffContent, String> {
+/// Diff content for a path.
+///
+/// - `commit` is `None`: worktree vs HEAD for a porcelain change (Changes tab).
+/// - `commit` is `Some(hash)`: parent vs that commit (`old_path` is the rename
+///   source when present). Used by the Log expand “View diff” action.
+pub fn read_diff_content(
+    root: &str,
+    target_path: &str,
+    max_bytes: u64,
+    commit: Option<&str>,
+    old_path: Option<&str>,
+) -> Result<GitDiffContent, String> {
+    if let Some(commit) = commit {
+        return read_commit_diff_content(root, target_path, commit, max_bytes, old_path);
+    }
+
     let repo_path = normalize_repo_path(root, target_path)?;
     let status = inspect(root).ok_or_else(|| "No Git repository is available for this panel.".to_string())?;
     let change = status
@@ -354,7 +432,7 @@ pub fn read_diff_content(root: &str, target_path: &str, max_bytes: u64) -> Resul
         .find(|change| change.path == repo_path)
         .ok_or_else(|| "The requested path has no Git changes.".to_string())?;
     let head_path = change.old_path.as_deref().unwrap_or(&change.path).to_string();
-    let head = read_head_file(root, &head_path, max_bytes)?;
+    let head = read_git_blob(root, &format!("HEAD:{head_path}"), max_bytes)?;
     let worktree_path = Path::new(root).join(&change.path);
     let worktree = match std::fs::metadata(&worktree_path) {
         Ok(metadata) if metadata.len() > max_bytes => {
@@ -367,6 +445,35 @@ pub fn read_diff_content(root: &str, target_path: &str, max_bytes: u64) -> Resul
     Ok(GitDiffContent {
         head_path,
         worktree_path: change.path.clone(),
+        head,
+        worktree,
+    })
+}
+
+fn read_commit_diff_content(
+    root: &str,
+    target_path: &str,
+    commit: &str,
+    max_bytes: u64,
+    old_path: Option<&str>,
+) -> Result<GitDiffContent, String> {
+    let commit = commit.trim();
+    if commit.is_empty() {
+        return Err("A commit hash is required.".into());
+    }
+    let repo_path = normalize_repo_path(root, target_path)?;
+    let left_path = old_path
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .map(|p| normalize_repo_path(root, p))
+        .transpose()?
+        .unwrap_or_else(|| repo_path.clone());
+    // Parent side (empty for root commits / pure adds).
+    let head = read_git_blob(root, &format!("{commit}^:{left_path}"), max_bytes)?;
+    let worktree = read_git_blob(root, &format!("{commit}:{repo_path}"), max_bytes)?;
+    Ok(GitDiffContent {
+        head_path: left_path,
+        worktree_path: repo_path,
         head,
         worktree,
     })
@@ -390,32 +497,24 @@ fn normalize_repo_path(root: &str, target_path: &str) -> Result<String, String> 
     Ok(relative.to_string_lossy().replace('\\', "/"))
 }
 
-fn read_head_file(root: &str, path: &str, max_bytes: u64) -> Result<Vec<u8>, String> {
-    let has_head = Command::new("git")
-        .arg("-C")
-        .arg(root)
-        .args(["rev-parse", "--verify", "--quiet", "HEAD"])
-        .output()
-        .map_err(|error| format!("Git is unavailable: {error}"))?
-        .status
-        .success();
-    if !has_head {
-        return Ok(Vec::new());
-    }
-    let object = format!("HEAD:{path}");
+/// Read a blob via `git show <object>` where `object` is e.g. `HEAD:path` or
+/// `abc123^:path`. Missing objects (new file / root parent) return empty bytes.
+fn read_git_blob(root: &str, object: &str, max_bytes: u64) -> Result<Vec<u8>, String> {
     let size = Command::new("git")
         .arg("-C")
         .arg(root)
-        .args(["cat-file", "-s", &object])
+        .args(["cat-file", "-s", object])
         .output()
         .map_err(|error| format!("Git is unavailable: {error}"))?;
     if !size.status.success() {
+        // Absent blob (new file, root commit parent, deleted path on a side).
         return Ok(Vec::new());
     }
     let size = String::from_utf8_lossy(&size.stdout).trim().parse::<u64>()
         .map_err(|error| format!("Could not read Git object size: {error}"))?;
     if size > max_bytes {
-        return Err(format!("{path} exceeds the compare size limit ({} MiB).", max_bytes / 1024 / 1024));
+        let label = object.rsplit_once(':').map(|(_, p)| p).unwrap_or(object);
+        return Err(format!("{label} exceeds the compare size limit ({} MiB).", max_bytes / 1024 / 1024));
     }
     let output = Command::new("git")
         .arg("-C")
@@ -427,7 +526,6 @@ fn read_head_file(root: &str, path: &str, max_bytes: u64) -> Result<Vec<u8>, Str
     if output.status.success() {
         Ok(output.stdout)
     } else {
-        // A path absent from HEAD is the expected baseline for new files.
         Ok(Vec::new())
     }
 }
@@ -439,7 +537,7 @@ mod tests {
     use std::process::Command;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use super::{has_no_staged_changes, read_diff_content, rollback_paths, status_counts, GitChange};
+    use super::{commit_show, has_no_staged_changes, read_diff_content, rollback_paths, status_counts, GitChange};
 
     fn change(index_status: &str, worktree_status: &str) -> GitChange {
         GitChange { path: "file".into(), old_path: None, index_status: index_status.into(), worktree_status: worktree_status.into() }
@@ -544,7 +642,14 @@ mod tests {
         with_test_repo(|repo| {
             fs::write(repo.join("tracked.txt"), "working\n").unwrap();
 
-            let diff = read_diff_content(repo.to_str().unwrap(), &repo.join("tracked.txt").to_string_lossy(), 1024).unwrap();
+            let diff = read_diff_content(
+                repo.to_str().unwrap(),
+                &repo.join("tracked.txt").to_string_lossy(),
+                1024,
+                None,
+                None,
+            )
+            .unwrap();
 
             assert_eq!(diff.head_path, "tracked.txt");
             assert_eq!(diff.worktree_path, "tracked.txt");
@@ -559,11 +664,11 @@ mod tests {
             fs::write(repo.join("new.txt"), "new\n").unwrap();
             fs::remove_file(repo.join("removed.txt")).unwrap();
 
-            let added = read_diff_content(repo.to_str().unwrap(), "new.txt", 1024).unwrap();
+            let added = read_diff_content(repo.to_str().unwrap(), "new.txt", 1024, None, None).unwrap();
             assert!(added.head.is_empty());
             assert_eq!(added.worktree, b"new\n");
 
-            let deleted = read_diff_content(repo.to_str().unwrap(), "removed.txt", 1024).unwrap();
+            let deleted = read_diff_content(repo.to_str().unwrap(), "removed.txt", 1024, None, None).unwrap();
             assert_eq!(deleted.head, b"remove\n");
             assert!(deleted.worktree.is_empty());
         });
@@ -576,7 +681,7 @@ mod tests {
         git(&repo, &["init", "-q"]);
         fs::write(repo.join("new.txt"), "new\n").unwrap();
 
-        let diff = read_diff_content(repo.to_str().unwrap(), "new.txt", 1024).unwrap();
+        let diff = read_diff_content(repo.to_str().unwrap(), "new.txt", 1024, None, None).unwrap();
 
         assert!(diff.head.is_empty());
         assert_eq!(diff.worktree, b"new\n");
@@ -589,12 +694,93 @@ mod tests {
             fs::rename(repo.join("old.txt"), repo.join("renamed.txt")).unwrap();
             git(repo, &["add", "-A"]);
 
-            let diff = read_diff_content(repo.to_str().unwrap(), "renamed.txt", 1024).unwrap();
+            let diff = read_diff_content(repo.to_str().unwrap(), "renamed.txt", 1024, None, None).unwrap();
 
             assert_eq!(diff.head_path, "old.txt");
             assert_eq!(diff.worktree_path, "renamed.txt");
             assert_eq!(diff.head, b"old\n");
             assert_eq!(diff.worktree, b"old\n");
+        });
+    }
+
+    #[test]
+    fn commit_show_lists_modified_added_and_deleted_paths() {
+        with_test_repo(|repo| {
+            fs::write(repo.join("tracked.txt"), "changed\n").unwrap();
+            fs::write(repo.join("brand-new.txt"), "hello\n").unwrap();
+            fs::remove_file(repo.join("removed.txt")).unwrap();
+            git(repo, &["add", "-A"]);
+            git(repo, &["commit", "-qm", "mixed changes"]);
+
+            let root = repo.to_str().unwrap();
+            let (log, _) = super::log(root, 0, 5).unwrap();
+            let tip = &log[0];
+            let changes = commit_show(root, &tip.hash).unwrap();
+            let by_path: std::collections::HashMap<_, _> =
+                changes.iter().map(|c| (c.path.as_str(), c)).collect();
+
+            assert_eq!(by_path["tracked.txt"].index_status, "M");
+            assert_eq!(by_path["brand-new.txt"].index_status, "A");
+            assert_eq!(by_path["removed.txt"].index_status, "D");
+        });
+    }
+
+    #[test]
+    fn commit_show_includes_rename_with_old_path() {
+        with_test_repo(|repo| {
+            fs::rename(repo.join("old.txt"), repo.join("renamed.txt")).unwrap();
+            git(repo, &["add", "-A"]);
+            git(repo, &["commit", "-qm", "rename old"]);
+
+            let root = repo.to_str().unwrap();
+            let (log, _) = super::log(root, 0, 5).unwrap();
+            let changes = commit_show(root, &log[0].hash).unwrap();
+            let renamed = changes.iter().find(|c| c.path == "renamed.txt").expect("rename");
+            assert_eq!(renamed.index_status, "R");
+            assert_eq!(renamed.old_path.as_deref(), Some("old.txt"));
+        });
+    }
+
+    #[test]
+    fn commit_show_for_root_commit_lists_initial_files() {
+        with_test_repo(|repo| {
+            let root = repo.to_str().unwrap();
+            let (log, _) = super::log(root, 0, 10).unwrap();
+            let initial = log.last().unwrap();
+            let changes = commit_show(root, &initial.hash).unwrap();
+            assert!(changes.iter().any(|c| c.path == "tracked.txt" && c.index_status == "A"));
+            assert!(changes.iter().any(|c| c.path == "old.txt" && c.index_status == "A"));
+        });
+    }
+
+    #[test]
+    fn commit_diff_reads_parent_and_commit_blobs() {
+        with_test_repo(|repo| {
+            fs::write(repo.join("tracked.txt"), "second\n").unwrap();
+            git(repo, &["add", "tracked.txt"]);
+            git(repo, &["commit", "-qm", "second"]);
+
+            let root = repo.to_str().unwrap();
+            let (log, _) = super::log(root, 0, 5).unwrap();
+            let tip = &log[0];
+            let diff = read_diff_content(root, "tracked.txt", 1024, Some(&tip.hash), None).unwrap();
+            assert_eq!(diff.head, b"base\n");
+            assert_eq!(diff.worktree, b"second\n");
+        });
+    }
+
+    #[test]
+    fn commit_diff_uses_empty_parent_for_added_file() {
+        with_test_repo(|repo| {
+            fs::write(repo.join("brand-new.txt"), "hello\n").unwrap();
+            git(repo, &["add", "brand-new.txt"]);
+            git(repo, &["commit", "-qm", "add file"]);
+
+            let root = repo.to_str().unwrap();
+            let (log, _) = super::log(root, 0, 5).unwrap();
+            let diff = read_diff_content(root, "brand-new.txt", 1024, Some(&log[0].hash), None).unwrap();
+            assert!(diff.head.is_empty());
+            assert_eq!(diff.worktree, b"hello\n");
         });
     }
 
