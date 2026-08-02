@@ -118,7 +118,7 @@ pub async fn dispatch(name: &str, scope: &Value, args: &Value, ctx: &mut IntentC
             bookmarks::handle(name, scope, args, ctx).await
         }
         "EnterHistorySource" => history::handle(name, scope, args, ctx).await,
-        "GitRefresh" | "GitFetch" | "GitStagePaths" | "GitUnstagePaths" | "GitRollbackPaths" | "GitCommit" | "GitSwitchBranch" | "GitPull" | "GitPush" | "GitSetUpstream" => git::handle(name, args, ctx).await,
+        "GitRefresh" | "GitFetch" | "GitStagePaths" | "GitUnstagePaths" | "GitRollbackPaths" | "GitCommit" | "GitSwitchBranch" | "GitPull" | "GitPush" | "GitSetUpstream" | "GitGetLog" => git::handle(name, args, ctx).await,
         "EnterProcsSource" => procs::handle(name, scope, args, ctx).await,
         "Quit" | "ConfirmQuit" | "SetFontSize" => app::handle(name, args, ctx).await,
         "SetGeneralOption" | "SetModalSizePreference" | "ClearThumbnailCache" => {

@@ -28,6 +28,8 @@ import type {
   BroItem,
   BroOptionsFailedMessage,
   BroOptionsReadyMessage,
+  GitLogEntry,
+  GitLogReadyMessage,
   ExternalClipboardReadyMessage,
   ExternalClipboardWrittenMessage,
   CacheStatusReadyMessage,
@@ -165,6 +167,15 @@ export interface PendingBro {
   error?: string;
 }
 
+export interface PendingGitLog {
+  panelId: string;
+  requestId: string;
+  status: "loading" | "ready" | "error";
+  commits: GitLogEntry[];
+  hasMore: boolean;
+  error?: string;
+}
+
 export interface PendingInput {
   panelId: string;
   requestId: string;
@@ -233,6 +244,8 @@ export interface AppState {
   pendingGlobalSelectionAdd: PendingGlobalSelectionAdd | null;
   pendingOpenWith: PendingOpenWith | null;
   pendingBro: PendingBro | null;
+  /** In-flight / loaded git log for the repository modal Log tab. */
+  pendingGitLog: PendingGitLog | null;
   pendingInput: PendingInput | null;
   pendingSearch: PendingSearch | null;
   pendingAttributes: PendingAttributes | null;
@@ -314,6 +327,7 @@ const initialState: AppState = {
   pendingGlobalSelectionAdd: null,
   pendingOpenWith: null,
   pendingBro: null,
+  pendingGitLog: null,
   pendingInput: null,
   pendingSearch: null,
   pendingAttributes: null,
@@ -373,6 +387,8 @@ export type AppAction =
   | { type: "CLOSE_OPEN_WITH" }
   | { type: "OPEN_BRO"; bro: PendingBro }
   | { type: "CLOSE_BRO" }
+  | { type: "REQUEST_GIT_LOG"; panelId: string; requestId: string; append: boolean }
+  | { type: "CLEAR_GIT_LOG" }
   | { type: "OPEN_SEARCH"; search: PendingSearch }
   | { type: "CLOSE_SEARCH" }
   | { type: "SET_SEARCH_TAB"; tab: "input" | "results" | "extra" }
@@ -1173,6 +1189,16 @@ function reducer(state: AppState, action: AppAction): AppState {
           };
         }
         case "Error":
+          if ((msg.code === "GIT_LOG_FAILED" || msg.code === "GIT_UNAVAILABLE") && state.pendingGitLog) {
+            return {
+              ...state,
+              pendingGitLog: {
+                ...state.pendingGitLog,
+                status: "error",
+                error: msg.message,
+              },
+            };
+          }
           if (msg.code === "RENAME_FAILED" && state.pendingRename) {
             return { ...state, pendingRename: { ...state.pendingRename, error: msg.message } };
           }
@@ -1416,6 +1442,26 @@ function reducer(state: AppState, action: AppAction): AppState {
               bros: [],
             },
           };
+        case "GitLogReady": {
+          const ready = msg as GitLogReadyMessage;
+          if (!state.pendingGitLog || state.pendingGitLog.requestId !== ready.requestId) {
+            return state;
+          }
+          // Append when loading more (we already had commits); replace on fresh fetch.
+          const wasLoadMore = state.pendingGitLog.commits.length > 0 && state.pendingGitLog.status === "loading";
+          return {
+            ...state,
+            pendingGitLog: {
+              ...state.pendingGitLog,
+              status: "ready",
+              commits: wasLoadMore
+                ? [...state.pendingGitLog.commits, ...ready.commits]
+                : ready.commits,
+              hasMore: ready.hasMore,
+              error: undefined,
+            },
+          };
+        }
         case "InputRequired": {
           const m = msg as import("../ws/types").InputRequiredMessage;
           return {
@@ -1589,6 +1635,24 @@ function reducer(state: AppState, action: AppAction): AppState {
       return { ...state, pendingContextMenu: null, pendingBro: action.bro };
     case "CLOSE_BRO":
       return { ...state, pendingBro: null };
+    case "REQUEST_GIT_LOG": {
+      const keep = action.append && state.pendingGitLog?.panelId === action.panelId
+        ? state.pendingGitLog.commits
+        : [];
+      return {
+        ...state,
+        pendingGitLog: {
+          panelId: action.panelId,
+          requestId: action.requestId,
+          status: "loading",
+          commits: keep,
+          hasMore: action.append ? (state.pendingGitLog?.hasMore ?? false) : false,
+          error: undefined,
+        },
+      };
+    }
+    case "CLEAR_GIT_LOG":
+      return { ...state, pendingGitLog: null };
     case "OPEN_COMMAND_PALETTE":
       return { ...state, commandPaletteOpen: true };
     case "CLOSE_COMMAND_PALETTE":

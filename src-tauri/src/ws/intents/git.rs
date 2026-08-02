@@ -6,6 +6,38 @@ use crate::ws::runtime::{rescan_panel, selected_names_for, IntentContext};
 pub(crate) async fn handle(name: &str, args: &Value, ctx: &mut IntentContext<'_>) {
     let panel_id = args.get("panelId").and_then(Value::as_str).unwrap_or("").to_string();
     let (source_id, repository) = panel_repo(&panel_id, ctx).await;
+
+    // Read-only log: no journal, no panel rescan.
+    if name == "GitGetLog" {
+        let request_id = args
+            .get("requestId")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        let Some((root, _)) = repository else {
+            send_error(ctx, "GIT_UNAVAILABLE", "No Git repository is available for this panel.").await;
+            return;
+        };
+        let skip = args.get("skip").and_then(Value::as_u64).unwrap_or(0) as usize;
+        let limit = args.get("limit").and_then(Value::as_u64).unwrap_or(100) as usize;
+        match crate::git::log(&root, skip, limit) {
+            Ok((commits, has_more)) => {
+                let _ = ctx
+                    .tx
+                    .send(ServerMessage::GitLogReady {
+                        timestamp: now(),
+                        panel_id,
+                        request_id,
+                        commits,
+                        has_more,
+                    })
+                    .await;
+            }
+            Err(message) => send_error(ctx, "GIT_LOG_FAILED", &message).await,
+        }
+        return;
+    }
+
     let operation = crate::journal::record_git_intent(
         name,
         args,

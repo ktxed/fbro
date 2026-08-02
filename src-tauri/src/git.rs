@@ -54,6 +54,31 @@ pub struct GitRepoStatus {
     pub changes: Vec<GitChange>,
 }
 
+/// A ref decoration attached to a log entry (`git log` `%D`).
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct GitLogRef {
+    pub name: String,
+    /// `head` | `branch` | `remote` | `tag`
+    pub kind: String,
+}
+
+/// One row of `git log` for the repository modal Log tab.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitLogEntry {
+    pub hash: String,
+    pub short_hash: String,
+    pub subject: String,
+    pub author_name: String,
+    pub author_email: String,
+    /// ISO-8601 author date from `%aI`.
+    pub author_date: String,
+    /// Branch / tag / remote decorations pointing at this commit.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub refs: Vec<GitLogRef>,
+}
+
 fn git(path: &str, args: &[&str]) -> Result<Vec<u8>, String> {
     let output = Command::new("git")
         .arg("-C")
@@ -177,6 +202,106 @@ fn status_label(change: &GitChange) -> String {
 pub fn run(root: &str, args: &[String]) -> Result<(), String> {
     let output = Command::new("git").arg("-C").arg(root).args(args).output().map_err(|e| e.to_string())?;
     if output.status.success() { Ok(()) } else { Err(String::from_utf8_lossy(&output.stderr).trim().to_string()) }
+}
+
+/// Read a page of commit history for `root`.
+///
+/// Requests `limit + 1` rows so the caller can set `has_more` without a second
+/// round-trip. Unborn repositories (no HEAD) return an empty page.
+pub fn log(root: &str, skip: usize, limit: usize) -> Result<(Vec<GitLogEntry>, bool), String> {
+    let limit = limit.max(1);
+    let has_head = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["rev-parse", "--verify", "--quiet", "HEAD"])
+        .output()
+        .map_err(|e| format!("Git is unavailable: {e}"))?
+        .status
+        .success();
+    if !has_head {
+        return Ok((Vec::new(), false));
+    }
+
+    // Fields: hash, short, subject, author name, author email, author date (ISO), decorations.
+    // Subject uses %s (single line). Records are newline-separated; fields NUL-separated.
+    // %D is comma-separated ref names (no wrapping parens), e.g. "HEAD -> main, origin/main, tag: v1".
+    let fetch = limit + 1;
+    let skip_arg = format!("--skip={skip}");
+    let n_arg = format!("-n{fetch}");
+    let format_arg = "--format=%H%x00%h%x00%s%x00%an%x00%ae%x00%aI%x00%D".to_string();
+    let output = git(root, &["log", &skip_arg, &n_arg, &format_arg])?;
+    let text = String::from_utf8_lossy(&output);
+    let mut entries = Vec::new();
+    for line in text.lines() {
+        if line.is_empty() {
+            continue;
+        }
+        let mut parts = line.split('\0');
+        let Some(hash) = parts.next().filter(|s| !s.is_empty()) else { continue };
+        let short_hash = parts.next().unwrap_or("").to_string();
+        let subject = parts.next().unwrap_or("").to_string();
+        let author_name = parts.next().unwrap_or("").to_string();
+        let author_email = parts.next().unwrap_or("").to_string();
+        let author_date = parts.next().unwrap_or("").to_string();
+        let refs = parse_log_decorations(parts.next().unwrap_or(""));
+        entries.push(GitLogEntry {
+            hash: hash.to_string(),
+            short_hash,
+            subject,
+            author_name,
+            author_email,
+            author_date,
+            refs,
+        });
+    }
+    let has_more = entries.len() > limit;
+    if has_more {
+        entries.truncate(limit);
+    }
+    Ok((entries, has_more))
+}
+
+/// Parse `git log` `%D` decoration list into display refs.
+fn parse_log_decorations(raw: &str) -> Vec<GitLogRef> {
+    raw.split(',')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .filter_map(|part| {
+            if part == "HEAD" {
+                return Some(GitLogRef {
+                    name: "HEAD".into(),
+                    kind: "head".into(),
+                });
+            }
+            if let Some(branch) = part.strip_prefix("HEAD -> ") {
+                let name = branch.trim();
+                if name.is_empty() {
+                    return None;
+                }
+                return Some(GitLogRef {
+                    name: name.into(),
+                    kind: "head".into(),
+                });
+            }
+            if let Some(tag) = part.strip_prefix("tag: ") {
+                let name = tag.trim();
+                if name.is_empty() {
+                    return None;
+                }
+                return Some(GitLogRef {
+                    name: name.into(),
+                    kind: "tag".into(),
+                });
+            }
+            // remotes look like origin/main; local branches usually have no slash
+            // (except nested names). Prefer remote when it looks like remote/…
+            let kind = if part.contains('/') { "remote" } else { "branch" };
+            Some(GitLogRef {
+                name: part.to_string(),
+                kind: kind.into(),
+            })
+        })
+        .collect()
 }
 
 /// Discard the current local state for the requested status entries. Tracked
@@ -318,6 +443,85 @@ mod tests {
 
     fn change(index_status: &str, worktree_status: &str) -> GitChange {
         GitChange { path: "file".into(), old_path: None, index_status: index_status.into(), worktree_status: worktree_status.into() }
+    }
+
+    #[test]
+    fn git_log_returns_commits_newest_first_with_has_more() {
+        with_test_repo(|repo| {
+            fs::write(repo.join("tracked.txt"), "second\n").unwrap();
+            git(repo, &["add", "tracked.txt"]);
+            git(repo, &["commit", "-qm", "second commit"]);
+
+            let root = repo.to_str().unwrap();
+            let (page, has_more) = super::log(root, 0, 1).unwrap();
+            assert_eq!(page.len(), 1);
+            assert!(has_more);
+            assert_eq!(page[0].subject, "second commit");
+            assert!(!page[0].hash.is_empty());
+            assert!(!page[0].short_hash.is_empty());
+            assert_eq!(page[0].author_name, "fbro tests");
+
+            let (all, has_more) = super::log(root, 0, 10).unwrap();
+            assert_eq!(all.len(), 2);
+            assert!(!has_more);
+            assert_eq!(all[0].subject, "second commit");
+            assert_eq!(all[1].subject, "initial");
+
+            let (skipped, has_more) = super::log(root, 1, 10).unwrap();
+            assert_eq!(skipped.len(), 1);
+            assert!(!has_more);
+            assert_eq!(skipped[0].subject, "initial");
+        });
+    }
+
+    #[test]
+    fn git_log_includes_branch_and_tag_decorations() {
+        with_test_repo(|repo| {
+            git(repo, &["branch", "feature"]);
+            git(repo, &["tag", "v1.0"]);
+            let root = repo.to_str().unwrap();
+            let (entries, _) = super::log(root, 0, 10).unwrap();
+            let tip = &entries[0];
+            let names: Vec<&str> = tip.refs.iter().map(|r| r.name.as_str()).collect();
+            assert!(
+                names.iter().any(|n| *n == "feature" || n.ends_with("feature")),
+                "expected feature branch decoration, got {names:?}"
+            );
+            assert!(
+                names.iter().any(|n| *n == "v1.0"),
+                "expected tag decoration, got {names:?}"
+            );
+            assert!(
+                tip.refs.iter().any(|r| r.kind == "tag" && r.name == "v1.0"),
+                "tag should be kind=tag: {:?}",
+                tip.refs
+            );
+        });
+    }
+
+    #[test]
+    fn parse_log_decorations_splits_kinds() {
+        let refs = super::parse_log_decorations("HEAD -> main, origin/main, tag: v1.0, feature");
+        assert_eq!(
+            refs,
+            vec![
+                super::GitLogRef { name: "main".into(), kind: "head".into() },
+                super::GitLogRef { name: "origin/main".into(), kind: "remote".into() },
+                super::GitLogRef { name: "v1.0".into(), kind: "tag".into() },
+                super::GitLogRef { name: "feature".into(), kind: "branch".into() },
+            ]
+        );
+    }
+
+    #[test]
+    fn git_log_empty_for_unborn_repository() {
+        let repo = temp_repo_path();
+        fs::create_dir_all(&repo).unwrap();
+        git(&repo, &["init", "-q"]);
+        let (entries, has_more) = super::log(repo.to_str().unwrap(), 0, 50).unwrap();
+        assert!(entries.is_empty());
+        assert!(!has_more);
+        fs::remove_dir_all(repo).unwrap();
     }
 
     #[test]

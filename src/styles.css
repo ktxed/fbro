@@ -1473,10 +1473,113 @@ body {
 .git-modal__stat { flex: 0 0 auto; padding: 1px 5px; border: 1px solid var(--border); border-radius: 3px; color: var(--text-muted); }
 .git-modal__warning { margin: 8px 12px 0; padding: 6px 8px; border: 1px solid color-mix(in srgb, var(--text-warning) 42%, var(--border)); background: color-mix(in srgb, var(--text-warning) 10%, var(--bg-panel)); color: var(--text-warning); font-size: calc(var(--font-size) - 1px); line-height: 1.35; }
 .git-modal__toolbar { display: flex; align-items: center; gap: 8px; padding: 10px 16px; }
-.git-modal__toolbar select, .git-modal__toolbar button, .git-modal__change button, .git-modal .modal__actions button { font: inherit; font-size: calc(var(--font-size) - 1px); margin-inline: 5px; padding-inline: 8px; }
+.git-modal__toolbar select, .git-modal__toolbar button, .git-modal__change button, .git-modal__log-more button, .git-modal .modal__actions button { font: inherit; font-size: calc(var(--font-size) - 1px); margin-inline: 5px; padding-inline: 8px; }
 .git-modal__toolbar .git-actions-modal__badge { margin-left: 5px; vertical-align: middle; }
 .git-modal kbd { display: inline-block; margin-left: 3px; padding: 0 3px; border: 1px solid var(--border); border-radius: 3px; color: var(--text-dim); font: inherit; font-size: calc(var(--font-size) - 4px); line-height: 1.3; vertical-align: 1px; }
 .git-modal__toolbar-spacer { flex: 1; }
+.git-modal__tabs { display: flex; gap: 0; padding: 0 12px; border-bottom: 1px solid var(--border); background: var(--bg-panel); }
+.git-modal__tab { appearance: none; border: none; border-bottom: 2px solid transparent; margin-bottom: -1px; padding: 7px 12px; background: none; color: var(--text-dim); font: inherit; font-size: calc(var(--font-size) - 1px); cursor: pointer; }
+.git-modal__tab:hover { color: var(--text); background: var(--bg-hover); }
+.git-modal__tab--active { color: var(--text); border-bottom-color: var(--accent); }
+.git-modal__tab kbd { margin-left: 6px; }
+.git-modal__log { flex: 1; min-height: 0; overflow: auto; }
+.git-modal__log-row { display: flex; align-items: center; gap: 10px; min-height: 28px; padding: 3px 16px; border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent); }
+.git-modal__log-row:hover { background: var(--bg-hover); }
+.git-modal__log-row--active, .git-modal__log-row:focus { background: var(--bg-hover); outline: 1px solid var(--border-focus); outline-offset: -1px; }
+.git-modal__log-hash-cell { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 2px; min-width: 5.5rem; }
+.git-modal__log-hash { color: var(--text-path); font-weight: 600; }
+/* Name column: subject fills; optional fixed refs track on the trailing edge (≤20%). */
+.git-modal__log-subject-cell {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: center;
+  column-gap: 8px;
+}
+.git-modal__log-subject-cell--has-refs {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 20%);
+}
+.git-modal__log-subject {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+/* Branch/tag chips in a stable right column; thin scrollbar when overflowing. */
+.git-modal__log-refs-wrap {
+  min-width: 0;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  overscroll-behavior: contain;
+}
+.git-modal__log-refs {
+  min-width: 0;
+  max-width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  white-space: nowrap;
+}
+.git-modal__log-refs::-webkit-scrollbar {
+  height: 6px;
+}
+.git-modal__log-refs::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--border) 80%, var(--text-dim));
+  border-radius: 3px;
+}
+.git-modal__log-refs::-webkit-scrollbar-track {
+  background: transparent;
+}
+.git-modal__log-ref {
+  flex: 0 0 auto;
+  max-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 0 5px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg-elev);
+  color: var(--text-dim);
+  font-size: calc(var(--font-size) - 2px);
+  line-height: 1.45;
+}
+.git-modal__log-ref--head {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  color: var(--text-path);
+  background: color-mix(in srgb, var(--accent) 14%, var(--bg-elev));
+}
+.git-modal__log-ref--branch {
+  border-color: color-mix(in srgb, var(--text-success, #73c991) 40%, var(--border));
+  color: var(--text-success, #73c991);
+}
+.git-modal__log-ref--remote {
+  color: var(--text-dim);
+}
+.git-modal__log-ref--tag {
+  border-color: color-mix(in srgb, var(--text-warning) 45%, var(--border));
+  color: var(--text-warning);
+}
+.git-modal__log-author { flex: 0 0 9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim); font-size: calc(var(--font-size) - 1px); }
+.git-modal__log-date { flex: 0 0 8.5rem; color: var(--text-dim); font-size: calc(var(--font-size) - 1px); white-space: nowrap; }
+.git-modal__log-copy { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; padding: 1px 2px; border: none; border-radius: 3px; background: none; color: var(--text-dim); cursor: pointer; opacity: 0.55; }
+.git-modal__log-row:hover .git-modal__log-copy,
+.git-modal__log-row--active .git-modal__log-copy,
+.git-modal__log-row:focus .git-modal__log-copy,
+.git-modal__log-copy:focus { opacity: 1; }
+.git-modal__log-copy:hover { color: var(--text); background: var(--bg-focused); }
+.git-modal__log-empty { display: flex; align-items: center; gap: 8px; padding: 20px 16px; color: var(--text-dim); }
+.git-modal__log-empty--error { color: var(--text-warning); }
+.git-modal__log-spinner { animation: git-actions-spin 900ms linear infinite; }
+.git-modal__log-more { display: flex; justify-content: center; padding: 10px; }
+.git-modal__log-more button { min-width: auto; }
 .git-modal__section-title { display: flex; align-items: center; gap: 12px; padding: 5px 12px; color: var(--text-dim); background: var(--bg-header); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); font-size: calc(var(--font-size) - 2px); text-transform: uppercase; letter-spacing: .06em; }
 .git-modal__section-title > span:last-child { margin-left: auto; }
 .git-modal__select-all { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; text-transform: none; letter-spacing: normal; }

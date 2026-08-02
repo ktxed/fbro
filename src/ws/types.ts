@@ -43,6 +43,26 @@ export interface GitRepoStatus {
   changes: GitChange[];
 }
 
+/** A ref decoration on a log entry (`git log` %D). */
+export interface GitLogRef {
+  name: string;
+  /** `head` | `branch` | `remote` | `tag` */
+  kind: "head" | "branch" | "remote" | "tag" | string;
+}
+
+/** One `git log` row for the repository modal Log tab. */
+export interface GitLogEntry {
+  hash: string;
+  shortHash: string;
+  subject: string;
+  authorName: string;
+  authorEmail: string;
+  /** ISO-8601 author date. */
+  authorDate: string;
+  /** Branches / tags / remotes pointing at this commit. */
+  refs?: GitLogRef[];
+}
+
 export interface Source {
   id: string;
   name: string;
@@ -789,6 +809,15 @@ export interface BroOptionsFailedMessage {
   message: string;
 }
 
+export interface GitLogReadyMessage {
+  type: "GitLogReady";
+  timestamp: number;
+  panelId: string;
+  requestId: string;
+  commits: GitLogEntry[];
+  hasMore: boolean;
+}
+
 export interface InputRequiredMessage {
   type: "InputRequired";
   timestamp: number;
@@ -953,6 +982,7 @@ export type BEMessage =
   | OpenWithOptionsFailedMessage
   | BroOptionsReadyMessage
   | BroOptionsFailedMessage
+  | GitLogReadyMessage
   | InputRequiredMessage
   | CacheStatusReadyMessage
   | TerminalSessionOpenedMessage

@@ -206,6 +206,17 @@ pub enum ServerMessage {
         request_id: String,
         message: String,
     },
+    /// Page of `git log` for the repository modal Log tab.
+    GitLogReady {
+        timestamp: u64,
+        #[serde(rename = "panelId")]
+        panel_id: String,
+        #[serde(rename = "requestId")]
+        request_id: String,
+        commits: Vec<crate::git::GitLogEntry>,
+        #[serde(rename = "hasMore")]
+        has_more: bool,
+    },
     /// Request text input from the FE (e.g. archive password).
     InputRequired {
         timestamp: u64,

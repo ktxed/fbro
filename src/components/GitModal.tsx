@@ -1,10 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { IconArrowDown, IconArrowUp, IconGitCompare, IconLoader2, IconMinus, IconPlus } from "@tabler/icons-react";
-import type { GitRepoStatus } from "../ws/types";
+import { IconArrowDown, IconArrowUp, IconCopy, IconGitCompare, IconLoader2, IconMinus, IconPlus } from "@tabler/icons-react";
+import { useAppDispatch, useAppState } from "../store";
+import type { GitLogRef, GitRepoStatus } from "../ws/types";
 import type { WsClient } from "../ws/client";
 import { ResizableModal } from "./ResizableModal";
 
+type GitTab = "changes" | "log";
+
+const LOG_PAGE_SIZE = 100;
+
 export function GitModal({ panelId, git, client, onClose }: { panelId: string; git: GitRepoStatus; client: WsClient; onClose: () => void }) {
+  const dispatch = useAppDispatch();
+  const { pendingGitLog } = useAppState();
+  const gitLog = pendingGitLog?.panelId === panelId ? pendingGitLog : null;
+
+  const [tab, setTab] = useState<GitTab>("changes");
   const [message, setMessage] = useState("");
   const staged = useMemo(() => git.changes.filter(c => c.indexStatus !== " " && c.indexStatus !== "?"), [git]);
   const modalRef = useRef<HTMLDivElement>(null);
@@ -13,9 +23,13 @@ export function GitModal({ panelId, git, client, onClose }: { panelId: string; g
   const commitRef = useRef<HTMLButtonElement>(null);
   const selectAllRef = useRef<HTMLInputElement>(null);
   const changeRowRefs = useRef<Array<HTMLDivElement | null>>([]);
+  const logRowRefs = useRef<Array<HTMLDivElement | null>>([]);
+  const logLoadMoreRef = useRef<HTMLDivElement | null>(null);
   const lastGitRef = useRef(git);
+  const logLoadedRootRef = useRef<string | null>(null);
   const [activity, setActivity] = useState<{ action: string; message: string } | null>(null);
   const [activeChangeIndex, setActiveChangeIndex] = useState(0);
+  const [activeLogIndex, setActiveLogIndex] = useState(0);
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(() => new Set());
   const [rollbackPaths, setRollbackPaths] = useState<string[] | null>(null);
   const selectionAnchorRef = useRef<number | null>(null);
@@ -31,6 +45,19 @@ export function GitModal({ panelId, git, client, onClose }: { panelId: string; g
   const selectedStaged = useMemo(() => selectedChanges.filter(change => isStaged(change)), [selectedChanges]);
   const selectedUnstaged = useMemo(() => selectedChanges.filter(change => !isStaged(change)), [selectedChanges]);
   const allChangesSelected = git.changes.length > 0 && selectedChanges.length === git.changes.length;
+  const logCommits = gitLog?.commits ?? [];
+
+  const requestLog = useCallback((opts: { skip: number; append: boolean }) => {
+    const requestId = crypto.randomUUID();
+    dispatch({ type: "REQUEST_GIT_LOG", panelId, requestId, append: opts.append });
+    client.sendIntent("GitGetLog", undefined, {
+      panelId,
+      requestId,
+      skip: opts.skip,
+      limit: LOG_PAGE_SIZE,
+    });
+  }, [client, dispatch, panelId]);
+
   const armRollback = (paths: string[]) => {
     const uniquePaths = [...new Set(paths)];
     if (samePathSet(rollbackPaths, uniquePaths)) {
@@ -76,15 +103,57 @@ export function GitModal({ panelId, git, client, onClose }: { panelId: string; g
       row?.scrollIntoView({ block: "nearest" });
     });
   }, [git.changes.length]);
+  const focusLogRow = useCallback((index: number, opts?: { revealLoadMore?: boolean }) => {
+    if (logCommits.length === 0) return;
+    const nextIndex = Math.max(0, Math.min(index, logCommits.length - 1));
+    setActiveLogIndex(nextIndex);
+    requestAnimationFrame(() => {
+      const row = logRowRefs.current[nextIndex];
+      row?.focus();
+      // When landing on the last page of history, also bring the Load more
+      // control into view so End feels like the bottom of the list.
+      if (opts?.revealLoadMore && logLoadMoreRef.current) {
+        logLoadMoreRef.current.scrollIntoView({ block: "nearest" });
+      } else {
+        row?.scrollIntoView({ block: "nearest" });
+      }
+    });
+  }, [logCommits.length]);
+
+  const copyLogHash = useCallback((hash: string) => {
+    void navigator.clipboard.writeText(hash);
+    dispatch({ type: "SHOW_TRANSIENT_HINT", message: "Copied commit hash" });
+  }, [dispatch]);
+
+  const handleClose = useCallback(() => {
+    dispatch({ type: "CLEAR_GIT_LOG" });
+    onClose();
+  }, [dispatch, onClose]);
+
   useEffect(() => {
     runAction("GitRefresh", "Refreshing Git status…");
   }, [client, panelId]);
+
+  useEffect(() => {
+    return () => {
+      dispatch({ type: "CLEAR_GIT_LOG" });
+    };
+  }, [dispatch]);
+
   useEffect(() => {
     if (activity && git !== lastGitRef.current) {
       setActivity({ action: "complete", message: `${activity.message.replace(/…$/, "")} complete` });
+      // After a successful commit (or other mutating action), refresh log if it was loaded.
+      if (logLoadedRootRef.current === git.root && tab === "log") {
+        requestLog({ skip: 0, append: false });
+      } else if (logLoadedRootRef.current === git.root) {
+        // Invalidate so next visit to Log re-fetches.
+        logLoadedRootRef.current = null;
+      }
     }
     lastGitRef.current = git;
-  }, [activity, git]);
+  }, [activity, git, requestLog, tab]);
+
   useEffect(() => {
     setActiveChangeIndex((index) => Math.min(index, Math.max(0, git.changes.length - 1)));
     changeRowRefs.current.length = git.changes.length;
@@ -95,22 +164,38 @@ export function GitModal({ panelId, git, client, onClose }: { panelId: string; g
     });
     setRollbackPaths(null);
   }, [git.changes]);
+
+  useEffect(() => {
+    setActiveLogIndex((index) => Math.min(index, Math.max(0, logCommits.length - 1)));
+    logRowRefs.current.length = logCommits.length;
+  }, [logCommits.length]);
+
+  // Lazy-load log when switching to the Log tab (or when root changes).
+  useEffect(() => {
+    if (tab !== "log") return;
+    if (logLoadedRootRef.current === git.root) return;
+    logLoadedRootRef.current = git.root;
+    requestLog({ skip: 0, append: false });
+  }, [tab, git.root, requestLog]);
+
   useEffect(() => {
     const frame = requestAnimationFrame(() => closeRef.current?.focus());
     return () => cancelAnimationFrame(frame);
   }, []);
+
   useEffect(() => {
     if (selectAllRef.current) {
       selectAllRef.current.indeterminate = selectedChanges.length > 0 && !allChangesSelected;
     }
   }, [allChangesSelected, selectedChanges.length]);
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
         event.stopImmediatePropagation();
         if (rollbackPaths) setRollbackPaths(null);
-        else onClose();
+        else handleClose();
         return;
       }
       if (event.key === "Tab") {
@@ -137,32 +222,78 @@ export function GitModal({ panelId, git, client, onClose }: { panelId: string; g
       const key = event.key.toLowerCase();
       const hasShortcutModifier = event.ctrlKey || event.metaKey || event.altKey;
       if (!hasShortcutModifier) {
+        if (key === "1") {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          setTab("changes");
+          return;
+        }
+        if (key === "2") {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          setTab("log");
+          return;
+        }
         const movement = event.key === "ArrowUp" || key === "k" ? -1 : event.key === "ArrowDown" || key === "j" ? 1 : 0;
         if (movement) {
           event.preventDefault();
           event.stopImmediatePropagation();
-          focusChangeRow(activeChangeIndex + movement);
+          if (tab === "log") focusLogRow(activeLogIndex + movement);
+          else focusChangeRow(activeChangeIndex + movement);
           return;
         }
-        const activeChange = git.changes[activeChangeIndex];
-        if (activeChange && event.key === " " && target instanceof HTMLElement && target.matches('[data-testid="git-change-row"]')) {
+        // Home / End: first and last row, same semantics as the file listing.
+        if (event.key === "Home" || event.key === "End") {
           event.preventDefault();
           event.stopImmediatePropagation();
-          toggleSelection(activeChangeIndex);
+          if (tab === "log") {
+            if (logCommits.length === 0) return;
+            if (event.key === "Home") {
+              focusLogRow(0);
+            } else {
+              focusLogRow(logCommits.length - 1, { revealLoadMore: !!gitLog?.hasMore });
+            }
+          } else {
+            if (git.changes.length === 0) return;
+            focusChangeRow(event.key === "Home" ? 0 : git.changes.length - 1);
+          }
           return;
         }
-        if (activeChange && key === "v") {
-          event.preventDefault();
-          event.stopImmediatePropagation();
-          act("GitViewDiff", { targetPath: activeChange.path });
-          return;
-        }
-        if (activeChange && key === "s") {
-          const isStaged = activeChange.indexStatus !== " " && activeChange.indexStatus !== "?";
-          event.preventDefault();
-          event.stopImmediatePropagation();
-          runAction(isStaged ? "GitUnstagePaths" : "GitStagePaths", `${isStaged ? "Unstaging" : "Staging"} ${activeChange.path}…`, { paths: [activeChange.path] });
-          return;
+        if (tab === "log") {
+          if (event.key === " " && gitLog?.hasMore && gitLog.status !== "loading") {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            requestLog({ skip: logCommits.length, append: true });
+            return;
+          }
+          const activeCommit = logCommits[activeLogIndex];
+          if (activeCommit && key === "y") {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            copyLogHash(activeCommit.hash);
+            return;
+          }
+        } else {
+          const activeChange = git.changes[activeChangeIndex];
+          if (activeChange && event.key === " " && target instanceof HTMLElement && target.matches('[data-testid="git-change-row"]')) {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            toggleSelection(activeChangeIndex);
+            return;
+          }
+          if (activeChange && key === "v") {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            act("GitViewDiff", { targetPath: activeChange.path });
+            return;
+          }
+          if (activeChange && key === "s") {
+            const isStaged = activeChange.indexStatus !== " " && activeChange.indexStatus !== "?";
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            runAction(isStaged ? "GitUnstagePaths" : "GitStagePaths", `${isStaged ? "Unstaging" : "Staging"} ${activeChange.path}…`, { paths: [activeChange.path] });
+            return;
+          }
         }
       }
       const accelerators: Record<string, () => void> = {
@@ -170,7 +301,7 @@ export function GitModal({ panelId, git, client, onClose }: { panelId: string; g
         l: () => { if (canPull) runAction("GitPull", "Pulling changes…"); },
         p: () => { if (canPush) runAction("GitPush", "Pushing changes…"); },
         r: () => runAction("GitRefresh", "Refreshing Git status…"),
-        c: () => { if (canCommit) commitRef.current?.click(); },
+        c: () => { if (tab === "changes" && canCommit) commitRef.current?.click(); },
       };
       const action = !hasShortcutModifier ? accelerators[key] : undefined;
       if (action) {
@@ -181,18 +312,334 @@ export function GitModal({ panelId, git, client, onClose }: { panelId: string; g
     };
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [activeChangeIndex, canCommit, canPull, canPush, focusChangeRow, git.changes, onClose, rollbackPaths, toggleSelection]);
-  return <div className="modal-overlay" role="dialog" aria-modal="true" onKeyDown={(event) => event.stopPropagation()} onKeyUp={(event) => event.stopPropagation()}><ResizableModal ref={modalRef} modalId="git" client={client} className="git-modal" ariaLabel="Git repository" ariaModal defaultSize={{ width: 1400, height: 700 }} minSize={{ width: 760, height: 620 }} onPointerDownCapture={(event) => { if (rollbackPaths && !(event.target as Element).closest("[data-git-rollback]")) setRollbackPaths(null); }}>
-    <div className="git-modal__header"><div><span className="git-modal__eyebrow">REPOSITORY</span><strong>{git.branch}</strong></div><button ref={closeRef} className="git-modal__close" title="Close (Esc)" onClick={onClose}>×</button></div>
-    <div className="git-modal__summary" title={git.root}><span className="git-modal__path">{git.root}</span><span className="git-modal__stat">{git.stagedCount} staged</span><span className="git-modal__stat">{git.modifiedCount} modified</span><span className="git-modal__stat">{git.untrackedCount} untracked</span></div>
-    {!git.clean && <div className="git-modal__warning">Staged changes are present. Branch switch and pull are disabled; pushing commits remains available.</div>}
-    <div className="git-modal__toolbar"><select ref={branchRef} value={git.branch} disabled={!git.clean} onChange={e => runAction("GitSwitchBranch", "Switching branch…", { branch: e.target.value })}>{git.branches.map(branch => <option key={branch} value={branch}>{branch}</option>)}</select><kbd>B</kbd><span className="git-modal__toolbar-spacer" /><button disabled={!canPull} title={!canPull ? "No incoming commits to pull" : undefined} onClick={() => runAction("GitPull", "Pulling changes…")}>Pull <kbd>L</kbd>{git.behindCount !== undefined && git.behindCount > 0 && <em className="git-actions-modal__badge git-actions-modal__badge--incoming"><IconArrowDown size={13} /> {git.behindCount}</em>}</button><button disabled={!canPush} title={!canPush ? "No outgoing commits to push" : undefined} onClick={() => runAction("GitPush", "Pushing changes…")}>Push <kbd>P</kbd>{git.aheadCount !== undefined && git.aheadCount > 0 && <em className="git-actions-modal__badge git-actions-modal__badge--outgoing"><IconArrowUp size={13} /> {git.aheadCount}</em>}</button><button onClick={() => runAction("GitRefresh", "Refreshing Git status…")}>Refresh <kbd>R</kbd></button></div>
-    <div className="git-modal__section-title"><span>Changes</span><label className="git-modal__select-all"><input ref={selectAllRef} type="checkbox" data-testid="git-select-all-toggle" aria-label="Select all Git changes" checked={allChangesSelected} disabled={git.changes.length === 0} onChange={toggleAllChanges} />Select all</label><span>{git.changes.length}</span></div>
-    {selectedChanges.length > 0 && <div className="git-modal__selection-toolbar" aria-label={`${selectedChanges.length} selected Git changes`}><strong data-testid="git-selection-count">{selectedChanges.length} selected</strong><button data-testid="git-clear-selection" onClick={() => { setSelectedPaths(new Set()); selectionAnchorRef.current = null; setRollbackPaths(null); }}>Clear</button><span /><button data-testid="git-stage-selected" disabled={selectedUnstaged.length === 0} onClick={() => runAction("GitStagePaths", `Staging ${describePaths(selectedUnstaged.map(change => change.path))}…`, { paths: selectedUnstaged.map(change => change.path) })}>Stage {selectedUnstaged.length}</button><button data-testid="git-unstage-selected" disabled={selectedStaged.length === 0} onClick={() => runAction("GitUnstagePaths", `Unstaging ${describePaths(selectedStaged.map(change => change.path))}…`, { paths: selectedStaged.map(change => change.path) })}>Unstage {selectedStaged.length}</button><button data-git-rollback data-testid="git-rollback-selected" className={`git-modal__change-action git-modal__change-action--danger${samePathSet(rollbackPaths, selectedChanges.map(change => change.path)) ? " git-modal__change-action--confirm" : ""}`} onClick={() => armRollback(selectedChanges.map(change => change.path))}>{samePathSet(rollbackPaths, selectedChanges.map(change => change.path)) ? `Confirm rollback ${selectedChanges.length}` : `Rollback ${selectedChanges.length}`}</button></div>}
-    <div className="git-modal__changes">{git.changes.map((change, index) => { const stagedChange = isStaged(change); const actionLabel = stagedChange ? "Unstage" : "Stage"; const rollbackPending = rollbackPaths?.length === 1 && rollbackPaths[0] === change.path; return <div ref={(element) => { changeRowRefs.current[index] = element; }} className={`git-modal__change${index === activeChangeIndex ? " git-modal__change--active" : ""}${selectedPaths.has(change.path) ? " git-modal__change--selected" : ""}`} key={change.path} role="group" tabIndex={0} aria-label={`Git change ${index + 1} of ${git.changes.length}: ${change.path}`} aria-keyshortcuts="Space" data-testid="git-change-row" data-change-index={index} onFocus={() => setActiveChangeIndex(index)}><input type="checkbox" data-testid="git-change-select" aria-label={`Select ${change.path}`} checked={selectedPaths.has(change.path)} onClick={event => { event.stopPropagation(); toggleSelection(index, event.shiftKey); }} onChange={() => undefined} /><code className={stagedChange ? "git-modal__change-state--staged" : ""}>{change.indexStatus}{change.worktreeStatus}</code><span title={change.path}>{change.path}</span><button className="git-modal__change-action" data-testid="git-view-diff" title="View diff (V)" aria-keyshortcuts="v" onFocus={() => setActiveChangeIndex(index)} onClick={() => { setRollbackPaths(null); act("GitViewDiff", { targetPath: change.path }); }}><IconGitCompare size={15} aria-hidden />View diff <kbd>V</kbd></button><button className="git-modal__change-action" title={`${actionLabel} (S)`} aria-keyshortcuts="s" onFocus={() => setActiveChangeIndex(index)} onClick={() => { setRollbackPaths(null); runAction(stagedChange ? "GitUnstagePaths" : "GitStagePaths", `${stagedChange ? "Unstaging" : "Staging"} ${change.path}…`, { paths: [change.path] }); }}>{stagedChange ? <IconMinus size={15} aria-hidden /> : <IconPlus size={15} aria-hidden />}{actionLabel} <kbd>S</kbd></button><button data-git-rollback data-testid="git-rollback-path" className={`git-modal__change-action git-modal__change-action--danger${rollbackPending ? " git-modal__change-action--confirm" : ""}`} onFocus={() => setActiveChangeIndex(index)} onClick={() => armRollback([change.path])}>{rollbackPending ? "Confirm rollback" : "Rollback"}</button></div>; })}</div>
-    <div className="git-modal__commit"><label htmlFor="git-commit-message">Commit message <span>{staged.length} staged</span></label><textarea id="git-commit-message" value={message} onChange={e => setMessage(e.target.value)} placeholder="Describe this change" rows={2} /></div>
-    <div className="modal__actions">{activity && <span className="git-modal__activity">{activity.action !== "complete" && <IconLoader2 size={14} />}{activity.message}</span>}<button onClick={onClose}>Close</button><button ref={commitRef} disabled={!canCommit} onClick={() => runAction("GitCommit", "Committing staged changes…", { message })}>Commit staged <kbd>C</kbd></button></div>
-  </ResizableModal></div>;
+  }, [
+    activeChangeIndex,
+    activeLogIndex,
+    canCommit,
+    canPull,
+    canPush,
+    copyLogHash,
+    focusChangeRow,
+    focusLogRow,
+    git.changes,
+    gitLog?.hasMore,
+    gitLog?.status,
+    handleClose,
+    logCommits,
+    requestLog,
+    rollbackPaths,
+    tab,
+    toggleSelection,
+  ]);
+
+  return (
+    <div
+      className="modal-overlay"
+      role="dialog"
+      aria-modal="true"
+      onKeyDown={(event) => event.stopPropagation()}
+      onKeyUp={(event) => event.stopPropagation()}
+    >
+      <ResizableModal
+        ref={modalRef}
+        modalId="git"
+        client={client}
+        className="git-modal"
+        ariaLabel="Git repository"
+        ariaModal
+        defaultSize={{ width: 1400, height: 700 }}
+        minSize={{ width: 760, height: 620 }}
+        onPointerDownCapture={(event) => {
+          if (rollbackPaths && !(event.target as Element).closest("[data-git-rollback]")) setRollbackPaths(null);
+        }}
+      >
+        <div className="git-modal__header">
+          <div>
+            <span className="git-modal__eyebrow">REPOSITORY</span>
+            <strong>{git.branch}</strong>
+          </div>
+          <button ref={closeRef} className="git-modal__close" title="Close (Esc)" onClick={handleClose}>×</button>
+        </div>
+        <div className="git-modal__summary" title={git.root}>
+          <span className="git-modal__path">{git.root}</span>
+          <span className="git-modal__stat">{git.stagedCount} staged</span>
+          <span className="git-modal__stat">{git.modifiedCount} modified</span>
+          <span className="git-modal__stat">{git.untrackedCount} untracked</span>
+        </div>
+        {!git.clean && (
+          <div className="git-modal__warning">
+            Staged changes are present. Branch switch and pull are disabled; pushing commits remains available.
+          </div>
+        )}
+        <div className="git-modal__toolbar">
+          <select
+            ref={branchRef}
+            value={git.branch}
+            disabled={!git.clean}
+            onChange={e => runAction("GitSwitchBranch", "Switching branch…", { branch: e.target.value })}
+          >
+            {git.branches.map(branch => <option key={branch} value={branch}>{branch}</option>)}
+          </select>
+          <kbd>B</kbd>
+          <span className="git-modal__toolbar-spacer" />
+          <button disabled={!canPull} title={!canPull ? "No incoming commits to pull" : undefined} onClick={() => runAction("GitPull", "Pulling changes…")}>
+            Pull <kbd>L</kbd>
+            {git.behindCount !== undefined && git.behindCount > 0 && (
+              <em className="git-actions-modal__badge git-actions-modal__badge--incoming"><IconArrowDown size={13} /> {git.behindCount}</em>
+            )}
+          </button>
+          <button disabled={!canPush} title={!canPush ? "No outgoing commits to push" : undefined} onClick={() => runAction("GitPush", "Pushing changes…")}>
+            Push <kbd>P</kbd>
+            {git.aheadCount !== undefined && git.aheadCount > 0 && (
+              <em className="git-actions-modal__badge git-actions-modal__badge--outgoing"><IconArrowUp size={13} /> {git.aheadCount}</em>
+            )}
+          </button>
+          <button onClick={() => runAction("GitRefresh", "Refreshing Git status…")}>Refresh <kbd>R</kbd></button>
+        </div>
+
+        <div className="git-modal__tabs" role="tablist" aria-label="Git views">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "changes"}
+            data-testid="git-tab-changes"
+            className={`git-modal__tab${tab === "changes" ? " git-modal__tab--active" : ""}`}
+            onClick={() => setTab("changes")}
+          >
+            Changes <kbd>1</kbd>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "log"}
+            data-testid="git-tab-log"
+            className={`git-modal__tab${tab === "log" ? " git-modal__tab--active" : ""}`}
+            onClick={() => setTab("log")}
+          >
+            Log <kbd>2</kbd>
+          </button>
+        </div>
+
+        {tab === "changes" ? (
+          <>
+            <div className="git-modal__section-title">
+              <span>Changes</span>
+              <label className="git-modal__select-all">
+                <input
+                  ref={selectAllRef}
+                  type="checkbox"
+                  data-testid="git-select-all-toggle"
+                  aria-label="Select all Git changes"
+                  checked={allChangesSelected}
+                  disabled={git.changes.length === 0}
+                  onChange={toggleAllChanges}
+                />
+                Select all
+              </label>
+              <span>{git.changes.length}</span>
+            </div>
+            {selectedChanges.length > 0 && (
+              <div className="git-modal__selection-toolbar" aria-label={`${selectedChanges.length} selected Git changes`}>
+                <strong data-testid="git-selection-count">{selectedChanges.length} selected</strong>
+                <button data-testid="git-clear-selection" onClick={() => { setSelectedPaths(new Set()); selectionAnchorRef.current = null; setRollbackPaths(null); }}>Clear</button>
+                <span />
+                <button
+                  data-testid="git-stage-selected"
+                  disabled={selectedUnstaged.length === 0}
+                  onClick={() => runAction("GitStagePaths", `Staging ${describePaths(selectedUnstaged.map(change => change.path))}…`, { paths: selectedUnstaged.map(change => change.path) })}
+                >
+                  Stage {selectedUnstaged.length}
+                </button>
+                <button
+                  data-testid="git-unstage-selected"
+                  disabled={selectedStaged.length === 0}
+                  onClick={() => runAction("GitUnstagePaths", `Unstaging ${describePaths(selectedStaged.map(change => change.path))}…`, { paths: selectedStaged.map(change => change.path) })}
+                >
+                  Unstage {selectedStaged.length}
+                </button>
+                <button
+                  data-git-rollback
+                  data-testid="git-rollback-selected"
+                  className={`git-modal__change-action git-modal__change-action--danger${samePathSet(rollbackPaths, selectedChanges.map(change => change.path)) ? " git-modal__change-action--confirm" : ""}`}
+                  onClick={() => armRollback(selectedChanges.map(change => change.path))}
+                >
+                  {samePathSet(rollbackPaths, selectedChanges.map(change => change.path))
+                    ? `Confirm rollback ${selectedChanges.length}`
+                    : `Rollback ${selectedChanges.length}`}
+                </button>
+              </div>
+            )}
+            <div className="git-modal__changes" role="tabpanel">
+              {git.changes.map((change, index) => {
+                const stagedChange = isStaged(change);
+                const actionLabel = stagedChange ? "Unstage" : "Stage";
+                const rollbackPending = rollbackPaths?.length === 1 && rollbackPaths[0] === change.path;
+                return (
+                  <div
+                    ref={(element) => { changeRowRefs.current[index] = element; }}
+                    className={`git-modal__change${index === activeChangeIndex ? " git-modal__change--active" : ""}${selectedPaths.has(change.path) ? " git-modal__change--selected" : ""}`}
+                    key={change.path}
+                    role="group"
+                    tabIndex={0}
+                    aria-label={`Git change ${index + 1} of ${git.changes.length}: ${change.path}`}
+                    aria-keyshortcuts="Space"
+                    data-testid="git-change-row"
+                    data-change-index={index}
+                    onFocus={() => setActiveChangeIndex(index)}
+                  >
+                    <input
+                      type="checkbox"
+                      data-testid="git-change-select"
+                      aria-label={`Select ${change.path}`}
+                      checked={selectedPaths.has(change.path)}
+                      onClick={event => { event.stopPropagation(); toggleSelection(index, event.shiftKey); }}
+                      onChange={() => undefined}
+                    />
+                    <code className={stagedChange ? "git-modal__change-state--staged" : ""}>{change.indexStatus}{change.worktreeStatus}</code>
+                    <span title={change.path}>{change.path}</span>
+                    <button
+                      className="git-modal__change-action"
+                      data-testid="git-view-diff"
+                      title="View diff (V)"
+                      aria-keyshortcuts="v"
+                      onFocus={() => setActiveChangeIndex(index)}
+                      onClick={() => { setRollbackPaths(null); act("GitViewDiff", { targetPath: change.path }); }}
+                    >
+                      <IconGitCompare size={15} aria-hidden />View diff <kbd>V</kbd>
+                    </button>
+                    <button
+                      className="git-modal__change-action"
+                      title={`${actionLabel} (S)`}
+                      aria-keyshortcuts="s"
+                      onFocus={() => setActiveChangeIndex(index)}
+                      onClick={() => {
+                        setRollbackPaths(null);
+                        runAction(
+                          stagedChange ? "GitUnstagePaths" : "GitStagePaths",
+                          `${stagedChange ? "Unstaging" : "Staging"} ${change.path}…`,
+                          { paths: [change.path] },
+                        );
+                      }}
+                    >
+                      {stagedChange ? <IconMinus size={15} aria-hidden /> : <IconPlus size={15} aria-hidden />}
+                      {actionLabel} <kbd>S</kbd>
+                    </button>
+                    <button
+                      data-git-rollback
+                      data-testid="git-rollback-path"
+                      className={`git-modal__change-action git-modal__change-action--danger${rollbackPending ? " git-modal__change-action--confirm" : ""}`}
+                      onFocus={() => setActiveChangeIndex(index)}
+                      onClick={() => armRollback([change.path])}
+                    >
+                      {rollbackPending ? "Confirm rollback" : "Rollback"}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="git-modal__commit">
+              <label htmlFor="git-commit-message">Commit message <span>{staged.length} staged</span></label>
+              <textarea
+                id="git-commit-message"
+                value={message}
+                onChange={e => setMessage(e.target.value)}
+                placeholder="Describe this change"
+                rows={2}
+              />
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="git-modal__section-title">
+              <span>Log</span>
+              <span>{gitLog?.status === "ready" ? logCommits.length : "…"}</span>
+            </div>
+            <div className="git-modal__log" role="tabpanel" data-testid="git-log-panel">
+              {gitLog?.status === "loading" && logCommits.length === 0 && (
+                <div className="git-modal__log-empty">
+                  <IconLoader2 size={16} className="git-modal__log-spinner" /> Loading history…
+                </div>
+              )}
+              {gitLog?.status === "error" && (
+                <div className="git-modal__log-empty git-modal__log-empty--error">{gitLog.error ?? "Could not load git log."}</div>
+              )}
+              {gitLog?.status === "ready" && logCommits.length === 0 && (
+                <div className="git-modal__log-empty">No commits yet.</div>
+              )}
+              {logCommits.map((commit, index) => (
+                <div
+                  key={commit.hash}
+                  ref={(element) => { logRowRefs.current[index] = element; }}
+                  className={`git-modal__log-row${index === activeLogIndex ? " git-modal__log-row--active" : ""}`}
+                  role="group"
+                  tabIndex={0}
+                  aria-label={`Commit ${index + 1} of ${logCommits.length}: ${commit.shortHash} ${commit.subject}`}
+                  data-testid="git-log-row"
+                  data-log-index={index}
+                  onFocus={() => setActiveLogIndex(index)}
+                >
+                  <span className="git-modal__log-hash-cell">
+                    <button
+                      type="button"
+                      className="git-modal__log-copy"
+                      title="Copy full hash (Y)"
+                      aria-keyshortcuts="y"
+                      onFocus={() => setActiveLogIndex(index)}
+                      onClick={() => copyLogHash(commit.hash)}
+                    >
+                      <IconCopy size={14} aria-hidden />
+                    </button>
+                    <code className="git-modal__log-hash" title={commit.hash}>{commit.shortHash}</code>
+                  </span>
+                  <span className={`git-modal__log-subject-cell${commit.refs && commit.refs.length > 0 ? " git-modal__log-subject-cell--has-refs" : ""}`}>
+                    <span className="git-modal__log-subject" title={commit.subject}>{commit.subject}</span>
+                    {commit.refs && commit.refs.length > 0 && (
+                      <LogRefsStrip refs={commit.refs} />
+                    )}
+                  </span>
+                  <span className="git-modal__log-author" title={commit.authorEmail || commit.authorName}>{commit.authorName}</span>
+                  <span className="git-modal__log-date" title={commit.authorDate}>{formatLogDate(commit.authorDate)}</span>
+                </div>
+              ))}
+              {gitLog?.hasMore && (
+                <div className="git-modal__log-more" ref={logLoadMoreRef}>
+                  <button
+                    type="button"
+                    className="git-modal__change-action"
+                    data-testid="git-log-load-more"
+                    disabled={gitLog.status === "loading"}
+                    onClick={() => requestLog({ skip: logCommits.length, append: true })}
+                    title="Load more (Space)"
+                  >
+                    {gitLog.status === "loading" ? "Loading…" : <>Load more <kbd>SPACE</kbd></>}
+                  </button>
+                </div>
+              )}
+            </div>
+          </>
+        )}
+
+        <div className="modal__actions">
+          {activity && (
+            <span className="git-modal__activity">
+              {activity.action !== "complete" && <IconLoader2 size={14} />}
+              {activity.message}
+            </span>
+          )}
+          <button onClick={handleClose}>Close</button>
+          {tab === "changes" && (
+            <button
+              ref={commitRef}
+              disabled={!canCommit}
+              onClick={() => runAction("GitCommit", "Committing staged changes…", { message })}
+            >
+              Commit staged <kbd>C</kbd>
+            </button>
+          )}
+        </div>
+      </ResizableModal>
+    </div>
+  );
 }
 
 function isStaged(change: GitRepoStatus["changes"][number]) {
@@ -208,4 +655,54 @@ function samePathSet(left: Iterable<string> | null, right: Iterable<string>) {
 
 function describePaths(paths: string[]) {
   return paths.length === 1 ? paths[0] : `${paths.length} files`;
+}
+
+function formatLogDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const p = (n: number) => n.toString().padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+/** Horizontally scrollable ref chips (visible thin scrollbar when overflowing). */
+function LogRefsStrip({ refs }: { refs: GitLogRef[] }) {
+  const wrapRef = useRef<HTMLSpanElement>(null);
+  const scrollerRef = useRef<HTMLSpanElement>(null);
+
+  // While the pointer is over the chip strip, keep wheel events here: map
+  // vertical scroll to horizontal chip pan and never bubble to the log list.
+  useEffect(() => {
+    const wrap = wrapRef.current;
+    const el = scrollerRef.current;
+    if (!wrap || !el) return;
+    const onWheel = (event: WheelEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
+      if (delta !== 0) el.scrollLeft += delta;
+    };
+    wrap.addEventListener("wheel", onWheel, { passive: false });
+    return () => wrap.removeEventListener("wheel", onWheel);
+  }, [refs]);
+
+  return (
+    <span
+      ref={wrapRef}
+      className="git-modal__log-refs-wrap"
+      title={refs.map((ref) => ref.name).join(", ")}
+      onClick={(event) => event.stopPropagation()}
+      onKeyDown={(event) => event.stopPropagation()}
+    >
+      <span className="git-modal__log-refs" ref={scrollerRef}>
+        {refs.map((ref) => (
+          <span
+            key={`${ref.kind}:${ref.name}`}
+            className={`git-modal__log-ref git-modal__log-ref--${ref.kind}`}
+          >
+            {ref.name}
+          </span>
+        ))}
+      </span>
+    </span>
+  );
 }
