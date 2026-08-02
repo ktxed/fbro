@@ -1550,6 +1550,7 @@ export function Panel({
                       mtime: entry.mtime,
                       btime: entry.btime,
                       permissions: entry.permissions,
+                      iconName: entry.iconName,
                     },
                   });
                 }}
@@ -1720,6 +1721,7 @@ export function Panel({
                         mtime: entry.mtime,
                         btime: entry.btime,
                         permissions: entry.permissions,
+                        iconName: entry.iconName,
                       },
                     });
                   }}

@@ -215,6 +215,7 @@ function openInfo(dispatch: Dispatch<AppAction>, panel: PanelState, state: AppSt
       mtime: entry.mtime,
       btime: entry.btime,
       permissions: entry.permissions,
+      iconName: entry.iconName,
     },
   });
   return true;

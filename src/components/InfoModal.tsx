@@ -1,8 +1,8 @@
-import { useRef, useEffect } from "react";
-import { useAppDispatch } from "../store";
+import { useRef, useEffect, useState, type ReactNode } from "react";
+import { useAppDispatch, useAppState } from "../store";
 import type { PendingInfo } from "../store";
 import type { WsClient } from "../ws/client";
-import { IconCopy } from "@tabler/icons-react";
+import { IconArrowUpRight, IconChevronRight, IconCopy } from "@tabler/icons-react";
 import { ResizableModal } from "./ResizableModal";
 
 interface InfoModalProps {
@@ -34,6 +34,33 @@ function kindLabel(kind: string): string {
     case "symlink":   return "Symbolic link";
     default:          return kind;
   }
+}
+
+/** Same fallbacks as the listing panel when no MIME icon is available. */
+function kindFallbackIcon(kind: string): ReactNode {
+  switch (kind) {
+    case "directory": return <IconChevronRight size={14} />;
+    case "symlink":   return <IconArrowUpRight size={14} />;
+    default:          return null;
+  }
+}
+
+/** Mirrors Panel EntryIcon: BE icon via fileserver, else kind fallback. */
+function TypeIcon({ kind, iconName }: { kind: string; iconName?: string }) {
+  const [failed, setFailed] = useState(false);
+  const { fileServerPort } = useAppState();
+  const icon = iconName && !failed && fileServerPort > 0 ? (
+    <img
+      src={`http://127.0.0.1:${fileServerPort}/__icon__/${iconName}`}
+      alt=""
+      draggable={false}
+      onError={() => setFailed(true)}
+    />
+  ) : (
+    kindFallbackIcon(kind)
+  );
+  if (!icon) return null;
+  return <span className="modal__info-type-icon" aria-hidden>{icon}</span>;
 }
 
 function CopyButton({ text }: { text: string }) {
@@ -83,12 +110,22 @@ export function InfoModal({ info, client }: InfoModalProps) {
         <div className="modal__header">Info</div>
         <div className="modal__body">
           <table className="modal__info-table">
-            <tbody>
+            <tbody className="modal__info-group">
               <tr>
                 <td className="modal__info-label">Name</td>
                 <td className="modal__info-value">{info.name}</td>
                 <td><CopyButton text={info.name} /></td>
               </tr>
+              <tr>
+                <td className="modal__info-label">Type</td>
+                <td className="modal__info-value modal__info-type">
+                  <TypeIcon kind={info.kind} iconName={info.iconName} />
+                  {kindLabel(info.kind)}
+                </td>
+                <td />
+              </tr>
+            </tbody>
+            <tbody className="modal__info-group">
               <tr>
                 <td className="modal__info-label">Full <span className="modal__hotkey">p</span>ath</td>
                 <td className="modal__info-value" title={info.fullPath}>{info.fullPath}</td>
@@ -99,26 +136,21 @@ export function InfoModal({ info, client }: InfoModalProps) {
                 <td className="modal__info-value" title={info.dirPath}>{info.dirPath}</td>
                 <td><CopyButton text={info.dirPath} /></td>
               </tr>
-              <tr>
-                <td className="modal__info-label">Type</td>
-                <td className="modal__info-value">{kindLabel(info.kind)}</td>
-                <td />
-              </tr>
+            </tbody>
+            <tbody className="modal__info-group">
               {info.kind !== "directory" && (
-                <>
-                  <tr>
-                    <td className="modal__info-label">Size</td>
-                    <td className="modal__info-value">{formatSize(info.size)}</td>
-                    <td />
-                  </tr>
-                  {info.size !== undefined && (
-                    <tr>
-                      <td className="modal__info-label">Size (bytes)</td>
-                      <td className="modal__info-value">{info.size.toLocaleString()} B</td>
-                      <td><CopyButton text={String(info.size)} /></td>
-                    </tr>
-                  )}
-                </>
+                <tr>
+                  <td className="modal__info-label">Size</td>
+                  <td className="modal__info-value">
+                    {formatSize(info.size)}
+                    {info.size !== undefined && info.size >= 1024 && (
+                      <> ({info.size.toLocaleString()} B)</>
+                    )}
+                  </td>
+                  <td>
+                    {info.size !== undefined && <CopyButton text={String(info.size)} />}
+                  </td>
+                </tr>
               )}
               <tr>
                 <td className="modal__info-label">Modified</td>

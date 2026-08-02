@@ -2943,10 +2943,16 @@ body {
   font-size: var(--font-size);
 }
 
+/* Visual grouping: gap between Name/Type, paths, and meta */
+.modal__info-table tbody + tbody tr:first-child > td {
+  padding-top: 14px;
+}
+
 .modal__info-label {
   color: var(--text-dim);
   white-space: nowrap;
-  padding-right: 12px;
+  padding-right: 24px;
+  min-width: 7.5rem;
   width: 1%;
 }
 
@@ -2957,6 +2963,36 @@ body {
 .modal__info-value {
   color: var(--text);
   word-break: break-all;
+  padding-right: 8px;
+}
+
+.modal__info-type {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.modal__info-type-icon {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-dim);
+}
+
+.modal__info-type-icon img {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+}
+
+.modal__info-table td:last-child {
+  padding-left: 4px;
+  width: 1%;
+  white-space: nowrap;
+  vertical-align: middle;
 }
 
 .modal__info-copy {

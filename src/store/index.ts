@@ -75,6 +75,8 @@ export interface PendingInfo {
   mtime?: string;
   btime?: string; // birth time — file creation; not available on all platforms/filesystems
   permissions?: string;
+  /** Same as VFSEntry.iconName — drives the Type-row icon in Info modal. */
+  iconName?: string;
 }
 
 export interface PendingMkdir {
