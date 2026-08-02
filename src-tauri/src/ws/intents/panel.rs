@@ -29,6 +29,7 @@ pub(crate) async fn handle(name: &str, scope: &Value, args: &Value, ctx: &mut In
         "SelectAll" => select_all(scope, ctx).await,
         "ClearSelection" => clear_selection(scope, ctx).await,
         "InvertSelection" => invert_selection(scope, ctx).await,
+        "ExtendSelectionTo" => extend_selection_to(scope, args, ctx).await,
         "MoveCursorWithSelect" => move_cursor_with_select(scope, args, ctx).await,
         "MoveCursorBy" => move_cursor_by(scope, args, ctx).await,
         "MoveCursorToEdge" => move_cursor_to_edge(scope, args, ctx).await,
@@ -675,6 +676,69 @@ async fn invert_selection(scope: &Value, ctx: &mut IntentContext<'_>) {
     .await;
 }
 
+/// Union the contiguous absolute-index range from `cursor` to `target` into
+/// `selection`. Returns the clamped target cursor and the sorted selection.
+/// Used by Shift+click range extend (linear in both list and grid modes).
+fn extend_selection_range(
+    cursor: usize,
+    selection: &[usize],
+    target: usize,
+    len: usize,
+) -> (usize, Vec<usize>) {
+    if len == 0 {
+        return (0, selection.to_vec());
+    }
+    let to = target.min(len - 1);
+    let from = cursor.min(len - 1);
+    let lo = from.min(to);
+    let hi = from.max(to);
+    let mut selected: HashSet<usize> = selection.iter().copied().collect();
+    for index in lo..=hi {
+        selected.insert(index);
+    }
+    let mut next: Vec<usize> = selected.into_iter().collect();
+    next.sort_unstable();
+    (to, next)
+}
+
+async fn extend_selection_to(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
+    let panel_id = resolve_panel_id(scope, ctx.state).await;
+    let parsed = IndexArgs::from_args(args);
+    let (new_cursor, new_selection, version, selected_entries) = {
+        let mut state_guard = ctx.state.lock().await;
+        if let Some(panel) = state_guard.panels.get_mut(&panel_id) {
+            let len = panel.entries.len();
+            if len == 0 {
+                return;
+            }
+            let (cursor, selection) =
+                extend_selection_range(panel.cursor, &panel.selection, parsed.index, len);
+            panel.cursor = cursor;
+            panel.selection = selection.clone();
+            panel.version += 1;
+            (
+                cursor,
+                selection,
+                panel.version,
+                selected_entries_for_panel(panel),
+            )
+        } else {
+            return;
+        }
+    };
+    send_panel_patch(
+        ctx,
+        panel_id,
+        version,
+        serde_json::json!({
+            "cursor": new_cursor,
+            "selection": new_selection,
+            "selectedEntries": selected_entries
+        }),
+    )
+    .await;
+}
+
 async fn move_cursor_with_select(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
     let panel_id = resolve_panel_id(scope, ctx.state).await;
     // Prefer `delta` (used by grid mode for ±cols / ±1 cell jumps); fall
@@ -1173,4 +1237,51 @@ async fn send_panel_patch(
             patch,
         })
         .await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::extend_selection_range;
+
+    #[test]
+    fn extend_down_from_empty_selection() {
+        let (cursor, selection) = extend_selection_range(2, &[], 5, 10);
+        assert_eq!(cursor, 5);
+        assert_eq!(selection, vec![2, 3, 4, 5]);
+    }
+
+    #[test]
+    fn extend_up_from_empty_selection() {
+        let (cursor, selection) = extend_selection_range(5, &[], 2, 10);
+        assert_eq!(cursor, 2);
+        assert_eq!(selection, vec![2, 3, 4, 5]);
+    }
+
+    #[test]
+    fn extend_unions_with_existing_selection() {
+        let (cursor, selection) = extend_selection_range(3, &[0, 10], 5, 12);
+        assert_eq!(cursor, 5);
+        assert_eq!(selection, vec![0, 3, 4, 5, 10]);
+    }
+
+    #[test]
+    fn extend_to_same_index_selects_cursor() {
+        let (cursor, selection) = extend_selection_range(3, &[], 3, 10);
+        assert_eq!(cursor, 3);
+        assert_eq!(selection, vec![3]);
+    }
+
+    #[test]
+    fn extend_clamps_out_of_range_target() {
+        let (cursor, selection) = extend_selection_range(1, &[], 99, 5);
+        assert_eq!(cursor, 4);
+        assert_eq!(selection, vec![1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn extend_empty_panel_is_noop() {
+        let (cursor, selection) = extend_selection_range(0, &[1], 3, 0);
+        assert_eq!(cursor, 0);
+        assert_eq!(selection, vec![1]);
+    }
 }

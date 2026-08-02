@@ -50,6 +50,7 @@ pub async fn dispatch(name: &str, scope: &Value, args: &Value, ctx: &mut IntentC
         | "SelectAll"
         | "ClearSelection"
         | "InvertSelection"
+        | "ExtendSelectionTo"
         | "MoveCursorWithSelect"
         | "MoveCursorBy"
         | "MoveCursorToEdge"

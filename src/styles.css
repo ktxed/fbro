@@ -1128,6 +1128,11 @@ body {
   background: var(--bg-selected);
 }
 
+/* Same specificity trap as list rows: keep selection fill under hover. */
+.panel__card--selected:hover {
+  background: var(--bg-selected);
+}
+
 .panel__card--cursor.panel__card--selected {
   border-color: var(--text-warning);
 }
@@ -1327,8 +1332,13 @@ body {
   background: var(--bg-row-alt);
 }
 
-.panel__row:hover {
-  background: var(--bg-hover);
+/* Selected rows keep selection chrome on hover. `.panel__row:hover` alone is
+ * more specific than `.panel__row--selected` and would otherwise paint the
+ * blue hover wash over the amber selection (especially visible on inactive
+ * panels). */
+.panel__row--selected:hover {
+  background: var(--bg-selected);
+  color: var(--text-selected);
 }
 
 .panel__row--drop-target {

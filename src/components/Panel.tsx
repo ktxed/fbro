@@ -1416,6 +1416,13 @@ export function Panel({
         e.preventDefault();
         dispatch({ type: "CLOSE_CONTEXT_MENU" });
         if (!isFocused) client.sendIntent("SwitchFocus", undefined, { to: panelId });
+        if (e.shiftKey) {
+          // Shift+click: union linear range from current cursor to this item.
+          // Same absolute-index range in list and grid (not a 2D rectangle).
+          client.sendIntent("ExtendSelectionTo", panelId, { index: absIndex });
+          focusDivRef.current?.focus();
+          return;
+        }
         client.sendIntent("SetCursor", panelId, { index: absIndex });
         onRowPointerDown({ absIndex, clientX: e.clientX, clientY: e.clientY });
         focusDivRef.current?.focus();
@@ -1628,6 +1635,13 @@ export function Panel({
           e.preventDefault();
           dispatch({ type: "CLOSE_CONTEXT_MENU" });
           if (!isFocused) client.sendIntent("SwitchFocus", undefined, { to: panelId });
+          if (e.shiftKey) {
+            // Shift+click: union linear range from current cursor to this item.
+            // Same absolute-index range in list and grid (not a 2D rectangle).
+            client.sendIntent("ExtendSelectionTo", panelId, { index: absIndex });
+            focusDivRef.current?.focus();
+            return;
+          }
           client.sendIntent("SetCursor", panelId, { index: absIndex });
           onRowPointerDown({ absIndex, clientX: e.clientX, clientY: e.clientY });
           focusDivRef.current?.focus();
