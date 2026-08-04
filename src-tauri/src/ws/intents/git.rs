@@ -1,13 +1,18 @@
+use std::path::{Component, Path};
+use std::sync::Arc;
+
 use serde_json::Value;
 
-use crate::ws::protocol::{now, ServerMessage};
+use crate::state::FileClipboard;
+use crate::vfs::git_blob::{GitBlobDriver, CLIPBOARD_SOURCE_ID};
+use crate::ws::protocol::{now, FileOpFileSchema, ServerMessage};
 use crate::ws::runtime::{rescan_panel, selected_names_for, IntentContext};
 
 pub(crate) async fn handle(name: &str, args: &Value, ctx: &mut IntentContext<'_>) {
     let panel_id = args.get("panelId").and_then(Value::as_str).unwrap_or("").to_string();
     let (source_id, repository) = panel_repo(&panel_id, ctx).await;
 
-    // Read-only log / commit show: no journal, no panel rescan.
+    // Read-only log / commit show / raw-file clipboard: no journal, no panel rescan.
     if name == "GitGetLog" {
         let request_id = args
             .get("requestId")
@@ -67,6 +72,10 @@ pub(crate) async fn handle(name: &str, args: &Value, ctx: &mut IntentContext<'_>
             }
             Err(message) => send_error(ctx, "GIT_COMMIT_SHOW_FAILED", &message).await,
         }
+        return;
+    }
+    if name == "GitCopyRawFile" {
+        git_copy_raw_file(args, repository, ctx).await;
         return;
     }
 
@@ -158,6 +167,110 @@ fn run_paths(root: &str, action: &str, args: &Value, staged: bool) -> Result<(),
     command.extend(paths.iter().filter_map(Value::as_str).map(str::to_string));
     if command.last().is_some_and(|s| s == "--") { return Err("No paths were provided.".into()); }
     crate::git::run(root, &command)
+}
+
+async fn git_copy_raw_file(
+    args: &Value,
+    repository: Option<(String, bool)>,
+    ctx: &mut IntentContext<'_>,
+) {
+    let Some((root, _)) = repository else {
+        send_error(ctx, "GIT_UNAVAILABLE", "No Git repository is available for this panel.").await;
+        return;
+    };
+    let commit = args
+        .get("commitHash")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let path_arg = args
+        .get("path")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if commit.is_empty() || path_arg.is_empty() {
+        send_error(ctx, "GIT_COPY_RAW_FAILED", "A commit hash and path are required.").await;
+        return;
+    }
+    let repo_path = match normalize_repo_rel_path(&path_arg) {
+        Ok(p) => p,
+        Err(message) => {
+            send_error(ctx, "GIT_COPY_RAW_FAILED", &message).await;
+            return;
+        }
+    };
+    if !GitBlobDriver::blob_exists(&root, &commit, &repo_path) {
+        send_error(
+            ctx,
+            "GIT_COPY_RAW_FAILED",
+            &format!("No file content at {commit:.7}:{repo_path} (deleted or missing)."),
+        )
+        .await;
+        return;
+    }
+    let size = match GitBlobDriver::blob_size(&root, &commit, &repo_path) {
+        Ok(s) => s,
+        Err(message) => {
+            send_error(ctx, "GIT_COPY_RAW_FAILED", &message).await;
+            return;
+        }
+    };
+    let driver = GitBlobDriver::single(&root, &commit, &repo_path);
+    let name = driver
+        .blob_names()
+        .next()
+        .unwrap_or(repo_path.as_str())
+        .to_string();
+    let short = if commit.len() >= 7 {
+        commit[..7].to_string()
+    } else {
+        commit.clone()
+    };
+
+    {
+        let mut state = ctx.state.lock().await;
+        state.drivers.insert(
+            CLIPBOARD_SOURCE_ID.to_string(),
+            Arc::new(driver) as Arc<dyn crate::vfs::VfsDriver>,
+        );
+        state.file_clipboard = Some(FileClipboard {
+            source_id: CLIPBOARD_SOURCE_ID.to_string(),
+            files: vec![FileOpFileSchema {
+                name: name.clone(),
+                size: Some(size),
+                kind: "file".into(),
+                source_path: Some(name.clone()),
+            }],
+            label: Some(short.clone()),
+        });
+    }
+
+    let _ = ctx
+        .tx
+        .send(ServerMessage::FileClipboardWritten {
+            timestamp: now(),
+            item_count: 1,
+            name,
+            label: Some(short),
+        })
+        .await;
+}
+
+fn normalize_repo_rel_path(path: &str) -> Result<String, String> {
+    let path = path.trim().trim_start_matches("./");
+    if path.is_empty() {
+        return Err("The requested Git path is invalid.".into());
+    }
+    let p = Path::new(path);
+    if p.is_absolute()
+        || p.components()
+            .any(|c| matches!(c, Component::ParentDir | Component::RootDir))
+    {
+        return Err("The requested Git path is invalid.".into());
+    }
+    Ok(path.replace('\\', "/"))
 }
 
 async fn panel_repo(panel_id: &str, ctx: &IntentContext<'_>) -> (Option<String>, Option<(String, bool)>) {

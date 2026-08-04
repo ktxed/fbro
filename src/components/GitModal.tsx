@@ -90,6 +90,14 @@ export function GitModal({ panelId, git, client, onClose }: { panelId: string; g
     });
   }, [act]);
 
+  const copyRawFile = useCallback((hash: string, change: GitChange) => {
+    if (change.indexStatus === "D") return;
+    act("GitCopyRawFile", {
+      commitHash: hash,
+      path: change.path,
+    });
+  }, [act]);
+
   const armRollback = (paths: string[]) => {
     const uniquePaths = [...new Set(paths)];
     if (samePathSet(rollbackPaths, uniquePaths)) {
@@ -425,7 +433,7 @@ export function GitModal({ panelId, git, client, onClose }: { panelId: string; g
               return;
             }
           }
-          if (logFocus.kind === "change" && key === "v") {
+          if (logFocus.kind === "change" && (key === "v" || key === "c")) {
             const commit = logCommits[logFocus.commitIndex];
             const change = commit && gitLog?.commitShows[commit.hash]?.status === "ready"
               ? gitLog.commitShows[commit.hash].changes[logFocus.changeIndex]
@@ -433,7 +441,8 @@ export function GitModal({ panelId, git, client, onClose }: { panelId: string; g
             if (commit && change) {
               event.preventDefault();
               event.stopImmediatePropagation();
-              viewCommitDiff(commit.hash, change);
+              if (key === "v") viewCommitDiff(commit.hash, change);
+              else copyRawFile(commit.hash, change);
               return;
             }
           }
@@ -483,6 +492,7 @@ export function GitModal({ panelId, git, client, onClose }: { panelId: string; g
     canPush,
     collapseCommit,
     copyLogHash,
+    copyRawFile,
     expandCommit,
     expandedCommitIndex,
     expandedHash,
@@ -830,6 +840,19 @@ export function GitModal({ panelId, git, client, onClose }: { panelId: string; g
                               >
                                 <IconGitCompare size={15} aria-hidden />View diff <kbd>V</kbd>
                               </button>
+                              {change.indexStatus !== "D" && (
+                                <button
+                                  type="button"
+                                  className="git-modal__change-action"
+                                  data-testid="git-log-copy-raw"
+                                  title="Copy raw file reference (C) — paste with Ctrl+V"
+                                  aria-keyshortcuts="c"
+                                  onFocus={() => setLogFocus({ kind: "change", commitIndex: index, changeIndex })}
+                                  onClick={() => copyRawFile(commit.hash, change)}
+                                >
+                                  <IconCopy size={15} aria-hidden />Copy raw <kbd>C</kbd>
+                                </button>
+                              )}
                             </div>
                           );
                         })}

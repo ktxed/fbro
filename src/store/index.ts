@@ -34,6 +34,7 @@ import type {
   GitCommitShowReadyMessage,
   ExternalClipboardReadyMessage,
   ExternalClipboardWrittenMessage,
+  FileClipboardWrittenMessage,
   CacheStatusReadyMessage,
   PrefetchCacheStatus,
   BookmarkEntry,
@@ -1370,6 +1371,7 @@ function reducer(state: AppState, action: AppAction): AppState {
               destPanel: m.panelId,
               destPath: m.destPath,
               conflictPolicy: "ask",
+              ...(m.sourceId ? { sourceId: m.sourceId } : {}),
             },
             pendingContextMenu: null,
             transientHint: null,
@@ -1383,6 +1385,17 @@ function reducer(state: AppState, action: AppAction): AppState {
             ...state,
             transientHint: {
               message: `${verb} ${m.itemCount} ${noun} to the system clipboard.`,
+              token: m.timestamp,
+            },
+          };
+        }
+        case "FileClipboardWritten": {
+          const m = msg as FileClipboardWrittenMessage;
+          const at = m.label ? ` @ ${m.label}` : "";
+          return {
+            ...state,
+            transientHint: {
+              message: `Copied raw file “${m.name}”${at}`,
               token: m.timestamp,
             },
           };

@@ -489,6 +489,8 @@ export interface PendingOp {
   destPanel?: string;
   destPath?: string;
   conflictPolicy: ConflictPolicy;
+  /** Virtual VFS driver id (e.g. git-blob clipboard). */
+  sourceId?: string;
 }
 
 export interface NavigateOkMessage {
@@ -548,6 +550,8 @@ export interface ExternalClipboardReadyMessage {
   opType: Extract<FileOpType, "copy" | "move">;
   files: FileOpFile[];
   destPath: string;
+  /** Virtual VFS driver for internal clipboard paste. */
+  sourceId?: string;
 }
 
 export interface ExternalClipboardWrittenMessage {
@@ -555,6 +559,14 @@ export interface ExternalClipboardWrittenMessage {
   timestamp: number;
   opType: Extract<FileOpType, "copy" | "move">;
   itemCount: number;
+}
+
+export interface FileClipboardWrittenMessage {
+  type: "FileClipboardWritten";
+  timestamp: number;
+  itemCount: number;
+  name: string;
+  label?: string;
 }
 
 // ─── Client → BE messages ────────────────────────────────────────────────────
@@ -985,6 +997,7 @@ export type BEMessage =
   | SyncReportSavedMessage
   | ExternalClipboardReadyMessage
   | ExternalClipboardWrittenMessage
+  | FileClipboardWrittenMessage
   | ViewerFileChangedMessage
   | DryRunReadyMessage
   | OpenWithOptionsReadyMessage

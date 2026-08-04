@@ -151,6 +151,9 @@ pub enum ServerMessage {
         files: Vec<FileOpFileSchema>,
         #[serde(rename = "destPath")]
         dest_path: String,
+        /// When set, `StartFileOp` uses this virtual driver instead of FS path resolution.
+        #[serde(rename = "sourceId", skip_serializing_if = "Option::is_none")]
+        source_id: Option<String>,
     },
     ExternalClipboardWritten {
         timestamp: u64,
@@ -158,6 +161,17 @@ pub enum ServerMessage {
         op_type: String,
         #[serde(rename = "itemCount")]
         item_count: usize,
+    },
+    /// Internal (virtual) file clipboard was set — FE shows a transient hint.
+    FileClipboardWritten {
+        timestamp: u64,
+        #[serde(rename = "itemCount")]
+        item_count: usize,
+        /// Display name of the primary file.
+        name: String,
+        /// Optional context (e.g. short commit hash).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        label: Option<String>,
     },
     ViewerFileChanged {
         timestamp: u64,

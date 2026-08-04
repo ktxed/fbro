@@ -66,6 +66,9 @@ struct StartFileOpArgs {
     enqueue: bool,
     dry_mode: bool,
     files: Vec<FileOpFileSchema>,
+    /// Virtual VFS driver id (e.g. git-blob clipboard). When set, files' sourcePath
+    /// are paths *within* that driver, not absolute host paths.
+    source_id: Option<String>,
 }
 
 struct PasteExternalClipboardArgs {
@@ -100,6 +103,7 @@ impl StartFileOpArgs {
                 .cloned()
                 .and_then(|value| serde_json::from_value(value).ok())
                 .unwrap_or_default(),
+            source_id: arg_str(args, "sourceId").map(String::from),
         }
     }
 }
@@ -548,6 +552,50 @@ async fn paste_external_clipboard(args: &Value, ctx: &mut IntentContext<'_>) {
         return;
     }
 
+    // Prefer the app-internal virtual clipboard (git raw file, …) over the OS clipboard.
+    {
+        let state_guard = ctx.state.lock().await;
+        if let Some(clipboard) = state_guard.file_clipboard.clone() {
+            let Some(panel) = state_guard.panels.get(&parsed.panel_id) else {
+                let _ = send_error(
+                    ctx,
+                    "PASTE_EXTERNAL_NO_PANEL",
+                    "No focused panel is available for paste.".to_string(),
+                )
+                .await;
+                return;
+            };
+            if !state_guard.drivers.contains_key(&panel.source_id) {
+                let _ = send_error(
+                    ctx,
+                    "PASTE_EXTERNAL_UNSUPPORTED_DESTINATION",
+                    "The focused panel does not support paste.".to_string(),
+                )
+                .await;
+                return;
+            }
+            if !state_guard.drivers.contains_key(&clipboard.source_id) {
+                // Stale clipboard — fall through to OS paste.
+            } else {
+                let panel_path = panel.path.clone();
+                let panel_id = panel.panel_id.clone();
+                drop(state_guard);
+                let _ = ctx
+                    .tx
+                    .send(ServerMessage::ExternalClipboardReady {
+                        timestamp: now(),
+                        panel_id,
+                        op_type: "copy".to_string(),
+                        files: clipboard.files,
+                        dest_path: panel_path,
+                        source_id: Some(clipboard.source_id),
+                    })
+                    .await;
+                return;
+            }
+        }
+    }
+
     let (panel_path, panel_id, platform) = {
         let state_guard = ctx.state.lock().await;
         let Some(panel) = state_guard.panels.get(&parsed.panel_id) else {
@@ -652,6 +700,7 @@ async fn paste_external_clipboard(args: &Value, ctx: &mut IntentContext<'_>) {
             op_type: op_type.to_string(),
             files,
             dest_path: panel_path,
+            source_id: None,
         })
         .await;
 }
@@ -720,13 +769,46 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
             return Err("Source panel is unavailable.".to_string());
         };
 
+        let has_virtual_source = parsed
+            .source_id
+            .as_ref()
+            .map(|id| !id.is_empty())
+            .unwrap_or(false);
         let has_explicit_sources = parsed.files.iter().any(|file| file.source_path.is_some());
 
         let (src_driver, source_path, files): (
             Arc<dyn crate::vfs::VfsDriver>,
             String,
             Vec<FileOpEntry>,
-        ) = if has_explicit_sources {
+        ) = if has_virtual_source {
+            let source_id = parsed.source_id.as_ref().unwrap();
+            let driver = state_guard
+                .drivers
+                .get(source_id)
+                .cloned()
+                .ok_or_else(|| "Virtual clipboard source is no longer available.".to_string())?;
+            let files = parsed
+                .files
+                .iter()
+                .map(|file| {
+                    let source_path = file
+                        .source_path
+                        .clone()
+                        .filter(|p| !p.is_empty())
+                        .unwrap_or_else(|| file.name.clone());
+                    FileOpEntry {
+                        name: file.name.clone(),
+                        dest_name: None,
+                        source_path,
+                        size: file.size,
+                        kind: file.kind.clone(),
+                        mtime: None,
+                        permissions: None,
+                    }
+                })
+                .collect();
+            (driver, String::new(), files)
+        } else if has_explicit_sources {
             let explicit_paths: Vec<String> = parsed
                 .files
                 .iter()

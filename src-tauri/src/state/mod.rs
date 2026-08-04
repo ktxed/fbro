@@ -468,6 +468,18 @@ impl PanelStatus {
     }
 }
 
+/// App-internal file clipboard (virtual sources such as git blobs).
+///
+/// Unlike the OS clipboard, paths here are VFS paths resolved through
+/// `source_id`'s driver — content is not preloaded into memory.
+#[derive(Clone, Debug)]
+pub struct FileClipboard {
+    pub source_id: String,
+    pub files: Vec<crate::ws::protocol::FileOpFileSchema>,
+    /// Optional short label for the FE hint (e.g. commit short hash).
+    pub label: Option<String>,
+}
+
 // ─── AppState ────────────────────────────────────────────────────────────────
 
 pub struct AppState {
@@ -478,6 +490,8 @@ pub struct AppState {
     pub layout_slots: Vec<String>,
     pub sources: HashMap<String, Source>,
     pub drivers: HashMap<String, Arc<dyn VfsDriver>>,
+    /// Internal copy buffer for virtual VFS entries (git raw file, …).
+    pub file_clipboard: Option<FileClipboard>,
     pub global_selections: SharedGlobalSelectionStore,
     pub focus: String,
     pub platform: Arc<dyn Platform>,
@@ -891,6 +905,7 @@ impl AppState {
             layout_slots,
             sources,
             drivers,
+            file_clipboard: None,
             global_selections,
             focus: "left".to_string(),
             platform,
