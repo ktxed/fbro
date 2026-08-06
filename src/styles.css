@@ -3685,6 +3685,9 @@ body {
   background: var(--bg);
   color: var(--text);
   font-family: monospace;
+  /* Chrome is non-selectable; only textual file content opts back in below. */
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .viewer__header {
@@ -3750,6 +3753,8 @@ body {
   white-space: pre;
   tab-size: 4;
   box-sizing: border-box;
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 /* Large-file mode: no native scroll, leave room for custom scrollbar */
@@ -3758,7 +3763,9 @@ body {
   padding-right: 22px;
 }
 
-/* Text mode: gutter + content side by side */
+/* Text mode: gutter + content side by side.
+ * Parent is non-selectable; only .viewer__content / .viewer__content-cell allow
+ * selection so drag / Ctrl+A never picks up line numbers. */
 .viewer__text {
   display: flex;
   height: 100%;
@@ -3767,6 +3774,8 @@ body {
   line-height: 1.5;
   tab-size: 4;
   box-sizing: border-box;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .viewer__text--virtual {
@@ -3783,7 +3792,10 @@ body {
   text-align: right;
   color: var(--text-dim, #666);
   border-right: 1px solid var(--border, #333);
+  -webkit-user-select: none;
   user-select: none;
+  /* Don't start or extend selection from the sticky gutter column. */
+  pointer-events: none;
   white-space: pre;
   /* Stay visible when scrolling right */
   position: sticky;
@@ -3798,6 +3810,8 @@ body {
   /* grow to fill short lines, but don't shrink below natural width for long lines */
   flex: 1 0 auto;
   white-space: pre;
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 /* Leave room for custom scrollbar in virtual text mode */
@@ -3818,20 +3832,20 @@ body {
   overflow-x: hidden;
 }
 
-/* Each logical line is a flex row: fixed-width gutter + wrapping content. */
+/* Each logical line is a flex row: line number via ::before + wrapping content.
+ * Pseudo-elements are never part of the selection/clipboard. */
 .viewer__wrap-row {
   display: flex;
   align-items: flex-start;
 }
 
-/* Gutter cell: same visual treatment as .viewer__gutter but per-row. */
-.viewer__gutter-cell {
+.viewer__wrap-row::before {
+  content: attr(data-ln);
   flex-shrink: 0;
   padding: 0 8px 0 12px;
   text-align: right;
   color: var(--text-dim, #666);
   border-right: 1px solid var(--border, #333);
-  user-select: none;
   white-space: pre;
   background: var(--bg);
 }
@@ -3844,6 +3858,8 @@ body {
   white-space: pre-wrap;
   word-break: break-all;
   overflow-wrap: break-word;
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 /* Leave room for virtual scrollbar in wrap mode too */
@@ -3853,7 +3869,9 @@ body {
 
 /* DOS/CP437 mode: use a monospace font that renders box-drawing chars correctly */
 .viewer--dos .viewer__content,
-.viewer--dos .viewer__gutter {
+.viewer--dos .viewer__gutter,
+.viewer--dos .viewer__wrap-row::before,
+.viewer--dos .viewer__content-cell {
   font-family: "Perfect DOS VGA 437", "Px437 IBM VGA8", "Fixedsys Excelsior", "Courier New", monospace;
   font-size: 16px;
   line-height: 1.25;
@@ -3869,6 +3887,8 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-size: 14px;
   line-height: 1.6;
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 .viewer__markdown h1,
@@ -4102,6 +4122,8 @@ body {
   border-radius: 2px;
   width: 200px;
   outline: none;
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 .viewer__find-input:focus {

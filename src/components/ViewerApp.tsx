@@ -131,6 +131,89 @@ function clamp(v: number, lo: number, hi: number) {
   return Math.max(lo, Math.min(hi, v));
 }
 
+/** True when the selection lives inside an editable field (find bar, etc.). */
+function selectionInEditable(sel: Selection): boolean {
+  const node = sel.anchorNode;
+  if (!node) return false;
+  const el = node.nodeType === Node.ELEMENT_NODE ? (node as Element) : node.parentElement;
+  return !!el?.closest("input, textarea, [contenteditable='true']");
+}
+
+/**
+ * Select only the textual file contents inside the viewer content root
+ * (never chrome, gutters, or other UI).
+ */
+function selectAllViewerText(root: HTMLElement | null): boolean {
+  if (!root) return false;
+  const sel = window.getSelection();
+  if (!sel) return false;
+
+  const content = root.matches(".viewer__content")
+    ? root
+    : root.querySelector<HTMLElement>(".viewer__content");
+  if (content) {
+    const range = document.createRange();
+    range.selectNodeContents(content);
+    sel.removeAllRanges();
+    sel.addRange(range);
+    return true;
+  }
+
+  const cells = root.querySelectorAll(".viewer__content-cell");
+  if (cells.length > 0) {
+    const first = cells[0];
+    const last = cells[cells.length - 1];
+    const range = document.createRange();
+    range.setStart(first, 0);
+    range.setEnd(last, last.childNodes.length);
+    sel.removeAllRanges();
+    sel.addRange(range);
+    return true;
+  }
+
+  // Hex dump <pre> or markdown preview root — the ref points at the content itself.
+  if (root.matches(".viewer__pre, .viewer__markdown")) {
+    const range = document.createRange();
+    range.selectNodeContents(root);
+    sel.removeAllRanges();
+    sel.addRange(range);
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Plain text for the current selection inside the viewer content root.
+ * Wrap mode stores one line per cell (no text newlines in the DOM), so we
+ * re-join selected cells with "\n".
+ */
+function selectedViewerPlainText(root: HTMLElement, sel: Selection): string {
+  if (!root.classList.contains("viewer__text--wrap") || sel.rangeCount === 0) {
+    return sel.toString();
+  }
+  const range = sel.getRangeAt(0);
+  const parts: string[] = [];
+  root.querySelectorAll(".viewer__content-cell").forEach((cell) => {
+    try {
+      if (!range.intersectsNode(cell)) return;
+      const cellRange = document.createRange();
+      cellRange.selectNodeContents(cell);
+      const clipped = cellRange.cloneRange();
+      if (range.compareBoundaryPoints(Range.START_TO_START, cellRange) > 0) {
+        clipped.setStart(range.startContainer, range.startOffset);
+      }
+      if (range.compareBoundaryPoints(Range.END_TO_END, cellRange) < 0) {
+        clipped.setEnd(range.endContainer, range.endOffset);
+      }
+      parts.push(clipped.toString());
+    } catch {
+      // Range boundaries can be transient mid-update; skip that cell.
+    }
+  });
+  return parts.length > 0 ? parts.join("\n") : sel.toString();
+}
+
 function highlightLine(
   text: string,
   matches: { line: number; start: number; end: number }[],
@@ -671,6 +754,16 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
         return;
       }
 
+      // Ctrl/Cmd+A — select all textual file contents (fully loaded / small files only).
+      // Always preventDefault so the browser never selects chrome (header, status, etc.).
+      if (ctrl && (e.key === "a" || e.key === "A")) {
+        e.preventDefault();
+        if (isSmall === true && !isImageMode && contentRef.current) {
+          selectAllViewerText(contentRef.current);
+        }
+        return;
+      }
+
       // F4 / E — open in preferred editor only for real local files.
       if (e.key === "F4" || (e.key === "e" && !ctrl && !e.shiftKey && !e.altKey)) {
         if (curIsLocalRef.current && !isArchiveSourceId(curSourceIdRef.current) && !isRemoteSourceId(curSourceIdRef.current)) {
@@ -786,7 +879,34 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [isSmall, fileSize, maxTopLine, vpLines, scrollByLines, requestChunk, windowLabel, effectiveMode, dosMode, findNext, findPrev]);
+  }, [isSmall, fileSize, maxTopLine, vpLines, scrollByLines, requestChunk, windowLabel, effectiveMode, dosMode, findNext, findPrev, isImageMode]);
+
+  // Copy: only textual file contents (never chrome). Wrap mode re-joins lines.
+  useEffect(() => {
+    const onCopy = (e: ClipboardEvent) => {
+      const sel = window.getSelection();
+      if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
+      if (selectionInEditable(sel)) return;
+
+      const root = contentRef.current;
+      const anchorIn = !!(root && sel.anchorNode && root.contains(sel.anchorNode));
+      const focusIn = !!(root && sel.focusNode && root.contains(sel.focusNode));
+      if (!root || !anchorIn || !focusIn) {
+        // Selection is outside the content root (or mixed with chrome) — block.
+        e.preventDefault();
+        e.clipboardData?.setData("text/plain", "");
+        return;
+      }
+
+      // Non-wrap text / hex / markdown: native sel.toString() is fine, but we
+      // still set clipboard explicitly so nothing outside the root can leak in.
+      const text = selectedViewerPlainText(root, sel);
+      e.preventDefault();
+      e.clipboardData?.setData("text/plain", text);
+    };
+    document.addEventListener("copy", onCopy);
+    return () => document.removeEventListener("copy", onCopy);
+  }, []);
 
   // ── Mouse wheel for large mode ────────────────────────────────────────────
 
@@ -1162,8 +1282,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
                 ref={contentRef as React.RefObject<HTMLDivElement>}
               >
                 {textView.rows.map((row, i) => (
-                  <div className="viewer__wrap-row" key={i}>
-                    <span className="viewer__gutter-cell">{row.gutter}</span>
+                  <div className="viewer__wrap-row" key={i} data-ln={row.gutter}>
                     <span className="viewer__content-cell">
                       {(findOpen && findQuery)
                         ? highlightLine(row.content, findMatches, visStart + i, findIdx, findLineFirstIdx.get(visStart + i) ?? 0)
