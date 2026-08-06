@@ -30,7 +30,7 @@ export function GitActionsModal({ panelId, git, client, onClose, onOpenRepositor
   };
 
   useEffect(() => {
-    runAction("GitRefresh", "Refreshing Git status…");
+    runAction("GitRefresh", "Fetching and refreshing…");
   }, [client, panelId]);
 
   useEffect(() => {

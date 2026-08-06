@@ -115,7 +115,12 @@ pub(crate) async fn handle(name: &str, args: &Value, ctx: &mut IntentContext<'_>
             else { crate::git::run(&root, &["push".into(), "--set-upstream".into(), "origin".into(), branch.into()]) }
         }),
         "GitFetch" => crate::git::run(&root, &["fetch".into()]),
-        "GitRefresh" => Ok(()),
+        // Refresh always re-scans local status (below). Also best-effort fetch so
+        // ahead/behind stay current; network/remote failures must not block that.
+        "GitRefresh" => {
+            let _ = crate::git::run(&root, &["fetch".into()]);
+            Ok(())
+        }
         _ => Ok(()),
     };
     match result {

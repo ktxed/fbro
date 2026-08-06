@@ -221,7 +221,7 @@ export function GitModal({ panelId, git, client, onClose }: { panelId: string; g
   }, [dispatch, onClose]);
 
   useEffect(() => {
-    runAction("GitRefresh", "Refreshing Git status…");
+    runAction("GitRefresh", "Fetching and refreshing…");
   }, [client, panelId]);
 
   useEffect(() => {
@@ -473,7 +473,7 @@ export function GitModal({ panelId, git, client, onClose }: { panelId: string; g
         b: () => branchRef.current?.focus(),
         l: () => { if (canPull) runAction("GitPull", "Pulling changes…"); },
         p: () => { if (canPush) runAction("GitPush", "Pushing changes…"); },
-        r: () => runAction("GitRefresh", "Refreshing Git status…"),
+        r: () => runAction("GitRefresh", "Fetching and refreshing…"),
         c: () => { if (tab === "changes" && canCommit) commitRef.current?.click(); },
       };
       const action = !hasShortcutModifier ? accelerators[key] : undefined;
@@ -573,7 +573,7 @@ export function GitModal({ panelId, git, client, onClose }: { panelId: string; g
               <em className="git-actions-modal__badge git-actions-modal__badge--outgoing"><IconArrowUp size={13} /> {git.aheadCount}</em>
             )}
           </button>
-          <button onClick={() => runAction("GitRefresh", "Refreshing Git status…")}>Refresh <kbd>R</kbd></button>
+          <button onClick={() => runAction("GitRefresh", "Fetching and refreshing…")} title="Fetch remotes and refresh status">Refresh <kbd>R</kbd></button>
         </div>
 
         <div className="git-modal__tabs" role="tablist" aria-label="Git views">
