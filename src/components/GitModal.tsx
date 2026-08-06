@@ -928,10 +928,35 @@ function formatLogDate(iso: string): string {
 function LogRefsStrip({ refs }: { refs: GitLogRef[] }) {
   const wrapRef = useRef<HTMLSpanElement>(null);
   const scrollerRef = useRef<HTMLSpanElement>(null);
+  // Prefer trailing chips (right-aligned look). Stay pinned to the end until the user pans.
+  const pinToEndRef = useRef(true);
+  const [fadeLeft, setFadeLeft] = useState(false);
+  const [fadeRight, setFadeRight] = useState(false);
+
+  const updateFades = useCallback(() => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    const maxScroll = Math.max(0, el.scrollWidth - el.clientWidth);
+    const isOverflowing = maxScroll > 1;
+    // Pin to trailing edge so the rightmost chips stay visible (matches prior flex-end look).
+    if (pinToEndRef.current && isOverflowing) {
+      el.scrollLeft = maxScroll;
+    }
+    const { scrollLeft } = el;
+    pinToEndRef.current = !isOverflowing || scrollLeft >= maxScroll - 1;
+    setFadeLeft(scrollLeft > 1);
+    setFadeRight(isOverflowing && scrollLeft < maxScroll - 1);
+  }, []);
+
+  // Reset pin when the ref set changes so new chips re-align to the trailing edge.
+  useEffect(() => {
+    pinToEndRef.current = true;
+  }, [refs]);
 
   // While the pointer is over the chip strip, keep wheel events here: map
   // vertical scroll to horizontal chip pan and never bubble to the log list.
   // scrollLeft works with overflow:hidden (clips without painting a scrollbar).
+  // Edge fades via mask-image track overflow + scroll position.
   useEffect(() => {
     const wrap = wrapRef.current;
     const el = scrollerRef.current;
@@ -941,21 +966,45 @@ function LogRefsStrip({ refs }: { refs: GitLogRef[] }) {
       event.preventDefault();
       event.stopPropagation();
       const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
-      if (delta !== 0) el.scrollLeft += delta;
+      if (delta !== 0) {
+        pinToEndRef.current = false;
+        el.scrollLeft += delta;
+        updateFades();
+      }
     };
     wrap.addEventListener("wheel", onWheel, { passive: false });
-    return () => wrap.removeEventListener("wheel", onWheel);
-  }, [refs]);
+    el.addEventListener("scroll", updateFades, { passive: true });
+    const ro = new ResizeObserver(() => updateFades());
+    ro.observe(el);
+    ro.observe(wrap);
+    const id = requestAnimationFrame(() => updateFades());
+    return () => {
+      wrap.removeEventListener("wheel", onWheel);
+      el.removeEventListener("scroll", updateFades);
+      ro.disconnect();
+      cancelAnimationFrame(id);
+    };
+  }, [refs, updateFades]);
+
+  const wrapClass = [
+    "git-modal__log-refs-wrap",
+    fadeLeft ? "git-modal__log-refs-wrap--fade-left" : "",
+    fadeRight ? "git-modal__log-refs-wrap--fade-right" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   return (
     <span
       ref={wrapRef}
-      className="git-modal__log-refs-wrap"
+      className={wrapClass}
       title={refs.map((ref) => ref.name).join(", ")}
       onClick={(event) => event.stopPropagation()}
       onKeyDown={(event) => event.stopPropagation()}
     >
       <span className="git-modal__log-refs" ref={scrollerRef}>
+        {/* Grows when chips fit (right-aligns them); collapses to 0 when overflowing. */}
+        <span className="git-modal__log-refs-spacer" aria-hidden="true" />
         {refs.map((ref) => (
           <span
             key={`${ref.kind}:${ref.name}`}

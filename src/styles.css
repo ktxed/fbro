@@ -1554,25 +1554,59 @@ body {
   color: var(--text);
 }
 /* Branch/tag chips in a stable right column.
- * overflow:hidden (not auto) so no native scrollbar can paint — wheel pans via JS. */
+ * overflow:hidden (not auto) so no native scrollbar can paint — wheel pans via JS.
+ * Trailing chips are preferred by pinning scrollLeft to the end (see LogRefsStrip).
+ * Edge fades use mask-image on the wrap (the visible clip edge). */
 .git-modal__log-refs-wrap {
   min-width: 0;
   width: 100%;
   display: flex;
   align-items: center;
-  justify-content: flex-end;
   overflow: hidden;
   overscroll-behavior: contain;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
+}
+.git-modal__log-refs-wrap--fade-right {
+  -webkit-mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 14px), transparent 100%);
+  mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 14px), transparent 100%);
+}
+.git-modal__log-refs-wrap--fade-left {
+  -webkit-mask-image: linear-gradient(to right, transparent 0, #000 14px, #000 100%);
+  mask-image: linear-gradient(to right, transparent 0, #000 14px, #000 100%);
+}
+.git-modal__log-refs-wrap--fade-left.git-modal__log-refs-wrap--fade-right {
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 14px,
+    #000 calc(100% - 14px),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 14px,
+    #000 calc(100% - 14px),
+    transparent 100%
+  );
 }
 .git-modal__log-refs {
   min-width: 0;
-  max-width: 100%;
+  width: 100%;
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: flex-start;
   gap: 4px;
   overflow: hidden;
   white-space: nowrap;
+}
+/* Pushes chips right when they fit; shrinks away when the strip overflows. */
+.git-modal__log-refs-spacer {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 .git-modal__log-ref {
   flex: 0 0 auto;
