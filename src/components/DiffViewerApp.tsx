@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type WheelEvent as ReactWheelEvent } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { resolveWsUrl, WsClient } from "../ws/client";
 import type {
@@ -14,6 +14,9 @@ import { DEFAULT_COLOR_SCHEME_ID, resolveColorScheme, type ColorSchemeId } from 
 
 type DiffViewMode = "split" | "unified";
 
+const DIFF_ROW_HEIGHT = 13 * 1.45;
+const DIFF_WHEEL_ROWS = 3;
+
 interface DiffViewerAppProps {
   requestId: string;
   windowLabel: string;
@@ -27,7 +30,17 @@ function shortPath(path: string) {
 }
 
 function lineText(value?: string) {
-  return value === "" ? "\u00A0" : value ?? "";
+  return value === undefined || value === "" ? "\u00A0" : value;
+}
+
+function normalizedWheelDelta(delta: number, deltaMode: number, pageSize: number) {
+  if (delta === 0) return 0;
+  if (deltaMode === 1) return delta * DIFF_ROW_HEIGHT;
+  if (deltaMode === 2) return delta * pageSize;
+  if (Number.isInteger(delta) && Math.abs(delta) < DIFF_ROW_HEIGHT) {
+    return Math.sign(delta) * DIFF_ROW_HEIGHT * DIFF_WHEEL_ROWS;
+  }
+  return delta;
 }
 
 function diffRowClassName(
@@ -54,6 +67,14 @@ export function DiffViewerApp({ requestId, windowLabel, initialColorScheme }: Di
   ));
   const clientRef = useRef<WsClient | null>(null);
   const currentFontSizeRef = useRef(DEFAULT_FONT_SIZE);
+  const splitBodyRef = useRef<HTMLElement | null>(null);
+  const unifiedBodyRef = useRef<HTMLElement | null>(null);
+  const leftPaneRef = useRef<HTMLDivElement | null>(null);
+  const rightPaneRef = useRef<HTMLDivElement | null>(null);
+  const leftTableRef = useRef<HTMLTableElement | null>(null);
+  const rightTableRef = useRef<HTMLTableElement | null>(null);
+  const splitScrollSourceRef = useRef<HTMLDivElement | null>(null);
+  const splitScrollReleaseRef = useRef<number | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -160,6 +181,24 @@ export function DiffViewerApp({ requestId, windowLabel, initialColorScheme }: Di
     });
   }, [changedBlocks.length]);
 
+  const scrollDiffVertically = useCallback((destination: "start" | "end" | "page-up" | "page-down") => {
+    const source = mode === "split" ? leftPaneRef.current : unifiedBodyRef.current;
+    if (!source) return;
+    let scrollTop: number;
+    if (destination === "start") {
+      scrollTop = 0;
+    } else if (destination === "end") {
+      scrollTop = source.scrollHeight;
+    } else {
+      const page = Math.max(DIFF_ROW_HEIGHT, source.clientHeight - DIFF_ROW_HEIGHT);
+      scrollTop = source.scrollTop + (destination === "page-down" ? page : -page);
+    }
+    source.scrollTop = scrollTop;
+    if (mode === "split" && rightPaneRef.current) {
+      rightPaneRef.current.scrollTop = source.scrollTop;
+    }
+  }, [mode]);
+
   useEffect(() => {
     if (changedBlocks.length === 0) return;
     const activeRow = changedBlocks[activeChangeIndex] ?? changedBlocks[0];
@@ -175,6 +214,26 @@ export function DiffViewerApp({ requestId, windowLabel, initialColorScheme }: Di
       }
       if (event.key === "1") setMode("split");
       if (event.key === "2") setMode("unified");
+      if (event.key === "Home") {
+        event.preventDefault();
+        scrollDiffVertically("start");
+        return;
+      }
+      if (event.key === "End") {
+        event.preventDefault();
+        scrollDiffVertically("end");
+        return;
+      }
+      if (event.key === "PageUp") {
+        event.preventDefault();
+        scrollDiffVertically("page-up");
+        return;
+      }
+      if (event.key === "PageDown") {
+        event.preventDefault();
+        scrollDiffVertically("page-down");
+        return;
+      }
       if (event.key === "n" || event.key === "j" || event.key === "F7" || event.key === "ArrowDown") {
         event.preventDefault();
         jumpChange(1);
@@ -186,7 +245,7 @@ export function DiffViewerApp({ requestId, windowLabel, initialColorScheme }: Di
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [jumpChange]);
+  }, [jumpChange, scrollDiffVertically]);
 
   const colorScheme = resolveColorScheme(colorSchemeId);
   const rowCount = result?.rows.length ?? 0;
@@ -194,6 +253,90 @@ export function DiffViewerApp({ requestId, windowLabel, initialColorScheme }: Di
     () => result?.rows.filter((row) => row.kind !== "equal").length ?? 0,
     [result],
   );
+
+  const syncSplitScroll = useCallback((source: HTMLDivElement, target: HTMLDivElement | null) => {
+    if (!target) return;
+    if (splitScrollSourceRef.current && splitScrollSourceRef.current !== source) return;
+    splitScrollSourceRef.current = source;
+    if (target.scrollLeft !== source.scrollLeft) target.scrollLeft = source.scrollLeft;
+    if (target.scrollTop !== source.scrollTop) target.scrollTop = source.scrollTop;
+    if (splitScrollReleaseRef.current !== null) {
+      cancelAnimationFrame(splitScrollReleaseRef.current);
+    }
+    splitScrollReleaseRef.current = requestAnimationFrame(() => {
+      if (splitScrollSourceRef.current === source) splitScrollSourceRef.current = null;
+      splitScrollReleaseRef.current = null;
+    });
+  }, []);
+
+  const handleSplitWheel = useCallback((event: ReactWheelEvent<HTMLDivElement>, target: HTMLDivElement | null) => {
+    if (!target || (event.deltaX === 0 && event.deltaY === 0)) return;
+    event.preventDefault();
+    const source = event.currentTarget;
+    const horizontalInput = event.shiftKey && event.deltaX === 0 ? event.deltaY : event.deltaX;
+    const verticalInput = event.shiftKey && event.deltaX === 0 ? 0 : event.deltaY;
+    source.scrollBy({
+      left: normalizedWheelDelta(horizontalInput, event.deltaMode, source.clientWidth),
+      top: normalizedWheelDelta(verticalInput, event.deltaMode, source.clientHeight),
+      behavior: "auto",
+    });
+    syncSplitScroll(source, target);
+  }, [syncSplitScroll]);
+
+  useEffect(() => () => {
+    if (splitScrollReleaseRef.current !== null) {
+      cancelAnimationFrame(splitScrollReleaseRef.current);
+    }
+  }, []);
+
+  useLayoutEffect(() => {
+    if (mode !== "split" || !result) return;
+    const body = splitBodyRef.current;
+    const leftPane = leftPaneRef.current;
+    const rightPane = rightPaneRef.current;
+    const leftTable = leftTableRef.current;
+    const rightTable = rightTableRef.current;
+    if (!body || !leftPane || !rightPane || !leftTable || !rightTable) return;
+    let cancelled = false;
+
+    const measureContentWidth = () => {
+      if (cancelled) return;
+      body.style.removeProperty("--diff-split-content-width");
+      const width = Math.ceil(Math.max(
+        leftTable.scrollWidth,
+        rightTable.scrollWidth,
+        leftPane.clientWidth,
+        rightPane.clientWidth,
+      ));
+      body.style.setProperty("--diff-split-content-width", `${width}px`);
+    };
+
+    measureContentWidth();
+    window.addEventListener("resize", measureContentWidth);
+    void document.fonts?.ready.then(measureContentWidth);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("resize", measureContentWidth);
+    };
+  }, [mode, result]);
+
+  const renderSplitRows = (side: "left" | "right") => result?.rows.map((row, index) => {
+    const blockIndex = changeBlockByRow.get(index);
+    const active = blockIndex !== undefined && blockIndex === activeChangeIndex;
+    const activeBlockStart = active && changeBlockByRow.get(index - 1) !== blockIndex;
+    const activeBlockEnd = active && changeBlockByRow.get(index + 1) !== blockIndex;
+    return (
+      <tr
+        key={index}
+        className={diffRowClassName(row.kind, active, activeBlockStart, activeBlockEnd)}
+        data-diff-row={index}
+        data-diff-side={side}
+      >
+        <td className="diff-table__line">{side === "left" ? row.leftLine ?? "" : row.rightLine ?? ""}</td>
+        <td className="diff-table__code">{lineText(side === "left" ? row.leftText : row.rightText)}</td>
+      </tr>
+    );
+  });
 
   return (
     <div
@@ -262,36 +405,38 @@ export function DiffViewerApp({ requestId, windowLabel, initialColorScheme }: Di
             <span>{rowCount} total rows</span>
           </div>
           {mode === "split" ? (
-            <main className="diff-viewer__body diff-viewer__body--split">
+            <main ref={splitBodyRef} className="diff-viewer__body diff-viewer__body--split">
               <div className="diff-viewer__file-header">
                 <span>{result.left.name}</span>
                 <span>{result.right.name}</span>
               </div>
-              <table className="diff-table diff-table--split">
-                <tbody>
-                  {result.rows.map((row, index) => {
-                    const blockIndex = changeBlockByRow.get(index);
-                    const active = blockIndex !== undefined && blockIndex === activeChangeIndex;
-                    const activeBlockStart = active && changeBlockByRow.get(index - 1) !== blockIndex;
-                    const activeBlockEnd = active && changeBlockByRow.get(index + 1) !== blockIndex;
-                    return (
-                      <tr
-                        key={index}
-                        className={diffRowClassName(row.kind, active, activeBlockStart, activeBlockEnd)}
-                        data-diff-row={index}
-                      >
-                        <td className="diff-table__line">{row.leftLine ?? ""}</td>
-                        <td className="diff-table__code">{lineText(row.leftText)}</td>
-                        <td className="diff-table__line">{row.rightLine ?? ""}</td>
-                        <td className="diff-table__code">{lineText(row.rightText)}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+              <div className="diff-viewer__split-panes">
+                <div
+                  ref={leftPaneRef}
+                  className="diff-viewer__split-pane"
+                  data-testid="diff-split-left"
+                  onWheel={(event) => handleSplitWheel(event, rightPaneRef.current)}
+                  onScroll={(event) => syncSplitScroll(event.currentTarget, rightPaneRef.current)}
+                >
+                  <table ref={leftTableRef} className="diff-table diff-table--split">
+                    <tbody>{renderSplitRows("left")}</tbody>
+                  </table>
+                </div>
+                <div
+                  ref={rightPaneRef}
+                  className="diff-viewer__split-pane diff-viewer__split-pane--right"
+                  data-testid="diff-split-right"
+                  onWheel={(event) => handleSplitWheel(event, leftPaneRef.current)}
+                  onScroll={(event) => syncSplitScroll(event.currentTarget, leftPaneRef.current)}
+                >
+                  <table ref={rightTableRef} className="diff-table diff-table--split">
+                    <tbody>{renderSplitRows("right")}</tbody>
+                  </table>
+                </div>
+              </div>
             </main>
           ) : (
-            <main className="diff-viewer__body">
+            <main ref={unifiedBodyRef} className="diff-viewer__body">
               <table className="diff-table diff-table--unified">
                 <tbody>
                   {result.rows.map((row, index) => {
