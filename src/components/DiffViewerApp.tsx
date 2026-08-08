@@ -234,11 +234,11 @@ export function DiffViewerApp({ requestId, windowLabel, initialColorScheme }: Di
         scrollDiffVertically("page-down");
         return;
       }
-      if (event.key === "n" || event.key === "j" || event.key === "F7" || event.key === "ArrowDown") {
+      if (event.key === "ArrowDown") {
         event.preventDefault();
         jumpChange(1);
       }
-      if (event.key === "p" || event.key === "k" || event.key === "F6" || event.key === "ArrowUp") {
+      if (event.key === "ArrowUp") {
         event.preventDefault();
         jumpChange(-1);
       }
