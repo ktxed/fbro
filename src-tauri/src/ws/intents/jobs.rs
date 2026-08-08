@@ -2373,8 +2373,15 @@ async fn make_dir(args: &Value, ctx: &mut IntentContext<'_>) {
 
     if let Some(driver) = driver {
         let full_path_clone = full_path.clone();
-        let result =
-            tokio::task::spawn_blocking(move || driver.create_dir_all(&full_path_clone)).await;
+        // create_dir_all is mkdir -p style and succeeds when the path already
+        // exists as a directory. F7 must reject that as a name conflict.
+        let result = tokio::task::spawn_blocking(move || {
+            if driver.exists(&full_path_clone) {
+                return Err(VfsError::AlreadyExists(full_path_clone));
+            }
+            driver.create_dir_all(&full_path_clone)
+        })
+        .await;
         match result {
             Ok(Ok(())) => {
                 crate::journal::record(
@@ -2401,7 +2408,14 @@ async fn make_dir(args: &Value, ctx: &mut IntentContext<'_>) {
                 .await;
             }
             Ok(Err(error)) => {
-                let _ = send_error(ctx, "MKDIR_FAILED", error.to_string()).await;
+                let message = match &error {
+                    VfsError::AlreadyExists(_) => format!(
+                        "A file or directory named \"{}\" already exists.",
+                        parsed.name
+                    ),
+                    other => other.to_string(),
+                };
+                let _ = send_error(ctx, "MKDIR_FAILED", message).await;
             }
             Err(_) => {}
         }
