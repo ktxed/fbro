@@ -2,21 +2,22 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { IconArrowDown, IconArrowUp, IconGitBranch, IconLoader2, IconRefresh } from "@tabler/icons-react";
 import type { GitRepoStatus } from "../ws/types";
 import type { WsClient } from "../ws/client";
+import type { GitActivity } from "./gitActivity";
 
 interface Props {
   panelId: string;
   git: GitRepoStatus;
   client: WsClient;
+  activity: GitActivity | null;
+  onActivityChange: (activity: GitActivity) => void;
   onClose: () => void;
   onOpenRepository: () => void;
 }
 
-export function GitActionsModal({ panelId, git, client, onClose, onOpenRepository }: Props) {
+export function GitActionsModal({ panelId, git, client, activity, onActivityChange, onClose, onOpenRepository }: Props) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const controlRefs = useRef<Array<HTMLButtonElement | HTMLSelectElement | null>>([]);
-  const lastGitRef = useRef(git);
   const [activeIndex, setActiveIndex] = useState(0);
-  const [activity, setActivity] = useState<{ action: string; message: string } | null>(null);
   const canPull = git.clean && git.behindCount !== undefined && git.behindCount > 0;
   const canPush = !!git.upstream && git.aheadCount !== undefined && git.aheadCount > 0;
   const pullDisabledMessage = !git.clean ? "Requires no staged changes" : !git.upstream ? "No upstream configured" : git.behindCount === 0 ? "Already up to date" : "Remote status unavailable — fetch first";
@@ -25,20 +26,9 @@ export function GitActionsModal({ panelId, git, client, onClose, onOpenRepositor
     client.sendIntent(name, undefined, { panelId, ...args });
   };
   const runAction = (name: string, message: string, args: Record<string, unknown> = {}) => {
-    setActivity({ action: name, message });
+    onActivityChange({ action: name, message });
     act(name, args);
   };
-
-  useEffect(() => {
-    runAction("GitRefresh", "Fetching and refreshing…");
-  }, [client, panelId]);
-
-  useEffect(() => {
-    if (activity && git !== lastGitRef.current) {
-      setActivity({ action: "complete", message: `${activity.message.replace(/…$/, "")} complete` });
-    }
-    lastGitRef.current = git;
-  }, [activity, git]);
 
   const focusControl = useCallback((index: number) => {
     const control = controlRefs.current[index];

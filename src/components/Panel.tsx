@@ -26,6 +26,7 @@ import { EntryThumb } from "./EntryThumb";
 import { isGlobalSelectionSourceId } from "../utils/sourceId";
 import { GitModal } from "./GitModal";
 import { GitActionsModal } from "./GitActionsModal";
+import type { GitActivity } from "./gitActivity";
 
 const ROW_HEIGHT = 22;
 const GRID_THUMB_SIZE = 128;
@@ -658,6 +659,8 @@ export function Panel({
   const dispatch = useAppDispatch();
   const [gitOpen, setGitOpen] = useState(false);
   const [gitActionsOpen, setGitActionsOpen] = useState(false);
+  const [gitActivity, setGitActivity] = useState<GitActivity | null>(null);
+  const gitActivityStartRef = useRef(panel.git);
   const [gridMetrics, setGridMetrics] = useState<{ cols: number; cardWidth: number; cardHeight: number; pageRows: number }>({ cols: 1, cardWidth: GRID_CARD_MIN_WIDTH, cardHeight: 168, pageRows: 1 });
   const listRef = useRef<HTMLDivElement>(null);
   const focusDivRef = useRef<HTMLDivElement>(null);
@@ -693,12 +696,37 @@ export function Panel({
   }, []);
   const closeGitModal = useCallback(() => {
     setGitOpen(false);
+    setGitActivity(null);
     restorePanelFocus();
   }, [restorePanelFocus]);
   const closeGitActions = useCallback(() => {
     setGitActionsOpen(false);
+    setGitActivity(null);
     restorePanelFocus();
   }, [restorePanelFocus]);
+  const beginGitActivity = useCallback((activity: GitActivity) => {
+    gitActivityStartRef.current = panel.git;
+    setGitActivity(activity);
+  }, [panel.git]);
+  const openGitRepository = useCallback(() => {
+    beginGitActivity({ action: "GitRefresh", message: "Fetching and refreshing…" });
+    client.sendIntent("GitRefresh", undefined, { panelId });
+    setGitOpen(true);
+  }, [beginGitActivity, client, panelId]);
+  const openGitActions = useCallback(() => {
+    beginGitActivity({ action: "GitRefresh", message: "Fetching and refreshing…" });
+    client.sendIntent("GitRefresh", undefined, { panelId });
+    setGitActionsOpen(true);
+  }, [beginGitActivity, client, panelId]);
+
+  useEffect(() => {
+    if (!gitActivity || gitActivity.action === "complete" || !panel.git || panel.git === gitActivityStartRef.current) return;
+    setGitActivity({
+      action: "complete",
+      message: `${gitActivity.message.replace(/…$/, "")} complete`,
+    });
+    gitActivityStartRef.current = panel.git;
+  }, [gitActivity, panel.git]);
 
   const isWindowed = panel.totalCount !== undefined && panel.totalCount > panel.entries.length;
   const totalCount = panel.totalCount ?? panel.entries.length;
@@ -1182,7 +1210,7 @@ export function Panel({
     if (gitActionsCommand) {
       e.preventDefault();
       e.stopPropagation();
-      if (panel.git) setGitActionsOpen(true);
+      if (panel.git) openGitActions();
       else dispatch({ type: "SHOW_TRANSIENT_HINT", message: "Git actions are available inside a local Git repository" });
       return;
     }
@@ -1833,11 +1861,11 @@ export function Panel({
             client={client}
           />
         )}
-        {panel.git && <button className={`panel__git-btn panel__git-btn--${gitHeaderState}`} tabIndex={-1} data-tooltip-id={`git-chip-${panelId}`} data-tooltip-content={panel.git.clean ? `Git ${panel.git.branch}: no staged changes` : `Git ${panel.git.branch}: staged changes present — commit or unstage before switching or pulling`} onClick={() => setGitOpen(true)}><IconGitBranch size={16} /><span className="panel__git-btn-label">{panel.git.branch}</span>{!panel.git.clean && <IconAlertTriangle className="panel__git-btn-warning" size={13} />}</button>}
+        {panel.git && <button className={`panel__git-btn panel__git-btn--${gitHeaderState}`} tabIndex={-1} data-tooltip-id={`git-chip-${panelId}`} data-tooltip-content={panel.git.clean ? `Git ${panel.git.branch}: no staged changes` : `Git ${panel.git.branch}: staged changes present — commit or unstage before switching or pulling`} onClick={openGitRepository}><IconGitBranch size={16} /><span className="panel__git-btn-label">{panel.git.branch}</span>{!panel.git.clean && <IconAlertTriangle className="panel__git-btn-warning" size={13} />}</button>}
       </div>
 
-      {gitOpen && panel.git && <GitModal panelId={panelId} git={panel.git} client={client} onClose={closeGitModal} />}
-      {gitActionsOpen && panel.git && <GitActionsModal panelId={panelId} git={panel.git} client={client} onClose={closeGitActions} onOpenRepository={() => { setGitActionsOpen(false); setGitOpen(true); }} />}
+      {gitOpen && panel.git && <GitModal panelId={panelId} git={panel.git} client={client} activity={gitActivity} onActivityChange={beginGitActivity} onClose={closeGitModal} />}
+      {gitActionsOpen && panel.git && <GitActionsModal panelId={panelId} git={panel.git} client={client} activity={gitActivity} onActivityChange={beginGitActivity} onClose={closeGitActions} onOpenRepository={() => { setGitActionsOpen(false); setGitOpen(true); }} />}
 
       <VolumeHeader sources={sources} panel={panel} client={client} onNavigateToSource={(sourceId) => { shouldFocusFilterRef.current = false; client.sendIntent("NavigateToSource", panelId, { sourceId }); }} onMountSource={(sourceId) => { shouldFocusFilterRef.current = false; client.sendIntent("MountSource", panelId, { sourceId }); }} />
 

@@ -4,6 +4,7 @@ import { useAppDispatch, useAppState } from "../store";
 import type { GitChange, GitLogRef, GitRepoStatus } from "../ws/types";
 import type { WsClient } from "../ws/client";
 import { ResizableModal } from "./ResizableModal";
+import type { GitActivity } from "./gitActivity";
 
 type GitTab = "changes" | "log";
 
@@ -14,7 +15,7 @@ type LogFocus =
 
 const LOG_PAGE_SIZE = 100;
 
-export function GitModal({ panelId, git, client, onClose }: { panelId: string; git: GitRepoStatus; client: WsClient; onClose: () => void }) {
+export function GitModal({ panelId, git, client, activity, onActivityChange, onClose }: { panelId: string; git: GitRepoStatus; client: WsClient; activity: GitActivity | null; onActivityChange: (activity: GitActivity) => void; onClose: () => void }) {
   const dispatch = useAppDispatch();
   const { pendingGitLog } = useAppState();
   const gitLog = pendingGitLog?.panelId === panelId ? pendingGitLog : null;
@@ -33,7 +34,6 @@ export function GitModal({ panelId, git, client, onClose }: { panelId: string; g
   const logLoadMoreRef = useRef<HTMLDivElement | null>(null);
   const lastGitRef = useRef(git);
   const logLoadedRootRef = useRef<string | null>(null);
-  const [activity, setActivity] = useState<{ action: string; message: string } | null>(null);
   const [activeChangeIndex, setActiveChangeIndex] = useState(0);
   const [logFocus, setLogFocus] = useState<LogFocus>({ kind: "commit", index: 0 });
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(() => new Set());
@@ -44,7 +44,7 @@ export function GitModal({ panelId, git, client, onClose }: { panelId: string; g
   const canPush = !!git.upstream && git.aheadCount !== undefined && git.aheadCount > 0;
   const act = (name: string, args: Record<string, unknown> = {}) => client.sendIntent(name, undefined, { panelId, ...args });
   const runAction = (name: string, message: string, args: Record<string, unknown> = {}) => {
-    setActivity({ action: name, message });
+    onActivityChange({ action: name, message });
     act(name, args);
   };
   const selectedChanges = useMemo(() => git.changes.filter(change => selectedPaths.has(change.path)), [git.changes, selectedPaths]);
@@ -221,18 +221,13 @@ export function GitModal({ panelId, git, client, onClose }: { panelId: string; g
   }, [dispatch, onClose]);
 
   useEffect(() => {
-    runAction("GitRefresh", "Fetching and refreshing…");
-  }, [client, panelId]);
-
-  useEffect(() => {
     return () => {
       dispatch({ type: "CLEAR_GIT_LOG" });
     };
   }, [dispatch]);
 
   useEffect(() => {
-    if (activity && git !== lastGitRef.current) {
-      setActivity({ action: "complete", message: `${activity.message.replace(/…$/, "")} complete` });
+    if (git !== lastGitRef.current) {
       // After a successful commit (or other mutating action), refresh log if it was loaded.
       if (logLoadedRootRef.current === git.root && tab === "log") {
         requestLog({ skip: 0, append: false });
@@ -242,7 +237,7 @@ export function GitModal({ panelId, git, client, onClose }: { panelId: string; g
       }
     }
     lastGitRef.current = git;
-  }, [activity, git, requestLog, tab]);
+  }, [git, requestLog, tab]);
 
   useEffect(() => {
     setActiveChangeIndex((index) => Math.min(index, Math.max(0, git.changes.length - 1)));
