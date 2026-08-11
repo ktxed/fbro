@@ -102,11 +102,11 @@ pub(crate) async fn handle(name: &str, args: &Value, ctx: &mut IntentContext<'_>
             if message.is_empty() { Err("A commit message is required.".to_string()) }
             else { crate::git::run(&root, &["commit".into(), "-m".into(), message.into()]) }
         }
-        "GitSwitchBranch" => guarded(clean, || {
+        "GitSwitchBranch" => {
             let branch = args.get("branch").and_then(Value::as_str).unwrap_or("").trim();
             if branch.is_empty() { Err("A branch is required.".to_string()) }
             else { crate::git::run(&root, &["switch".into(), branch.into()]) }
-        }),
+        },
         "GitPull" => guarded(clean, || crate::git::run(&root, &["pull".into()])),
         "GitPush" => crate::git::run(&root, &["push".into()]),
         "GitSetUpstream" => guarded(clean, || {

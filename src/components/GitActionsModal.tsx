@@ -92,14 +92,14 @@ export function GitActionsModal({ panelId, git, client, activity, onActivityChan
           <button type="button" className="git-actions-modal__close" onClick={onClose} title="Close">×</button>
         </header>
         <div className="git-actions-modal__repo" title={git.root}>{git.root}</div>
-        {!git.clean && <div className="git-actions-modal__warning">Staged changes are present. Switch and pull require no staged changes; pushing commits remains available.</div>}
+        {!git.clean && <div className="git-actions-modal__warning">Staged changes are present. Git may reject a branch switch if it would overwrite them; pull remains disabled.</div>}
         <div className="git-actions-modal__choices">
           <button ref={(el) => { controlRefs.current[0] = el; }} type="button" className={`git-actions-modal__choice${activeIndex === 0 ? " is-keyboard-active" : ""}`} onFocus={() => setActiveIndex(0)} onClick={() => runAction("GitFetch", "Fetching remote…")}>
             <IconRefresh size={19} /><span><strong>Fetch <kbd>F</kbd></strong><small>Update remote branch information</small></span>
           </button>
-          <label className={`git-actions-modal__choice git-actions-modal__choice--branch${!git.clean ? " is-disabled" : ""}${activeIndex === 1 ? " is-keyboard-active" : ""}`} title={!git.clean ? disabledMessage : undefined}>
-            <IconGitBranch size={19} /><span><strong>Switch branch <kbd>B</kbd></strong><small>Requires no staged changes</small></span>
-            <select ref={(el) => { controlRefs.current[1] = el; }} value={git.branch} disabled={!git.clean} onFocus={() => setActiveIndex(1)} onChange={(event) => runAction("GitSwitchBranch", "Switching branch…", { branch: event.target.value })}>
+          <label className={`git-actions-modal__choice git-actions-modal__choice--branch${activeIndex === 1 ? " is-keyboard-active" : ""}`}>
+            <IconGitBranch size={19} /><span><strong>Switch branch <kbd>B</kbd></strong><small>Preserve changes when Git allows</small></span>
+            <select ref={(el) => { controlRefs.current[1] = el; }} value={git.branch} onFocus={() => setActiveIndex(1)} onChange={(event) => runAction("GitSwitchBranch", "Switching branch…", { branch: event.target.value })}>
               {git.branches.map((branch) => <option key={branch} value={branch}>{branch}</option>)}
             </select>
           </label>

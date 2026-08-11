@@ -542,14 +542,13 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
         </div>
         {!git.clean && (
           <div className="git-modal__warning">
-            Staged changes are present. Branch switch and pull are disabled; pushing commits remains available.
+            Staged changes are present. Git may reject a branch switch if it would overwrite them; pull remains disabled.
           </div>
         )}
         <div className="git-modal__toolbar">
           <select
             ref={branchRef}
             value={git.branch}
-            disabled={!git.clean}
             onChange={e => runAction("GitSwitchBranch", "Switching branch…", { branch: e.target.value })}
           >
             {git.branches.map(branch => <option key={branch} value={branch}>{branch}</option>)}
