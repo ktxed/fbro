@@ -5723,6 +5723,7 @@ body {
 }
 
 .diff-viewer__segmented-btn,
+.diff-viewer__toggle,
 .diff-viewer__close {
   min-height: 32px;
   padding: 0 12px;
@@ -5738,6 +5739,17 @@ body {
 }
 
 .diff-viewer__segmented-btn--active {
+  background: color-mix(in srgb, var(--accent) 16%, var(--bg-elev));
+  color: var(--accent);
+}
+
+.diff-viewer__toggle {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.diff-viewer__toggle--active {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
   background: color-mix(in srgb, var(--accent) 16%, var(--bg-elev));
   color: var(--accent);
 }
@@ -5871,6 +5883,21 @@ body {
   overflow: hidden;
   text-overflow: clip;
   vertical-align: top;
+}
+
+.diff-viewer--wrap .diff-viewer__body,
+.diff-viewer--wrap .diff-viewer__split-pane {
+  overflow-x: hidden;
+}
+
+.diff-viewer--wrap .diff-table--split {
+  width: 100%;
+  table-layout: fixed;
+}
+
+.diff-viewer--wrap .diff-table__code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .diff-table__row--equal .diff-table__code {

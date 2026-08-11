@@ -33,6 +33,18 @@ function lineText(value?: string) {
   return value === undefined || value === "" ? "\u00A0" : value;
 }
 
+function MnemonicLabel({ text, mnemonic }: { text: string; mnemonic: string }) {
+  const index = text.toLowerCase().indexOf(mnemonic.toLowerCase());
+  if (index < 0) return <>{text}</>;
+  return (
+    <>
+      {text.slice(0, index)}
+      <span className="modal__mnemonic">{text[index]}</span>
+      {text.slice(index + 1)}
+    </>
+  );
+}
+
 function normalizedWheelDelta(delta: number, deltaMode: number, pageSize: number) {
   if (delta === 0) return 0;
   if (deltaMode === 1) return delta * DIFF_ROW_HEIGHT;
@@ -60,6 +72,7 @@ export function DiffViewerApp({ requestId, windowLabel, initialColorScheme }: Di
   const [result, setResult] = useState<CompareDiffResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<DiffViewMode>("split");
+  const [wordWrap, setWordWrap] = useState(false);
   const [loading, setLoading] = useState(true);
   const [activeChangeIndex, setActiveChangeIndex] = useState(0);
   const [colorSchemeId, setColorSchemeId] = useState<ColorSchemeId>(() => (
@@ -214,6 +227,16 @@ export function DiffViewerApp({ requestId, windowLabel, initialColorScheme }: Di
       }
       if (event.key === "1") setMode("split");
       if (event.key === "2") setMode("unified");
+      if (!event.ctrlKey && !event.metaKey && !event.altKey) {
+        const key = event.key.toLowerCase();
+        if (["p", "n", "s", "u", "w", "c"].includes(key)) event.preventDefault();
+        if (key === "p") jumpChange(-1);
+        if (key === "n") jumpChange(1);
+        if (key === "s") setMode("split");
+        if (key === "u") setMode("unified");
+        if (key === "w") setWordWrap((current) => !current);
+        if (key === "c") closeWindow();
+      }
       if (event.key === "Home") {
         event.preventDefault();
         scrollDiffVertically("start");
@@ -297,6 +320,10 @@ export function DiffViewerApp({ requestId, windowLabel, initialColorScheme }: Di
     const leftTable = leftTableRef.current;
     const rightTable = rightTableRef.current;
     if (!body || !leftPane || !rightPane || !leftTable || !rightTable) return;
+    if (wordWrap) {
+      body.style.removeProperty("--diff-split-content-width");
+      return;
+    }
     let cancelled = false;
 
     const measureContentWidth = () => {
@@ -318,7 +345,47 @@ export function DiffViewerApp({ requestId, windowLabel, initialColorScheme }: Di
       cancelled = true;
       window.removeEventListener("resize", measureContentWidth);
     };
-  }, [mode, result]);
+  }, [mode, result, wordWrap]);
+
+  useLayoutEffect(() => {
+    if (mode !== "split" || !result) return;
+    const leftRows = Array.from(leftTableRef.current?.rows ?? []);
+    const rightRows = Array.from(rightTableRef.current?.rows ?? []);
+    const clearRowHeights = () => {
+      leftRows.forEach((row) => row.style.removeProperty("height"));
+      rightRows.forEach((row) => row.style.removeProperty("height"));
+    };
+    clearRowHeights();
+    if (!wordWrap) return;
+
+    let frame: number | null = null;
+    let cancelled = false;
+    const alignRowHeights = () => {
+      clearRowHeights();
+      leftRows.forEach((leftRow, index) => {
+        const rightRow = rightRows[index];
+        if (!rightRow) return;
+        const height = Math.max(leftRow.getBoundingClientRect().height, rightRow.getBoundingClientRect().height);
+        leftRow.style.height = `${height}px`;
+        rightRow.style.height = `${height}px`;
+      });
+    };
+    const scheduleAlignment = () => {
+      if (cancelled) return;
+      if (frame !== null) cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(alignRowHeights);
+    };
+
+    scheduleAlignment();
+    window.addEventListener("resize", scheduleAlignment);
+    void document.fonts?.ready.then(scheduleAlignment);
+    return () => {
+      cancelled = true;
+      if (frame !== null) cancelAnimationFrame(frame);
+      window.removeEventListener("resize", scheduleAlignment);
+      clearRowHeights();
+    };
+  }, [mode, result, wordWrap]);
 
   const renderSplitRows = (side: "left" | "right") => result?.rows.map((row, index) => {
     const blockIndex = changeBlockByRow.get(index);
@@ -340,7 +407,7 @@ export function DiffViewerApp({ requestId, windowLabel, initialColorScheme }: Di
 
   return (
     <div
-      className="diff-viewer"
+      className={wordWrap ? "diff-viewer diff-viewer--wrap" : "diff-viewer"}
       data-testid="diff-viewer"
       data-color-scheme={colorScheme.id}
       style={{ colorScheme: colorScheme.mode }}
@@ -361,8 +428,9 @@ export function DiffViewerApp({ requestId, windowLabel, initialColorScheme }: Di
               type="button"
               onClick={() => jumpChange(-1)}
               disabled={changedBlocks.length === 0}
+              title="Previous change (P / Up)"
             >
-              Prev
+              <MnemonicLabel text="Prev" mnemonic="p" />
             </button>
             <span className="diff-viewer__jump-count">
               {changedBlocks.length === 0 ? "0/0" : `${activeChangeIndex + 1}/${changedBlocks.length}`}
@@ -372,8 +440,9 @@ export function DiffViewerApp({ requestId, windowLabel, initialColorScheme }: Di
               type="button"
               onClick={() => jumpChange(1)}
               disabled={changedBlocks.length === 0}
+              title="Next change (N / Down)"
             >
-              Next
+              <MnemonicLabel text="Next" mnemonic="n" />
             </button>
           </div>
           <div className="diff-viewer__segmented" role="group" aria-label="Diff view mode">
@@ -381,18 +450,31 @@ export function DiffViewerApp({ requestId, windowLabel, initialColorScheme }: Di
               className={mode === "split" ? "diff-viewer__segmented-btn diff-viewer__segmented-btn--active" : "diff-viewer__segmented-btn"}
               type="button"
               onClick={() => setMode("split")}
+              title="Side by side (S / 1)"
             >
-              Side by side
+              <MnemonicLabel text="Side by side" mnemonic="s" />
             </button>
             <button
               className={mode === "unified" ? "diff-viewer__segmented-btn diff-viewer__segmented-btn--active" : "diff-viewer__segmented-btn"}
               type="button"
               onClick={() => setMode("unified")}
+              title="Unified (U / 2)"
             >
-              Unified
+              <MnemonicLabel text="Unified" mnemonic="u" />
             </button>
           </div>
-          <button className="diff-viewer__close" type="button" onClick={closeWindow}>Close</button>
+          <button
+            className={wordWrap ? "diff-viewer__toggle diff-viewer__toggle--active" : "diff-viewer__toggle"}
+            type="button"
+            aria-pressed={wordWrap}
+            title="Toggle word wrap (W)"
+            onClick={() => setWordWrap((current) => !current)}
+          >
+            <MnemonicLabel text="Wrap" mnemonic="w" />
+          </button>
+          <button className="diff-viewer__close" type="button" title="Close (C / Esc)" onClick={closeWindow}>
+            <MnemonicLabel text="Close" mnemonic="c" />
+          </button>
         </div>
       </header>
 
