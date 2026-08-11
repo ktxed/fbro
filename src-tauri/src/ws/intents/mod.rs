@@ -110,9 +110,11 @@ pub async fn dispatch(name: &str, scope: &Value, args: &Value, ctx: &mut IntentC
         | "ViewerNavigate"
         | "ReadFileChunk"
         | "SetEmbeddedViewerActive" => viewer::handle(name, args, ctx).await,
-        "CompareFiles" | "GitViewDiff" | "GetCompareDiff" | "CloseCompareWindow" => {
-            compare::handle(name, scope, args, ctx).await
-        }
+        "CompareFiles"
+        | "GitViewDiff"
+        | "GetCompareDiff"
+        | "NavigateCompareDiff"
+        | "CloseCompareWindow" => compare::handle(name, scope, args, ctx).await,
         "QueryCacheStatus" | "ClearCache" => cache::handle(name, args, ctx).await,
         "AddBookmark" | "RemoveBookmark" | "EnterBookmarkSource" => {
             bookmarks::handle(name, scope, args, ctx).await

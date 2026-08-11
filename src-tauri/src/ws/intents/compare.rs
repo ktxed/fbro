@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::path::Path;
 use std::process::Command;
 use std::sync::Arc;
 
@@ -6,14 +7,14 @@ use serde_json::Value;
 use similar::{ChangeTag, TextDiff};
 
 use crate::state::settings::CompareDifferMode;
-use crate::state::{source_id_for_local_path, AppState, CompareSession, Panel, Source};
+use crate::state::{source_id_for_local_path, AppState, CompareSession, GitCompareNavigation, Panel, Source};
 use crate::vfs::{git_diff::GitDiffSnapshotDriver, search::SearchResultsDriver, VfsDriver};
 use crate::ws::intents::{
     arg_str, is_archive_source, is_global_selection_source, is_procs_source, is_search_source,
 };
 use crate::ws::protocol::{
-    now, CompareDiffResultSchema, CompareDiffRowSchema, CompareTargetSchema, EntrySchema,
-    ServerMessage,
+    now, CompareDiffNavigationSchema, CompareDiffResultSchema, CompareDiffRowSchema,
+    CompareTargetSchema, EntrySchema, ServerMessage,
 };
 use crate::ws::runtime::{resolve_panel_id, url_encode, IntentContext};
 
@@ -47,6 +48,7 @@ pub(crate) async fn handle(name: &str, scope: &Value, args: &Value, ctx: &mut In
         "CompareFiles" => compare_files(scope, args, ctx).await,
         "GitViewDiff" => git_view_diff(args, ctx).await,
         "GetCompareDiff" => get_compare_diff(args, ctx).await,
+        "NavigateCompareDiff" => navigate_compare_diff(args, ctx).await,
         "CloseCompareWindow" => close_compare_window(args, ctx).await,
         _ => {}
     }
@@ -158,7 +160,7 @@ async fn launch_compare_targets(
 
     let max_bytes = max_file_size_mb.saturating_mul(1024 * 1024);
     let result = build_diff(&targets[0], &targets[1], max_bytes).await?;
-    open_internal_diff(result, color_scheme, viewer_bg, ctx).await
+    open_internal_diff(result, color_scheme, viewer_bg, None, ctx).await
 }
 
 async fn launch_git_diff(
@@ -169,15 +171,60 @@ async fn launch_git_diff(
     old_path: Option<String>,
     ctx: &mut IntentContext<'_>,
 ) -> Result<(), String> {
-    let max_bytes = {
+    let (max_bytes, color_scheme, viewer_bg) = {
         let state_guard = ctx.state.lock().await;
-        state_guard
-            .settings
-            .general
-            .compare_max_file_size_mb
-            .saturating_mul(1024 * 1024)
+        let color_scheme = state_guard.settings.general.color_scheme.clone();
+        let viewer_bg = match color_scheme.as_str() {
+            "daylight" => tauri::webview::Color(244, 246, 248, 255),
+            _ => tauri::webview::Color(13, 13, 13, 255),
+        };
+        (
+            state_guard.settings.general.compare_max_file_size_mb.saturating_mul(1024 * 1024),
+            color_scheme,
+            viewer_bg,
+        )
     };
+    let changes = if let Some(hash) = commit_hash.as_deref() {
+        crate::git::commit_show(&root, hash).unwrap_or_default()
+    } else {
+        crate::git::inspect(&root).map(|status| status.changes).unwrap_or_default()
+    };
+    let current_index = changes.iter().position(|change| {
+        change.path == target_path || Path::new(&root).join(&change.path) == Path::new(target_path)
+    });
+    let mut result = build_git_diff_result(
+        panel_id,
+        &root,
+        target_path,
+        commit_hash.as_deref(),
+        old_path.as_deref(),
+        max_bytes,
+    ).await?;
+    let navigation = current_index.map(|current_index| GitCompareNavigation {
+        panel_id: panel_id.to_string(),
+        root,
+        commit_hash,
+        changes,
+        current_index,
+    });
+    if let Some(navigation) = navigation.as_ref() {
+        set_navigation_metadata(&mut result, navigation);
+    }
+    open_internal_diff(result, color_scheme, viewer_bg, navigation, ctx).await
+}
+
+async fn build_git_diff_result(
+    panel_id: &str,
+    root: &str,
+    target_path: &str,
+    commit_hash: Option<&str>,
+    old_path: Option<&str>,
+    max_bytes: u64,
+) -> Result<CompareDiffResultSchema, String> {
+    let root = root.to_string();
     let target_path = target_path.to_string();
+    let commit_hash = commit_hash.map(str::to_string);
+    let old_path = old_path.map(str::to_string);
     let content = tokio::task::spawn_blocking(move || {
         crate::git::read_diff_content(
             &root,
@@ -218,7 +265,7 @@ async fn launch_git_diff(
             driver,
         },
     ];
-    launch_compare_targets(targets, false, ctx).await
+    build_diff(&targets[0], &targets[1], max_bytes).await
 }
 
 async fn resolve_git_diff_repo(
@@ -251,6 +298,7 @@ async fn open_internal_diff(
     result: CompareDiffResultSchema,
     color_scheme: String,
     viewer_bg: tauri::webview::Color,
+    git_navigation: Option<GitCompareNavigation>,
     ctx: &mut IntentContext<'_>,
 ) -> Result<(), String> {
     let request_id = uuid::Uuid::new_v4().to_string();
@@ -260,6 +308,7 @@ async fn open_internal_diff(
             request_id.clone(),
             CompareSession {
                 result: Ok(result.clone()),
+                git_navigation,
             },
         );
         while state_guard.compare_sessions.len() > 16 {
@@ -411,7 +460,15 @@ fn build_diff_from_text(
         rows,
         unified,
         identical,
+        navigation: None,
     }
+}
+
+fn set_navigation_metadata(result: &mut CompareDiffResultSchema, navigation: &GitCompareNavigation) {
+    result.navigation = Some(CompareDiffNavigationSchema {
+        current_index: navigation.current_index,
+        total: navigation.changes.len(),
+    });
 }
 
 fn trim_diff_line(value: &str) -> String {
@@ -740,6 +797,101 @@ fn ensure_distinct(left: &CompareTarget, right: &CompareTarget) -> Result<(), St
     Ok(())
 }
 
+async fn navigate_compare_diff(args: &Value, ctx: &mut IntentContext<'_>) {
+    let request_id = arg_str(args, "requestId").unwrap_or("").to_string();
+    let direction = arg_str(args, "direction").unwrap_or("");
+    if request_id.is_empty() || !matches!(direction, "prev" | "next") {
+        return;
+    }
+    let (mut navigation, max_bytes, current_result) = {
+        let state_guard = ctx.state.lock().await;
+        let Some(session) = state_guard.compare_sessions.get(&request_id) else {
+            return;
+        };
+        let Some(navigation) = session.git_navigation.clone() else {
+            return;
+        };
+        (
+            navigation,
+            state_guard.settings.general.compare_max_file_size_mb.saturating_mul(1024 * 1024),
+            session.result.clone(),
+        )
+    };
+    let next_index = adjacent_git_change_index(
+        navigation.current_index,
+        navigation.changes.len(),
+        direction,
+    );
+    if next_index == navigation.current_index {
+        if let Ok(result) = current_result {
+            let _ = ctx.tx.send(ServerMessage::CompareDiffReady {
+                timestamp: now(),
+                request_id,
+                result,
+            }).await;
+        }
+        return;
+    }
+    let mut candidate_index = next_index;
+    loop {
+        let change = navigation.changes[candidate_index].clone();
+        match build_git_diff_result(
+            &navigation.panel_id,
+            &navigation.root,
+            &change.path,
+            navigation.commit_hash.as_deref(),
+            change.old_path.as_deref(),
+            max_bytes,
+        ).await {
+            Ok(mut result) => {
+                navigation.current_index = candidate_index;
+                set_navigation_metadata(&mut result, &navigation);
+                {
+                    let mut state_guard = ctx.state.lock().await;
+                    let Some(session) = state_guard.compare_sessions.get_mut(&request_id) else {
+                        return;
+                    };
+                    session.result = Ok(result.clone());
+                    session.git_navigation = Some(navigation);
+                }
+                let _ = ctx.tx.send(ServerMessage::CompareDiffReady {
+                    timestamp: now(),
+                    request_id,
+                    result,
+                }).await;
+                return;
+            }
+            Err(message) => {
+                let following_index = adjacent_git_change_index(
+                    candidate_index,
+                    navigation.changes.len(),
+                    direction,
+                );
+                if following_index == candidate_index {
+                    let _ = ctx.tx.send(ServerMessage::CompareDiffFailed {
+                        timestamp: now(),
+                        request_id,
+                        message,
+                    }).await;
+                    return;
+                }
+                candidate_index = following_index;
+            }
+        }
+    }
+}
+
+fn adjacent_git_change_index(current: usize, total: usize, direction: &str) -> usize {
+    if total == 0 {
+        return 0;
+    }
+    if direction == "prev" {
+        current.saturating_sub(1)
+    } else {
+        current.saturating_add(1).min(total - 1)
+    }
+}
+
 async fn get_compare_diff(args: &Value, ctx: &mut IntentContext<'_>) {
     let request_id = arg_str(args, "requestId").unwrap_or("").to_string();
     if request_id.is_empty() {
@@ -822,7 +974,7 @@ async fn send_compare_error(
 mod tests {
     use std::collections::HashMap;
 
-    use super::{global_selection_reference_source, validate_text_bytes};
+    use super::{adjacent_git_change_index, global_selection_reference_source, validate_text_bytes};
     use crate::state::Source;
     use crate::ws::protocol::EntrySchema;
 
@@ -873,6 +1025,15 @@ mod tests {
     #[test]
     fn strict_text_rejects_invalid_utf8() {
         assert!(validate_text_bytes("a.bin", vec![0xff], 1024).is_err());
+    }
+
+    #[test]
+    fn git_diff_navigation_stops_at_changed_file_boundaries() {
+        assert_eq!(adjacent_git_change_index(0, 3, "prev"), 0);
+        assert_eq!(adjacent_git_change_index(0, 3, "next"), 1);
+        assert_eq!(adjacent_git_change_index(1, 3, "prev"), 0);
+        assert_eq!(adjacent_git_change_index(2, 3, "next"), 2);
+        assert_eq!(adjacent_git_change_index(0, 0, "next"), 0);
     }
 
     #[test]

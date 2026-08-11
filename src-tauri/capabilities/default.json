@@ -2,9 +2,11 @@
   "$schema": "https://schemas.tauri.app/config/2/capabilities",
   "identifier": "default",
   "description": "Default capabilities for the main window",
-  "windows": ["main"],
+  "windows": ["main", "diff-*"],
   "permissions": [
     "core:event:default",
-    "core:webview:default"
+    "core:webview:default",
+    "core:window:allow-set-title",
+    "core:window:allow-toggle-maximize"
   ]
 }

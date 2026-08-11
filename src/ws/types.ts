@@ -957,6 +957,10 @@ export interface CompareDiffResult {
   rows: CompareDiffRow[];
   unified: string;
   identical: boolean;
+  navigation?: {
+    currentIndex: number;
+    total: number;
+  };
 }
 
 export interface CompareDiffReadyMessage {

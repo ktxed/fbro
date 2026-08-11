@@ -366,6 +366,15 @@ pub struct CompareDiffResultSchema {
     pub rows: Vec<CompareDiffRowSchema>,
     pub unified: String,
     pub identical: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub navigation: Option<CompareDiffNavigationSchema>,
+}
+
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct CompareDiffNavigationSchema {
+    pub current_index: usize,
+    pub total: usize,
 }
 
 #[derive(Serialize, Clone, Debug)]

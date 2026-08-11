@@ -5769,6 +5769,11 @@ body {
   flex: 0 0 auto;
 }
 
+.diff-viewer__meta-error {
+  margin-left: auto;
+  color: var(--text-danger);
+}
+
 .diff-viewer__status {
   flex: 1;
   display: grid;

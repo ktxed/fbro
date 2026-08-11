@@ -591,6 +591,16 @@ pub struct BroRequest {
 #[derive(Clone, Debug)]
 pub struct CompareSession {
     pub result: Result<CompareDiffResultSchema, String>,
+    pub git_navigation: Option<GitCompareNavigation>,
+}
+
+#[derive(Clone, Debug)]
+pub struct GitCompareNavigation {
+    pub panel_id: String,
+    pub root: String,
+    pub commit_hash: Option<String>,
+    pub changes: Vec<crate::git::GitChange>,
+    pub current_index: usize,
 }
 
 impl AppState {

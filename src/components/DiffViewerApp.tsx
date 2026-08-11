@@ -71,6 +71,7 @@ function diffRowClassName(
 export function DiffViewerApp({ requestId, windowLabel, initialColorScheme }: DiffViewerAppProps) {
   const [result, setResult] = useState<CompareDiffResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [navigationError, setNavigationError] = useState<string | null>(null);
   const [mode, setMode] = useState<DiffViewMode>("split");
   const [wordWrap, setWordWrap] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -79,6 +80,7 @@ export function DiffViewerApp({ requestId, windowLabel, initialColorScheme }: Di
     resolveColorScheme(initialColorScheme ?? DEFAULT_COLOR_SCHEME_ID).id
   ));
   const clientRef = useRef<WsClient | null>(null);
+  const resultRef = useRef<CompareDiffResult | null>(null);
   const currentFontSizeRef = useRef(DEFAULT_FONT_SIZE);
   const splitBodyRef = useRef<HTMLElement | null>(null);
   const unifiedBodyRef = useRef<HTMLElement | null>(null);
@@ -125,14 +127,17 @@ export function DiffViewerApp({ requestId, windowLabel, initialColorScheme }: Di
         if (msg.type === "CompareDiffReady") {
           const ready = msg as CompareDiffReadyMessage;
           if (ready.requestId !== requestId) return;
+          resultRef.current = ready.result;
           setResult(ready.result);
           setError(null);
+          setNavigationError(null);
           setLoading(false);
         }
         if (msg.type === "CompareDiffFailed") {
           const failed = msg as { requestId: string; message: string };
           if (failed.requestId !== requestId) return;
-          setError(failed.message);
+          if (resultRef.current) setNavigationError(failed.message);
+          else setError(failed.message);
           setLoading(false);
         }
       };
@@ -145,6 +150,17 @@ export function DiffViewerApp({ requestId, windowLabel, initialColorScheme }: Di
     };
   }, [requestId]);
 
+  useEffect(() => {
+    if (!result) return;
+    try {
+      void getCurrentWindow()
+        .setTitle(`${result.left.name} ↔ ${result.right.name} — fbro compare`)
+        .catch(() => {});
+    } catch {
+      // Browser tests do not expose a Tauri window.
+    }
+  }, [result]);
+
   const closeWindow = () => {
     clientRef.current?.sendIntent("CloseCompareWindow", undefined, {
       requestId,
@@ -154,6 +170,16 @@ export function DiffViewerApp({ requestId, windowLabel, initialColorScheme }: Di
       void getCurrentWindow().close();
     } catch {
       // Backend close handles Tauri contexts; browser tests can ignore it.
+    }
+  };
+
+  const toggleMaximize = () => {
+    try {
+      void getCurrentWindow().toggleMaximize().catch((cause) => {
+        setNavigationError(`Could not toggle maximize: ${String(cause)}`);
+      });
+    } catch (cause) {
+      setNavigationError(`Could not toggle maximize: ${String(cause)}`);
     }
   };
 
@@ -229,12 +255,22 @@ export function DiffViewerApp({ requestId, windowLabel, initialColorScheme }: Di
       if (event.key === "2") setMode("unified");
       if (!event.ctrlKey && !event.metaKey && !event.altKey) {
         const key = event.key.toLowerCase();
-        if (["p", "n", "s", "u", "w", "c"].includes(key)) event.preventDefault();
+        if ((key === "j" || key === "k") && result?.navigation) {
+          event.preventDefault();
+          setNavigationError(null);
+          clientRef.current?.sendIntent("NavigateCompareDiff", undefined, {
+            requestId,
+            direction: key === "k" ? "next" : "prev",
+          });
+          return;
+        }
+        if (["p", "n", "s", "u", "w", "m", "c"].includes(key)) event.preventDefault();
         if (key === "p") jumpChange(-1);
         if (key === "n") jumpChange(1);
         if (key === "s") setMode("split");
         if (key === "u") setMode("unified");
         if (key === "w") setWordWrap((current) => !current);
+        if (key === "m") toggleMaximize();
         if (key === "c") closeWindow();
       }
       if (event.key === "Home") {
@@ -268,7 +304,7 @@ export function DiffViewerApp({ requestId, windowLabel, initialColorScheme }: Di
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [jumpChange, scrollDiffVertically]);
+  }, [jumpChange, requestId, result?.navigation, scrollDiffVertically]);
 
   const colorScheme = resolveColorScheme(colorSchemeId);
   const rowCount = result?.rows.length ?? 0;
@@ -472,6 +508,9 @@ export function DiffViewerApp({ requestId, windowLabel, initialColorScheme }: Di
           >
             <MnemonicLabel text="Wrap" mnemonic="w" />
           </button>
+          <button className="diff-viewer__toggle" type="button" title="Toggle maximize (M)" onClick={toggleMaximize}>
+            <MnemonicLabel text="Maximize" mnemonic="m" />
+          </button>
           <button className="diff-viewer__close" type="button" title="Close (C / Esc)" onClick={closeWindow}>
             <MnemonicLabel text="Close" mnemonic="c" />
           </button>
@@ -485,6 +524,10 @@ export function DiffViewerApp({ requestId, windowLabel, initialColorScheme }: Di
           <div className="diff-viewer__meta">
             <span>{result.identical ? "No differences" : `${changedCount} changed rows`}</span>
             <span>{rowCount} total rows</span>
+            {result.navigation && (
+              <span>{result.navigation.currentIndex + 1}/{result.navigation.total} changed files · J/K prev/next file</span>
+            )}
+            {navigationError && <span className="diff-viewer__meta-error">{navigationError}</span>}
           </div>
           {mode === "split" ? (
             <main ref={splitBodyRef} className="diff-viewer__body diff-viewer__body--split">
