@@ -81,6 +81,10 @@ pub struct GitLogEntry {
 
 fn git(path: &str, args: &[&str]) -> Result<Vec<u8>, String> {
     let output = Command::new("git")
+        // These commands only inspect repository state. Prevent Git from
+        // refreshing the index as an optional optimization: the Git watcher
+        // would observe that write and schedule another inspection forever.
+        .env("GIT_OPTIONAL_LOCKS", "0")
         .arg("-C")
         .arg(path)
         .args(args)
@@ -685,6 +689,23 @@ mod tests {
             assert!(paths.iter().any(|path| path == &common_dir));
             assert!(paths.iter().any(|path| path.starts_with(common_dir.join("worktrees"))));
             git(repo, &["worktree", "remove", "--force", linked.to_str().unwrap()]);
+        });
+    }
+
+    #[test]
+    fn inspect_does_not_write_the_git_index() {
+        with_test_repo(|repo| {
+            let index = repo.join(".git/index");
+            let before = fs::metadata(&index).unwrap().modified().unwrap();
+
+            // Make the cached stat data stale without changing file content.
+            // A normal `git status` refreshes and rewrites the index here.
+            std::thread::sleep(std::time::Duration::from_millis(25));
+            fs::write(repo.join("tracked.txt"), "base\n").unwrap();
+
+            assert!(super::inspect(repo.to_str().unwrap()).is_some());
+            let after = fs::metadata(index).unwrap().modified().unwrap();
+            assert_eq!(after, before);
         });
     }
 
