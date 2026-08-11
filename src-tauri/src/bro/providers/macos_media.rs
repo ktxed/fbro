@@ -4,7 +4,7 @@ use crate::bro::model::{
 use crate::bro::probe::{
     find_binary_on_path, macos_app_executable, macos_app_exists, macos_common_cli_candidates,
 };
-use crate::bro::providers::{BroDiscoveryContext, BroProvider};
+use crate::bro::providers::{mpv_playlist_args, BroDiscoveryContext, BroProvider};
 use crate::bro::version::native_version;
 
 pub struct MacOSMediaProvider;
@@ -24,9 +24,7 @@ impl BroProvider for MacOSMediaProvider {
                 program,
                 Some("mpv".to_string()),
                 version,
-                vec![LaunchArg::TargetPlaylistFile {
-                    flag: "--playlist=".to_string(),
-                }],
+                mpv_playlist_args(),
             ));
         }
 
@@ -47,9 +45,7 @@ impl BroProvider for MacOSMediaProvider {
                 program,
                 Some(bundle_path),
                 version,
-                vec![LaunchArg::TargetPlaylistFile {
-                    flag: "--playlist=".to_string(),
-                }],
+                mpv_playlist_args(),
             ));
         }
 

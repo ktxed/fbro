@@ -6,7 +6,7 @@ use crate::bro::model::{
     BroOption, BroPre, BroProtocol, BroSource, LaunchArg, LaunchRecipe, ResolvedBro,
 };
 use crate::bro::probe::find_binary_on_path;
-use crate::bro::providers::{BroDiscoveryContext, BroProvider};
+use crate::bro::providers::{mpv_playlist_args, BroDiscoveryContext, BroProvider};
 use crate::bro::version::native_version;
 
 // ── PE VERSIONINFO reader (version.dll) ─────────────────────────────────────
@@ -88,9 +88,7 @@ impl BroProvider for WindowsMediaProvider {
                     "mpv",
                     program,
                     version,
-                    vec![LaunchArg::TargetPlaylistFile {
-                        flag: "--playlist=".to_string(),
-                    }],
+                    mpv_playlist_args(),
                 ));
             }
         }

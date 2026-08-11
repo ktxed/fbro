@@ -1,4 +1,4 @@
-use crate::bro::model::{BroInputItem, ResolvedBro};
+use crate::bro::model::{BroInputItem, LaunchArg, ResolvedBro};
 
 pub mod copy_paths;
 pub mod extract;
@@ -25,6 +25,15 @@ pub trait BroProvider: Send + Sync {
     fn list(&self, ctx: &BroDiscoveryContext<'_>) -> Vec<ResolvedBro>;
 }
 
+pub(super) fn mpv_playlist_args() -> Vec<LaunchArg> {
+    vec![
+        LaunchArg::Literal("--force-window=yes".to_string()),
+        LaunchArg::TargetPlaylistFile {
+            flag: "--playlist=".to_string(),
+        },
+    ]
+}
+
 pub fn builtin_providers() -> Vec<Box<dyn BroProvider>> {
     let mut providers: Vec<Box<dyn BroProvider>> = Vec::new();
 
@@ -44,4 +53,23 @@ pub fn builtin_providers() -> Vec<Box<dyn BroProvider>> {
     providers.push(Box::new(extract::ExtractProvider));
 
     providers
+}
+
+#[cfg(test)]
+mod tests {
+    use super::mpv_playlist_args;
+    use crate::bro::model::LaunchArg;
+
+    #[test]
+    fn mpv_forces_a_window_before_opening_the_playlist() {
+        assert_eq!(
+            mpv_playlist_args(),
+            vec![
+                LaunchArg::Literal("--force-window=yes".to_string()),
+                LaunchArg::TargetPlaylistFile {
+                    flag: "--playlist=".to_string(),
+                },
+            ]
+        );
+    }
 }

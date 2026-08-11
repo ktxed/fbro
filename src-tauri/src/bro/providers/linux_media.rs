@@ -2,7 +2,7 @@ use crate::bro::model::{
     BroOption, BroPre, BroProtocol, BroSource, LaunchArg, LaunchRecipe, ResolvedBro,
 };
 use crate::bro::probe::{find_binary_on_path, flatpak_app_installed};
-use crate::bro::providers::{BroDiscoveryContext, BroProvider};
+use crate::bro::providers::{mpv_playlist_args, BroDiscoveryContext, BroProvider};
 use crate::bro::version::{flatpak_version, native_version};
 
 pub struct LinuxMediaProvider;
@@ -18,9 +18,7 @@ impl BroProvider for LinuxMediaProvider {
                 "mpv",
                 program.clone(),
                 native_version(&program),
-                vec![LaunchArg::TargetPlaylistFile {
-                    flag: "--playlist=".to_string(),
-                }],
+                mpv_playlist_args(),
             ));
         }
 
@@ -76,10 +74,29 @@ fn native_command_bro(
 }
 
 fn flatpak_mpv_bro() -> ResolvedBro {
-    flatpak_media_bro("io.mpv.Mpv", "mpv")
+    flatpak_media_bro_with_args("io.mpv.Mpv", "mpv", mpv_playlist_args())
 }
 
 fn flatpak_media_bro(app_id: &str, name: &str) -> ResolvedBro {
+    flatpak_media_bro_with_args(
+        app_id,
+        name,
+        vec![LaunchArg::TargetPlaylistFile {
+            flag: "--playlist=".to_string(),
+        }],
+    )
+}
+
+fn flatpak_media_bro_with_args(
+    app_id: &str,
+    name: &str,
+    player_args: Vec<LaunchArg>,
+) -> ResolvedBro {
+    let mut args = vec![
+        LaunchArg::Literal("run".to_string()),
+        LaunchArg::Literal(app_id.to_string()),
+    ];
+    args.extend(player_args);
     resolved_command_bro(
         BroOption {
             id: format!("flatpak:{app_id}"),
@@ -96,13 +113,7 @@ fn flatpak_media_bro(app_id: &str, name: &str) -> ResolvedBro {
             },
         },
         "flatpak".to_string(),
-        vec![
-            LaunchArg::Literal("run".to_string()),
-            LaunchArg::Literal(app_id.to_string()),
-            LaunchArg::TargetPlaylistFile {
-                flag: "--playlist=".to_string(),
-            },
-        ],
+        args,
     )
 }
 
