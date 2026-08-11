@@ -839,6 +839,16 @@ export interface GitCommitShowReadyMessage {
   changes: GitChange[];
 }
 
+export interface GitActionFinishedMessage {
+  type: "GitActionFinished";
+  timestamp: number;
+  panelId: string;
+  action: string;
+  activityId?: string;
+  success: boolean;
+  message?: string;
+}
+
 export interface InputRequiredMessage {
   type: "InputRequired";
   timestamp: number;
@@ -1010,6 +1020,7 @@ export type BEMessage =
   | BroOptionsFailedMessage
   | GitLogReadyMessage
   | GitCommitShowReadyMessage
+  | GitActionFinishedMessage
   | InputRequiredMessage
   | CacheStatusReadyMessage
   | TerminalSessionOpenedMessage

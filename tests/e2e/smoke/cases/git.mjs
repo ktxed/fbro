@@ -192,6 +192,13 @@ export async function runGitFlow(browser, observer) {
     timeout: 10_000,
     label: "Git clear all",
   });
+  await browser.execute(() => document.querySelector('[data-testid="git-change-row"]')?.focus());
+  await browser.keys(["Control", "a"]);
+  await waitFor(async () => (await gitSelectionCount(browser)) === `${changeCount} selected`, {
+    timeout: 10_000,
+    label: "Git Ctrl+A select all",
+  });
+  await (await browser.$('[data-testid="git-clear-selection"]')).click();
 
   await browser.execute(() => {
     const row = [...document.querySelectorAll('[data-testid="git-change-row"]')]
@@ -258,6 +265,44 @@ export async function runGitFlow(browser, observer) {
   });
   if (!fs.existsSync(path.join(hostRepo, "removed.txt")) || fs.existsSync(path.join(hostRepo, "untracked.txt"))) {
     throw new Error("Git rollback did not restore the staged deletion and remove the untracked file");
+  }
+
+  // Hold a Git action open so the in-flight guard can be observed without
+  // depending on remote/network timing.
+  const refresh = await browser.$('[data-testid="git-refresh"]');
+  await refresh.waitForClickable({ timeout: 10_000 });
+  await browser.execute(() => {
+    window.__fbroOriginalWsSend = WebSocket.prototype.send;
+    window.__fbroHeldGitRefreshCount = 0;
+    WebSocket.prototype.send = function holdGitRefresh(data) {
+      if (typeof data === "string") {
+        try {
+          const message = JSON.parse(data);
+          if (message.type === "Intent" && message.name === "GitRefresh") {
+            window.__fbroHeldGitRefreshCount += 1;
+            return;
+          }
+        } catch {
+          // Forward non-JSON WebSocket traffic unchanged.
+        }
+      }
+      return window.__fbroOriginalWsSend.call(this, data);
+    };
+  });
+  await refresh.click();
+  await waitFor(async () => !(await refresh.isEnabled()), {
+    timeout: 10_000,
+    label: "Git action disabled while in flight",
+  });
+  await browser.keys("r");
+  const heldRefreshCount = await browser.execute(() => window.__fbroHeldGitRefreshCount);
+  await browser.execute(() => {
+    WebSocket.prototype.send = window.__fbroOriginalWsSend;
+    delete window.__fbroOriginalWsSend;
+    delete window.__fbroHeldGitRefreshCount;
+  });
+  if (heldRefreshCount !== 1) {
+    throw new Error(`In-flight Git refresh was sent ${heldRefreshCount} times`);
   }
 
   await browser.keys("Escape");

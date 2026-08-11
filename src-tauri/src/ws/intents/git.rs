@@ -10,6 +10,10 @@ use crate::ws::runtime::{rescan_panel, selected_names_for, IntentContext};
 
 pub(crate) async fn handle(name: &str, args: &Value, ctx: &mut IntentContext<'_>) {
     let panel_id = args.get("panelId").and_then(Value::as_str).unwrap_or("").to_string();
+    let activity_id = args
+        .get("activityId")
+        .and_then(Value::as_str)
+        .map(str::to_string);
     let (source_id, repository) = panel_repo(&panel_id, ctx).await;
 
     // Read-only log / commit show / raw-file clipboard: no journal, no panel rescan.
@@ -90,6 +94,15 @@ pub(crate) async fn handle(name: &str, args: &Value, ctx: &mut IntentContext<'_>
         if let Some(operation) = operation.as_ref() {
             crate::journal::record_git_result(operation, "failed", Some(message));
         }
+        send_action_finished(
+            ctx,
+            &panel_id,
+            name,
+            activity_id.as_deref(),
+            false,
+            Some(message),
+        )
+        .await;
         send_error(ctx, "GIT_UNAVAILABLE", message).await;
         return;
     };
@@ -145,15 +158,48 @@ pub(crate) async fn handle(name: &str, args: &Value, ctx: &mut IntentContext<'_>
                 selection_names,
                 ctx.dir_size_queue,
                 ctx.watcher_cmd_tx,
-            ).await
+            )
+            .await;
+            send_action_finished(ctx, &panel_id, name, activity_id.as_deref(), true, None)
+                .await;
         }
         Err(message) => {
             if let Some(operation) = operation.as_ref() {
                 crate::journal::record_git_result(operation, "failed", Some(&message));
             }
+            send_action_finished(
+                ctx,
+                &panel_id,
+                name,
+                activity_id.as_deref(),
+                false,
+                Some(&message),
+            )
+            .await;
             send_error(ctx, "GIT_ACTION_FAILED", &message).await
         }
     }
+}
+
+async fn send_action_finished(
+    ctx: &mut IntentContext<'_>,
+    panel_id: &str,
+    action: &str,
+    activity_id: Option<&str>,
+    success: bool,
+    message: Option<&str>,
+) {
+    let _ = ctx
+        .tx
+        .send(ServerMessage::GitActionFinished {
+            timestamp: now(),
+            panel_id: panel_id.to_string(),
+            action: action.to_string(),
+            activity_id: activity_id.map(str::to_string),
+            success,
+            message: message.map(str::to_string),
+        })
+        .await;
 }
 
 fn rollback_paths(root: &str, args: &Value) -> Result<(), String> {

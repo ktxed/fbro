@@ -241,6 +241,18 @@ pub enum ServerMessage {
         hash: String,
         changes: Vec<crate::git::GitChange>,
     },
+    /// Completion signal for a mutating or remote Git action.
+    GitActionFinished {
+        timestamp: u64,
+        #[serde(rename = "panelId")]
+        panel_id: String,
+        action: String,
+        #[serde(rename = "activityId", skip_serializing_if = "Option::is_none")]
+        activity_id: Option<String>,
+        success: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        message: Option<String>,
+    },
     /// Request text input from the FE (e.g. archive password).
     InputRequired {
         timestamp: u64,

@@ -660,7 +660,6 @@ export function Panel({
   const [gitOpen, setGitOpen] = useState(false);
   const [gitActionsOpen, setGitActionsOpen] = useState(false);
   const [gitActivity, setGitActivity] = useState<GitActivity | null>(null);
-  const gitActivityStartRef = useRef(panel.git);
   const [gridMetrics, setGridMetrics] = useState<{ cols: number; cardWidth: number; cardHeight: number; pageRows: number }>({ cols: 1, cardWidth: GRID_CARD_MIN_WIDTH, cardHeight: 168, pageRows: 1 });
   const listRef = useRef<HTMLDivElement>(null);
   const focusDivRef = useRef<HTMLDivElement>(null);
@@ -705,28 +704,31 @@ export function Panel({
     restorePanelFocus();
   }, [restorePanelFocus]);
   const beginGitActivity = useCallback((activity: GitActivity) => {
-    gitActivityStartRef.current = panel.git;
     setGitActivity(activity);
-  }, [panel.git]);
+  }, []);
   const openGitRepository = useCallback(() => {
-    beginGitActivity({ action: "GitRefresh", message: "Fetching and refreshing…" });
-    client.sendIntent("GitRefresh", undefined, { panelId });
+    const id = crypto.randomUUID();
+    beginGitActivity({ id, action: "GitRefresh", message: "Fetching and refreshing…", status: "running" });
+    client.sendIntent("GitRefresh", undefined, { panelId, activityId: id });
     setGitOpen(true);
   }, [beginGitActivity, client, panelId]);
   const openGitActions = useCallback(() => {
-    beginGitActivity({ action: "GitRefresh", message: "Fetching and refreshing…" });
-    client.sendIntent("GitRefresh", undefined, { panelId });
+    const id = crypto.randomUUID();
+    beginGitActivity({ id, action: "GitRefresh", message: "Fetching and refreshing…", status: "running" });
+    client.sendIntent("GitRefresh", undefined, { panelId, activityId: id });
     setGitActionsOpen(true);
   }, [beginGitActivity, client, panelId]);
 
   useEffect(() => {
-    if (!gitActivity || gitActivity.action === "complete" || !panel.git || panel.git === gitActivityStartRef.current) return;
+    const result = appState.gitActionResult;
+    if (!gitActivity || gitActivity.status !== "running" || !result || result.activityId !== gitActivity.id || result.panelId !== panelId || result.action !== gitActivity.action) return;
     setGitActivity({
-      action: "complete",
-      message: `${gitActivity.message.replace(/…$/, "")} complete`,
+      id: gitActivity.id,
+      action: gitActivity.action,
+      status: result.success ? "complete" : "failed",
+      message: result.success ? `${gitActivity.message.replace(/…$/, "")} complete` : (result.message ?? "Git action failed"),
     });
-    gitActivityStartRef.current = panel.git;
-  }, [gitActivity, panel.git]);
+  }, [appState.gitActionResult, gitActivity, panelId]);
 
   const isWindowed = panel.totalCount !== undefined && panel.totalCount > panel.entries.length;
   const totalCount = panel.totalCount ?? panel.entries.length;

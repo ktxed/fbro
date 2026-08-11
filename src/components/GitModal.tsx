@@ -42,10 +42,16 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
   const canCommit = message.trim().length > 0 && staged.length > 0;
   const canPull = git.clean && git.behindCount !== undefined && git.behindCount > 0;
   const canPush = !!git.upstream && git.aheadCount !== undefined && git.aheadCount > 0;
+  const actionInFlight = activity?.status === "running";
+  const actionInFlightRef = useRef(actionInFlight);
+  actionInFlightRef.current = actionInFlight;
   const act = (name: string, args: Record<string, unknown> = {}) => client.sendIntent(name, undefined, { panelId, ...args });
   const runAction = (name: string, message: string, args: Record<string, unknown> = {}) => {
-    onActivityChange({ action: name, message });
-    act(name, args);
+    if (actionInFlightRef.current) return;
+    actionInFlightRef.current = true;
+    const id = crypto.randomUUID();
+    onActivityChange({ id, action: name, message, status: "running" });
+    act(name, { ...args, activityId: id });
   };
   const selectedChanges = useMemo(() => git.changes.filter(change => selectedPaths.has(change.path)), [git.changes, selectedPaths]);
   const selectedStaged = useMemo(() => selectedChanges.filter(change => isStaged(change)), [selectedChanges]);
@@ -99,6 +105,7 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
   }, [act]);
 
   const armRollback = (paths: string[]) => {
+    if (actionInFlightRef.current) return;
     const uniquePaths = [...new Set(paths)];
     if (samePathSet(rollbackPaths, uniquePaths)) {
       setRollbackPaths(null);
@@ -328,6 +335,14 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
       if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) return;
       const key = event.key.toLowerCase();
       const hasShortcutModifier = event.ctrlKey || event.metaKey || event.altKey;
+      if (tab === "changes" && key === "a" && (event.ctrlKey || event.metaKey) && !event.altKey) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        setSelectedPaths(new Set(git.changes.map(change => change.path)));
+        selectionAnchorRef.current = git.changes.length > 0 ? 0 : null;
+        setRollbackPaths(null);
+        return;
+      }
       if (!hasShortcutModifier) {
         if (key === "1") {
           event.preventDefault();
@@ -549,25 +564,26 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
           <select
             ref={branchRef}
             value={git.branch}
+            disabled={actionInFlight}
             onChange={e => runAction("GitSwitchBranch", "Switching branch…", { branch: e.target.value })}
           >
             {git.branches.map(branch => <option key={branch} value={branch}>{branch}</option>)}
           </select>
           <kbd>B</kbd>
           <span className="git-modal__toolbar-spacer" />
-          <button disabled={!canPull} title={!canPull ? "No incoming commits to pull" : undefined} onClick={() => runAction("GitPull", "Pulling changes…")}>
+          <button disabled={actionInFlight || !canPull} title={!canPull ? "No incoming commits to pull" : undefined} onClick={() => runAction("GitPull", "Pulling changes…")}>
             Pull <kbd>L</kbd>
             {git.behindCount !== undefined && git.behindCount > 0 && (
               <em className="git-actions-modal__badge git-actions-modal__badge--incoming"><IconArrowDown size={13} /> {git.behindCount}</em>
             )}
           </button>
-          <button disabled={!canPush} title={!canPush ? "No outgoing commits to push" : undefined} onClick={() => runAction("GitPush", "Pushing changes…")}>
+          <button disabled={actionInFlight || !canPush} title={!canPush ? "No outgoing commits to push" : undefined} onClick={() => runAction("GitPush", "Pushing changes…")}>
             Push <kbd>P</kbd>
             {git.aheadCount !== undefined && git.aheadCount > 0 && (
               <em className="git-actions-modal__badge git-actions-modal__badge--outgoing"><IconArrowUp size={13} /> {git.aheadCount}</em>
             )}
           </button>
-          <button onClick={() => runAction("GitRefresh", "Fetching and refreshing…")} title="Fetch remotes and refresh status">Refresh <kbd>R</kbd></button>
+          <button data-testid="git-refresh" disabled={actionInFlight} onClick={() => runAction("GitRefresh", "Fetching and refreshing…")} title="Fetch remotes and refresh status">Refresh <kbd>R</kbd></button>
         </div>
 
         <div className="git-modal__tabs" role="tablist" aria-label="Git views">
@@ -618,14 +634,14 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
                 <span />
                 <button
                   data-testid="git-stage-selected"
-                  disabled={selectedUnstaged.length === 0}
+                  disabled={actionInFlight || selectedUnstaged.length === 0}
                   onClick={() => runAction("GitStagePaths", `Staging ${describePaths(selectedUnstaged.map(change => change.path))}…`, { paths: selectedUnstaged.map(change => change.path) })}
                 >
                   Stage {selectedUnstaged.length}
                 </button>
                 <button
                   data-testid="git-unstage-selected"
-                  disabled={selectedStaged.length === 0}
+                  disabled={actionInFlight || selectedStaged.length === 0}
                   onClick={() => runAction("GitUnstagePaths", `Unstaging ${describePaths(selectedStaged.map(change => change.path))}…`, { paths: selectedStaged.map(change => change.path) })}
                 >
                   Unstage {selectedStaged.length}
@@ -633,6 +649,7 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
                 <button
                   data-git-rollback
                   data-testid="git-rollback-selected"
+                  disabled={actionInFlight}
                   className={`git-modal__change-action git-modal__change-action--danger${samePathSet(rollbackPaths, selectedChanges.map(change => change.path)) ? " git-modal__change-action--confirm" : ""}`}
                   onClick={() => armRollback(selectedChanges.map(change => change.path))}
                 >
@@ -682,6 +699,7 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
                     </button>
                     <button
                       className="git-modal__change-action"
+                      disabled={actionInFlight}
                       title={`${actionLabel} (S)`}
                       aria-keyshortcuts="s"
                       onFocus={() => setActiveChangeIndex(index)}
@@ -700,6 +718,7 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
                     <button
                       data-git-rollback
                       data-testid="git-rollback-path"
+                      disabled={actionInFlight}
                       className={`git-modal__change-action git-modal__change-action--danger${rollbackPending ? " git-modal__change-action--confirm" : ""}`}
                       onFocus={() => setActiveChangeIndex(index)}
                       onClick={() => armRollback([change.path])}
@@ -876,7 +895,7 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
         <div className="modal__actions">
           {activity && (
             <span className="git-modal__activity">
-              {activity.action !== "complete" && <IconLoader2 size={14} />}
+              {activity.status === "running" && <IconLoader2 size={14} />}
               {activity.message}
             </span>
           )}
@@ -884,7 +903,7 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
           {tab === "changes" && (
             <button
               ref={commitRef}
-              disabled={!canCommit}
+              disabled={actionInFlight || !canCommit}
               onClick={() => runAction("GitCommit", "Committing staged changes…", { message })}
             >
               Commit staged <kbd>C</kbd>

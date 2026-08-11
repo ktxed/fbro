@@ -20,14 +20,20 @@ export function GitActionsModal({ panelId, git, client, activity, onActivityChan
   const [activeIndex, setActiveIndex] = useState(0);
   const canPull = git.clean && git.behindCount !== undefined && git.behindCount > 0;
   const canPush = !!git.upstream && git.aheadCount !== undefined && git.aheadCount > 0;
+  const actionInFlight = activity?.status === "running";
+  const actionInFlightRef = useRef(actionInFlight);
+  actionInFlightRef.current = actionInFlight;
   const pullDisabledMessage = !git.clean ? "Requires no staged changes" : !git.upstream ? "No upstream configured" : git.behindCount === 0 ? "Already up to date" : "Remote status unavailable — fetch first";
   const pushDisabledMessage = !git.upstream ? "No upstream configured — set an upstream first" : git.aheadCount === 0 ? "No outgoing commits" : "Remote status unavailable — fetch first";
   const act = (name: string, args: Record<string, unknown> = {}) => {
     client.sendIntent(name, undefined, { panelId, ...args });
   };
   const runAction = (name: string, message: string, args: Record<string, unknown> = {}) => {
-    onActivityChange({ action: name, message });
-    act(name, args);
+    if (actionInFlightRef.current) return;
+    actionInFlightRef.current = true;
+    const id = crypto.randomUUID();
+    onActivityChange({ id, action: name, message, status: "running" });
+    act(name, { ...args, activityId: id });
   };
 
   const focusControl = useCallback((index: number) => {
@@ -94,25 +100,25 @@ export function GitActionsModal({ panelId, git, client, activity, onActivityChan
         <div className="git-actions-modal__repo" title={git.root}>{git.root}</div>
         {!git.clean && <div className="git-actions-modal__warning">Staged changes are present. Git may reject a branch switch if it would overwrite them; pull remains disabled.</div>}
         <div className="git-actions-modal__choices">
-          <button ref={(el) => { controlRefs.current[0] = el; }} type="button" className={`git-actions-modal__choice${activeIndex === 0 ? " is-keyboard-active" : ""}`} onFocus={() => setActiveIndex(0)} onClick={() => runAction("GitFetch", "Fetching remote…")}>
+          <button ref={(el) => { controlRefs.current[0] = el; }} type="button" className={`git-actions-modal__choice${activeIndex === 0 ? " is-keyboard-active" : ""}`} disabled={actionInFlight} onFocus={() => setActiveIndex(0)} onClick={() => runAction("GitFetch", "Fetching remote…")}>
             <IconRefresh size={19} /><span><strong>Fetch <kbd>F</kbd></strong><small>Update remote branch information</small></span>
           </button>
           <label className={`git-actions-modal__choice git-actions-modal__choice--branch${activeIndex === 1 ? " is-keyboard-active" : ""}`}>
             <IconGitBranch size={19} /><span><strong>Switch branch <kbd>B</kbd></strong><small>Preserve changes when Git allows</small></span>
-            <select ref={(el) => { controlRefs.current[1] = el; }} value={git.branch} onFocus={() => setActiveIndex(1)} onChange={(event) => runAction("GitSwitchBranch", "Switching branch…", { branch: event.target.value })}>
+            <select ref={(el) => { controlRefs.current[1] = el; }} value={git.branch} disabled={actionInFlight} onFocus={() => setActiveIndex(1)} onChange={(event) => runAction("GitSwitchBranch", "Switching branch…", { branch: event.target.value })}>
               {git.branches.map((branch) => <option key={branch} value={branch}>{branch}</option>)}
             </select>
           </label>
-          <button ref={(el) => { controlRefs.current[2] = el; }} type="button" className={`git-actions-modal__choice${activeIndex === 2 ? " is-keyboard-active" : ""}`} disabled={!canPull} title={!canPull ? pullDisabledMessage : undefined} onFocus={() => setActiveIndex(2)} onClick={() => runAction("GitPull", "Pulling changes…")}>
+          <button ref={(el) => { controlRefs.current[2] = el; }} type="button" className={`git-actions-modal__choice${activeIndex === 2 ? " is-keyboard-active" : ""}`} disabled={actionInFlight || !canPull} title={!canPull ? pullDisabledMessage : undefined} onFocus={() => setActiveIndex(2)} onClick={() => runAction("GitPull", "Pulling changes…")}>
             <IconArrowDown size={19} /><span><strong>Pull <kbd>L</kbd></strong><small>Bring in remote commits</small></span>
             {git.behindCount !== undefined && git.behindCount > 0 && <em className="git-actions-modal__badge git-actions-modal__badge--incoming"><IconArrowDown size={13} /> {git.behindCount}</em>}
           </button>
-          <button ref={(el) => { controlRefs.current[3] = el; }} type="button" className={`git-actions-modal__choice${activeIndex === 3 ? " is-keyboard-active" : ""}`} disabled={!canPush} title={!canPush ? pushDisabledMessage : undefined} onFocus={() => setActiveIndex(3)} onClick={() => runAction("GitPush", "Pushing changes…")}>
+          <button ref={(el) => { controlRefs.current[3] = el; }} type="button" className={`git-actions-modal__choice${activeIndex === 3 ? " is-keyboard-active" : ""}`} disabled={actionInFlight || !canPush} title={!canPush ? pushDisabledMessage : undefined} onFocus={() => setActiveIndex(3)} onClick={() => runAction("GitPush", "Pushing changes…")}>
             <IconArrowUp size={19} /><span><strong>Push <kbd>P</kbd></strong><small>Send local commits to remote</small></span>
             {git.aheadCount !== undefined && git.aheadCount > 0 && <em className="git-actions-modal__badge git-actions-modal__badge--outgoing"><IconArrowUp size={13} /> {git.aheadCount}</em>}
           </button>
         </div>
-        <footer><span className={activity ? "git-actions-modal__activity" : undefined}>{activity && activity.action !== "complete" && <IconLoader2 size={14} />}{activity?.message ?? (git.upstream ? `Tracking ${git.upstream}` : "No upstream configured")}</span><div className="git-actions-modal__footer-actions">{!git.upstream && <button type="button" disabled={!git.clean || git.detached} title={!git.clean ? disabledMessage : git.detached ? "A detached HEAD cannot have a branch upstream" : "Push this branch to origin and configure its upstream"} onClick={() => runAction("GitSetUpstream", "Setting upstream…", { branch: git.branch })}>Set upstream <kbd>U</kbd></button>}<button type="button" onClick={onClose}>Close</button></div></footer>
+        <footer><span className={activity ? "git-actions-modal__activity" : undefined}>{activity?.status === "running" && <IconLoader2 size={14} />}{activity?.message ?? (git.upstream ? `Tracking ${git.upstream}` : "No upstream configured")}</span><div className="git-actions-modal__footer-actions">{!git.upstream && <button type="button" disabled={actionInFlight || !git.clean || git.detached} title={!git.clean ? disabledMessage : git.detached ? "A detached HEAD cannot have a branch upstream" : "Push this branch to origin and configure its upstream"} onClick={() => runAction("GitSetUpstream", "Setting upstream…", { branch: git.branch })}>Set upstream <kbd>U</kbd></button>}<button type="button" onClick={onClose}>Close</button></div></footer>
       </div>
     </div>
   );

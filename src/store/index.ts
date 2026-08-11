@@ -32,6 +32,7 @@ import type {
   GitLogEntry,
   GitLogReadyMessage,
   GitCommitShowReadyMessage,
+  GitActionFinishedMessage,
   ExternalClipboardReadyMessage,
   ExternalClipboardWrittenMessage,
   FileClipboardWrittenMessage,
@@ -260,6 +261,7 @@ export interface AppState {
   pendingBro: PendingBro | null;
   /** In-flight / loaded git log for the repository modal Log tab. */
   pendingGitLog: PendingGitLog | null;
+  gitActionResult: GitActionFinishedMessage | null;
   pendingInput: PendingInput | null;
   pendingSearch: PendingSearch | null;
   pendingAttributes: PendingAttributes | null;
@@ -342,6 +344,7 @@ const initialState: AppState = {
   pendingOpenWith: null,
   pendingBro: null,
   pendingGitLog: null,
+  gitActionResult: null,
   pendingInput: null,
   pendingSearch: null,
   pendingAttributes: null,
@@ -1543,6 +1546,8 @@ function reducer(state: AppState, action: AppAction): AppState {
             },
           };
         }
+        case "GitActionFinished":
+          return { ...state, gitActionResult: msg as GitActionFinishedMessage };
         case "InputRequired": {
           const m = msg as import("../ws/types").InputRequiredMessage;
           return {
