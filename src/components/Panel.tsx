@@ -922,6 +922,23 @@ export function Panel({
     }
   }, [isFocused, modalActive, panel.filterModeActive]);
 
+  // A separate viewer window can leave the main WebView focused at the OS
+  // level while its DOM focus has fallen back to <body>. Restore the active
+  // panel when the main window is reactivated so its shortcuts work on the
+  // first key press after closing the viewer.
+  useEffect(() => {
+    if (!isFocused) return;
+    const restoreFocus = () => {
+      if (modalActive) return;
+      const active = document.activeElement;
+      if (active && active !== document.body && active !== document.documentElement) return;
+      if (panel.filterModeActive) filterInputRef.current?.focus();
+      else focusDivRef.current?.focus();
+    };
+    window.addEventListener("focus", restoreFocus);
+    return () => window.removeEventListener("focus", restoreFocus);
+  }, [isFocused, modalActive, panel.filterModeActive]);
+
   useEffect(() => {
     if (sortSelectorOpen) {
       setSortDraft(panel.sort);

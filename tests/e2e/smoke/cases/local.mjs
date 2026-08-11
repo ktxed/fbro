@@ -168,6 +168,26 @@ export async function runLocalFlow(browser, observer) {
   await browser.keys(["Escape"]);
   await observer.waitForSort("left", "size", "desc");
   observer.assertFileEntryOrder("left", ["aardvark.txt", "baby.txt", "zebra.txt"]);
+
+  await verifyWindowFocusRestoration(browser, observer);
+}
+
+async function verifyWindowFocusRestoration(browser, observer) {
+  await clickEntry(browser, "left", "aardvark.txt");
+  const initialCursor = observer.state.panels.left?.cursor;
+  observer.sendIntent("ViewerNavigate", undefined, { panelId: "left", direction: "next" });
+  await waitFor(() => observer.state.panels.left?.cursor !== initialCursor, {
+    timeout: 10_000,
+    label: "viewer file navigation",
+  });
+  await browser.execute(() => {
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    window.dispatchEvent(new FocusEvent("focus"));
+  });
+  await waitFor(async () => browser.execute(() => document.activeElement?.getAttribute("data-testid") === "panel-left"), {
+    timeout: 10_000,
+    label: "panel focus restored after window reactivation",
+  });
 }
 
 async function verifyColorSchemeSwitch(browser, observer) {
