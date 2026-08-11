@@ -310,6 +310,15 @@ export async function runGitFlow(browser, observer) {
   observer.sendIntent("NavigatePanelTo", undefined, { panelId: "left", path: repo });
   await observer.waitForPanelPath("left", repo);
   await observer.waitForPanelReady("left");
+
+  // Git metadata changes do not necessarily touch any visible working-tree
+  // files. An external commit must still invalidate stale panel decorations.
+  git(hostRepo, ["add", "-A"]);
+  git(hostRepo, ["commit", "-qm", "external watcher refresh"]);
+  await waitFor(() => {
+    const panel = observer.state.panels.left;
+    return panel?.path === repo && panel.status === "ready" && panel.git?.changes.length === 0;
+  }, { timeout: 10_000, label: "Git metadata watcher refresh after external commit" });
 }
 
 async function panelGitStatus(browser, name) {

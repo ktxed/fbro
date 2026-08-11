@@ -786,6 +786,13 @@ pub(crate) async fn rescan_panel(
         })
         .await;
 
+    if driver.is_local() {
+        let _ = watcher_cmd_tx.send(WatcherCommand::Watch {
+            panel_id: panel_id.to_string(),
+            path: PathBuf::from(&path),
+        }).await;
+    }
+
     let handle = spawn_scan(
         panel_id.to_string(),
         source_id,
@@ -889,6 +896,13 @@ pub(crate) async fn quiet_rescan_panel(
                 .map(|entry| entry.name.clone())
         })
     };
+
+    if driver.is_local() {
+        let _ = watcher_cmd_tx.send(WatcherCommand::Watch {
+            panel_id: panel_id.to_string(),
+            path: PathBuf::from(&path),
+        }).await;
+    }
 
     let handle = spawn_scan_atomic(
         panel_id.to_string(),
