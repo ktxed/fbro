@@ -51,10 +51,12 @@ export async function clickSortHeader(browser, panelId, by) {
   await el.click();
 }
 
-export async function openSortSelector(browser, panelId) {
+export async function openSortSelector(browser, panelId, { preserveFocus = false } = {}) {
   const panel = await browser.$(`[data-testid="panel-${panelId}"]`);
-  await panel.waitForClickable({ timeout: 10_000 });
-  await panel.click();
+  if (!preserveFocus) {
+    await panel.waitForClickable({ timeout: 10_000 });
+    await panel.click();
+  }
   await browser.performActions([{
     type: "key",
     id: "keyboard",

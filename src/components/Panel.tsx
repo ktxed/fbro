@@ -760,6 +760,12 @@ export function Panel({
     focusDivRef.current?.focus();
   }, []);
 
+  const restoreFilterFocus = useCallback(() => {
+    if (!panel.filterModeActive) return;
+    shouldFocusFilterRef.current = true;
+    window.setTimeout(() => filterInputRef.current?.focus(), 0);
+  }, [panel.filterModeActive]);
+
   const requestInlineStageFocusRestore = useCallback(() => {
     restoreInlineStageFocusRef.current = true;
   }, []);
@@ -780,13 +786,15 @@ export function Panel({
   const closeSortSelector = useCallback(() => {
     if (appState.activeSortSelectorPanelId === panelId) {
       dispatch({ type: "CLOSE_SORT_SELECTOR" });
+      restoreFilterFocus();
     }
-  }, [appState.activeSortSelectorPanelId, dispatch, panelId]);
+  }, [appState.activeSortSelectorPanelId, dispatch, panelId, restoreFilterFocus]);
 
   const applySortSelector = useCallback(() => {
     client.sendIntent("SetSort", panelId, sortDraft);
     dispatch({ type: "CLOSE_SORT_SELECTOR" });
-  }, [client, dispatch, panelId, sortDraft]);
+    restoreFilterFocus();
+  }, [client, dispatch, panelId, restoreFilterFocus, sortDraft]);
 
   const handleSortSelectorKeyDown = useCallback((e: React.KeyboardEvent) => {
     e.preventDefault();
@@ -946,10 +954,10 @@ export function Panel({
   }, [sortSelectorOpen, panel.sort]);
 
   useEffect(() => {
-    if (sortSelectorOpen && (!isFocused || modalActive || panel.filterModeActive)) {
+    if (sortSelectorOpen && (!isFocused || modalActive)) {
       dispatch({ type: "CLOSE_SORT_SELECTOR" });
     }
-  }, [dispatch, isFocused, modalActive, panel.filterModeActive, sortSelectorOpen]);
+  }, [dispatch, isFocused, modalActive, sortSelectorOpen]);
 
   useEffect(() => {
     sortSelectorOpenRef.current = sortSelectorOpen;
@@ -1299,7 +1307,11 @@ export function Panel({
       return;
     }
     const hasEditModifier = e.ctrlKey || e.metaKey;
-    const isPrintable = e.key.length === 1 && !e.altKey && !hasEditModifier;
+    // Shift-modified printable keys may be panel shortcuts (for example the
+    // Shift+S sort selector), so let those reach the panel command handler.
+    // Unmatched shifted keys are still stopped below and keep their normal
+    // text-input behaviour.
+    const isPrintable = e.key.length === 1 && !e.shiftKey && !e.altKey && !hasEditModifier;
     const isEditShortcut = hasEditModifier && ["a", "c", "v", "x", "z", "y"].includes(e.key.toLowerCase());
     const isLocalEditingKey =
       isPrintable ||

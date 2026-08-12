@@ -169,6 +169,24 @@ export async function runLocalFlow(browser, observer) {
   await observer.waitForSort("left", "size", "desc");
   observer.assertFileEntryOrder("left", ["aardvark.txt", "baby.txt", "zebra.txt"]);
 
+  const leftPanel = await browser.$('[data-testid="panel-left"]');
+  await leftPanel.click();
+  await browser.keys(["f"]);
+  const filterInput = await browser.$('[data-testid="panel-left"] .panel__filter-input');
+  await filterInput.waitForDisplayed({ timeout: 10_000 });
+  await filterInput.click();
+
+  await openSortSelector(browser, "left", { preserveFocus: true });
+  await browser.keys(["ArrowRight"]);
+  await browser.keys(["ArrowUp"]);
+  await browser.keys(["Enter"]);
+  await observer.waitForSort("left", "date", "asc");
+  await waitFor(async () => await browser.execute(() => document.activeElement?.classList.contains("panel__filter-input") === true), {
+    timeout: 5_000,
+    label: "filter input focus after closing sort selector",
+  });
+  await browser.keys(["Escape"]);
+
   await verifyWindowFocusRestoration(browser, observer);
 }
 
