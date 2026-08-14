@@ -566,4 +566,6 @@ async fn switch_tab(args: &Value, ctx: &mut IntentContext<'_>) {
             let _ = sender.send(focus_patch.clone()).await;
         }
     }
+
+    crate::ws::intents::git::refresh_panel_git_status(&panel_id, ctx).await;
 }

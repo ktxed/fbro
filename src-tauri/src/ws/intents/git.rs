@@ -3,12 +3,17 @@ use std::sync::Arc;
 
 use serde_json::Value;
 
-use crate::state::FileClipboard;
+use crate::state::{FileClipboard, PanelStatus, TabKind};
 use crate::vfs::git_blob::{GitBlobDriver, CLIPBOARD_SOURCE_ID};
 use crate::ws::protocol::{now, FileOpFileSchema, ServerMessage};
-use crate::ws::runtime::{rescan_panel, selected_names_for, IntentContext};
+use crate::ws::runtime::{quiet_rescan_panel, rescan_panel, selected_names_for, IntentContext};
 
 pub(crate) async fn handle(name: &str, args: &Value, ctx: &mut IntentContext<'_>) {
+    if name == "RefreshGitStatus" {
+        refresh_git_status(args, ctx).await;
+        return;
+    }
+
     let panel_id = args.get("panelId").and_then(Value::as_str).unwrap_or("").to_string();
     let activity_id = args
         .get("activityId")
@@ -179,6 +184,78 @@ pub(crate) async fn handle(name: &str, args: &Value, ctx: &mut IntentContext<'_>
             send_error(ctx, "GIT_ACTION_FAILED", &message).await
         }
     }
+}
+
+/// Reconcile cached Git decorations after a meaningful user action. Unlike a
+/// filesystem watcher, this checks Git's semantic state and only rescans when
+/// the result actually changed.
+pub(crate) async fn refresh_git_status(args: &Value, ctx: &mut IntentContext<'_>) {
+    let requested_panel = args.get("panelId").and_then(Value::as_str).map(str::to_string);
+    let panel_ids = if let Some(panel_id) = requested_panel {
+        vec![panel_id]
+    } else {
+        let state = ctx.state.lock().await;
+        state
+            .layout_slots
+            .iter()
+            .filter_map(|slot_id| state.slots.get(slot_id).map(|slot| slot.active_panel_id.clone()))
+            .collect()
+    };
+
+    for panel_id in panel_ids {
+        refresh_panel_git_status(&panel_id, ctx).await;
+    }
+}
+
+pub(crate) async fn refresh_panel_git_status(panel_id: &str, ctx: &mut IntentContext<'_>) {
+    let Some((path, source_id, cached_git)) = ({
+        let state = ctx.state.lock().await;
+        let panel = state.panels.get(panel_id);
+        panel.and_then(|panel| {
+            let is_local = state
+                .drivers
+                .get(&panel.source_id)
+                .map(|driver| driver.is_local())
+                .unwrap_or(false);
+            (is_local
+                && panel.tab_kind == TabKind::Listing
+                && !matches!(panel.status, PanelStatus::Loading))
+            .then(|| (panel.path.clone(), panel.source_id.clone(), panel.git.clone()))
+        })
+    }) else {
+        return;
+    };
+
+    let inspect_path = path.clone();
+    let current_git = tokio::task::spawn_blocking(move || crate::git::inspect(&inspect_path))
+        .await
+        .ok()
+        .flatten();
+
+    let selection_names = {
+        let state = ctx.state.lock().await;
+        let Some(panel) = state.panels.get(panel_id) else {
+            return;
+        };
+        if panel.path != path || panel.source_id != source_id || panel.git != cached_git {
+            return;
+        }
+        if panel.git == current_git {
+            return;
+        }
+        selected_names_for(&state, panel_id)
+    };
+
+    quiet_rescan_panel(
+        panel_id,
+        ctx.state,
+        ctx.tx,
+        ctx.scan_handles,
+        selection_names,
+        ctx.dir_size_queue,
+        ctx.watcher_cmd_tx,
+    )
+    .await;
 }
 
 async fn send_action_finished(

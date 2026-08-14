@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::ws::protocol::EntrySchema;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GitChange {
     pub path: String,
@@ -33,7 +33,7 @@ pub struct GitEntryDetails {
     pub sample_paths: Vec<String>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GitRepoStatus {
     pub root: String,
@@ -95,31 +95,6 @@ fn git(path: &str, args: &[&str]) -> Result<Vec<u8>, String> {
     } else {
         Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
     }
-}
-
-pub fn metadata_dirs(path: &str) -> Vec<std::path::PathBuf> {
-    let Ok(value) = git(path, &["rev-parse", "--absolute-git-dir"]) else {
-        return Vec::new();
-    };
-    let Ok(value) = String::from_utf8(value) else {
-        return Vec::new();
-    };
-    let git_dir = std::path::PathBuf::from(value.trim());
-    if !git_dir.is_dir() {
-        return Vec::new();
-    }
-    let git_dir = std::fs::canonicalize(&git_dir).unwrap_or(git_dir);
-    let common_dir = std::fs::read_to_string(git_dir.join("commondir"))
-        .ok()
-        .map(|value| git_dir.join(value.trim()))
-        .and_then(|path| std::fs::canonicalize(path).ok());
-    let mut paths = vec![git_dir];
-    if let Some(common_dir) = common_dir {
-        if !paths.contains(&common_dir) {
-            paths.push(common_dir);
-        }
-    }
-    paths
 }
 
 pub fn inspect(path: &str) -> Option<GitRepoStatus> {
@@ -667,32 +642,6 @@ mod tests {
     }
 
     #[test]
-    fn metadata_dirs_resolve_from_a_repository_subdirectory() {
-        with_test_repo(|repo| {
-            let nested = repo.join("nested");
-            fs::create_dir_all(&nested).unwrap();
-            assert_eq!(
-                super::metadata_dirs(nested.to_str().unwrap()),
-                vec![fs::canonicalize(repo.join(".git")).unwrap()],
-            );
-        });
-    }
-
-    #[test]
-    fn metadata_dirs_include_linked_worktree_and_common_git_storage() {
-        with_test_repo(|repo| {
-            let linked = repo.with_extension("linked-worktree");
-            git(repo, &["worktree", "add", "-qb", "linked-test", linked.to_str().unwrap()]);
-            let paths = super::metadata_dirs(linked.to_str().unwrap());
-            let common_dir = fs::canonicalize(repo.join(".git")).unwrap();
-            assert_eq!(paths.len(), 2);
-            assert!(paths.iter().any(|path| path == &common_dir));
-            assert!(paths.iter().any(|path| path.starts_with(common_dir.join("worktrees"))));
-            git(repo, &["worktree", "remove", "--force", linked.to_str().unwrap()]);
-        });
-    }
-
-    #[test]
     fn inspect_does_not_write_the_git_index() {
         with_test_repo(|repo| {
             let index = repo.join(".git/index");
@@ -706,6 +655,19 @@ mod tests {
             assert!(super::inspect(repo.to_str().unwrap()).is_some());
             let after = fs::metadata(index).unwrap().modified().unwrap();
             assert_eq!(after, before);
+        });
+    }
+
+    #[test]
+    fn inspect_snapshots_change_only_with_semantic_git_state() {
+        with_test_repo(|repo| {
+            let first = super::inspect(repo.to_str().unwrap()).unwrap();
+            let unchanged = super::inspect(repo.to_str().unwrap()).unwrap();
+            assert_eq!(unchanged, first);
+
+            fs::write(repo.join("tracked.txt"), "changed\n").unwrap();
+            let changed = super::inspect(repo.to_str().unwrap()).unwrap();
+            assert_ne!(changed, first);
         });
     }
 

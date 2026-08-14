@@ -62,6 +62,13 @@ export function App() {
 
   const client = clientRef.current;
 
+  useEffect(() => {
+    if (!client) return;
+    const refreshGitStatus = () => client.sendIntent("RefreshGitStatus");
+    window.addEventListener("focus", refreshGitStatus);
+    return () => window.removeEventListener("focus", refreshGitStatus);
+  }, [client]);
+
   return (
     <AppContext.Provider value={{ state, dispatch }}>
       {!state.connected && (

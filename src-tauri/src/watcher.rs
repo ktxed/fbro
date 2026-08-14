@@ -76,28 +76,10 @@ async fn watcher_task(
                 return;
             }
         };
-    // Git metadata lives outside the visible directory for nested panels and
-    // linked worktrees, so it needs its own recursive watcher.
-    let mut git_watcher = match notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
-        if let Ok(event) = res {
-            let _ = sync_tx.send(event);
-        }
-    }) {
-        Ok(w) => Some(w),
-        Err(e) => {
-            eprintln!("[fbro] Failed to create Git watcher: {e}");
-            None
-        }
-    };
-
     // panel_id → watched path
     let mut watched: HashMap<String, PathBuf> = HashMap::new();
     // path → list of panel_ids watching it
     let mut path_panels: HashMap<PathBuf, Vec<String>> = HashMap::new();
-    // Git watches are separate because they are recursive and may point at a
-    // worktree metadata directory outside the repository checkout.
-    let mut git_watched: HashMap<String, Vec<PathBuf>> = HashMap::new();
-    let mut git_path_panels: HashMap<PathBuf, Vec<String>> = HashMap::new();
     // Debounce: path → latest event time
     let mut pending: HashMap<PathBuf, Instant> = HashMap::new();
 
@@ -143,47 +125,12 @@ async fn watcher_task(
                             }
                         }
 
-                        let git_paths = crate::git::metadata_dirs(path.to_string_lossy().as_ref());
-                        if git_watched.get(&panel_id) != Some(&git_paths) {
-                            if let Some(old_paths) = git_watched.remove(&panel_id) {
-                                for old_path in old_paths {
-                                    remove_panel_from_path(&mut git_path_panels, &old_path, &panel_id);
-                                    if !git_path_panels.contains_key(&old_path) {
-                                        if let Some(watcher) = git_watcher.as_mut() {
-                                            let _ = watcher.unwatch(&old_path);
-                                        }
-                                    }
-                                }
-                            }
-                            for git_path in &git_paths {
-                                let needs_watch = !git_path_panels.contains_key(git_path);
-                                git_path_panels.entry(git_path.clone()).or_default().push(panel_id.clone());
-                                if needs_watch {
-                                    if let Some(watcher) = git_watcher.as_mut() {
-                                        if let Err(e) = watcher.watch(git_path, RecursiveMode::Recursive) {
-                                            eprintln!("[fbro] Git watch error for {}: {e}", git_path.display());
-                                        }
-                                    }
-                                }
-                            }
-                            git_watched.insert(panel_id, git_paths);
-                        }
                     }
                     Some(WatcherCommand::Unwatch { panel_id }) => {
                         if let Some(old_path) = watched.remove(&panel_id) {
                             remove_panel_from_path(&mut path_panels, &old_path, &panel_id);
                             if !path_panels.contains_key(&old_path) {
                                 let _ = watcher.unwatch(&old_path);
-                            }
-                        }
-                        if let Some(old_paths) = git_watched.remove(&panel_id) {
-                            for old_path in old_paths {
-                                remove_panel_from_path(&mut git_path_panels, &old_path, &panel_id);
-                                if !git_path_panels.contains_key(&old_path) {
-                                    if let Some(watcher) = git_watcher.as_mut() {
-                                        let _ = watcher.unwatch(&old_path);
-                                    }
-                                }
                             }
                         }
                     }
@@ -218,11 +165,6 @@ async fn watcher_task(
                     if path_panels.contains_key(&dir) {
                         pending.insert(dir, Instant::now());
                     }
-                    for git_path in git_path_panels.keys() {
-                        if event_path == git_path || event_path.starts_with(git_path) {
-                            pending.insert(git_path.clone(), Instant::now());
-                        }
-                    }
                 }
             }
 
@@ -254,9 +196,6 @@ async fn watcher_task(
                                 deleted_panels.insert(pid.clone());
                             }
                         }
-                    }
-                    if let Some(panels) = git_path_panels.get(&path) {
-                        changed_panels.extend(panels.iter().cloned());
                     }
                 }
                 for panel_id in &deleted_panels {

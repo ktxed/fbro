@@ -352,18 +352,49 @@ export async function runGitFlow(browser, observer) {
     timeout: 10_000,
     label: "restore local source after Git journal assertions",
   });
-  observer.sendIntent("NavigatePanelTo", undefined, { panelId: "left", path: repo });
   await observer.waitForPanelPath("left", repo);
   await observer.waitForPanelReady("left");
 
-  // Git metadata changes do not necessarily touch any visible working-tree
-  // files. An external commit must still invalidate stale panel decorations.
+  // A semantic check with unchanged Git state must not rescan the panel.
+  const unchangedStart = observer.messages.length;
+  observer.sendIntent("RefreshGitStatus", undefined, { panelId: "left" });
+  observer.sendIntent("RequestStateSnapshot");
+  await waitFor(() => observer.messages.slice(unchangedStart).some((message) => message.type === "StateSnapshot"), {
+    timeout: 10_000,
+    label: "unchanged Git status reconciliation",
+  });
+  const unchangedPanelPatches = observer.messages.slice(unchangedStart).filter((message) =>
+    message.type === "StatePatch" && message.domain === "panels" && message.entityId === "left"
+  );
+  if (unchangedPanelPatches.length !== 0) {
+    throw new Error(`Unchanged Git status caused ${unchangedPanelPatches.length} panel patches`);
+  }
+
+  // Git metadata changes do not necessarily touch visible working-tree files.
+  // They remain cached until a meaningful user action requests reconciliation.
   git(hostRepo, ["add", "-A"]);
   git(hostRepo, ["commit", "-qm", "external watcher refresh"]);
+  await new Promise((resolve) => setTimeout(resolve, 750));
+  if (!(observer.state.panels.left?.git?.changes.length > 0)) {
+    throw new Error("External commit refreshed Git state without a user trigger");
+  }
+  observer.sendIntent("RefreshGitStatus", undefined, { panelId: "left" });
   await waitFor(() => {
     const panel = observer.state.panels.left;
     return panel?.path === repo && panel.status === "ready" && panel.git?.changes.length === 0;
-  }, { timeout: 10_000, label: "Git metadata watcher refresh after external commit" });
+  }, { timeout: 10_000, label: "user-driven Git refresh after external commit" });
+
+  // Navigation always performs a full scan, so leaving and returning to a
+  // repository is also an explicit Git refresh trigger.
+  git(hostRepo, ["branch", "navigation-refresh"]);
+  observer.navigatePanelToPath("left", path.dirname(repo));
+  await observer.waitForPanelPath("left", path.dirname(repo));
+  observer.navigatePanelToPath("left", repo);
+  await observer.waitForPanelPath("left", repo);
+  await waitFor(() => observer.state.panels.left?.git?.branches.includes("navigation-refresh"), {
+    timeout: 10_000,
+    label: "Git refresh after navigating back to repository",
+  });
 }
 
 async function panelGitStatus(browser, name) {

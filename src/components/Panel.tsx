@@ -707,17 +707,13 @@ export function Panel({
     setGitActivity(activity);
   }, []);
   const openGitRepository = useCallback(() => {
-    const id = crypto.randomUUID();
-    beginGitActivity({ id, action: "GitRefresh", message: "Fetching and refreshing…", status: "running" });
-    client.sendIntent("GitRefresh", undefined, { panelId, activityId: id });
+    client.sendIntent("RefreshGitStatus", undefined, { panelId });
     setGitOpen(true);
-  }, [beginGitActivity, client, panelId]);
+  }, [client, panelId]);
   const openGitActions = useCallback(() => {
-    const id = crypto.randomUUID();
-    beginGitActivity({ id, action: "GitRefresh", message: "Fetching and refreshing…", status: "running" });
-    client.sendIntent("GitRefresh", undefined, { panelId, activityId: id });
+    client.sendIntent("RefreshGitStatus", undefined, { panelId });
     setGitActionsOpen(true);
-  }, [beginGitActivity, client, panelId]);
+  }, [client, panelId]);
 
   useEffect(() => {
     const result = appState.gitActionResult;
