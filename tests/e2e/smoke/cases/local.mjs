@@ -152,6 +152,8 @@ export async function runLocalFlow(browser, observer) {
   await observer.waitForAllEntries("left", sortFiles);
   observer.assertFileEntryOrder("left", ["zebra.txt", "baby.txt", "aardvark.txt"]);
 
+  await verifyLiveDateSortCursorAnchor(browser, observer, hostSortDir, nowSec);
+
   await openSortSelector(browser, "left");
   await browser.keys(["ArrowLeft"]);
   await browser.keys(["ArrowDown"]);
@@ -188,6 +190,47 @@ export async function runLocalFlow(browser, observer) {
   await browser.keys(["Escape"]);
 
   await verifyWindowFocusRestoration(browser, observer);
+}
+
+async function verifyLiveDateSortCursorAnchor(browser, observer, hostSortDir, nowSec) {
+  // Keep the listing shorter than the viewport to verify that virtual tail
+  // space still lets new entries grow upward. A non-default row height catches
+  // any return to estimated pixel offsets.
+  await clickEntry(browser, "left", "baby.txt");
+  await browser.keys(" ");
+  await waitFor(() => observer.state.panels.left?.selection?.length === 1, {
+    timeout: 10_000,
+    label: "live anchor selection",
+  });
+
+  observer.sendIntent("SetFontSize", undefined, { value: 18 });
+  await waitFor(async () => browser.execute(() => {
+    const row = document.querySelector('[data-testid="panel-left"] [data-entry-name="baby.txt"]');
+    return row ? Math.round(row.getBoundingClientRect().height) === 27 : false;
+  }), { timeout: 10_000, label: "zoomed row height" });
+
+  const before = await browser.execute(() => {
+    const row = document.querySelector('[data-testid="panel-left"] [data-entry-name="baby.txt"]');
+    return row ? {
+      top: row.getBoundingClientRect().top,
+      alternate: row.classList.contains("panel__row--alt"),
+    } : null;
+  });
+  if (!before) throw new Error("live anchor row disappeared before prepend");
+  const newest = path.join(hostSortDir, "newest-live-file.txt");
+  fs.writeFileSync(newest, "newest\n");
+  fs.utimesSync(newest, nowSec, nowSec + 60);
+  await observer.waitForEntry("left", "newest-live-file.txt", "file");
+
+  await waitFor(async () => browser.execute((expected) => {
+    const row = document.querySelector('[data-testid="panel-left"] [data-entry-name="baby.txt"]');
+    if (!(row instanceof HTMLElement) || !row.classList.contains("panel__row--selected")) return false;
+    return Math.abs(row.getBoundingClientRect().top - expected.top) < 0.5
+      && row.classList.contains("panel__row--alt") === expected.alternate;
+  }, before), { timeout: 10_000, label: "live date-sort cursor viewport and zebra anchor" });
+
+  observer.sendIntent("ClearSelection", "left");
+  observer.sendIntent("SetFontSize", undefined, { value: 13 });
 }
 
 async function verifyWindowFocusRestoration(browser, observer) {

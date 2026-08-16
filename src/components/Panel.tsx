@@ -1012,7 +1012,24 @@ export function Panel({
   // (decoupled from the structural version guard), so missing one mid-drag
   // is harmless — the next frame resends with the latest scrollTop.
   const windowRafRef = useRef(0);
+  // Seed from existing state so remounting a tab does not replay an old,
+  // already-consumed anchor adjustment.
+  const appliedViewportAnchorRef = useRef(panel.viewportAnchor?.version ?? 0);
+  const cursorViewportOffsetRef = useRef<number | null>(null);
+  const viewportAnchorReserveRef = useRef(0);
   const isGridMode = panel.viewMode === "grid" && panel.supportsThumbnails;
+  const captureCursorViewportOffset = useCallback(() => {
+    const list = listRef.current;
+    const row = list?.querySelector<HTMLElement>(`[data-abs-index="${panel.cursor}"]`);
+    if (!list || !row) {
+      cursorViewportOffsetRef.current = null;
+      return;
+    }
+    const listRect = list.getBoundingClientRect();
+    const rowRect = row.getBoundingClientRect();
+    const visible = rowRect.bottom > listRect.top && rowRect.top < listRect.bottom;
+    cursorViewportOffsetRef.current = visible ? rowRect.top - listRect.top : null;
+  }, [panel.cursor]);
   const handleScroll = useCallback(() => {
     if (!isWindowed && !isGridMode) return;
     if (windowRafRef.current) return;
@@ -1042,6 +1059,49 @@ export function Panel({
       client.sendIntent("RequestWindow", panelId, { start, count });
     });
   }, [isWindowed, isGridMode, panelId, client]);
+  const handleListScroll = useCallback(() => {
+    captureCursorViewportOffset();
+    handleScroll();
+  }, [captureCursorViewportOffset, handleScroll]);
+
+  // A quiet rescan keeps the cursor on the same entry, but sorted insertions
+  // can move that entry to a different absolute index. Measure the actual DOM
+  // displacement so zoomed rows and grid geometry stay pixel-stable.
+  useLayoutEffect(() => {
+    const anchor = panel.viewportAnchor;
+    const list = listRef.current;
+    if (list && panel.selection.length === 0 && viewportAnchorReserveRef.current > 0) {
+      viewportAnchorReserveRef.current = 0;
+      list.style.removeProperty("--viewport-anchor-reserve");
+    }
+    const previousOffset = cursorViewportOffsetRef.current;
+    const row = list?.querySelector<HTMLElement>(`[data-abs-index="${panel.cursor}"]`);
+    if (anchor && anchor.version > appliedViewportAnchorRef.current) {
+      appliedViewportAnchorRef.current = anchor.version;
+      if (list && row && previousOffset !== null) {
+        const currentOffset = row.getBoundingClientRect().top - list.getBoundingClientRect().top;
+        const targetScrollTop = list.scrollTop + currentOffset - previousOffset;
+        if (panel.selection.length > 0) {
+          const contentTail = list.lastElementChild as HTMLElement | null;
+          const listRect = list.getBoundingClientRect();
+          const contentHeight = contentTail
+            ? contentTail.getBoundingClientRect().bottom - listRect.top + list.scrollTop
+            : 0;
+          const requiredReserve = Math.max(
+            0,
+            Math.ceil(targetScrollTop + list.clientHeight - contentHeight),
+          );
+          if (requiredReserve !== viewportAnchorReserveRef.current) {
+            viewportAnchorReserveRef.current = requiredReserve;
+            list.style.setProperty("--viewport-anchor-reserve", `${requiredReserve}px`);
+          }
+        }
+        list.scrollTop = targetScrollTop;
+        handleScroll();
+      }
+    }
+    captureCursorViewportOffset();
+  }, [appState.fontSize, captureCursorViewportOffset, handleScroll, panel.cursor, panel.selection.length, panel.viewportAnchor]);
 
   useEffect(() => () => {
     if (windowRafRef.current) {
@@ -1658,7 +1718,7 @@ export function Panel({
         data-entry-kind={entry.kind}
         className={[
           "panel__row",
-          absIndex % 2 === 1 ? "panel__row--alt" : "",
+          (absIndex + (panel.zebraPhase ?? 0)) % 2 === 1 ? "panel__row--alt" : "",
           absIndex === panel.cursor ? "panel__row--cursor" : "",
           selectionSet.has(absIndex) ? "panel__row--selected" : "",
           dragActive && dragDropAllowed && dragHoverAbsIndex === absIndex ? "panel__row--drop-target" : "",
@@ -1898,7 +1958,7 @@ export function Panel({
 
       <SortHeader sort={panel.sort} panelId={panelId} client={client} />
 
-      <div className={`panel__list${isGrid ? " panel__list--grid" : ""}`} ref={listRef} onScroll={isGrid || isWindowed ? handleScroll : undefined} onMouseDown={(e) => { if (e.target === e.currentTarget) focusDivRef.current?.focus(); }} style={modalActive ? { overflow: "hidden" } : undefined}>
+      <div className={`panel__list${isGrid ? " panel__list--grid" : ""}`} ref={listRef} onScroll={handleListScroll} onMouseDown={(e) => { if (e.target === e.currentTarget) focusDivRef.current?.focus(); }} style={modalActive ? { overflow: "hidden" } : undefined}>
         {isGrid ? (
           (() => {
             const { cols, cardWidth, cardHeight } = gridMetrics;

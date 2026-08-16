@@ -12,6 +12,47 @@ const BATCH_SIZE: usize = 50;
 pub const WINDOWED_THRESHOLD: usize = 1500;
 pub const INITIAL_WINDOW_SIZE: usize = 200;
 
+#[derive(Debug, PartialEq)]
+struct LiveListingState {
+    cursor: usize,
+    selection: Vec<usize>,
+    anchor_delta: Option<i64>,
+}
+
+/// Reconcile interaction state against a replacement listing at commit time.
+/// Using the panel's current entries ensures interactions made while the scan
+/// was running are not overwritten by scan-start state.
+fn reconcile_live_listing(
+    old_entries: &[EntrySchema],
+    old_cursor: usize,
+    old_selection: &[usize],
+    new_entries: &[EntrySchema],
+) -> LiveListingState {
+    let old_cursor = old_cursor.min(old_entries.len().saturating_sub(1));
+    let cursor_name = old_entries.get(old_cursor).map(|entry| entry.name.as_str());
+    let anchored_index =
+        cursor_name.and_then(|name| new_entries.iter().position(|entry| entry.name == name));
+    let cursor =
+        anchored_index.unwrap_or_else(|| old_cursor.min(new_entries.len().saturating_sub(1)));
+
+    let selected_names: std::collections::HashSet<&str> = old_selection
+        .iter()
+        .filter_map(|&index| old_entries.get(index).map(|entry| entry.name.as_str()))
+        .collect();
+    let selection = new_entries
+        .iter()
+        .enumerate()
+        .filter(|(_, entry)| selected_names.contains(entry.name.as_str()))
+        .map(|(index, _)| index)
+        .collect();
+
+    LiveListingState {
+        cursor,
+        selection,
+        anchor_delta: anchored_index.map(|index| index as i64 - old_cursor as i64),
+    }
+}
+
 fn build_selected_entries(entries: &[EntrySchema], selection: &[usize]) -> Vec<FileOpFileSchema> {
     selection
         .iter()
@@ -347,7 +388,7 @@ pub async fn run_scan(
         .filter_map(|e| e.size)
         .sum();
 
-    let cursor = cursor_index
+    let initial_cursor = cursor_index
         .filter(|&i| i < schema_entries.len())
         .or_else(|| {
             cursor_hint
@@ -356,7 +397,7 @@ pub async fn run_scan(
         })
         .unwrap_or(0);
 
-    let selection: Vec<usize> = match selection_names {
+    let initial_selection: Vec<usize> = match selection_names {
         Some(names) => {
             let name_set: std::collections::HashSet<_> = names.into_iter().collect();
             schema_entries
@@ -373,15 +414,22 @@ pub async fn run_scan(
         // ── Mode B: windowed ─────────────────────────────────────────────
         let window_count = INITIAL_WINDOW_SIZE.min(total);
         let max_start = total.saturating_sub(window_count);
-        let cursor_centered_start = cursor.saturating_sub(window_count / 2).min(max_start);
-        let selected_entries = build_selected_entries(&schema_entries, &selection);
 
         // Decide window_start AND store entries in one lock block. If the panel
         // already has a non-zero window_start the user has scrolled away from
         // the cursor (this is a quiet/background rescan, not a fresh navigation
         // or sort) — preserve that scroll position so the visible content
         // doesn't snap back to the top.
-        let (window_start, window_json, window_version) = {
+        let (
+            window_start,
+            window_json,
+            window_version,
+            version,
+            cursor,
+            selection,
+            selected_entries,
+            anchor_delta,
+        ) = {
             let mut s = state.lock().await;
             if let Some(panel) = s.panels.get_mut(&panel_id) {
                 if panel.panel_epoch != panel_epoch
@@ -396,14 +444,37 @@ pub async fn run_scan(
                     );
                     return;
                 }
+                let live = atomic.then(|| {
+                    reconcile_live_listing(
+                        &panel.entries,
+                        panel.cursor,
+                        &panel.selection,
+                        &schema_entries,
+                    )
+                });
+                let cursor = live.as_ref().map_or(initial_cursor, |state| state.cursor);
+                let selection = live.as_ref().map_or_else(
+                    || initial_selection.clone(),
+                    |state| state.selection.clone(),
+                );
+                let anchor_delta = live.as_ref().and_then(|state| state.anchor_delta);
+                let cursor_centered_start = cursor.saturating_sub(window_count / 2).min(max_start);
                 let existing_start = panel.window_start;
-                let window_start = if existing_start > 0 && existing_start <= max_start {
+                let anchored_start = anchor_delta.map(|delta| {
+                    existing_start
+                        .saturating_add_signed(delta as isize)
+                        .min(max_start)
+                });
+                let window_start = if let Some(start) = anchored_start {
+                    start
+                } else if existing_start > 0 && existing_start <= max_start {
                     existing_start
                 } else {
                     cursor_centered_start
                 };
                 let window_json =
                     serde_json::json!(&schema_entries[window_start..window_start + window_count]);
+                let selected_entries = build_selected_entries(&schema_entries, &selection);
                 panel.entries = schema_entries;
                 panel.cursor = cursor;
                 panel.selection = selection.clone();
@@ -413,8 +484,21 @@ pub async fn run_scan(
                 panel.window_version += 1;
                 panel.status = crate::state::PanelStatus::Ready;
                 panel.git = git_status.clone();
-                panel.version = version_base + 1;
-                (window_start, window_json, panel.window_version)
+                panel.version = if atomic {
+                    panel.version + 1
+                } else {
+                    version_base + 1
+                };
+                (
+                    window_start,
+                    window_json,
+                    panel.window_version,
+                    panel.version,
+                    cursor,
+                    selection,
+                    selected_entries,
+                    anchor_delta,
+                )
             } else {
                 return;
             }
@@ -425,7 +509,7 @@ pub async fn run_scan(
                 timestamp: crate::ws::protocol::now(),
                 domain: "panels".to_string(),
                 entity_id: Some(panel_id.clone()),
-                version: version_base + 1,
+                version,
                 patch: serde_json::json!({
                     "status": "ready",
                     "panelEpoch": panel_epoch,
@@ -437,20 +521,23 @@ pub async fn run_scan(
                     "cursor": cursor,
                     "selection": selection,
                     "selectedEntries": selected_entries,
+                    "viewportAnchor": anchor_delta.map(|delta| serde_json::json!({
+                        "version": version,
+                        "delta": delta,
+                    })),
                     "git": git_status,
                 }),
             })
             .await;
         eprintln!(
             "[scan] ready sent: panel={panel_id} source={source_id} path={path} epoch={panel_epoch} version={} mode=windowed total={total}",
-            version_base + 1
+            version
         );
     } else if atomic {
         // ── Mode A-atomic: single replacement (no flash for watcher rescans) ─
-        let version = version_base + 1;
-
-        // Update BE state atomically
-        {
+        // Reconcile and update under one lock so interactions made while the
+        // scan ran win over the scan-start snapshot.
+        let (version, cursor, selection, anchor_delta) = {
             let mut s = state.lock().await;
             if let Some(panel) = s.panels.get_mut(&panel_id) {
                 if panel.panel_epoch != panel_epoch
@@ -465,15 +552,25 @@ pub async fn run_scan(
                     );
                     return;
                 }
+                let live = reconcile_live_listing(
+                    &panel.entries,
+                    panel.cursor,
+                    &panel.selection,
+                    &schema_entries,
+                );
+                let version = panel.version + 1;
                 panel.entries = schema_entries.clone();
-                panel.cursor = cursor;
-                panel.selection = selection.clone();
+                panel.cursor = live.cursor;
+                panel.selection = live.selection.clone();
                 panel.windowed = false;
                 panel.status = crate::state::PanelStatus::Ready;
                 panel.version = version;
                 panel.git = git_status.clone();
+                (version, live.cursor, live.selection, live.anchor_delta)
+            } else {
+                return;
             }
-        }
+        };
 
         let sent = tx
             .send(ServerMessage::StatePatch {
@@ -490,6 +587,10 @@ pub async fn run_scan(
                     "cursor": cursor,
                     "selection": selection,
                     "selectedEntries": build_selected_entries(&schema_entries, &selection),
+                    "viewportAnchor": anchor_delta.map(|delta| serde_json::json!({
+                        "version": version,
+                        "delta": delta,
+                    })),
                     "git": git_status,
                 }),
             })
@@ -529,7 +630,7 @@ pub async fn run_scan(
         }
 
         version += 1;
-        let selected_entries = build_selected_entries(&schema_entries, &selection);
+        let selected_entries = build_selected_entries(&schema_entries, &initial_selection);
         {
             let mut s = state.lock().await;
             let Some(panel) = s.panels.get_mut(&panel_id) else {
@@ -560,8 +661,8 @@ pub async fn run_scan(
                     "status": "ready",
                     "total": total,
                     "totalSize": total_file_size,
-                    "cursor": cursor,
-                    "selection": selection,
+                    "cursor": initial_cursor,
+                    "selection": initial_selection,
                     "selectedEntries": selected_entries,
                     "git": git_status,
                 }),
@@ -575,5 +676,75 @@ pub async fn run_scan(
                 "[scan] ready send failed: panel={panel_id} source={source_id} path={path} epoch={panel_epoch} version={version} mode=streamed error={error}"
             ),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(name: &str) -> EntrySchema {
+        EntrySchema {
+            name: name.to_string(),
+            kind: "file".to_string(),
+            size: None,
+            mtime: None,
+            btime: None,
+            permissions: None,
+            icon_name: None,
+            cc: None,
+            source_path: None,
+            git_status: None,
+            git_details: None,
+        }
+    }
+
+    fn entries(names: &[&str]) -> Vec<EntrySchema> {
+        names.iter().map(|name| entry(name)).collect()
+    }
+
+    #[test]
+    fn live_listing_tracks_cursor_and_selection_across_prepends() {
+        let old = entries(&["c", "b", "a"]);
+        let new = entries(&["e", "d", "c", "b", "a"]);
+
+        assert_eq!(
+            reconcile_live_listing(&old, 1, &[0, 1], &new),
+            LiveListingState {
+                cursor: 3,
+                selection: vec![2, 3],
+                anchor_delta: Some(2),
+            }
+        );
+    }
+
+    #[test]
+    fn live_listing_uses_the_interaction_state_present_at_commit() {
+        let old = entries(&["c", "b", "a"]);
+        let new = entries(&["e", "d", "c", "b", "a"]);
+
+        assert_eq!(
+            reconcile_live_listing(&old, 2, &[2], &new),
+            LiveListingState {
+                cursor: 4,
+                selection: vec![4],
+                anchor_delta: Some(2),
+            }
+        );
+    }
+
+    #[test]
+    fn live_listing_falls_back_when_cursor_entry_disappears() {
+        let old = entries(&["c", "b", "a"]);
+        let new = entries(&["c", "a"]);
+
+        assert_eq!(
+            reconcile_live_listing(&old, 1, &[0, 1], &new),
+            LiveListingState {
+                cursor: 1,
+                selection: vec![0],
+                anchor_delta: None,
+            }
+        );
     }
 }

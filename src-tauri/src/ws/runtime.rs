@@ -843,10 +843,9 @@ pub(crate) async fn quiet_rescan_panel(
     }
 
     let (source_id, panel_epoch, path, sort, filter, show_hidden, version, driver) = {
-        let mut state_guard = state.lock().await;
+        let state_guard = state.lock().await;
         let (source_id, panel_epoch, path, sort, filter, show_hidden, version) =
-            if let Some(panel) = state_guard.panels.get_mut(panel_id) {
-                panel.version += 1;
+            if let Some(panel) = state_guard.panels.get(panel_id) {
                 (
                     panel.source_id.clone(),
                     panel.panel_epoch,

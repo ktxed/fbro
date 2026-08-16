@@ -10,6 +10,36 @@ use crate::ws::protocol::{FilterSpec, SortSpec};
 
 pub struct LocalFsDriver;
 
+fn compare_entries(a: &VfsEntry, b: &VfsEntry, sort: &SortSpec) -> std::cmp::Ordering {
+    let a_dir = a.kind == VfsKind::Directory;
+    let b_dir = b.kind == VfsKind::Directory;
+    if a_dir != b_dir {
+        return b_dir.cmp(&a_dir);
+    }
+    let ord = match sort.by.as_str() {
+        "size" => a.size.unwrap_or(0).cmp(&b.size.unwrap_or(0)),
+        "date" => a.mtime.cmp(&b.mtime),
+        "kind" => {
+            let ext = |entry: &VfsEntry| -> String {
+                entry
+                    .name
+                    .rfind('.')
+                    .map(|index| entry.name[index + 1..].to_lowercase())
+                    .unwrap_or_default()
+            };
+            ext(a).cmp(&ext(b))
+        }
+        _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+    }
+    .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+    .then_with(|| a.name.cmp(&b.name));
+    if sort.order == "desc" {
+        ord.reverse()
+    } else {
+        ord
+    }
+}
+
 fn normalize_path(path: std::path::PathBuf) -> String {
     #[cfg(windows)]
     return path.to_string_lossy().replace('\\', "/");
@@ -187,32 +217,7 @@ impl VfsDriver for LocalFsDriver {
             });
         }
 
-        entries.sort_by(|a, b| {
-            let a_dir = a.kind == VfsKind::Directory;
-            let b_dir = b.kind == VfsKind::Directory;
-            if a_dir != b_dir {
-                return b_dir.cmp(&a_dir);
-            }
-            let ord = match sort.by.as_str() {
-                "size" => a.size.unwrap_or(0).cmp(&b.size.unwrap_or(0)),
-                "date" => a.mtime.cmp(&b.mtime),
-                "kind" => {
-                    let ext = |e: &VfsEntry| -> String {
-                        e.name
-                            .rfind('.')
-                            .map(|i| e.name[i + 1..].to_lowercase())
-                            .unwrap_or_default()
-                    };
-                    ext(a).cmp(&ext(b))
-                }
-                _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
-            };
-            if sort.order == "desc" {
-                ord.reverse()
-            } else {
-                ord
-            }
-        });
+        entries.sort_by(|a, b| compare_entries(a, b, sort));
 
         Ok(entries)
     }
@@ -377,5 +382,41 @@ impl VfsDriver for LocalFsDriver {
                 "set_permissions is only supported on Unix".to_string(),
             ))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn dated_entry(name: &str) -> VfsEntry {
+        VfsEntry {
+            name: name.to_string(),
+            kind: VfsKind::File,
+            size: Some(0),
+            mtime: Some("100".to_string()),
+            btime: None,
+            permissions: None,
+            icon_name: None,
+            cc: None,
+            source_path: None,
+        }
+    }
+
+    #[test]
+    fn equal_dates_have_deterministic_name_order() {
+        let sort = SortSpec {
+            by: "date".to_string(),
+            order: "desc".to_string(),
+        };
+        let mut first = vec![dated_entry("b"), dated_entry("a"), dated_entry("c")];
+        let mut second = vec![dated_entry("c"), dated_entry("b"), dated_entry("a")];
+
+        first.sort_by(|a, b| compare_entries(a, b, &sort));
+        second.sort_by(|a, b| compare_entries(a, b, &sort));
+
+        let first_names: Vec<_> = first.iter().map(|entry| entry.name.as_str()).collect();
+        let second_names: Vec<_> = second.iter().map(|entry| entry.name.as_str()).collect();
+        assert_eq!(first_names, second_names);
     }
 }

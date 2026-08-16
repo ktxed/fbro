@@ -599,10 +599,10 @@ function applyPatch(state: AppState, msg: StatePatchMessage): AppState {
     if (msg.patch.cursor !== undefined && !patchHasEntries) {
       preGuardPanel = { ...preGuardPanel, cursor: msg.patch.cursor as number };
     }
-    if (msg.patch.selection !== undefined) {
+    if (msg.patch.selection !== undefined && !patchHasEntries) {
       preGuardPanel = { ...preGuardPanel, selection: msg.patch.selection as number[] };
     }
-    if (msg.patch.selectedEntries !== undefined) {
+    if (msg.patch.selectedEntries !== undefined && !patchHasEntries) {
       preGuardPanel = { ...preGuardPanel, selectedEntries: msg.patch.selectedEntries as PanelState["selectedEntries"] };
     }
     if (msg.patch.calculatingSize !== undefined) {
@@ -735,6 +735,18 @@ function applyPatch(state: AppState, msg: StatePatchMessage): AppState {
     }
     if (msg.patch.git !== undefined) {
       updated = { ...updated, git: msg.patch.git === null ? undefined : msg.patch.git as PanelState["git"] };
+    }
+    if (msg.patch.viewportAnchor !== undefined && msg.patch.viewportAnchor !== null) {
+      const viewportAnchor = msg.patch.viewportAnchor as NonNullable<PanelState["viewportAnchor"]>;
+      const zebraPhase = ((updated.zebraPhase ?? 0) + viewportAnchor.delta) % 2;
+      updated = {
+        ...updated,
+        viewportAnchor,
+        zebraPhase: zebraPhase < 0 ? zebraPhase + 2 : zebraPhase,
+      };
+    } else if (msg.patch.viewportAnchor === null
+        || (msg.patch.entries !== undefined && msg.patch.status === "loading")) {
+      updated = { ...updated, zebraPhase: 0 };
     }
 
     const locationChanged = updated.path !== panel.path

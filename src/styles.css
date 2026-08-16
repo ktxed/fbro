@@ -1077,6 +1077,9 @@ body {
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
+  /* Live listing updates are anchored explicitly to the cursor row. Native
+   * browser scroll anchoring would race or double-apply that adjustment. */
+  overflow-anchor: none;
   scrollbar-width: thin;
   scrollbar-color: var(--border) transparent;
   /* Keep the scrollbar gutter reserved even when overflow is forced to
@@ -1085,6 +1088,13 @@ body {
    * card's height ticks up by a couple px, and the grid visibly shifts
    * down on modal open / back up on close. */
   scrollbar-gutter: stable;
+}
+
+.panel__list::after {
+  content: "";
+  display: block;
+  height: var(--viewport-anchor-reserve, 0px);
+  pointer-events: none;
 }
 
 .panel__list--grid {

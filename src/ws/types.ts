@@ -204,6 +204,10 @@ export interface PanelState {
    *  fast scroll-driven RequestWindow responses can't be dropped by the
    *  structural-version guard (see store reducer). */
   windowVersion?: number;
+  /** One-shot viewport adjustment emitted by a live listing replacement. */
+  viewportAnchor?: { version: number; delta: number };
+  /** Alternating-row phase retained across cursor-anchored live prepends. */
+  zebraPhase?: number;
   shadowSource?: ShadowSource;
   /** When set, this panel is hosting an embedded terminal split with this PTY session id. */
   terminalSessionId?: number;
