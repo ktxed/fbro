@@ -24,6 +24,7 @@ import { BroModal } from "./BroModal";
 import { InputModal } from "./InputModal";
 import { SearchModal } from "./SearchModal";
 import { SettingsModal } from "./SettingsModal";
+import { useModalStack } from "./ModalStack";
 import { useAppDispatch, useAppState } from "../store";
 import { EmbeddedViewerPanel } from "./EmbeddedViewerPanel";
 import type { FileOpFile, FileOpType, PanelState, VFSEntry } from "../ws/types";
@@ -144,6 +145,7 @@ function resolveDropTarget(
 export function Layout({ client, jobsViewOpen, onCloseJobsView, onOpenJobsView }: LayoutProps) {
   const state = useAppState();
   const dispatch = useAppDispatch();
+  const { hasActiveModal } = useModalStack();
   const [dragCandidate, setDragCandidate] = useState<DragCandidate | null>(null);
   const [activeDrag, setActiveDrag] = useState<ActiveDragSession | null>(null);
   const [dragOutInProgress, setDragOutInProgress] = useState(false);
@@ -426,7 +428,7 @@ export function Layout({ client, jobsViewOpen, onCloseJobsView, onOpenJobsView }
   }
 
   const activeJob = state.activeJobId ? state.jobs[state.activeJobId] ?? null : null;
-  const modalActive = state.pendingOp !== null || state.activeJobId !== null || state.pendingQuit !== null || state.pendingRename !== null || state.pendingAttributes !== null || state.pendingInfo !== null || state.pendingMkdir !== null || state.pendingTouch !== null || state.pendingNoEditor !== null || state.pendingGoToPath !== null || state.pendingPanelHistory !== null || state.pendingDryRun !== null || state.pendingContextMenu !== null || state.pendingGlobalSelectionAdd !== null || state.pendingOpenWith !== null || state.pendingBro !== null || state.pendingInput !== null || state.pendingSearch !== null || state.pendingSettings !== null || state.commandPaletteOpen || state.aboutOpen || jobsViewOpen;
+  const modalActive = hasActiveModal || state.pendingContextMenu !== null;
 
   const dragCursorClass = dragOutInProgress
     ? "layout--drag-out"

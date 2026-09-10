@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useAppState } from "../store";
 import type { WsClient } from "../ws/client";
+import { ModalLayer, useModalStack } from "./ModalStack";
 
 interface PairingRequestModalProps {
   client: WsClient;
@@ -16,6 +17,8 @@ export function PairingRequestModal({ client }: PairingRequestModalProps) {
   const state = useAppState();
   const pp = state.pendingPairing;
   const [now, setNow] = useState(Date.now());
+  const [admittedHandshakeId, setAdmittedHandshakeId] = useState<string | null>(null);
+  const { hasActiveModal } = useModalStack();
 
   useEffect(() => {
     if (!pp) return;
@@ -23,7 +26,16 @@ export function PairingRequestModal({ client }: PairingRequestModalProps) {
     return () => clearInterval(id);
   }, [pp?.handshakeId]);
 
-  if (!pp) return null;
+  useEffect(() => {
+    if (!pp) {
+      setAdmittedHandshakeId(null);
+      return;
+    }
+    if (admittedHandshakeId === pp.handshakeId) return;
+    if (!hasActiveModal) setAdmittedHandshakeId(pp.handshakeId);
+  }, [admittedHandshakeId, hasActiveModal, pp]);
+
+  if (!pp || admittedHandshakeId !== pp.handshakeId) return null;
 
   const secondsLeft = Math.max(0, Math.ceil((pp.expiresAt - now) / 1000));
 
@@ -35,7 +47,7 @@ export function PairingRequestModal({ client }: PairingRequestModalProps) {
   };
 
   return (
-    <div className="modal-overlay" role="dialog" aria-modal="true">
+    <ModalLayer modalId="pairing" role="dialog" aria-modal="true">
       <div className="modal modal--pairing" data-testid="pairing-dialog">
         <div className="modal__header">Pair with {pp.name}</div>
         <div className="modal__body">
@@ -66,6 +78,6 @@ export function PairingRequestModal({ client }: PairingRequestModalProps) {
           </button>
         </div>
       </div>
-    </div>
+    </ModalLayer>
   );
 }

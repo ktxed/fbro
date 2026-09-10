@@ -4,6 +4,7 @@ import type { PendingGoToPath } from "../store";
 import type { WsClient } from "../ws/client";
 import { useInputHistory } from "../hooks/useInputHistory";
 import { InputHistoryDropdown } from "./InputHistoryDropdown";
+import { ModalLayer } from "./ModalStack";
 
 interface GoToPathModalProps {
   goToPath: PendingGoToPath;
@@ -54,7 +55,7 @@ export function GoToPathModal({ goToPath, client }: GoToPathModalProps) {
   };
 
   return (
-    <div className="modal-overlay" tabIndex={-1} onClick={close} onKeyDown={(e) => {
+    <ModalLayer modalId="go-to-path" onClick={close} onKeyDown={(e) => {
       if (e.key === "Tab") { e.preventDefault(); return; }
       if (e.key === "Enter") { e.preventDefault(); submit(); return; }
       if (e.key === "Escape") { e.preventDefault(); close(); }
@@ -106,6 +107,6 @@ export function GoToPathModal({ goToPath, client }: GoToPathModalProps) {
           </button>
         </div>
       </div>
-    </div>
+    </ModalLayer>
   );
 }

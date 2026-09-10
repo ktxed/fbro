@@ -20,6 +20,22 @@ export async function runSearchFlow(browser, observer) {
   });
   const input = await browser.$('[data-testid="search-file-mask-input"]');
   await input.waitForDisplayed({ timeout: 10_000 });
+  await browser.execute(() => {
+    window.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "P",
+      code: "KeyP",
+      ctrlKey: true,
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true,
+    }));
+  });
+  if (await browser.$(".command-palette").isExisting()) {
+    throw new Error("Command Palette opened above the Search modal");
+  }
+  if ((await browser.$$('[data-modal-state="top"]')).length !== 1) {
+    throw new Error("Search modal was not the sole active modal layer");
+  }
   await input.setValue("renamed.txt");
   await clickCommand(browser, "search.start");
   await clickCommand(browser, "search.to-results");

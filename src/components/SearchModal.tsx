@@ -9,6 +9,7 @@ import { InputHistoryDropdown } from "./InputHistoryDropdown";
 import { DateTimeInput } from "./DateTimeInput";
 import { ResizableModal } from "./ResizableModal";
 import { stepNumberInputOnWheel } from "../utils/numberInputWheel";
+import { ModalLayer } from "./ModalStack";
 
 function MnemonicLabel({ text, mnemonic }: { text: string; mnemonic: string }) {
   const idx = text.toLowerCase().indexOf(mnemonic.toLowerCase());
@@ -380,9 +381,8 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
   const hasResults = resultCount > 0;
 
   return (
-      <div
-      className="modal-overlay"
-      tabIndex={-1}
+    <ModalLayer
+      modalId="search"
       onKeyDown={handleOverlayKeyDown}
     >
       <ResizableModal
@@ -923,6 +923,6 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
           </button>
         </div>
       </ResizableModal>
-    </div>
+    </ModalLayer>
   );
 }

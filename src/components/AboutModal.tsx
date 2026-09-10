@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useAppDispatch } from "../store";
 import type { WsClient } from "../ws/client";
 import { ResizableModal } from "./ResizableModal";
+import { ModalLayer } from "./ModalStack";
 
 function diagnosticText(info: Readonly<FbroBuildInfo>): string {
   const dirty = info.dirty === null ? "unknown" : info.dirty ? "dirty" : "clean";
@@ -45,8 +46,8 @@ export function AboutModal({ client }: { client: WsClient }) {
   };
 
   return (
-    <div
-      className="modal-overlay"
+    <ModalLayer
+      modalId="about"
       onClick={close}
       onKeyDown={(event) => {
         if (event.key === "Escape") {
@@ -123,6 +124,6 @@ export function AboutModal({ client }: { client: WsClient }) {
           </button>
         </div>
       </ResizableModal>
-    </div>
+    </ModalLayer>
   );
 }

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useAppDispatch, useAppState, type PendingGlobalSelectionAdd } from "../store";
 import type { WsClient } from "../ws/client";
+import { ModalLayer } from "./ModalStack";
 
 interface GlobalSelectionModalProps {
   add: PendingGlobalSelectionAdd;
@@ -86,7 +87,7 @@ export function GlobalSelectionModal({ add, client }: GlobalSelectionModalProps)
   };
 
   return (
-    <div className="modal-overlay" tabIndex={-1} onClick={close} onKeyDown={handleKeyDown}>
+    <ModalLayer modalId="global-selection" onClick={close} onKeyDown={handleKeyDown}>
       <div className="modal" role="dialog" aria-label="To global selection" onClick={(e) => e.stopPropagation()}>
         <div className="modal__header">To global selection</div>
         <div className="modal__body">
@@ -140,6 +141,6 @@ export function GlobalSelectionModal({ add, client }: GlobalSelectionModalProps)
           </button>
         </div>
       </div>
-    </div>
+    </ModalLayer>
   );
 }

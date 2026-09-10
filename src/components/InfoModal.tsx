@@ -4,6 +4,7 @@ import type { PendingInfo } from "../store";
 import type { WsClient } from "../ws/client";
 import { IconArrowUpRight, IconChevronRight, IconCopy } from "@tabler/icons-react";
 import { ResizableModal } from "./ResizableModal";
+import { ModalLayer } from "./ModalStack";
 
 interface InfoModalProps {
   info: PendingInfo;
@@ -99,7 +100,7 @@ export function InfoModal({ info, client }: InfoModalProps) {
   };
 
   return (
-    <div className="modal-overlay" ref={overlayRef} tabIndex={-1} onClick={close} onKeyDown={handleKeyDown}>
+    <ModalLayer modalId="info" ref={overlayRef} onClick={close} onKeyDown={handleKeyDown}>
       <ResizableModal
         modalId="info"
         client={client}
@@ -178,6 +179,6 @@ export function InfoModal({ info, client }: InfoModalProps) {
           <button className="modal__btn modal__btn--primary" onClick={close}>Close</button>
         </div>
       </ResizableModal>
-    </div>
+    </ModalLayer>
   );
 }

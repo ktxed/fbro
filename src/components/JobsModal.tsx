@@ -5,6 +5,7 @@ import type { WsClient } from "../ws/client";
 import { IconEye, IconPlayerPlay, IconPlayerPause, IconX } from "@tabler/icons-react";
 import { cancelJobWithPartialPrompt } from "../utils/jobCancel";
 import { ResizableModal } from "./ResizableModal";
+import { ModalLayer } from "./ModalStack";
 
 const FILE_LIST_PAGE_SIZE = 25;
 
@@ -634,14 +635,6 @@ export function JobsModal({ onClose, client }: { onClose: () => void; client: Ws
   }, [dirSizeTasks.length]);
 
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape" || e.key === "j") { e.preventDefault(); onClose(); }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [onClose]);
-
-  useEffect(() => {
     if (activeTab === "cache") {
       client.sendIntent("QueryCacheStatus", undefined, {});
     }
@@ -663,7 +656,17 @@ export function JobsModal({ onClose, client }: { onClose: () => void; client: Ws
   });
 
   return (
-    <div className="modal-overlay" ref={overlayRef} onClick={onOverlayClick}>
+    <ModalLayer
+      modalId="jobs"
+      ref={overlayRef}
+      onClick={onOverlayClick}
+      onKeyDown={(e) => {
+        if (e.key === "Escape" || e.key === "j") {
+          e.preventDefault();
+          onClose();
+        }
+      }}
+    >
       <ResizableModal
         modalId="jobs"
         client={client}
@@ -792,6 +795,6 @@ export function JobsModal({ onClose, client }: { onClose: () => void; client: Ws
           <button className="modal__btn" onClick={onClose}>Close <kbd>j</kbd></button>
         </div>
       </ResizableModal>
-    </div>
+    </ModalLayer>
   );
 }

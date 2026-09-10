@@ -4,6 +4,7 @@ import type { PendingRename } from "../store";
 import type { WsClient } from "../ws/client";
 import { useInputHistory } from "../hooks/useInputHistory";
 import { InputHistoryDropdown } from "./InputHistoryDropdown";
+import { ModalLayer } from "./ModalStack";
 
 interface RenameModalProps {
   rename: PendingRename;
@@ -53,7 +54,7 @@ export function RenameModal({ rename, client }: RenameModalProps) {
   };
 
   return (
-    <div className="modal-overlay" tabIndex={-1} onClick={close} onKeyDown={(e) => {
+    <ModalLayer modalId="rename" onClick={close} onKeyDown={(e) => {
       if (e.key === "Tab") { e.preventDefault(); return; }
       if (e.key === "Enter") { e.preventDefault(); submit(); return; }
       if (e.key === "Escape") { e.preventDefault(); close(); }
@@ -108,6 +109,6 @@ export function RenameModal({ rename, client }: RenameModalProps) {
           </button>
         </div>
       </div>
-    </div>
+    </ModalLayer>
   );
 }

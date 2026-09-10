@@ -7,6 +7,7 @@ import { Toolbar } from "./components/Toolbar";
 import { PairingRequestModal } from "./components/PairingRequestModal";
 import { applyZoom } from "./utils/zoom";
 import { resolveColorScheme } from "./theme/colorSchemes";
+import { ModalStackProvider } from "./components/ModalStack";
 
 export function App() {
   const [state, dispatch] = useAppReducer();
@@ -71,21 +72,23 @@ export function App() {
 
   return (
     <AppContext.Provider value={{ state, dispatch }}>
-      {!state.connected && (
-        <div className="banner banner--disconnected">
-          Connecting to backend…
+      <ModalStackProvider>
+        {!state.connected && (
+          <div className="banner banner--disconnected">
+            Connecting to backend…
+          </div>
+        )}
+        <div
+          className="app"
+          data-color-scheme={colorScheme.id}
+          style={{ colorScheme: colorScheme.mode }}
+        >
+          {client && <Layout client={client} jobsViewOpen={jobsViewOpen} onCloseJobsView={() => setJobsViewOpen(false)} onOpenJobsView={() => setJobsViewOpen(true)} />}
+          {client && <JobsBar client={client} onOpenJobsView={() => setJobsViewOpen(true)} />}
+          {client && <Toolbar client={client} onOpenJobsView={() => setJobsViewOpen(true)} />}
+          {client && <PairingRequestModal client={client} />}
         </div>
-      )}
-      <div
-        className="app"
-        data-color-scheme={colorScheme.id}
-        style={{ colorScheme: colorScheme.mode }}
-      >
-        {client && <Layout client={client} jobsViewOpen={jobsViewOpen} onCloseJobsView={() => setJobsViewOpen(false)} onOpenJobsView={() => setJobsViewOpen(true)} />}
-        {client && <JobsBar client={client} onOpenJobsView={() => setJobsViewOpen(true)} />}
-        {client && <Toolbar client={client} jobsViewOpen={jobsViewOpen} onOpenJobsView={() => setJobsViewOpen(true)} />}
-        {client && <PairingRequestModal client={client} />}
-      </div>
+      </ModalStackProvider>
     </AppContext.Provider>
   );
 }

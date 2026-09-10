@@ -6,6 +6,7 @@ import { SettingsDisplayTab } from "./SettingsDisplayTab";
 import { SettingsSharingTab } from "./SettingsSharingTab";
 import type { WsClient } from "../ws/client";
 import { ResizableModal } from "./ResizableModal";
+import { ModalLayer } from "./ModalStack";
 
 const TABS: { id: SettingsTab; label: string }[] = [
   { id: "general", label: "General" },
@@ -37,8 +38,9 @@ export function SettingsModal({ client }: SettingsModalProps) {
   };
 
   return (
-    <div
-      className="modal-overlay modal-overlay--no-click"
+    <ModalLayer
+      modalId="settings"
+      className="modal-overlay--no-click"
       onKeyDown={handleKeyDown}
       // Trap focus: prevent Tab from escaping
     >
@@ -96,6 +98,6 @@ export function SettingsModal({ client }: SettingsModalProps) {
           </button>
         </div>
       </ResizableModal>
-    </div>
+    </ModalLayer>
   );
 }

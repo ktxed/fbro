@@ -7,6 +7,7 @@ import type { WsClient } from "../ws/client";
 import type { BroParamItem } from "../ws/types";
 import { InputHistoryDropdown } from "./InputHistoryDropdown";
 import { ResizableModal } from "./ResizableModal";
+import { ModalLayer } from "./ModalStack";
 
 interface BroModalProps {
   client: WsClient;
@@ -289,7 +290,7 @@ export function BroModal({ client, bro }: BroModalProps) {
   };
 
   return (
-    <div className="modal-overlay" onClick={close}>
+    <ModalLayer modalId="bro" onClick={close}>
       <ResizableModal
         ref={dialogRef}
         modalId="bro"
@@ -475,7 +476,7 @@ export function BroModal({ client, bro }: BroModalProps) {
           </button>
         </div>
       </ResizableModal>
-    </div>
+    </ModalLayer>
   );
 }
 

@@ -4,6 +4,7 @@ import { useAppDispatch, useAppState, markHistoryNavPending, type PendingPanelHi
 import type { WsClient } from "../ws/client";
 import { archiveFilePath, isArchiveSourceId, isSearchSourceId } from "../utils/sourceId";
 import { ResizableModal } from "./ResizableModal";
+import { ModalLayer } from "./ModalStack";
 
 interface PanelHistoryModalProps {
   client: WsClient;
@@ -97,7 +98,7 @@ export function PanelHistoryModal({ client, panelHistory }: PanelHistoryModalPro
   };
 
   return (
-    <div className="modal-overlay" onClick={close}>
+    <ModalLayer modalId="panel-history" onClick={close}>
       <ResizableModal
         ref={dialogRef}
         modalId="panel-history"
@@ -149,6 +150,6 @@ export function PanelHistoryModal({ client, panelHistory }: PanelHistoryModalPro
           </div>
         </div>
       </ResizableModal>
-    </div>
+    </ModalLayer>
   );
 }

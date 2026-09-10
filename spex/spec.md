@@ -59,6 +59,9 @@ The FE is a **non-authoritative projection** of BE state.
 - Invent panel or job state
 - Apply semantic sorting or filtering
 
+Full-screen dialog presentation, focus, and input ownership follow
+[Modal Stack](modal-stack.md).
+
 If FE desyncs → request snapshot.
 
 ---

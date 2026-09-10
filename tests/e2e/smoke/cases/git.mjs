@@ -160,6 +160,22 @@ export async function runGitFlow(browser, observer) {
   await gitButton.click();
   const gitModal = await browser.$(".git-modal");
   await gitModal.waitForDisplayed({ timeout: 10_000 });
+  await browser.execute(() => {
+    window.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "f",
+      code: "KeyF",
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    }));
+  });
+  if (await browser.$(".search-modal__tabs").isExisting()) {
+    throw new Error("Search opened above the Git modal");
+  }
+  if ((await browser.$$('[data-modal-state="top"]')).length !== 1
+    || !await browser.$('[data-modal-id^="git:"][data-modal-state="top"]').isExisting()) {
+    throw new Error("Git modal was not the sole active modal layer");
+  }
   await waitFor(() => gitChangeCode(browser, "changed.txt"), {
     timeout: 10_000,
     label: "Git change row",

@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { IconArrowDown, IconArrowUp, IconCopy, IconGitCompare, IconLoader2, IconMinus, IconPlus } from "@tabler/icons-react";
 import { useAppDispatch, useAppState } from "../store";
 import type { GitChange, GitLogRef, GitRepoStatus } from "../ws/types";
 import type { WsClient } from "../ws/client";
 import { ResizableModal } from "./ResizableModal";
+import { ModalLayer } from "./ModalStack";
 import type { GitActivity } from "./gitActivity";
 
 type GitTab = "changes" | "log";
@@ -299,11 +300,10 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
     }
   }, [allChangesSelected, selectedChanges.length]);
 
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
+  const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
       if (event.key === "Escape") {
         event.preventDefault();
-        event.stopImmediatePropagation();
+        event.stopPropagation();
         if (rollbackPaths) setRollbackPaths(null);
         else if (tab === "log" && expandedHash) {
           collapseCommit();
@@ -325,7 +325,7 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
           ? controls[(index <= 0 ? controls.length : index) - 1]
           : controls[(index + 1) % controls.length];
         event.preventDefault();
-        event.stopImmediatePropagation();
+        event.stopPropagation();
         next.focus();
         return;
       }
@@ -337,7 +337,7 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
       const hasShortcutModifier = event.ctrlKey || event.metaKey || event.altKey;
       if (tab === "changes" && key === "a" && (event.ctrlKey || event.metaKey) && !event.altKey) {
         event.preventDefault();
-        event.stopImmediatePropagation();
+        event.stopPropagation();
         setSelectedPaths(new Set(git.changes.map(change => change.path)));
         selectionAnchorRef.current = git.changes.length > 0 ? 0 : null;
         setRollbackPaths(null);
@@ -346,20 +346,20 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
       if (!hasShortcutModifier) {
         if (key === "1") {
           event.preventDefault();
-          event.stopImmediatePropagation();
+          event.stopPropagation();
           setTab("changes");
           return;
         }
         if (key === "2") {
           event.preventDefault();
-          event.stopImmediatePropagation();
+          event.stopPropagation();
           setTab("log");
           return;
         }
         const movement = event.key === "ArrowUp" || key === "k" ? -1 : event.key === "ArrowDown" || key === "j" ? 1 : 0;
         if (movement) {
           event.preventDefault();
-          event.stopImmediatePropagation();
+          event.stopPropagation();
           if (tab === "log") moveLogFocus(movement);
           else focusChangeRow(activeChangeIndex + movement);
           return;
@@ -367,7 +367,7 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
         // Home / End: first and last visible log item (commit or nested file).
         if (event.key === "Home" || event.key === "End") {
           event.preventDefault();
-          event.stopImmediatePropagation();
+          event.stopPropagation();
           if (tab === "log") {
             if (logCommits.length === 0) return;
             if (event.key === "Home") {
@@ -395,7 +395,7 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
           // Right: expand active commit / enter first nested change.
           if (event.key === "ArrowRight") {
             event.preventDefault();
-            event.stopImmediatePropagation();
+            event.stopPropagation();
             const commitIndex = logFocus.kind === "commit" ? logFocus.index : logFocus.commitIndex;
             const commit = logCommits[commitIndex];
             if (!commit) return;
@@ -416,7 +416,7 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
           // Left: leave nested change → parent commit; collapse when on header.
           if (event.key === "ArrowLeft") {
             event.preventDefault();
-            event.stopImmediatePropagation();
+            event.stopPropagation();
             if (logFocus.kind === "change") {
               focusLogItem({ kind: "commit", index: logFocus.commitIndex });
               return;
@@ -430,7 +430,7 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
           }
           if (event.key === " " && logFocus.kind === "commit" && gitLog?.hasMore && gitLog.status !== "loading") {
             event.preventDefault();
-            event.stopImmediatePropagation();
+            event.stopPropagation();
             requestLog({ skip: logCommits.length, append: true });
             return;
           }
@@ -438,7 +438,7 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
             const activeCommit = logCommits[logFocus.index];
             if (activeCommit && key === "y") {
               event.preventDefault();
-              event.stopImmediatePropagation();
+              event.stopPropagation();
               copyLogHash(activeCommit.hash);
               return;
             }
@@ -450,7 +450,7 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
               : undefined;
             if (commit && change) {
               event.preventDefault();
-              event.stopImmediatePropagation();
+              event.stopPropagation();
               if (key === "v") viewCommitDiff(commit.hash, change);
               else copyRawFile(commit.hash, change);
               return;
@@ -460,20 +460,20 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
           const activeChange = git.changes[activeChangeIndex];
           if (activeChange && event.key === " " && target instanceof HTMLElement && target.matches('[data-testid="git-change-row"]')) {
             event.preventDefault();
-            event.stopImmediatePropagation();
+            event.stopPropagation();
             toggleSelection(activeChangeIndex);
             return;
           }
           if (activeChange && key === "v") {
             event.preventDefault();
-            event.stopImmediatePropagation();
+            event.stopPropagation();
             act("GitViewDiff", { targetPath: activeChange.path });
             return;
           }
           if (activeChange && key === "s") {
             const isStaged = activeChange.indexStatus !== " " && activeChange.indexStatus !== "?";
             event.preventDefault();
-            event.stopImmediatePropagation();
+            event.stopPropagation();
             runAction(isStaged ? "GitUnstagePaths" : "GitStagePaths", `${isStaged ? "Unstaging" : "Staging"} ${activeChange.path}…`, { paths: [activeChange.path] });
             return;
           }
@@ -489,44 +489,20 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
       const action = !hasShortcutModifier ? accelerators[key] : undefined;
       if (action) {
         event.preventDefault();
-        event.stopImmediatePropagation();
+        event.stopPropagation();
         action();
       }
-    };
-    window.addEventListener("keydown", onKeyDown, true);
-    return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [
-    activeChangeIndex,
-    canCommit,
-    canPull,
-    canPush,
-    collapseCommit,
-    copyLogHash,
-    copyRawFile,
-    expandCommit,
-    expandedCommitIndex,
-    expandedHash,
-    focusChangeRow,
-    focusLogItem,
-    git.changes,
-    gitLog,
-    handleClose,
-    logCommits,
-    logFocus,
-    moveLogFocus,
-    requestLog,
-    rollbackPaths,
-    tab,
-    toggleSelection,
-    viewCommitDiff,
-  ]);
+  };
 
   return (
-    <div
-      className="modal-overlay"
+    <ModalLayer
+      modalId={`git:${panelId}`}
       role="dialog"
       aria-modal="true"
-      onKeyDown={(event) => event.stopPropagation()}
+      onKeyDown={(event) => {
+        onKeyDown(event);
+        event.stopPropagation();
+      }}
       onKeyUp={(event) => event.stopPropagation()}
     >
       <ResizableModal
@@ -911,7 +887,7 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
           )}
         </div>
       </ResizableModal>
-    </div>
+    </ModalLayer>
   );
 }
 

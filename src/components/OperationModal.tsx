@@ -6,6 +6,7 @@ import type { AppState, PendingDryRun } from "../store";
 import { isArchiveSourceId, isGlobalSelectionSourceId } from "../utils/sourceId";
 import { IconAlertTriangle, IconCopy } from "@tabler/icons-react";
 import { ResizableModal } from "./ResizableModal";
+import { ModalLayer } from "./ModalStack";
 
 interface OperationModalProps {
   pending: PendingOp | null;
@@ -606,7 +607,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
     const otherPanel = panelIds.find(id => id !== pendingDryRun.sourcePanel) ?? panelIds[0] ?? "";
     const title = pendingDryRun.manifestPath ? "Fedup Delete Dry-Run Generated" : "Dry Run Script Generated";
     return (
-      <div className="modal-overlay" ref={modalRef} tabIndex={-1} onKeyDown={(e) => { if (e.key === "Escape") closeDryRun(); if (e.key === "Tab") e.preventDefault(); }}>
+      <ModalLayer modalId="operation:dry-run" ref={modalRef} onKeyDown={(e) => { if (e.key === "Escape") closeDryRun(); }}>
         <ResizableModal
           modalId="operation:dry-run"
           client={client}
@@ -672,7 +673,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
             <button className="modal__btn modal__btn--primary" data-command-id="dry-run.close" onClick={closeDryRun}>Close</button>
           </div>
         </ResizableModal>
-      </div>
+      </ModalLayer>
     );
   }
 
@@ -784,7 +785,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
     };
 
     return (
-      <div className="modal-overlay" ref={modalRef} tabIndex={-1} onClick={close} onKeyDown={handlePendingKeyDown}>
+      <ModalLayer modalId={`operation:${pending.opType}`} ref={modalRef} onClick={close} onKeyDown={handlePendingKeyDown}>
         <ResizableModal
           modalId={`operation:${pending.opType}`}
           client={client}
@@ -916,7 +917,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
             </button>
           </div>
         </ResizableModal>
-      </div>
+      </ModalLayer>
     );
   }
 
@@ -1128,7 +1129,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
     };
 
     return (
-      <div className="modal-overlay" ref={modalRef} tabIndex={-1} onClick={isTerminal && !requiresExplicitClose ? close : undefined} onKeyDown={handleActiveJobKeyDown}>
+      <ModalLayer modalId={`operation:${activeJob.kind}`} ref={modalRef} onClick={isTerminal && !requiresExplicitClose ? close : undefined} onKeyDown={handleActiveJobKeyDown}>
         <ResizableModal
           modalId={isSyncBro || isFedupBro ? `operation:${activeJob.kind}:result` : `operation:${activeJob.kind}`}
           client={client}
@@ -1493,7 +1494,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
             )}
           </div>
         </ResizableModal>
-      </div>
+      </ModalLayer>
     );
   }
 

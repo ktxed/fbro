@@ -4,6 +4,7 @@ import type { PendingTouch } from "../store";
 import type { WsClient } from "../ws/client";
 import { useInputHistory } from "../hooks/useInputHistory";
 import { InputHistoryDropdown } from "./InputHistoryDropdown";
+import { ModalLayer } from "./ModalStack";
 
 interface TouchModalProps {
   touch: PendingTouch;
@@ -46,7 +47,7 @@ export function TouchModal({ touch, client }: TouchModalProps) {
   };
 
   return (
-    <div className="modal-overlay" tabIndex={-1} onClick={close} onKeyDown={(e) => {
+    <ModalLayer modalId="touch" onClick={close} onKeyDown={(e) => {
       if (e.key === "Tab") { e.preventDefault(); return; }
       if (e.key === "Enter") { e.preventDefault(); submit(); return; }
       if (e.key === "Escape") { e.preventDefault(); close(); }
@@ -98,6 +99,6 @@ export function TouchModal({ touch, client }: TouchModalProps) {
           </button>
         </div>
       </div>
-    </div>
+    </ModalLayer>
   );
 }

@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { useAppDispatch } from "../store";
 import type { PendingAttributes } from "../store";
 import type { WsClient } from "../ws/client";
+import { ModalLayer } from "./ModalStack";
 
 interface AttributesModalProps {
   attributes: PendingAttributes;
@@ -117,7 +118,7 @@ export function AttributesModal({ attributes, client }: AttributesModalProps) {
   const canSubmit = !submitting && parseOctMode(octInput) !== null;
 
   return (
-    <div className="modal-overlay" ref={overlayRef} tabIndex={-1} onClick={close} onKeyDown={handleKeyDown}>
+    <ModalLayer modalId="attributes" ref={overlayRef} onClick={close} onKeyDown={handleKeyDown}>
       <div className="modal modal--fixed" onClick={(e) => e.stopPropagation()}>
         <div className="modal__header">Set Permissions</div>
         <div className="modal__body">
@@ -192,6 +193,6 @@ export function AttributesModal({ attributes, client }: AttributesModalProps) {
           </button>
         </div>
       </div>
-    </div>
+    </ModalLayer>
   );
 }

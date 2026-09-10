@@ -1,6 +1,7 @@
 import { useRef, useEffect } from "react";
 import { useAppDispatch, useAppState } from "../store";
 import type { WsClient } from "../ws/client";
+import { ModalLayer } from "./ModalStack";
 
 interface QuitModalProps {
   client: WsClient;
@@ -23,8 +24,8 @@ export function QuitModal({ client }: QuitModalProps) {
   const cancel = () => dispatch({ type: "CANCEL_QUIT" });
 
   return (
-    <div
-      className="modal-overlay"
+    <ModalLayer
+      modalId="quit"
       ref={overlayRef}
       tabIndex={-1}
       onKeyDown={(e) => {
@@ -55,6 +56,6 @@ export function QuitModal({ client }: QuitModalProps) {
           </div>
         </div>
       </div>
-    </div>
+    </ModalLayer>
   );
 }

@@ -2132,6 +2132,10 @@ body {
   z-index: 100;
 }
 
+.modal-layer[data-modal-state="background"] {
+  pointer-events: none;
+}
+
 .modal {
   background: var(--bg-panel);
   border: 1px solid var(--border-focus);
