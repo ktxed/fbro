@@ -507,7 +507,7 @@ pub(crate) async fn navigate_to(
         view_mode,
     ) = {
         let mut state_guard = state.lock().await;
-        let (source_id, sort, filter, show_hidden, version, panel_epoch, shadow_schema) =
+        let (source_id, current_sort, filter, show_hidden, version, panel_epoch, shadow_schema) =
             if let Some(panel) = state_guard.panels.get_mut(panel_id) {
                 let source_id = panel.source_id.clone();
                 panel.path = new_path.to_string();
@@ -557,6 +557,9 @@ pub(crate) async fn navigate_to(
             }
             return;
         };
+        let sort = state_guard
+            .apply_location_settings(panel_id, driver.is_local())
+            .unwrap_or(current_sort);
         let supports_thumbs = driver.supports_thumbnails();
         // Auto-fall-back: if grid is active but new source doesn't support
         // thumbnails, drop back to list mode.
@@ -599,6 +602,7 @@ pub(crate) async fn navigate_to(
                 "selection": [],
                 "selectedEntries": [],
                 "status": "loading",
+                "sort": { "by": sort.by, "order": sort.order },
                 "filter": null,
                 "filterModeActive": false,
                 "totalCount": null,
@@ -683,7 +687,7 @@ pub(crate) async fn rescan_panel(
         let (
             source_id,
             path,
-            sort,
+            current_sort,
             filter,
             filter_mode_active,
             show_hidden,
@@ -735,6 +739,9 @@ pub(crate) async fn rescan_panel(
             }
             return;
         };
+        let sort = state_guard
+            .apply_location_settings(panel_id, driver.is_local())
+            .unwrap_or(current_sort);
         let supports_thumbs = driver.supports_thumbnails();
         if !supports_thumbs {
             if let Some(panel) = state_guard.panels.get_mut(panel_id) {
@@ -847,8 +854,8 @@ pub(crate) async fn quiet_rescan_panel(
     }
 
     let (source_id, panel_epoch, path, sort, filter, show_hidden, version, driver) = {
-        let state_guard = state.lock().await;
-        let (source_id, panel_epoch, path, sort, filter, show_hidden, version) =
+        let mut state_guard = state.lock().await;
+        let (source_id, panel_epoch, path, current_sort, filter, show_hidden, version) =
             if let Some(panel) = state_guard.panels.get(panel_id) {
                 (
                     panel.source_id.clone(),
@@ -878,6 +885,9 @@ pub(crate) async fn quiet_rescan_panel(
             }
             return;
         };
+        let sort = state_guard
+            .apply_location_settings(panel_id, driver.is_local())
+            .unwrap_or(current_sort);
         (
             source_id,
             panel_epoch,

@@ -96,9 +96,16 @@ export class FbroObserver {
   }
 
   waitForPanelReady(panelId, timeout = 15_000) {
+    let lastSnapshotRequest = 0;
     return waitFor(() => {
       const panel = this.state.panels[panelId];
-      return panel?.status === "ready" ? panel : false;
+      if (panel?.status === "ready") return panel;
+      const now = Date.now();
+      if (now - lastSnapshotRequest > 500) {
+        lastSnapshotRequest = now;
+        this.sendIntent("RequestStateSnapshot");
+      }
+      return false;
     }, { timeout, label: `${this.name} panel ${panelId} ready` });
   }
 

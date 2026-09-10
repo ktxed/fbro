@@ -143,16 +143,25 @@ async fn prepare_panel_home_recovery(
             panel.view_mode = crate::state::PanelViewMode::List;
         }
 
+        let panel_sort = panel.sort.clone();
+        let panel_show_hidden = panel.show_hidden;
+        let panel_version = panel.version;
+        let panel_epoch = panel.panel_epoch;
+        let view_mode = panel.view_mode.as_str().to_string();
+        let sort = state_guard
+            .apply_location_settings(panel_id, driver.is_local())
+            .unwrap_or(panel_sort);
+
         (
             home,
-            panel.sort.clone(),
-            panel.show_hidden,
-            panel.version,
-            panel.panel_epoch,
+            sort,
+            panel_show_hidden,
+            panel_version,
+            panel_epoch,
             driver,
             fallback_source_id,
             supports_thumbs,
-            panel.view_mode.as_str().to_string(),
+            view_mode,
         )
     };
 
@@ -171,6 +180,7 @@ async fn prepare_panel_home_recovery(
                 "selection": [],
                 "selectedEntries": [],
                 "status": "loading",
+                "sort": { "by": sort.by, "order": sort.order },
                 "filter": null,
                 "filterModeActive": false,
                 "totalCount": null,

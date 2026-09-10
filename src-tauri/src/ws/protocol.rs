@@ -624,7 +624,7 @@ pub struct ShadowSourceSchema {
     pub cursor_hint: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct SortSpec {
     pub by: String,
     pub order: String,

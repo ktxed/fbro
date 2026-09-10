@@ -200,6 +200,22 @@ export async function runLocalFlow(browser, observer) {
   });
   await browser.keys(["Escape"]);
 
+  // Sorting is remembered by local location, shared across panels, and an
+  // unseen directory starts from the name-ascending default.
+  await goToPanelPath(browser, observer, "left", aSrc);
+  await observer.waitForSort("left", "name", "asc");
+  await goToPanelPath(browser, observer, "left", sortDir);
+  await observer.waitForSort("left", "date", "asc");
+  await goToPanelPath(browser, observer, "right", sortDir);
+  await observer.waitForSort("right", "date", "asc");
+  await clickSortHeader(browser, "left", "date");
+  await observer.waitForSort("left", "date", "desc");
+  await observer.waitForSort("right", "date", "desc");
+  await clickSortHeader(browser, "left", "date");
+  await observer.waitForSort("left", "date", "asc");
+  await observer.waitForSort("right", "date", "asc");
+  await goToPanelPath(browser, observer, "right", path.posix.join(aDst, "alpha"));
+
   await verifyWindowFocusRestoration(browser, observer);
   await verifyGridLeftAtFirstItemNavigatesUp(browser, observer, aSrc);
 }

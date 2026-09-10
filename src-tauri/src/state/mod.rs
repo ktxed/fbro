@@ -1,3 +1,4 @@
+pub mod location_settings;
 pub mod settings;
 
 use std::collections::{HashMap, HashSet};
@@ -520,6 +521,8 @@ pub struct AppState {
     pub bookmarks: Vec<BookmarkEntry>,
     pub font_size: u8,
     pub settings: settings::Settings,
+    /// Per-local-directory preferences loaded from the shared SQLite store.
+    pub location_settings: location_settings::LocationSettingsMap,
     pub child_processes: HashMap<u32, ChildProcessEntry>,
     pub pty_manager: Arc<crate::terminal::PtyManager>,
     /// Thumbnail generation worker pool. The fileserver uses it directly to
@@ -604,6 +607,19 @@ pub struct GitCompareNavigation {
 }
 
 impl AppState {
+    /// Apply the preferences associated with the panel's current local path.
+    /// Non-local panels keep their existing per-panel behavior.
+    pub fn apply_location_settings(&mut self, panel_id: &str, is_local: bool) -> Option<SortSpec> {
+        let panel = self.panels.get(panel_id)?;
+        if !is_local {
+            return Some(panel.sort.clone());
+        }
+
+        let sort = location_settings::sort_for(&self.location_settings, &panel.path);
+        self.panels.get_mut(panel_id)?.sort = sort.clone();
+        Some(sort)
+    }
+
     pub fn fallback_source_id_for_home(&self) -> Option<String> {
         let home = self.platform.home_dir();
         fallback_source_id_for_home_candidates(
@@ -627,6 +643,10 @@ impl AppState {
     ) -> Self {
         let home = platform.home_dir();
         let loaded_settings = settings::load();
+        let location_settings = location_settings::load().unwrap_or_else(|error| {
+            eprintln!("[fbro] Failed to load location settings: {error}");
+            HashMap::new()
+        });
         let show_hidden_default = loaded_settings.general.show_hidden_default;
 
         // Validate a saved path; fall back to home if it is no longer a directory.
@@ -673,10 +693,10 @@ impl AppState {
             .map(|v| v.id.clone())
             .unwrap_or_else(|| vols[0].id.clone());
 
-        let default_sort = SortSpec {
-            by: "name".to_string(),
-            order: "asc".to_string(),
-        };
+        let left_path = resolve("left");
+        let right_path = resolve("right");
+        let left_sort = location_settings::sort_for(&location_settings, &left_path);
+        let right_sort = location_settings::sort_for(&location_settings, &right_path);
 
         let view_for = |id: &str| -> PanelViewMode {
             if loaded_settings.general.save_panel_view_mode {
@@ -696,9 +716,9 @@ impl AppState {
             tab_kind: TabKind::Listing,
             tab_title_override: None,
             source_id: initial_source_id.clone(),
-            path: resolve("left"),
+            path: left_path,
             status: PanelStatus::Loading,
-            sort: default_sort.clone(),
+            sort: left_sort,
             filter: None,
             filter_mode_active: false,
             show_hidden: show_hidden_default,
@@ -725,9 +745,9 @@ impl AppState {
             tab_kind: TabKind::Listing,
             tab_title_override: None,
             source_id: initial_source_id.clone(),
-            path: resolve("right"),
+            path: right_path,
             status: PanelStatus::Loading,
-            sort: default_sort,
+            sort: right_sort,
             filter: None,
             filter_mode_active: false,
             show_hidden: show_hidden_default,
@@ -932,6 +952,7 @@ impl AppState {
             bookmarks: crate::bookmarks::load(),
             font_size: crate::persistence::load().font_size.unwrap_or(13),
             settings: loaded_settings,
+            location_settings,
             child_processes: HashMap::new(),
             pty_manager: Arc::new(crate::terminal::PtyManager::new()),
             thumb_pool,
@@ -1244,6 +1265,17 @@ pub fn restore_tabs_from_session(
                 .min(live_slot.tab_panel_ids.len().saturating_sub(1));
             live_slot.active_panel_id = live_slot.tab_panel_ids[active_index].clone();
         }
+    }
+
+    let restored_panel_ids = state.panels.keys().cloned().collect::<Vec<_>>();
+    for panel_id in restored_panel_ids {
+        let is_local = state
+            .panels
+            .get(&panel_id)
+            .and_then(|panel| state.drivers.get(&panel.source_id))
+            .map(|driver| driver.is_local())
+            .unwrap_or(false);
+        state.apply_location_settings(&panel_id, is_local);
     }
 }
 

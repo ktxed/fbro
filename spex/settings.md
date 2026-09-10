@@ -13,7 +13,7 @@ Settings are exposed through a tabbed modal dialog triggered by **Ctrl+,** (or *
 | Trigger | Command `app.settings`, default binding **Ctrl+,** / **Cmd+,**, also reachable from the command palette |
 | Apply model | Live-apply — no Save button. Each control dispatches its own typed intent on change; BE pushes `StatePatch` |
 | Wire surface | Per-setting intents (typed). One fat `UpdateSetting { path, value }` intent was rejected. |
-| Persistence | Per subtree: `General` → `~/.config/fbro/settings.json` (atomic temp+rename) |
+| Persistence | General settings → `settings.json`; local location settings → `journal.sqlite3` |
 | Defaults | Hardcoded in BE `Default` impls; missing or corrupt file → defaults silently, no error |
 | Validation | Authoritative on BE. FE controls reflect `state.settings.*` after the BE confirms — no optimistic updates |
 | Backdrop click | Does **not** close — settings is a considered action; explicit close (Esc or Close button) required |
@@ -102,11 +102,28 @@ Writes are atomic: content is written to `settings.json.tmp` then renamed over `
 
 On startup, a missing or unparseable file is silently replaced by defaults — no error is shown.
 
+### Local location settings
+
+Preferences associated with a local filesystem directory are stored in the
+`location_settings` table of the existing `journal.sqlite3` database. The
+domain model is `LocationSettings`; sorting is its first setting and consists
+of the sort column plus direction.
+
+Rows are keyed by normalized absolute local path. They are loaded into
+`AppState.location_settings` at startup and updated with an UPSERT whenever
+sorting changes. Panels and tabs therefore share the same preference for a
+location. An unseen location uses name ascending. Remote, archive, search, and
+other virtual sources do not participate.
+
+Location-setting writes are storage only and are not added to the visible,
+append-only audit journal.
+
 ## Key files
 
 | File | Role |
 |---|---|
 | `src-tauri/src/state/settings.rs` | `Settings` / `GeneralSettings` structs, `load()`, `save_general()` |
+| `src-tauri/src/state/location_settings.rs` | SQLite-backed per-location settings model and persistence |
 | `src-tauri/src/ws/intents/settings.rs` | `SetGeneralOption` intent handler |
 | `src-tauri/src/ws/protocol.rs` | `SettingsSnapshot`, `GeneralSettingsSchema` |
 | `src-tauri/src/ws/commands.rs` | `app.settings` command + Ctrl+,/Cmd+, binding |

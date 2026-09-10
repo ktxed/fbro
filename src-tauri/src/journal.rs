@@ -15,7 +15,7 @@ use crate::ws::protocol::{FilterSpec, SortSpec};
 
 pub const SOURCE_ID: &str = "journal";
 
-fn database_path() -> std::path::PathBuf {
+pub(crate) fn database_path() -> std::path::PathBuf {
     crate::config::config_dir().join("journal.sqlite3")
 }
 

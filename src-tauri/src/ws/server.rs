@@ -242,24 +242,34 @@ async fn handle_connection(
         // First connection: incremental scan so entries appear progressively.
         for panel_id in &panel_ids {
             let (source_id, panel_epoch, path, sort, filter, show_hidden, version_base, driver) = {
-                let state_guard = state.lock().await;
+                let mut state_guard = state.lock().await;
                 let Some(panel) = state_guard.panels.get(panel_id) else {
                     continue;
                 };
-                let Some(driver) = state_guard.drivers.get(&panel.source_id).cloned() else {
+                let source_id = panel.source_id.clone();
+                let panel_epoch = panel.panel_epoch;
+                let path = panel.path.clone();
+                let current_sort = panel.sort.clone();
+                let filter = panel.filter.clone();
+                let show_hidden = panel.show_hidden;
+                let version = panel.version;
+                let Some(driver) = state_guard.drivers.get(&source_id).cloned() else {
                     // Driver missing (e.g. a search source was ejected while
                     // the client was disconnected) — skip the initial scan for
                     // this panel; it will be rescanned when navigated.
                     continue;
                 };
+                let sort = state_guard
+                    .apply_location_settings(panel_id, driver.is_local())
+                    .unwrap_or(current_sort);
                 (
-                    panel.source_id.clone(),
-                    panel.panel_epoch,
-                    panel.path.clone(),
-                    panel.sort.clone(),
-                    panel.filter.clone(),
-                    panel.show_hidden,
-                    panel.version,
+                    source_id,
+                    panel_epoch,
+                    path,
+                    sort,
+                    filter,
+                    show_hidden,
+                    version,
                     driver,
                 )
             };

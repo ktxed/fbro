@@ -241,28 +241,87 @@ async fn refresh_panels(ctx: &mut IntentContext<'_>) {
 async fn set_sort(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
     let panel_id = resolve_panel_id(scope, ctx.state).await;
     let parsed = SortArgs::from_args(args);
-    let names = {
-        let mut state_guard = ctx.state.lock().await;
-        let names = selected_names_for(&state_guard, &panel_id);
-        if let Some(panel) = state_guard.panels.get_mut(&panel_id) {
-            panel.sort = crate::ws::protocol::SortSpec {
-                by: parsed.by,
-                order: parsed.order,
-            };
-        }
-        names
+    if !crate::state::location_settings::valid_sort(&parsed.by, &parsed.order) {
+        return;
+    }
+    let sort = crate::ws::protocol::SortSpec {
+        by: parsed.by,
+        order: parsed.order,
     };
-    rescan_panel(
-        &panel_id,
-        ctx.state,
-        ctx.tx,
-        ctx.scan_handles,
-        None,
-        names,
-        ctx.dir_size_queue,
-        ctx.watcher_cmd_tx,
-    )
-    .await;
+    let (rescans, persisted) = {
+        let mut state_guard = ctx.state.lock().await;
+        let local_location = state_guard.panels.get(&panel_id).and_then(|panel| {
+            state_guard
+                .drivers
+                .get(&panel.source_id)
+                .filter(|driver| driver.is_local())
+                .map(|_| crate::state::location_settings::normalize_local_path(&panel.path))
+        });
+        let affected_panel_ids = if let Some(location) = local_location.as_deref() {
+            state_guard
+                .panels
+                .iter()
+                .filter(|(_, panel)| {
+                    panel.tab_kind == crate::state::TabKind::Listing
+                        && state_guard
+                            .drivers
+                            .get(&panel.source_id)
+                            .is_some_and(|driver| driver.is_local())
+                        && crate::state::location_settings::normalize_local_path(&panel.path)
+                            == location
+                })
+                .map(|(id, _)| id.clone())
+                .collect::<Vec<_>>()
+        } else if state_guard.panels.contains_key(&panel_id) {
+            vec![panel_id.clone()]
+        } else {
+            Vec::new()
+        };
+        let rescans = affected_panel_ids
+            .iter()
+            .map(|id| (id.clone(), selected_names_for(&state_guard, id)))
+            .collect::<Vec<_>>();
+        for id in &affected_panel_ids {
+            if let Some(panel) = state_guard.panels.get_mut(id) {
+                panel.sort = sort.clone();
+            }
+        }
+        let persisted = local_location.map(|location| {
+            let settings = crate::state::location_settings::LocationSettings {
+                sort: Some(sort.clone()),
+            };
+            state_guard
+                .location_settings
+                .insert(location.clone(), settings.clone());
+            (location, settings)
+        });
+        (rescans, persisted)
+    };
+    for (affected_panel_id, names) in rescans {
+        rescan_panel(
+            &affected_panel_id,
+            ctx.state,
+            ctx.tx,
+            ctx.scan_handles,
+            None,
+            names,
+            ctx.dir_size_queue,
+            ctx.watcher_cmd_tx,
+        )
+        .await;
+    }
+
+    if let Some((location, settings)) = persisted {
+        let result = tokio::task::spawn_blocking(move || {
+            crate::state::location_settings::save(&location, &settings)
+        })
+        .await;
+        match result {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => eprintln!("[fbro] Failed to save location settings: {error}"),
+            Err(error) => eprintln!("[fbro] Location settings task failed: {error}"),
+        }
+    }
 }
 
 async fn set_filter(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
