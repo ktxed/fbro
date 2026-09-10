@@ -33,6 +33,7 @@ if (params.get("diff") === "1") {
         isLocal={params.get("local") === "1"}
         nativeFileSize={sizeParam !== null ? Number(sizeParam) : null}
         initialColorScheme={params.get("colorScheme")}
+        initialFindQuery={params.get("find")}
       />
     </React.StrictMode>,
   );

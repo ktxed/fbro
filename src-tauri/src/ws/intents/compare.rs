@@ -999,6 +999,7 @@ mod tests {
         EntrySchema {
             name: source_path.unwrap_or("missing.txt").to_string(),
             kind: "file".to_string(),
+            browsable_archive: false,
             size: Some(1),
             mtime: None,
             btime: None,

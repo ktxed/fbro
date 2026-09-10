@@ -39,6 +39,34 @@ use state::{AppState, CliOpenRequest};
 use tokio::sync::Mutex;
 use tokio_tungstenite::tungstenite::Message;
 
+fn allow_webview_navigation(url: &tauri::Url) -> bool {
+    let production = (url.scheme() == "tauri" && url.host_str() == Some("localhost"))
+        || (matches!(url.scheme(), "http" | "https")
+            && url.host_str() == Some("tauri.localhost"));
+    let development = cfg!(debug_assertions)
+        && url.scheme() == "http"
+        && matches!(url.host_str(), Some("localhost" | "127.0.0.1"))
+        && url.port() == Some(5173);
+    production || development || url.as_str() == "about:blank"
+}
+
+#[cfg(test)]
+mod navigation_policy_tests {
+    use super::allow_webview_navigation;
+
+    #[test]
+    fn blocks_external_and_active_navigation_schemes() {
+        for url in [
+            "https://example.test/", "javascript:alert(1)", "data:text/html,x",
+            "file:///etc/passwd", "localfile://localhost/tmp/page.html",
+        ] {
+            assert!(!allow_webview_navigation(&url.parse().unwrap()), "{url}");
+        }
+        assert!(allow_webview_navigation(&"tauri://localhost/index.html".parse().unwrap()));
+        assert!(allow_webview_navigation(&"about:blank".parse().unwrap()));
+    }
+}
+
 fn percent_decode(s: &str) -> String {
     let bytes = s.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
@@ -293,6 +321,11 @@ fn main() {
         Arc::new(StdMutex::new(HashMap::new()));
 
     tauri::Builder::default()
+        .plugin(
+            tauri::plugin::Builder::<tauri::Wry>::new("navigation-policy")
+                .on_navigation(|_, url| allow_webview_navigation(url))
+                .build(),
+        )
         .register_uri_scheme_protocol("localfile", |_ctx, request| {
             // Serve local filesystem files for the viewer.
             // WebKit blocks file:// from a non-file:// origin, so we proxy via

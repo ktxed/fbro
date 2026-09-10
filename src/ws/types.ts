@@ -3,6 +3,8 @@
 export interface VFSEntry {
   name: string;
   kind: "file" | "directory" | "symlink" | "other";
+  /** The backend can mount this file as a navigable archive shadow source. */
+  browsableArchive?: boolean;
   size?: number;
   mtime?: string;
   btime?: string; // birth time — file creation; not available on all platforms/filesystems
@@ -756,6 +758,14 @@ export interface FileChunkMessage {
   fileSize?: number;
 }
 
+export interface MarkdownPreviewMessage {
+  type: "MarkdownPreview";
+  timestamp: number;
+  path: string;
+  html: string;
+  links: Array<{ id: string; path: string }>;
+}
+
 export interface RenameOkMessage {
   type: "RenameOk";
   timestamp: number;
@@ -1005,6 +1015,7 @@ export type BEMessage =
   | ErrorMessage
   | QuitConfirmRequiredMessage
   | FileChunkMessage
+  | MarkdownPreviewMessage
   | RenameOkMessage
   | MkdirOkMessage
   | TouchFileOkMessage

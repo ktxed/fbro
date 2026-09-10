@@ -76,6 +76,14 @@ pub enum ServerMessage {
         #[serde(rename = "fileSize", skip_serializing_if = "Option::is_none")]
         file_size: Option<u64>,
     },
+    /// Backend-rendered Markdown. Link destinations have already been resolved
+    /// and checked; the HTML contains only inert fragment identifiers.
+    MarkdownPreview {
+        timestamp: u64,
+        path: String,
+        html: String,
+        links: Vec<MarkdownLinkSchema>,
+    },
     RenameOk {
         timestamp: u64,
         #[serde(rename = "panelId")]
@@ -370,6 +378,12 @@ pub enum ServerMessage {
     },
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct MarkdownLinkSchema {
+    pub id: String,
+    pub path: String,
+}
+
 #[derive(Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct CompareDiffResultSchema {
@@ -626,6 +640,8 @@ pub struct FilterSpec {
 pub struct EntrySchema {
     pub name: String,
     pub kind: String,
+    #[serde(rename = "browsableArchive")]
+    pub browsable_archive: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub size: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]

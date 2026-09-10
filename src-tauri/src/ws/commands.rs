@@ -84,6 +84,7 @@ pub(crate) fn build_interactive_commands() -> Vec<InteractiveCommandSchema> {
             vec![mod_binding("p", true)],
             None,
         ),
+        command("app.about", "App", "About fbro", vec![], None),
         command(
             "app.search",
             "App",
@@ -633,4 +634,21 @@ pub(crate) fn build_interactive_commands() -> Vec<InteractiveCommandSchema> {
         ));
     }
     commands
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_interactive_commands;
+
+    #[test]
+    fn about_is_available_without_reserving_a_shortcut() {
+        let commands = build_interactive_commands();
+        let about = commands
+            .iter()
+            .find(|command| command.id == "app.about")
+            .expect("About command should be registered");
+        assert_eq!(about.category, "App");
+        assert_eq!(about.title, "About fbro");
+        assert!(about.bindings.is_empty());
+    }
 }

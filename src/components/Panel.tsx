@@ -11,7 +11,7 @@ import {
   PANEL_SHORTCUT_COMMAND_IDS,
 } from "../commands/interactive";
 import { useAppDispatch, useAppState } from "../store";
-import { IconChevronDown, IconChevronUp, IconChevronRight, IconChevronLeft, IconArrowUpRight, IconX, IconAlertTriangle, IconActivity, IconHistory, IconGitBranch, IconGitCompare, IconLock, IconMinus, IconNetwork, IconListCheck, IconPlus, IconRestore, IconCopy, IconPhoto, IconTrash, IconPencil, IconRobot, IconArrowsMove } from "@tabler/icons-react";
+import { IconChevronDown, IconChevronUp, IconChevronRight, IconChevronLeft, IconArrowUpRight, IconX, IconAlertTriangle, IconActivity, IconHistory, IconGitBranch, IconGitCompare, IconLock, IconMinus, IconNetwork, IconListCheck, IconPlus, IconRestore, IconCopy, IconPhoto, IconTrash, IconPencil, IconRobot, IconArrowsMove, IconFolderOpen } from "@tabler/icons-react";
 import { contextualEntryIsSelected, contextualOperationAvailable, resolveContextualTarget, type ContextualTarget } from "../contextualOperations";
 
 // Maps Source.iconName (BE-provided) to a Tabler icon component for rendering
@@ -223,7 +223,15 @@ function GitBubbleActions({
     <span className="panel__git-bubble panel__git-bubble--actions" data-testid="git-inline-bubble">
       <span className="panel__git-bubble-label">{label}</span>
       <span className="panel__git-bubble-buttons panel__inline-toolbar" role="toolbar" aria-label={`Git and file actions for ${path}`} onKeyDown={handleToolbarKeyDown}>
-        <InlineOperationButtons panelId={panelId} tooltipId={`git-inline-actions-${panelId}`} items={[...gitOperations, ...fileOperations]} />
+        <InlineOperationButtons
+          panelId={panelId}
+          tooltipId={`git-inline-actions-${panelId}`}
+          items={[
+            ...fileOperations.filter((item) => item.id === "panel.browse-archive"),
+            ...gitOperations,
+            ...fileOperations.filter((item) => item.id !== "panel.browse-archive"),
+          ]}
+        />
       </span>
     </span>
   );
@@ -1638,6 +1646,17 @@ export function Panel({
       contextualOperationAvailable(id, appState, target);
     const previewUrl = entry && available("file.preview") && isImagePreviewCandidate(entry) ? thumbUrlFor(entry, PREVIEW_THUMB_SIZE) : null;
     const operations: InlineOperationItem[] = [];
+    if (available("panel.browse-archive")) operations.push({
+      id: "panel.browse-archive",
+      testId: "file-inline-browse-archive",
+      label: "Browse archive",
+      ariaLabel: `Browse ${target.primary.name} as archive`,
+      icon: <IconFolderOpen size={13} aria-hidden />,
+      run: () => {
+        focusPanel();
+        client.sendIntent("OpenEntry", panelId);
+      },
+    });
     if (previewUrl) operations.push({
         id: "file.preview",
         testId: "file-inline-preview",

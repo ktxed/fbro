@@ -36,6 +36,7 @@ export const GLOBAL_SHORTCUT_COMMAND_IDS = [
   "app.open_jobs",
   "app.search",
   "app.settings",
+  "app.about",
   "app.install_fbro_command",
   "panel.viewer.embed",
   "panel.navigate_source_root",
@@ -464,17 +465,15 @@ function toggleSelectedDirectorySizes(client: WsClient, panel: PanelState) {
 function openFocusedEntry(client: WsClient, panel: PanelState, sources: Record<string, Source>) {
   const entry = currentEntry(panel);
   if (entry && entry.kind !== "directory") {
-    // Archive files are navigable — treat Enter the same as navigating into a directory.
-    const lname = entry.name.toLowerCase();
-    if (sources[panel.sourceId]?.kind === "remote" || panel.sourceId === "journal") {
+    if (entry.browsableArchive) {
+      client.sendIntent("OpenEntry", "focused-panel");
+    } else if (sources[panel.sourceId]?.kind === "remote" || panel.sourceId === "journal") {
       client.sendIntent("ViewFile", undefined, {
         panelId: panel.panelId,
         path: panel.path,
         sourceId: panel.sourceId,
         filename: entry.name,
       });
-    } else if (entry.kind === "file" && (lname.endsWith(".zip") || lname.endsWith(".7z")) && !panel.shadowSource) {
-      client.sendIntent("OpenEntry", "focused-panel");
     } else {
       client.sendIntent("OpenFile", "focused-panel");
     }
@@ -571,6 +570,9 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
       return !!context.onOpenJobsView;
     case "app.settings":
       dispatch({ type: "OPEN_SETTINGS", tab: "general" });
+      return true;
+    case "app.about":
+      dispatch({ type: "OPEN_ABOUT" });
       return true;
     case "app.install_fbro_command":
       void invoke<{ path: string; command: string }>("install_fbro_command")

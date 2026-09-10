@@ -970,10 +970,11 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
     const showOverallProgress = totalFileCount > 1;
     const shouldConfirmCancel = (isQueued || isProgress)
       && (isRemoteCopy || (p?.currentFileBytesTotal ?? 0) > LARGE_CANCEL_THRESHOLD);
-    const canSkipCurrentFile = isProgress
-      && activeJob.kind === "file-op"
+    const showSkipCurrentFile = activeJob.kind === "file-op"
       && activeJob.type === "copy"
-      && !activeSourcePanel?.shadowSource
+      && !activeSourcePanel?.shadowSource;
+    const canSkipCurrentFile = showSkipCurrentFile
+      && isProgress
       && !activeJob.paused
       && !!p?.currentFile;
     const graph = speedGraphData(speedSamples);
@@ -1422,8 +1423,8 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
                     Pause
                   </button>
                 ) : null}
-                {canSkipCurrentFile && (
-                  <button className="modal__btn" data-command-id="job.skip-current-file" onClick={skipCurrentFile}>
+                {showSkipCurrentFile && (
+                  <button className="modal__btn" data-command-id="job.skip-current-file" onClick={skipCurrentFile} disabled={!canSkipCurrentFile}>
                     Skip
                   </button>
                 )}

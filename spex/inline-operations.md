@@ -50,6 +50,7 @@ the applicable general operations.
 
 | Item | Cardinality | Eligibility / behavior |
 |---|---:|---|
+| Browse archive | exactly 1 | Backend-advertised navigable archive; always the first choice and activation enters the existing archive shadow source |
 | View Git diff, Stage / Unstage, Rollback | exactly 1 | Single changed Git file; rollback retains its in-place confirmation |
 | Preview | exactly 1 | Image file on a thumbnail-capable source; hover/focus shows the thumbnail and activation opens the viewer |
 | Compare | 1–2 | Exactly two selected files, or a single selected file that differs from the file under the cursor — the own panel's lone selection, otherwise the other panel's single selection (a cross-panel pair with one selection per panel) |
@@ -66,7 +67,8 @@ values with plural menu labels for a selection.
 
 - The choices bar has `role="toolbar"`; every item is a native button with an
   accessible target-specific name.
-- From the panel, Right Arrow enters the first choice without moving the cursor.
+- From the panel, Right Arrow enters the first choice without moving the cursor. On a navigable archive this focuses Browse archive; Enter or Space then enters the archive.
+- Inline operations that navigate away from the current row restore focus to the panel before dispatching the navigation, so keyboard input continues after the row unmounts.
   A singleton directory has no bar, so Right Arrow drills down. When a directory
   is the cursor row of a multi-selection, Right Arrow enters the bulk-operation
   bar instead; Enter still drills into the directory.

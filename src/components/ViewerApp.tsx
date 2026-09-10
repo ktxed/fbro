@@ -1,12 +1,11 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { resolveWsUrl, WsClient } from "../ws/client";
-import type { BEMessage, FileChunkMessage, ViewerFileChangedMessage, StateSnapshotMessage, StatePatchMessage } from "../ws/types";
+import type { BEMessage, FileChunkMessage, MarkdownPreviewMessage, ViewerFileChangedMessage, StateSnapshotMessage, StatePatchMessage } from "../ws/types";
 import { applyZoom, nextZoomSize, DEFAULT_FONT_SIZE } from "../utils/zoom";
 import { ImageViewer, IMAGE_LIMIT } from "../viewers/ImageViewer";
 import { ViewerLoading } from "../viewers/ViewerLoading";
 import { detectRenderer, isImageExt, isMdExt, isVideoExt } from "../viewers/media";
-import { marked } from "marked";
 import { DirectFileViewer, canUseDirect } from "../viewers/DirectFileViewer";
 import { isArchiveSourceId, isRemoteSourceId } from "../utils/sourceId";
 import { useInputHistory } from "../hooks/useInputHistory";
@@ -22,7 +21,7 @@ let _mermaidTheme: "dark" | "default" | null = null;
 function getMermaid(theme: "dark" | "default") {
   if (!_mermaidReady) {
     _mermaidReady = import("mermaid").then(async ({ default: m }) => {
-      m.initialize({ startOnLoad: false, theme });
+      m.initialize({ startOnLoad: false, theme, securityLevel: "strict", flowchart: { htmlLabels: false } });
       _mermaidTheme = theme;
       try { await m.render("mermaid-warmup", "graph TD\n  A-->B"); } catch {}
       return m;
@@ -30,7 +29,7 @@ function getMermaid(theme: "dark" | "default") {
   }
   return _mermaidReady.then((m) => {
     if (_mermaidTheme !== theme) {
-      m.initialize({ startOnLoad: false, theme });
+      m.initialize({ startOnLoad: false, theme, securityLevel: "strict", flowchart: { htmlLabels: false } });
       _mermaidTheme = theme;
     }
     return m;
@@ -51,6 +50,7 @@ interface ViewerAppProps {
   isLocal: boolean;
   nativeFileSize: number | null;
   initialColorScheme?: string | null;
+  initialFindQuery?: string | null;
 }
 
 type ViewMode = "text" | "image" | "hex";
@@ -77,6 +77,30 @@ function detectBinary(bytes: Uint8Array): boolean {
 
 function renderText(bytes: Uint8Array): string {
   return new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+}
+
+function sanitizedMermaidSvg(svg: string): SVGElement | null {
+  const doc = new DOMParser().parseFromString(svg, "image/svg+xml");
+  if (doc.querySelector("parsererror")) return null;
+  doc.querySelectorAll("script,foreignObject,iframe,object,embed,image,a").forEach(node => node.remove());
+  doc.querySelectorAll<HTMLElement>("*").forEach(element => {
+    for (const attr of Array.from(element.attributes)) {
+      const name = attr.name.toLowerCase();
+      if (name.startsWith("on")) element.removeAttribute(attr.name);
+      if ((name === "href" || name === "xlink:href") && !attr.value.startsWith("#")) {
+        element.removeAttribute(attr.name);
+      }
+      if (name === "style") {
+        const residue = attr.value.replace(/url\(\s*(['"]?)#[\w:.-]+\1\s*\)/gi, "");
+        if (/url\s*\(|@import/i.test(residue)) element.removeAttribute(attr.name);
+      }
+    }
+  });
+  doc.querySelectorAll("style").forEach(style => {
+    const residue = (style.textContent ?? "").replace(/url\(\s*(['"]?)#[\w:.-]+\1\s*\)/gi, "");
+    if (/url\s*\(|@import/i.test(residue)) style.remove();
+  });
+  return doc.documentElement instanceof SVGElement ? doc.documentElement : null;
 }
 
 // ─── CP437 (DOS) rendering ────────────────────────────────────────────────────
@@ -243,7 +267,7 @@ function highlightLine(
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: initFilename, windowLabel, panelId, isLocal, nativeFileSize, initialColorScheme }: ViewerAppProps) {
+export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: initFilename, windowLabel, panelId, isLocal, nativeFileSize, initialColorScheme, initialFindQuery }: ViewerAppProps) {
   // Effective image cap (in bytes) for this viewer window. Passed via the
   // launch URL by the BE based on the current ludicrousMode + maxImageSizeMb.
   // Falls back to IMAGE_LIMIT (5 MiB) so old links / missing param keep working.
@@ -310,10 +334,11 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
   const [dosMode, setDosMode] = useState(false);
   const [wordWrap, setWordWrap] = useState(false);
   const [markdownMode, setMarkdownMode] = useState(() => isMdExt(initFilename));
+  const [markdownPreview, setMarkdownPreview] = useState<MarkdownPreviewMessage | null>(null);
 
   // ── Find state ────────────────────────────────────────────────────────────
   const [findOpen, setFindOpen]   = useState(false);
-  const [findQuery, setFindQuery] = useState("");
+  const [findQuery, setFindQuery] = useState(() => initialFindQuery ?? "");
   const [findIdx, setFindIdx]     = useState(0);
   const findHistory = useInputHistory("viewer.find", setFindQuery);
   // Stable refs so the keyboard handler closure doesn't go stale
@@ -501,7 +526,13 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
 
       client.onConnected = () => {
         setError(null);
-        if (httpInitDoneRef.current) return; // already loaded via HTTP
+        if (httpInitDoneRef.current) {
+          // The HTTP fast path supplies raw bytes only. Markdown must still
+          // cross the backend renderer so the viewer receives sanitized HTML
+          // and its prevalidated local-link table.
+          if (isMdExt(filenameRef.current)) requestChunk(0, SMALL_LIMIT);
+          return;
+        }
         if (canUseDirect(isLocal, initFilename, nativeFileSize, effectiveImageLimit)) {
           setLoading(false);
         } else {
@@ -558,6 +589,10 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
         setIsSmall(prev => prev !== null ? prev : (m.eof && bytes.length <= SMALL_LIMIT));
         setBufSeq(s => s + 1);
         }
+        if (msg.type === "MarkdownPreview") {
+          const m = msg as MarkdownPreviewMessage;
+          if (m.path === curPathRef.current) setMarkdownPreview(m);
+        }
         if (msg.type === "ViewerFileChanged") {
           const m = msg as ViewerFileChangedMessage;
         setPendingNavigation(n => Math.max(0, n - 1));
@@ -568,6 +603,9 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
         // Reset viewer state for new file
         setDosMode(false);
         setMarkdownMode(isMdExt(m.filename));
+        setMarkdownPreview(null);
+        curPathRef.current = m.path;
+        curSourceIdRef.current = m.sourceId;
         setCurPath(m.path);
         setCurSourceId(m.sourceId);
         setCurFilename(m.filename);
@@ -754,6 +792,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
       // F — open find (or previous match with Shift+F)
       if ((e.key === "f" || e.key === "F") && !ctrl && !e.altKey) {
         e.preventDefault();
+        if (effectiveMode === "text" && markdownMode) setMarkdownMode(false);
         setFindOpen(true);
         if (e.shiftKey) findPrev();
         setTimeout(() => (findHistory.inputRef as React.RefObject<HTMLInputElement>).current?.focus(), 0);
@@ -894,7 +933,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [isSmall, fileSize, maxTopLine, vpLines, scrollByLines, requestChunk, windowLabel, effectiveMode, dosMode, findNext, findPrev, isImageMode]);
+  }, [isSmall, fileSize, maxTopLine, vpLines, scrollByLines, requestChunk, windowLabel, effectiveMode, dosMode, markdownMode, findNext, findPrev, isImageMode]);
 
   // Copy: only textual file contents (never chrome). Wrap mode re-joins lines.
   useEffect(() => {
@@ -1061,10 +1100,9 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
 
   const isMarkdownPreviewActive = effectiveMode === "text" && markdownMode && isSmall === true;
 
-  const markdownHtml = useMemo((): string => {
-    if (!isMarkdownPreviewActive || !buffer) return "";
-    return marked.parse(renderText(buffer)) as string;
-  }, [isMarkdownPreviewActive, buffer]);
+  const markdownHtml = isMarkdownPreviewActive && markdownPreview?.path === curPath
+    ? markdownPreview.html
+    : "";
 
   // Start loading mermaid as soon as the viewer mounts on a markdown file, so
   // the async warm-up overlaps with the file fetch instead of running after.
@@ -1080,13 +1118,37 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
     if (!markdownHtml || !contentRef.current) return;
     const container = contentRef.current;
     container.innerHTML = markdownHtml;
+    const targets = new Map(markdownPreview?.links.map(link => [`#${link.id}`, link.path]) ?? []);
+    container.querySelectorAll<HTMLAnchorElement>("a[href]").forEach(anchor => {
+      const target = targets.get(anchor.getAttribute("href") ?? "");
+      // Removing href blocks middle-click and modifier-click too; the viewer
+      // handles backend-approved files itself instead of browser navigation.
+      anchor.removeAttribute("href");
+      if (target) anchor.dataset.viewerMarkdownTarget = target;
+    });
+    const handleLinkClick = (event: MouseEvent) => {
+      const element = event.target instanceof Element ? event.target : null;
+      const anchor = element?.closest<HTMLAnchorElement>("a[data-viewer-markdown-target]");
+      if (!anchor || !container.contains(anchor)) return;
+
+      // Never let the webview perform native URL navigation. The only links
+      // supported by the viewer are relative paths to another Markdown file.
+      event.preventDefault();
+      const target = anchor.dataset.viewerMarkdownTarget;
+      if (!target) return;
+      clientRef.current?.sendIntent("ViewerOpenFile", undefined, {
+        panelId,
+        sourceId: curSourceIdRef.current,
+        path: target,
+      });
+    };
+    container.addEventListener("click", handleLinkClick);
     const codeBlocks = Array.from(
       container.querySelectorAll<HTMLElement>("code.language-mermaid"),
     );
-    if (codeBlocks.length === 0) return;
 
     let cancelled = false;
-    getMermaid(resolveColorScheme(colorSchemeId).mermaidTheme).then(mermaid => {
+    if (codeBlocks.length > 0) getMermaid(resolveColorScheme(colorSchemeId).mermaidTheme).then(mermaid => {
       if (cancelled) return;
       codeBlocks.forEach(async (code, i) => {
         const source = code.textContent ?? "";
@@ -1097,15 +1159,20 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
           if (cancelled || !pre.isConnected) return;
           const wrapper = document.createElement("div");
           wrapper.className = "viewer__mermaid";
-          wrapper.innerHTML = svg;
+          const safeSvg = sanitizedMermaidSvg(svg);
+          if (!safeSvg) throw new Error("Mermaid returned invalid SVG");
+          wrapper.replaceChildren(document.importNode(safeSvg, true));
           pre.replaceWith(wrapper);
         } catch (err) {
           console.error("mermaid render failed:", err);
         }
       });
     });
-    return () => { cancelled = true; };
-  }, [markdownHtml, colorSchemeId]);
+    return () => {
+      cancelled = true;
+      container.removeEventListener("click", handleLinkClick);
+    };
+  }, [markdownHtml, markdownPreview, colorSchemeId, panelId]);
 
   // ── Status bar info ───────────────────────────────────────────────────────
 

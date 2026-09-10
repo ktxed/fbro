@@ -342,9 +342,13 @@ pub async fn run_scan(
         }
     };
 
+    let advertise_browsable_archives = driver.is_local() || crate::ws::intents::is_search_source(&source_id);
     let mut schema_entries: Vec<EntrySchema> = entries
         .into_iter()
         .map(|e| EntrySchema {
+            browsable_archive: advertise_browsable_archives
+                && e.kind == crate::vfs::VfsKind::File
+                && crate::vfs::browsable_archive_kind(&e.name).is_some(),
             name: e.name,
             kind: e.kind.as_str().to_string(),
             size: e.size,
@@ -712,6 +716,7 @@ mod tests {
         EntrySchema {
             name: name.to_string(),
             kind: "file".to_string(),
+            browsable_archive: false,
             size: None,
             mtime: None,
             btime: None,

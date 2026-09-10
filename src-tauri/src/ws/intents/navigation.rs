@@ -6,7 +6,7 @@ use std::sync::Arc;
 use serde_json::Value;
 
 use crate::state::{Panel, PanelStatus, PanelViewMode, ShadowSource, Source, TabKind};
-use crate::vfs::VfsDriver;
+use crate::vfs::{browsable_archive_kind, BrowsableArchiveKind, VfsDriver};
 use crate::watcher::WatcherCommand;
 use crate::ws::intents::{
     archive_file_path, arg_str, is_archive_source, is_global_selection_source, is_search_source,
@@ -463,41 +463,17 @@ async fn open_entry(scope: &Value, ctx: &mut IntentContext<'_>) {
             ctx.watcher_cmd_tx,
         )
         .await;
-    } else if entry_kind == "file"
-        && is_zip_like(&entry_name)
-        && (!is_in_shadow || is_search_source(&source_id))
-    {
-        // Enter zip archive as a shadow filesystem.
-        enter_zip_archive(&panel_id, &new_path, &entry_name, ctx).await;
-    } else if entry_kind == "file"
-        && is_7z_like(&entry_name)
-        && (!is_in_shadow || is_search_source(&source_id))
-    {
-        // Enter 7z archive as a shadow filesystem.
-        enter_7z_archive(&panel_id, &new_path, &entry_name, ctx).await;
+    } else if entry_kind == "file" && (!is_in_shadow || is_search_source(&source_id)) {
+        match browsable_archive_kind(&entry_name) {
+            Some(BrowsableArchiveKind::Zip) => {
+                enter_zip_archive(&panel_id, &new_path, &entry_name, ctx).await;
+            }
+            Some(BrowsableArchiveKind::SevenZip) => {
+                enter_7z_archive(&panel_id, &new_path, &entry_name, ctx).await;
+            }
+            None => {}
+        }
     }
-}
-
-fn is_zip_like(name: &str) -> bool {
-    let lower = name.to_lowercase();
-    lower.ends_with(".zip")
-        || lower.ends_with(".apk")
-        || lower.ends_with(".jar")
-        || lower.ends_with(".war")
-        || lower.ends_with(".ear")
-        || lower.ends_with(".docx")
-        || lower.ends_with(".xlsx")
-        || lower.ends_with(".pptx")
-        || lower.ends_with(".odt")
-        || lower.ends_with(".ods")
-        || lower.ends_with(".odp")
-        || lower.ends_with(".epub")
-        || lower.ends_with(".xpi")
-        || lower.ends_with(".crx")
-}
-
-fn is_7z_like(name: &str) -> bool {
-    name.to_lowercase().ends_with(".7z")
 }
 
 /// Create a SevenZipFsDriver, register a shadow source, and navigate the panel into the archive root.

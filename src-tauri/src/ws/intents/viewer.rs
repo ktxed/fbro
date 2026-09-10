@@ -1,14 +1,18 @@
+use std::io::Read;
 use std::sync::Arc;
 
+use comrak::nodes::NodeValue;
+use comrak::{format_html, parse_document, Arena, Options};
 use serde_json::Value;
 
+use crate::jobs::JobKind;
 use crate::jobs::viewer_prefetch::{is_image_ext, PREFETCH_IMAGE_CAP};
 use crate::state::settings::GeneralSettings;
 use crate::vfs::{search::SearchResultsDriver, VfsDriver};
 use crate::ws::intents::{
     arg_str, arg_u64, is_archive_source, is_journal_source, is_procs_source, is_search_source,
 };
-use crate::ws::protocol::{now, ServerMessage};
+use crate::ws::protocol::{now, MarkdownLinkSchema, ServerMessage};
 use crate::ws::runtime::{url_encode, IntentContext};
 
 /// Effective image cap (in bytes) for the viewer + prefetch.
@@ -52,6 +56,7 @@ pub(crate) async fn handle(name: &str, args: &Value, ctx: &mut IntentContext<'_>
         "EditFile" => edit_file(args, ctx).await,
         "CloseViewerWindow" => close_viewer_window(args, ctx).await,
         "ViewerNavigate" => viewer_navigate(args, ctx).await,
+        "ViewerOpenFile" => viewer_open_file(args, ctx).await,
         "ReadFileChunk" => read_file_chunk(args, ctx).await,
         "SetEmbeddedViewerActive" => set_embedded_viewer_active(args, ctx).await,
         _ => {}
@@ -123,6 +128,22 @@ struct ReadChunkArgs {
     size: usize,
 }
 
+struct ViewerOpenFileArgs {
+    panel_id: String,
+    source_id: String,
+    path: String,
+}
+
+impl ViewerOpenFileArgs {
+    fn from_args(args: &Value) -> Self {
+        Self {
+            panel_id: arg_str(args, "panelId").unwrap_or("").to_string(),
+            source_id: arg_str(args, "sourceId").unwrap_or("").to_string(),
+            path: arg_str(args, "path").unwrap_or("").to_string(),
+        }
+    }
+}
+
 impl ReadChunkArgs {
     fn from_args(args: &Value) -> Self {
         Self {
@@ -139,15 +160,24 @@ async fn view_file(args: &Value, ctx: &mut IntentContext<'_>) {
 
     // When viewing from a search results source, resolve the real file path
     // and real source_id so the viewer uses the local filesystem driver.
-    let (effective_source_id, full_path) = if is_search_source(&parsed.source_id) {
+    let (effective_source_id, full_path, initial_find_query) = if is_search_source(&parsed.source_id) {
         let state_guard = ctx.state.lock().await;
+        let initial_find_query = parsed
+            .source_id
+            .strip_prefix("search:")
+            .and_then(|job_id| state_guard.job_store.jobs.get(job_id))
+            .and_then(|job| match &job.kind {
+                JobKind::Search(meta) => meta.params.content_query.clone(),
+                _ => None,
+            })
+            .filter(|query| !query.is_empty());
         let resolved = state_guard.drivers.get(&parsed.source_id).and_then(|drv| {
             drv.as_any()
                 .downcast_ref::<SearchResultsDriver>()
                 .and_then(|sd| sd.resolve_real_info(&parsed.filename))
         });
         if let Some((real_full_path, real_source_id)) = resolved {
-            (real_source_id, real_full_path)
+            (real_source_id, real_full_path, initial_find_query)
         } else {
             let best_source = state_guard
                 .sources
@@ -167,6 +197,7 @@ async fn view_file(args: &Value, ctx: &mut IntentContext<'_>) {
             (
                 best_source,
                 format!("{}/{}", parsed.path.trim_end_matches('/'), parsed.filename),
+                initial_find_query,
             )
         }
     } else if is_journal_source(&parsed.source_id) {
@@ -176,7 +207,7 @@ async fn view_file(args: &Value, ctx: &mut IntentContext<'_>) {
             .get(&parsed.source_id)
             .map(|driver| driver.resolve_child("", &parsed.filename))
             .unwrap_or_else(|| parsed.filename.clone());
-        (parsed.source_id.clone(), inner_path)
+        (parsed.source_id.clone(), inner_path, None)
     } else if is_archive_source(&parsed.source_id) || is_procs_source(&parsed.source_id) {
         let inner_path = {
             let p = parsed.path.trim_end_matches('/');
@@ -186,11 +217,12 @@ async fn view_file(args: &Value, ctx: &mut IntentContext<'_>) {
                 format!("{}/{}", p, parsed.filename)
             }
         };
-        (parsed.source_id.clone(), inner_path)
+        (parsed.source_id.clone(), inner_path, None)
     } else {
         (
             parsed.source_id.clone(),
             format!("{}/{}", parsed.path.trim_end_matches('/'), parsed.filename),
+            None,
         )
     };
 
@@ -236,6 +268,9 @@ async fn view_file(args: &Value, ctx: &mut IntentContext<'_>) {
     }
     query_string.push_str(&format!("&imgcap={image_cap_bytes}"));
     query_string.push_str(&format!("&colorScheme={}", url_encode(&color_scheme)));
+    if let Some(find_query) = initial_find_query {
+        query_string.push_str(&format!("&find={}", url_encode(&find_query)));
+    }
 
     // Use spawn_blocking so the macOS dispatch_sync to the Cocoa main thread
     // runs on the blocking thread pool rather than a Tokio async worker thread.
@@ -334,6 +369,14 @@ async fn close_viewer_window(args: &Value, ctx: &IntentContext<'_>) {
     let existed = ctx.app_handle.get_webview_window(&parsed.label).is_some();
     if let Some(window) = ctx.app_handle.get_webview_window(&parsed.label) {
         let _ = window.close();
+    }
+    // macOS does not reliably make another application window key when the
+    // active viewer closes. Explicitly reactivate the main window so its
+    // focus handler can return DOM focus to the active panel immediately.
+    if let Some(main_window) = ctx.app_handle.get_webview_window("main") {
+        let _ = main_window.unminimize();
+        let _ = main_window.show();
+        let _ = main_window.set_focus();
     }
     if existed {
         let mut state_guard = ctx.state.lock().await;
@@ -587,6 +630,294 @@ async fn viewer_navigate(args: &Value, ctx: &mut IntentContext<'_>) {
     }
 }
 
+fn is_markdown_filename(filename: &str) -> bool {
+    matches!(
+        filename
+            .rsplit('.')
+            .next()
+            .map(str::to_ascii_lowercase)
+            .as_deref(),
+        Some("md" | "markdown" | "mdown")
+    )
+}
+
+/// Resolve a deliberately small URL subset: a percent-decoded relative path
+/// with no scheme, authority, query, fragment, backslash, or control bytes.
+fn safe_relative_path(url: &str) -> Option<String> {
+    let mut bytes = Vec::with_capacity(url.len());
+    let raw = url.as_bytes();
+    let mut index = 0;
+    while index < raw.len() {
+        if raw[index] == b'%' {
+            let hex = raw.get(index + 1..index + 3)?;
+            let text = std::str::from_utf8(hex).ok()?;
+            bytes.push(u8::from_str_radix(text, 16).ok()?);
+            index += 3;
+        } else {
+            bytes.push(raw[index]);
+            index += 1;
+        }
+    }
+    let decoded = String::from_utf8(bytes).ok()?;
+    if decoded.is_empty()
+        || decoded.starts_with('/')
+        || decoded.starts_with('\\')
+        || decoded.contains(['\\', ':', '?', '#', '\0'])
+        || decoded.chars().any(char::is_control)
+    {
+        return None;
+    }
+    Some(decoded)
+}
+
+fn resolve_viewer_path(driver: &dyn VfsDriver, current_path: &str, target: &str) -> Option<String> {
+    let mut path = driver.parent_path(current_path)?;
+    for component in target.split('/') {
+        match component {
+            "" | "." => {}
+            ".." => path = driver.parent_path(&path)?,
+            name => path = driver.resolve_child(&path, name),
+        }
+    }
+    Some(path)
+}
+
+async fn viewer_open_file(args: &Value, ctx: &mut IntentContext<'_>) {
+    let parsed = ViewerOpenFileArgs::from_args(args);
+    if !is_markdown_filename(&parsed.path) || parsed.path.contains('\0') {
+        return;
+    }
+
+    let driver = {
+        let state_guard = ctx.state.lock().await;
+        state_guard.drivers.get(&parsed.source_id).cloned()
+    };
+    let Some(driver) = driver else { return };
+    if !driver.is_local() { return; }
+
+    // Recheck the canonical path received from the validated preview. This is
+    // both a TOCTOU check and a trust-boundary check for forged intents.
+    let validation_driver = Arc::clone(&driver);
+    let validation_path = parsed.path.clone();
+    let valid_file =
+        tokio::task::spawn_blocking(move || validation_driver.open_read(&validation_path).is_ok())
+            .await
+            .unwrap_or(false);
+    if !valid_file {
+        return;
+    }
+
+    let filename = parsed
+        .path
+        .rsplit('/')
+        .next()
+        .unwrap_or(&parsed.path)
+        .to_string();
+    let file_size = driver_file_size(Some(Arc::clone(&driver)), parsed.path.clone()).await;
+    let _ = ctx
+        .tx
+        .send(ServerMessage::ViewerFileChanged {
+            timestamp: now(),
+            path: parsed.path,
+            filename,
+            source_id: parsed.source_id,
+            panel_id: parsed.panel_id,
+            file_size,
+            is_local: driver.is_local(),
+            is_binary: Some(false),
+        })
+        .await;
+}
+
+fn raster_signature_matches(path: &str, bytes: &[u8]) -> bool {
+    let ext = path.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
+    match ext.as_str() {
+        "png" => bytes.starts_with(b"\x89PNG\r\n\x1a\n"),
+        "jpg" | "jpeg" => bytes.starts_with(&[0xff, 0xd8, 0xff]),
+        "gif" => bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a"),
+        "webp" => bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP"),
+        "bmp" => bytes.starts_with(b"BM"),
+        "ico" => bytes.starts_with(&[0, 0, 1, 0]),
+        "avif" => {
+            bytes.get(4..8) == Some(b"ftyp")
+                && bytes.get(8..32).is_some_and(|brands| {
+                    brands.windows(4).any(|brand| brand == b"avif" || brand == b"avis")
+                })
+        }
+        _ => false,
+    }
+}
+
+fn valid_local_image(driver: &dyn VfsDriver, path: &str, cap: usize) -> bool {
+    let Some(size) = driver.file_size(path) else { return false };
+    if size > cap as u64 {
+        return false;
+    }
+    let Ok(reader) = driver.open_read(path) else { return false };
+    let mut bytes = Vec::new();
+    if reader.take(64).read_to_end(&mut bytes).is_err() {
+        return false;
+    }
+    raster_signature_matches(path, &bytes)
+}
+
+/// The single policy boundary for every URL-like value coming out of a
+/// Markdown AST. Nothing in the renderer or frontend resolves destinations.
+struct MarkdownUrlPolicy<'a> {
+    driver: &'a dyn VfsDriver,
+    current_path: &'a str,
+    file_server_port: u16,
+    image_cap: usize,
+}
+
+impl MarkdownUrlPolicy<'_> {
+    fn link_target(&self, url: &str) -> Option<String> {
+        safe_relative_path(url)
+            .filter(|target| is_markdown_filename(target))
+            .and_then(|target| resolve_viewer_path(self.driver, self.current_path, &target))
+            .filter(|path| self.driver.open_read(path).is_ok())
+    }
+
+    fn image_source(&self, url: &str) -> Option<String> {
+        let path = safe_relative_path(url)
+            .and_then(|target| resolve_viewer_path(self.driver, self.current_path, &target))
+            .filter(|path| valid_local_image(self.driver, path, self.image_cap))?;
+        Some(format!(
+            "http://127.0.0.1:{}{}",
+            self.file_server_port,
+            url_encode(&path)
+        ))
+    }
+}
+
+fn sanitize_mermaid(source: &str) -> String {
+    source
+        .lines()
+        .map(|line| {
+            let folded = line.trim().to_ascii_lowercase();
+            let unsafe_line = folded.starts_with("click ")
+                || folded.starts_with("%%{")
+                || folded == "---"
+                || folded.starts_with("config:")
+                || folded.contains(" href")
+                || folded.contains("url(")
+                || folded.contains("://")
+                || folded.contains("javascript:")
+                || folded.contains("vbscript:")
+                || folded.contains("data:")
+                || folded.contains("file:")
+                || folded.contains("image:")
+                || folded.contains("img:");
+            if unsafe_line {
+                "%% unsafe Mermaid URL or interaction removed %%".to_string()
+            } else {
+                line.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+struct RenderedMarkdown {
+    html: String,
+    links: Vec<MarkdownLinkSchema>,
+}
+
+fn render_markdown(
+    driver: &dyn VfsDriver,
+    current_path: &str,
+    markdown: &str,
+    file_server_port: u16,
+    image_cap: usize,
+) -> RenderedMarkdown {
+    let arena = Arena::new();
+    let mut options = Options::default();
+    options.extension.strikethrough = true;
+    options.extension.table = true;
+    options.extension.tasklist = true;
+    options.extension.tagfilter = true;
+    options.render.r#unsafe = false;
+    let root = parse_document(&arena, markdown, &options);
+    let nodes: Vec<_> = root.descendants().collect();
+    let mut links = Vec::new();
+    let url_policy = MarkdownUrlPolicy {
+        driver,
+        current_path,
+        file_server_port,
+        image_cap,
+    };
+
+    for node in nodes {
+        enum Work { Link(String), Image(String), Mermaid, None }
+        let work = match &node.data.borrow().value {
+            NodeValue::Link(link) => Work::Link(link.url.clone()),
+            NodeValue::Image(link) => Work::Image(link.url.clone()),
+            NodeValue::CodeBlock(block)
+                if block.info.split_whitespace().next().is_some_and(|lang| lang.eq_ignore_ascii_case("mermaid")) => Work::Mermaid,
+            _ => Work::None,
+        };
+
+        match work {
+            Work::Link(url) => {
+                let target = url_policy.link_target(&url);
+                if let Some(path) = target {
+                    let id = format!("fbro-md-{}", links.len());
+                    if let NodeValue::Link(link) = &mut node.data.borrow_mut().value {
+                        link.url = format!("#{id}");
+                    }
+                    links.push(MarkdownLinkSchema { id, path });
+                } else {
+                    let children: Vec<_> = node.children().collect();
+                    for child in children { node.insert_before(child); }
+                    node.detach();
+                }
+            }
+            Work::Image(url) => {
+                if let Some(source) = url_policy.image_source(&url) {
+                    if let NodeValue::Image(link) = &mut node.data.borrow_mut().value {
+                        link.url = source;
+                    }
+                } else {
+                    let children: Vec<_> = node.children().collect();
+                    for child in children { node.insert_before(child); }
+                    node.detach();
+                }
+            }
+            Work::Mermaid => {
+                if let NodeValue::CodeBlock(block) = &mut node.data.borrow_mut().value {
+                    block.literal = sanitize_mermaid(&block.literal);
+                }
+            }
+            Work::None => {}
+        }
+    }
+
+    let mut html = String::new();
+    format_html(root, &options, &mut html).expect("rendering Markdown to a String cannot fail");
+    RenderedMarkdown { html, links }
+}
+
+async fn send_markdown_preview(
+    ctx: &IntentContext<'_>,
+    driver: Arc<dyn VfsDriver>,
+    path: String,
+    bytes: Vec<u8>,
+    file_server_port: u16,
+    image_cap: usize,
+) {
+    if !driver.is_local() || !is_markdown_filename(&path) { return; }
+    let Ok(markdown) = String::from_utf8(bytes) else { return };
+    let render_path = path.clone();
+    let rendered = tokio::task::spawn_blocking(move || {
+        render_markdown(driver.as_ref(), &render_path, &markdown, file_server_port, image_cap)
+    }).await;
+    if let Ok(rendered) = rendered {
+        let _ = ctx.tx.send(ServerMessage::MarkdownPreview {
+            timestamp: now(), path, html: rendered.html, links: rendered.links,
+        }).await;
+    }
+}
+
 async fn read_file_chunk(args: &Value, ctx: &mut IntentContext<'_>) {
     let parsed = ReadChunkArgs::from_args(args);
 
@@ -631,9 +962,13 @@ async fn read_file_chunk(args: &Value, ctx: &mut IntentContext<'_>) {
         (parsed.source_id.clone(), parsed.path.clone())
     };
 
-    let driver = {
+    let (driver, file_server_port, image_cap) = {
         let state_guard = ctx.state.lock().await;
-        state_guard.drivers.get(&effective_source_id).cloned()
+        (
+            state_guard.drivers.get(&effective_source_id).cloned(),
+            state_guard.file_server_port,
+            effective_image_cap_bytes(&state_guard.settings.general),
+        )
     };
     let file_size = driver_file_size(driver.clone(), effective_path.clone()).await;
 
@@ -657,28 +992,36 @@ async fn read_file_chunk(args: &Value, ctx: &mut IntentContext<'_>) {
             } else {
                 bytes
             };
+            let preview_bytes = (eof && driver.as_ref().is_some_and(|d| d.is_local()))
+                .then(|| bytes.clone());
             let data: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
             let _ = ctx
                 .tx
                 .send(ServerMessage::FileChunk {
                     timestamp: now(),
-                    path: effective_path,
+                    path: effective_path.clone(),
                     offset: 0,
                     data,
                     eof,
                     file_size: cached_file_size,
                 })
                 .await;
+            if let (Some(driver), Some(preview_bytes)) = (driver.clone(), preview_bytes) {
+                send_markdown_preview(
+                    ctx, driver, effective_path, preview_bytes, file_server_port, image_cap,
+                ).await;
+            }
             return;
         }
     }
 
     if let Some(driver) = driver {
+        let read_driver = Arc::clone(&driver);
         let path_clone = effective_path.clone();
         let offset = parsed.offset;
         let size = parsed.size;
         let result =
-            tokio::task::spawn_blocking(move || driver.read_chunk(&path_clone, offset, size)).await;
+            tokio::task::spawn_blocking(move || read_driver.read_chunk(&path_clone, offset, size)).await;
         match result {
             Ok(Ok(mut bytes)) => {
                 let eof = bytes.len() < size
@@ -690,18 +1033,24 @@ async fn read_file_chunk(args: &Value, ctx: &mut IntentContext<'_>) {
                     }
                 }
 
+                let preview_bytes = (offset == 0 && eof && driver.is_local()).then(|| bytes.clone());
                 let data: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
                 let _ = ctx
                     .tx
                     .send(ServerMessage::FileChunk {
                         timestamp: now(),
-                        path: effective_path,
+                        path: effective_path.clone(),
                         offset,
                         data,
                         eof,
                         file_size,
                     })
                     .await;
+                if let Some(preview_bytes) = preview_bytes {
+                    send_markdown_preview(
+                        ctx, driver, effective_path, preview_bytes, file_server_port, image_cap,
+                    ).await;
+                }
             }
             Ok(Err(error)) => {
                 let _ = ctx
@@ -770,4 +1119,75 @@ pub(super) fn collect_neighbors(
         }
     }
     neighbors
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{is_markdown_filename, render_markdown, safe_relative_path, sanitize_mermaid};
+    use crate::vfs::local::LocalFsDriver;
+    use std::fs;
+
+    #[test]
+    fn markdown_link_extensions_are_restricted() {
+        assert!(is_markdown_filename("guide.md"));
+        assert!(is_markdown_filename("docs/Guide.MARKDOWN"));
+        assert!(is_markdown_filename("notes.mdown"));
+        assert!(!is_markdown_filename("https://example.test/page.md?download=1"));
+        assert!(!is_markdown_filename("notes.txt"));
+        assert!(!is_markdown_filename("README"));
+    }
+
+    #[test]
+    fn url_path_subset_rejects_encoded_and_explicit_url_syntax() {
+        assert_eq!(safe_relative_path("docs/next%2Emd").as_deref(), Some("docs/next.md"));
+        for value in [
+            "https://example.test/x.md", "//example.test/x.md", "/etc/passwd",
+            "%2fetc/passwd", "foo%3abar.md", "foo%5cbar.md", "foo.md%3Fx=1",
+            "foo.md%23fragment", "data:text/html,x",
+        ] {
+            assert_eq!(safe_relative_path(value), None, "{value}");
+        }
+    }
+
+    #[test]
+    fn backend_rendering_emits_only_verified_local_targets() {
+        let dir = std::env::temp_dir().join(format!(
+            "fbro-markdown-test-{}-{}", std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos(),
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        let current = dir.join("README.md");
+        fs::write(dir.join("next.md"), "# next").unwrap();
+        fs::write(dir.join("pixel.png"), b"\x89PNG\r\n\x1a\n").unwrap();
+        fs::write(dir.join("bad.svg"), b"<svg onload='alert(1)'/>").unwrap();
+        let markdown = "[good](next.md) [missing](no.md) [web](https://example.test)\n\n\
+            ![pixel](pixel.png) ![vector](bad.svg)\n\n<img src=x onerror=alert(1)>";
+        let rendered = render_markdown(
+            &LocalFsDriver, &current.to_string_lossy(), markdown, 43210, 1024,
+        );
+
+        assert_eq!(rendered.links.len(), 1);
+        assert_eq!(rendered.links[0].path, dir.join("next.md").to_string_lossy());
+        assert!(rendered.html.contains("href=\"#fbro-md-0\""));
+        assert!(rendered.html.contains("good"));
+        assert!(rendered.html.contains("missing"));
+        assert!(rendered.html.contains("web"));
+        assert!(!rendered.html.contains("https://example.test"));
+        assert!(rendered.html.contains("http://127.0.0.1:43210"));
+        assert!(!rendered.html.contains("bad.svg"));
+        assert!(!rendered.html.contains("onerror"));
+        assert!(!rendered.html.contains("<img src=x"));
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn mermaid_interactions_and_urls_are_corrupted() {
+        let source = "graph TD\n A-->B\n click A href \"https://example.test\"\n B[ok]";
+        let safe = sanitize_mermaid(source);
+        assert!(safe.contains("A-->B"));
+        assert!(safe.contains("B[ok]"));
+        assert!(!safe.contains("click A"));
+        assert!(!safe.contains("https://"));
+    }
 }

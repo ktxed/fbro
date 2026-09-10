@@ -17,6 +17,7 @@ import { GlobalSelectionModal } from "./GlobalSelectionModal";
 import { PanelHistoryModal } from "./PanelHistoryModal";
 import { JobsModal } from "./JobsModal";
 import { CommandPaletteModal } from "./CommandPaletteModal";
+import { AboutModal } from "./AboutModal";
 import { ContextMenu } from "./ContextMenu";
 import { OpenWithModal } from "./OpenWithModal";
 import { BroModal } from "./BroModal";
@@ -425,7 +426,7 @@ export function Layout({ client, jobsViewOpen, onCloseJobsView, onOpenJobsView }
   }
 
   const activeJob = state.activeJobId ? state.jobs[state.activeJobId] ?? null : null;
-  const modalActive = state.pendingOp !== null || state.activeJobId !== null || state.pendingQuit !== null || state.pendingRename !== null || state.pendingAttributes !== null || state.pendingInfo !== null || state.pendingMkdir !== null || state.pendingTouch !== null || state.pendingNoEditor !== null || state.pendingGoToPath !== null || state.pendingPanelHistory !== null || state.pendingDryRun !== null || state.pendingContextMenu !== null || state.pendingGlobalSelectionAdd !== null || state.pendingOpenWith !== null || state.pendingBro !== null || state.pendingInput !== null || state.pendingSearch !== null || state.pendingSettings !== null || state.commandPaletteOpen || jobsViewOpen;
+  const modalActive = state.pendingOp !== null || state.activeJobId !== null || state.pendingQuit !== null || state.pendingRename !== null || state.pendingAttributes !== null || state.pendingInfo !== null || state.pendingMkdir !== null || state.pendingTouch !== null || state.pendingNoEditor !== null || state.pendingGoToPath !== null || state.pendingPanelHistory !== null || state.pendingDryRun !== null || state.pendingContextMenu !== null || state.pendingGlobalSelectionAdd !== null || state.pendingOpenWith !== null || state.pendingBro !== null || state.pendingInput !== null || state.pendingSearch !== null || state.pendingSettings !== null || state.commandPaletteOpen || state.aboutOpen || jobsViewOpen;
 
   const dragCursorClass = dragOutInProgress
     ? "layout--drag-out"
@@ -580,6 +581,9 @@ export function Layout({ client, jobsViewOpen, onCloseJobsView, onOpenJobsView }
       )}
       {state.commandPaletteOpen && (
         <CommandPaletteModal client={client} onOpenJobsView={onOpenJobsView} />
+      )}
+      {state.aboutOpen && (
+        <AboutModal client={client} />
       )}
       {state.pendingSettings && (
         <SettingsModal client={client} />

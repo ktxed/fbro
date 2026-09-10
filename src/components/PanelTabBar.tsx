@@ -42,19 +42,33 @@ export function PanelTabBar({ slot, panels, client }: Props) {
   };
 
   useEffect(() => {
-    const id = setTimeout(updateArrows, 0);
-    return () => clearTimeout(id);
+    const el = listRef.current;
+    const id = requestAnimationFrame(updateArrows);
+    if (!el) return () => cancelAnimationFrame(id);
+    const onWheel = (event: WheelEvent) => {
+      if (el.scrollWidth <= el.clientWidth) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY)
+        ? event.deltaX
+        : event.deltaY;
+      if (delta !== 0) {
+        el.scrollLeft += delta;
+        updateArrows();
+      }
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    const observer = new ResizeObserver(updateArrows);
+    observer.observe(el);
+    return () => {
+      cancelAnimationFrame(id);
+      el.removeEventListener("wheel", onWheel);
+      observer.disconnect();
+    };
   }, [slot.tabPanelIds.length]);
 
   const scroll = (dir: number) => {
     listRef.current?.scrollBy({ left: dir * 80, behavior: "smooth" });
-  };
-
-  const onWheel = (e: React.WheelEvent) => {
-    const el = listRef.current;
-    if (!el || el.scrollWidth <= el.clientWidth) return;
-    e.preventDefault();
-    el.scrollBy({ left: e.deltaY !== 0 ? e.deltaY : e.deltaX, behavior: "smooth" });
   };
 
   const switchTo = (panelId: string) => {
@@ -92,10 +106,13 @@ export function PanelTabBar({ slot, panels, client }: Props) {
         <IconChevronLeft size={14} />
       </button>
       <div
-        className="panel__tabs-list"
+        className={[
+          "panel__tabs-list",
+          canLeft ? "panel__tabs-list--fade-left" : "",
+          canRight ? "panel__tabs-list--fade-right" : "",
+        ].filter(Boolean).join(" ")}
         ref={listRef}
         onScroll={updateArrows}
-        onWheel={onWheel}
         onDoubleClick={(e) => {
           if (e.target === e.currentTarget) newTabFromLeftmost();
         }}

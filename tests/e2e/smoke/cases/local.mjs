@@ -16,11 +16,13 @@ import {
   openSortSelector,
   openPanelContextMenu,
   setTextInputValue,
+  pressWindowKey,
 } from "../browser.mjs";
 import { waitFor } from "../wait.mjs";
 
 export async function runLocalFlow(browser, observer) {
   await verifyColorSchemeSwitch(browser, observer);
+  await verifyAboutModal(browser);
 
   const aSrc = backendPath("a", "src");
   const aDst = backendPath("a", "dst");
@@ -200,6 +202,39 @@ export async function runLocalFlow(browser, observer) {
 
   await verifyWindowFocusRestoration(browser, observer);
   await verifyGridLeftAtFirstItemNavigatesUp(browser, observer, aSrc);
+}
+
+async function verifyAboutModal(browser) {
+  await browser.execute(() => document.querySelector('[data-testid="panel-left"]')?.focus());
+  // The command palette uses Cmd+Shift+P on macOS and Ctrl+Shift+P elsewhere.
+  // Dispatching both is harmless because only the platform binding matches.
+  await pressWindowKey(browser, "p", { shift: true, meta: true });
+  await pressWindowKey(browser, "p", { shift: true, ctrl: true });
+
+  const paletteInput = await browser.$(".command-palette__input");
+  await paletteInput.waitForDisplayed({ timeout: 10_000 });
+  await setTextInputValue(browser, ".command-palette__input", "About fbro");
+  await browser.keys("Enter");
+
+  const about = await browser.$('[data-testid="about-modal"]');
+  await about.waitForDisplayed({ timeout: 10_000 });
+  const version = await browser.$('[data-testid="about-version"]').getText();
+  const commit = await browser.$('[data-testid="about-commit"]').getText();
+  const profile = await browser.$('[data-testid="about-profile"]').getText();
+  const dirty = await browser.$('[data-testid="about-dirty"]').getText();
+  const builtAt = await browser.$('[data-testid="about-built-at"]').getText();
+  if (!/^\d+\.\d+\.\d+/.test(version)) throw new Error(`invalid About version: ${version}`);
+  if (!/^[0-9a-f]{40}$/.test(commit)) throw new Error(`invalid About commit: ${commit}`);
+  if (!["development", "debug", "release"].includes(profile)) throw new Error(`invalid About profile: ${profile}`);
+  if (!["Clean", "Dirty", "Unknown"].includes(dirty)) throw new Error(`invalid About dirty state: ${dirty}`);
+  if (Number.isNaN(Date.parse(builtAt))) throw new Error(`invalid About build timestamp: ${builtAt}`);
+
+  await browser.keys("Escape");
+  await about.waitForDisplayed({ timeout: 10_000, reverse: true });
+  await waitFor(async () => browser.execute(() => document.activeElement?.getAttribute("data-testid") === "panel-left"), {
+    timeout: 10_000,
+    label: "panel focus after closing About",
+  });
 }
 
 async function verifyGridLeftAtFirstItemNavigatesUp(browser, observer, aSrc) {

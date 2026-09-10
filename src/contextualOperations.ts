@@ -5,6 +5,7 @@ import type { FileOpFile, PanelState, VFSEntry } from "./ws/types";
 export type ContextualOperationId =
   | "platform.reveal"
   | "platform.open-with"
+  | "panel.browse-archive"
   | "panel.pass-to-bro"
   | "file.compare"
   | "git.view-diff"
@@ -42,6 +43,7 @@ export interface ContextualTarget {
 export const OPERATION_CARDINALITY: Record<ContextualOperationId, OperationCardinality> = {
   "platform.reveal": { min: 1, max: 1 },
   "platform.open-with": { min: 1, max: 1 },
+  "panel.browse-archive": { min: 1, max: 1 },
   "panel.pass-to-bro": { min: 1 },
   "file.compare": { min: 1, max: 2 },
   "git.view-diff": { min: 1, max: 1 },
@@ -162,6 +164,8 @@ export function contextualOperationAvailable(
     case "platform.reveal":
     case "platform.open-with":
       return isLocalFilesystem;
+    case "panel.browse-archive":
+      return target.primary.kind === "file" && target.primary.entry?.browsableArchive === true;
     case "panel.pass-to-bro":
       return isLocalFilesystem || isGlobalRoot || canCompareTarget(state, target);
     case "file.compare":

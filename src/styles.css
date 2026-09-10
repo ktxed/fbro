@@ -405,9 +405,40 @@ body {
   overflow-x: auto;
   scrollbar-width: none;
   min-width: 0;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
 }
 
 .panel__tabs-list::-webkit-scrollbar { display: none; }
+
+.panel__tabs-list--fade-right {
+  -webkit-mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 14px), transparent 100%);
+  mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 14px), transparent 100%);
+}
+
+.panel__tabs-list--fade-left {
+  -webkit-mask-image: linear-gradient(to right, transparent 0, #000 14px, #000 100%);
+  mask-image: linear-gradient(to right, transparent 0, #000 14px, #000 100%);
+}
+
+.panel__tabs-list--fade-left.panel__tabs-list--fade-right {
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 14px,
+    #000 calc(100% - 14px),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 14px,
+    #000 calc(100% - 14px),
+    transparent 100%
+  );
+}
 
 .panel__tabs-arrow {
   flex-shrink: 0;
@@ -3193,6 +3224,61 @@ body {
   width: 1%;
   white-space: nowrap;
   vertical-align: middle;
+}
+
+/* About modal */
+
+.about-modal__body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.about-modal__product {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.about-modal__product strong {
+  color: var(--text);
+  font-size: calc(var(--font-size) + 5px);
+}
+
+.about-modal__product span {
+  color: var(--text-dim);
+}
+
+.about-modal__table .modal__info-label {
+  min-width: 8.5rem;
+}
+
+.about-modal__hash {
+  font-size: calc(var(--font-size) - 1px);
+}
+
+.about-modal__status {
+  font-weight: bold;
+}
+
+.about-modal__status--clean {
+  color: var(--text-success);
+}
+
+.about-modal__status--dirty {
+  color: var(--text-warning);
+}
+
+.about-modal__status--unknown {
+  color: var(--text-dim);
+}
+
+.about-modal__copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .modal__info-copy {

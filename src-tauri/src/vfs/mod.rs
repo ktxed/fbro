@@ -282,6 +282,29 @@ pub struct VfsEntry {
     pub source_path: Option<String>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BrowsableArchiveKind {
+    Zip,
+    SevenZip,
+}
+
+/// Archive containers that the built-in VFS can expose as a directory tree.
+/// Keep format recognition here so navigation and entry capabilities cannot
+/// drift apart.
+pub fn browsable_archive_kind(name: &str) -> Option<BrowsableArchiveKind> {
+    let lower = name.to_ascii_lowercase();
+    if lower.ends_with(".7z") {
+        return Some(BrowsableArchiveKind::SevenZip);
+    }
+    [
+        ".zip", ".apk", ".jar", ".war", ".ear", ".docx", ".xlsx", ".pptx", ".odt",
+        ".ods", ".odp", ".epub", ".xpi", ".crx",
+    ]
+    .iter()
+    .any(|extension| lower.ends_with(extension))
+    .then_some(BrowsableArchiveKind::Zip)
+}
+
 /// Derive a freedesktop icon name from the entry kind and file extension.
 /// No content/MIME scanning — purely extension-based.
 pub fn icon_name_for_entry(name: &str, kind: &VfsKind) -> Option<String> {
@@ -422,6 +445,29 @@ pub fn format_mtime(t: SystemTime) -> Option<String> {
         let secs = d.as_secs();
         format!("{secs}")
     })
+}
+
+#[cfg(test)]
+mod archive_kind_tests {
+    use super::{browsable_archive_kind, BrowsableArchiveKind};
+
+    #[test]
+    fn recognizes_every_browsable_archive_container() {
+        for name in [
+            "a.zip", "a.apk", "a.jar", "a.war", "a.ear", "a.docx", "a.xlsx", "a.pptx",
+            "a.odt", "a.ods", "a.odp", "a.epub", "a.xpi", "a.crx",
+        ] {
+            assert_eq!(browsable_archive_kind(name), Some(BrowsableArchiveKind::Zip), "{name}");
+        }
+        assert_eq!(browsable_archive_kind("A.7Z"), Some(BrowsableArchiveKind::SevenZip));
+    }
+
+    #[test]
+    fn rejects_archives_without_a_browsing_driver() {
+        for name in ["a.tar", "a.tar.gz", "a.rar", "a.iso", "a.txt"] {
+            assert_eq!(browsable_archive_kind(name), None, "{name}");
+        }
+    }
 }
 
 #[cfg(test)]
