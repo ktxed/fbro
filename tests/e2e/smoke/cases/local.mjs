@@ -472,6 +472,7 @@ async function verifyLiveDateSortCursorAnchor(browser, observer, hostSortDir, no
 async function verifyWindowFocusRestoration(browser, observer) {
   await clickEntry(browser, "left", "aardvark.txt");
   const initialCursor = observer.state.panels.left?.cursor;
+  const initialViewMode = observer.state.panels.left?.viewMode;
   observer.sendIntent("ViewerNavigate", undefined, { panelId: "left", direction: "next" });
   await waitFor(() => observer.state.panels.left?.cursor !== initialCursor, {
     timeout: 10_000,
@@ -483,25 +484,28 @@ async function verifyWindowFocusRestoration(browser, observer) {
     timeout: 10_000,
     label,
   });
-  const toggleGridFromRestoredFocus = async (label) => {
+  const toggleViewModeFromRestoredFocus = async (label) => {
     await waitFor(panelIsActive, { timeout: 10_000, label });
     await browser.keys("g");
-    await waitForViewMode("grid", `${label}: grid mode`);
+    await waitFor(() => observer.state.panels.left?.viewMode !== initialViewMode, {
+      timeout: 10_000,
+      label: `${label}: view mode changed`,
+    });
     await browser.keys("g");
-    await waitForViewMode("list", `${label}: list mode restored`);
+    await waitForViewMode(initialViewMode, `${label}: view mode restored`);
   };
 
   await browser.execute(() => {
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
     window.dispatchEvent(new FocusEvent("focus"));
   });
-  await toggleGridFromRestoredFocus("panel focus restored after window reactivation");
+  await toggleViewModeFromRestoredFocus("panel focus restored after window reactivation");
 
   await browser.execute(() => {
     document.querySelector('[data-command-id="file.view"]')?.focus();
     window.dispatchEvent(new FocusEvent("focus"));
   });
-  await toggleGridFromRestoredFocus("panel focus restored from toolbar button");
+  await toggleViewModeFromRestoredFocus("panel focus restored from toolbar button");
 }
 
 async function verifyColorSchemeSwitch(browser, observer) {
