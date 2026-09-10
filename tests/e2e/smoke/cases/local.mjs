@@ -472,7 +472,6 @@ async function verifyLiveDateSortCursorAnchor(browser, observer, hostSortDir, no
 async function verifyWindowFocusRestoration(browser, observer) {
   await clickEntry(browser, "left", "aardvark.txt");
   const initialCursor = observer.state.panels.left?.cursor;
-  const initialViewMode = observer.state.panels.left?.viewMode;
   observer.sendIntent("ViewerNavigate", undefined, { panelId: "left", direction: "next" });
   await waitFor(() => observer.state.panels.left?.cursor !== initialCursor, {
     timeout: 10_000,
@@ -480,19 +479,20 @@ async function verifyWindowFocusRestoration(browser, observer) {
   });
 
   const panelIsActive = () => browser.execute(() => document.activeElement?.getAttribute("data-testid") === "panel-left");
-  const waitForViewMode = (mode, label) => waitFor(() => observer.state.panels.left?.viewMode === mode, {
-    timeout: 10_000,
-    label,
-  });
+  const isGrid = () => browser.execute(() => document.querySelector('[data-testid="panel-left"] .panel__list')?.classList.contains("panel__list--grid") === true);
+  const initialGrid = await isGrid();
   const toggleViewModeFromRestoredFocus = async (label) => {
     await waitFor(panelIsActive, { timeout: 10_000, label });
     await browser.keys("g");
-    await waitFor(() => observer.state.panels.left?.viewMode !== initialViewMode, {
+    await waitFor(async () => (await isGrid()) !== initialGrid, {
       timeout: 10_000,
       label: `${label}: view mode changed`,
     });
     await browser.keys("g");
-    await waitForViewMode(initialViewMode, `${label}: view mode restored`);
+    await waitFor(async () => (await isGrid()) === initialGrid, {
+      timeout: 10_000,
+      label: `${label}: view mode restored`,
+    });
   };
 
   await browser.execute(() => {
