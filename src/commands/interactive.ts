@@ -5,6 +5,7 @@ import { isMac, isWindows } from "../utils/platform";
 import type { AppAction, AppState } from "../store";
 import { markHistoryNavPending } from "../store";
 import { isGlobalSelectionSourceId, isSearchSourceId } from "../utils/sourceId";
+import { contextualEntryIsSelected } from "../contextualOperations";
 import type { WsClient } from "../ws/client";
 import type {
   FileOpFile,
@@ -42,6 +43,7 @@ export const GLOBAL_SHORTCUT_COMMAND_IDS = [
   "file.compare",
   "file.set_permissions",
   "panel.toggle_hidden",
+  "panel.toggle_view_mode",
   "file.copy_external",
   "file.cut_external",
   "file.paste_external",
@@ -146,6 +148,8 @@ export interface ContextActionTarget {
   name: string;
   kind: string;
   size?: number;
+  scope?: "entry" | "selection";
+  entries?: FileOpFile[];
 }
 
 function normalizeKey(key: string): string {
@@ -369,24 +373,26 @@ export function executeTargetedCommand(
     kind: target.kind,
     sourcePath: target.fullPath,
   };
+  const files = target.entries?.length ? target.entries : [file];
+  const explicitPath = target.scope === "selection" ? undefined : target.fullPath;
 
   switch (commandId) {
     case "panel.pass_to_bro":
       return context.state.panels[target.panelId]
-        ? openPassToBro(context.state, context.dispatch, context.client, context.state.panels[target.panelId], target.fullPath)
+        ? openPassToBro(context.state, context.dispatch, context.client, context.state.panels[target.panelId], explicitPath)
         : false;
     case "file.compare":
       context.client.sendIntent("CompareFiles", target.panelId, {
         panelId: target.panelId,
-        targetPath: target.fullPath,
+        ...(explicitPath ? { targetPath: explicitPath } : {}),
       });
       return true;
     case "file.copy":
-      return openFileOpForEntries(context.state, context.dispatch, target.panelId, [file], "copy");
+      return openFileOpForEntries(context.state, context.dispatch, target.panelId, files, "copy");
     case "file.move":
-      return openFileOpForEntries(context.state, context.dispatch, target.panelId, [file], "move");
+      return openFileOpForEntries(context.state, context.dispatch, target.panelId, files, "move");
     case "file.delete":
-      return openFileOpForEntries(context.state, context.dispatch, target.panelId, [file], "delete");
+      return openFileOpForEntries(context.state, context.dispatch, target.panelId, files, "delete");
     case "file.rename":
       return openRenameForTarget(context.dispatch, target);
     default:
@@ -717,7 +723,15 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
       return true;
     }
     case "panel.cursor.left":
-      client.sendIntent("MoveCursorBy", "focused-panel", { delta: -1 });
+      if (focused && focused.panel.viewMode === "grid" && focused.panel.cursor === 0) {
+        client.sendIntent("NavigateUp", "focused-panel", {
+          sourceId: focused.panel.sourceId,
+          path: focused.panel.path,
+          panelEpoch: focused.panel.panelEpoch,
+        });
+      } else {
+        client.sendIntent("MoveCursorBy", "focused-panel", { delta: -1 });
+      }
       return true;
     case "panel.cursor.right":
       client.sendIntent("MoveCursorBy", "focused-panel", { delta: 1 });
@@ -893,7 +907,7 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
       if (!entry || entry.name === "..") return false;
       const dirPath = focused.panel.path.replace(/[/\\]+$/, "");
       const fullPath = entry.sourcePath ?? `${dirPath}/${entry.name}`;
-      const targetsSelection = focused.panel.selection.length > 0;
+      const targetsSelection = contextualEntryIsSelected(focused.panel, focused.panel.cursor);
       dispatch({
         type: "OPEN_CONTEXT_MENU",
         menu: {
@@ -910,7 +924,7 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
           anchorBottom: rect.bottom,
           isShadow: !!focused.panel.shadowSource,
           targetScope: targetsSelection ? "selection" : "entry",
-          targetCount: targetsSelection ? focused.panel.selection.length : 1,
+          targetCount: targetsSelection ? focused.panel.selectedEntries.length : 1,
         },
       });
       const panelDiv = document.querySelector<HTMLElement>(`[data-panel-id="${focused.panelId}"]`);

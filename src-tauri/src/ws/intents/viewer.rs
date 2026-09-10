@@ -2,10 +2,12 @@ use std::sync::Arc;
 
 use serde_json::Value;
 
-use crate::jobs::viewer_prefetch::PREFETCH_IMAGE_CAP;
+use crate::jobs::viewer_prefetch::{is_image_ext, PREFETCH_IMAGE_CAP};
 use crate::state::settings::GeneralSettings;
 use crate::vfs::{search::SearchResultsDriver, VfsDriver};
-use crate::ws::intents::{arg_str, arg_u64, is_archive_source, is_journal_source, is_procs_source, is_search_source};
+use crate::ws::intents::{
+    arg_str, arg_u64, is_archive_source, is_journal_source, is_procs_source, is_search_source,
+};
 use crate::ws::protocol::{now, ServerMessage};
 use crate::ws::runtime::{url_encode, IntentContext};
 
@@ -265,14 +267,17 @@ async fn view_file(args: &Value, ctx: &mut IntentContext<'_>) {
     }
 
     // Prime the prefetch cache for files neighboring the one being opened.
-    ctx.viewer_prefetch.clear();
     let (neighbors, driver, image_cap) = {
         let state_guard = ctx.state.lock().await;
         let panel = state_guard.panels.get(&parsed.panel_id);
         let mut neighbors = match (panel, driver.as_ref()) {
-            (Some(panel), Some(drv)) if drv.is_local() => {
-                collect_neighbors(&panel.entries, panel.cursor, &panel.path, &panel.source_id)
-            }
+            (Some(panel), Some(drv)) if drv.is_local() => collect_neighbors(
+                &panel.entries,
+                panel.cursor,
+                &panel.path,
+                &panel.source_id,
+                "next",
+            ),
             _ => vec![],
         };
         // Include the target file itself so it is warm in the cache when the
@@ -280,7 +285,8 @@ async fn view_file(args: &Value, ctx: &mut IntentContext<'_>) {
         // the first open always misses the cache and reads from disk, which is
         // noticeable on macOS where WebKit takes longer to initialise.
         if driver.as_ref().map_or(false, |d| d.is_local()) {
-            neighbors.push((full_path.clone(), file_size));
+            neighbors.retain(|(path, _)| path != &full_path);
+            neighbors.insert(0, (full_path.clone(), file_size));
         }
         (
             neighbors,
@@ -289,8 +295,13 @@ async fn view_file(args: &Value, ctx: &mut IntentContext<'_>) {
         )
     };
     if let Some(driver) = driver {
-        ctx.viewer_prefetch
-            .schedule_neighbors(neighbors, effective_source_id, driver, image_cap);
+        ctx.viewer_prefetch.schedule_neighbors(
+            parsed.panel_id,
+            neighbors,
+            effective_source_id,
+            driver,
+            image_cap,
+        );
     }
 }
 
@@ -365,6 +376,7 @@ async fn set_embedded_viewer_active(args: &Value, ctx: &IntentContext<'_>) {
 }
 
 async fn viewer_navigate(args: &Value, ctx: &mut IntentContext<'_>) {
+    let started = std::time::Instant::now();
     let parsed = ViewerNavigateArgs::from_args(args);
     let nav_result = {
         let mut state_guard = ctx.state.lock().await;
@@ -385,8 +397,13 @@ async fn viewer_navigate(args: &Value, ctx: &mut IntentContext<'_>) {
                 .entries
                 .get(new_cursor)
                 .map(|entry| (entry.name.clone(), entry.kind.clone()));
-            let prefetch_neighbors =
-                collect_neighbors(&panel.entries, new_cursor, &dir_path, &source_id);
+            let prefetch_neighbors = collect_neighbors(
+                &panel.entries,
+                new_cursor,
+                &dir_path,
+                &source_id,
+                &parsed.direction,
+            );
             Some((
                 new_cursor,
                 source_id,
@@ -399,6 +416,24 @@ async fn viewer_navigate(args: &Value, ctx: &mut IntentContext<'_>) {
         }
     };
 
+    if nav_result
+        .as_ref()
+        .and_then(|result| result.3.as_ref())
+        .is_none()
+    {
+        ctx.viewer_prefetch.cancel_panel(&parsed.panel_id);
+        let _ = ctx
+            .tx
+            .send(ServerMessage::Error {
+                timestamp: now(),
+                code: "NOT_A_FILE".into(),
+                message: "No file available in the source panel".into(),
+                recoverable: true,
+                extra: None,
+            })
+            .await;
+        return;
+    }
     if let Some((new_cursor, source_id, dir_path, entry_info, prefetch_neighbors)) = nav_result {
         if let Some((name, kind)) = entry_info {
             if kind == "file" {
@@ -451,12 +486,27 @@ async fn viewer_navigate(args: &Value, ctx: &mut IntentContext<'_>) {
                     .get(&effective_source_id)
                     .cloned();
                 let is_local = driver.as_ref().map(|drv| drv.is_local()).unwrap_or(false);
+                if !is_local {
+                    ctx.viewer_prefetch.cancel_panel(&parsed.panel_id);
+                }
                 let file_size = driver_file_size(driver.clone(), effective_path.clone()).await;
 
                 // Determine binary hint so the FE can skip directly to hex mode.
                 // Try prefetch cache first (no I/O), then probe 4 KB for large files.
+                let image_cap = {
+                    let state = ctx.state.lock().await;
+                    effective_image_cap_bytes(&state.settings.general)
+                };
+                let direct_image = is_local
+                    && is_image_ext(&effective_path)
+                    && file_size.is_some_and(|size| size < image_cap as u64);
                 let is_binary: Option<bool> = {
-                    if let Some(entry) = ctx.viewer_prefetch.get_cached_by_path(&effective_path) {
+                    if direct_image {
+                        None
+                    } else if let Some(entry) = ctx
+                        .viewer_prefetch
+                        .get_cached(&effective_source_id, &effective_path)
+                    {
                         Some(detect_binary(&entry.content))
                     } else if file_size
                         .map(|sz| sz > PREFETCH_OTHER_THRESHOLD)
@@ -480,6 +530,8 @@ async fn viewer_navigate(args: &Value, ctx: &mut IntentContext<'_>) {
                     }
                 };
 
+                eprintln!("[viewer navigation] panel={} direction={} path={effective_path:?} elapsed_ms={} direct_image={direct_image}",
+                    parsed.panel_id, parsed.direction, started.elapsed().as_millis());
                 let _ = ctx
                     .tx
                     .send(ServerMessage::ViewerFileChanged {
@@ -497,11 +549,8 @@ async fn viewer_navigate(args: &Value, ctx: &mut IntentContext<'_>) {
                 // Schedule BE cache prefetch for neighboring files.
                 if let Some(ref drv) = driver {
                     if drv.is_local() {
-                        let image_cap = {
-                            let state_guard = ctx.state.lock().await;
-                            effective_image_cap_bytes(&state_guard.settings.general)
-                        };
                         ctx.viewer_prefetch.schedule_neighbors(
+                            parsed.panel_id.clone(),
                             prefetch_neighbors,
                             effective_source_id,
                             Arc::clone(drv),
@@ -510,6 +559,7 @@ async fn viewer_navigate(args: &Value, ctx: &mut IntentContext<'_>) {
                     }
                 }
             } else {
+                ctx.viewer_prefetch.cancel_panel(&parsed.panel_id);
                 let _ = ctx
                     .tx
                     .send(ServerMessage::Error {
@@ -670,24 +720,26 @@ async fn read_file_chunk(args: &Value, ctx: &mut IntentContext<'_>) {
     }
 }
 
-fn collect_neighbors(
+pub(super) fn collect_neighbors(
     entries: &[crate::ws::protocol::EntrySchema],
     cursor: usize,
     dir_path: &str,
     source_id: &str,
+    direction: &str,
 ) -> Vec<(String, Option<u64>)> {
     use crate::jobs::viewer_prefetch::PREFETCH_N;
     if is_archive_source(source_id) || is_search_source(source_id) {
         return vec![];
     }
-    let mut neighbors = Vec::new();
+    let mut previous = Vec::new();
+    let mut following = Vec::new();
     let base = dir_path.trim_end_matches('/');
     let mut count = 0usize;
     let mut i = cursor;
     while count < PREFETCH_N && i > 0 {
         i -= 1;
         if entries[i].kind == "file" {
-            neighbors.push((format!("{}/{}", base, entries[i].name), entries[i].size));
+            previous.push((format!("{}/{}", base, entries[i].name), entries[i].size));
             count += 1;
         }
     }
@@ -696,8 +748,25 @@ fn collect_neighbors(
     while count < PREFETCH_N && i + 1 < entries.len() {
         i += 1;
         if entries[i].kind == "file" {
-            neighbors.push((format!("{}/{}", base, entries[i].name), entries[i].size));
+            following.push((format!("{}/{}", base, entries[i].name), entries[i].size));
             count += 1;
+        }
+    }
+    let mut neighbors = Vec::new();
+    if let Some(entry) = entries.get(cursor).filter(|e| e.kind == "file") {
+        neighbors.push((format!("{base}/{}", entry.name), entry.size));
+    }
+    let (first, second) = if direction == "prev" {
+        (previous, following)
+    } else {
+        (following, previous)
+    };
+    for distance in 0..PREFETCH_N {
+        if let Some(entry) = first.get(distance) {
+            neighbors.push(entry.clone());
+        }
+        if let Some(entry) = second.get(distance) {
+            neighbors.push(entry.clone());
         }
     }
     neighbors

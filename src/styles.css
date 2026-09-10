@@ -1462,15 +1462,28 @@ body {
 .panel__git-bubble { flex: 0 1 auto; max-width: 42%; margin-left: 6px; padding: 0 5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: 1px solid color-mix(in srgb, var(--text-warning) 55%, var(--border)); border-radius: 9px; background: color-mix(in srgb, var(--text-warning) 12%, transparent); color: var(--text-warning); font-size: calc(var(--font-size) - 3px); line-height: 16px; cursor: help; }
 .panel__row--cursor .panel__git-bubble { color: inherit; border-color: color-mix(in srgb, currentColor 50%, transparent); background: color-mix(in srgb, currentColor 14%, transparent); }
 .panel__git-bubble--actions { display: inline-flex; align-items: center; gap: 2px; padding-right: 1px; cursor: default; }
+.panel__file-bubble { flex: 0 0 auto; padding-left: 2px; }
 .panel__git-bubble-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .panel__git-bubble-buttons { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 1px; }
-.panel__git-bubble-action { display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; width: 16px; height: 16px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: inherit; cursor: pointer; }
-.panel__git-bubble-action:hover, .panel__git-bubble-action:focus-visible { outline: none; background: color-mix(in srgb, currentColor 20%, transparent); }
-.panel__git-bubble-action--danger { color: var(--text-warning); }
-.panel__row--cursor .panel__git-bubble-action--danger { color: inherit; }
-.panel__git-bubble-action--armed { background: color-mix(in srgb, var(--text-warning) 30%, transparent); color: var(--text-warning) !important; }
+.panel__inline-operation { display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; width: 16px; height: 16px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: inherit; cursor: pointer; }
+.panel__inline-operation:hover, .panel__inline-operation:focus-visible { outline: none; background: color-mix(in srgb, currentColor 20%, transparent); }
+.panel__inline-operation--danger { color: var(--text-warning); }
+.panel__row--cursor .panel__inline-operation--danger { color: inherit; }
+.panel__inline-operation--armed { background: color-mix(in srgb, var(--text-warning) 30%, transparent); color: var(--text-warning) !important; }
 .panel__git-tooltip { max-width: min(420px, calc(100vw - 32px)); padding: 7px 9px !important; border: 1px solid var(--border-focus); border-radius: 4px; background: var(--bg-elev) !important; color: var(--text) !important; box-shadow: var(--shadow-modal); white-space: pre-line; font-family: var(--font); font-size: var(--font-size); line-height: 1.35; opacity: 1 !important; }
 .panel__git-icon-tooltip { padding: 4px 6px !important; white-space: nowrap; font-size: calc(var(--font-size) - 2px); }
+.panel__file-preview-tooltip {
+  z-index: 1000 !important;
+  width: min(280px, calc(100vw - 32px));
+  padding: 5px !important;
+  border: 1px solid var(--border-focus);
+  border-radius: 6px;
+  background: var(--bg-elev) !important;
+  box-shadow: var(--shadow-modal);
+}
+.panel__file-preview-tooltip .react-tooltip-content-wrapper { padding: 0; }
+.panel__file-preview-tooltip img { display: block; width: 100%; height: auto; max-height: min(220px, calc(100vh - 64px)); object-fit: contain; border-radius: 3px; }
+.panel__file-preview-tooltip img.panel__file-preview-throbber { width: auto; height: auto; max-height: none; margin: 0 auto; }
 .git-modal { width: auto; max-width: calc(100vw - 48px); min-height: 0; overflow: hidden; }
 .git-modal__header { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; border-bottom: 1px solid var(--border); background: var(--bg-header); }
 .git-modal__header > div { display: flex; align-items: baseline; gap: 9px; min-width: 0; }
@@ -1782,10 +1795,14 @@ body {
 }
 
 .panel__loading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   padding: 8px;
   color: var(--text-dim);
   font-style: italic;
 }
+.panel__loading img { width: 32px; height: 32px; image-rendering: auto; }
 
 .panel__footer {
   background: var(--bg-footer);
@@ -4024,12 +4041,43 @@ body {
 
 /* Image mode */
 .viewer__image-container {
+  position: relative;
   height: 100%;
   overflow: hidden;
   display: flex;
   align-items: center;
   justify-content: center;
   background: var(--bg);
+}
+
+.viewer__loading-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  pointer-events: none;
+  color: var(--text-dim);
+}
+
+.viewer__loading-overlay img { width: 64px; height: 64px; }
+
+/* Keep ordinary image loads quiet; fade in only when a viewer load takes longer. */
+.viewer .viewer__loading-overlay {
+  opacity: 0;
+  animation: viewer-loading-fade-in 200ms ease-out 300ms forwards;
+}
+
+@keyframes viewer-loading-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .viewer .viewer__loading-overlay { animation-duration: 1ms; }
 }
 
 .viewer__image-notice {
@@ -5710,8 +5758,11 @@ body {
 }
 
 .diff-viewer__jump-btn {
-  min-height: 32px;
-  padding: 0 10px;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  padding: 0;
   border: 0;
   background: var(--bg-elev);
   color: var(--text);
@@ -5735,8 +5786,11 @@ body {
 .diff-viewer__segmented-btn,
 .diff-viewer__toggle,
 .diff-viewer__close {
-  min-height: 32px;
-  padding: 0 12px;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  padding: 0;
   border: 0;
   background: var(--bg-elev);
   color: var(--text);

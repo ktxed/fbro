@@ -303,9 +303,17 @@ impl VfsDriver for LocalFsDriver {
         let mut file = fs::File::open(path).map_err(|e| map_io_err(path, e))?;
         file.seek(SeekFrom::Start(offset))
             .map_err(|e| map_io_err(path, e))?;
-        let mut buf = vec![0u8; size];
-        let n = file.read(&mut buf).map_err(|e| map_io_err(path, e))?;
-        buf.truncate(n);
+        // Allocate for the bytes that exist, not the viewer's potentially huge cap.
+        let remaining = file
+            .metadata()
+            .map_err(|e| map_io_err(path, e))?
+            .len()
+            .saturating_sub(offset);
+        let limit = remaining.min(size as u64);
+        let mut buf = Vec::with_capacity(limit as usize);
+        file.take(limit)
+            .read_to_end(&mut buf)
+            .map_err(|e| map_io_err(path, e))?;
         Ok(buf)
     }
 

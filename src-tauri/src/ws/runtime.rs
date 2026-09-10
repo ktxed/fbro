@@ -352,6 +352,8 @@ pub(crate) fn build_sources(state: &AppState) -> Vec<SourceSchema> {
                         os: p.os.clone(),
                     })
             });
+            let storage_class = crate::storage::registry()
+                .source_class(&src.kind, src.mounted, &src.root_path);
             SourceSchema {
                 id: src.id.clone(),
                 name: src.name.clone(),
@@ -364,6 +366,8 @@ pub(crate) fn build_sources(state: &AppState) -> Vec<SourceSchema> {
                 },
                 root_path: src.root_path.clone(),
                 mounted: src.mounted,
+                storage_class,
+                prefetch_eligible: storage_class.eligible(),
                 free_bytes: space.map(|(free, _)| free),
                 total_bytes: space.map(|(_, total)| total),
                 shadow: src.shadow,
@@ -1254,6 +1258,15 @@ pub(crate) async fn update_panel_from_patch(
     patch: &serde_json::Value,
     version: u64,
 ) {
+    // Viewer navigation has already moved the shared cursor before broadcasting
+    // this version-zero notification. GUI/observer delivery can lag behind later
+    // navigation intents; replaying it here would move the shared cursor backwards.
+    if version == 0
+        && patch.as_object().is_some_and(|fields| fields.len() == 1)
+        && patch.get("cursor").and_then(serde_json::Value::as_u64).is_some()
+    {
+        return;
+    }
     let mut state_guard = state.lock().await;
     if let Some(panel) = state_guard.panels.get_mut(panel_id) {
         if let Some(panel_epoch) = patch.get("panelEpoch").and_then(|value| value.as_u64()) {

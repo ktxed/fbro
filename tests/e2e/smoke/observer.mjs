@@ -39,7 +39,7 @@ export class FbroObserver {
           type: "Hello",
           timestamp: Date.now(),
           protocolVersion: "0",
-          client: { kind: "gui", name: `fbro-e2e-${this.name}`, supports: ["jobs", "decisions"] },
+          client: { kind: "observer", name: `fbro-e2e-${this.name}`, supports: ["jobs", "decisions"] },
         }));
         resolve(true);
       });

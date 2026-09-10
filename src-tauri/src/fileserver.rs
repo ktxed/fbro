@@ -18,7 +18,7 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 pub type SharedStateSlot = Arc<Mutex<Option<SharedState>>>;
 const REMOTE_THUMB_TTL: Duration = Duration::from_secs(7 * 24 * 60 * 60);
@@ -150,6 +150,12 @@ fn handle(
         }
     }
     let req = std::str::from_utf8(&buf).unwrap_or("");
+    let speculative = req
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .and_then(|target| target.split_once('?'))
+        .is_some_and(|(_, query)| query.split('&').any(|part| part == "prefetch=1"));
 
     // Parse path from request line: "GET /url-encoded-path HTTP/1.1"
     let url_path = match req.lines().next().and_then(|l| l.split_whitespace().nth(1)) {
@@ -180,12 +186,16 @@ fn handle(
 
     // Thumbnail requests: /__thumb__/{size}/{percent-encoded-host-path}
     if let Some(rest) = url_path.strip_prefix("/__thumb__/") {
-        return handle_thumb(stream, thumb_cache, thumb_pool, rest);
+        return handle_thumb(stream, thumb_cache, thumb_pool, rest, speculative);
     }
 
     // Remote thumbnail requests:
     // /__remote_thumb__/{sourceId}/{size}/{mtime}/{fileSize}/{remote-path}
     if let Some(rest) = url_path.strip_prefix("/__remote_thumb__/") {
+        if speculative {
+            eprintln!("[thumbnail prefetch] skip remote request path={url_path:?}");
+            return skip_prefetch(&mut stream);
+        }
         return handle_remote_thumb(stream, state_slot, rest);
     }
 
@@ -203,9 +213,11 @@ fn handle(
         .and_then(|l| l.splitn(2, ':').nth(1))
         .map(|v| v.trim().to_string());
 
+    let started = Instant::now();
     let total = match std::fs::metadata(&path).map(|m| m.len()) {
         Ok(n) => n,
-        Err(_) => {
+        Err(error) => {
+            eprintln!("[viewer http] failed path={path:?} error={error}");
             stream.write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n")?;
             return Ok(());
         }
@@ -242,10 +254,17 @@ fn handle(
     // The prefetch only caches a prefix of large files (e.g. videos), so we
     // must verify the cached content is the complete file before using it —
     // otherwise we'd serve a truncated MP4 and qtdemux would reject it.
-    let data = match prefetch.get_cached_by_path(&path) {
-        Some(entry) if entry.file_size == Some(entry.content.len() as u64) => entry.content.clone(),
-        _ => std::fs::read(&path)?,
+    let cached = prefetch
+        .get_cached_by_path(&path)
+        .filter(|entry| entry.file_size == Some(total) && entry.content.len() as u64 == total);
+    let disk_data;
+    let data = if let Some(ref entry) = cached {
+        entry.content.as_slice()
+    } else {
+        disk_data = std::fs::read(&path)?;
+        disk_data.as_slice()
     };
+    let read_ms = started.elapsed().as_millis();
     write!(
         stream,
         "HTTP/1.1 200 OK\r\n\
@@ -257,7 +276,15 @@ fn handle(
          Connection: close\r\n\r\n",
         data.len()
     )?;
-    stream.write_all(&data)?;
+    let result = stream.write_all(data);
+    eprintln!(
+        "[viewer http] path={path:?} source={} bytes={} read_ms={read_ms} total_ms={} result={:?}",
+        if cached.is_some() { "cache" } else { "disk" },
+        data.len(),
+        started.elapsed().as_millis(),
+        result.as_ref().err()
+    );
+    result?;
     Ok(())
 }
 
@@ -409,6 +436,7 @@ fn handle_thumb(
     cache: &ThumbCache,
     pool: &ThumbPool,
     rest: &str,
+    speculative: bool,
 ) -> std::io::Result<()> {
     // Parse {size}/{rest-as-path}
     let (size_str, path_part) = match rest.split_once('/') {
@@ -433,6 +461,18 @@ fn handle_thumb(
         format!("/{decoded}")
     };
 
+    let policy = crate::storage::registry();
+    let permit = if speculative {
+        match policy.authorize(&path) {
+            Some(permit) => Some(permit),
+            None => return skip_prefetch(&mut stream),
+        }
+    } else {
+        None
+    };
+    let path = permit
+        .as_ref()
+        .map_or(path, |permit| permit.path.to_string_lossy().into_owned());
     let mtime = std::fs::metadata(&path)
         .ok()
         .and_then(|m| m.modified().ok())
@@ -447,6 +487,9 @@ fn handle_thumb(
     };
 
     if let Some(cached) = cache.get(&key) {
+        if permit.as_ref().is_some_and(|p| !policy.valid(p)) {
+            return skip_prefetch(&mut stream);
+        }
         return write_thumb_response(&mut stream, &cached);
     }
 
@@ -457,8 +500,12 @@ fn handle_thumb(
         path: path.clone(),
         size,
         mtime,
+        speculative_generation: permit.as_ref().map(|permit| permit.generation()),
     });
     let bytes_opt = rx.recv().unwrap_or(None);
+    if permit.as_ref().is_some_and(|p| !policy.valid(p)) {
+        return skip_prefetch(&mut stream);
+    }
 
     match bytes_opt {
         Some(bytes) => {
@@ -472,6 +519,10 @@ fn handle_thumb(
             Ok(())
         }
     }
+}
+
+fn skip_prefetch(stream: &mut TcpStream) -> std::io::Result<()> {
+    stream.write_all(b"HTTP/1.1 204 No Content\r\nCache-Control: no-store\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n")
 }
 
 fn write_thumb_response(stream: &mut TcpStream, bytes: &[u8]) -> std::io::Result<()> {

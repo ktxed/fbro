@@ -1,15 +1,18 @@
 import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from "react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Tooltip } from "react-tooltip";
 import type { PanelState, VFSEntry, Source } from "../ws/types";
 import type { WsClient } from "../ws/client";
 import {
   executeCommand,
+  executeTargetedCommand,
   findMatchingCommand,
   GLOBAL_SHORTCUT_COMMAND_IDS,
   PANEL_SHORTCUT_COMMAND_IDS,
 } from "../commands/interactive";
 import { useAppDispatch, useAppState } from "../store";
-import { IconChevronDown, IconChevronUp, IconChevronRight, IconChevronLeft, IconArrowUpRight, IconX, IconAlertTriangle, IconActivity, IconHistory, IconGitBranch, IconGitCompare, IconLock, IconMinus, IconNetwork, IconListCheck, IconPlus, IconRestore } from "@tabler/icons-react";
+import { IconChevronDown, IconChevronUp, IconChevronRight, IconChevronLeft, IconArrowUpRight, IconX, IconAlertTriangle, IconActivity, IconHistory, IconGitBranch, IconGitCompare, IconLock, IconMinus, IconNetwork, IconListCheck, IconPlus, IconRestore, IconCopy, IconPhoto, IconTrash, IconPencil, IconRobot, IconArrowsMove } from "@tabler/icons-react";
+import { contextualEntryIsSelected, contextualOperationAvailable, resolveContextualTarget, type ContextualTarget } from "../contextualOperations";
 
 // Maps Source.iconName (BE-provided) to a Tabler icon component for rendering
 // in the volume bar. Sources with an iconName render the icon in place of
@@ -27,19 +30,91 @@ import { isGlobalSelectionSourceId } from "../utils/sourceId";
 import { GitModal } from "./GitModal";
 import { GitActionsModal } from "./GitActionsModal";
 import type { GitActivity } from "./gitActivity";
+import previewThrobberUrl from "../assets/win98-flag-throbber-64nn.gif";
 
 const ROW_HEIGHT = 22;
 const GRID_THUMB_SIZE = 128;
+const PREVIEW_THUMB_SIZE = 280;
 const GRID_CARD_MIN_WIDTH = 144;
 const GRID_GAP = 8;
 const GRID_PADDING = 16; // 8px on each side from .panel__list--grid padding
 const FILTER_DEBOUNCE_MS = 200;
+const IMAGE_PREVIEW_EXTENSIONS = new Set([
+  "avif", "bmp", "gif", "heic", "heif", "ico", "jpeg", "jpg", "png", "svg", "tif", "tiff", "webp",
+]);
 const SORT_COLUMNS = [
   { id: "kind", label: "Kind" },
   { id: "name", label: "Name" },
   { id: "size", label: "Size" },
   { id: "date", label: "Date" },
 ] as const;
+
+type InlineOperationItem = {
+  id: string;
+  testId: string;
+  label: string;
+  ariaLabel: string;
+  icon: React.ReactNode;
+  run: () => void;
+  danger?: boolean;
+  armed?: boolean;
+  preview?: { url: string; name: string };
+};
+
+function PreviewTooltipImage({ url, name }: { url: string; name: string }) {
+  const [loadedUrl, setLoadedUrl] = useState<string | null>(null);
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  if (failedUrl === url) return null;
+  return (
+    <>
+      {loadedUrl !== url && (
+        <img className="panel__file-preview-throbber" src={previewThrobberUrl} alt="" aria-hidden />
+      )}
+      <img
+        src={url}
+        alt={name}
+        style={loadedUrl === url ? undefined : { display: "none" }}
+        onLoad={() => setLoadedUrl(url)}
+        onError={() => setFailedUrl(url)}
+      />
+    </>
+  );
+}
+
+function InlineOperationButtons({ panelId, tooltipId, items }: {
+  panelId: string;
+  tooltipId: string;
+  items: readonly InlineOperationItem[];
+}) {
+  const stopRowInteraction = (event: React.SyntheticEvent) => event.stopPropagation();
+  return items.map((item) => (
+    <button
+      key={item.id}
+      type="button"
+      tabIndex={-1}
+      className={[
+        "panel__inline-operation",
+        item.danger ? "panel__inline-operation--danger" : "",
+        item.armed ? "panel__inline-operation--armed" : "",
+      ].filter(Boolean).join(" ")}
+      data-testid={item.testId}
+      data-inline-operation={item.id}
+      data-tooltip-id={item.preview ? `file-inline-preview-${panelId}` : tooltipId}
+      data-tooltip-content={item.label}
+      data-preview-url={item.preview?.url}
+      data-preview-name={item.preview?.name}
+      aria-label={item.ariaLabel}
+      onMouseDown={stopRowInteraction}
+      onDoubleClick={stopRowInteraction}
+      onClick={(event) => {
+        event.stopPropagation();
+        item.run();
+      }}
+    >
+      {item.icon}
+    </button>
+  ));
+}
 
 function GitBubbleActions({
   panelId,
@@ -49,6 +124,7 @@ function GitBubbleActions({
   client,
   onExitKeyboardMode,
   onRestoreStageFocus,
+  fileOperations,
 }: {
   panelId: string;
   path: string;
@@ -57,9 +133,9 @@ function GitBubbleActions({
   client: WsClient;
   onExitKeyboardMode: () => void;
   onRestoreStageFocus: () => void;
+  fileOperations: readonly InlineOperationItem[];
 }) {
   const [rollbackArmed, setRollbackArmed] = useState(false);
-  const tooltipId = `git-inline-actions-${panelId}`;
 
   useEffect(() => {
     setRollbackArmed(false);
@@ -80,7 +156,37 @@ function GitBubbleActions({
     }
     else setRollbackArmed(true);
   };
-  const stopRowInteraction = (event: React.SyntheticEvent) => event.stopPropagation();
+  const gitOperations: InlineOperationItem[] = [
+    {
+      id: "git.view-diff",
+      testId: "git-inline-view-diff",
+      label: "View Git diff",
+      ariaLabel: `View Git diff for ${path}`,
+      icon: <IconGitCompare size={13} aria-hidden />,
+      run: () => {
+        setRollbackArmed(false);
+        client.sendIntent("GitViewDiff", undefined, { panelId, targetPath: path });
+      },
+    },
+    {
+      id: staged ? "git.unstage" : "git.stage",
+      testId: staged ? "git-inline-unstage" : "git-inline-stage",
+      label: staged ? "Unstage" : "Stage",
+      ariaLabel: `${staged ? "Unstage" : "Stage"} ${path}`,
+      icon: staged ? <IconMinus size={13} aria-hidden /> : <IconPlus size={13} aria-hidden />,
+      run: runStageAction,
+    },
+    {
+      id: "git.rollback",
+      testId: "git-inline-rollback",
+      label: rollbackArmed ? "Confirm rollback" : "Rollback",
+      ariaLabel: `${rollbackArmed ? "Confirm rollback" : "Rollback"} ${path}`,
+      icon: rollbackArmed ? <IconAlertTriangle size={13} aria-hidden /> : <IconRestore size={13} aria-hidden />,
+      run: runRollbackAction,
+      danger: true,
+      armed: rollbackArmed,
+    },
+  ];
   const handleToolbarKeyDown = (event: React.KeyboardEvent<HTMLSpanElement>) => {
     const unmodified = !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey;
     if (unmodified && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
@@ -89,8 +195,12 @@ function GitBubbleActions({
       if (buttons.length > 0 && current >= 0) {
         event.preventDefault();
         event.stopPropagation();
-        const direction = event.key === "ArrowRight" ? 1 : -1;
-        buttons[(current + direction + buttons.length) % buttons.length].focus();
+        if (event.key === "ArrowLeft" && current === 0) {
+          onExitKeyboardMode();
+        } else {
+          const direction = event.key === "ArrowRight" ? 1 : -1;
+          buttons[(current + direction + buttons.length) % buttons.length].focus();
+        }
       }
       return;
     }
@@ -112,53 +222,8 @@ function GitBubbleActions({
   return (
     <span className="panel__git-bubble panel__git-bubble--actions" data-testid="git-inline-bubble">
       <span className="panel__git-bubble-label">{label}</span>
-      <span className="panel__git-bubble-buttons" role="toolbar" aria-label={`Git actions for ${path}`} onKeyDown={handleToolbarKeyDown}>
-        <button
-          type="button"
-          tabIndex={-1}
-          className="panel__git-bubble-action"
-          data-testid="git-inline-view-diff"
-          data-tooltip-id={tooltipId}
-          data-tooltip-content="View Git diff"
-          aria-label={`View Git diff for ${path}`}
-          onMouseDown={stopRowInteraction}
-          onDoubleClick={stopRowInteraction}
-          onClick={(event) => {
-            event.stopPropagation();
-            setRollbackArmed(false);
-            client.sendIntent("GitViewDiff", undefined, { panelId, targetPath: path });
-          }}
-        >
-          <IconGitCompare size={13} aria-hidden />
-        </button>
-        <button
-          type="button"
-          tabIndex={-1}
-          className="panel__git-bubble-action"
-          data-testid={staged ? "git-inline-unstage" : "git-inline-stage"}
-          data-tooltip-id={tooltipId}
-          data-tooltip-content={staged ? "Unstage" : "Stage"}
-          aria-label={`${staged ? "Unstage" : "Stage"} ${path}`}
-          onMouseDown={stopRowInteraction}
-          onDoubleClick={stopRowInteraction}
-          onClick={(event) => { event.stopPropagation(); runStageAction(); }}
-        >
-          {staged ? <IconMinus size={13} aria-hidden /> : <IconPlus size={13} aria-hidden />}
-        </button>
-        <button
-          type="button"
-          tabIndex={-1}
-          className={`panel__git-bubble-action panel__git-bubble-action--danger${rollbackArmed ? " panel__git-bubble-action--armed" : ""}`}
-          data-testid="git-inline-rollback"
-          data-tooltip-id={tooltipId}
-          data-tooltip-content={rollbackArmed ? "Confirm rollback" : "Rollback"}
-          aria-label={`${rollbackArmed ? "Confirm rollback" : "Rollback"} ${path}`}
-          onMouseDown={stopRowInteraction}
-          onDoubleClick={stopRowInteraction}
-          onClick={(event) => { event.stopPropagation(); runRollbackAction(); }}
-        >
-          {rollbackArmed ? <IconAlertTriangle size={13} aria-hidden /> : <IconRestore size={13} aria-hidden />}
-        </button>
+      <span className="panel__git-bubble-buttons panel__inline-toolbar" role="toolbar" aria-label={`Git and file actions for ${path}`} onKeyDown={handleToolbarKeyDown}>
+        <InlineOperationButtons panelId={panelId} tooltipId={`git-inline-actions-${panelId}`} items={[...gitOperations, ...fileOperations]} />
       </span>
     </span>
   );
@@ -639,6 +704,23 @@ function isRestricted(entry: VFSEntry): boolean {
   return false;
 }
 
+/** True when returning from another Tauri window should leave DOM focus alone. */
+function shouldKeepWindowFocusTarget(active: Element | null): boolean {
+  if (!(active instanceof HTMLElement)) return false;
+  if (active.closest(".panel-terminal")) return true;
+  if (active.closest(".dt-input")) return true;
+  if (active.isContentEditable) return true;
+  return active instanceof HTMLInputElement
+    || active instanceof HTMLTextAreaElement
+    || active instanceof HTMLSelectElement;
+}
+
+function isImagePreviewCandidate(entry: VFSEntry): boolean {
+  if (entry.kind !== "file") return false;
+  const extension = entry.name.split(".").pop()?.toLowerCase();
+  return !!extension && IMAGE_PREVIEW_EXTENSIONS.has(extension);
+}
+
 export function Panel({
   panelId,
   panel,
@@ -926,21 +1008,45 @@ export function Panel({
     }
   }, [isFocused, modalActive, panel.filterModeActive]);
 
-  // A separate viewer window can leave the main WebView focused at the OS
-  // level while its DOM focus has fallen back to <body>. Restore the active
-  // panel when the main window is reactivated so its shortcuts work on the
-  // first key press after closing the viewer.
+  // A separate viewer/compare window takes OS focus. On return, WebKitGTK
+  // often leaves document.activeElement on the panel (or a toolbar button)
+  // while no longer delivering keys. Re-assert listing focus so panel
+  // shortcuts such as `g` work on the first keypress.
   useEffect(() => {
     if (!isFocused) return;
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
     const restoreFocus = () => {
       if (modalActive) return;
       const active = document.activeElement;
-      if (active && active !== document.body && active !== document.documentElement) return;
-      if (panel.filterModeActive) filterInputRef.current?.focus();
-      else focusDivRef.current?.focus();
+      if (shouldKeepWindowFocusTarget(active)) return;
+      if (panel.filterModeActive) {
+        filterInputRef.current?.focus({ preventScroll: true });
+        return;
+      }
+      const el = focusDivRef.current;
+      if (!el) return;
+      // Same-node focus() is a no-op on WebKit; blur first so key routing resumes.
+      if (active === el) el.blur();
+      el.focus({ preventScroll: true });
     };
     window.addEventListener("focus", restoreFocus);
-    return () => window.removeEventListener("focus", restoreFocus);
+    void getCurrentWindow()
+      .onFocusChanged(({ payload: focused }) => {
+        if (focused) restoreFocus();
+      })
+      .then((fn) => {
+        if (cancelled) fn();
+        else unlisten = fn;
+      })
+      .catch(() => {
+        // DOM window focus remains the fallback (synthetic e2e events, non-Tauri).
+      });
+    return () => {
+      cancelled = true;
+      window.removeEventListener("focus", restoreFocus);
+      unlisten?.();
+    };
   }, [isFocused, modalActive, panel.filterModeActive]);
 
   useEffect(() => {
@@ -1101,6 +1207,11 @@ export function Panel({
       }
     }
     captureCursorViewportOffset();
+    // Font and surrounding flex-layout changes can settle after this layout
+    // effect. Refresh once on the next frame so a later live prepend anchors
+    // to the position the user actually saw.
+    const settledCaptureFrame = requestAnimationFrame(captureCursorViewportOffset);
+    return () => cancelAnimationFrame(settledCaptureFrame);
   }, [appState.fontSize, captureCursorViewportOffset, handleScroll, panel.cursor, panel.selection.length, panel.viewportAnchor]);
 
   useEffect(() => () => {
@@ -1180,7 +1291,7 @@ export function Panel({
     if (entry.name === "..") return;
     const targetsSelection = explicitTarget
       ? explicitTarget.targetScope === "selection"
-      : panel.selection.includes(absIndex);
+      : contextualEntryIsSelected(panel, absIndex, entry);
     const targetCount = explicitTarget?.targetCount ?? (targetsSelection ? panel.selection.length : 1);
 
     if (!isFocused) {
@@ -1219,7 +1330,7 @@ export function Panel({
     if (!rect) return;
     const dirPath = panel.path.replace(/[/\\]+$/, "");
     const fullPath = entry.sourcePath ?? `${dirPath}/${entry.name}`;
-    const targetsSelection = panel.selection.length > 0;
+    const targetsSelection = contextualEntryIsSelected(panel, panel.cursor, entry);
     dispatch({
       type: "OPEN_CONTEXT_MENU",
       menu: {
@@ -1236,7 +1347,7 @@ export function Panel({
         anchorBottom: rect.bottom,
         isShadow: !!panel.shadowSource,
         targetScope: targetsSelection ? "selection" : "entry",
-        targetCount: targetsSelection ? panel.selection.length : 1,
+        targetCount: targetsSelection ? panel.selectedEntries.length : 1,
       },
     });
   }, [dispatch, panel, panelId]);
@@ -1281,11 +1392,14 @@ export function Panel({
     const unmodified = !e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey;
     if (unmodified && e.key === "ArrowRight" && panel.viewMode === "list") {
       const cursorRow = listRef.current?.querySelector<HTMLElement>(`[data-abs-index="${panel.cursor}"]`);
-      const diffButton = cursorRow?.querySelector<HTMLButtonElement>('[data-testid="git-inline-view-diff"]');
-      if (diffButton) {
+      // Singleton directories have no toolbar, so Right drills down. A
+      // directory anchoring a multi-selection does have bulk actions and Right
+      // enters that toolbar; Enter remains the way to open the directory.
+      const firstAction = cursorRow?.querySelector<HTMLButtonElement>(".panel__inline-toolbar button");
+      if (firstAction) {
         e.preventDefault();
         e.stopPropagation();
-        diffButton.focus();
+        firstAction.focus();
         return;
       }
     }
@@ -1324,6 +1438,12 @@ export function Panel({
     if (command) {
       e.preventDefault();
       e.stopPropagation();
+      // A shortcut typed while focus sits on an inline toolbar button would
+      // otherwise dangle: the command can move the cursor away and unmount
+      // the very button holding focus, dropping keyboard control of the panel.
+      const activeElement = document.activeElement;
+      const focusInsideInlineToolbar = activeElement instanceof HTMLElement
+        && activeElement.closest(".panel__inline-toolbar") !== null;
       executeCommand(command.id, {
         state: appState,
         dispatch,
@@ -1345,6 +1465,7 @@ export function Panel({
         getGridCols: () => computeGridMetrics(listRef.current).cols,
         getGridPageRows: () => computeGridMetrics(listRef.current).pageRows,
       });
+      if (focusInsideInlineToolbar) focusDivRef.current?.focus();
       return;
     }
   }
@@ -1443,13 +1564,171 @@ export function Panel({
     return `${dir}/${entry.name}`;
   };
 
-  const thumbUrlFor = (entry: VFSEntry): string | null => {
+  const thumbUrlFor = (entry: VFSEntry, size: number = GRID_THUMB_SIZE): string | null => {
     const entryPath = entryPathFor(entry);
     if (!entryPath || appState.fileServerPort <= 0) return null;
     if (source?.kind === "remote") {
-      return `http://127.0.0.1:${appState.fileServerPort}/__remote_thumb__/${encodeURIComponent(panel.sourceId)}/${GRID_THUMB_SIZE}/${encodeURIComponent(entry.mtime ?? "0")}/${encodeURIComponent(String(entry.size ?? 0))}/${encodeURIComponent(entryPath)}`;
+      return `http://127.0.0.1:${appState.fileServerPort}/__remote_thumb__/${encodeURIComponent(panel.sourceId)}/${size}/${encodeURIComponent(entry.mtime ?? "0")}/${encodeURIComponent(String(entry.size ?? 0))}/${encodeURIComponent(entryPath)}`;
     }
-    return `http://127.0.0.1:${appState.fileServerPort}/__thumb__/${GRID_THUMB_SIZE}/${encodeURIComponent(entryPath)}`;
+    return `http://127.0.0.1:${appState.fileServerPort}/__thumb__/${size}/${encodeURIComponent(entryPath)}`;
+  };
+
+  // Warm the preview-size thumbnail for the cursor entry and its next neighbor
+  // so the inline preview tooltip opens instantly — the same idea as the
+  // viewer's neighbor preloading. Only explicitly eligible sources qualify;
+  // the backend independently checks each marked request and resolved target.
+  // Successful warmups populate the BE LRU and disk thumbnail cache.
+  const [windowFocused, setWindowFocused] = useState(() => document.hasFocus());
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    const focus = () => setWindowFocused(true);
+    const blur = () => setWindowFocused(false);
+    window.addEventListener("focus", focus);
+    window.addEventListener("blur", blur);
+    void getCurrentWindow().onFocusChanged(({ payload }) => setWindowFocused(payload))
+      .then(fn => { if (disposed) fn(); else unlisten = fn; }).catch(() => {});
+    return () => {
+      disposed = true;
+      window.removeEventListener("focus", focus);
+      window.removeEventListener("blur", blur);
+      unlisten?.();
+    };
+  }, []);
+  useEffect(() => {
+    if (!windowFocused || source?.prefetchEligible !== true || panel.viewMode !== "list" || !panel.supportsThumbnails || appState.fileServerPort <= 0) return;
+    const windowStart = panel.windowStart ?? 0;
+    const candidates = [panel.entries[panel.cursor - windowStart], panel.entries[panel.cursor + 1 - windowStart]]
+      .filter((entry): entry is VFSEntry => !!entry && isImagePreviewCandidate(entry));
+    const urls = candidates
+      .map((entry) => thumbUrlFor(entry, PREVIEW_THUMB_SIZE))
+      .filter((url): url is string => !!url);
+    if (urls.length === 0) return;
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      for (const url of urls) {
+        // Consume the response so a speculative fetch cannot retain an unread body.
+        void fetch(`${url}?prefetch=1`, { signal: controller.signal }).then(r => r.arrayBuffer()).catch(() => {});
+      }
+    }, 200);
+    return () => { window.clearTimeout(timer); controller.abort(); };
+  }, [windowFocused, panel.cursor, panel.entries, panel.windowStart, panel.viewMode, panel.supportsThumbnails, panel.sourceId, source?.kind, source?.prefetchEligible, appState.fileServerPort]);
+
+  const runContextualFileCommand = (
+    target: ContextualTarget,
+    commandId: "panel.pass_to_bro" | "file.compare" | "file.copy" | "file.move" | "file.rename" | "file.delete",
+  ) => {
+    const { primary } = target;
+    executeTargetedCommand(commandId, { state: appState, dispatch, client }, {
+      panelId,
+      dirPath: target.dirPath,
+      fullPath: primary.fullPath,
+      name: primary.name,
+      kind: primary.kind,
+      size: primary.size,
+      scope: target.scope,
+      entries: target.entries,
+    });
+  };
+
+  const inlineFileOperationsFor = (target: ContextualTarget): InlineOperationItem[] => {
+    const entry = target.primary.entry;
+    const targetLabel = target.count > 1 ? `${target.count} selected items` : target.primary.name;
+    const available = (id: Parameters<typeof contextualOperationAvailable>[0]) =>
+      contextualOperationAvailable(id, appState, target);
+    const previewUrl = entry && available("file.preview") && isImagePreviewCandidate(entry) ? thumbUrlFor(entry, PREVIEW_THUMB_SIZE) : null;
+    const operations: InlineOperationItem[] = [];
+    if (previewUrl) operations.push({
+        id: "file.preview",
+        testId: "file-inline-preview",
+        label: "Preview",
+        ariaLabel: `Preview ${target.primary.name}`,
+        icon: <IconPhoto size={13} aria-hidden />,
+        preview: { url: previewUrl, name: target.primary.name },
+        run: () => client.sendIntent("ViewFile", undefined, {
+          panelId, path: panel.path, sourceId: panel.sourceId, filename: target.primary.name,
+        }),
+      });
+    if (available("file.compare")) operations.push({
+      id: "file.compare",
+      testId: "file-inline-compare",
+      label: "Compare",
+      ariaLabel: `Compare ${targetLabel}`,
+      icon: <IconGitCompare size={13} aria-hidden />,
+      run: () => runContextualFileCommand(target, "file.compare"),
+    });
+    if (available("panel.pass-to-bro")) operations.push({
+        id: "panel.pass-to-bro",
+        testId: "file-inline-pass-to-bro",
+        label: "Pass to Bro",
+        ariaLabel: `Pass ${targetLabel} to Bro`,
+        icon: <IconRobot size={13} aria-hidden />,
+        run: () => runContextualFileCommand(target, "panel.pass_to_bro"),
+      });
+    if (available("file.copy")) operations.push({
+        id: "file.copy",
+        testId: "file-inline-copy",
+        label: "Copy",
+        ariaLabel: `Copy ${targetLabel}`,
+        icon: <IconCopy size={13} aria-hidden />,
+        run: () => runContextualFileCommand(target, "file.copy"),
+      });
+    if (available("file.move")) operations.push({
+      id: "file.move",
+      testId: "file-inline-move",
+      label: "Move",
+      ariaLabel: `Move ${targetLabel}`,
+      icon: <IconArrowsMove size={13} aria-hidden />,
+      run: () => runContextualFileCommand(target, "file.move"),
+    });
+    if (available("file.rename")) operations.push({
+        id: "file.rename",
+        testId: "file-inline-rename",
+        label: "Rename",
+        ariaLabel: `Rename ${target.primary.name}`,
+        icon: <IconPencil size={13} aria-hidden />,
+        run: () => runContextualFileCommand(target, "file.rename"),
+      });
+    if (available("file.delete")) operations.push({
+        id: "file.delete",
+        testId: "file-inline-delete",
+        label: "Delete",
+        ariaLabel: `Delete ${targetLabel}`,
+        icon: <IconTrash size={13} aria-hidden />,
+        danger: true,
+        run: () => runContextualFileCommand(target, "file.delete"),
+      });
+    return operations;
+  };
+
+  const handleInlineToolbarKeyDown = (event: React.KeyboardEvent<HTMLSpanElement>) => {
+    const unmodified = !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey;
+    if (unmodified && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
+      const buttons = [...event.currentTarget.querySelectorAll<HTMLButtonElement>("button")];
+      const current = buttons.indexOf(document.activeElement as HTMLButtonElement);
+      if (buttons.length > 0 && current >= 0) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (event.key === "ArrowLeft" && current === 0) {
+          focusPanel();
+        } else {
+          const direction = event.key === "ArrowRight" ? 1 : -1;
+          buttons[(current + direction + buttons.length) % buttons.length].focus();
+        }
+      }
+      return;
+    }
+    if (event.key === "Enter" || event.key === " ") {
+      event.stopPropagation();
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      focusPanel();
+      return;
+    }
+    if (event.key === "ArrowUp" || event.key === "ArrowDown") focusPanel();
   };
 
   const openEntry = (entry: VFSEntry, absIndex: number) => {
@@ -1708,6 +1987,13 @@ export function Panel({
     const inlineGitChange = inlineGitPath
       ? panel.git?.changes.find(change => change.path === inlineGitPath)
       : undefined;
+    const contextualTarget = absIndex === panel.cursor ? resolveContextualTarget(panel, absIndex, entry) : null;
+    const singleTarget = contextualTarget?.count === 1;
+    // A singleton directory uses Right Arrow for drill-down and does not need
+    // a shortcut bar. Directories can still participate in bulk selections.
+    const fileOperations = contextualTarget && (contextualTarget.count > 1 || entry.kind !== "directory")
+      ? inlineFileOperationsFor(contextualTarget)
+      : [];
     return (
       <div
         key={absIndex}
@@ -1845,9 +2131,17 @@ export function Panel({
                 </button>
               )}
               {entry.gitStatus && <span className="panel__git-status" data-tooltip-id={`git-summary-${panelId}`} data-tooltip-content={gitSummary ? `Git: ${entry.gitStatus}\n${gitSummary}` : `Git: ${entry.gitStatus}`}>{entry.gitStatus === "untracked" ? "?" : entry.gitStatus === "modified" ? "M" : entry.gitStatus === "deleted" ? "D" : entry.gitStatus === "conflicted" ? "!" : "●"}</span>}
-              {absIndex === panel.cursor && gitInline && (inlineGitPath && inlineGitChange
-                ? <GitBubbleActions panelId={panelId} path={inlineGitPath} label={gitInline} staged={inlineGitChange.indexStatus !== " " && inlineGitChange.indexStatus !== "?"} client={client} onExitKeyboardMode={focusPanel} onRestoreStageFocus={requestInlineStageFocusRestore} />
+              {absIndex === panel.cursor && singleTarget && gitInline && (inlineGitPath && inlineGitChange
+                ? <GitBubbleActions panelId={panelId} path={inlineGitPath} label={gitInline} staged={inlineGitChange.indexStatus !== " " && inlineGitChange.indexStatus !== "?"} client={client} onExitKeyboardMode={focusPanel} onRestoreStageFocus={requestInlineStageFocusRestore} fileOperations={fileOperations} />
                 : <span className="panel__git-bubble" data-tooltip-id={`git-summary-${panelId}`} data-tooltip-content={gitSummary}>{gitInline}</span>)}
+              {absIndex === panel.cursor && (!singleTarget || !inlineGitChange) && fileOperations.length > 0 && (
+                <span className="panel__git-bubble panel__git-bubble--actions panel__file-bubble" data-testid="file-inline-bubble">
+                  {contextualTarget && contextualTarget.count > 1 && <span className="panel__git-bubble-label">{contextualTarget.count} selected</span>}
+                  <span className="panel__git-bubble-buttons panel__inline-toolbar" role="toolbar" aria-label={contextualTarget && contextualTarget.count > 1 ? `File actions for ${contextualTarget.count} selected items` : `File actions for ${entry.name}`} onKeyDown={handleInlineToolbarKeyDown}>
+                    <InlineOperationButtons panelId={panelId} tooltipId={`file-inline-actions-${panelId}`} items={fileOperations} />
+                  </span>
+                </span>
+              )}
             </span>
           );
         })()}
@@ -1986,7 +2280,10 @@ export function Panel({
                   }, { tooltip: true, thumbWidth: cardWidth });
                 })()}
                 {panel.status === "loading" && panel.entries.length === 0 && (
-                  <div className="panel__loading">Loading…</div>
+                  <div className="panel__loading" role="status">
+                    <img src={previewThrobberUrl} alt="" aria-hidden />
+                    <span>Loading…</span>
+                  </div>
                 )}
               </div>
             );
@@ -1999,7 +2296,10 @@ export function Panel({
           <>
             {panel.entries.map((entry, i) => renderRow(entry, i))}
             {panel.status === "loading" && panel.entries.length === 0 && (
-              <div className="panel__loading">Loading…</div>
+              <div className="panel__loading" role="status">
+                <img src={previewThrobberUrl} alt="" aria-hidden />
+                <span>Loading…</span>
+              </div>
             )}
           </>
         )}
@@ -2070,6 +2370,26 @@ export function Panel({
       <Tooltip id={`git-summary-${panelId}`} className="panel__git-tooltip" delayShow={120} place="bottom" border="1px solid var(--border-focus)" arrowColor="var(--bg-elev)" />
       <Tooltip id={`git-chip-${panelId}`} className="panel__git-tooltip" delayShow={120} place="bottom" border="1px solid var(--border-focus)" arrowColor="var(--bg-elev)" />
       <Tooltip id={`git-inline-actions-${panelId}`} className="panel__git-tooltip panel__git-icon-tooltip" delayShow={180} place="bottom" border="1px solid var(--border-focus)" arrowColor="var(--bg-elev)" />
+      <Tooltip id={`file-inline-actions-${panelId}`} className="panel__git-tooltip panel__git-icon-tooltip" delayShow={180} place="bottom" border="1px solid var(--border-focus)" arrowColor="var(--bg-elev)" />
+      <Tooltip
+        id={`file-inline-preview-${panelId}`}
+        className="panel__file-preview-tooltip"
+        delayShow={220}
+        place="bottom"
+        border="1px solid var(--border-focus)"
+        arrowColor="var(--bg-elev)"
+        opacity={1}
+        render={({ activeAnchor }) => {
+          const previewUrl = activeAnchor?.getAttribute("data-preview-url");
+          if (!previewUrl) return null;
+          return (
+            <PreviewTooltipImage
+              url={previewUrl}
+              name={activeAnchor?.getAttribute("data-preview-name") ?? "File preview"}
+            />
+          );
+        }}
+      />
       {panel.terminalSessionId !== undefined && (
         <PanelTerminal
           client={client}

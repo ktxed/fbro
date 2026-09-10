@@ -2,10 +2,7 @@ use std::collections::HashSet;
 
 use serde_json::Value;
 
-use crate::jobs::viewer_prefetch::PREFETCH_N;
-use crate::ws::intents::{
-    arg_bool, arg_i64, arg_str, arg_u64, arg_usize_vec, is_archive_source, is_search_source,
-};
+use crate::ws::intents::{arg_bool, arg_i64, arg_str, arg_u64, arg_usize_vec};
 use crate::ws::protocol::{now, ServerMessage};
 use crate::ws::runtime::{
     build_state_snapshot, handle_volumes_changed, rescan_panel, resolve_panel_id,
@@ -439,7 +436,7 @@ async fn move_cursor(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
                     if drv.is_local() {
                         let neighbors = neighbors_for_prefetch(
                             &panel.entries,
-                            new_cursor,
+                            panel.cursor,
                             &panel.path,
                             &source_id,
                         );
@@ -455,7 +452,7 @@ async fn move_cursor(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
             }
         };
         if let Some((neighbors, source_id, driver, image_cap)) = prefetch_info {
-            prefetch.schedule_neighbors(neighbors, source_id, driver, image_cap);
+            prefetch.schedule_neighbors(panel_id, neighbors, source_id, driver, image_cap);
         }
     });
 }
@@ -1115,30 +1112,7 @@ fn neighbors_for_prefetch(
     dir_path: &str,
     source_id: &str,
 ) -> Vec<(String, Option<u64>)> {
-    if is_archive_source(source_id) || is_search_source(source_id) {
-        return vec![];
-    }
-    let mut neighbors = Vec::new();
-    let base = dir_path.trim_end_matches('/');
-    let mut count = 0usize;
-    let mut i = cursor;
-    while count < PREFETCH_N && i > 0 {
-        i -= 1;
-        if entries[i].kind == "file" {
-            neighbors.push((format!("{}/{}", base, entries[i].name), entries[i].size));
-            count += 1;
-        }
-    }
-    count = 0;
-    i = cursor;
-    while count < PREFETCH_N && i + 1 < entries.len() {
-        i += 1;
-        if entries[i].kind == "file" {
-            neighbors.push((format!("{}/{}", base, entries[i].name), entries[i].size));
-            count += 1;
-        }
-    }
-    neighbors
+    super::viewer::collect_neighbors(entries, cursor, dir_path, source_id, "next")
 }
 
 async fn set_panel_view_mode(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {

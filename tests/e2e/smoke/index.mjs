@@ -26,6 +26,7 @@ import { runFedupFlow } from "./cases/fedup.mjs";
 import { runGlobalSelectionFlow } from "./cases/global-selection.mjs";
 import { runGitFlow } from "./cases/git.mjs";
 import { runLocalFlow } from "./cases/local.mjs";
+import { runViewerFlow } from "./cases/viewer.mjs";
 import { runQuickEditFlow } from "./cases/quick-edit.mjs";
 import { runRemoteFlow } from "./cases/remote.mjs";
 import { runDatetimeSearchFlow, runSearchFlow, runSizeSearchFlow } from "./cases/search.mjs";
@@ -59,7 +60,12 @@ async function main() {
     observerA = new FbroObserver("fbro-a", wsUrls.a);
     await observerA.connect();
 
+    if (process.env.FBRO_E2E_VIEWER_ONLY === "1") {
+      await runViewerFlow(browserA, observerA);
+      return;
+    }
     await runLocalFlow(browserA, observerA);
+    await runViewerFlow(browserA, observerA);
     await runQuickEditFlow(browserA, observerA);
     await runGlobalSelectionFlow(browserA, observerA);
     await runGitFlow(browserA, observerA);

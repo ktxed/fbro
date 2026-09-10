@@ -661,6 +661,10 @@ pub struct SourceSchema {
     #[serde(rename = "rootPath")]
     pub root_path: String,
     pub mounted: bool,
+    #[serde(rename = "storageClass")]
+    pub storage_class: crate::storage::StorageClass,
+    #[serde(rename = "prefetchEligible")]
+    pub prefetch_eligible: bool,
     #[serde(rename = "freeBytes", skip_serializing_if = "Option::is_none")]
     pub free_bytes: Option<u64>,
     #[serde(rename = "totalBytes", skip_serializing_if = "Option::is_none")]

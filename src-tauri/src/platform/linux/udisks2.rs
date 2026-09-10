@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use tokio::sync::mpsc;
 use zbus::zvariant::{ObjectPath, OwnedObjectPath, OwnedValue, Value};
@@ -11,7 +11,14 @@ const UDISKS2_PATH: &str = "/org/freedesktop/UDisks2";
 const BLOCK_PREFIX: &str = "/org/freedesktop/UDisks2/block_devices/";
 
 const BLOCK_IFACE: &str = "org.freedesktop.UDisks2.Block";
+const DRIVE_IFACE: &str = "org.freedesktop.UDisks2.Drive";
 const FS_IFACE: &str = "org.freedesktop.UDisks2.Filesystem";
+
+pub(super) struct VolumeInventory {
+    pub volumes: Vec<VolumeInfo>,
+    /// Mounted paths hidden by UDisks must not be reintroduced by /proc/mounts.
+    pub ignored_mount_paths: HashSet<String>,
+}
 
 /// Filesystem types we care about (same whitelist as /proc/mounts path).
 const FS_WHITELIST: &[&str] = &[
@@ -19,12 +26,12 @@ const FS_WHITELIST: &[&str] = &[
     "hfsplus", "fuseblk", "nfs", "nfs4", "cifs",
 ];
 
-pub struct UDisks2 {
+pub(super) struct UDisks2 {
     connection: Connection,
 }
 
 impl UDisks2 {
-    pub async fn new() -> Result<Self, String> {
+    pub(super) async fn new() -> Result<Self, String> {
         let connection = Connection::system()
             .await
             .map_err(|e| format!("D-Bus system bus: {e}"))?;
@@ -44,17 +51,22 @@ impl UDisks2 {
         Ok(Self { connection })
     }
 
-    /// Enumerate all block devices, returning both mounted and unmounted volumes.
-    pub async fn list_block_devices(&self) -> Vec<VolumeInfo> {
+    /// Return mounted filesystems plus unmounted user-removable media. UDisks
+    /// knows about every low-level partition, but those are not all sources.
+    pub(super) async fn list_block_devices(&self) -> VolumeInventory {
         let objects = match self.get_managed_objects().await {
             Ok(o) => o,
             Err(e) => {
                 eprintln!("[fbro] udisks2 GetManagedObjects failed: {e}");
-                return vec![];
+                return VolumeInventory {
+                    volumes: vec![],
+                    ignored_mount_paths: HashSet::new(),
+                };
             }
         };
 
         let mut volumes = Vec::new();
+        let mut ignored_mount_paths = HashSet::new();
 
         for (path, interfaces) in &objects {
             let path_str = path.as_str();
@@ -67,8 +79,22 @@ impl UDisks2 {
                 None => continue,
             };
 
-            // Skip if HintIgnore is true
+            let Some(fs_props) = interfaces.get(FS_IFACE) else {
+                continue;
+            };
+            let mount_points = prop_byte_array_list(fs_props, "MountPoints");
+            let mounted = !mount_points.is_empty();
+
+            // Remember ignored mounted paths so the /proc fallback cannot put
+            // a device that UDisks explicitly hid back into the source bar.
             if prop_bool(block, "HintIgnore").unwrap_or(false) {
+                ignored_mount_paths.extend(mount_points);
+                continue;
+            }
+
+            let hint_system = prop_bool(block, "HintSystem").unwrap_or(true);
+            let drive_removable = drive_is_removable(block, &objects);
+            if !is_user_visible_volume(mounted, hint_system, drive_removable) {
                 continue;
             }
 
@@ -94,18 +120,8 @@ impl UDisks2 {
 
             let id_uuid = prop_string(block, "IdUUID").unwrap_or_default();
             let id_label = prop_string(block, "IdLabel").unwrap_or_default();
-
-            // Check if mounted via Filesystem interface
-            let (mounted, mount_point) = if let Some(fs_props) = interfaces.get(FS_IFACE) {
-                let mounts = prop_byte_array_list(fs_props, "MountPoints");
-                if let Some(first) = mounts.first() {
-                    (true, first.clone())
-                } else {
-                    (false, String::new())
-                }
-            } else {
-                (false, String::new())
-            };
+            let hint_name = prop_string(block, "HintName").unwrap_or_default();
+            let mount_point = mount_points.first().cloned().unwrap_or_default();
 
             // Generate stable ID
             let id = if !id_uuid.is_empty() {
@@ -114,7 +130,14 @@ impl UDisks2 {
                 format!("vol-dev-{dev_name}")
             };
 
-            let name = if !id_label.is_empty() {
+            // Mounted sources historically use their mount-point component in
+            // fbro. Keep that stable across the /proc -> UDisks reconciliation;
+            // labels remain useful for unmounted media with no mount point.
+            let name = if mounted {
+                mount_display_name(&mount_point)
+            } else if !hint_name.is_empty() {
+                hint_name
+            } else if !id_label.is_empty() {
                 id_label
             } else {
                 dev_name.to_string()
@@ -132,11 +155,14 @@ impl UDisks2 {
         // Sort: mounted first, then by name
         volumes.sort_by(|a, b| b.mounted.cmp(&a.mounted).then_with(|| a.name.cmp(&b.name)));
 
-        volumes
+        VolumeInventory {
+            volumes,
+            ignored_mount_paths,
+        }
     }
 
     /// Mount a block device via udisks2. Returns the mount point on success.
-    pub async fn mount(&self, object_path: &str) -> Result<String, String> {
+    pub(super) async fn mount(&self, object_path: &str) -> Result<String, String> {
         let path =
             ObjectPath::try_from(object_path).map_err(|e| format!("invalid object path: {e}"))?;
 
@@ -155,7 +181,7 @@ impl UDisks2 {
 
     /// Subscribe to udisks2 D-Bus signals. Returns a channel that fires ()
     /// whenever a device or mount state changes.
-    pub async fn subscribe_signals(&self) -> mpsc::Receiver<()> {
+    pub(super) async fn subscribe_signals(&self) -> mpsc::Receiver<()> {
         let (tx, rx) = mpsc::channel(8);
 
         // InterfacesAdded / InterfacesRemoved on ObjectManager
@@ -256,6 +282,39 @@ impl UDisks2 {
     }
 }
 
+type ManagedObjects = HashMap<OwnedObjectPath, HashMap<String, HashMap<String, OwnedValue>>>;
+
+fn is_user_visible_volume(mounted: bool, hint_system: bool, drive_removable: bool) -> bool {
+    mounted || (!hint_system && drive_removable)
+}
+
+fn mount_display_name(mount_point: &str) -> String {
+    if mount_point == "/" {
+        return "/".into();
+    }
+    mount_point
+        .trim_end_matches('/')
+        .rsplit('/')
+        .next()
+        .filter(|name| !name.is_empty())
+        .unwrap_or(mount_point)
+        .to_string()
+}
+
+fn drive_is_removable(block: &HashMap<String, OwnedValue>, objects: &ManagedObjects) -> bool {
+    let Some(drive_path) = prop_object_path(block, "Drive") else {
+        return false;
+    };
+    let Some(drive) = objects
+        .iter()
+        .find(|(path, _)| path.as_str() == drive_path)
+        .and_then(|(_, interfaces)| interfaces.get(DRIVE_IFACE))
+    else {
+        return false;
+    };
+    prop_bool(drive, "Removable").unwrap_or(false)
+}
+
 // ── Property extraction helpers ─────────────────────────────────────────────
 
 fn prop_string(props: &HashMap<String, OwnedValue>, key: &str) -> Option<String> {
@@ -270,6 +329,13 @@ fn prop_bool(props: &HashMap<String, OwnedValue>, key: &str) -> Option<bool> {
 
 fn prop_u64(props: &HashMap<String, OwnedValue>, key: &str) -> Option<u64> {
     props.get(key).and_then(|v| u64::try_from(v).ok())
+}
+
+fn prop_object_path(props: &HashMap<String, OwnedValue>, key: &str) -> Option<String> {
+    props
+        .get(key)
+        .and_then(|value| <&ObjectPath<'_>>::try_from(value).ok())
+        .map(|path| path.as_str().to_string())
 }
 
 /// Extract MountPoints property: Array of Array<byte> (null-terminated paths).
@@ -302,5 +368,27 @@ fn prop_byte_array_list(props: &HashMap<String, OwnedValue>, key: &str) -> Vec<S
             .collect()
     } else {
         vec![]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{is_user_visible_volume, mount_display_name};
+
+    #[test]
+    fn visibility_keeps_mounts_and_only_user_removable_unmounted_media() {
+        assert!(is_user_visible_volume(true, true, false));
+        assert!(is_user_visible_volume(true, false, false));
+        assert!(is_user_visible_volume(false, false, true));
+        assert!(!is_user_visible_volume(false, true, true));
+        assert!(!is_user_visible_volume(false, false, false));
+        assert!(!is_user_visible_volume(false, true, false));
+    }
+
+    #[test]
+    fn unlabeled_mounted_devices_use_friendly_mount_names() {
+        assert_eq!(mount_display_name("/"), "/");
+        assert_eq!(mount_display_name("/home"), "home");
+        assert_eq!(mount_display_name("/mnt/photo archive/"), "photo archive");
     }
 }

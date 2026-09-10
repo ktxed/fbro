@@ -10,55 +10,15 @@ import {
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { bindingMatches, executeTargetedCommand } from "../commands/interactive";
 import { buildContextMenuItems } from "../contextMenu";
-import { useAppDispatch, useAppState, type AppState, type PendingContextMenu } from "../store";
+import { useAppDispatch, useAppState, type PendingContextMenu } from "../store";
 import { resolveColorScheme } from "../theme/colorSchemes";
-import { isGlobalSelectionSourceId } from "../utils/sourceId";
+import { contextualOperationAvailable, resolveContextualTarget } from "../contextualOperations";
 import type { WsClient } from "../ws/client";
-import type { PanelState, VFSEntry } from "../ws/types";
+import type { VFSEntry } from "../ws/types";
 
 interface ContextMenuProps {
   client: WsClient;
   menu: PendingContextMenu;
-}
-
-function entryAt(panel: PanelState, absIndex: number): VFSEntry | undefined {
-  return panel.entries[absIndex - (panel.windowStart ?? 0)];
-}
-
-function cursorFile(panel?: PanelState): VFSEntry | undefined {
-  if (!panel) return undefined;
-  const entry = entryAt(panel, panel.cursor);
-  return entry?.kind === "file" && entry.name !== ".." ? entry : undefined;
-}
-
-function selectedFiles(panel?: PanelState): VFSEntry[] {
-  if (!panel) return [];
-  return panel.selection
-    .map((index) => entryAt(panel, index))
-    .filter((entry): entry is VFSEntry => !!entry && entry.kind === "file" && entry.name !== "..");
-}
-
-function canCompareFromMenu(state: AppState, menu: PendingContextMenu) {
-  if (menu.kind !== "file") return false;
-  const panel = state.panels[menu.panelId];
-  if (!panel) return false;
-  const currentSelected = selectedFiles(panel);
-  if (currentSelected.length === 2) {
-    return menu.targetScope === "selection" || currentSelected.some((entry) => entry.name === menu.name);
-  }
-  const targetName = menu.name;
-  if (currentSelected.length === 1) {
-    const cursor = cursorFile(panel);
-    if (cursor && cursor.name !== currentSelected[0].name) return true;
-    if (targetName !== currentSelected[0].name) return true;
-  }
-
-  const panelIds = state.layout.panels.length > 0 ? state.layout.panels : Object.keys(state.panels);
-  const otherPanel = state.panels[panelIds.find((id) => id !== menu.panelId) ?? ""];
-  const thisCandidates = currentSelected.length === 1 ? currentSelected : [{ name: targetName, kind: "file" } as VFSEntry];
-  const otherSelected = selectedFiles(otherPanel);
-  const otherCandidates = otherSelected.length === 1 ? otherSelected : otherSelected.length === 0 ? [cursorFile(otherPanel)].filter(Boolean) as VFSEntry[] : [];
-  return thisCandidates.length === 1 && otherCandidates.length === 1;
 }
 
 export function ContextMenu({ client, menu }: ContextMenuProps) {
@@ -71,17 +31,13 @@ export function ContextMenu({ client, menu }: ContextMenuProps) {
   const items = useMemo(
     () => {
       const panel = state.panels[menu.panelId];
-      const source = panel ? state.sources[panel.sourceId] : undefined;
-      const isLocalFilesystem = !!source
-        && source.kind === "filesystem"
-        && !menu.isShadow
-        && !source.shadow
-        && source.mounted;
-      const isGlobalSelection = !!panel && isGlobalSelectionSourceId(panel.sourceId);
-      const isGlobalRoot = isGlobalSelection && panel.path === "";
-      const isGlobalInside = isGlobalSelection && panel.path !== "";
-      const supports = source?.supports ?? [];
-      const targetEntry = panel ? entryAt(panel, menu.absIndex) : undefined;
+      const target = panel ? resolveContextualTarget(panel, menu.absIndex, {
+        name: menu.name,
+        kind: menu.kind as VFSEntry["kind"],
+        size: menu.size,
+      }) : null;
+      if (!target) return [];
+      const can = (id: Parameters<typeof contextualOperationAvailable>[0]) => contextualOperationAvailable(id, state, target);
       return buildContextMenuItems(
         state.commands,
         menu.fullPath,
@@ -89,16 +45,20 @@ export function ContextMenu({ client, menu }: ContextMenuProps) {
         menu.kind,
         {
           isShadow: menu.isShadow,
-          canPlatform: isLocalFilesystem,
-          canOpenWith: isLocalFilesystem,
-          canPassToBro: isLocalFilesystem || isGlobalRoot || canCompareFromMenu(state, menu),
-          canCompare: canCompareFromMenu(state, menu),
-          canGitDiff: isLocalFilesystem && menu.kind === "file" && !!targetEntry?.gitStatus,
-          canAddToGlobalSelection: isLocalFilesystem,
-          canCopy: !!menu.isShadow || (isLocalFilesystem && supports.includes("CopySelection")),
-          canRename: (isLocalFilesystem && supports.includes("Rename")) || isGlobalRoot,
-          canDelete: (isLocalFilesystem && supports.includes("DeleteSelection")) || isGlobalSelection,
-          canCopyFullPath: isLocalFilesystem || isGlobalInside,
+          canPlatform: can("platform.reveal"),
+          canOpenWith: can("platform.open-with"),
+          canPassToBro: can("panel.pass-to-bro"),
+          canCompare: can("file.compare"),
+          canGitDiff: can("git.view-diff"),
+          canAddToGlobalSelection: can("selection.to-global"),
+          canCopy: can("file.copy"),
+          canMove: can("file.move"),
+          canRename: can("file.rename"),
+          canDelete: can("file.delete"),
+          canCopyFullPath: can("clipboard.paths"),
+          targetCount: target.count,
+          clipboardNames: target.entries.map((entry) => entry.name).join("\n"),
+          clipboardPaths: target.entries.map((entry) => entry.fullPath).join("\n"),
         },
       );
     },
@@ -176,6 +136,13 @@ export function ContextMenu({ client, menu }: ContextMenuProps) {
     if (!item || item.kind === "separator") return;
 
     close();
+    const panel = state.panels[menu.panelId];
+    const target = panel ? resolveContextualTarget(panel, menu.absIndex, {
+      name: menu.name,
+      kind: menu.kind as VFSEntry["kind"],
+      size: menu.size,
+    }) : null;
+    if (!target) return;
 
     if (item.kind === "command" && item.commandId) {
       executeTargetedCommand(
@@ -188,6 +155,8 @@ export function ContextMenu({ client, menu }: ContextMenuProps) {
           name: menu.name,
           kind: menu.kind,
           size: menu.size,
+          scope: target.scope,
+          entries: target.entries,
         },
       );
       return;
@@ -241,7 +210,7 @@ export function ContextMenu({ client, menu }: ContextMenuProps) {
           panelId: menu.panelId,
           dirPath: menu.dirPath,
           requestId,
-          explicitPath: menu.fullPath,
+          ...(target.scope === "entry" ? { explicitPath: target.primary.fullPath } : {}),
           status: "loading",
           inputs: [],
           bros: [],
@@ -249,17 +218,17 @@ export function ContextMenu({ client, menu }: ContextMenuProps) {
       });
       client.sendIntent("ListBros", menu.panelId, {
         requestId,
-        targetPath: menu.fullPath,
+        ...(target.scope === "entry" ? { targetPath: target.primary.fullPath } : {}),
         suggestedOutputDir,
       });
       return;
     }
 
     if (item.kind === "globalSelection") {
-      const targetPath = menu.targetScope === "selection" ? undefined : menu.fullPath;
-      const targetName = menu.targetScope === "selection"
-        ? `${menu.targetCount} selected ${menu.targetCount === 1 ? "entry" : "entries"}`
-        : menu.name;
+      const targetPath = target.scope === "selection" ? undefined : target.primary.fullPath;
+      const targetName = target.scope === "selection"
+        ? `${target.count} selected ${target.count === 1 ? "entry" : "entries"}`
+        : target.primary.name;
       if (state.globalSelections.length === 0) {
         client.sendIntent("AddToGlobalSelection", menu.panelId, {
           panelId: menu.panelId,
@@ -272,7 +241,7 @@ export function ContextMenu({ client, menu }: ContextMenuProps) {
             panelId: menu.panelId,
             ...(targetPath ? { targetPath } : {}),
             targetName,
-            targetCount: menu.targetCount,
+            targetCount: target.count,
           },
         });
       }
@@ -373,6 +342,7 @@ export function ContextMenu({ client, menu }: ContextMenuProps) {
                 key={item.id}
                 className={`context-menu__item${index === highlightedIndex ? " context-menu__item--active" : ""}`}
                 data-command-id={item.kind === "command" && item.commandId ? item.commandId : undefined}
+                data-contextual-operation={item.id}
                 role="menuitem"
                 onMouseEnter={() => setHighlightedIndex(index)}
                 onClick={() => { void runItem(index); }}

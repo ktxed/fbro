@@ -1046,6 +1046,37 @@ impl AppState {
 
         removed
     }
+
+    /// Replace the synchronous startup inventory with the canonical watcher
+    /// inventory before the first client snapshot. The two Linux providers use
+    /// different stable IDs, so preserve panel paths and rebind their sources.
+    pub fn reconcile_initial_volumes(&mut self, volumes: Vec<crate::platform::VolumeInfo>) {
+        let removed = self.rebuild_sources(volumes);
+        if removed.is_empty() {
+            return;
+        }
+        let removed: HashSet<_> = removed.into_iter().collect();
+        let fallback = self.fallback_source_id_for_home();
+        let rebindings: Vec<_> = self
+            .panels
+            .iter()
+            .filter(|(_, panel)| removed.contains(&panel.source_id))
+            .filter_map(|(panel_id, panel)| {
+                source_id_for_local_path(&self.sources, &panel.path)
+                    .or_else(|| fallback.clone())
+                    .map(|source_id| (panel_id.clone(), panel.source_id.clone(), source_id))
+            })
+            .collect();
+        for (panel_id, old_source_id, source_id) in rebindings {
+            if let Some(panel) = self.panels.get_mut(&panel_id) {
+                eprintln!(
+                    "[fbro] initial volume reconciliation panel={panel_id:?} source={old_source_id:?}->{source_id:?} path={:?}",
+                    panel.path
+                );
+                panel.source_id = source_id;
+            }
+        }
+    }
 }
 
 /// Add restored tabs (beyond the first, which `new_default` already seeded)
@@ -1253,7 +1284,33 @@ pub fn collect_visible_thumb_paths(state: &AppState) -> std::collections::HashSe
 
 #[cfg(test)]
 mod tests {
-    use super::fallback_source_id_for_home_candidates;
+    use super::{fallback_source_id_for_home_candidates, AppState};
+    use crate::platform::{Platform, VolumeInfo};
+    use std::sync::Arc;
+
+    struct TestPlatform {
+        home: String,
+    }
+
+    impl Platform for TestPlatform {
+        fn home_dir(&self) -> String {
+            self.home.clone()
+        }
+
+        fn open_in_editor(&self, _path: &str) -> Result<String, String> {
+            unreachable!()
+        }
+
+        fn list_volumes(&self) -> Vec<VolumeInfo> {
+            vec![VolumeInfo {
+                id: "fallback-root".into(),
+                name: "/".into(),
+                root_path: "/".into(),
+                mounted: true,
+                device_path: None,
+            }]
+        }
+    }
 
     #[test]
     fn fallback_source_prefers_home_owner() {
@@ -1299,5 +1356,64 @@ mod tests {
             fallback_source_id_for_home_candidates(candidates, "/home/user"),
             None
         );
+    }
+
+    #[test]
+    fn initial_reconciliation_preserves_paths_and_rebinds_fallback_ids() {
+        let home =
+            std::env::temp_dir().join(format!("fbro-initial-volumes-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&home).unwrap();
+        let platform: Arc<dyn Platform> = Arc::new(TestPlatform {
+            home: home.to_string_lossy().into_owned(),
+        });
+        let mut state = AppState::new_default(
+            platform.clone(),
+            Default::default(),
+            0,
+            crate::thumb_pool::ThumbPool::start(platform, 1),
+            Arc::new(crate::fileserver::ThumbCache::new(1)),
+        );
+        assert!(state
+            .panels
+            .values()
+            .all(|panel| panel.source_id == "fallback-root"));
+        let old_paths: Vec<_> = state
+            .panels
+            .values()
+            .map(|panel| panel.path.clone())
+            .collect();
+
+        state.reconcile_initial_volumes(vec![
+            VolumeInfo {
+                id: "udisks-root".into(),
+                name: "/".into(),
+                root_path: "/".into(),
+                mounted: true,
+                device_path: Some("/org/freedesktop/UDisks2/block_devices/root".into()),
+            },
+            VolumeInfo {
+                id: "removable".into(),
+                name: "SD Card".into(),
+                root_path: String::new(),
+                mounted: false,
+                device_path: Some("/org/freedesktop/UDisks2/block_devices/card".into()),
+            },
+        ]);
+
+        assert!(!state.sources.contains_key("fallback-root"));
+        assert!(state.sources.contains_key("removable"));
+        assert!(state
+            .panels
+            .values()
+            .all(|panel| panel.source_id == "udisks-root"));
+        assert_eq!(
+            state
+                .panels
+                .values()
+                .map(|panel| panel.path.clone())
+                .collect::<Vec<_>>(),
+            old_paths
+        );
+        std::fs::remove_dir_all(home).unwrap();
     }
 }

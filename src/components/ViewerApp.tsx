@@ -4,6 +4,7 @@ import { resolveWsUrl, WsClient } from "../ws/client";
 import type { BEMessage, FileChunkMessage, ViewerFileChangedMessage, StateSnapshotMessage, StatePatchMessage } from "../ws/types";
 import { applyZoom, nextZoomSize, DEFAULT_FONT_SIZE } from "../utils/zoom";
 import { ImageViewer, IMAGE_LIMIT } from "../viewers/ImageViewer";
+import { ViewerLoading } from "../viewers/ViewerLoading";
 import { detectRenderer, isImageExt, isMdExt, isVideoExt } from "../viewers/media";
 import { marked } from "marked";
 import { DirectFileViewer, canUseDirect } from "../viewers/DirectFileViewer";
@@ -264,6 +265,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
   const [loading, setLoading]     = useState(true);
   const [error, setError]         = useState<string | null>(null);
   const [navError, setNavError]   = useState<string | null>(null);
+  const [pendingNavigation, setPendingNavigation] = useState(0);
   const [colorSchemeId, setColorSchemeId] = useState<ColorSchemeId>(() => resolveColorScheme(initialColorScheme ?? DEFAULT_COLOR_SCHEME_ID).id);
 
   // Buffer
@@ -492,8 +494,13 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
       if (cancelled) return;
       const client = new WsClient("viewer", wsUrl);
       clientRef.current = client;
+      client.onDisconnected = () => {
+        setPendingNavigation(0);
+        setError("Viewer connection lost; reconnecting…");
+      };
 
       client.onConnected = () => {
+        setError(null);
         if (httpInitDoneRef.current) return; // already loaded via HTTP
         if (canUseDirect(isLocal, initFilename, nativeFileSize, effectiveImageLimit)) {
           setLoading(false);
@@ -527,6 +534,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
         }
         if (msg.type === "FileChunk") {
           const m = msg as FileChunkMessage;
+          if (m.path !== curPathRef.current) return;
           const bytes = hexDecode(m.data);
 
         bufRangeRef.current = { offset: m.offset, end: m.offset + bytes.length, eof: m.eof };
@@ -552,6 +560,10 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
         }
         if (msg.type === "ViewerFileChanged") {
           const m = msg as ViewerFileChangedMessage;
+        setPendingNavigation(n => Math.max(0, n - 1));
+        curPathRef.current = m.path;
+        curSourceIdRef.current = m.sourceId;
+        filenameRef.current = m.filename;
         const direct = canUseDirect(m.isLocal ?? false, m.filename, m.fileSize ?? null, effectiveImageLimit);
         // Reset viewer state for new file
         setDosMode(false);
@@ -593,6 +605,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
         }
         if (msg.type === "Error") {
           const err = msg as { code: string; message: string };
+          setPendingNavigation(n => Math.max(0, n - 1));
           if (err.code === "NOT_A_FILE") {
             setNavError(err.message);
           } else {
@@ -816,12 +829,14 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
       if (e.key === "k") {
         e.preventDefault();
         setNavError(null);
+        if (clientRef.current) setPendingNavigation(n => n + 1);
         clientRef.current?.sendIntent("ViewerNavigate", undefined, { panelId, direction: "next" });
         return;
       }
       if (e.key === "j") {
         e.preventDefault();
         setNavError(null);
+        if (clientRef.current) setPendingNavigation(n => n + 1);
         clientRef.current?.sendIntent("ViewerNavigate", undefined, { panelId, direction: "prev" });
         return;
       }
@@ -1159,6 +1174,8 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
           </div>
         </div>
         <div className="viewer__body" ref={bodyRef}>
+          {pendingNavigation > 0 && <ViewerLoading />}
+          {error && <div className="viewer__error" role="alert">{error}</div>}
           {navError ? (
             <div className="viewer__nav-error">
               <p>{navError}</p>
@@ -1240,6 +1257,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
       </div>
 
       <div className="viewer__body" ref={bodyRef}>
+        {pendingNavigation > 0 && <ViewerLoading />}
         {loading && !buffer && <div className="viewer__loading">Loading…</div>}
         {error && <div className="viewer__error">{error}</div>}
         {navError && (

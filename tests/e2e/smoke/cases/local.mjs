@@ -3,6 +3,7 @@ import path from "node:path";
 import { backendPath, hostPath } from "../config.mjs";
 import {
   clickCommand,
+  clickContextMenuItem,
   clickEntry,
   clickSortHeader,
   closeTerminalJobDialog,
@@ -13,6 +14,7 @@ import {
   expectCheckboxSelected,
   goToPanelPath,
   openSortSelector,
+  openPanelContextMenu,
   setTextInputValue,
 } from "../browser.mjs";
 import { waitFor } from "../wait.mjs";
@@ -104,14 +106,18 @@ export async function runLocalFlow(browser, observer) {
 
   await goToPanelPath(browser, observer, "left", aSrc);
   await createDirectory(browser, observer, "left", "sort-test");
-  await doubleClickEntry(browser, "left", "sort-test");
   const sortDir = path.posix.join(aSrc, "sort-test");
+  await clickEntry(browser, "left", "sort-test");
+  const folderInlineOperations = await browser.$$('[data-testid="panel-left"] [data-entry-name="sort-test"] [data-inline-operation]');
+  if (folderInlineOperations.length !== 0) throw new Error("singleton directory unexpectedly rendered inline operations");
+  await browser.keys("ArrowRight");
   await observer.waitForPanelPath("left", sortDir);
 
   const hostSortDir = hostPath(sortDir);
   fs.writeFileSync(path.join(hostSortDir, "aardvark.txt"), Buffer.alloc(500));
   fs.writeFileSync(path.join(hostSortDir, "zebra.txt"), Buffer.alloc(10));
   fs.writeFileSync(path.join(hostSortDir, "baby.txt"), Buffer.alloc(100));
+  fs.mkdirSync(path.join(hostSortDir, "selected-folder"));
 
   const nowSec = Date.now() / 1000;
   fs.utimesSync(path.join(hostSortDir, "aardvark.txt"), nowSec, nowSec - 3600);
@@ -123,9 +129,12 @@ export async function runLocalFlow(browser, observer) {
   await observer.waitForPanelPath("left", sortDir);
   const sortFiles = ["aardvark.txt", "zebra.txt", "baby.txt"];
   await observer.waitForAllEntries("left", sortFiles);
+  await observer.waitForEntry("left", "selected-folder", "directory");
 
   await observer.waitForSort("left", "name", "asc");
   observer.assertFileEntryOrder("left", ["aardvark.txt", "baby.txt", "zebra.txt"]);
+  await verifySelectedFolderInlineNavigation(browser, observer, sortDir, "aardvark.txt");
+  await verifyContextualSelectionOperations(browser, observer, sortFiles);
 
   await clickSortHeader(browser, "left", "name");
   await observer.waitForSort("left", "name", "desc");
@@ -190,6 +199,165 @@ export async function runLocalFlow(browser, observer) {
   await browser.keys(["Escape"]);
 
   await verifyWindowFocusRestoration(browser, observer);
+  await verifyGridLeftAtFirstItemNavigatesUp(browser, observer, aSrc);
+}
+
+async function verifyGridLeftAtFirstItemNavigatesUp(browser, observer, aSrc) {
+  const gridDir = path.posix.join(aSrc, "sort-test");
+  await goToPanelPath(browser, observer, "left", gridDir);
+  const isGrid = () => browser.execute(() =>
+    document.querySelector('[data-testid="panel-left"] .panel__list')?.classList.contains("panel__list--grid") === true);
+  const cursorCardName = () => browser.execute(() =>
+    document.querySelector('[data-testid="panel-left"] .panel__card--cursor')?.getAttribute("data-entry-name") ?? null);
+  const firstEntryName = () => browser.execute(() =>
+    document.querySelector('[data-testid="panel-left"] .panel__list [data-entry-name]')?.getAttribute("data-entry-name") ?? null);
+
+  await browser.execute(() => document.querySelector('[data-testid="panel-left"]')?.focus());
+  await browser.keys("g");
+  await waitFor(isGrid, { timeout: 10_000, label: "grid mode for Left navigation" });
+
+  await browser.keys("End");
+  await waitFor(async () => (await cursorCardName()) !== null, {
+    timeout: 10_000,
+    label: "grid cursor card after End",
+  });
+  const lastName = await cursorCardName();
+  await browser.keys("ArrowLeft");
+  await waitFor(async () => {
+    const name = await cursorCardName();
+    return name !== null && name !== lastName;
+  }, { timeout: 10_000, label: "grid Left moved the cursor off the last item" });
+  if (observer.state.panels.left?.path !== gridDir) {
+    throw new Error(`grid Left away from the first item navigated to ${observer.state.panels.left?.path}`);
+  }
+
+  await browser.keys("Home");
+  await waitFor(async () => {
+    const first = await firstEntryName();
+    return first !== null && (await cursorCardName()) === first;
+  }, { timeout: 10_000, label: "grid cursor card on the first item" });
+  await browser.keys("ArrowLeft");
+  await observer.waitForPanelPath("left", aSrc);
+
+  await browser.keys("g");
+  await waitFor(async () => !(await isGrid()), {
+    timeout: 10_000,
+    label: "list mode restored after grid Left navigation",
+  });
+}
+
+async function verifySelectedFolderInlineNavigation(browser, observer, sortDir, fileName) {
+  const selectedNames = () => browser.execute(() => [...document.querySelectorAll('[data-testid="panel-left"] [data-testid="panel-entry"].panel__row--selected')]
+    .map((entry) => entry.getAttribute("data-entry-name")));
+
+  await clickEntry(browser, "left", fileName);
+  await browser.keys(" ");
+  await clickEntry(browser, "left", "selected-folder");
+  await browser.keys(" ");
+  await waitFor(async () => {
+    const selected = await selectedNames();
+    return selected.includes("selected-folder") && selected.includes(fileName);
+  }, { timeout: 10_000, label: "folder bulk-operation selection" });
+
+  await clickEntry(browser, "left", "selected-folder");
+  await browser.keys("ArrowRight");
+  await waitFor(() => browser.execute(() => {
+    const row = document.querySelector('[data-testid="panel-left"] [data-entry-name="selected-folder"]');
+    return row?.querySelector("[data-inline-operation]")?.contains(document.activeElement) === true;
+  }), { timeout: 10_000, label: "selected folder inline toolbar focus" });
+  if (observer.state.panels.left?.path !== sortDir) {
+    throw new Error("Right Arrow navigated into a folder anchoring a multi-selection");
+  }
+
+  await browser.keys("Escape");
+  await browser.keys("Enter");
+  await observer.waitForPanelPath("left", path.posix.join(sortDir, "selected-folder"));
+  await goToPanelPath(browser, observer, "left", sortDir);
+  await observer.waitForEntry("left", "selected-folder", "directory");
+}
+
+async function verifyContextualSelectionOperations(browser, observer, [first, second, third]) {
+  const inlineIds = async (name) => browser.execute((name) => {
+    const escaped = CSS.escape(name);
+    return [...document.querySelectorAll(`[data-testid="panel-left"] [data-entry-name="${escaped}"] [data-inline-operation]`)]
+      .map((button) => button.getAttribute("data-inline-operation"));
+  }, name);
+  const menuLabels = async () => browser.execute(() => [...document.querySelectorAll(".context-menu [role='menuitem'] > span:first-child")]
+    .map((label) => label.textContent?.trim() ?? ""));
+  const selectedNames = () => browser.execute(() => [...document.querySelectorAll('[data-testid="panel-left"] [data-testid="panel-entry"].panel__row--selected')]
+    .map((entry) => entry.getAttribute("data-entry-name")));
+
+  const clearButton = await browser.$('[data-testid="panel-left"] .panel__selection-clear');
+  if (await clearButton.isExisting()) await clearButton.click();
+  await waitFor(async () => (await selectedNames()).length === 0, { timeout: 10_000, label: "clear contextual selection" });
+
+  await clickEntry(browser, "left", first);
+  await browser.keys(" ");
+  await clickEntry(browser, "left", second);
+  await browser.keys(" ");
+  await waitFor(async () => {
+    const selected = await selectedNames();
+    return selected.includes(first) && selected.includes(second);
+  }, { timeout: 10_000, label: "two-item contextual selection" });
+  await clickEntry(browser, "left", second);
+  await waitFor(async () => {
+    const actual = (await inlineIds(second)).join("|");
+    if (actual !== "file.compare|panel.pass-to-bro|file.copy|file.move|file.delete") {
+      const domCursor = await browser.execute(() => document.querySelector('[data-testid="panel-left"] .panel__row--cursor')?.getAttribute("data-entry-name"));
+      const panel = observer.state.panels.left;
+      throw new Error(`got ${actual || "<none>"}; DOM cursor=${domCursor}; state cursor=${panel?.cursor}; selectedEntries=${JSON.stringify(panel?.selectedEntries)}`);
+    }
+    return true;
+  }, {
+    timeout: 10_000,
+    label: "two-item inline contextual operations",
+  });
+  await openPanelContextMenu(browser, "left");
+  const pairLabels = await menuLabels();
+  for (const expected of ["Compare", "Pass to Bro...", "Copy", "Move", "Delete", "Copy names", "Copy full paths"]) {
+    if (!pairLabels.includes(expected)) throw new Error(`two-item context menu lacks ${expected}: ${JSON.stringify(pairLabels)}`);
+  }
+  for (const excluded of ["Rename", "Open With..."]) {
+    if (pairLabels.includes(excluded)) throw new Error(`two-item context menu unexpectedly includes ${excluded}`);
+  }
+  const copyItem = await browser.$('[data-contextual-operation="file.copy"]');
+  await copyItem.waitForClickable({ timeout: 10_000 });
+  await copyItem.click();
+  const copyDialog = await browser.$('[data-testid="operation-dialog"]');
+  await copyDialog.waitForDisplayed({ timeout: 10_000 });
+  const copyDialogText = await copyDialog.getText();
+  if (!copyDialogText.includes(first) || !copyDialogText.includes(second)) {
+    throw new Error(`selection copy dialog lacks selected entries: ${copyDialogText}`);
+  }
+  await clickCommand(browser, "file.copy.cancel");
+
+  await clickEntry(browser, "left", third);
+  await browser.keys(" ");
+  await waitFor(async () => (await selectedNames()).length === 3, { timeout: 10_000, label: "three-item contextual selection" });
+  await clickEntry(browser, "left", third);
+  await waitFor(async () => (await inlineIds(third)).join("|") === "panel.pass-to-bro|file.copy|file.move|file.delete", {
+    timeout: 10_000,
+    label: "three-item inline contextual operations",
+  });
+
+  await clickEntry(browser, "left", third);
+  await browser.keys(" ");
+  await waitFor(async () => (await selectedNames()).length === 2, { timeout: 10_000, label: "cursor-wins retained selection" });
+  await clickEntry(browser, "left", third);
+  await waitFor(async () => (await inlineIds(third)).includes("file.rename"), {
+    timeout: 10_000,
+    label: "unselected cursor singleton operations",
+  });
+  await openPanelContextMenu(browser, "left");
+  const cursorLabels = await menuLabels();
+  if (!cursorLabels.includes("Rename") || !cursorLabels.includes("Copy name") || cursorLabels.includes("Copy names")) {
+    throw new Error(`unselected cursor did not win contextual targeting: ${JSON.stringify(cursorLabels)}`);
+  }
+  await browser.keys("Escape");
+  const cleanupButton = await browser.$('[data-testid="panel-left"] .panel__selection-clear');
+  await cleanupButton.waitForClickable({ timeout: 10_000 });
+  await cleanupButton.click();
+  await waitFor(async () => (await selectedNames()).length === 0, { timeout: 10_000, label: "contextual selection cleanup" });
 }
 
 async function verifyLiveDateSortCursorAnchor(browser, observer, hostSortDir, nowSec) {
@@ -197,8 +365,21 @@ async function verifyLiveDateSortCursorAnchor(browser, observer, hostSortDir, no
   // space still lets new entries grow upward. A non-default row height catches
   // any return to estimated pixel offsets.
   await clickEntry(browser, "left", "baby.txt");
-  await browser.keys(" ");
-  await waitFor(() => observer.state.panels.left?.selection?.length === 1, {
+  await browser.execute(() => document.querySelector('[data-testid="panel-left"]')?.focus());
+  await browser.performActions([{
+    type: "key",
+    id: "keyboard",
+    actions: [
+      { type: "keyDown", value: " " },
+      { type: "keyUp", value: " " },
+    ],
+  }]);
+  await browser.releaseActions();
+  await waitFor(async () => browser.execute(() => {
+    const row = document.querySelector('[data-testid="panel-left"] [data-entry-name="baby.txt"]');
+    return row?.classList.contains("panel__row--cursor") === true
+      && row.classList.contains("panel__row--selected");
+  }), {
     timeout: 10_000,
     label: "live anchor selection",
   });
@@ -210,9 +391,10 @@ async function verifyLiveDateSortCursorAnchor(browser, observer, hostSortDir, no
   }), { timeout: 10_000, label: "zoomed row height" });
 
   const before = await browser.execute(() => {
+    const list = document.querySelector('[data-testid="panel-left"] .panel__list');
     const row = document.querySelector('[data-testid="panel-left"] [data-entry-name="baby.txt"]');
-    return row ? {
-      top: row.getBoundingClientRect().top,
+    return row && list ? {
+      offset: row.getBoundingClientRect().top - list.getBoundingClientRect().top,
       alternate: row.classList.contains("panel__row--alt"),
     } : null;
   });
@@ -223,13 +405,32 @@ async function verifyLiveDateSortCursorAnchor(browser, observer, hostSortDir, no
   await observer.waitForEntry("left", "newest-live-file.txt", "file");
 
   await waitFor(async () => browser.execute((expected) => {
+    const list = document.querySelector('[data-testid="panel-left"] .panel__list');
     const row = document.querySelector('[data-testid="panel-left"] [data-entry-name="baby.txt"]');
-    if (!(row instanceof HTMLElement) || !row.classList.contains("panel__row--selected")) return false;
-    return Math.abs(row.getBoundingClientRect().top - expected.top) < 0.5
-      && row.classList.contains("panel__row--alt") === expected.alternate;
+    if (!(row instanceof HTMLElement) || !(list instanceof HTMLElement)) {
+      throw new Error("baby.txt or its listing viewport is not rendered");
+    }
+    const actual = {
+      offset: row.getBoundingClientRect().top - list.getBoundingClientRect().top,
+      alternate: row.classList.contains("panel__row--alt"),
+      selected: row.classList.contains("panel__row--selected"),
+    };
+    if (!actual.selected
+      || Math.abs(actual.offset - expected.offset) >= 0.5
+      || actual.alternate !== expected.alternate) {
+      throw new Error(`expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
+    }
+    return true;
   }, before), { timeout: 10_000, label: "live date-sort cursor viewport and zebra anchor" });
 
-  observer.sendIntent("ClearSelection", "left");
+  const clearSelection = await browser.$('[data-testid="panel-left"] .panel__selection-clear');
+  await clearSelection.waitForClickable({ timeout: 10_000 });
+  await clearSelection.click();
+  fs.unlinkSync(newest);
+  await waitFor(() => {
+    const entries = observer.state.panels.left?.entries ?? [];
+    return entries.some((entry) => entry.name === "newest-live-file.txt") ? false : true;
+  }, { timeout: 10_000, label: "live anchor fixture cleanup" });
   observer.sendIntent("SetFontSize", undefined, { value: 13 });
 }
 
@@ -241,14 +442,31 @@ async function verifyWindowFocusRestoration(browser, observer) {
     timeout: 10_000,
     label: "viewer file navigation",
   });
+
+  const panelIsActive = () => browser.execute(() => document.activeElement?.getAttribute("data-testid") === "panel-left");
+  const waitForViewMode = (mode, label) => waitFor(() => observer.state.panels.left?.viewMode === mode, {
+    timeout: 10_000,
+    label,
+  });
+  const toggleGridFromRestoredFocus = async (label) => {
+    await waitFor(panelIsActive, { timeout: 10_000, label });
+    await browser.keys("g");
+    await waitForViewMode("grid", `${label}: grid mode`);
+    await browser.keys("g");
+    await waitForViewMode("list", `${label}: list mode restored`);
+  };
+
   await browser.execute(() => {
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
     window.dispatchEvent(new FocusEvent("focus"));
   });
-  await waitFor(async () => browser.execute(() => document.activeElement?.getAttribute("data-testid") === "panel-left"), {
-    timeout: 10_000,
-    label: "panel focus restored after window reactivation",
+  await toggleGridFromRestoredFocus("panel focus restored after window reactivation");
+
+  await browser.execute(() => {
+    document.querySelector('[data-command-id="file.view"]')?.focus();
+    window.dispatchEvent(new FocusEvent("focus"));
   });
+  await toggleGridFromRestoredFocus("panel focus restored from toolbar button");
 }
 
 async function verifyColorSchemeSwitch(browser, observer) {

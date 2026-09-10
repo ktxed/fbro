@@ -1,4 +1,5 @@
-import { useRef, useState, useCallback, useEffect } from "react";
+import { useRef, useState, useCallback, useEffect, useMemo } from "react";
+import { ViewerLoading } from "./ViewerLoading";
 
 const SCALE_MAX = 16;
 const SCALE_CLICK = 2;   // jump-to scale on click
@@ -19,6 +20,12 @@ export function ZoomableImage({ src, alt }: Props) {
   zoomRef.current = zoom;
   const [isDragging, setIsDragging] = useState(false);
   const hasDraggedRef = useRef(false);
+  const request = useMemo(() => ({ src }), [src]);
+  const [imageState, setImageState] = useState<{ request: typeof request; status: "ready" | "error" } | null>(null);
+  const currentRequest = useRef(request);
+  currentRequest.current = request;
+  const ready = imageState?.request === request && imageState.status === "ready";
+  const failed = imageState?.request === request && imageState.status === "error";
 
   // Reset when the image changes (j/k navigation).
   useEffect(() => { setZoom({ scale: 1, tx: 0, ty: 0 }); }, [src]);
@@ -118,12 +125,20 @@ export function ZoomableImage({ src, alt }: Props) {
       style={{ overflow: "hidden", cursor }}
       onMouseDown={handleMouseDown}
       onClick={handleClick}
+      aria-busy={!ready && !failed}
     >
+      {!ready && !failed && <ViewerLoading />}
+      {failed && <div className="viewer__image-notice" role="alert">Unable to load image: {alt}</div>}
       <img
+        key={src}
         src={src}
         alt={alt}
         draggable={false}
+        onLoad={() => { if (currentRequest.current === request) setImageState({ request, status: "ready" }); }}
+        onError={() => { if (currentRequest.current === request) setImageState({ request, status: "error" }); }}
         style={{
+          visibility: ready ? "visible" : "hidden",
+          position: failed ? "absolute" : undefined,
           maxWidth: "100%",
           maxHeight: "100%",
           objectFit: "contain",

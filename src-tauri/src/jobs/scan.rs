@@ -12,6 +12,24 @@ const BATCH_SIZE: usize = 50;
 pub const WINDOWED_THRESHOLD: usize = 1500;
 pub const INITIAL_WINDOW_SIZE: usize = 200;
 
+async fn send_atomic_panel_patch(
+    state: &SharedState,
+    initiating_tx: &mpsc::Sender<ServerMessage>,
+    message: ServerMessage,
+) -> bool {
+    let senders = state.lock().await.gui_senders.clone();
+    let mut initiating_tx_seen = false;
+    let mut sent = false;
+    for sender in senders {
+        initiating_tx_seen |= sender.same_channel(initiating_tx);
+        sent |= sender.send(message.clone()).await.is_ok();
+    }
+    if !initiating_tx_seen {
+        sent |= initiating_tx.send(message).await.is_ok();
+    }
+    sent
+}
+
 #[derive(Debug, PartialEq)]
 struct LiveListingState {
     cursor: usize,
@@ -504,8 +522,7 @@ pub async fn run_scan(
             }
         };
 
-        let _ = tx
-            .send(ServerMessage::StatePatch {
+        let patch = ServerMessage::StatePatch {
                 timestamp: crate::ws::protocol::now(),
                 domain: "panels".to_string(),
                 entity_id: Some(panel_id.clone()),
@@ -527,8 +544,12 @@ pub async fn run_scan(
                     })),
                     "git": git_status,
                 }),
-            })
-            .await;
+            };
+        if atomic {
+            send_atomic_panel_patch(&state, &tx, patch).await;
+        } else {
+            let _ = tx.send(patch).await;
+        }
         eprintln!(
             "[scan] ready sent: panel={panel_id} source={source_id} path={path} epoch={panel_epoch} version={} mode=windowed total={total}",
             version
@@ -572,8 +593,10 @@ pub async fn run_scan(
             }
         };
 
-        let sent = tx
-            .send(ServerMessage::StatePatch {
+        let sent = send_atomic_panel_patch(
+            &state,
+            &tx,
+            ServerMessage::StatePatch {
                 timestamp: crate::ws::protocol::now(),
                 domain: "panels".to_string(),
                 entity_id: Some(panel_id.clone()),
@@ -593,15 +616,17 @@ pub async fn run_scan(
                     })),
                     "git": git_status,
                 }),
-            })
-            .await;
-        match sent {
-            Ok(()) => eprintln!(
+            },
+        )
+        .await;
+        if sent {
+            eprintln!(
                 "[scan] ready sent: panel={panel_id} source={source_id} path={path} epoch={panel_epoch} version={version} mode=atomic total={total}"
-            ),
-            Err(error) => eprintln!(
-                "[scan] ready send failed: panel={panel_id} source={source_id} path={path} epoch={panel_epoch} version={version} mode=atomic error={error}"
-            ),
+            );
+        } else {
+            eprintln!(
+                "[scan] ready send failed: panel={panel_id} source={source_id} path={path} epoch={panel_epoch} version={version} mode=atomic"
+            );
         }
     } else {
         // ── Mode A: full list (streamed) ─────────────────────────────────

@@ -405,6 +405,33 @@ That’s not accidental — it’s a sign the abstraction boundaries are right.
 
 ---
 
+## 10. Speculative viewer and thumbnail reads
+
+`VfsDriver::is_local()` means native paths, not fast storage. A shared backend
+storage registry independently classifies mounted paths, including nested mounts
+that are not shown in the source bar. Source snapshots/patches expose
+`storageClass` and `prefetchEligible`.
+
+Only `internal-ssd` enables prefetch. `rotational`, `removable-external`, `remote`,
+`virtual`, and `unknown` disable it. There are no overrides or disk benchmarks.
+Remote fbro sources always disable prefetch regardless of the remote disk type.
+
+Discovery refreshes OS metadata in a background blocking worker every two seconds:
+Linux uses mountinfo and sysfs backing devices; macOS uses DiskArbitration and
+IOKit; Windows uses volume extents and storage properties. Missing evidence is
+unknown. Linux Btrfs/ZFS pools currently remain unknown because a mount device
+alone does not prove the characteristics of every pool member.
+
+Viewer jobs check policy before enqueueing and again before reading. Both the
+lexical path and canonical target must qualify. Registry changes invalidate queued
+viewer work, cached viewer bytes, and speculative permits; reads already in
+progress may finish, but their stale results are discarded.
+
+Thumbnail warmups use `?prefetch=1`. The HTTP handler and thumbnail worker enforce
+the same policy; rejected warmups return non-cacheable HTTP 204. Ordinary requested
+images, visible grid thumbnails, and requested previews remain available on every
+source. Classification changes and skipped warmups are logged.
+
 ## Suggested next step
 
 Two very natural next steps:

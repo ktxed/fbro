@@ -129,8 +129,9 @@ pub trait VolumeWatcher: Send + Sync {
 
 `create_volume_watcher(platform)` picks the best available backend:
 
-* Linux + udisks2 reachable → `Udisks2Watcher` (mount unmounted volumes,
-  receive change signals over D-Bus).
+* Linux + udisks2 reachable → `Udisks2Watcher` (show mounted filesystems and
+  unmounted user-removable media, mount on click, receive change signals over
+  D-Bus). Unmounted internal/system partitions remain outside the source bar.
 * Linux without udisks2 → `ProcMountsWatcher` (poll `/proc/mounts`, no
   mounting).
 * Other platforms → `FallbackVolumeWatcher` (wraps `Platform::list_volumes`;
@@ -149,6 +150,11 @@ let state = AppState::new_default(platform.clone(), thumb_pool, ...);
 // later, inside the ws server task:
 let volume_watcher = create_volume_watcher(platform).await;
 ```
+
+The watcher immediately reconciles the synchronous startup inventory before
+the first client snapshot. This gives startup and hot-plug updates identical
+volume visibility and stable UDisks IDs. Existing panel paths are preserved and
+rebound to the most specific mounted source when an initial fallback ID changes.
 
 `AppState.platform: Arc<dyn Platform>` is the canonical handle. Intent
 handlers reach it through `ctx.state.lock().await.platform` (or by cloning the

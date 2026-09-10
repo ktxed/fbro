@@ -4,6 +4,7 @@ import { App } from "./App";
 import { DiffViewerApp } from "./components/DiffViewerApp";
 import { ViewerApp } from "./components/ViewerApp";
 import "./styles.css";
+import throbberUrl from "./assets/win98-flag-throbber-64nn.gif";
 
 const params = new URLSearchParams(window.location.search);
 
@@ -36,6 +37,14 @@ if (params.get("diff") === "1") {
     </React.StrictMode>,
   );
 } else {
+  // Only the main window renders panels. Warm the browser cache before a panel
+  // can enter its loading state without touching viewer/compare webviews.
+  const throbberPreload = document.createElement("link");
+  throbberPreload.rel = "preload";
+  throbberPreload.as = "image";
+  throbberPreload.href = throbberUrl;
+  document.head.appendChild(throbberPreload);
+
   root.render(
     <React.StrictMode>
       <App />

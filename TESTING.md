@@ -25,6 +25,28 @@ The Dockerized backend app instances still run under `xvfb-run`.
 
 ## Smoke Tests
 
+Storage-policy regressions are covered by backend tests:
+
+```bash
+cargo test --manifest-path src-tauri/Cargo.toml storage
+cargo test --manifest-path src-tauri/Cargo.toml viewer_prefetch
+cargo test --manifest-path src-tauri/Cargo.toml thumb_pool
+```
+
+Linux fixtures cover internal NVMe/SATA, rotational disks, USB/MMC readers,
+removable PCI devices, remote mounts, partitions, mapped/mixed devices, unresolved
+members, hidden nested mounts, symlink targets, and device replacement. Instrumented
+viewer and thumbnail tests verify rejected work does not call its provider and
+foreground thumbnails still work. Windows storage-descriptor fixtures also run on
+Linux, but do not exercise Win32 device queries. Tests inject registries only in test code;
+there is no runtime eligibility override.
+
+On native macOS and Windows, additionally verify source `storageClass` and
+`prefetchEligible` on internal SSDs, external SSDs/card readers, network volumes,
+and multi-device volumes. Unknown devices must stay disabled. Verify unplug/remount
+updates within the discovery interval and does not reuse old viewer cache entries.
+Linux fixture tests do not replace these native platform checks.
+
 The smoke test starts two fbro backend/app instances named `fbro-a` and
 `fbro-b`, starts two local `tauri-driver` processes, drives the UI through
 WebDriver, and observes backend state over WebSocket.
@@ -115,6 +137,11 @@ flowchart LR
 
 Useful environment variables:
 
+- `FBRO_E2E_VIEWER_ONLY=1`: run only the image viewer regression flow. It covers
+  delayed loads, more than 21 high-resolution JPEGs, reverse/rapid navigation,
+  and recovery from an invalid image. Timings and process-memory samples are
+  written to `artifacts/e2e/viewer-timings.json`; they include WebDriver and a
+  local forwarding server's overhead and are not a standalone rendering benchmark.
 - `FBRO_E2E_COMPOSE_FILES`: compose file list used by local smoke runs.
 - `FBRO_APP_BINARY`: host app binary used by the frontend-only WebDriver
   windows. The debug script sets this to `src-tauri/target/debug/fbro`.
@@ -128,6 +155,19 @@ By default the smoke harness runs Docker cleanup in `finally`:
 
 ```bash
 docker compose ... down --remove-orphans
+```
+
+Viewer diagnostics use the existing backend stderr log: `[viewer navigation]`
+reports navigation preparation time, `[viewer http]` distinguishes cache hits
+from disk reads, `[viewer prefetch]` reports scheduling/read/eviction activity
+and allocated cache bytes, and `[thumbnail]` reports queue waits and generation
+times. The prefetch cache is limited to 21 entries and 256 MiB, with two readers;
+foreground loads do not wait for a prefetch slot.
+
+Run the deterministic prefetch regression tests with:
+
+```bash
+cargo test --manifest-path src-tauri/Cargo.toml viewer_prefetch
 ```
 
 ## What The Smoke Test Covers

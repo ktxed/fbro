@@ -20,6 +20,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::mpsc;
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
+use std::time::Instant;
 
 use crate::platform::Platform;
 
@@ -28,10 +29,38 @@ pub struct ThumbJobKey {
     pub path: String,
     pub size: u32,
     pub mtime: u64,
+    /// Separate speculative jobs from requested previews so cancelling a warmup
+    /// never cancels a foreground request for the same image.
+    pub speculative_generation: Option<u64>,
 }
 
 /// `Some(bytes)` on success, `None` if the OS thumbnail provider returned nothing.
 pub type ThumbResult = Option<Vec<u8>>;
+
+fn generate_thumbnail(
+    platform: &dyn Platform,
+    policy: &crate::storage::StorageRegistry,
+    key: &ThumbJobKey,
+) -> ThumbResult {
+    let Some(generation) = key.speculative_generation else {
+        // Requested previews never depend on the speculative-read policy.
+        return platform
+            .get_thumbnail(&key.path, key.size)
+            .map(|(bytes, _)| bytes);
+    };
+    if generation != policy.generation() {
+        return None;
+    }
+    let permit = policy.authorize(&key.path)?;
+    if permit.generation() != generation || !policy.valid(&permit) {
+        return None;
+    }
+    let result = platform.get_thumbnail(&permit.path.to_string_lossy(), key.size);
+    if !policy.valid(&permit) {
+        return None;
+    }
+    result.map(|(bytes, _)| bytes)
+}
 
 struct PoolState {
     high: VecDeque<ThumbJobKey>,
@@ -45,12 +74,64 @@ struct PoolState {
     /// decoding doesn't fight the viewer for CPU/disk.
     max_concurrent: usize,
     in_flight: usize,
+    queued_at: HashMap<ThumbJobKey, Instant>,
 }
 
 pub struct ThumbPool {
     state: Mutex<PoolState>,
     cvar: Condvar,
     platform: Arc<dyn Platform>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct CountingPlatform(AtomicUsize);
+    impl Platform for CountingPlatform {
+        fn home_dir(&self) -> String {
+            String::new()
+        }
+        fn open_in_editor(&self, _: &str) -> Result<String, String> {
+            unreachable!()
+        }
+        fn get_thumbnail(&self, _: &str, _: u32) -> Option<(Vec<u8>, &'static str)> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Some((vec![1], "image/png"))
+        }
+    }
+
+    #[test]
+    fn revoked_and_unknown_warmups_skip_provider_but_requested_previews_work() {
+        let policy = crate::storage::StorageRegistry::default();
+        let platform = CountingPlatform(AtomicUsize::new(0));
+        let root = std::env::temp_dir().join(format!("fbro-thumb-policy-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&root).unwrap();
+        let path = root.join("image.jpg");
+        std::fs::write(&path, b"test").unwrap();
+        let mut key = ThumbJobKey {
+            path: path.to_string_lossy().into_owned(),
+            size: 128,
+            mtime: 0,
+            speculative_generation: Some(policy.generation()),
+        };
+        assert!(generate_thumbnail(&platform, &policy, &key).is_none());
+        assert_eq!(platform.0.load(Ordering::SeqCst), 0);
+        policy.allow_test_root(&root);
+        key.speculative_generation = Some(policy.generation());
+        assert!(generate_thumbnail(&platform, &policy, &key).is_some());
+        assert_eq!(platform.0.load(Ordering::SeqCst), 1);
+        policy.set_test_root(&root, crate::storage::StorageClass::RemovableExternal);
+        assert!(generate_thumbnail(&platform, &policy, &key).is_none());
+        key.speculative_generation = Some(policy.generation());
+        assert!(generate_thumbnail(&platform, &policy, &key).is_none());
+        assert_eq!(platform.0.load(Ordering::SeqCst), 1);
+        key.speculative_generation = None;
+        assert!(generate_thumbnail(&platform, &policy, &key).is_some());
+        assert_eq!(platform.0.load(Ordering::SeqCst), 2);
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }
 
 impl ThumbPool {
@@ -65,6 +146,7 @@ impl ThumbPool {
                 closed: false,
                 max_concurrent: workers,
                 in_flight: 0,
+                queued_at: HashMap::new(),
             }),
             cvar: Condvar::new(),
             platform,
@@ -126,13 +208,17 @@ impl ThumbPool {
         let already_queued = !entry.is_empty();
         entry.push(tx);
         if !already_queued {
+            g.queued_at.insert(key.clone(), Instant::now());
             if g.visible.contains(&key.path) {
-                g.high.push_back(key);
+                g.high.push_back(key.clone());
             } else {
-                g.low.push_back(key);
+                g.low.push_back(key.clone());
             }
             self.cvar.notify_one();
         }
+        eprintln!("[thumbnail] request path={:?} size={} deduplicated={already_queued} queued={} active={}",
+            key.path, key.size,
+            g.high.len() + g.low.len(), g.in_flight);
         rx
     }
 
@@ -166,6 +252,17 @@ impl ThumbPool {
             }
             if let Some(k) = picked {
                 g.in_flight += 1;
+                let wait = g
+                    .queued_at
+                    .remove(&k)
+                    .map_or(0, |t| t.elapsed().as_millis());
+                eprintln!(
+                    "[thumbnail] start path={:?} size={} wait_ms={wait} queued={} active={}",
+                    k.path,
+                    k.size,
+                    g.high.len() + g.low.len(),
+                    g.in_flight
+                );
                 return Some(k);
             }
             g = self.cvar.wait(g).unwrap();
@@ -183,10 +280,17 @@ impl ThumbPool {
 
     fn worker_loop(self: Arc<Self>) {
         while let Some(key) = self.dequeue() {
-            let result = self
-                .platform
-                .get_thumbnail(&key.path, key.size)
-                .map(|(b, _ct)| b);
+            let started = Instant::now();
+            let policy = crate::storage::registry();
+            let result = generate_thumbnail(self.platform.as_ref(), &policy, &key);
+            eprintln!(
+                "[thumbnail] complete path={:?} size={} elapsed_ms={} bytes={} success={}",
+                key.path,
+                key.size,
+                started.elapsed().as_millis(),
+                result.as_ref().map_or(0, Vec::len),
+                result.is_some()
+            );
             let waiters = {
                 let mut g = self.state.lock().unwrap();
                 g.waiters.remove(&key).unwrap_or_default()

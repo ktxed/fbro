@@ -75,6 +75,9 @@ export interface Source {
   };
   rootPath: string;
   mounted: boolean;
+  storageClass?: "internal-ssd" | "rotational" | "removable-external" | "remote" | "virtual" | "unknown";
+  /** Missing metadata from older backends disables speculative loading. */
+  prefetchEligible?: boolean;
   freeBytes?: number;
   totalBytes?: number;
   shadow?: boolean;

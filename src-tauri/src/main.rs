@@ -15,6 +15,7 @@ mod persistence;
 mod platform;
 mod remote;
 mod state;
+mod storage;
 mod terminal;
 mod thumb_pool;
 mod vfs;
@@ -441,6 +442,40 @@ fn main() {
                 let shared_state = Arc::new(Mutex::new(app_state));
                 if let Ok(mut slot) = file_server_state.lock() {
                     *slot = Some(Arc::clone(&shared_state));
+                }
+
+                // One policy registry for all viewers, thumbnail requests and source
+                // projections. Native discovery never runs under the app-state lock.
+                {
+                    let state = shared_state.clone();
+                    let prefetch = viewer_prefetch.clone();
+                    tauri::async_runtime::spawn(async move {
+                        loop {
+                            let changed = tokio::task::spawn_blocking(|| storage::registry().refresh())
+                                .await
+                                .unwrap_or(false);
+                            if changed {
+                                prefetch.invalidate_storage_policy();
+                                let (sources, senders) = {
+                                    let state = state.lock().await;
+                                    let senders: Vec<_> = state.gui_senders.iter()
+                                        .chain(&state.viewer_senders).cloned().collect();
+                                    (ws::runtime::build_sources_json(&state), senders)
+                                };
+                                let message = ws::protocol::ServerMessage::StatePatch {
+                                    timestamp: ws::protocol::now(),
+                                    domain: "sources".into(),
+                                    entity_id: None,
+                                    version: 0,
+                                    patch: serde_json::json!({"sources": sources}),
+                                };
+                                for sender in senders {
+                                    let _ = sender.send(message.clone()).await;
+                                }
+                            }
+                            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                        }
+                    });
                 }
 
                 // If the user previously enabled sharing, restart the russh +

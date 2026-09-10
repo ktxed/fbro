@@ -42,6 +42,14 @@ pub async fn start(
     let dir_size_queue = Arc::new(DirSizeQueue::new());
     let platform = state.lock().await.platform.clone();
     let volume_watcher = crate::platform::create_volume_watcher(platform).await;
+    // AppState is constructed synchronously from the platform fallback. Before
+    // exposing a snapshot, replace that temporary list with the same canonical
+    // inventory used for every later hot-plug update.
+    let initial_volumes = volume_watcher.list_volumes().await;
+    state
+        .lock()
+        .await
+        .reconcile_initial_volumes(initial_volumes);
     let (cli_open_notify_tx, _) = broadcast::channel::<()>(16);
 
     loop {
@@ -120,6 +128,10 @@ async fn handle_connection(
     };
 
     let is_gui = hello_client.kind == "gui";
+    // Test/automation observers need the same state and intent surface as the
+    // GUI, but must not start another watcher for the shared panel state.
+    let is_observer = hello_client.kind == "observer";
+    let is_state_client = is_gui || is_observer;
     let session_id = uuid::Uuid::new_v4().to_string();
 
     if is_gui {
@@ -165,6 +177,13 @@ async fn handle_connection(
             build_state_snapshot(&state_guard, dir_size_tasks)
         };
         (Some(snapshot), panel_ids, is_reconnect)
+    } else if is_observer {
+        let dir_size_tasks = dir_size_queue.snapshot().await;
+        let snapshot = {
+            let state_guard = state.lock().await;
+            build_state_snapshot(&state_guard, dir_size_tasks)
+        };
+        (Some(snapshot), vec![], false)
     } else {
         (None, vec![], false)
     };
@@ -310,9 +329,11 @@ async fn handle_connection(
 
     {
         let mut state_guard = state.lock().await;
-        if is_gui {
+        if is_state_client {
             state_guard.gui_senders.push(tx.clone());
-            state_guard.has_gui_connected = true;
+            if is_gui {
+                state_guard.has_gui_connected = true;
+            }
         } else {
             state_guard.viewer_senders.push(tx.clone());
         }
@@ -457,7 +478,7 @@ async fn handle_connection(
                         match serde_json::from_str::<ClientMessage>(&text) {
                             Ok(ClientMessage::Intent { name, scope, args, .. }) => {
                                 eprintln!("[fbro] intent: {name} scope={scope} args={args}");
-                                if !is_gui && name == "OpenPathInRightPanel" {
+                                if !is_state_client && name == "OpenPathInRightPanel" {
                                     queue_cli_open_request(
                                         &state,
                                         &cli_open_notify_tx,

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type WheelEvent as ReactWheelEvent } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { IconArrowsMaximize, IconChevronDown, IconChevronUp, IconColumns2, IconLayoutRows, IconTextWrap, IconX } from "@tabler/icons-react";
 import { resolveWsUrl, WsClient } from "../ws/client";
 import type {
   BEMessage,
@@ -16,6 +17,7 @@ type DiffViewMode = "split" | "unified";
 
 const DIFF_ROW_HEIGHT = 13 * 1.45;
 const DIFF_WHEEL_ROWS = 3;
+const DIFF_HORIZONTAL_SCROLL_STEP = 80;
 
 interface DiffViewerAppProps {
   requestId: string;
@@ -31,18 +33,6 @@ function shortPath(path: string) {
 
 function lineText(value?: string) {
   return value === undefined || value === "" ? "\u00A0" : value;
-}
-
-function MnemonicLabel({ text, mnemonic }: { text: string; mnemonic: string }) {
-  const index = text.toLowerCase().indexOf(mnemonic.toLowerCase());
-  if (index < 0) return <>{text}</>;
-  return (
-    <>
-      {text.slice(0, index)}
-      <span className="modal__mnemonic">{text[index]}</span>
-      {text.slice(index + 1)}
-    </>
-  );
 }
 
 function normalizedWheelDelta(delta: number, deltaMode: number, pageSize: number) {
@@ -238,6 +228,15 @@ export function DiffViewerApp({ requestId, windowLabel, initialColorScheme }: Di
     }
   }, [mode]);
 
+  const scrollDiffHorizontally = useCallback((delta: number) => {
+    const source = mode === "split" ? leftPaneRef.current : unifiedBodyRef.current;
+    if (!source) return;
+    source.scrollLeft += delta;
+    if (mode === "split" && rightPaneRef.current) {
+      rightPaneRef.current.scrollLeft = source.scrollLeft;
+    }
+  }, [mode]);
+
   useEffect(() => {
     if (changedBlocks.length === 0) return;
     const activeRow = changedBlocks[activeChangeIndex] ?? changedBlocks[0];
@@ -301,10 +300,18 @@ export function DiffViewerApp({ requestId, windowLabel, initialColorScheme }: Di
         event.preventDefault();
         jumpChange(-1);
       }
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        scrollDiffHorizontally(-DIFF_HORIZONTAL_SCROLL_STEP);
+      }
+      if (event.key === "ArrowRight") {
+        event.preventDefault();
+        scrollDiffHorizontally(DIFF_HORIZONTAL_SCROLL_STEP);
+      }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [jumpChange, requestId, result?.navigation, scrollDiffVertically]);
+  }, [jumpChange, requestId, result?.navigation, scrollDiffHorizontally, scrollDiffVertically]);
 
   const colorScheme = resolveColorScheme(colorSchemeId);
   const rowCount = result?.rows.length ?? 0;
@@ -464,9 +471,10 @@ export function DiffViewerApp({ requestId, windowLabel, initialColorScheme }: Di
               type="button"
               onClick={() => jumpChange(-1)}
               disabled={changedBlocks.length === 0}
+              aria-label="Previous change"
               title="Previous change (P / Up)"
             >
-              <MnemonicLabel text="Prev" mnemonic="p" />
+              <IconChevronUp size={16} aria-hidden />
             </button>
             <span className="diff-viewer__jump-count">
               {changedBlocks.length === 0 ? "0/0" : `${activeChangeIndex + 1}/${changedBlocks.length}`}
@@ -476,9 +484,10 @@ export function DiffViewerApp({ requestId, windowLabel, initialColorScheme }: Di
               type="button"
               onClick={() => jumpChange(1)}
               disabled={changedBlocks.length === 0}
+              aria-label="Next change"
               title="Next change (N / Down)"
             >
-              <MnemonicLabel text="Next" mnemonic="n" />
+              <IconChevronDown size={16} aria-hidden />
             </button>
           </div>
           <div className="diff-viewer__segmented" role="group" aria-label="Diff view mode">
@@ -486,33 +495,36 @@ export function DiffViewerApp({ requestId, windowLabel, initialColorScheme }: Di
               className={mode === "split" ? "diff-viewer__segmented-btn diff-viewer__segmented-btn--active" : "diff-viewer__segmented-btn"}
               type="button"
               onClick={() => setMode("split")}
+              aria-label="Side by side view"
               title="Side by side (S / 1)"
             >
-              <MnemonicLabel text="Side by side" mnemonic="s" />
+              <IconColumns2 size={16} aria-hidden />
             </button>
             <button
               className={mode === "unified" ? "diff-viewer__segmented-btn diff-viewer__segmented-btn--active" : "diff-viewer__segmented-btn"}
               type="button"
               onClick={() => setMode("unified")}
+              aria-label="Unified view"
               title="Unified (U / 2)"
             >
-              <MnemonicLabel text="Unified" mnemonic="u" />
+              <IconLayoutRows size={16} aria-hidden />
             </button>
           </div>
           <button
             className={wordWrap ? "diff-viewer__toggle diff-viewer__toggle--active" : "diff-viewer__toggle"}
             type="button"
             aria-pressed={wordWrap}
+            aria-label="Toggle word wrap"
             title="Toggle word wrap (W)"
             onClick={() => setWordWrap((current) => !current)}
           >
-            <MnemonicLabel text="Wrap" mnemonic="w" />
+            <IconTextWrap size={16} aria-hidden />
           </button>
-          <button className="diff-viewer__toggle" type="button" title="Toggle maximize (M)" onClick={toggleMaximize}>
-            <MnemonicLabel text="Maximize" mnemonic="m" />
+          <button className="diff-viewer__toggle" type="button" aria-label="Toggle maximize" title="Toggle maximize (M)" onClick={toggleMaximize}>
+            <IconArrowsMaximize size={16} aria-hidden />
           </button>
-          <button className="diff-viewer__close" type="button" title="Close (C / Esc)" onClick={closeWindow}>
-            <MnemonicLabel text="Close" mnemonic="c" />
+          <button className="diff-viewer__close" type="button" aria-label="Close compare window" title="Close (C / Esc)" onClick={closeWindow}>
+            <IconX size={16} aria-hidden />
           </button>
         </div>
       </header>

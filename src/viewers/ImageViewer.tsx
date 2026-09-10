@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { mimeForFile } from "./media";
 import { ZoomableImage } from "./ZoomableImage";
+import { ViewerLoading } from "./ViewerLoading";
 
 export const IMAGE_LIMIT = 5 * 1024 * 1024; // 5 MiB — baseline when ludicrous mode is off
 
@@ -45,7 +46,7 @@ export function ImageViewer({ buffer, fileSize, filename, imageLimit }: ImageVie
   if (!url) {
     return (
       <div className="viewer__image-container">
-        <div className="viewer__loading">Loading image…</div>
+        <ViewerLoading />
       </div>
     );
   }

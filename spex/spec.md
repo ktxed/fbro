@@ -7,6 +7,9 @@ Once in a panel they can select files and perform operations like copy, delete, 
 
 This document summarizes the agreed architecture and interaction model for a personal, opinionated, cross-platform n-panel file manager.
 
+The context-sensitive operation buttons shown beside the cursor entry are
+specified in [inline-operations.md](./inline-operations.md).
+
 ---
 
 ## 1. Frontend (FE) and Backend (BE)

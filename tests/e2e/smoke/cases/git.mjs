@@ -39,10 +39,13 @@ export async function runGitFlow(browser, observer) {
   await inlineStage.waitForDisplayed({ timeout: 10_000 });
   let inlineRollback = await browser.$('[data-testid="git-inline-rollback"]');
   await inlineRollback.waitForDisplayed({ timeout: 10_000 });
-  const inlineActionLabels = await browser.execute(() => [...document.querySelectorAll('[data-entry-name="inline.txt"] .panel__git-bubble-action')]
-    .map(button => button.getAttribute("data-tooltip-content")));
-  if (inlineActionLabels.join("|") !== "View Git diff|Stage|Rollback") {
-    throw new Error(`Unexpected inline Git actions: ${JSON.stringify(inlineActionLabels)}`);
+  const inlineActions = await browser.execute(() => [...document.querySelectorAll('[data-entry-name="inline.txt"] [data-inline-operation]')]
+    .map(button => ({ id: button.getAttribute("data-inline-operation"), label: button.getAttribute("data-tooltip-content") })));
+  const inlineActionIds = inlineActions.map(action => action.id).join("|");
+  const inlineActionLabels = inlineActions.map(action => action.label).join("|");
+  if (inlineActionIds !== "git.view-diff|git.stage|git.rollback|panel.pass-to-bro|file.copy|file.move|file.rename|file.delete"
+    || inlineActionLabels !== "View Git diff|Stage|Rollback|Pass to Bro|Copy|Move|Rename|Delete") {
+    throw new Error(`Unexpected inline Git actions: ${JSON.stringify(inlineActions)}`);
   }
   await inlineStage.moveTo();
   const iconTooltip = await browser.$(".panel__git-icon-tooltip");
@@ -68,11 +71,21 @@ export async function runGitFlow(browser, observer) {
     label: "inline Git keyboard left navigation",
   });
   await browser.keys("ArrowLeft");
-  await waitFor(async () => (await browser.$('[data-testid="git-inline-rollback"]')).isFocused(), {
+  await waitFor(async () => (await browser.$('[data-testid="panel-left"]')).isFocused(), {
     timeout: 10_000,
-    label: "inline Git keyboard wrap",
+    label: "inline Git keyboard left exit",
   });
+  await browser.keys("ArrowLeft");
+  await observer.waitForPanelPath("left", path.dirname(repo));
+  await goToPanelPath(browser, observer, "left", repo);
+  await clickEntry(browser, "left", "inline.txt");
+  const reEntryDiff = await browser.$('[data-entry-name="inline.txt"] [data-testid="git-inline-view-diff"]');
+  await reEntryDiff.waitForDisplayed({ timeout: 10_000 });
   await browser.keys("ArrowRight");
+  await waitFor(async () => (await browser.$('[data-testid="git-inline-view-diff"]')).isFocused(), {
+    timeout: 10_000,
+    label: "inline Git keyboard re-entry",
+  });
   await browser.keys("Escape");
   await waitFor(async () => (await browser.$('[data-testid="panel-left"]')).isFocused(), {
     timeout: 10_000,

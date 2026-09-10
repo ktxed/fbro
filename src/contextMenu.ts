@@ -23,9 +23,13 @@ export interface ContextMenuOptions {
   canGitDiff?: boolean;
   canAddToGlobalSelection?: boolean;
   canCopy?: boolean;
+  canMove?: boolean;
   canRename?: boolean;
   canDelete?: boolean;
   canCopyFullPath?: boolean;
+  targetCount?: number;
+  clipboardNames?: string;
+  clipboardPaths?: string;
 }
 
 function commandItem(
@@ -46,7 +50,7 @@ function commandItem(
 function platformItem(): ContextMenuItem {
   if (isMac) {
     return {
-      id: "platform.file_manager",
+      id: "platform.reveal",
       kind: "platform",
       label: "Open in Finder",
       actionId: "file_manager",
@@ -54,14 +58,14 @@ function platformItem(): ContextMenuItem {
   }
   if (isWindows) {
     return {
-      id: "platform.file_manager",
+      id: "platform.reveal",
       kind: "platform",
       label: "Show in Explorer",
       actionId: "file_manager",
     };
   }
   return {
-    id: "platform.file_manager",
+    id: "platform.reveal",
     kind: "platform",
     label: "Open containing folder",
     actionId: "file_manager",
@@ -76,20 +80,21 @@ export function buildContextMenuItems(
   options: ContextMenuOptions = {},
 ): ContextMenuItem[] {
   const isShadow = !!options.isShadow;
+  const isMultiple = (options.targetCount ?? 1) > 1;
   const openWithItem: ContextMenuItem | null = options.canOpenWith && (kind === "file" || kind === "directory")
-    ? { id: "platform.open_with", kind: "openWith", label: "Open With..." }
+    ? { id: "platform.open-with", kind: "openWith", label: "Open With..." }
     : null;
   const broItem: ContextMenuItem | null = options.canPassToBro && (kind === "file" || kind === "directory")
-    ? { id: "platform.pass_to_bro", kind: "bro", label: "Pass to Bro..." }
+    ? { id: "panel.pass-to-bro", kind: "bro", label: "Pass to Bro..." }
     : null;
   const compareItem: ContextMenuItem | null = options.canCompare && kind === "file"
     ? commandItem("file.compare", "Compare", commands)
     : null;
   const gitDiffItem: ContextMenuItem | null = options.canGitDiff && kind === "file"
-    ? { id: "git.view_diff", kind: "gitDiff", label: "View Git diff" }
+    ? { id: "git.view-diff", kind: "gitDiff", label: "View Git diff" }
     : null;
   const globalSelectionItem: ContextMenuItem | null = options.canAddToGlobalSelection && (kind === "file" || kind === "directory")
-    ? { id: "selection.to_global", kind: "globalSelection", label: "To global selection" }
+    ? { id: "selection.to-global", kind: "globalSelection", label: "To global selection" }
     : null;
 
   return [
@@ -100,10 +105,11 @@ export function buildContextMenuItems(
     ...(globalSelectionItem ? [globalSelectionItem] : []),
     ...(openWithItem ? [openWithItem] : []),
     ...(options.canCopy ? [commandItem("file.copy", isShadow ? "Extract" : "Copy", commands)] : []),
+    ...(options.canMove ? [commandItem("file.move", "Move", commands)] : []),
     ...(options.canRename ? [commandItem("file.rename", "Rename", commands)] : []),
     ...(options.canDelete ? [commandItem("file.delete", "Delete", commands)] : []),
     { id: "separator.clipboard", kind: "separator" },
-    { id: "clipboard.name", kind: "clipboard", label: "Copy name", clipboardText: name },
-    ...(options.canCopyFullPath ? [{ id: "clipboard.fullPath", kind: "clipboard", label: "Copy full path", clipboardText: fullPath } as ContextMenuItem] : []),
+    { id: "clipboard.names", kind: "clipboard", label: isMultiple ? "Copy names" : "Copy name", clipboardText: options.clipboardNames ?? name },
+    ...(options.canCopyFullPath ? [{ id: "clipboard.paths", kind: "clipboard", label: isMultiple ? "Copy full paths" : "Copy full path", clipboardText: options.clipboardPaths ?? fullPath } as ContextMenuItem] : []),
   ];
 }

@@ -27,23 +27,12 @@ pub struct UDisks2Watcher {
 #[async_trait::async_trait]
 impl VolumeWatcher for UDisks2Watcher {
     async fn list_volumes(&self) -> Vec<VolumeInfo> {
-        let mut vols = self.udisks2.list_block_devices().await;
-        // Merge with /proc/mounts-based volumes: udisks2 may miss some (e.g. root, network mounts)
-        let ids: HashSet<String> = vols.iter().map(|v| v.id.clone()).collect();
-        // Also deduplicate by mount point: two volumes cannot share the same
-        // mounted path. This prevents duplicates when udisks2 and /proc/mounts
-        // both report the same physical volume with different ID formats.
-        let mounted_paths: HashSet<String> = vols
-            .iter()
-            .filter(|v| v.mounted)
-            .map(|v| mount_path_key(&v.root_path))
-            .collect();
-        for pv in self.platform.list_volumes() {
-            if !ids.contains(&pv.id) && !mounted_paths.contains(&mount_path_key(&pv.root_path)) {
-                vols.push(pv);
-            }
-        }
-        vols
+        let inventory = self.udisks2.list_block_devices().await;
+        merge_with_platform_volumes(
+            inventory.volumes,
+            inventory.ignored_mount_paths,
+            self.platform.list_volumes(),
+        )
     }
 
     async fn mount(&self, device_path: &str) -> Result<String, String> {
@@ -55,9 +44,48 @@ impl VolumeWatcher for UDisks2Watcher {
     }
 }
 
+fn merge_with_platform_volumes(
+    mut vols: Vec<VolumeInfo>,
+    ignored_mount_paths: HashSet<String>,
+    platform_volumes: Vec<VolumeInfo>,
+) -> Vec<VolumeInfo> {
+    // Merge with /proc/mounts-based volumes: udisks2 may miss some (e.g. root, network mounts)
+    let ids: HashSet<String> = vols.iter().map(|v| v.id.clone()).collect();
+    // Also deduplicate by mount point: two volumes cannot share the same
+    // mounted path. This prevents duplicates when udisks2 and /proc/mounts
+    // both report the same physical volume with different ID formats.
+    let mounted_paths: HashSet<String> = vols
+        .iter()
+        .filter(|v| v.mounted)
+        .map(|v| mount_path_key(&v.root_path))
+        .collect();
+    for pv in platform_volumes {
+        let path = mount_path_key(&pv.root_path);
+        if !ids.contains(&pv.id)
+            && !mounted_paths.contains(&path)
+            && !ignored_mount_paths.contains(&path)
+        {
+            vols.push(pv);
+        }
+    }
+    vols
+}
+
 #[cfg(test)]
 mod tests {
-    use super::mount_path_key;
+    use super::{merge_with_platform_volumes, mount_path_key};
+    use crate::platform::VolumeInfo;
+    use std::collections::HashSet;
+
+    fn volume(id: &str, path: &str) -> VolumeInfo {
+        VolumeInfo {
+            id: id.into(),
+            name: id.into(),
+            root_path: path.into(),
+            mounted: true,
+            device_path: None,
+        }
+    }
 
     #[test]
     fn normalizes_mount_path_keys_for_deduplication() {
@@ -70,6 +98,22 @@ mod tests {
             mount_path_key("/run/media/me/Extreme SSD"),
             "/run/media/me/Extreme SSD"
         );
+    }
+
+    #[test]
+    fn merge_adds_missing_mounts_without_readding_ignored_or_duplicate_paths() {
+        let merged = merge_with_platform_volumes(
+            vec![volume("udisks-root", "/")],
+            HashSet::from(["/hidden".to_string()]),
+            vec![
+                volume("proc-root", "/"),
+                volume("proc-hidden", "/hidden"),
+                volume("network", "/mnt/network"),
+            ],
+        );
+        assert_eq!(merged.len(), 2);
+        assert!(merged.iter().any(|volume| volume.id == "udisks-root"));
+        assert!(merged.iter().any(|volume| volume.id == "network"));
     }
 }
 
