@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { IconArrowDown, IconArrowUp, IconCopy, IconGitCompare, IconLoader2, IconMinus, IconPlus } from "@tabler/icons-react";
+import { IconArrowBackUp, IconArrowDown, IconArrowUp, IconCopy, IconGitCompare, IconLoader2, IconMinus, IconPlus } from "@tabler/icons-react";
 import { useAppDispatch, useAppState } from "../store";
 import type { GitChange, GitLogRef, GitRepoStatus } from "../ws/types";
 import type { WsClient } from "../ws/client";
@@ -684,44 +684,49 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
                     />
                     <code className={stagedChange ? "git-modal__change-state--staged" : ""}>{change.indexStatus}{change.worktreeStatus}</code>
                     <span title={change.path}>{change.path}</span>
-                    <button
-                      className="git-modal__change-action"
-                      data-testid="git-view-diff"
-                      title="View diff (V)"
-                      aria-keyshortcuts="v"
-                      onFocus={() => setActiveChangeIndex(index)}
-                      onClick={() => { setRollbackPaths(null); act("GitViewDiff", { targetPath: change.path }); }}
-                    >
-                      <IconGitCompare size={15} aria-hidden />View diff <kbd>V</kbd>
-                    </button>
-                    <button
-                      className="git-modal__change-action"
-                      disabled={actionInFlight}
-                      title={`${actionLabel} (S)`}
-                      aria-keyshortcuts="s"
-                      onFocus={() => setActiveChangeIndex(index)}
-                      onClick={() => {
-                        setRollbackPaths(null);
-                        runAction(
-                          stagedChange ? "GitUnstagePaths" : "GitStagePaths",
-                          `${stagedChange ? "Unstaging" : "Staging"} ${change.path}…`,
-                          { paths: [change.path] },
-                        );
-                      }}
-                    >
-                      {stagedChange ? <IconMinus size={15} aria-hidden /> : <IconPlus size={15} aria-hidden />}
-                      {actionLabel} <kbd>S</kbd>
-                    </button>
-                    <button
-                      data-git-rollback
-                      data-testid="git-rollback-path"
-                      disabled={actionInFlight}
-                      className={`git-modal__change-action git-modal__change-action--danger${rollbackPending ? " git-modal__change-action--confirm" : ""}`}
-                      onFocus={() => setActiveChangeIndex(index)}
-                      onClick={() => armRollback([change.path])}
-                    >
-                      {rollbackPending ? "Confirm rollback" : "Rollback"}
-                    </button>
+                    <div className="git-modal__change-actions">
+                      <button
+                        className="git-modal__change-action git-modal__change-action--icon"
+                        data-testid="git-view-diff"
+                        title="View diff (V)"
+                        aria-label="View diff"
+                        aria-keyshortcuts="v"
+                        onFocus={() => setActiveChangeIndex(index)}
+                        onClick={() => { setRollbackPaths(null); act("GitViewDiff", { targetPath: change.path }); }}
+                      >
+                        <IconGitCompare size={15} aria-hidden />
+                      </button>
+                      <button
+                        className="git-modal__change-action git-modal__change-action--icon"
+                        disabled={actionInFlight}
+                        title={`${actionLabel} (S)`}
+                        aria-label={actionLabel}
+                        aria-keyshortcuts="s"
+                        onFocus={() => setActiveChangeIndex(index)}
+                        onClick={() => {
+                          setRollbackPaths(null);
+                          runAction(
+                            stagedChange ? "GitUnstagePaths" : "GitStagePaths",
+                            `${stagedChange ? "Unstaging" : "Staging"} ${change.path}…`,
+                            { paths: [change.path] },
+                          );
+                        }}
+                      >
+                        {stagedChange ? <IconMinus size={15} aria-hidden /> : <IconPlus size={15} aria-hidden />}
+                      </button>
+                      <button
+                        data-git-rollback
+                        data-testid="git-rollback-path"
+                        disabled={actionInFlight}
+                        className={`git-modal__change-action git-modal__change-action--icon git-modal__change-action--danger${rollbackPending ? " git-modal__change-action--confirm" : ""}`}
+                        title={rollbackPending ? "Confirm rollback" : "Rollback"}
+                        aria-label={rollbackPending ? "Confirm rollback" : "Rollback"}
+                        onFocus={() => setActiveChangeIndex(index)}
+                        onClick={() => armRollback([change.path])}
+                      >
+                        <IconArrowBackUp size={15} aria-hidden />
+                      </button>
+                    </div>
                   </div>
                 );
               })}

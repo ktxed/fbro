@@ -34,6 +34,7 @@
   --border-strong:#4a4a4a;
   --text:         #c8c8d0;
   --text-dim:     #666680;
+  --text-muted:   #666680;
   --text-dir:     #6699ff;
   --text-link:    #ff9944;
   --text-path:    #88aadd;
@@ -81,6 +82,7 @@
   --border-strong:#8ea0b3;
   --text:         #17212b;
   --text-dim:     #4f6173;
+  --text-muted:   #4f6173;
   --text-dir:     #0059b8;
   --text-link:    #7f3f00;
   --text-path:    #245680;
@@ -1527,7 +1529,46 @@ body {
 .git-modal__stat { flex: 0 0 auto; padding: 1px 5px; border: 1px solid var(--border); border-radius: 3px; color: var(--text-muted); }
 .git-modal__warning { margin: 8px 12px 0; padding: 6px 8px; border: 1px solid color-mix(in srgb, var(--text-warning) 42%, var(--border)); background: color-mix(in srgb, var(--text-warning) 10%, var(--bg-panel)); color: var(--text-warning); font-size: calc(var(--font-size) - 1px); line-height: 1.35; }
 .git-modal__toolbar { display: flex; align-items: center; gap: 8px; padding: 10px 16px; }
-.git-modal__toolbar select, .git-modal__toolbar button, .git-modal__change button, .git-modal__log-more button, .git-modal .modal__actions button { font: inherit; font-size: calc(var(--font-size) - 1px); margin-inline: 5px; padding-inline: 8px; }
+/* appearance:none + explicit colors: Win10 WebView2 otherwise paints native ButtonFace
+ * (light gray enabled / muddy disabled) over the dark theme. */
+.git-modal__toolbar select,
+.git-modal__toolbar button,
+.git-modal__selection-toolbar button,
+.git-modal__log-more button,
+.git-modal .modal__actions button {
+  appearance: none;
+  -webkit-appearance: none;
+  font: inherit;
+  font-size: calc(var(--font-size) - 1px);
+  margin-inline: 5px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg-footer);
+  color: var(--text);
+  cursor: pointer;
+}
+.git-modal__toolbar select {
+  background: var(--bg-input);
+  color: var(--text);
+}
+.git-modal__toolbar button:hover:not(:disabled),
+.git-modal__selection-toolbar button:hover:not(:disabled),
+.git-modal__log-more button:hover:not(:disabled),
+.git-modal .modal__actions button:hover:not(:disabled) {
+  background: var(--bg-focused);
+  border-color: var(--border-focus);
+  color: var(--text);
+}
+.git-modal__toolbar button:disabled,
+.git-modal__selection-toolbar button:disabled,
+.git-modal .modal__actions button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  background: var(--bg-footer);
+  color: var(--text-dim);
+  border-color: var(--border);
+}
 .git-modal__toolbar .git-modal__badge { margin-left: 5px; vertical-align: middle; }
 .git-modal__badge { display: inline-flex; align-items: center; gap: 2px; padding: 2px 5px; border: 1px solid currentColor; border-radius: 10px; font-style: normal; font-size: calc(var(--font-size) - 3px); }
 .git-modal__badge--incoming { color: var(--accent); }
@@ -1720,7 +1761,7 @@ body {
 .git-modal__selection-toolbar span { flex: 1; }
 .git-modal__selection-toolbar button { font: inherit; font-size: calc(var(--font-size) - 2px); padding: 2px 7px; }
 .git-modal__changes { flex: 1; min-height: 0; overflow: auto; }
-.git-modal__change { display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 3px 16px; border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent); }
+.git-modal__change { display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 3px 3px 3px 16px; border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent); }
 .git-modal__change:hover { background: var(--bg-hover); }
 .git-modal__change--active, .git-modal__change:focus { background: var(--bg-hover); outline: 1px solid var(--border-focus); outline-offset: -1px; }
 .git-modal__change--selected { background: color-mix(in srgb, var(--accent) 12%, var(--bg-panel)); }
@@ -1728,7 +1769,37 @@ body {
 .git-modal__change code { width: 22px; color: var(--text-warning); font-weight: 700; }
 .git-modal__change-state--staged { color: var(--text-success, #73c991) !important; }
 .git-modal__change span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.git-modal__change-action { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-width: 100px; }
+.git-modal__change-actions { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 4px; }
+.git-modal__change-action {
+  appearance: none;
+  -webkit-appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 4px 8px;
+  font: inherit;
+  font-size: calc(var(--font-size) - 1px);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg-footer);
+  color: var(--text);
+  cursor: pointer;
+}
+.git-modal__change-action--icon {
+  width: 26px;
+  height: 26px;
+  min-width: 26px;
+  padding: 0;
+}
+.git-modal__change-action:hover:not(:disabled) {
+  background: var(--bg-focused);
+  border-color: var(--border-focus);
+}
+.git-modal__change-action:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
 .git-modal__change-action svg { flex: 0 0 auto; }
 .git-modal__change-action--danger { color: var(--text-warning); }
 .git-modal__change-action--confirm { border-color: var(--text-warning); background: color-mix(in srgb, var(--text-warning) 14%, var(--bg-panel)); color: var(--text-warning); }
