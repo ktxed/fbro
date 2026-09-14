@@ -26,6 +26,7 @@ import { BookmarksPopover } from "./BookmarksPopover";
 import { PanelTabBar } from "./PanelTabBar";
 import { PanelTerminal } from "./PanelTerminal";
 import { EntryThumb } from "./EntryThumb";
+import { isLikelyBinaryPath } from "../utils/binaryPath";
 import { isGlobalSelectionSourceId } from "../utils/sourceId";
 import { GitModal } from "./GitModal";
 import type { GitActivity } from "./gitActivity";
@@ -156,7 +157,7 @@ function GitBubbleActions({
     else setRollbackArmed(true);
   };
   const gitOperations: InlineOperationItem[] = [
-    {
+    ...(!isLikelyBinaryPath(path) ? [{
       id: "git.view-diff",
       testId: "git-inline-view-diff",
       label: "View Git diff",
@@ -166,7 +167,7 @@ function GitBubbleActions({
         setRollbackArmed(false);
         client.sendIntent("GitViewDiff", undefined, { panelId, targetPath: path });
       },
-    },
+    } satisfies InlineOperationItem] : []),
     {
       id: staged ? "git.unstage" : "git.stage",
       testId: staged ? "git-inline-unstage" : "git-inline-stage",

@@ -1,4 +1,5 @@
 import type { AppState } from "./store";
+import { isLikelyBinaryPath } from "./utils/binaryPath";
 import { isGlobalSelectionSourceId } from "./utils/sourceId";
 import type { FileOpFile, PanelState, VFSEntry } from "./ws/types";
 
@@ -171,6 +172,10 @@ export function contextualOperationAvailable(
     case "file.compare":
       return canCompareTarget(state, target);
     case "git.view-diff":
+      return isLocalFilesystem
+        && target.primary.kind === "file"
+        && !!target.primary.entry?.gitStatus
+        && !isLikelyBinaryPath(target.primary.fullPath || target.primary.name);
     case "git.stage":
     case "git.unstage":
     case "git.rollback":

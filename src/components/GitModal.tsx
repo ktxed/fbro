@@ -5,6 +5,7 @@ import type { GitChange, GitLogRef, GitRepoStatus } from "../ws/types";
 import type { WsClient } from "../ws/client";
 import { ResizableModal } from "./ResizableModal";
 import { ModalLayer } from "./ModalStack";
+import { isLikelyBinaryPath } from "../utils/binaryPath";
 import type { GitActivity } from "./gitActivity";
 
 type GitTab = "changes" | "log";
@@ -21,7 +22,9 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
   const { pendingGitLog } = useAppState();
   const gitLog = pendingGitLog?.panelId === panelId ? pendingGitLog : null;
 
-  const [tab, setTab] = useState<GitTab>("changes");
+  const hasChanges = git.changes.length > 0;
+  const [tab, setTab] = useState<GitTab>(() => git.changes.length > 0 ? "changes" : "log");
+  const activeTab: GitTab = hasChanges ? tab : "log";
   const [message, setMessage] = useState("");
   const staged = useMemo(() => git.changes.filter(c => c.indexStatus !== " " && c.indexStatus !== "?"), [git]);
   const modalRef = useRef<HTMLDivElement>(null);
@@ -35,6 +38,7 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
   const logLoadMoreRef = useRef<HTMLDivElement | null>(null);
   const lastGitRef = useRef(git);
   const logLoadedRootRef = useRef<string | null>(null);
+  const didAutoFocusLogRef = useRef(false);
   const [activeChangeIndex, setActiveChangeIndex] = useState(0);
   const [logFocus, setLogFocus] = useState<LogFocus>({ kind: "commit", index: 0 });
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(() => new Set());
@@ -255,7 +259,7 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
   useEffect(() => {
     if (git !== lastGitRef.current) {
       // After a successful commit (or other mutating action), refresh log if it was loaded.
-      if (logLoadedRootRef.current === git.root && tab === "log") {
+      if (logLoadedRootRef.current === git.root && activeTab === "log") {
         requestLog({ skip: 0, append: false });
       } else if (logLoadedRootRef.current === git.root) {
         // Invalidate so next visit to Log re-fetches.
@@ -263,7 +267,7 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
       }
     }
     lastGitRef.current = git;
-  }, [git, requestLog, tab]);
+  }, [git, requestLog, activeTab]);
 
   useEffect(() => {
     setActiveChangeIndex((index) => Math.min(index, Math.max(0, git.changes.length - 1)));
@@ -301,13 +305,26 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
 
   // Lazy-load log when switching to the Log tab (or when root changes).
   useEffect(() => {
-    if (tab !== "log") return;
+    if (activeTab !== "log") return;
     if (logLoadedRootRef.current === git.root) return;
     logLoadedRootRef.current = git.root;
     requestLog({ skip: 0, append: false });
-  }, [tab, git.root, requestLog]);
+  }, [activeTab, git.root, requestLog]);
+
+  const logHasCommits = logCommits.length > 0;
+  useEffect(() => {
+    if (hasChanges) {
+      didAutoFocusLogRef.current = false;
+      return;
+    }
+    if (activeTab !== "log" || !logHasCommits || didAutoFocusLogRef.current) return;
+    didAutoFocusLogRef.current = true;
+    const frame = requestAnimationFrame(() => focusLogItem({ kind: "commit", index: 0 }));
+    return () => cancelAnimationFrame(frame);
+  }, [hasChanges, activeTab, logHasCommits, focusLogItem]);
 
   useEffect(() => {
+    if (!hasChanges) return;
     const frame = requestAnimationFrame(() => closeRef.current?.focus());
     return () => cancelAnimationFrame(frame);
   }, []);
@@ -323,7 +340,7 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
         event.preventDefault();
         event.stopPropagation();
         if (rollbackPaths) setRollbackPaths(null);
-        else if (tab === "log" && expandedHash) {
+        else if (activeTab === "log" && expandedHash) {
           collapseCommit();
           const idx = expandedCommitIndex >= 0 ? expandedCommitIndex : 0;
           focusLogItem({ kind: "commit", index: idx });
@@ -353,7 +370,7 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
       if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) return;
       const key = event.key.toLowerCase();
       const hasShortcutModifier = event.ctrlKey || event.metaKey || event.altKey;
-      if (tab === "changes" && key === "a" && (event.ctrlKey || event.metaKey) && !event.altKey) {
+      if (activeTab === "changes" && key === "a" && (event.ctrlKey || event.metaKey) && !event.altKey) {
         event.preventDefault();
         event.stopPropagation();
         setSelectedPaths(new Set(git.changes.map(change => change.path)));
@@ -365,7 +382,7 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
         if (key === "1") {
           event.preventDefault();
           event.stopPropagation();
-          setTab("changes");
+          if (hasChanges) setTab("changes");
           return;
         }
         if (key === "2") {
@@ -378,7 +395,7 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
         if (movement) {
           event.preventDefault();
           event.stopPropagation();
-          if (tab === "log") moveLogFocus(movement);
+          if (activeTab === "log") moveLogFocus(movement);
           else focusChangeRow(activeChangeIndex + movement);
           return;
         }
@@ -386,7 +403,7 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
         if (event.key === "Home" || event.key === "End") {
           event.preventDefault();
           event.stopPropagation();
-          if (tab === "log") {
+          if (activeTab === "log") {
             if (logCommits.length === 0) return;
             if (event.key === "Home") {
               focusLogItem({ kind: "commit", index: 0 });
@@ -409,7 +426,7 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
           }
           return;
         }
-        if (tab === "log") {
+        if (activeTab === "log") {
           // Right: expand active commit / enter first nested change.
           if (event.key === "ArrowRight") {
             event.preventDefault();
@@ -467,6 +484,7 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
               ? gitLog.commitShows[commit.hash].changes[logFocus.changeIndex]
               : undefined;
             if (commit && change) {
+              if (key === "v" && isLikelyBinaryPath(change.path)) return;
               event.preventDefault();
               event.stopPropagation();
               if (key === "v") viewCommitDiff(commit.hash, change);
@@ -483,6 +501,7 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
             return;
           }
           if (activeChange && key === "v") {
+            if (isLikelyBinaryPath(activeChange.path)) return;
             event.preventDefault();
             event.stopPropagation();
             act("GitViewDiff", { targetPath: activeChange.path });
@@ -498,14 +517,14 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
         }
       }
       const accelerators: Record<string, () => void> = {
-        b: () => branchRef.current?.focus(),
         f: () => runAction("GitFetch", "Fetching remote…"),
         l: () => { if (canPull) runAction("GitPull", "Pulling changes…"); },
         p: () => { if (canPush) runAction("GitPush", "Pushing changes…"); },
         r: () => runAction("GitRefresh", "Fetching and refreshing…"),
         u: () => { if (canSetUpstream) runAction("GitSetUpstream", "Setting upstream…", { branch: git.branch }); },
-        c: () => { if (tab === "changes" && canCommit) commitRef.current?.click(); },
+        c: () => { if (activeTab === "changes" && canCommit) commitRef.current?.click(); },
       };
+      if (git.branches.length > 0) accelerators.b = () => branchRef.current?.focus();
       const action = !hasShortcutModifier ? accelerators[key] : undefined;
       if (action) {
         event.preventDefault();
@@ -557,15 +576,19 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
           </div>
         )}
         <div className="git-modal__toolbar">
-          <select
-            ref={branchRef}
-            value={git.branch}
-            disabled={actionInFlight}
-            onChange={e => runAction("GitSwitchBranch", "Switching branch…", { branch: e.target.value })}
-          >
-            {git.branches.map(branch => <option key={branch} value={branch}>{branch}</option>)}
-          </select>
-          <kbd>B</kbd>
+          {git.branches.length > 0 && (
+            <>
+              <select
+                ref={branchRef}
+                value={git.branch}
+                disabled={actionInFlight}
+                onChange={e => runAction("GitSwitchBranch", "Switching branch…", { branch: e.target.value })}
+              >
+                {git.branches.map(branch => <option key={branch} value={branch}>{branch}</option>)}
+              </select>
+              <kbd>B</kbd>
+            </>
+          )}
           <span className="git-modal__toolbar-spacer" />
           <button disabled={actionInFlight || !canPull} title={!canPull ? pullDisabledMessage : undefined} onClick={() => runAction("GitPull", "Pulling changes…")}>
             Pull <kbd>L</kbd>
@@ -584,29 +607,31 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
         </div>
 
         <div className="git-modal__tabs" role="tablist" aria-label="Git views">
+          {hasChanges && (
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === "changes"}
+              data-testid="git-tab-changes"
+              className={`git-modal__tab${activeTab === "changes" ? " git-modal__tab--active" : ""}`}
+              onClick={() => setTab("changes")}
+            >
+              Changes <kbd>1</kbd>
+            </button>
+          )}
           <button
             type="button"
             role="tab"
-            aria-selected={tab === "changes"}
-            data-testid="git-tab-changes"
-            className={`git-modal__tab${tab === "changes" ? " git-modal__tab--active" : ""}`}
-            onClick={() => setTab("changes")}
-          >
-            Changes <kbd>1</kbd>
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={tab === "log"}
+            aria-selected={activeTab === "log"}
             data-testid="git-tab-log"
-            className={`git-modal__tab${tab === "log" ? " git-modal__tab--active" : ""}`}
+            className={`git-modal__tab${activeTab === "log" ? " git-modal__tab--active" : ""}`}
             onClick={() => setTab("log")}
           >
-            Log <kbd>2</kbd>
+            Log {hasChanges && <kbd>2</kbd>}
           </button>
         </div>
 
-        {tab === "changes" ? (
+        {activeTab === "changes" ? (
           <>
             <div className="git-modal__section-title">
               <span>Changes</span>
@@ -685,17 +710,19 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
                     <code className={stagedChange ? "git-modal__change-state--staged" : ""}>{change.indexStatus}{change.worktreeStatus}</code>
                     <span title={change.path}>{change.path}</span>
                     <div className="git-modal__change-actions">
-                      <button
-                        className="git-modal__change-action git-modal__change-action--icon"
-                        data-testid="git-view-diff"
-                        title="View diff (V)"
-                        aria-label="View diff"
-                        aria-keyshortcuts="v"
-                        onFocus={() => setActiveChangeIndex(index)}
-                        onClick={() => { setRollbackPaths(null); act("GitViewDiff", { targetPath: change.path }); }}
-                      >
-                        <IconGitCompare size={15} aria-hidden />
-                      </button>
+                      {!isLikelyBinaryPath(change.path) && (
+                        <button
+                          className="git-modal__change-action git-modal__change-action--icon"
+                          data-testid="git-view-diff"
+                          title="View diff (V)"
+                          aria-label="View diff"
+                          aria-keyshortcuts="v"
+                          onFocus={() => setActiveChangeIndex(index)}
+                          onClick={() => { setRollbackPaths(null); act("GitViewDiff", { targetPath: change.path }); }}
+                        >
+                          <IconGitCompare size={15} aria-hidden />
+                        </button>
+                      )}
                       <button
                         className="git-modal__change-action git-modal__change-action--icon"
                         disabled={actionInFlight}
@@ -844,17 +871,19 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
                             >
                               <code className="git-modal__log-change-state">{change.indexStatus}</code>
                               <span className="git-modal__log-change-path" title={pathLabel}>{pathLabel}</span>
-                              <button
-                                type="button"
-                                className="git-modal__change-action"
-                                data-testid="git-log-view-diff"
-                                title="View diff (V)"
-                                aria-keyshortcuts="v"
-                                onFocus={() => setLogFocus({ kind: "change", commitIndex: index, changeIndex })}
-                                onClick={() => viewCommitDiff(commit.hash, change)}
-                              >
-                                <IconGitCompare size={15} aria-hidden />View diff <kbd>V</kbd>
-                              </button>
+                              {!isLikelyBinaryPath(change.path) && (
+                                <button
+                                  type="button"
+                                  className="git-modal__change-action"
+                                  data-testid="git-log-view-diff"
+                                  title="View diff (V)"
+                                  aria-keyshortcuts="v"
+                                  onFocus={() => setLogFocus({ kind: "change", commitIndex: index, changeIndex })}
+                                  onClick={() => viewCommitDiff(commit.hash, change)}
+                                >
+                                  <IconGitCompare size={15} aria-hidden />View diff <kbd>V</kbd>
+                                </button>
+                              )}
                               {change.indexStatus !== "D" && (
                                 <button
                                   type="button"
@@ -930,7 +959,7 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
             </div>
           )}
           <button onClick={handleClose}>Close</button>
-          {tab === "changes" && (
+          {activeTab === "changes" && (
             <button
               ref={commitRef}
               disabled={actionInFlight || !canCommit}
