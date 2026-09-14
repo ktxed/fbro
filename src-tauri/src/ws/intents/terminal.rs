@@ -23,13 +23,6 @@ pub(crate) async fn handle(name: &str, scope: &Value, args: &Value, ctx: &mut In
 }
 
 async fn quick_edit(panel_id: &str, ctx: &mut IntentContext<'_>) {
-    if cfg!(target_os = "windows") {
-        let message = "Quick edit is currently available only on Linux and macOS.";
-        record_quick_edit_failure(panel_id, None, None, None, &[], message, None);
-        send_quick_edit_error(ctx, message).await;
-        return;
-    }
-
     let (cwd, file_path, source_id, version, gui_senders, pty_manager, editor) = {
         let state_guard = ctx.state.lock().await;
         let Some(panel) = state_guard.panels.get(panel_id) else {
@@ -89,41 +82,47 @@ async fn quick_edit(panel_id: &str, ctx: &mut IntentContext<'_>) {
         )
     };
 
-    let editors = editor.with_fallback();
-    let editor_candidates = editors.map(|candidate| candidate.program());
+    let editor_names = crate::terminal::search_names(editor);
     let operation = crate::journal::new_operation("QuickEditFile", Some(&source_id)).expect("QuickEditFile is a journal operation");
     crate::journal::record_quick_edit_intent(
         &operation,
         panel_id,
         Some(&file_path),
         Some(editor.program()),
-        &editor_candidates,
+        &editor_names,
     );
     let before = file_fingerprint(&file_path);
     let mut failures = Vec::new();
     let mut session_id = None;
-    for editor in editors {
+    for name in &editor_names {
+        let Some(program) = crate::terminal::locate_editor(name) else {
+            continue;
+        };
         match pty_manager.open_command(
             panel_id.to_string(),
             &cwd,
             80,
             24,
-            editor.program(),
+            &program,
             &[file_path.clone()],
             ctx.tx.clone(),
             ctx.state.clone(),
             pty_manager.clone(),
-            Some(QuickEditCompletion::new(operation.clone(), file_path.clone(), editor.program().to_string(), before.clone())),
+            Some(QuickEditCompletion::new(operation.clone(), file_path.clone(), name.to_string(), before.clone())),
         ) {
             Ok(id) => {
                 session_id = Some(id);
                 break;
             }
-            Err(error) => failures.push(format!("{}: {error}", editor.program())),
+            Err(error) => failures.push(format!("{name}: {error}")),
         }
     }
     let Some(session_id) = session_id else {
-        let message = format!("Could not start nano or vim. {}", failures.join("; "));
+        let message = if failures.is_empty() {
+            "Could not find nano, vim, micro, or edit on PATH (also checks Git for Windows, Scoop, Chocolatey, and WinGet).".to_string()
+        } else {
+            format!("Could not start a terminal editor. {}", failures.join("; "))
+        };
         let changed = fingerprint_changed(&before, &file_fingerprint(&file_path));
         crate::journal::record_quick_edit_result(&operation, Some(&file_path), None, None, "failed", Some(&message), changed, None, None);
         send_quick_edit_error(ctx, &message).await;

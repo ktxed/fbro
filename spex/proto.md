@@ -261,7 +261,7 @@ Slot patches use `domain: "slots"`. Patch payloads:
 | `panel.tab.switch` | `{ slotId, panelId }` | Activates `panelId` within `slotId`. |
 | `panel.tab.rename` | `{ panelId, title }` | Sets `tabTitle` override (FUTURE — protocol only). |
 | `panel.terminal.promote` | `{ panelId }` | Detaches the panel's embedded PTY and inserts it as a sibling terminal tab; source panel returns to listing. |
-| `QuickEditFile` | panel id scope | Opens the cursor file in the configured Nano/Vim embedded terminal editor (Linux/macOS only). The temporary terminal closes when the editor exits. |
+| `QuickEditFile` | panel id scope | Opens the cursor file in the configured Nano/Vim embedded terminal editor. On Windows, also probes Git for Windows `usr\\bin`, Scoop, Chocolatey, and WinGet for nano/vim/micro/edit. The temporary terminal closes when the editor exits. |
 
 ---
 

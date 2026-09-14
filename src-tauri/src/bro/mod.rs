@@ -6,6 +6,7 @@ mod registry;
 mod version;
 
 pub(crate) use model::LaunchRecipe;
+pub(crate) use probe::find_binary_on_path;
 pub use model::{
     BroInputItem, BroLaunchInputKind, BroOption, BroPre, BroProtocol, BroSource, ResolvedBro,
 };

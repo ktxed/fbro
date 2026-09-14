@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { GeneralSettings } from "../ws/types";
 import type { WsClient } from "../ws/client";
-import { isWindows } from "../utils/platform";
+
 import { stepNumberInputOnWheel } from "../utils/numberInputWheel";
 import { ModalLayer } from "./ModalStack";
 
@@ -214,13 +214,13 @@ export function SettingsGeneralTab({ general, client }: SettingsGeneralTabProps)
           />
           <span>Restore all panel tabs across sessions (otherwise only the active tab returns)</span>
         </label>
-        {!isWindows && <label className="settings-tab__option">
+        <label className="settings-tab__option">
           <span>Quick terminal editor</span>
           <select value={general.quickTerminalEditor} onChange={(e) => send("quickTerminalEditor", e.target.value)}>
             <option value="nano">Nano</option>
             <option value="vim">Vim</option>
           </select>
-        </label>}
+        </label>
         <div className="settings-tab__option" style={{ flexDirection: "column", alignItems: "flex-start", gap: 6 }}>
           <span>Fedup default ignore patterns</span>
           <div className="settings-tab__fedup-ignore-editor">

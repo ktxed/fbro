@@ -100,7 +100,7 @@ pub struct GeneralSettings {
     /// External differ executable. fbro passes the two local file paths as args.
     #[serde(default)]
     pub compare_external_command: String,
-    /// Terminal editor used by Quick Edit on Linux and macOS.
+    /// Terminal editor used by Quick Edit (nano/vim preference; Windows also probes Git, Scoop, Chocolatey, WinGet).
     #[serde(default)]
     pub quick_terminal_editor: QuickTerminalEditor,
 }

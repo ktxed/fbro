@@ -1,7 +1,7 @@
 import type { Dispatch } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
-import { isMac, isWindows } from "../utils/platform";
+import { isMac } from "../utils/platform";
 import type { AppAction, AppState } from "../store";
 import { markHistoryNavPending } from "../store";
 import { isGlobalSelectionSourceId, isSearchSourceId } from "../utils/sourceId";
@@ -639,7 +639,7 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
       if (isGlobalSelectionSourceId(focused.panel.sourceId)) return false;
       return openViewerIntent(client, focused.panel, "EditFile");
     case "file.quick_edit": {
-      if (isWindows || !focused || !sourceCapability("Edit") || !sourceCapability("OpenShell")) return false;
+      if (!focused || !sourceCapability("Edit") || !sourceCapability("OpenShell")) return false;
       const entry = currentEntry(focused.panel);
       if (!entry || entry.kind !== "file" || focused.panel.terminalSessionId !== undefined || focused.panel.shadowSource) return false;
       client.sendIntent("QuickEditFile", focused.panelId);

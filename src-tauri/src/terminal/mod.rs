@@ -21,6 +21,9 @@ use tokio::sync::mpsc;
 use crate::state::SharedState;
 use crate::ws::protocol::{now, ServerMessage};
 
+mod quick_editor;
+pub(crate) use quick_editor::{locate_editor, search_names};
+
 /// A single live PTY-backed shell session.
 pub struct PtySession {
     pub session_id: u32,
