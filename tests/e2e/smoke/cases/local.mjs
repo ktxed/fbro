@@ -200,6 +200,8 @@ export async function runLocalFlow(browser, observer) {
   });
   await browser.keys(["Escape"]);
 
+  await verifyFilterEscapeRestoresCompleteListing(browser, observer, aSrc);
+
   // Per-location sorting is opt-in. While disabled, navigation carries the
   // panel's current sort and another panel at the same path remains independent.
   if (observer.state.settings?.general?.rememberSortPerLocation !== false) {
@@ -240,6 +242,47 @@ export async function runLocalFlow(browser, observer) {
 
   await verifyWindowFocusRestoration(browser, observer);
   await verifyGridLeftAtFirstItemNavigatesUp(browser, observer, aSrc);
+}
+
+async function verifyFilterEscapeRestoresCompleteListing(browser, observer, aSrc) {
+  const fixtureName = "filter-escape-race";
+  const fixturePath = path.posix.join(aSrc, fixtureName);
+  const hostFixturePath = hostPath(fixturePath);
+  fs.mkdirSync(hostFixturePath, { recursive: true });
+  const expectedNames = Array.from({ length: 84 }, (_, index) =>
+    `entry-${String(index).padStart(3, "0")}.${index < 4 ? "txt" : "dat"}`
+  );
+  for (const name of expectedNames) fs.writeFileSync(path.join(hostFixturePath, name), name);
+
+  await goToPanelPath(browser, observer, "left", fixturePath);
+  await observer.waitForEntry("left", expectedNames.at(-1), "file");
+  await waitFor(async () => browser.execute((names) => {
+    const rendered = new Set([...document.querySelectorAll('[data-testid="panel-left"] [data-entry-name]')]
+      .map((row) => row.getAttribute("data-entry-name")));
+    return names.every((name) => rendered.has(name));
+  }, expectedNames), { timeout: 10_000, label: "complete filter race fixture" });
+
+  const panel = await browser.$('[data-testid="panel-left"]');
+  await panel.click();
+  await browser.keys(["f"]);
+  const input = await browser.$('[data-testid="panel-left"] .panel__filter-input');
+  await input.waitForDisplayed({ timeout: 10_000 });
+  await input.setValue("txt");
+  await waitFor(async () => browser.execute(() => {
+    const names = [...document.querySelectorAll('[data-testid="panel-left"] [data-entry-name]')]
+      .map((row) => row.getAttribute("data-entry-name"));
+    return names.length === 4 && names.every((name) => name?.endsWith(".txt"));
+  }), { timeout: 10_000, label: "filtered race fixture" });
+
+  await browser.keys(["Escape"]);
+  await waitFor(async () => browser.execute((names) => {
+    const rendered = new Set([...document.querySelectorAll('[data-testid="panel-left"] [data-entry-name]')]
+      .map((row) => row.getAttribute("data-entry-name")));
+    return names.every((name) => rendered.has(name));
+  }, expectedNames), { timeout: 10_000, label: "complete listing after clearing filter" });
+
+  await goToPanelPath(browser, observer, "left", aSrc);
+  fs.rmSync(hostFixturePath, { recursive: true });
 }
 
 async function verifyLocationSortReset(browser, observer) {

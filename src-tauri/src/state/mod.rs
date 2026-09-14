@@ -430,8 +430,9 @@ pub struct Panel {
     pub selection: Vec<usize>,
     pub entries: Vec<EntrySchema>,
     pub version: u64,
-    /// Monotonic navigation context. Background panel work captures this value
-    /// when it starts and must not mutate the panel after it changes.
+    /// Monotonic listing context. Navigation and replacement rescans advance it;
+    /// background panel work captures this value when it starts and must not
+    /// mutate the panel after it changes.
     pub panel_epoch: u64,
     pub calculating_size: HashSet<String>,
     /// When true, this panel is in windowed mode (Mode B) — FE receives only a

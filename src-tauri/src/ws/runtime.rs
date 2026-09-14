@@ -708,6 +708,14 @@ pub(crate) async fn rescan_panel(
             panel.window_start = 0;
             panel.window_count = 0;
             panel.version += 1;
+            // A rescan can be superseded while its streamed entry patches are
+            // already queued for delivery (filter typing followed by Escape is
+            // a common example). Versions alone cannot distinguish those
+            // patches: the old scan's next batch can have the same version as
+            // this reset. Give every replacement scan a fresh epoch so both
+            // the backend and frontend reject all queued patches from the
+            // superseded listing.
+            panel.panel_epoch += 1;
             let shadow_schema = panel.shadow_source.as_ref().map(|ss| ShadowSourceSchema {
                 parent_source_id: ss.parent_source_id.clone(),
                 parent_path: ss.parent_path.clone(),
@@ -809,7 +817,11 @@ pub(crate) async fn rescan_panel(
         }).await;
     }
 
-    let handle = spawn_scan(
+    // Commit replacement rescans in one versioned patch. Streaming batches
+    // can collide with an immediately following panel intent (notably
+    // SetFilterMode(false) after Escape), causing the first 50-entry batch to
+    // be rejected as an equal-version patch.
+    let handle = spawn_scan_atomic(
         panel_id.to_string(),
         source_id,
         panel_epoch,
@@ -820,13 +832,11 @@ pub(crate) async fn rescan_panel(
         tx.clone(),
         driver,
         cursor_hint,
-        None,
         selection_names,
         Arc::clone(state),
         Arc::clone(dir_size_queue),
         show_hidden,
         watcher_cmd_tx.clone(),
-        true,
     );
     scan_handles.insert(panel_id.to_string(), handle);
 }

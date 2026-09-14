@@ -476,7 +476,7 @@ pub async fn run_scan(
                     );
                     return;
                 }
-                let live = atomic.then(|| {
+                let live = (atomic && !panel.entries.is_empty()).then(|| {
                     reconcile_live_listing(
                         &panel.entries,
                         panel.cursor,
@@ -587,21 +587,32 @@ pub async fn run_scan(
                     );
                     return;
                 }
-                let live = reconcile_live_listing(
-                    &panel.entries,
-                    panel.cursor,
-                    &panel.selection,
-                    &schema_entries,
+                // Quiet rescans reconcile against the live listing. A
+                // replacement rescan has already cleared it, so use the
+                // cursor/selection hints captured before that reset instead.
+                let live = (!panel.entries.is_empty()).then(|| {
+                    reconcile_live_listing(
+                        &panel.entries,
+                        panel.cursor,
+                        &panel.selection,
+                        &schema_entries,
+                    )
+                });
+                let cursor = live.as_ref().map_or(initial_cursor, |state| state.cursor);
+                let selection = live.as_ref().map_or_else(
+                    || initial_selection.clone(),
+                    |state| state.selection.clone(),
                 );
+                let anchor_delta = live.as_ref().and_then(|state| state.anchor_delta);
                 let version = panel.version + 1;
                 panel.entries = schema_entries.clone();
-                panel.cursor = live.cursor;
-                panel.selection = live.selection.clone();
+                panel.cursor = cursor;
+                panel.selection = selection.clone();
                 panel.windowed = false;
                 panel.status = crate::state::PanelStatus::Ready;
                 panel.version = version;
                 panel.git = git_status.clone();
-                (version, live.cursor, live.selection, live.anchor_delta)
+                (version, cursor, selection, anchor_delta)
             } else {
                 return;
             }
