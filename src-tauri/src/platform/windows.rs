@@ -47,6 +47,7 @@ extern "system" {
     fn GlobalUnlock(h_mem: *mut c_void) -> i32;
 }
 
+const CF_UNICODETEXT: u32 = 13;
 const CF_HDROP: u32 = 15;
 const DROP_EFFECT_COPY: u32 = 1;
 const DROP_EFFECT_MOVE: u32 = 2;
@@ -244,6 +245,10 @@ impl Platform for WindowsPlatform {
         write_windows_external_clipboard(payload)
     }
 
+    fn write_text_clipboard(&self, text: &str) -> Result<(), String> {
+        write_windows_text_clipboard(text)
+    }
+
     fn get_thumbnail(&self, path: &str, size: u32) -> Option<(Vec<u8>, &'static str)> {
         windows_get_thumbnail(path, size).map(|bytes| (bytes, "image/png"))
     }
@@ -382,6 +387,54 @@ fn write_windows_external_clipboard(payload: &ExternalClipboardPayload) -> Resul
     }
 
     result
+}
+
+fn write_windows_text_clipboard(text: &str) -> Result<(), String> {
+    let wide = encode_clipboard_utf16(text);
+    let bytes = unsafe {
+        slice::from_raw_parts(
+            wide.as_ptr().cast::<u8>(),
+            wide.len() * std::mem::size_of::<u16>(),
+        )
+    };
+
+    unsafe {
+        if OpenClipboard(std::ptr::null_mut()) == 0 {
+            return Err("Failed to open the system clipboard.".to_string());
+        }
+    }
+
+    let result = (|| {
+        if unsafe { EmptyClipboard() } == 0 {
+            return Err("Failed to clear the system clipboard.".to_string());
+        }
+
+        let handle = alloc_global_bytes(bytes)?;
+        if unsafe { SetClipboardData(CF_UNICODETEXT, handle) }.is_null() {
+            unsafe {
+                GlobalFree(handle);
+            }
+            return Err("Failed to publish text to the system clipboard.".to_string());
+        }
+
+        Ok(())
+    })();
+
+    unsafe {
+        CloseClipboard();
+    }
+
+    result
+}
+
+/// CF_UNICODETEXT is UTF-16LE with a trailing NUL. Lone `\n` becomes `\r\n`
+/// so Notepad, cmd, and PowerShell paste the same line breaks Explorer would.
+fn encode_clipboard_utf16(text: &str) -> Vec<u16> {
+    text.replace("\r\n", "\n")
+        .replace('\n', "\r\n")
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect()
 }
 
 fn build_windows_hdrop(payload: &ExternalClipboardPayload) -> Result<*mut c_void, String> {
@@ -1180,5 +1233,54 @@ pub fn invoke_handler(ext: &str, exe_path: &str, file_path: &str) -> Result<(), 
         } else {
             Ok(())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::encode_clipboard_utf16;
+
+    fn decode_clipboard_utf16(wide: &[u16]) -> String {
+        assert_eq!(
+            wide.last().copied(),
+            Some(0),
+            "clipboard payload must be NUL-terminated"
+        );
+        String::from_utf16(&wide[..wide.len() - 1]).expect("valid UTF-16")
+    }
+
+    #[test]
+    fn encode_clipboard_utf16_terminates_empty_text() {
+        assert_eq!(encode_clipboard_utf16(""), vec![0]);
+    }
+
+    #[test]
+    fn encode_clipboard_utf16_keeps_plain_text() {
+        assert_eq!(
+            decode_clipboard_utf16(&encode_clipboard_utf16("hello")),
+            "hello"
+        );
+    }
+
+    #[test]
+    fn encode_clipboard_utf16_converts_lone_newlines() {
+        assert_eq!(
+            decode_clipboard_utf16(&encode_clipboard_utf16("C:/a\nC:/b")),
+            "C:/a\r\nC:/b"
+        );
+    }
+
+    #[test]
+    fn encode_clipboard_utf16_does_not_double_existing_crlf() {
+        assert_eq!(
+            decode_clipboard_utf16(&encode_clipboard_utf16("C:/a\r\nC:/b")),
+            "C:/a\r\nC:/b"
+        );
+    }
+
+    #[test]
+    fn encode_clipboard_utf16_preserves_non_ascii_paths() {
+        let path = "C:/Users/ktx/файл.txt";
+        assert_eq!(decode_clipboard_utf16(&encode_clipboard_utf16(path)), path);
     }
 }

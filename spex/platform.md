@@ -107,7 +107,8 @@ for "open with", `NSPasteboard` for the clipboard, `open -R` for reveal.
 Home from `USERPROFILE`. `SHGetKnownFolderPath` for canonical folders,
 `IShellItemImageFactory` for thumbnails, `AssocQueryString` for default apps
 and the "Open with" list, `ShellExecuteEx` for launches, `OleSetClipboard` for
-file clipboard payloads in `CF_HDROP` format.
+file clipboard payloads in `CF_HDROP` format, `SetClipboardData(CF_UNICODETEXT)`
+for `write_text_clipboard` (Copy Paths bro).
 
 ---
 
