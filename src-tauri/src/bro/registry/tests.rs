@@ -321,12 +321,19 @@ fn omits_optional_seven_zip_password_when_empty() {
 }
 
 #[test]
-fn returns_empty_registry_result_on_unsupported_platforms() {
-    #[cfg(target_os = "windows")]
-    assert!(list_bros(&sample_inputs(), None, None).is_empty());
+fn list_bros_includes_copy_paths_on_every_platform() {
+    let bros = list_bros(&sample_inputs(), None, None);
+    assert!(bros
+        .iter()
+        .any(|bro| bro.option.id == "builtin:copy-paths"));
+}
 
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
-    {
-        let _ = list_bros(&sample_inputs(), None, None);
+#[cfg(windows)]
+#[test]
+fn list_bros_includes_tar_when_tar_exe_is_on_path() {
+    if crate::bro::probe::find_binary_on_path(&["tar"]).is_none() {
+        return;
     }
+    let bros = list_bros(&sample_inputs(), None, None);
+    assert!(bros.iter().any(|bro| bro.option.id == "native:tar"));
 }

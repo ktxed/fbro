@@ -150,7 +150,7 @@ fn default_extract_dir(ctx: &BroDiscoveryContext<'_>, kind: ArchiveKind) -> Opti
         .suggested_output_dir
         .map(PathBuf::from)
         .or_else(|| Path::new(&input.path).parent().map(Path::to_path_buf))?;
-    Some(output_dir.join(stem).to_string_lossy().to_string())
+    Some(output_dir.join(stem).to_string_lossy().replace('\\', "/"))
 }
 
 /// Strip the archive extension(s) from `name` to produce a destination folder name.

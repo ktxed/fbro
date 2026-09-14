@@ -9,7 +9,6 @@ pub mod linux_media;
 #[cfg(target_os = "macos")]
 pub mod macos_media;
 pub mod seven_zip;
-#[cfg(any(target_os = "linux", target_os = "macos"))]
 pub mod tar;
 #[cfg(target_os = "windows")]
 pub mod windows_media;
@@ -47,7 +46,6 @@ pub fn builtin_providers() -> Vec<Box<dyn BroProvider>> {
     #[cfg(target_os = "windows")]
     providers.push(Box::new(windows_media::WindowsMediaProvider));
     providers.push(Box::new(seven_zip::SevenZipProvider));
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
     providers.push(Box::new(tar::TarProvider));
     providers.push(Box::new(zip::ZipProvider));
     providers.push(Box::new(extract::ExtractProvider));

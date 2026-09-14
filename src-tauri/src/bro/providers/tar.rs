@@ -53,7 +53,11 @@ fn default_output_path(ctx: &BroDiscoveryContext<'_>) -> Option<String> {
         .suggested_output_dir
         .map(PathBuf::from)
         .or_else(|| first_input_parent(ctx.inputs))?;
-    Some(output_dir.join(file_name).to_string_lossy().to_string())
+    Some(join_as_vfs_path(&output_dir, &file_name))
+}
+
+fn join_as_vfs_path(dir: &Path, name: &str) -> String {
+    dir.join(name).to_string_lossy().replace('\\', "/")
 }
 
 fn archive_file_name(ctx: &BroDiscoveryContext<'_>) -> String {

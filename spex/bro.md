@@ -385,7 +385,9 @@ That means:
 
 ### 5.2 v0 built-in discovery
 
-v0 ships built-in bro discovery for Linux and macOS, excluding Windows.
+v0 ships built-in bro discovery on Linux, macOS, and Windows. A platform
+with no matching binaries may still return a short list (Copy Paths and
+other builtins).
 
 Current built-in bros by platform:
 
@@ -407,13 +409,20 @@ macOS:
 * native `7z`
 * native `tar`
 
+Windows:
+
+* native `mpv` / `vlc` from `PATH` and common install directories
+* built-in `Fedup Bro`
+* native `7z` (`7z.exe` on `PATH` or `Program Files\7-Zip`)
+* native `tar` (`tar.exe` from Windows 10+)
+
 Discovery rules:
 
 * native bros are detected from executables in `PATH`
+* on Windows, a bare name such as `tar` also matches `tar.exe` / `.cmd` / `.bat`
 * Flatpak bros are detected from installed app IDs
 * native and Flatpak installs are listed separately if both exist
 * version is best-effort and may fall back to `unknown`
-* `tar` and `7z` are only exposed on non-Windows platforms
 * `7z` is an external native dependency, not a bundled tool
 * `7z` probes native binaries in `PATH` with fallback order `7z`, `7zz`, `7za`, `7zr`
 * `7z` also probes common Homebrew install paths on macOS when GUI PATH resolution is thin
