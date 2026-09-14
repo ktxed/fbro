@@ -229,6 +229,11 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
     dispatch({ type: "SHOW_TRANSIENT_HINT", message: "Copied commit hash" });
   }, [dispatch]);
 
+  const copyLogRef = useCallback((name: string) => {
+    void navigator.clipboard.writeText(name);
+    dispatch({ type: "SHOW_TRANSIENT_HINT", message: `Copied ${name}` });
+  }, [dispatch]);
+
   const handleClose = useCallback(() => {
     dispatch({ type: "CLEAR_GIT_LOG" });
     onClose();
@@ -787,7 +792,7 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
                       <span className={`git-modal__log-subject-cell${commit.refs && commit.refs.length > 0 ? " git-modal__log-subject-cell--has-refs" : ""}`}>
                         <span className="git-modal__log-subject" title={commit.subject}>{commit.subject}</span>
                         {commit.refs && commit.refs.length > 0 && (
-                          <LogRefsStrip refs={commit.refs} />
+                          <LogRefsStrip refs={commit.refs} onCopy={copyLogRef} />
                         )}
                       </span>
                       <span className="git-modal__log-author" title={commit.authorEmail || commit.authorName}>{commit.authorName}</span>
@@ -958,7 +963,7 @@ function formatLogDate(iso: string): string {
 }
 
 /** Horizontally pannable ref chips. overflow:hidden — no native scrollbar. */
-function LogRefsStrip({ refs }: { refs: GitLogRef[] }) {
+function LogRefsStrip({ refs, onCopy }: { refs: GitLogRef[]; onCopy: (name: string) => void }) {
   const wrapRef = useRef<HTMLSpanElement>(null);
   const scrollerRef = useRef<HTMLSpanElement>(null);
   // Prefer trailing chips (right-aligned look). Stay pinned to the end until the user pans.
@@ -1043,7 +1048,17 @@ function LogRefsStrip({ refs }: { refs: GitLogRef[] }) {
             key={`${ref.kind}:${ref.name}`}
             className={`git-modal__log-ref git-modal__log-ref--${ref.kind}`}
           >
-            {ref.name}
+            <span className="git-modal__log-ref-name">{ref.name}</span>
+            <button
+              type="button"
+              className="git-modal__log-ref-copy"
+              data-testid="git-log-copy-ref"
+              aria-label={`Copy ${ref.kind} ${ref.name}`}
+              title={`Copy ${ref.name}`}
+              onClick={() => onCopy(ref.name)}
+            >
+              <IconCopy size={12} aria-hidden />
+            </button>
           </span>
         ))}
       </span>

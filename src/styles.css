@@ -1668,9 +1668,9 @@ body {
 .git-modal__log-ref {
   flex: 0 0 auto;
   max-width: 12rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  padding: 0 5px;
+  display: inline-flex;
+  align-items: center;
+  padding-left: 5px;
   border: 1px solid var(--border);
   border-radius: 3px;
   background: var(--bg-elev);
@@ -1678,6 +1678,9 @@ body {
   font-size: calc(var(--font-size) - 2px);
   line-height: 1.45;
 }
+.git-modal__log-ref-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.git-modal__log-ref-copy { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; width: 20px; align-self: stretch; padding: 0; border: 0; border-left: 1px solid color-mix(in srgb, currentColor 28%, transparent); background: transparent; color: inherit; cursor: pointer; opacity: .62; }
+.git-modal__log-ref-copy:hover, .git-modal__log-ref-copy:focus-visible { background: color-mix(in srgb, currentColor 12%, transparent); opacity: 1; outline: none; }
 .git-modal__log-ref--head {
   border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
   color: var(--text-path);
