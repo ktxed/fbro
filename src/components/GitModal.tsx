@@ -44,6 +44,9 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
   const canPull = git.clean && git.behindCount !== undefined && git.behindCount > 0;
   const canPush = !!git.upstream && git.aheadCount !== undefined && git.aheadCount > 0;
   const canSetUpstream = !git.upstream && git.clean && !git.detached;
+  const showForcePushOptions = activity?.action === "GitPush"
+    && activity.status === "failed"
+    && /\brejected\b/i.test(activity.message);
   const pullDisabledMessage = !git.clean ? "Requires no staged changes" : !git.upstream ? "No upstream configured" : git.behindCount === 0 ? "Already up to date" : "Remote status unavailable — fetch first";
   const pushDisabledMessage = !git.upstream ? "No upstream configured — set an upstream first" : git.aheadCount === 0 ? "No outgoing commits" : "Remote status unavailable — fetch first";
   const actionInFlight = activity?.status === "running";
@@ -894,6 +897,27 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
             >
               Set upstream <kbd>U</kbd>
             </button>
+          )}
+          {showForcePushOptions && (
+            <div className="git-modal__force-push" aria-label="Force push options">
+              <button
+                data-testid="git-push-force-with-lease"
+                disabled={actionInFlight}
+                title="Retry while refusing to overwrite remote changes you have not fetched"
+                onClick={() => runAction("GitPush", "Force pushing with lease…", { forceMode: "lease" })}
+              >
+                Force with lease
+              </button>
+              <button
+                data-testid="git-push-force"
+                className="git-modal__force-push-danger"
+                disabled={actionInFlight}
+                title="Retry and overwrite the remote branch"
+                onClick={() => runAction("GitPush", "Force pushing…", { forceMode: "force" })}
+              >
+                Force push
+              </button>
+            </div>
           )}
           <button onClick={handleClose}>Close</button>
           {tab === "changes" && (

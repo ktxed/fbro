@@ -1733,6 +1733,8 @@ body {
 .git-modal .modal__actions { padding-inline: 16px; }
 .git-modal__activity { display: inline-flex; align-items: center; gap: 6px; margin-right: auto; color: var(--text-path); font-size: calc(var(--font-size) - 2px); }
 .git-modal__activity svg { animation: git-actions-spin 900ms linear infinite; }
+.git-modal__force-push { display: flex; align-items: center; gap: 4px; }
+.git-modal .modal__actions .git-modal__force-push-danger { border-color: color-mix(in srgb, var(--text-warning) 55%, var(--border)); color: var(--text-warning); }
 .git-modal__commit label { display: flex; justify-content: space-between; margin-bottom: 5px; color: var(--text-dim); font-size: calc(var(--font-size) - 1px); }
 .git-modal__commit label span { color: var(--text-muted); }
 .git-modal textarea { width: 100%; min-height: 48px; box-sizing: border-box; padding: 8px 10px; border: 1px solid var(--border); border-radius: 5px; background: var(--bg-input); color: var(--text); font-family: var(--font); font-size: var(--font-size); line-height: 1.4; resize: vertical; }
