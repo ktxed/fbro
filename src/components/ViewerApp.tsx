@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { IconArrowsMaximize } from "@tabler/icons-react";
 import { resolveWsUrl, WsClient } from "../ws/client";
 import type { BEMessage, FileChunkMessage, MarkdownPreviewMessage, ViewerFileChangedMessage, StateSnapshotMessage, StatePatchMessage } from "../ws/types";
 import { applyZoom, nextZoomSize, DEFAULT_FONT_SIZE } from "../utils/zoom";
@@ -82,7 +83,11 @@ function renderText(bytes: Uint8Array): string {
 function sanitizedMermaidSvg(svg: string): SVGElement | null {
   const doc = new DOMParser().parseFromString(svg, "image/svg+xml");
   if (doc.querySelector("parsererror")) return null;
-  doc.querySelectorAll("script,foreignObject,iframe,object,embed,image,a").forEach(node => node.remove());
+  // Mermaid 11 renders flowchart node captions as sanitized HTML inside
+  // foreignObject. Keep those containers or every node is left blank; their
+  // descendants still pass through the attribute and active-content filters
+  // below before the SVG is inserted into the viewer.
+  doc.querySelectorAll("script,iframe,object,embed,image,a").forEach(node => node.remove());
   doc.querySelectorAll<HTMLElement>("*").forEach(element => {
     for (const attr of Array.from(element.attributes)) {
       const name = attr.name.toLowerCase();
@@ -373,6 +378,17 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
     setMode(newMode);
     if (!buffer) {
       requestChunk(0, SMALL_LIMIT);
+    }
+  }
+
+  function toggleMaximize() {
+    try {
+      void getCurrentWindow().toggleMaximize().catch((cause) => {
+        console.error("Could not toggle viewer maximize:", cause);
+      });
+    } catch (cause) {
+      // Browser-based tests do not expose a Tauri window.
+      console.error("Could not toggle viewer maximize:", cause);
     }
   }
 
@@ -789,6 +805,13 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
         return;
       }
 
+      // When typing in the find input, only intercept Escape and Enter
+      if (inFind) {
+        if (e.key === "Escape") { findHistory.addToHistory(findQuery); setFindOpen(false); }
+        else if (e.key === "Enter") { e.preventDefault(); findHistory.addToHistory(findQuery); e.shiftKey ? findPrev() : findNext(); }
+        return;
+      }
+
       // F — open find (or previous match with Shift+F)
       if ((e.key === "f" || e.key === "F") && !ctrl && !e.altKey) {
         e.preventDefault();
@@ -796,13 +819,6 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
         setFindOpen(true);
         if (e.shiftKey) findPrev();
         setTimeout(() => (findHistory.inputRef as React.RefObject<HTMLInputElement>).current?.focus(), 0);
-        return;
-      }
-
-      // When typing in the find input, only intercept Escape and Enter
-      if (inFind) {
-        if (e.key === "Escape") { findHistory.addToHistory(findQuery); setFindOpen(false); }
-        else if (e.key === "Enter") { e.preventDefault(); findHistory.addToHistory(findQuery); e.shiftKey ? findPrev() : findNext(); }
         return;
       }
 
@@ -852,9 +868,20 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
         return;
       }
 
-      if (e.key === "1") { switchMode("text"); return; }
+      if (e.key === "1") { setMarkdownMode(false); switchMode("text"); return; }
       if (e.key === "2") { switchMode("image"); return; }
       if (e.key === "3") { switchMode("hex"); return; }
+      if (e.key === "4" && isMdExt(filenameRef.current)) {
+        setMarkdownMode(true);
+        switchMode("text");
+        return;
+      }
+
+      if (!ctrl && !e.altKey && e.key.toLowerCase() === "m") {
+        e.preventDefault();
+        toggleMaximize();
+        return;
+      }
 
       // Space toggles play/pause for the directly-rendered <video>. The
       // window keydown handler runs before the video gets focus, so the
@@ -880,9 +907,14 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
         return;
       }
 
-      if (e.key === "s" && effectiveMode === "text") { setDosMode(prev => !prev); return; }
-      if (e.key === "w" && effectiveMode === "text") { setWordWrap(prev => !prev); return; }
-      if (e.key === "m" && effectiveMode === "text") { setMarkdownMode(prev => !prev); return; }
+      if (!ctrl && !e.altKey && e.key.toLowerCase() === "s" && effectiveMode === "text") {
+        setDosMode(prev => !prev);
+        return;
+      }
+      if (!ctrl && !e.altKey && e.key.toLowerCase() === "w" && effectiveMode === "text") {
+        setWordWrap(prev => !prev);
+        return;
+      }
 
       const goStart = e.key === "Home" || (e.key === "ArrowUp" && e.metaKey);
       const goEnd   = e.key === "End"  || (e.key === "ArrowDown" && e.metaKey);
@@ -1238,6 +1270,14 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
             >
               3 Hex
             </button>
+            <button
+              className="viewer__mode-btn"
+              onClick={toggleMaximize}
+              title="Toggle maximize (M)"
+              aria-label="Toggle maximize"
+            >
+              <IconArrowsMaximize size={14} aria-hidden /> M Max
+            </button>
           </div>
         </div>
         <div className="viewer__body" ref={bodyRef}>
@@ -1255,7 +1295,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
           )}
         </div>
         <div className="viewer__status">
-          <span className="viewer__status-nav">j/k prev/next file · Esc close</span>
+          <span className="viewer__status-nav">j/k prev/next file · M maximize · Esc close</span>
         </div>
       </div>
     );
@@ -1271,8 +1311,8 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
         <span className="viewer__filename">{curFilename}</span>
         <div className="viewer__mode-btns">
           <button
-            className={`viewer__mode-btn${effectiveMode === "text" ? " viewer__mode-btn--active" : ""}`}
-            onClick={() => switchMode("text")}
+            className={`viewer__mode-btn${effectiveMode === "text" && !markdownMode ? " viewer__mode-btn--active" : ""}`}
+            onClick={() => { setMarkdownMode(false); switchMode("text"); }}
             title="Text mode (1)"
           >
             1 Text
@@ -1293,13 +1333,15 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
           </button>
           {effectiveMode === "text" && (
             <>
-              <button
-                className={`viewer__mode-btn${markdownMode ? " viewer__mode-btn--active" : ""}`}
-                onClick={() => setMarkdownMode(prev => !prev)}
-                title="Markdown preview (m)"
-              >
-                M MD
-              </button>
+              {isMdExt(curFilename) && (
+                <button
+                  className={`viewer__mode-btn${markdownMode ? " viewer__mode-btn--active" : ""}`}
+                  onClick={() => setMarkdownMode(true)}
+                  title="Markdown preview (4)"
+                >
+                  4 MD
+                </button>
+              )}
               {!markdownMode && (
                 <>
                   <button
@@ -1320,6 +1362,14 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
               )}
             </>
           )}
+          <button
+            className="viewer__mode-btn"
+            onClick={toggleMaximize}
+            title="Toggle maximize (M)"
+            aria-label="Toggle maximize"
+          >
+            <IconArrowsMaximize size={14} aria-hidden /> M Max
+          </button>
         </div>
       </div>
 
@@ -1452,9 +1502,10 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
           {(() => {
             const canEdit = curIsLocal && !isArchiveSourceId(curSourceId) && !isRemoteSourceId(curSourceId);
             const editHint = canEdit ? " · e/F4 edit" : "";
-            if (isImageMode) return `z zoom · j/k prev/next file · 1 text · 2 image · 3 hex${editHint}`;
-            if (effectiveMode === "text") return `↑↓ PgDn/PgUp scroll · j/k prev/next · 1 text · 2 image · 3 hex · m md · s dos · w wrap · f find${editHint}`;
-            return `↑↓ PgDn/PgUp scroll · j/k prev/next file · 1 text · 2 image · 3 hex${editHint}`;
+            const markdownHint = isMdExt(curFilename) ? " · 4 md" : "";
+            if (isImageMode) return `z zoom · j/k prev/next file · 1 text · 2 image · 3 hex${markdownHint} · M maximize${editHint}`;
+            if (effectiveMode === "text") return `↑↓ PgDn/PgUp scroll · j/k prev/next · 1 text · 2 image · 3 hex${markdownHint} · M maximize · s dos · w wrap · f find${editHint}`;
+            return `↑↓ PgDn/PgUp scroll · j/k prev/next file · 1 text · 2 image · 3 hex${markdownHint} · M maximize${editHint}`;
           })()}
         </span>
       </div>

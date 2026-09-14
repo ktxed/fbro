@@ -611,7 +611,7 @@ impl AppState {
     /// Non-local panels keep their existing per-panel behavior.
     pub fn apply_location_settings(&mut self, panel_id: &str, is_local: bool) -> Option<SortSpec> {
         let panel = self.panels.get(panel_id)?;
-        if !is_local {
+        if !is_local || !self.settings.general.remember_sort_per_location {
             return Some(panel.sort.clone());
         }
 
@@ -642,11 +642,41 @@ impl AppState {
         thumb_cache: Arc<ThumbCache>,
     ) -> Self {
         let home = platform.home_dir();
-        let loaded_settings = settings::load();
-        let location_settings = location_settings::load().unwrap_or_else(|error| {
+        let mut loaded_settings = settings::load();
+        let mut location_settings = location_settings::load().unwrap_or_else(|error| {
             eprintln!("[fbro] Failed to load location settings: {error}");
             HashMap::new()
         });
+        if !loaded_settings.general.remember_sort_per_location && !location_settings.is_empty() {
+            let now_ms = crate::ws::protocol::now();
+            let disabled_at_ms = *loaded_settings
+                .location_sort_disabled_at_ms
+                .get_or_insert(now_ms);
+            if location_settings::retention_expired(disabled_at_ms, now_ms) {
+                match location_settings::clear_sorts() {
+                    Ok(removed_count) => {
+                        location_settings.clear();
+                        loaded_settings.location_sort_disabled_at_ms = None;
+                        crate::journal::record_location_sort_expiry(
+                            "completed",
+                            removed_count,
+                            None,
+                        );
+                    }
+                    Err(error) => {
+                        eprintln!("[fbro] Failed to expire location settings: {error}");
+                        crate::journal::record_location_sort_expiry(
+                            "failed",
+                            0,
+                            Some(&error),
+                        );
+                    }
+                }
+            }
+            if let Err(error) = settings::save(&loaded_settings) {
+                eprintln!("[fbro] Failed to save location-settings retention: {error}");
+            }
+        }
         let show_hidden_default = loaded_settings.general.show_hidden_default;
 
         // Validate a saved path; fall back to home if it is no longer a directory.
@@ -695,8 +725,15 @@ impl AppState {
 
         let left_path = resolve("left");
         let right_path = resolve("right");
-        let left_sort = location_settings::sort_for(&location_settings, &left_path);
-        let right_sort = location_settings::sort_for(&location_settings, &right_path);
+        let sort_for = |path: &str| {
+            if loaded_settings.general.remember_sort_per_location {
+                location_settings::sort_for(&location_settings, path)
+            } else {
+                location_settings::default_sort()
+            }
+        };
+        let left_sort = sort_for(&left_path);
+        let right_sort = sort_for(&right_path);
 
         let view_for = |id: &str| -> PanelViewMode {
             if loaded_settings.general.save_panel_view_mode {

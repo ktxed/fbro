@@ -12,6 +12,7 @@ pub(crate) async fn handle(name: &str, args: &Value, ctx: &mut IntentContext<'_>
         "SetGeneralOption" => set_general_option(args, ctx).await,
         "SetModalSizePreference" => set_modal_size_preference(args, ctx).await,
         "ClearThumbnailCache" => clear_thumbnail_cache(ctx).await,
+        "ResetLocationSortSettings" => reset_location_sort_settings(ctx).await,
         _ => {}
     }
 }
@@ -97,6 +98,19 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
     let Some(value) = args.get("value") else {
         return;
     };
+
+    if key == "rememberSortPerLocation" {
+        let Some(enable) = value.as_bool() else {
+            bad_setting(ctx.tx, "rememberSortPerLocation must be a boolean").await;
+            return;
+        };
+        if enable {
+            if let Err(error) = expire_location_sorts_if_needed(ctx).await {
+                bad_setting(ctx.tx, &error).await;
+                return;
+            }
+        }
+    }
 
     // Track whether show_hidden changed so we can propagate to panels.
     let mut show_hidden_changed: Option<bool> = None;
@@ -256,6 +270,17 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
                     // option doesn't leave stale entries that would re-apply
                     // if the user re-enables it later.
                     state_guard.settings.panel_view_modes.clear();
+                }
+            }
+            "rememberSortPerLocation" => {
+                let v = value.as_bool().expect("validated above");
+                let was_enabled = state_guard.settings.general.remember_sort_per_location;
+                state_guard.settings.general.remember_sort_per_location = v;
+                if was_enabled && !v {
+                    state_guard.settings.location_sort_disabled_at_ms =
+                        (!state_guard.location_settings.is_empty()).then_some(now());
+                } else if v {
+                    state_guard.settings.location_sort_disabled_at_ms = None;
                 }
             }
             "sevenzipExtractor" => {
@@ -466,9 +491,12 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
         }
     }
 
-    let general = {
+    let (general, location_settings_count) = {
         let state_guard = ctx.state.lock().await;
-        state_guard.settings.general.clone()
+        (
+            state_guard.settings.general.clone(),
+            state_guard.location_settings.len(),
+        )
     };
 
     let sevenzip_resolved = crate::jobs::extract_archive::resolve_sevenzip_binary(
@@ -492,6 +520,8 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
                 "ludicrousMode": general.ludicrous_mode,
                 "maxImageSizeMb": general.max_image_size_mb,
                 "savePanelViewMode": general.save_panel_view_mode,
+                "rememberSortPerLocation": general.remember_sort_per_location,
+                "locationSettingsCount": location_settings_count,
                 "enableVideoThumbnails": general.enable_video_thumbnails,
                 "thumbnailMaxImageSizeMb": general.thumbnail_max_image_size_mb,
                 "thumbnailVideoFrameSkip": general.thumbnail_video_frame_skip,
@@ -513,6 +543,120 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
         let _ = sender.send(patch.clone()).await;
     }
     for sender in &viewer_senders {
+        let _ = sender.send(patch.clone()).await;
+    }
+    let _ = ctx.tx.send(patch).await;
+}
+
+async fn expire_location_sorts_if_needed(ctx: &mut IntentContext<'_>) -> Result<(), String> {
+    let (disabled_at_ms, cached_count) = {
+        let state_guard = ctx.state.lock().await;
+        (
+            state_guard.settings.location_sort_disabled_at_ms,
+            state_guard.location_settings.len(),
+        )
+    };
+    let Some(disabled_at_ms) = disabled_at_ms else {
+        return Ok(());
+    };
+    if !crate::state::location_settings::retention_expired(disabled_at_ms, now()) {
+        return Ok(());
+    }
+
+    let result = match tokio::task::spawn_blocking(crate::state::location_settings::clear_sorts).await
+    {
+        Ok(result) => result,
+        Err(error) => {
+            let error = error.to_string();
+            crate::journal::record_location_sort_expiry("failed", 0, Some(&error));
+            return Err(format!(
+                "Could not expire {cached_count} remembered location settings: {error}"
+            ));
+        }
+    };
+    match result {
+        Ok(removed_count) => {
+            let mut state_guard = ctx.state.lock().await;
+            state_guard.location_settings.clear();
+            state_guard.settings.location_sort_disabled_at_ms = None;
+            if let Err(error) = crate::state::settings::save(&state_guard.settings) {
+                eprintln!("[fbro] Failed to save expired location settings state: {error}");
+            }
+            crate::journal::record_location_sort_expiry("completed", removed_count, None);
+            Ok(())
+        }
+        Err(error) => {
+            crate::journal::record_location_sort_expiry("failed", 0, Some(&error));
+            Err(format!(
+                "Could not expire {cached_count} remembered location settings: {error}"
+            ))
+        }
+    }
+}
+
+async fn reset_location_sort_settings(ctx: &mut IntentContext<'_>) {
+    let cached_count = {
+        let state_guard = ctx.state.lock().await;
+        state_guard.location_settings.len()
+    };
+    let operation = crate::journal::record_location_sort_reset_intent(cached_count);
+    let result = tokio::task::spawn_blocking(crate::state::location_settings::clear_sorts).await;
+    let removed_count = match result {
+        Ok(Ok(removed_count)) => removed_count,
+        Ok(Err(error)) => {
+            crate::journal::record_location_sort_reset_result(
+                &operation,
+                "failed",
+                0,
+                Some(&error),
+            );
+            bad_setting(
+                ctx.tx,
+                &format!("Could not reset remembered location settings: {error}"),
+            )
+            .await;
+            return;
+        }
+        Err(error) => {
+            let error = error.to_string();
+            crate::journal::record_location_sort_reset_result(
+                &operation,
+                "failed",
+                0,
+                Some(&error),
+            );
+            bad_setting(
+                ctx.tx,
+                &format!("Could not reset remembered location settings: {error}"),
+            )
+            .await;
+            return;
+        }
+    };
+
+    let gui_senders = {
+        let mut state_guard = ctx.state.lock().await;
+        state_guard.location_settings.clear();
+        state_guard.settings.location_sort_disabled_at_ms = None;
+        if let Err(error) = crate::state::settings::save(&state_guard.settings) {
+            eprintln!("[fbro] Failed to save reset location settings state: {error}");
+        }
+        state_guard.gui_senders.clone()
+    };
+    crate::journal::record_location_sort_reset_result(
+        &operation,
+        "completed",
+        removed_count,
+        None,
+    );
+    let patch = ServerMessage::StatePatch {
+        timestamp: now(),
+        domain: "settings".to_string(),
+        entity_id: None,
+        version: 0,
+        patch: serde_json::json!({ "general": { "locationSettingsCount": 0 } }),
+    };
+    for sender in &gui_senders {
         let _ = sender.send(patch.clone()).await;
     }
     let _ = ctx.tx.send(patch).await;

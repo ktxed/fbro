@@ -141,6 +141,11 @@ pub(crate) fn build_state_snapshot(
                     ludicrous_mode: state.settings.general.ludicrous_mode,
                     max_image_size_mb: state.settings.general.max_image_size_mb,
                     save_panel_view_mode: state.settings.general.save_panel_view_mode,
+                    remember_sort_per_location: state
+                        .settings
+                        .general
+                        .remember_sort_per_location,
+                    location_settings_count: state.location_settings.len(),
                     enable_video_thumbnails: state.settings.general.enable_video_thumbnails,
                     thumbnail_max_image_size_mb: state.settings.general.thumbnail_max_image_size_mb,
                     thumbnail_video_frame_skip: state.settings.general.thumbnail_video_frame_skip,

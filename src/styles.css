@@ -3832,6 +3832,9 @@ body {
 }
 
 .viewer__mode-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   background: var(--bg-footer);
   border: 1px solid var(--border);
   color: var(--text-dim);

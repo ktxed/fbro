@@ -124,7 +124,10 @@ pub async fn dispatch(name: &str, scope: &Value, args: &Value, ctx: &mut IntentC
         "RefreshGitStatus" | "GitRefresh" | "GitFetch" | "GitStagePaths" | "GitUnstagePaths" | "GitRollbackPaths" | "GitCommit" | "GitSwitchBranch" | "GitPull" | "GitPush" | "GitSetUpstream" | "GitGetLog" | "GitGetCommitShow" | "GitCopyRawFile" => git::handle(name, args, ctx).await,
         "EnterProcsSource" => procs::handle(name, scope, args, ctx).await,
         "Quit" | "ConfirmQuit" | "SetFontSize" => app::handle(name, args, ctx).await,
-        "SetGeneralOption" | "SetModalSizePreference" | "ClearThumbnailCache" => {
+        "SetGeneralOption"
+        | "SetModalSizePreference"
+        | "ClearThumbnailCache"
+        | "ResetLocationSortSettings" => {
             settings::handle(name, args, ctx).await
         }
         "OpenPanelTerminal" | "QuickEditFile" | "ResizeTerminal" | "ClosePanelTerminal" => {

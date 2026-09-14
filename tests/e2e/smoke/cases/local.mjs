@@ -200,24 +200,92 @@ export async function runLocalFlow(browser, observer) {
   });
   await browser.keys(["Escape"]);
 
-  // Sorting is remembered by local location, shared across panels, and an
-  // unseen directory starts from the name-ascending default.
+  // Per-location sorting is opt-in. While disabled, navigation carries the
+  // panel's current sort and another panel at the same path remains independent.
+  if (observer.state.settings?.general?.rememberSortPerLocation !== false) {
+    throw new Error("per-location sorting should default to disabled");
+  }
+  await goToPanelPath(browser, observer, "left", aSrc);
+  await observer.waitForSort("left", "date", "asc");
+  await goToPanelPath(browser, observer, "right", sortDir);
+  await observer.waitForSort("right", "name", "asc");
+  await goToPanelPath(browser, observer, "left", sortDir);
+  await observer.waitForSort("left", "date", "asc");
+  await clickSortHeader(browser, "left", "date");
+  await observer.waitForSort("left", "date", "desc");
+  await observer.waitForSort("right", "name", "asc");
+
+  observer.sendIntent("SetGeneralOption", undefined, { key: "rememberSortPerLocation", value: true });
+  await waitFor(() => observer.state.settings?.general?.rememberSortPerLocation === true, {
+    timeout: 10_000,
+    label: "enable per-location sorting",
+  });
+
+  // Once enabled, the next sort is cached and synchronized across panels at
+  // the same local location. Unseen locations use name ascending.
+  await clickSortHeader(browser, "left", "date");
+  await observer.waitForSort("left", "date", "asc");
+  await observer.waitForSort("right", "date", "asc");
+  await waitFor(() => observer.state.settings?.general?.locationSettingsCount === 1, {
+    timeout: 10_000,
+    label: "remembered location count",
+  });
   await goToPanelPath(browser, observer, "left", aSrc);
   await observer.waitForSort("left", "name", "asc");
   await goToPanelPath(browser, observer, "left", sortDir);
   await observer.waitForSort("left", "date", "asc");
-  await goToPanelPath(browser, observer, "right", sortDir);
-  await observer.waitForSort("right", "date", "asc");
-  await clickSortHeader(browser, "left", "date");
-  await observer.waitForSort("left", "date", "desc");
-  await observer.waitForSort("right", "date", "desc");
-  await clickSortHeader(browser, "left", "date");
-  await observer.waitForSort("left", "date", "asc");
-  await observer.waitForSort("right", "date", "asc");
+
+  await verifyLocationSortReset(browser, observer);
   await goToPanelPath(browser, observer, "right", path.posix.join(aDst, "alpha"));
 
   await verifyWindowFocusRestoration(browser, observer);
   await verifyGridLeftAtFirstItemNavigatesUp(browser, observer, aSrc);
+}
+
+async function verifyLocationSortReset(browser, observer) {
+  await pressWindowKey(browser, ",", { meta: true });
+  await pressWindowKey(browser, ",", { ctrl: true });
+  const settings = await browser.$('[data-modal-id="settings"]');
+  await settings.waitForDisplayed({ timeout: 10_000 });
+
+  const toggle = await browser.$('[data-testid="remember-sort-per-location"]');
+  if (!(await toggle.isSelected())) throw new Error("location sort toggle is not enabled in settings");
+  await (await browser.$('[data-testid="remember-sort-per-location"]')).click();
+  await waitFor(() => observer.state.settings?.general?.rememberSortPerLocation === false, {
+    timeout: 10_000,
+    label: "disable per-location sorting from settings",
+  });
+  const countHint = await browser.$('[data-testid="location-settings-count"]');
+  await waitFor(async () => (await countHint.getText()).includes("retained for up to 30 days"), {
+    timeout: 10_000,
+    label: "location sort retention hint",
+  });
+  await (await browser.$('[data-testid="remember-sort-per-location"]')).click();
+  await waitFor(() => observer.state.settings?.general?.rememberSortPerLocation === true, {
+    timeout: 10_000,
+    label: "re-enable per-location sorting from settings",
+  });
+  const reset = await browser.$('[data-testid="reset-location-sorts"]');
+  if (!(await reset.isEnabled())) throw new Error("location sort reset should be enabled for cached locations");
+
+  await reset.click();
+  const confirmation = await browser.$('[data-testid="reset-location-sorts-modal"]');
+  await confirmation.waitForDisplayed({ timeout: 10_000 });
+  await browser.keys("Escape");
+  await confirmation.waitForDisplayed({ timeout: 10_000, reverse: true });
+  if (observer.state.settings?.general?.locationSettingsCount !== 1) {
+    throw new Error("cancelling location sort reset changed the cached count");
+  }
+
+  await (await browser.$('[data-testid="reset-location-sorts"]')).click();
+  await (await browser.$('[data-testid="reset-location-sorts-modal"]')).waitForDisplayed({ timeout: 10_000 });
+  await (await browser.$('[data-testid="confirm-reset-location-sorts"]')).click();
+  await waitFor(() => observer.state.settings?.general?.locationSettingsCount === 0, {
+    timeout: 10_000,
+    label: "reset remembered location sorts",
+  });
+  await browser.keys("Escape");
+  await settings.waitForDisplayed({ timeout: 10_000, reverse: true });
 }
 
 async function verifyAboutModal(browser) {

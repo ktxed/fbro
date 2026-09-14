@@ -1,7 +1,7 @@
 use crate::vfs::VfsDriver;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Instant, SystemTime};
 
 pub const PREFETCH_N: usize = 5;
 pub const PREFETCH_IMAGE_CAP: usize = 10 * 1024 * 1024;
@@ -14,6 +14,21 @@ const WORKERS: usize = 2;
 pub struct PrefetchEntry {
     pub content: Vec<u8>,
     pub file_size: Option<u64>,
+    fingerprint: Option<FileFingerprint>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct FileFingerprint {
+    size: u64,
+    modified: Option<SystemTime>,
+}
+
+fn file_fingerprint(path: &str) -> Option<FileFingerprint> {
+    let metadata = std::fs::metadata(path).ok()?;
+    Some(FileFingerprint {
+        size: metadata.len(),
+        modified: metadata.modified().ok(),
+    })
 }
 
 struct BoundedCache {
@@ -65,6 +80,19 @@ impl BoundedCache {
         self.order.retain(|k| k != key);
         self.order.push_back(key.to_string());
         Some(entry)
+    }
+
+    fn get_fresh(&mut self, key: &str, path: &str) -> Option<Arc<PrefetchEntry>> {
+        let cached_fingerprint = self.map.get(key)?.fingerprint.clone();
+        if cached_fingerprint != file_fingerprint(path) {
+            if let Some(stale) = self.map.remove(key) {
+                self.bytes -= stale.content.capacity();
+            }
+            self.order.retain(|k| k != key);
+            eprintln!("[viewer prefetch] invalidate changed path={path:?}");
+            return None;
+        }
+        self.get(key)
     }
 }
 
@@ -263,6 +291,7 @@ impl ViewerPrefetchQueue {
     }
 
     fn read(request: &Request) -> Option<PrefetchEntry> {
+        let fingerprint_before = file_fingerprint(&request.path);
         let file_size = request.driver.file_size(&request.path);
         if is_image_ext(&request.path) && file_size.is_some_and(|n| n > request.cap as u64) {
             return None;
@@ -270,8 +299,16 @@ impl ViewerPrefetchQueue {
         let cap = file_size.map_or(request.cap, |size| size.min(request.cap as u64) as usize);
         match request.driver.read_chunk(&request.path, 0, cap) {
             Ok(mut content) => {
+                let fingerprint = file_fingerprint(&request.path);
+                if fingerprint != fingerprint_before {
+                    return None;
+                }
                 content.shrink_to_fit();
-                Some(PrefetchEntry { content, file_size })
+                Some(PrefetchEntry {
+                    content,
+                    file_size,
+                    fingerprint,
+                })
             }
             Err(error) => {
                 eprintln!(
@@ -289,7 +326,7 @@ impl ViewerPrefetchQueue {
             .lock()
             .unwrap()
             .cache
-            .get(&Self::cache_key(source_id, path))
+            .get_fresh(&Self::cache_key(source_id, path), path)
     }
 
     /// The HTTP server only handles host paths; source namespaces remain intact for WS reads.
@@ -303,7 +340,7 @@ impl ViewerPrefetchQueue {
             .keys()
             .find(|k| k.ends_with(&suffix))
             .cloned()?;
-        state.cache.get(&key)
+        state.cache.get_fresh(&key, path)
     }
 
     pub fn clear(&self) {
@@ -516,7 +553,30 @@ mod tests {
         PrefetchEntry {
             content: vec![1; size],
             file_size: Some(size as u64),
+            fingerprint: None,
         }
+    }
+
+    #[test]
+    fn changed_file_invalidates_cached_bytes() {
+        let fixture = Fixture::new();
+        let path = fixture.0.join("changed.md");
+        std::fs::write(&path, b"old").unwrap();
+        let path = path.to_str().unwrap();
+        let queue = ViewerPrefetchQueue::new();
+        let req = request(path);
+        let cached = ViewerPrefetchQueue::read(&req).unwrap();
+        queue
+            .state
+            .lock()
+            .unwrap()
+            .cache
+            .insert(req.key, Arc::new(cached));
+
+        assert_eq!(queue.get_cached("local", path).unwrap().content, b"old");
+        std::fs::write(path, b"new version").unwrap();
+        assert!(queue.get_cached("local", path).is_none());
+        assert_eq!(queue.stats().entry_count, 0);
     }
 
     #[test]

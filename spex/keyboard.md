@@ -37,7 +37,32 @@ dialog types.
 
 ---
 
-## 3. Design Rules
+## 3. Separate viewer window
+
+The viewer uses number keys for renderer selection and letters for actions or
+text transformations:
+
+| Key | Action |
+|---|---|
+| `1` | Raw text; explicitly leaves Markdown preview |
+| `2` | Image/media renderer |
+| `3` | Hex |
+| `4` | Markdown preview for `.md`, `.markdown`, and `.mdown` files |
+| `M` | Toggle maximize/restore, matching the compare window |
+| `S` | Toggle DOS/CP437 decoding in raw text mode |
+| `W` | Toggle word wrapping in raw text mode |
+| `F` | Open find; Markdown preview first returns to raw text |
+| `E` / `F4` | Edit a real local file |
+| `J` / `K` | Previous/next file |
+| `Esc` | Close the viewer, or leave native fullscreen first on macOS |
+
+Markdown is a distinct presentation of text rather than a second simultaneous
+toggle: only `1 Text` or `4 MD` is shown as active. When focus is in the find
+input, printable viewer shortcuts are not intercepted.
+
+---
+
+## 4. Design Rules
 
 1. Derive ownership from rendered UI state; do not toggle an input mode in
    response to key presses.

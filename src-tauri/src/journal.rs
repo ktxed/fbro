@@ -175,6 +175,52 @@ pub fn record_git_result(operation: &JournalOperation, outcome: &str, error: Opt
     record_correlated_result(operation, outcome, error, Value::Null);
 }
 
+pub fn record_location_sort_reset_intent(cached_count: usize) -> JournalOperation {
+    let operation = new_operation_with_context(
+        "ResetLocationSortSettings",
+        None,
+        json!({ "cachedCount": cached_count }),
+    )
+    .expect("ResetLocationSortSettings is a journal operation");
+    record_correlated_intent(&operation, Value::Null, &Value::Null, Value::Null);
+    operation
+}
+
+pub fn record_location_sort_reset_result(
+    operation: &JournalOperation,
+    outcome: &str,
+    removed_count: usize,
+    error: Option<&str>,
+) {
+    record_correlated_result(
+        operation,
+        outcome,
+        error,
+        json!({ "removedCount": removed_count }),
+    );
+}
+
+pub fn record_location_sort_expiry(
+    outcome: &str,
+    removed_count: usize,
+    error: Option<&str>,
+) {
+    record(
+        "operation.finished.v1",
+        None,
+        None,
+        None,
+        Some(outcome),
+        json!({
+            "kind": "expire-location-sort-settings",
+            "outcome": outcome,
+            "removedCount": removed_count,
+            "retentionDays": 30,
+            "error": error,
+        }),
+    );
+}
+
 pub fn record_quick_edit_intent(
     operation: &JournalOperation,
     panel_id: &str,
@@ -274,6 +320,7 @@ fn command_operation(command: &str) -> Option<&'static str> {
         "KillProcess" => Some("kill-process"),
         "OpenTerminal" => Some("terminal"),
         "QuickEditFile" => Some("quick-edit"),
+        "ResetLocationSortSettings" => Some("reset-location-sort-settings"),
         "GitFetch" => Some("git-fetch"),
         "GitStagePaths" => Some("git-stage"),
         "GitUnstagePaths" => Some("git-unstage"),
@@ -378,6 +425,7 @@ mod tests {
             ("GitSetUpstream", "git-set-upstream"),
             ("GitViewDiff", "git-view-diff"),
             ("QuickEditFile", "quick-edit"),
+            ("ResetLocationSortSettings", "reset-location-sort-settings"),
         ];
         for (command, operation) in expected {
             assert_eq!(command_operation(command), Some(operation));

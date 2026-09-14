@@ -623,6 +623,8 @@ export interface GeneralSettings {
   ludicrousMode: boolean;
   maxImageSizeMb: number;
   savePanelViewMode: boolean;
+  rememberSortPerLocation: boolean;
+  locationSettingsCount: number;
   enableVideoThumbnails: boolean;
   thumbnailMaxImageSizeMb: number;
   thumbnailVideoFrameSkip: number;

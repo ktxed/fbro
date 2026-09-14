@@ -248,15 +248,22 @@ async fn set_sort(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
         by: parsed.by,
         order: parsed.order,
     };
-    let (rescans, persisted) = {
+    let (rescans, persisted, count_patch) = {
         let mut state_guard = ctx.state.lock().await;
-        let local_location = state_guard.panels.get(&panel_id).and_then(|panel| {
-            state_guard
-                .drivers
-                .get(&panel.source_id)
-                .filter(|driver| driver.is_local())
-                .map(|_| crate::state::location_settings::normalize_local_path(&panel.path))
-        });
+        let remember_per_location = state_guard.settings.general.remember_sort_per_location;
+        let local_location = remember_per_location
+            .then(|| {
+                state_guard.panels.get(&panel_id).and_then(|panel| {
+                    state_guard
+                        .drivers
+                        .get(&panel.source_id)
+                        .filter(|driver| driver.is_local())
+                        .map(|_| {
+                            crate::state::location_settings::normalize_local_path(&panel.path)
+                        })
+                })
+            })
+            .flatten();
         let affected_panel_ids = if let Some(location) = local_location.as_deref() {
             state_guard
                 .panels
@@ -290,12 +297,19 @@ async fn set_sort(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
             let settings = crate::state::location_settings::LocationSettings {
                 sort: Some(sort.clone()),
             };
+            let is_new = !state_guard.location_settings.contains_key(&location);
             state_guard
                 .location_settings
                 .insert(location.clone(), settings.clone());
-            (location, settings)
+            (location, settings, is_new)
         });
-        (rescans, persisted)
+        let count_patch = persisted
+            .as_ref()
+            .and_then(|(_, _, is_new)| is_new.then_some((
+                state_guard.location_settings.len(),
+                state_guard.gui_senders.clone(),
+            )));
+        (rescans, persisted, count_patch)
     };
     for (affected_panel_id, names) in rescans {
         rescan_panel(
@@ -311,7 +325,7 @@ async fn set_sort(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
         .await;
     }
 
-    if let Some((location, settings)) = persisted {
+    if let Some((location, settings, _)) = persisted {
         let result = tokio::task::spawn_blocking(move || {
             crate::state::location_settings::save(&location, &settings)
         })
@@ -321,6 +335,21 @@ async fn set_sort(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
             Ok(Err(error)) => eprintln!("[fbro] Failed to save location settings: {error}"),
             Err(error) => eprintln!("[fbro] Location settings task failed: {error}"),
         }
+    }
+    if let Some((location_settings_count, gui_senders)) = count_patch {
+        let patch = crate::ws::protocol::ServerMessage::StatePatch {
+            timestamp: crate::ws::protocol::now(),
+            domain: "settings".to_string(),
+            entity_id: None,
+            version: 0,
+            patch: serde_json::json!({
+                "general": { "locationSettingsCount": location_settings_count }
+            }),
+        };
+        for sender in &gui_senders {
+            let _ = sender.send(patch.clone()).await;
+        }
+        let _ = ctx.tx.send(patch).await;
     }
 }
 

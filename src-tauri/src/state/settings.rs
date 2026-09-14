@@ -12,6 +12,10 @@ pub struct Settings {
     /// Per-modal preferred dimensions, keyed by stable frontend modal id.
     #[serde(default)]
     pub modal_sizes: HashMap<String, ModalSizePreference>,
+    /// Start of the grace period during which location sorts are retained
+    /// after the feature is disabled. Internal persistence metadata only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub location_sort_disabled_at_ms: Option<u64>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -36,6 +40,9 @@ pub struct GeneralSettings {
     /// When false (default), every session starts with both panels in list.
     #[serde(default)]
     pub save_panel_view_mode: bool,
+    /// Remember sorting independently for each local filesystem location.
+    #[serde(default)]
+    pub remember_sort_per_location: bool,
     /// Linux fbro-managed thumbnailer: when false, skip video thumbnail
     /// generation entirely (returns no thumb so the FE falls back to icon).
     #[serde(default = "default_true")]
@@ -265,6 +272,7 @@ impl Default for GeneralSettings {
             ludicrous_mode: false,
             max_image_size_mb: 512,
             save_panel_view_mode: false,
+            remember_sort_per_location: false,
             enable_video_thumbnails: true,
             thumbnail_max_image_size_mb: 100,
             thumbnail_video_frame_skip: 5,
@@ -320,6 +328,7 @@ mod tests {
             general: GeneralSettings::default(),
             panel_view_modes: HashMap::new(),
             modal_sizes: HashMap::new(),
+            location_sort_disabled_at_ms: None,
         };
         let mut value = serde_json::to_value(settings).unwrap();
         value.as_object_mut().unwrap().remove("modal_sizes");
@@ -327,6 +336,25 @@ mod tests {
         let decoded: Settings = serde_json::from_value(value).unwrap();
 
         assert!(decoded.modal_sizes.is_empty());
+    }
+
+    #[test]
+    fn location_sort_memory_defaults_off_for_existing_settings() {
+        let settings = Settings::default();
+        let mut value = serde_json::to_value(settings).unwrap();
+        value["general"]
+            .as_object_mut()
+            .unwrap()
+            .remove("remember_sort_per_location");
+        value
+            .as_object_mut()
+            .unwrap()
+            .remove("location_sort_disabled_at_ms");
+
+        let decoded: Settings = serde_json::from_value(value).unwrap();
+
+        assert!(!decoded.general.remember_sort_per_location);
+        assert_eq!(decoded.location_sort_disabled_at_ms, None);
     }
 
     #[test]
@@ -343,6 +371,7 @@ mod tests {
             general: GeneralSettings::default(),
             panel_view_modes: HashMap::new(),
             modal_sizes,
+            location_sort_disabled_at_ms: None,
         };
 
         let encoded = serde_json::to_string(&settings).unwrap();
@@ -362,6 +391,7 @@ mod tests {
             },
             panel_view_modes: HashMap::new(),
             modal_sizes: HashMap::new(),
+            location_sort_disabled_at_ms: None,
         };
 
         migrate_settings(&mut settings);
@@ -382,6 +412,7 @@ mod tests {
             },
             panel_view_modes: HashMap::new(),
             modal_sizes: HashMap::new(),
+            location_sort_disabled_at_ms: None,
         };
 
         migrate_settings(&mut settings);

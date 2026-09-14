@@ -4,6 +4,7 @@ import type { GeneralSettings } from "../ws/types";
 import type { WsClient } from "../ws/client";
 import { isWindows } from "../utils/platform";
 import { stepNumberInputOnWheel } from "../utils/numberInputWheel";
+import { ModalLayer } from "./ModalStack";
 
 interface SettingsGeneralTabProps {
   general: GeneralSettings;
@@ -27,6 +28,8 @@ export function SettingsGeneralTab({ general, client }: SettingsGeneralTabProps)
   const [commandStatus, setCommandStatus] = useState<string | null>(null);
   const [commandBusy, setCommandBusy] = useState(false);
   const [commandProbing, setCommandProbing] = useState(true);
+  const [confirmLocationReset, setConfirmLocationReset] = useState(false);
+  const locationResetCancelRef = useRef<HTMLButtonElement>(null);
   const [sevenzipPathDraft, setSevenzipPathDraft] = useState(general.sevenzipCustomPath);
   const [fedupIgnoreDraft, setFedupIgnoreDraft] = useState(general.fedupDefaultIgnorePatterns);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -123,6 +126,11 @@ export function SettingsGeneralTab({ general, client }: SettingsGeneralTabProps)
           ? "Install managed fbro command"
           : "Install fbro command";
 
+  const resetLocationSorts = () => {
+    setConfirmLocationReset(false);
+    client.sendIntent("ResetLocationSortSettings");
+  };
+
   return (
     <div className="settings-tab">
       <div className="settings-tab__section">
@@ -173,6 +181,31 @@ export function SettingsGeneralTab({ general, client }: SettingsGeneralTabProps)
           />
           <span>Save panel listing mode (list / grid) per panel across sessions</span>
         </label>
+        <label className="settings-tab__option">
+          <input
+            type="checkbox"
+            data-testid="remember-sort-per-location"
+            checked={general.rememberSortPerLocation}
+            onChange={(e) => send("rememberSortPerLocation", e.target.checked)}
+          />
+          <span>Remember sorting per location</span>
+        </label>
+        <div className="settings-tab__option">
+          <span data-testid="location-settings-count">
+            {general.locationSettingsCount === 0
+              ? "No remembered locations"
+              : `${general.locationSettingsCount} remembered location${general.locationSettingsCount === 1 ? "" : "s"}${general.rememberSortPerLocation ? "" : " retained for up to 30 days"}`}
+          </span>
+          <button
+            className="settings-button settings-button--danger"
+            data-testid="reset-location-sorts"
+            type="button"
+            disabled={general.locationSettingsCount === 0}
+            onClick={() => setConfirmLocationReset(true)}
+          >
+            Reset remembered sorting
+          </button>
+        </div>
         <label className="settings-tab__option">
           <input
             type="checkbox"
@@ -334,6 +367,44 @@ export function SettingsGeneralTab({ general, client }: SettingsGeneralTabProps)
           />
         </label>
       </div>
+      {confirmLocationReset && (
+        <ModalLayer
+          modalId="reset-location-sorts"
+          initialFocusRef={locationResetCancelRef}
+          className="modal-overlay--no-click"
+          onKeyDown={(event) => {
+            event.stopPropagation();
+            if (event.key === "Escape") setConfirmLocationReset(false);
+          }}
+        >
+          <div className="modal" data-testid="reset-location-sorts-modal" role="alertdialog" aria-modal="true" aria-label="Reset remembered sorting">
+            <div className="modal__header">Reset remembered sorting</div>
+            <div className="modal__body">
+              <p className="modal__summary">
+                Forget sorting remembered for {general.locationSettingsCount} location{general.locationSettingsCount === 1 ? "" : "s"}? This cannot be undone.
+              </p>
+              <div className="modal__actions">
+                <button
+                  className="settings-button settings-button--danger"
+                  data-testid="confirm-reset-location-sorts"
+                  type="button"
+                  onClick={resetLocationSorts}
+                >
+                  Reset sorting
+                </button>
+                <button
+                  ref={locationResetCancelRef}
+                  className="modal__btn"
+                  type="button"
+                  onClick={() => setConfirmLocationReset(false)}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </ModalLayer>
+      )}
     </div>
   );
 }
