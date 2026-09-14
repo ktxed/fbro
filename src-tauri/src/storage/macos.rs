@@ -227,7 +227,7 @@ pub(super) fn discover() -> Vec<MountPolicy> {
         .collect();
     let mut mounts = Vec::new();
     for (root, device, flags) in entries {
-        let (class, identity) = if flags & libc::MNT_LOCAL == 0 {
+        let (class, identity) = if flags & (libc::MNT_LOCAL as u32) == 0 {
             (StorageClass::Remote, device)
         } else if session.0.is_null() || !device.starts_with("/dev/") {
             (StorageClass::Unknown, device)
