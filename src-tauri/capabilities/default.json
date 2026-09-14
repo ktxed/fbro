@@ -2,7 +2,7 @@
   "$schema": "https://schemas.tauri.app/config/2/capabilities",
   "identifier": "default",
   "description": "Default capabilities for the main window",
-  "windows": ["main", "diff-*"],
+  "windows": ["main", "diff-*", "viewer-*"],
   "permissions": [
     "core:event:default",
     "core:webview:default",
