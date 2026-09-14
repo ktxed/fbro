@@ -392,6 +392,18 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
     }
   }
 
+  useEffect(() => {
+    const title = `${curFilename} — fbro viewer`;
+    // Keep the document title in sync for browser-based runs and accessibility;
+    // Tauri's native title must be updated explicitly after viewer navigation.
+    document.title = title;
+    try {
+      void getCurrentWindow().setTitle(title).catch(() => {});
+    } catch {
+      // Browser-based tests do not expose a Tauri window.
+    }
+  }, [curFilename]);
+
   // ── Derived: lines from buffer ────────────────────────────────────────────
 
   // lines: display rows (long file lines are wrapped into multiple rows)

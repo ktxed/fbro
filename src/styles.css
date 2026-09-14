@@ -4241,6 +4241,43 @@ body {
   max-height: 100%;
 }
 
+.viewer__pdf {
+  position: relative;
+  height: 100%;
+  overflow: auto;
+  padding: 16px;
+  background: #303030;
+}
+
+.viewer__pdf-page {
+  position: relative;
+  width: min(100%, 1200px);
+  margin: 0 auto 16px;
+  background: #fff;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.45);
+}
+
+.viewer__pdf-page canvas {
+  display: block;
+  max-width: 100%;
+  margin: auto;
+}
+
+.viewer__pdf-error,
+.viewer__pdf-page-error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 24px;
+  color: var(--text);
+  text-align: center;
+}
+
+.viewer__pdf-page-error {
+  color: #6b1f1f;
+}
+
 .viewer__embed {
   width: 100%;
   height: 100%;

@@ -8,6 +8,11 @@ declare module "*.gif" {
   export default url;
 }
 
+declare module "*.mjs?url" {
+  const url: string;
+  export default url;
+}
+
 interface FbroBuildInfo {
   version: string;
   commit: string;

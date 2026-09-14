@@ -6,6 +6,28 @@ import { execFileSync } from "node:child_process";
 import { artifactsDir, backendPath, hostPath } from "../config.mjs";
 import { waitFor } from "../wait.mjs";
 
+function minimalPdf() {
+  const stream = "BT /F1 24 Tf 40 110 Td (fbro PDF preview) Tj ET\n";
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>",
+    `<< /Length ${Buffer.byteLength(stream)} >>\nstream\n${stream}endstream`,
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+  ];
+  let pdf = "%PDF-1.4\n";
+  const offsets = [0];
+  for (let index = 0; index < objects.length; index++) {
+    offsets.push(Buffer.byteLength(pdf));
+    pdf += `${index + 1} 0 obj\n${objects[index]}\nendobj\n`;
+  }
+  const xref = Buffer.byteLength(pdf);
+  pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  pdf += offsets.slice(1).map(offset => `${String(offset).padStart(10, "0")} 00000 n \n`).join("");
+  pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return pdf;
+}
+
 // Uses the real viewer component, WS navigation, prefetch queue and file server.
 // A forwarding server can hold one image response to make loading/error tests deterministic.
 export async function runViewerFlow(browser, observer) {
@@ -35,6 +57,10 @@ export async function runViewerFlow(browser, observer) {
   const names = Array.from({ length: 32 }, (_, i) => `${String(i).padStart(2, "0")}.jpg`);
   for (const name of names) fs.writeFileSync(hostPath(`${directory}/${name}`), jpeg);
   fs.writeFileSync(hostPath(`${directory}/32-broken.jpg`), "not an image");
+  const pdfName = "PDF preview.pdf";
+  fs.writeFileSync(hostPath(`${directory}/${pdfName}`), minimalPdf());
+  const afterPdfName = "ZZ after PDF.txt";
+  fs.writeFileSync(hostPath(`${directory}/${afterPdfName}`), "Viewer title follows navigation.\n");
 
   let hold = false;
   const held = new Set();
@@ -144,6 +170,32 @@ export async function runViewerFlow(browser, observer) {
     if (await browser.$(".viewer__loading-overlay").isExisting()) throw new Error("image failure left loading indicator visible");
     await navigate("j", "31.jpg");
     sampleMemory("final");
+
+    await observer.waitForEntry("left", afterPdfName);
+    const pdfIndex = observer.state.panels.left.entries.findIndex(entry => entry.name === pdfName);
+    if (pdfIndex < 0) throw new Error("PDF fixture is missing from the viewer directory");
+    observer.sendIntent("SetCursor", "left", { index: pdfIndex });
+    await waitFor(() => observer.state.panels.left.cursor === pdfIndex, {
+      timeout: 10_000,
+      label: "PDF fixture cursor",
+    });
+    const pdfParams = new URLSearchParams({ viewer: "1", path: `${directory}/${pdfName}`,
+      source: observer.state.panels.left.sourceId, name: pdfName, label: "main", panel: "left",
+      local: "1", size: String(fs.statSync(hostPath(`${directory}/${pdfName}`)).size),
+      fsport: String(observer.state.fileServerPort) });
+    await browser.url(`${mainUrl.split("?")[0]}?${pdfParams}`);
+    await browser.$('.viewer__pdf-page[data-rendered="true"] canvas').waitForDisplayed({ timeout: 15_000 });
+    if (await browser.$(".viewer__pdf-error").isExisting()) throw new Error("PDF viewer reported an error");
+    await browser.keys("k");
+    await waitFor(() => browser.execute(expected =>
+      document.querySelector(".viewer__filename")?.textContent === expected, afterPdfName), {
+      timeout: 10_000,
+      label: "navigation away from PDF",
+    });
+    await waitFor(async () => (await browser.getTitle()) === `${afterPdfName} — fbro viewer`, {
+      timeout: 10_000,
+      label: "viewer window title after PDF navigation",
+    });
   } catch (error) {
     measurements.error = String(error);
     measurements.viewer = await browser.execute(() => ({

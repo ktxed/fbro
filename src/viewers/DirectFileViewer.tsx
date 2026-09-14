@@ -1,6 +1,7 @@
 import type React from "react";
-import { isMac } from "../utils/platform";
+import { isLinux, isMac } from "../utils/platform";
 import { isImageExt, isVideoExt, isPdfExt } from "./media";
+import { PdfViewer } from "./PdfViewer";
 import { ZoomableImage } from "./ZoomableImage";
 
 export const IMAGE_DIRECT_LIMIT = 10 * 1024 * 1024; // 10 MiB — baseline when ludicrous mode is off
@@ -44,11 +45,19 @@ export function DirectFileViewer({ path, filename, fsPort: fsPropPort, videoRef 
   // <video> elements, but GStreamer does not affect <img>, and localfile:// is not
   // supported by WebView2 on Windows without additional setup.)
   const fsPort = fsPropPort ?? Number(new URLSearchParams(window.location.search).get("fsport") ?? "0");
-  const urlPath = path.startsWith("/") ? path : `/${path}`;
+  const urlPath = (path.startsWith("/") ? path : `/${path}`)
+    .split("/")
+    .map(encodeURIComponent)
+    .join("/");
   const url = `http://127.0.0.1:${fsPort}${urlPath}`;
 
   if (isPdfExt(filename)) {
-    return <embed className="viewer__embed" src={url} type="application/pdf" />;
+    // WebKitGTK does not ship a browser PDF plugin, so an application/pdf
+    // <embed> is blank on Linux. Keep the native viewers on macOS/Windows and
+    // provide the missing renderer where it is needed.
+    return isLinux
+      ? <PdfViewer url={url} filename={filename} />
+      : <embed className="viewer__embed" src={url} type="application/pdf" />;
   }
   if (isVideoExt(filename)) {
     return (
