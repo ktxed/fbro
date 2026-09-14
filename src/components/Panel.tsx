@@ -28,7 +28,6 @@ import { PanelTerminal } from "./PanelTerminal";
 import { EntryThumb } from "./EntryThumb";
 import { isGlobalSelectionSourceId } from "../utils/sourceId";
 import { GitModal } from "./GitModal";
-import { GitActionsModal } from "./GitActionsModal";
 import type { GitActivity } from "./gitActivity";
 import previewThrobberUrl from "../assets/win98-flag-throbber-64nn.gif";
 
@@ -748,7 +747,6 @@ export function Panel({
   const appState = useAppState();
   const dispatch = useAppDispatch();
   const [gitOpen, setGitOpen] = useState(false);
-  const [gitActionsOpen, setGitActionsOpen] = useState(false);
   const [gitActivity, setGitActivity] = useState<GitActivity | null>(null);
   const [gridMetrics, setGridMetrics] = useState<{ cols: number; cardWidth: number; cardHeight: number; pageRows: number }>({ cols: 1, cardWidth: GRID_CARD_MIN_WIDTH, cardHeight: 168, pageRows: 1 });
   const listRef = useRef<HTMLDivElement>(null);
@@ -788,23 +786,12 @@ export function Panel({
     setGitActivity(null);
     restorePanelFocus();
   }, [restorePanelFocus]);
-  const closeGitActions = useCallback(() => {
-    setGitActionsOpen(false);
-    setGitActivity(null);
-    restorePanelFocus();
-  }, [restorePanelFocus]);
   const beginGitActivity = useCallback((activity: GitActivity) => {
     setGitActivity(activity);
   }, []);
   const openGitRepository = useCallback(() => {
-    client.sendIntent("RefreshGitStatus", undefined, { panelId });
     setGitOpen(true);
-  }, [client, panelId]);
-  const openGitActions = useCallback(() => {
-    client.sendIntent("RefreshGitStatus", undefined, { panelId });
-    setGitActionsOpen(true);
-  }, [client, panelId]);
-
+  }, []);
   useEffect(() => {
     const result = appState.gitActionResult;
     if (!gitActivity || gitActivity.status !== "running" || !result || result.activityId !== gitActivity.id || result.panelId !== panelId || result.action !== gitActivity.action) return;
@@ -1415,8 +1402,8 @@ export function Panel({
     if (gitActionsCommand) {
       e.preventDefault();
       e.stopPropagation();
-      if (panel.git) openGitActions();
-      else dispatch({ type: "SHOW_TRANSIENT_HINT", message: "Git actions are available inside a local Git repository" });
+      if (panel.git) openGitRepository();
+      else dispatch({ type: "SHOW_TRANSIENT_HINT", message: "Git repository actions are available inside a local Git repository" });
       return;
     }
     if (panel.filterModeActive && e.key === "Escape") {
@@ -2265,7 +2252,6 @@ export function Panel({
       </div>
 
       {gitOpen && panel.git && <GitModal panelId={panelId} git={panel.git} client={client} activity={gitActivity} onActivityChange={beginGitActivity} onClose={closeGitModal} />}
-      {gitActionsOpen && panel.git && <GitActionsModal panelId={panelId} git={panel.git} client={client} activity={gitActivity} onActivityChange={beginGitActivity} onClose={closeGitActions} onOpenRepository={() => { setGitActionsOpen(false); setGitOpen(true); }} />}
 
       <VolumeHeader sources={sources} panel={panel} client={client} onNavigateToSource={(sourceId) => { shouldFocusFilterRef.current = false; client.sendIntent("NavigateToSource", panelId, { sourceId }); }} onMountSource={(sourceId) => { shouldFocusFilterRef.current = false; client.sendIntent("MountSource", panelId, { sourceId }); }} />
 

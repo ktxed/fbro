@@ -43,6 +43,9 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
   const canCommit = message.trim().length > 0 && staged.length > 0;
   const canPull = git.clean && git.behindCount !== undefined && git.behindCount > 0;
   const canPush = !!git.upstream && git.aheadCount !== undefined && git.aheadCount > 0;
+  const canSetUpstream = !git.upstream && git.clean && !git.detached;
+  const pullDisabledMessage = !git.clean ? "Requires no staged changes" : !git.upstream ? "No upstream configured" : git.behindCount === 0 ? "Already up to date" : "Remote status unavailable — fetch first";
+  const pushDisabledMessage = !git.upstream ? "No upstream configured — set an upstream first" : git.aheadCount === 0 ? "No outgoing commits" : "Remote status unavailable — fetch first";
   const actionInFlight = activity?.status === "running";
   const actionInFlightRef = useRef(actionInFlight);
   actionInFlightRef.current = actionInFlight;
@@ -233,6 +236,13 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
       dispatch({ type: "CLEAR_GIT_LOG" });
     };
   }, [dispatch]);
+
+  // Re-inspect the repository whenever this modal opens so its controlled
+  // branch picker is updated from Git's current HEAD, including branch
+  // changes made outside fbro while the panel remained open.
+  useEffect(() => {
+    client.sendIntent("RefreshGitStatus", undefined, { panelId });
+  }, [client, panelId]);
 
   useEffect(() => {
     if (git !== lastGitRef.current) {
@@ -481,9 +491,11 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
       }
       const accelerators: Record<string, () => void> = {
         b: () => branchRef.current?.focus(),
+        f: () => runAction("GitFetch", "Fetching remote…"),
         l: () => { if (canPull) runAction("GitPull", "Pulling changes…"); },
         p: () => { if (canPush) runAction("GitPush", "Pushing changes…"); },
         r: () => runAction("GitRefresh", "Fetching and refreshing…"),
+        u: () => { if (canSetUpstream) runAction("GitSetUpstream", "Setting upstream…", { branch: git.branch }); },
         c: () => { if (tab === "changes" && canCommit) commitRef.current?.click(); },
       };
       const action = !hasShortcutModifier ? accelerators[key] : undefined;
@@ -547,18 +559,19 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
           </select>
           <kbd>B</kbd>
           <span className="git-modal__toolbar-spacer" />
-          <button disabled={actionInFlight || !canPull} title={!canPull ? "No incoming commits to pull" : undefined} onClick={() => runAction("GitPull", "Pulling changes…")}>
+          <button disabled={actionInFlight || !canPull} title={!canPull ? pullDisabledMessage : undefined} onClick={() => runAction("GitPull", "Pulling changes…")}>
             Pull <kbd>L</kbd>
             {git.behindCount !== undefined && git.behindCount > 0 && (
-              <em className="git-actions-modal__badge git-actions-modal__badge--incoming"><IconArrowDown size={13} /> {git.behindCount}</em>
+              <em className="git-modal__badge git-modal__badge--incoming"><IconArrowDown size={13} /> {git.behindCount}</em>
             )}
           </button>
-          <button disabled={actionInFlight || !canPush} title={!canPush ? "No outgoing commits to push" : undefined} onClick={() => runAction("GitPush", "Pushing changes…")}>
+          <button disabled={actionInFlight || !canPush} title={!canPush ? pushDisabledMessage : undefined} onClick={() => runAction("GitPush", "Pushing changes…")}>
             Push <kbd>P</kbd>
             {git.aheadCount !== undefined && git.aheadCount > 0 && (
-              <em className="git-actions-modal__badge git-actions-modal__badge--outgoing"><IconArrowUp size={13} /> {git.aheadCount}</em>
+              <em className="git-modal__badge git-modal__badge--outgoing"><IconArrowUp size={13} /> {git.aheadCount}</em>
             )}
           </button>
+          <button data-testid="git-fetch" disabled={actionInFlight} onClick={() => runAction("GitFetch", "Fetching remote…")} title="Update remote branch information">Fetch <kbd>F</kbd></button>
           <button data-testid="git-refresh" disabled={actionInFlight} onClick={() => runAction("GitRefresh", "Fetching and refreshing…")} title="Fetch remotes and refresh status">Refresh <kbd>R</kbd></button>
         </div>
 
@@ -869,11 +882,18 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
         )}
 
         <div className="modal__actions">
-          {activity && (
-            <span className="git-modal__activity">
-              {activity.status === "running" && <IconLoader2 size={14} />}
-              {activity.message}
-            </span>
+          <span className="git-modal__activity">
+            {activity?.status === "running" && <IconLoader2 size={14} />}
+            {activity?.message ?? (git.upstream ? `Tracking ${git.upstream}` : "No upstream configured")}
+          </span>
+          {!git.upstream && (
+            <button
+              disabled={actionInFlight || !canSetUpstream}
+              title={!git.clean ? "Requires no staged changes" : git.detached ? "A detached HEAD cannot have a branch upstream" : "Push this branch to origin and configure its upstream"}
+              onClick={() => runAction("GitSetUpstream", "Setting upstream…", { branch: git.branch })}
+            >
+              Set upstream <kbd>U</kbd>
+            </button>
           )}
           <button onClick={handleClose}>Close</button>
           {tab === "changes" && (

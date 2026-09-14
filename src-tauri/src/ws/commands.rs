@@ -553,7 +553,7 @@ pub(crate) fn build_interactive_commands() -> Vec<InteractiveCommandSchema> {
         command(
             "panel.git.actions",
             "Panel",
-            "Git Actions…",
+            "Git Repository…",
             vec![keybinding_with_modifiers("g", true, false, false, false)],
             None,
         ),
