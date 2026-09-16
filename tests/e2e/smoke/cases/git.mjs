@@ -160,6 +160,16 @@ export async function runGitFlow(browser, observer) {
   await gitButton.click();
   const gitModal = await browser.$(".git-modal");
   await gitModal.waitForDisplayed({ timeout: 10_000 });
+  await (await browser.$('[data-testid="git-tab-log"]')).click();
+  await waitFor(async () => (await browser.$('[data-testid="git-log-row"]')).isDisplayed(), {
+    timeout: 10_000,
+    label: "Git commit log",
+  });
+  const firstCommitSubject = await browser.execute(() => document.querySelector('[data-testid="git-log-row"] .git-modal__log-subject')?.textContent?.trim());
+  if (firstCommitSubject !== "initial") {
+    throw new Error(`Unexpected first Git commit: ${firstCommitSubject}`);
+  }
+  await (await browser.$('[data-testid="git-tab-changes"]')).click();
   await browser.execute(() => {
     window.dispatchEvent(new KeyboardEvent("keydown", {
       key: "f",

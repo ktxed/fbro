@@ -245,6 +245,10 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
 
   useEffect(() => {
     return () => {
+      // React StrictMode replays effects without recreating refs. Reset this
+      // guard along with the store so the replayed load effect requests the
+      // log again instead of leaving pendingGitLog empty.
+      logLoadedRootRef.current = null;
       dispatch({ type: "CLEAR_GIT_LOG" });
     };
   }, [dispatch]);
