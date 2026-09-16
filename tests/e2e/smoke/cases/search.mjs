@@ -9,6 +9,15 @@ export async function runSearchFlow(browser, observer) {
   await observer.waitForPanelPath("left", aDst);
   await observer.waitForPanelNotShadow("left");
   await reloadBrowserApp(browser, "fbro-a");
+
+  const leftPanel = await browser.$('[data-testid="panel-left"]');
+  await leftPanel.click();
+  await browser.keys(["f"]);
+  const quickFilterInput = await browser.$('[data-testid="panel-left"] .panel__filter-input');
+  await quickFilterInput.waitForDisplayed({ timeout: 10_000 });
+  await quickFilterInput.setValue("does-not-match-search-result");
+  await observer.waitForNoEntry("left", "renamed.txt");
+
   await browser.execute(() => {
     window.dispatchEvent(new KeyboardEvent("keydown", {
       key: "f",
@@ -40,6 +49,19 @@ export async function runSearchFlow(browser, observer) {
   await clickCommand(browser, "search.start");
   await clickCommand(browser, "search.to-results");
   await observer.waitForSearchResultsMounted("left");
+  await browser.waitUntil(
+    async () => {
+      const panel = observer.state.panels.left;
+      return panel?.filter == null && panel?.filterModeActive === false;
+    },
+    {
+      timeout: 10_000,
+      timeoutMsg: "Quick filter remained active after mounting search results",
+    },
+  );
+  if (await quickFilterInput.isDisplayed()) {
+    throw new Error("Quick filter bar remained visible after mounting search results");
+  }
   await observer.waitForEntry("left", "renamed.txt", "file");
   await browser.waitUntil(async () => {
     const dateCell = await browser.$('[data-testid="panel-left"] [data-entry-name="renamed.txt"] .panel__mtime');

@@ -297,8 +297,9 @@ When user clicks "To Results":
 1. BE creates shadow source `search:<job_id>`
 2. Panel's `source_id` switches to search source
 3. Panel's `path` set to `/`
-4. Panel rescans using `SearchResultsDriver.list()`
-5. Results appear as a flat panel listing
+4. Panel's quick filter and filter-entry mode are cleared
+5. Panel rescans using `SearchResultsDriver.list()`
+6. Results appear as a flat panel listing
 
 ## Navigation from Search Results
 

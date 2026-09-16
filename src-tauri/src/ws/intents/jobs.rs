@@ -3015,6 +3015,8 @@ async fn mount_search_results(args: &Value, ctx: &mut IntentContext<'_>) {
             });
             panel.source_id = source_id.clone();
             panel.path = "/".to_string();
+            panel.filter = None;
+            panel.filter_mode_active = false;
         }
     }
 
