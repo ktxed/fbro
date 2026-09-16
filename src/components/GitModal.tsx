@@ -875,32 +875,36 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
                             >
                               <code className="git-modal__log-change-state">{change.indexStatus}</code>
                               <span className="git-modal__log-change-path" title={pathLabel}>{pathLabel}</span>
-                              {!isLikelyBinaryPath(change.path) && (
-                                <button
-                                  type="button"
-                                  className="git-modal__change-action"
-                                  data-testid="git-log-view-diff"
-                                  title="View diff (V)"
-                                  aria-keyshortcuts="v"
-                                  onFocus={() => setLogFocus({ kind: "change", commitIndex: index, changeIndex })}
-                                  onClick={() => viewCommitDiff(commit.hash, change)}
-                                >
-                                  <IconGitCompare size={15} aria-hidden />View diff <kbd>V</kbd>
-                                </button>
-                              )}
-                              {change.indexStatus !== "D" && (
-                                <button
-                                  type="button"
-                                  className="git-modal__change-action"
-                                  data-testid="git-log-copy-raw"
-                                  title="Copy raw file reference (C) — paste with Ctrl+V"
-                                  aria-keyshortcuts="c"
-                                  onFocus={() => setLogFocus({ kind: "change", commitIndex: index, changeIndex })}
-                                  onClick={() => copyRawFile(commit.hash, change)}
-                                >
-                                  <IconCopy size={15} aria-hidden />Copy raw <kbd>C</kbd>
-                                </button>
-                              )}
+                              <div className="git-modal__change-actions">
+                                {!isLikelyBinaryPath(change.path) && (
+                                  <button
+                                    type="button"
+                                    className="git-modal__change-action git-modal__change-action--icon"
+                                    data-testid="git-log-view-diff"
+                                    title="View diff (V)"
+                                    aria-label="View diff"
+                                    aria-keyshortcuts="v"
+                                    onFocus={() => setLogFocus({ kind: "change", commitIndex: index, changeIndex })}
+                                    onClick={() => viewCommitDiff(commit.hash, change)}
+                                  >
+                                    <IconGitCompare size={15} aria-hidden />
+                                  </button>
+                                )}
+                                {change.indexStatus !== "D" && (
+                                  <button
+                                    type="button"
+                                    className="git-modal__change-action git-modal__change-action--icon"
+                                    data-testid="git-log-copy-raw"
+                                    title="Copy raw file reference (C) — paste with Ctrl+V"
+                                    aria-label="Copy raw file reference"
+                                    aria-keyshortcuts="c"
+                                    onFocus={() => setLogFocus({ kind: "change", commitIndex: index, changeIndex })}
+                                    onClick={() => copyRawFile(commit.hash, change)}
+                                  >
+                                    <IconCopy size={15} aria-hidden />
+                                  </button>
+                                )}
+                              </div>
                             </div>
                           );
                         })}

@@ -169,6 +169,14 @@ export async function runGitFlow(browser, observer) {
   if (firstCommitSubject !== "initial") {
     throw new Error(`Unexpected first Git commit: ${firstCommitSubject}`);
   }
+  await (await browser.$('[data-testid="git-log-row"]')).doubleClick();
+  const expandedActions = await browser.$('[data-testid="git-log-commit-show"] .git-modal__change-actions');
+  await expandedActions.waitForDisplayed({ timeout: 10_000 });
+  const expandedActionLabels = await browser.execute(() => [...document.querySelectorAll('[data-testid="git-log-commit-show"] .git-modal__change-action')]
+    .map((button) => ({ text: button.textContent?.trim(), label: button.getAttribute("aria-label"), iconOnly: button.classList.contains("git-modal__change-action--icon") })));
+  if (expandedActionLabels.length === 0 || expandedActionLabels.some((action) => action.text || !action.label || !action.iconOnly)) {
+    throw new Error(`Expanded Git log actions are not icon-only: ${JSON.stringify(expandedActionLabels)}`);
+  }
   await (await browser.$('[data-testid="git-tab-changes"]')).click();
   await browser.execute(() => {
     window.dispatchEvent(new KeyboardEvent("keydown", {
