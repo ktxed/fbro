@@ -238,10 +238,69 @@ export async function runLocalFlow(browser, observer) {
   await observer.waitForSort("left", "date", "asc");
 
   await verifyLocationSortReset(browser, observer);
+  await verifyInlinePreviewNavigation(browser, observer, aSrc, sortDir);
   await goToPanelPath(browser, observer, "right", path.posix.join(aDst, "alpha"));
 
   await verifyWindowFocusRestoration(browser, observer);
   await verifyGridLeftAtFirstItemNavigatesUp(browser, observer, aSrc);
+}
+
+async function verifyInlinePreviewNavigation(browser, observer, aSrc, restorePath) {
+  const fixturePath = path.posix.join(aSrc, "inline-preview-navigation");
+  const hostFixturePath = hostPath(fixturePath);
+  fs.mkdirSync(hostFixturePath, { recursive: true });
+  const imageNames = ["01-preview.png", "02-preview.png"];
+  const encodedImages = await browser.execute(() => ["#d34a4a", "#4a72d3"].map((color) => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 96;
+    canvas.height = 64;
+    const context = canvas.getContext("2d");
+    context.fillStyle = color;
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL("image/png").split(",")[1];
+  }));
+  imageNames.forEach((name, index) => {
+    fs.writeFileSync(path.join(hostFixturePath, name), Buffer.from(encodedImages[index], "base64"));
+  });
+  fs.writeFileSync(path.join(hostFixturePath, "03-stop.txt"), "preview sequence boundary\n");
+
+  await goToPanelPath(browser, observer, "left", fixturePath);
+  await observer.waitForAllEntries("left", [...imageNames, "03-stop.txt"]);
+  observer.sendIntent("SetSort", "left", { by: "name", order: "asc" });
+  await observer.waitForSort("left", "name", "asc");
+  await clickEntry(browser, "left", imageNames[0]);
+  await browser.keys("ArrowRight");
+  const firstPreview = await browser.$(`[data-entry-name="${imageNames[0]}"] [data-testid="file-inline-preview"]`);
+  await waitFor(() => firstPreview.isFocused(), {
+    timeout: 10_000,
+    label: "inline image preview keyboard focus",
+  });
+  await browser.$(".panel__file-preview-tooltip").waitForDisplayed({ timeout: 10_000 });
+  await browser.$(`.panel__file-preview-tooltip img[alt="${imageNames[0]}"]`).waitForDisplayed({ timeout: 10_000 });
+
+  await browser.keys("ArrowDown");
+  await waitFor(() => browser.execute(() =>
+    document.querySelector('[data-testid="panel-left"] .panel__row--cursor')?.getAttribute("data-entry-name") === "02-preview.png"), {
+    timeout: 10_000,
+    label: "cursor moved to second preview image",
+  });
+  await browser.$(".panel__file-preview-tooltip").waitForDisplayed({ timeout: 10_000 });
+  await browser.$(`.panel__file-preview-tooltip img[alt="${imageNames[1]}"]`).waitForDisplayed({ timeout: 10_000 });
+  const secondPreviewDescribed = await browser.$(`[data-entry-name="${imageNames[1]}"] [data-testid="file-inline-preview"]`).getAttribute("aria-describedby");
+  if (secondPreviewDescribed !== "file-inline-preview-left") {
+    throw new Error(`inline preview did not re-anchor to the second image: ${secondPreviewDescribed}`);
+  }
+
+  await browser.keys("ArrowDown");
+  await waitFor(() => browser.execute(() =>
+    document.querySelector('[data-testid="panel-left"] .panel__row--cursor')?.getAttribute("data-entry-name") === "03-stop.txt"), {
+    timeout: 10_000,
+    label: "cursor moved to inline preview sequence boundary",
+  });
+  await browser.$(".panel__file-preview-tooltip").waitForDisplayed({ timeout: 10_000, reverse: true });
+
+  await goToPanelPath(browser, observer, "left", restorePath);
+  fs.rmSync(hostFixturePath, { recursive: true });
 }
 
 async function verifyFilterEscapeRestoresCompleteListing(browser, observer, aSrc) {

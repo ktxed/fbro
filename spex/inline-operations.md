@@ -78,7 +78,10 @@ values with plural menu labels for a selection.
   panel keypress (navigate to the parent folder).
 - Enter or Space invokes the focused choice.
 - Escape returns focus to the panel. Up/Down also leave the bar and resume
-  panel navigation.
+  panel navigation. If the Preview tooltip is open, adjacent Up/Down navigation
+  keeps it open across consecutive previewable images, re-anchors it to the new
+  cursor row, and shows the loading throbber until the new thumbnail is ready.
+  Reaching a non-previewable entry or using any other navigation closes it.
 - Pointer events on a choice must not select, open, or drag the underlying row.
 - Destructive operations retain their normal confirmation rules. Only an
   explicitly designed in-place confirmation may use `armed` state.

@@ -1,6 +1,6 @@
 import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { Tooltip } from "react-tooltip";
+import { Tooltip, type TooltipRefProps } from "react-tooltip";
 import type { PanelState, VFSEntry, Source } from "../ws/types";
 import type { WsClient } from "../ws/client";
 import {
@@ -59,6 +59,11 @@ type InlineOperationItem = {
   danger?: boolean;
   armed?: boolean;
   preview?: { url: string; name: string };
+};
+
+type PreviewContinuation = {
+  acknowledgedCursor: number;
+  queuedTargets: number[];
 };
 
 function PreviewTooltipImage({ url, name }: { url: string; name: string }) {
@@ -752,6 +757,11 @@ export function Panel({
   const [gridMetrics, setGridMetrics] = useState<{ cols: number; cardWidth: number; cardHeight: number; pageRows: number }>({ cols: 1, cardWidth: GRID_CARD_MIN_WIDTH, cardHeight: 168, pageRows: 1 });
   const listRef = useRef<HTMLDivElement>(null);
   const focusDivRef = useRef<HTMLDivElement>(null);
+  const previewTooltipRef = useRef<TooltipRefProps | null>(null);
+  const previewContinuationRef = useRef<PreviewContinuation | null>(null);
+  const previewReanchorFrameRef = useRef<number | null>(null);
+  const previewReanchorPendingRef = useRef(false);
+  const [previewContinuationActive, setPreviewContinuationActive] = useState(false);
   const restoreInlineStageFocusRef = useRef(false);
   const bookmarkBtnRef = useRef<HTMLButtonElement>(null);
   const rightDrag = useRef({ active: false, everMoved: false, startRow: -1, mode: "select" as "select" | "deselect", preSelection: [] as number[] });
@@ -776,6 +786,117 @@ export function Panel({
   } | null>(null);
   const [tooltipNameClipped, setTooltipNameClipped] = useState(false);
   const tooltipNameRef = useRef<HTMLDivElement | null>(null);
+
+  const previewAvailableAt = useCallback((absIndex: number) => {
+    const entry = panel.entries[absIndex - (panel.windowStart ?? 0)];
+    // An adjacent cursor target can briefly sit outside a large directory's
+    // loaded window. Defer the decision until that window arrives instead of
+    // treating the missing slice as a non-image boundary.
+    if (!entry) return null;
+    if (!isImagePreviewCandidate(entry) || appState.fileServerPort <= 0) return false;
+    const target = resolveContextualTarget(panel, absIndex, entry);
+    return !!target && contextualOperationAvailable("file.preview", appState, target);
+  }, [appState, panel]);
+
+  const cancelPreviewContinuation = useCallback((closeTooltip = true) => {
+    previewContinuationRef.current = null;
+    previewReanchorPendingRef.current = false;
+    if (previewReanchorFrameRef.current !== null) {
+      cancelAnimationFrame(previewReanchorFrameRef.current);
+      previewReanchorFrameRef.current = null;
+    }
+    setPreviewContinuationActive(false);
+    if (closeTooltip) previewTooltipRef.current?.close();
+  }, []);
+
+  const armPreviewContinuation = useCallback((direction: "up" | "down") => {
+    let continuation = previewContinuationRef.current;
+    if (!continuation) {
+      const tooltip = previewTooltipRef.current;
+      const anchor = tooltip?.activeAnchor;
+      const anchorRow = anchor?.closest<HTMLElement>("[data-abs-index]");
+      const anchorCursor = Number(anchorRow?.dataset.absIndex);
+      if (!tooltip?.isOpen
+        || !anchor?.getAttribute("data-preview-url")
+        || anchorCursor !== panel.cursor
+        || !previewAvailableAt(panel.cursor)) return;
+      continuation = { acknowledgedCursor: panel.cursor, queuedTargets: [] };
+      previewContinuationRef.current = continuation;
+      setPreviewContinuationActive(true);
+    }
+
+    const predictedCursor = continuation.queuedTargets.at(-1) ?? continuation.acknowledgedCursor;
+    const targetCursor = predictedCursor + (direction === "down" ? 1 : -1);
+    if (previewAvailableAt(targetCursor) === false) {
+      cancelPreviewContinuation();
+      return;
+    }
+    continuation.queuedTargets.push(targetCursor);
+    previewReanchorPendingRef.current = true;
+  }, [cancelPreviewContinuation, panel.cursor, previewAvailableAt]);
+
+  useEffect(() => {
+    if (!previewContinuationActive) return;
+    const closeOnPointerDeparture = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      const anchor = previewTooltipRef.current?.activeAnchor;
+      const tooltip = document.getElementById(`file-inline-preview-${panelId}`);
+      if (anchor?.contains(target) || tooltip?.contains(target)) return;
+      cancelPreviewContinuation();
+    };
+    window.addEventListener("pointermove", closeOnPointerDeparture);
+    window.addEventListener("pointerdown", closeOnPointerDeparture);
+    return () => {
+      window.removeEventListener("pointermove", closeOnPointerDeparture);
+      window.removeEventListener("pointerdown", closeOnPointerDeparture);
+    };
+  }, [cancelPreviewContinuation, panelId, previewContinuationActive]);
+
+  useEffect(() => {
+    if (!isFocused || panel.viewMode !== "list") cancelPreviewContinuation();
+  }, [cancelPreviewContinuation, isFocused, panel.viewMode]);
+
+  useEffect(() => {
+    cancelPreviewContinuation();
+  }, [cancelPreviewContinuation, panel.path, panel.sourceId]);
+
+  useEffect(() => {
+    const continuation = previewContinuationRef.current;
+    if (!continuation || panel.cursor === continuation.acknowledgedCursor) return;
+    const targetIndex = continuation.queuedTargets.indexOf(panel.cursor);
+    const targetAvailable = previewAvailableAt(panel.cursor);
+    if (targetIndex < 0 || targetAvailable === false) {
+      cancelPreviewContinuation();
+      return;
+    }
+    if (targetAvailable === null) return;
+
+    continuation.acknowledgedCursor = panel.cursor;
+    continuation.queuedTargets.splice(0, targetIndex + 1);
+    if (previewReanchorFrameRef.current !== null) cancelAnimationFrame(previewReanchorFrameRef.current);
+    previewReanchorFrameRef.current = requestAnimationFrame(() => {
+      previewReanchorFrameRef.current = null;
+      const button = listRef.current?.querySelector<HTMLButtonElement>(
+        `[data-abs-index="${panel.cursor}"] [data-inline-operation="file.preview"]`,
+      );
+      const url = button?.getAttribute("data-preview-url");
+      if (!button || !url) {
+        cancelPreviewContinuation();
+        return;
+      }
+      const name = button.getAttribute("data-preview-name") ?? "File preview";
+      const panelSelector = CSS.escape(`panel-${panelId}`);
+      previewTooltipRef.current?.open({
+        anchorSelect: `[data-testid="${panelSelector}"] [data-abs-index="${panel.cursor}"] [data-inline-operation="file.preview"]`,
+        content: <PreviewTooltipImage key={url} url={url} name={name} />,
+      });
+    });
+  }, [cancelPreviewContinuation, panel.cursor, panelId, previewAvailableAt]);
+
+  useEffect(() => () => {
+    if (previewReanchorFrameRef.current !== null) cancelAnimationFrame(previewReanchorFrameRef.current);
+  }, []);
 
   const restorePanelFocus = useCallback(() => {
     // The dialog owns focus while it is open. Return it to the panel on the
@@ -1434,6 +1555,11 @@ export function Panel({
     if (command) {
       e.preventDefault();
       e.stopPropagation();
+      if (command.id === "panel.cursor.up" || command.id === "panel.cursor.down") {
+        armPreviewContinuation(command.id === "panel.cursor.up" ? "up" : "down");
+      } else if (previewContinuationRef.current) {
+        cancelPreviewContinuation();
+      }
       // A shortcut typed while focus sits on an inline toolbar button would
       // otherwise dangle: the command can move the cursor away and unmount
       // the very button holding focus, dropping keyboard control of the panel.
@@ -2378,6 +2504,7 @@ export function Panel({
       <Tooltip id={`git-inline-actions-${panelId}`} className="panel__git-tooltip panel__git-icon-tooltip" delayShow={180} place="bottom" border="1px solid var(--border-focus)" arrowColor="var(--bg-elev)" />
       <Tooltip id={`file-inline-actions-${panelId}`} className="panel__git-tooltip panel__git-icon-tooltip" delayShow={180} place="bottom" border="1px solid var(--border-focus)" arrowColor="var(--bg-elev)" />
       <Tooltip
+        ref={previewTooltipRef}
         id={`file-inline-preview-${panelId}`}
         className="panel__file-preview-tooltip"
         delayShow={220}
@@ -2385,6 +2512,15 @@ export function Panel({
         border="1px solid var(--border-focus)"
         arrowColor="var(--bg-elev)"
         opacity={1}
+        globalCloseEvents={{ escape: true }}
+        afterShow={() => {
+          previewReanchorPendingRef.current = false;
+        }}
+        afterHide={() => {
+          if (!previewReanchorPendingRef.current && !previewTooltipRef.current?.isOpen) {
+            cancelPreviewContinuation(false);
+          }
+        }}
         render={({ activeAnchor }) => {
           const previewUrl = activeAnchor?.getAttribute("data-preview-url");
           if (!previewUrl) return null;
