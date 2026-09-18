@@ -81,7 +81,14 @@ function renderText(bytes: Uint8Array): string {
 }
 
 function sanitizedMermaidSvg(svg: string): SVGElement | null {
-  const doc = new DOMParser().parseFromString(svg, "image/svg+xml");
+  // Mermaid serializes HTML inside foreignObject using HTML void-element
+  // syntax. In particular, state-diagram notes turn Markdown line breaks into
+  // <br>, which is valid HTML but leaves the element open when parsed as XML.
+  // Keep strict SVG/XML parsing by canonicalizing those breaks first.
+  const xmlSvg = svg.replace(/<br(\s[^>]*)?>/gi, tag =>
+    tag.endsWith("/>") ? tag : `${tag.slice(0, -1)}/>`
+  );
+  const doc = new DOMParser().parseFromString(xmlSvg, "image/svg+xml");
   if (doc.querySelector("parsererror")) return null;
   // Mermaid 11 renders flowchart node captions as sanitized HTML inside
   // foreignObject. Keep those containers or every node is left blank; their

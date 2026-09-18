@@ -61,6 +61,20 @@ export async function runViewerFlow(browser, observer) {
   fs.writeFileSync(hostPath(`${directory}/${pdfName}`), minimalPdf());
   const afterPdfName = "ZZ after PDF.txt";
   fs.writeFileSync(hostPath(`${directory}/${afterPdfName}`), "Viewer title follows navigation.\n");
+  const mermaidName = "ZZZ Mermaid state.md";
+  const mermaidMarkdown = `# Mermaid state diagram
+
+\`\`\`mermaid
+stateDiagram-v2
+    [*] --> PENDING : confirmed request,<br/>catalogue says invoiceAutomatically
+
+    note right of PENDING
+        ON_DEMAND mode only picks up rows
+        with released_at set.
+    end note
+\`\`\`
+`;
+  fs.writeFileSync(hostPath(`${directory}/${mermaidName}`), mermaidMarkdown);
 
   let hold = false;
   const held = new Set();
@@ -196,6 +210,25 @@ export async function runViewerFlow(browser, observer) {
       timeout: 10_000,
       label: "viewer window title after PDF navigation",
     });
+
+    await observer.waitForEntry("left", mermaidName);
+    const mermaidParams = new URLSearchParams({ viewer: "1", path: `${directory}/${mermaidName}`,
+      source: observer.state.panels.left.sourceId, name: mermaidName, label: "main", panel: "left",
+      local: "1", size: String(Buffer.byteLength(mermaidMarkdown)),
+      fsport: String(observer.state.fileServerPort) });
+    await browser.url(`${mainUrl.split("?")[0]}?${mermaidParams}`);
+    await browser.$(".viewer__mermaid svg").waitForDisplayed({ timeout: 15_000 });
+    const mermaidResult = await browser.execute(() => ({
+      diagrams: document.querySelectorAll(".viewer__mermaid svg").length,
+      rawBlocks: document.querySelectorAll("code.language-mermaid").length,
+      text: document.querySelector(".viewer__mermaid svg")?.textContent ?? "",
+    }));
+    if (mermaidResult.diagrams !== 1 || mermaidResult.rawBlocks !== 0
+      || !mermaidResult.text.includes("ON_DEMAND mode")
+      || !mermaidResult.text.includes("catalogue says")
+      || !mermaidResult.text.includes("invoiceAutomatically")) {
+      throw new Error(`Mermaid state diagram did not render correctly: ${JSON.stringify(mermaidResult)}`);
+    }
   } catch (error) {
     measurements.error = String(error);
     measurements.viewer = await browser.execute(() => ({
