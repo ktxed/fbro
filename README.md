@@ -45,6 +45,7 @@ Architecture and protocol live under [`spex/`](spex/):
 | [spec.md](spex/spec.md) | Overview |
 | [proto.md](spex/proto.md) | FE ↔ BE protocol |
 | [vfs.md](spex/vfs.md) | Virtual file system |
+| [sources.md](spex/sources.md) | Source hierarchy, lifecycles, and tab mapping |
 | [bro.md](spex/bro.md) | Bro processors |
 | [remote-fbro.md](spex/remote-fbro.md) | Peer remote |
 
