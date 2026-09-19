@@ -5,6 +5,14 @@ import { clickCommand, reloadBrowserApp } from "../browser.mjs";
 
 export async function runSearchFlow(browser, observer) {
   const aDst = backendPath("a", "dst");
+  const hostDst = hostPath(aDst);
+  fs.mkdirSync(hostDst, { recursive: true });
+  fs.writeFileSync(path.join(hostDst, "renamed.txt"), "root result\n");
+  for (const directory of ["hint-one", "hint-two"]) {
+    fs.mkdirSync(path.join(hostDst, directory), { recursive: true });
+    fs.writeFileSync(path.join(hostDst, directory, "renamed.txt"), `${directory}\n`);
+  }
+  fs.writeFileSync(path.join(hostDst, "uniquely-renamed.txt"), "unique result\n");
   observer.navigatePanelToPath("left", aDst);
   await observer.waitForPanelPath("left", aDst);
   await observer.waitForPanelNotShadow("left");
@@ -45,7 +53,7 @@ export async function runSearchFlow(browser, observer) {
   if ((await browser.$$('[data-modal-state="top"]')).length !== 1) {
     throw new Error("Search modal was not the sole active modal layer");
   }
-  await input.setValue("renamed.txt");
+  await input.setValue("*renamed*");
   await clickCommand(browser, "search.start");
   await clickCommand(browser, "search.to-results");
   await observer.waitForSearchResultsMounted("left");
@@ -63,6 +71,28 @@ export async function runSearchFlow(browser, observer) {
     throw new Error("Quick filter bar remained visible after mounting search results");
   }
   await observer.waitForEntry("left", "renamed.txt", "file");
+  await observer.waitForEntry("left", "uniquely-renamed.txt", "file");
+  await browser.waitUntil(async () => {
+    const hints = await browser.execute(() => Array.from(
+      document.querySelectorAll('[data-testid="panel-left"] [data-entry-name="renamed.txt"]')
+    ).map((row) => row.querySelector('[data-testid="path-hint"]')?.textContent?.trim() ?? ""));
+    if (hints.length !== 3) return false;
+    return hints.every(Boolean)
+      && hints.some((hint) => hint.includes("hint-one"))
+      && hints.some((hint) => hint.includes("hint-two"));
+  }, {
+    timeout: 10_000,
+    timeoutMsg: "Duplicate search results did not receive distinguishing path hints",
+  });
+  const uniqueHint = await browser.$('[data-testid="panel-left"] [data-entry-name="uniquely-renamed.txt"] [data-testid="path-hint"]');
+  if (await uniqueHint.isExisting()) {
+    throw new Error("Unique search result unexpectedly received a path hint");
+  }
+  const hintedRow = await browser.$('[data-testid="panel-left"] [data-entry-name="renamed.txt"]');
+  const hintedRowTitle = await hintedRow.getAttribute("title");
+  if (!hintedRowTitle?.endsWith("/renamed.txt")) {
+    throw new Error(`Duplicate search result did not expose its full path as a tooltip: ${hintedRowTitle}`);
+  }
   await browser.waitUntil(async () => {
     const dateCell = await browser.$('[data-testid="panel-left"] [data-entry-name="renamed.txt"] .panel__mtime');
     if (!await dateCell.isExisting()) return false;

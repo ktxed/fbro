@@ -2135,6 +2135,7 @@ export function Panel({
         data-abs-index={absIndex}
         data-entry-name={entry.name}
         data-entry-kind={entry.kind}
+        title={entry.pathHint ? entry.sourcePath : undefined}
         className={[
           "panel__row",
           (absIndex + (panel.zebraPhase ?? 0)) % 2 === 1 ? "panel__row--alt" : "",
@@ -2230,6 +2231,12 @@ export function Panel({
             <span className={`panel__name${colorClass ? ` ${colorClass}` : ""}`}>
               <span className="panel__name-base">{base}</span>
               {ext && <span className="panel__name-ext">{ext}</span>}
+              {entry.pathHint && (
+                <span className="panel__path-hint" data-testid="path-hint">
+                  <span className="panel__path-hint-separator">·</span>
+                  {entry.pathHint}
+                </span>
+              )}
               {restricted && (
                 <button
                   type="button"

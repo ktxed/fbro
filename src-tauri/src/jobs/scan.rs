@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
@@ -11,6 +12,95 @@ use crate::ws::protocol::{EntrySchema, FileOpFileSchema, FilterSpec, ServerMessa
 const BATCH_SIZE: usize = 50;
 pub const WINDOWED_THRESHOLD: usize = 1500;
 pub const INITIAL_WINDOW_SIZE: usize = 200;
+
+fn normalized_parent(path: &str) -> String {
+    let normalized = path.replace('\\', "/");
+    match normalized.rsplit_once('/') {
+        Some(("", _)) => "/".to_string(),
+        Some((parent, _)) => parent.trim_end_matches('/').to_string(),
+        None => ".".to_string(),
+    }
+}
+
+fn parent_components(parent: &str) -> Vec<&str> {
+    parent
+        .split('/')
+        .filter(|component| !component.is_empty())
+        .collect()
+}
+
+fn suffix_key(parent: &str, depth: usize) -> String {
+    let components = parent_components(parent);
+    if components.is_empty() {
+        return parent.to_string();
+    }
+    components[components.len().saturating_sub(depth)..].join("/")
+}
+
+fn display_parent_suffix(parent: &str, depth: usize) -> String {
+    let components = parent_components(parent);
+    if components.is_empty() {
+        return parent.to_string();
+    }
+    if depth >= components.len() {
+        return parent.to_string();
+    }
+    format!("…/{}", components[components.len() - depth..].join("/"))
+}
+
+/// Decorate exact-name duplicate groups with the shortest parent suffix that
+/// distinguishes each entry. This runs before window slicing, so hints remain
+/// correct even when another duplicate is outside the visible frontend slice.
+fn add_duplicate_path_hints(entries: &mut [EntrySchema]) {
+    let mut groups: HashMap<String, Vec<usize>> = HashMap::new();
+    for (index, entry) in entries.iter().enumerate() {
+        groups.entry(entry.name.clone()).or_default().push(index);
+    }
+
+    for indices in groups.values().filter(|indices| indices.len() > 1) {
+        let parents: Vec<String> = indices
+            .iter()
+            .map(|&index| {
+                entries[index]
+                    .source_path
+                    .as_deref()
+                    .map(normalized_parent)
+                    .unwrap_or_else(|| ".".to_string())
+            })
+            .collect();
+        let max_depth = parents
+            .iter()
+            .map(|parent| parent_components(parent).len().max(1))
+            .max()
+            .unwrap_or(1);
+        let mut unique_depths = vec![None; parents.len()];
+
+        for depth in 1..=max_depth {
+            let keys: Vec<String> = parents
+                .iter()
+                .map(|parent| suffix_key(parent, depth))
+                .collect();
+            let mut counts: HashMap<&str, usize> = HashMap::new();
+            for key in &keys {
+                *counts.entry(key.as_str()).or_default() += 1;
+            }
+            for (index, key) in keys.iter().enumerate() {
+                if unique_depths[index].is_none() && counts.get(key.as_str()) == Some(&1) {
+                    unique_depths[index] = Some(depth);
+                }
+            }
+        }
+
+        for (group_index, &entry_index) in indices.iter().enumerate() {
+            let fallback_depth = parent_components(&parents[group_index]).len().max(1);
+            let depth = unique_depths[group_index].unwrap_or(fallback_depth);
+            entries[entry_index].path_hint = Some(display_parent_suffix(
+                &parents[group_index],
+                depth,
+            ));
+        }
+    }
+}
 
 async fn send_atomic_panel_patch(
     state: &SharedState,
@@ -368,10 +458,15 @@ pub async fn run_scan(
             icon_name: e.icon_name,
             cc: e.cc,
             source_path: e.source_path,
+            path_hint: None,
             git_status: None,
             git_details: None,
         })
         .collect();
+
+    if crate::ws::intents::is_search_source(&source_id) {
+        add_duplicate_path_hints(&mut schema_entries);
+    }
 
     let git_status = if driver.is_local() {
         let path = path.clone();
@@ -745,6 +840,7 @@ mod tests {
             icon_name: None,
             cc: None,
             source_path: None,
+            path_hint: None,
             git_status: None,
             git_details: None,
         }
@@ -752,6 +848,91 @@ mod tests {
 
     fn entries(names: &[&str]) -> Vec<EntrySchema> {
         names.iter().map(|name| entry(name)).collect()
+    }
+
+    fn entry_at(name: &str, source_path: &str) -> EntrySchema {
+        EntrySchema {
+            source_path: Some(source_path.to_string()),
+            ..entry(name)
+        }
+    }
+
+    #[test]
+    fn path_hints_are_only_added_to_exact_name_duplicates() {
+        let mut entries = vec![
+            entry_at("README.md", "/work/alpha/README.md"),
+            entry_at("README.md", "/work/beta/README.md"),
+            entry_at("readme.md", "/work/gamma/readme.md"),
+            entry_at("unique.txt", "/work/alpha/unique.txt"),
+        ];
+
+        add_duplicate_path_hints(&mut entries);
+
+        assert_eq!(entries[0].path_hint.as_deref(), Some("…/alpha"));
+        assert_eq!(entries[1].path_hint.as_deref(), Some("…/beta"));
+        assert_eq!(entries[2].path_hint, None);
+        assert_eq!(entries[3].path_hint, None);
+    }
+
+    #[test]
+    fn path_hints_expand_through_shared_parent_suffixes() {
+        let mut entries = vec![
+            entry_at("README.md", "/home/one/project/docs/README.md"),
+            entry_at("README.md", "/srv/two/project/docs/README.md"),
+        ];
+
+        add_duplicate_path_hints(&mut entries);
+
+        assert_eq!(entries[0].path_hint.as_deref(), Some("…/one/project/docs"));
+        assert_eq!(entries[1].path_hint.as_deref(), Some("…/two/project/docs"));
+    }
+
+    #[test]
+    fn path_hints_normalize_windows_separators() {
+        let mut entries = vec![
+            entry_at("README.md", r"C:\Users\alice\README.md"),
+            entry_at("README.md", r"C:\Users\bob\README.md"),
+        ];
+
+        add_duplicate_path_hints(&mut entries);
+
+        assert_eq!(entries[0].path_hint.as_deref(), Some("…/alice"));
+        assert_eq!(entries[1].path_hint.as_deref(), Some("…/bob"));
+    }
+
+    #[test]
+    fn path_hints_fall_back_to_the_full_parent_when_paths_match() {
+        let mut entries = vec![
+            entry_at("README.md", "/work/project/README.md"),
+            entry_at("README.md", "/work/project/README.md"),
+        ];
+
+        add_duplicate_path_hints(&mut entries);
+
+        assert_eq!(entries[0].path_hint.as_deref(), Some("/work/project"));
+        assert_eq!(entries[1].path_hint.as_deref(), Some("/work/project"));
+    }
+
+    #[test]
+    fn path_hints_consider_duplicates_beyond_the_window_threshold() {
+        let mut entries: Vec<EntrySchema> = (0..=WINDOWED_THRESHOLD)
+            .map(|index| {
+                entry_at(
+                    &format!("item-{index}.txt"),
+                    &format!("/work/{index}/item-{index}.txt"),
+                )
+            })
+            .collect();
+        entries[0] = entry_at("README.md", "/work/first/README.md");
+        entries[WINDOWED_THRESHOLD] = entry_at("README.md", "/work/last/README.md");
+
+        add_duplicate_path_hints(&mut entries);
+
+        assert_eq!(entries[0].path_hint.as_deref(), Some("…/first"));
+        assert_eq!(
+            entries[WINDOWED_THRESHOLD].path_hint.as_deref(),
+            Some("…/last")
+        );
     }
 
     #[test]

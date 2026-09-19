@@ -1453,6 +1453,26 @@ body {
   color: inherit;
 }
 
+.panel__path-hint {
+  flex: 0 10 auto;
+  min-width: 0;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-dim);
+}
+
+.panel__path-hint-separator {
+  padding: 0 0.55em;
+}
+
+.panel__row--cursor .panel__path-hint,
+.panel__row--selected .panel__path-hint {
+  color: inherit;
+  opacity: 0.72;
+}
+
 .panel__name-warn {
   flex: 0 0 auto;
   align-self: center;

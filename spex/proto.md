@@ -295,6 +295,7 @@ Notes:
 * Entries MAY arrive incrementally
 * BE controls ordering
 * FE MUST NOT re-sort
+* Flat virtual listings MAY include `sourcePath` plus an optional `pathHint`; search results use `pathHint` only for exact-name duplicates and compute it from the complete result set before window slicing.
 
 ---
 

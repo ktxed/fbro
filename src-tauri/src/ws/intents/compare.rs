@@ -1007,6 +1007,7 @@ mod tests {
             icon_name: None,
             cc: None,
             source_path: source_path.map(str::to_string),
+            path_hint: None,
             git_status: None,
             git_details: None,
         }

@@ -668,6 +668,11 @@ pub struct EntrySchema {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(rename = "sourcePath")]
     pub source_path: Option<String>,
+    /// Compact parent-path context for entries whose names are ambiguous in a
+    /// flat virtual listing (currently duplicate search results only).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "pathHint")]
+    pub path_hint: Option<String>,
     #[serde(rename = "gitStatus", skip_serializing_if = "Option::is_none")]
     pub git_status: Option<String>,
     #[serde(rename = "gitDetails", skip_serializing_if = "Option::is_none")]

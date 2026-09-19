@@ -15,6 +15,8 @@ export interface VFSEntry {
   /** Real absolute path when the entry's logical name differs from its filesystem
    *  path (e.g. search-result entries). Absent for all normal entries. */
   sourcePath?: string;
+  /** Compact parent-path context for ambiguous names in flat virtual listings. */
+  pathHint?: string;
   gitStatus?: string;
   gitDetails?: {
     changedCount: number;

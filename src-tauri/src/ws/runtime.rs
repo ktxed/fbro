@@ -1336,6 +1336,7 @@ pub(crate) async fn update_panel_from_patch(
                         icon_name: entry["iconName"].as_str().map(String::from),
                         cc: entry["cc"].as_str().map(String::from),
                         source_path: entry["sourcePath"].as_str().map(String::from),
+                        path_hint: entry["pathHint"].as_str().map(String::from),
                         git_status: entry["gitStatus"].as_str().map(String::from),
                         git_details: entry.get("gitDetails").and_then(|value| serde_json::from_value(value.clone()).ok()),
                     });
