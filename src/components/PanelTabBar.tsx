@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { IconChevronLeft, IconChevronRight, IconTerminal2, IconX } from "@tabler/icons-react";
 import type { PanelSlot, PanelState } from "../ws/types";
 import type { WsClient } from "../ws/client";
+import { isSearchSourceId } from "../utils/sourceId";
 
 const MAX_TAB_CHARS = 18;
 
@@ -12,6 +13,7 @@ function tabTitle(panel: PanelState | undefined): string {
     const base = basename(panel.path) || "~";
     return base;
   }
+  if (isSearchSourceId(panel.sourceId)) return panel.sourceId;
   return basename(panel.path) || "/";
 }
 
@@ -119,11 +121,14 @@ export function PanelTabBar({ slot, panels, client }: Props) {
           const title = tabTitle(panel);
           const displayed =
             title.length > MAX_TAB_CHARS ? title.slice(0, MAX_TAB_CHARS - 1) + "…" : title;
+          const tooltip = panel && isSearchSourceId(panel.sourceId)
+            ? title
+            : panel?.path ?? title;
           return (
             <div
               key={panelId}
               className={`panel__tab${isActive ? " panel__tab--active" : ""}`}
-              title={panel?.path ?? title}
+              title={tooltip}
               onClick={() => switchTo(panelId)}
               onAuxClick={(e) => {
                 if (e.button === 1) {
