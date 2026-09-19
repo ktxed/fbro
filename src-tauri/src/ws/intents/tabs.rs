@@ -31,6 +31,22 @@ fn alloc_panel_id(slot_id: &str, existing: &HashSet<String>) -> String {
     }
 }
 
+fn can_clone_active_tab(
+    tab_kind: TabKind,
+    source_kind: Option<&str>,
+    source_mounted: bool,
+    source_shadow: bool,
+    has_shadow_context: bool,
+    driver_is_local: bool,
+) -> bool {
+    tab_kind == TabKind::Listing
+        && source_kind == Some("filesystem")
+        && source_mounted
+        && !source_shadow
+        && !has_shadow_context
+        && driver_is_local
+}
+
 /// Emit the targeted patches needed when a slot's membership (and possibly the
 /// set of known panels) changes. Avoids re-serializing every panel's entries
 /// like a full snapshot would.
@@ -149,22 +165,46 @@ async fn new_tab(args: &Value, ctx: &mut IntentContext<'_>) {
         Some(s) => s.to_string(),
         None => return,
     };
-    // Optional: caller can supply a specific panel to clone from (e.g. the
-    // leftmost non-terminal tab when double-clicking empty tab-bar space).
-    let base_panel_id = args
-        .get("basePanelId")
-        .and_then(Value::as_str)
-        .map(str::to_string);
-
-    // Clone the requested (or active) tab's source/path/view defaults to seed the new panel.
-    let (new_panel, driver, supports_thumbs, sort, filter, show_hidden, version) = {
+    // Clone local filesystem listings. Virtual, remote, and terminal tabs do
+    // not carry a safe filesystem context to duplicate, so they seed at Home.
+    let (new_panel, driver, sort, filter, show_hidden, version) = {
         let mut state_guard = ctx.state.lock().await;
 
         let Some(slot) = state_guard.slots.get(&slot_id).cloned() else {
             return;
         };
-        let source_id = base_panel_id.unwrap_or_else(|| slot.active_panel_id.clone());
-        let Some(source) = state_guard.panels.get(&source_id).cloned() else {
+        let Some(source) = state_guard.panels.get(&slot.active_panel_id).cloned() else {
+            return;
+        };
+
+        let active_source = state_guard.sources.get(&source.source_id);
+        let active_driver = state_guard.drivers.get(&source.source_id);
+        let clone_active = can_clone_active_tab(
+            source.tab_kind,
+            active_source.map(|item| item.kind.as_str()),
+            active_source.map(|item| item.mounted).unwrap_or(false),
+            active_source.map(|item| item.shadow).unwrap_or(true),
+            source.shadow_source.is_some(),
+            active_driver.map(|item| item.is_local()).unwrap_or(false),
+        );
+
+        let mut source_paths = source.source_paths.clone();
+        let (new_source_id, new_path, git) = if clone_active {
+            (
+                source.source_id.clone(),
+                source.path.clone(),
+                source.git.clone(),
+            )
+        } else {
+            let home = state_guard.platform.home_dir();
+            let Some(home_source_id) = state_guard.fallback_source_id_for_home() else {
+                return;
+            };
+            source_paths.insert(home_source_id.clone(), home.clone());
+            (home_source_id, home, None)
+        };
+
+        let Some(driver) = state_guard.drivers.get(&new_source_id).cloned() else {
             return;
         };
 
@@ -176,8 +216,8 @@ async fn new_tab(args: &Value, ctx: &mut IntentContext<'_>) {
             slot_id: slot_id.clone(),
             tab_kind: TabKind::Listing,
             tab_title_override: None,
-            source_id: source.source_id.clone(),
-            path: source.path.clone(),
+            source_id: new_source_id,
+            path: new_path,
             status: PanelStatus::Loading,
             sort: source.sort.clone(),
             filter: None,
@@ -194,17 +234,13 @@ async fn new_tab(args: &Value, ctx: &mut IntentContext<'_>) {
             window_start: 0,
             window_count: 0,
             window_version: 0,
-            source_paths: source.source_paths.clone(),
+            source_paths,
             shadow_source: None,
             terminal_session: None,
-            git: source.git.clone(),
+            git,
         };
 
-        let driver = state_guard.drivers.get(&source.source_id).cloned();
-        let supports_thumbs = driver
-            .as_ref()
-            .map(|d| d.supports_thumbnails())
-            .unwrap_or(false);
+        let supports_thumbs = driver.supports_thumbnails();
 
         // Adjust view if the cloned source doesn't support thumbnails.
         let mut new_panel = new_panel;
@@ -215,7 +251,6 @@ async fn new_tab(args: &Value, ctx: &mut IntentContext<'_>) {
         let sort = new_panel.sort.clone();
         let filter = new_panel.filter.clone();
         let show_hidden = new_panel.show_hidden;
-        let path = new_panel.path.clone();
         let version = new_panel.version;
 
         // Insert panel + update slot.
@@ -235,16 +270,7 @@ async fn new_tab(args: &Value, ctx: &mut IntentContext<'_>) {
         // Move focus to the newly created tab.
         state_guard.focus = new_panel_id.clone();
 
-        let _ = path; // path captured inside `new_panel.path` already
-        (
-            new_panel,
-            driver,
-            supports_thumbs,
-            sort,
-            filter,
-            show_hidden,
-            version,
-        )
+        (new_panel, driver, sort, filter, show_hidden, version)
     };
 
     broadcast_slot_change(
@@ -256,33 +282,30 @@ async fn new_tab(args: &Value, ctx: &mut IntentContext<'_>) {
     .await;
 
     // Kick off the scan for the new tab so its listing populates.
-    if let Some(driver) = driver {
-        let _ = supports_thumbs;
-        let handle = tokio::spawn(run_scan(
-            new_panel.panel_id.clone(),
-            new_panel.source_id.clone(),
-            new_panel.panel_epoch,
-            new_panel.path.clone(),
-            sort,
-            filter,
-            version,
-            ctx.tx.clone(),
-            driver,
-            None,
-            None,
-            None,
-            Arc::clone(ctx.state),
-            Arc::clone(ctx.dir_size_queue),
-            false,
-            show_hidden,
-            ctx.watcher_cmd_tx.clone(),
-            true,
-        ));
-        ctx.scan_handles.insert(
-            new_panel.panel_id.clone(),
-            crate::jobs::ScanHandle { handle },
-        );
-    }
+    let handle = tokio::spawn(run_scan(
+        new_panel.panel_id.clone(),
+        new_panel.source_id.clone(),
+        new_panel.panel_epoch,
+        new_panel.path.clone(),
+        sort,
+        filter,
+        version,
+        ctx.tx.clone(),
+        driver,
+        None,
+        None,
+        None,
+        Arc::clone(ctx.state),
+        Arc::clone(ctx.dir_size_queue),
+        false,
+        show_hidden,
+        ctx.watcher_cmd_tx.clone(),
+        true,
+    ));
+    ctx.scan_handles.insert(
+        new_panel.panel_id.clone(),
+        crate::jobs::ScanHandle { handle },
+    );
 }
 
 async fn close_tab(args: &Value, ctx: &mut IntentContext<'_>) {
@@ -568,4 +591,69 @@ async fn switch_tab(args: &Value, ctx: &mut IntentContext<'_>) {
     }
 
     crate::ws::intents::git::refresh_panel_git_status(&panel_id, ctx).await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::can_clone_active_tab;
+    use crate::state::TabKind;
+
+    #[test]
+    fn local_filesystem_listing_is_cloneable() {
+        assert!(can_clone_active_tab(
+            TabKind::Listing,
+            Some("filesystem"),
+            true,
+            false,
+            false,
+            true,
+        ));
+    }
+
+    #[test]
+    fn non_physical_tabs_fall_back_to_home() {
+        for (tab_kind, source_kind, source_shadow, has_shadow_context, driver_is_local) in [
+            (TabKind::Listing, Some("virtual"), true, true, false),
+            (TabKind::Listing, Some("remote"), false, false, false),
+            (TabKind::Terminal, Some("filesystem"), false, false, true),
+            (TabKind::Listing, Some("filesystem"), false, true, true),
+        ] {
+            assert!(!can_clone_active_tab(
+                tab_kind,
+                source_kind,
+                true,
+                source_shadow,
+                has_shadow_context,
+                driver_is_local,
+            ));
+        }
+    }
+
+    #[test]
+    fn unavailable_or_non_local_filesystem_falls_back_to_home() {
+        assert!(!can_clone_active_tab(
+            TabKind::Listing,
+            Some("filesystem"),
+            false,
+            false,
+            false,
+            true,
+        ));
+        assert!(!can_clone_active_tab(
+            TabKind::Listing,
+            Some("filesystem"),
+            true,
+            false,
+            false,
+            false,
+        ));
+        assert!(!can_clone_active_tab(
+            TabKind::Listing,
+            None,
+            true,
+            false,
+            false,
+            true,
+        ));
+    }
 }

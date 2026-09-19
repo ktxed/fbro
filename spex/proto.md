@@ -256,7 +256,7 @@ Slot patches use `domain: "slots"`. Patch payloads:
 
 | Intent | Args | Behavior |
 |---|---|---|
-| `panel.tab.new` | `{ slotId, source: "clone" }` | Creates a new tab in the slot, cloning the active tab's source+path; inserts after the active tab and activates it. |
+| `panel.tab.new` | `{ slotId, source: "clone" }` | Creates a new tab after the active tab and activates it; clones an active local filesystem listing, otherwise opens the user's Home directory. |
 | `panel.tab.close` | `{ panelId }` | Closes the tab; activates the tab to its left. No-op when this is the slot's only tab. |
 | `panel.tab.switch` | `{ slotId, panelId }` | Activates `panelId` within `slotId`. |
 | `panel.tab.rename` | `{ panelId, title }` | Sets `tabTitle` override (FUTURE — protocol only). |

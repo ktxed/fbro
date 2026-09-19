@@ -84,7 +84,7 @@ stateDiagram-v2
 
 ### 3.2 New tab (`panel.tab.new`)
 
-1. Clone the active panel's `source_id` and `path`.
+1. If the active panel is a local filesystem listing, clone its `source_id` and `path`; otherwise use the local source containing the user's Home directory and start at Home.
 2. Allocate a new panel id; insert it after the active tab in `tab_panel_ids`.
 3. Set `active_panel_id` to the new panel id; update `focus`.
 4. Emit targeted patches: `panel-upsert` (create:true), `slot`, `layout`, `focus`.
@@ -198,12 +198,12 @@ These bindings are **panel-scoped**: they fire only when a panel listing has foc
 
 | Command | Default binding | Behavior |
 |---|---|---|
-| `panel.tab.new` | Ctrl/Cmd+T | New tab (clone of current source+path) |
+| `panel.tab.new` | Ctrl/Cmd+T | New tab (clone active local listing; otherwise open Home) |
 | `panel.tab.close` | Ctrl/Cmd+W | Close active tab; no-op on last tab |
 | `panel.tab.next` | Shift+K | Activate next tab (wraps) |
 | `panel.tab.prev` | Shift+J | Activate previous tab (wraps) |
 
-Middle-click on a tab chip also closes it. Double-clicking on **empty space** in the tab bar creates a new tab cloned from the leftmost non-terminal tab (falls back to the leftmost tab if all tabs are terminal tabs).
+Middle-click on a tab chip also closes it. Double-clicking on **empty space** in the tab bar uses the same New Tab behavior as Ctrl/Cmd+T: clone the active local filesystem listing, or open Home when the active tab is virtual, remote, or terminal.
 
 ---
 

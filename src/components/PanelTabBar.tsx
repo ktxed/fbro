@@ -84,14 +84,10 @@ export function PanelTabBar({ slot, panels, client }: Props) {
     client.sendIntent("panel.tab.close", undefined, { panelId });
   };
 
-  const newTabFromLeftmost = () => {
-    const basePanelId =
-      slot.tabPanelIds.find((id) => panels[id]?.tabKind !== "terminal") ??
-      slot.tabPanelIds[0];
+  const newTabFromActive = () => {
     client.sendIntent("panel.tab.new", undefined, {
       slotId: slot.slotId,
       source: "clone",
-      basePanelId,
     });
   };
 
@@ -114,7 +110,7 @@ export function PanelTabBar({ slot, panels, client }: Props) {
         ref={listRef}
         onScroll={updateArrows}
         onDoubleClick={(e) => {
-          if (e.target === e.currentTarget) newTabFromLeftmost();
+          if (e.target === e.currentTarget) newTabFromActive();
         }}
       >
         {slot.tabPanelIds.map((panelId) => {
