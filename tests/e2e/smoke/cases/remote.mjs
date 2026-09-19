@@ -9,6 +9,7 @@ import {
   confirmOperation,
   doubleClickEntry,
   expectCheckboxSelected,
+  pressWindowKey,
   reloadBrowserApp,
 } from "../browser.mjs";
 import { waitFor } from "../wait.mjs";
@@ -77,15 +78,51 @@ export async function runRemoteFlow(browserA, observerA, browserB, observerB) {
   await waitFor(() => observerA.state.shareConfig.enabled, { timeout: 20_000, label: "fbro-a sharing enabled" });
   await waitFor(() => observerB.state.shareConfig.enabled, { timeout: 20_000, label: "fbro-b sharing enabled" });
 
-  observerB.sendIntent("StartPairing", undefined, { address: "fbro-a:7880" });
+  await pressWindowKey(browserB, ",", { ctrl: true });
+  const settingsB = await browserB.$('[data-modal-id="settings"]');
+  await settingsB.waitForDisplayed({ timeout: 10_000 });
+  await (await browserB.$('[data-testid="settings-tab-sharing"]')).click();
+  await (await browserB.$('[data-testid="direct-pair-address"]')).setValue("fbro-a:7880");
+  await (await browserB.$('[data-command-id="sharing.pair-direct"]')).click();
+
+  const settingsA = await browserA.$('[data-modal-id="settings"]');
+  await settingsA.waitForDisplayed({ timeout: 20_000 });
+  const confirmations = await Promise.all([
+    browserA.$('[data-testid="pairing-confirmation"]'),
+    browserB.$('[data-testid="pairing-confirmation"]'),
+  ]);
+  await Promise.all(confirmations.map((confirmation) => confirmation.waitForDisplayed({ timeout: 20_000 })));
+  for (const browser of [browserA, browserB]) {
+    const placementCorrect = await browser.execute(() => {
+      const confirmation = document.querySelector('[data-testid="pairing-confirmation"]');
+      if (!(confirmation instanceof HTMLElement)) return false;
+      const fingerprint = confirmation.dataset.peerFingerprint;
+      const matchingPeer = [...document.querySelectorAll('[data-peer-id]')]
+        .find((row) => row instanceof HTMLElement && row.dataset.peerFingerprint === fingerprint);
+      if (matchingPeer) return matchingPeer.contains(confirmation);
+      return document.querySelector('[data-testid="direct-pair-card"]')?.contains(confirmation) ?? false;
+    });
+    if (!placementCorrect) throw new Error("pairing confirmation was not placed with its peer or direct-pair fallback");
+    if (await browser.$('[data-modal-id="pairing"]').isExisting()) {
+      throw new Error("legacy pairing modal is still present");
+    }
+  }
   await Promise.all([
-    observerA.confirmPairingRequests(),
-    observerB.confirmPairingRequests(),
+    browserA.$('[data-command-id="pairing.confirm"]').then((button) => button.click()),
+    browserB.$('[data-command-id="pairing.confirm"]').then((button) => button.click()),
   ]);
   await waitFor(() => observerB.state.shareConfig.pairedPeers?.length > 0, {
     timeout: 20_000,
     label: "fbro-b paired peer",
   });
+  if (!(await settingsA.isDisplayed()) || !(await settingsB.isDisplayed())) {
+    throw new Error("Sharing settings did not remain open after pairing resolved");
+  }
+  await Promise.all([browserA.keys("Escape"), browserB.keys("Escape")]);
+  await Promise.all([
+    settingsA.waitForDisplayed({ timeout: 10_000, reverse: true }),
+    settingsB.waitForDisplayed({ timeout: 10_000, reverse: true }),
+  ]);
   const fingerprint = observerB.state.shareConfig.pairedPeers[0].fingerprint;
   observerB.sendIntent("RetryLastPeer", undefined, { fingerprint });
   await waitFor(() => Object.values(observerB.state.sources).some((source) => source.kind === "remote"), {

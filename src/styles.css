@@ -5571,6 +5571,77 @@ body {
   opacity: 0.58;
 }
 
+.sharing-peer--pairing {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.pairing-confirmation {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+  margin-top: 2px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 58%, var(--border));
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--accent) 12%, transparent), transparent 55%),
+    var(--bg-input);
+}
+
+.sharing-card--pair > .pairing-confirmation {
+  margin: 12px 14px 0;
+}
+
+.pairing-confirmation__copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 3px;
+  color: var(--text-dim);
+  line-height: 1.35;
+}
+
+.pairing-confirmation__copy strong {
+  color: var(--text);
+}
+
+.pairing-confirmation__warning {
+  color: var(--text-warning);
+  font-size: calc(var(--font-size) - 1px);
+}
+
+.pairing-confirmation__code {
+  padding: 7px 10px;
+  border: 1px solid var(--border-focus);
+  border-radius: 7px;
+  background: var(--bg-panel);
+  color: var(--text-path);
+  font-family: var(--font-mono, monospace);
+  font-size: calc(var(--font-size) + 8px);
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  white-space: nowrap;
+}
+
+.pairing-confirmation__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px;
+}
+
+.pairing-confirmation__timer,
+.pairing-confirmation__status {
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.pairing-confirmation__status {
+  color: var(--text-path);
+}
+
 .sharing-peer__avatar {
   display: grid;
   place-items: center;
@@ -5745,8 +5816,13 @@ body {
 
   .sharing-hero,
   .sharing-pair-row,
-  .sharing-peer {
+  .sharing-peer,
+  .pairing-confirmation {
     grid-template-columns: 1fr;
+  }
+
+  .pairing-confirmation__actions {
+    justify-content: flex-start;
   }
 
   .sharing-stats {

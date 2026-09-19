@@ -434,6 +434,7 @@ export type AppAction =
   | { type: "CLOSE_ATTRIBUTES" }
   | { type: "OPEN_SETTINGS"; tab: SettingsTab }
   | { type: "CLOSE_SETTINGS" }
+  | { type: "SET_PAIRING_DECISION"; handshakeId: string; accept: boolean }
   | { type: "SET_MAXIMIZED_TERMINAL"; panelId: string | null };
 
 // ─── Reducer ─────────────────────────────────────────────────────────────────
@@ -1602,13 +1603,16 @@ function reducer(state: AppState, action: AppAction): AppState {
         case "PairingRequested":
           return {
             ...state,
+            pendingSettings: { activeTab: "sharing" },
             pendingPairing: {
               handshakeId: msg.handshakeId,
               code: msg.code,
               name: msg.name,
               os: msg.os,
               pubkeyAlgo: msg.pubkeyAlgo,
+              peerFingerprint: msg.peerFingerprint,
               expiresAt: msg.expiresAt,
+              localDecision: null,
             },
           };
         case "PairingResolved":
@@ -1718,6 +1722,12 @@ function reducer(state: AppState, action: AppAction): AppState {
       return { ...state, pendingSettings: { activeTab: action.tab }, pendingContextMenu: null };
     case "CLOSE_SETTINGS":
       return { ...state, pendingSettings: null };
+    case "SET_PAIRING_DECISION":
+      if (state.pendingPairing?.handshakeId !== action.handshakeId) return state;
+      return {
+        ...state,
+        pendingPairing: { ...state.pendingPairing, localDecision: action.accept },
+      };
     case "SET_MAXIMIZED_TERMINAL":
       storeMaximizedTerminalPanelId(action.panelId);
       return { ...state, maximizedTerminalPanelId: action.panelId };

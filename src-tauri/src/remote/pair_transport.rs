@@ -322,6 +322,7 @@ where
             name: their_name.clone(),
             os: their_os.clone(),
             pubkey_algo: "ssh-ed25519".to_string(),
+            peer_fingerprint: their_fp.clone(),
             expires_at,
         },
     )

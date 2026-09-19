@@ -5,6 +5,7 @@ import type { WsClient } from "../ws/client";
 import type { SharedRoot } from "../ws/types";
 import { useInputHistory } from "../hooks/useInputHistory";
 import { InputHistoryDropdown } from "./InputHistoryDropdown";
+import { PairingConfirmation } from "./PairingConfirmation";
 
 interface SettingsSharingTabProps {
   client: WsClient;
@@ -113,6 +114,10 @@ export function SettingsSharingTab({ client }: SettingsSharingTabProps) {
   const state = useAppState();
   const share = state.shareConfig;
   const discovered = state.discoveredPeers;
+  const pairing = state.pendingPairing;
+  const pairingPeerId = pairing
+    ? discovered.find((peer) => peer.pubkeyFp === pairing.peerFingerprint)?.id
+    : undefined;
   const shareTargets = mergeShareTargets(share.sharedRoots, share.shareSuggestions);
   const sharedSet = new Set(share.sharedRoots.map((root) => root.id));
   const sourceTargets = shareTargets.filter((target) => target.origin === "source");
@@ -187,6 +192,7 @@ export function SettingsSharingTab({ client }: SettingsSharingTabProps) {
   };
 
   const pair = (peerId: string) => {
+    if (pairing) return;
     client.sendIntent("StartPairing", undefined, { peerId });
   };
 
@@ -194,6 +200,7 @@ export function SettingsSharingTab({ client }: SettingsSharingTabProps) {
   const pairHistory = useInputHistory("sharing.pair", setDirectPairAddress);
 
   const pairDirect = () => {
+    if (pairing) return;
     const address = directPairAddress.trim();
     if (!address) return;
     pairHistory.addToHistory(directPairAddress);
@@ -463,7 +470,9 @@ export function SettingsSharingTab({ client }: SettingsSharingTabProps) {
               return (
                 <li
                   key={p.id}
-                  className={`sharing-peer${stale ? " sharing-peer--stale" : ""}`}
+                  className={`sharing-peer${stale && pairingPeerId !== p.id ? " sharing-peer--stale" : ""}${pairingPeerId === p.id ? " sharing-peer--pairing" : ""}`}
+                  data-peer-id={p.id}
+                  data-peer-fingerprint={p.pubkeyFp}
                 >
                   <div className="sharing-peer__avatar">{p.name.slice(0, 1).toUpperCase()}</div>
                   <div className="sharing-peer__body">
@@ -540,15 +549,19 @@ export function SettingsSharingTab({ client }: SettingsSharingTabProps) {
                           <button
                             className="sharing-button sharing-button--primary"
                             onClick={() => pair(p.id)}
+                            disabled={pairing !== null}
                             title="Begin a pairing handshake — compare the 6-digit code on both sides"
                           >
-                            Pair
+                            {pairingPeerId === p.id ? "Pairing…" : "Pair"}
                           </button>
                         );
                       }
                       return <span className="sharing-peer__meta">non-fbro sshd</span>;
                     })()}
                   </div>
+                  {pairing && pairingPeerId === p.id && (
+                    <PairingConfirmation client={client} pairing={pairing} />
+                  )}
                 </li>
               );
             })}
@@ -588,7 +601,7 @@ export function SettingsSharingTab({ client }: SettingsSharingTabProps) {
         )}
       </section>
 
-      <section className="sharing-card sharing-card--pair">
+      <section className="sharing-card sharing-card--pair" data-testid="direct-pair-card">
         <div className="sharing-card__header">
           <div>
             <span className="sharing-kicker">Pair directly</span>
@@ -600,8 +613,10 @@ export function SettingsSharingTab({ client }: SettingsSharingTabProps) {
           <input
             ref={pairHistory.inputRef as React.RefObject<HTMLInputElement>}
             className="sharing-input"
+            data-testid="direct-pair-address"
             type="text"
             value={directPairAddress}
+            disabled={pairing !== null}
             onChange={(event) => setDirectPairAddress(event.target.value)}
             onKeyDown={(event) => {
               pairHistory.onKeyDown(event);
@@ -621,13 +636,17 @@ export function SettingsSharingTab({ client }: SettingsSharingTabProps) {
           )}
           <button
             className="sharing-button sharing-button--primary"
+            data-command-id="sharing.pair-direct"
             onClick={pairDirect}
-            disabled={directPairAddress.trim().length === 0}
+            disabled={pairing !== null || directPairAddress.trim().length === 0}
             title="Pair directly over TCP port 7880. The peer must have remote access enabled."
           >
-            Pair
+            {pairing && !pairingPeerId ? "Pairing…" : "Pair"}
           </button>
         </div>
+        {pairing && !pairingPeerId && (
+          <PairingConfirmation client={client} pairing={pairing} />
+        )}
         <p className="sharing-note">
           Use this when mDNS is empty or stale. Browsing switches to SFTP port
           7879 after trust is established.

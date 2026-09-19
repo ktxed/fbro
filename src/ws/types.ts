@@ -157,7 +157,11 @@ export interface PendingPairing {
   name: string;
   os?: string;
   pubkeyAlgo: string;
+  peerFingerprint: string;
   expiresAt: number;
+  /** Decision already sent by this frontend; the transport may still be
+   * waiting for the other peer. */
+  localDecision: boolean | null;
 }
 
 export interface ShadowSource {
@@ -915,6 +919,8 @@ export interface PairingRequestedMessage {
   name: string;
   os?: string;
   pubkeyAlgo: string;
+  /** Fingerprint derived from the public key exchanged during this handshake. */
+  peerFingerprint: string;
   /** Unix millis when the handshake auto-aborts. */
   expiresAt: number;
 }

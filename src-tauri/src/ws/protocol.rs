@@ -300,8 +300,8 @@ pub enum ServerMessage {
     },
     /// A paired-handshake is in progress and needs the user to compare the
     /// 6-digit `code` against the other device. Fires on both peers
-    /// simultaneously. The FE shows a modal; the user clicks Confirm/Cancel,
-    /// driving a `ConfirmPairing` intent.
+    /// simultaneously. The FE shows an inline confirmation in Sharing settings;
+    /// the user clicks Confirm/Cancel, driving a `ConfirmPairing` intent.
     PairingRequested {
         timestamp: u64,
         #[serde(rename = "handshakeId")]
@@ -314,11 +314,16 @@ pub enum ServerMessage {
         os: Option<String>,
         #[serde(rename = "pubkeyAlgo")]
         pubkey_algo: String,
+        /// Fingerprint derived from the public key exchanged by the transport.
+        /// The FE uses this to associate the request with an mDNS peer without
+        /// relying on the peer's self-reported name.
+        #[serde(rename = "peerFingerprint")]
+        peer_fingerprint: String,
         /// Unix millis when the handshake auto-aborts if not confirmed.
         #[serde(rename = "expiresAt")]
         expires_at: u64,
     },
-    /// A pairing handshake has terminated. Closes the modal on both sides.
+    /// A pairing handshake has terminated. Clears the confirmation on both sides.
     PairingResolved {
         timestamp: u64,
         #[serde(rename = "handshakeId")]

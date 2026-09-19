@@ -208,8 +208,10 @@ Inbound intents:
 
 Outbound events:
 
-- `PairingRequested { handshake_id, code, name, os, pubkey_algo, expires_at }` —
-  drives the modal on both sides; `code` is the zero-padded 6-digit string.
+- `PairingRequested { handshake_id, code, name, os, pubkey_algo, peer_fingerprint, expires_at }` —
+  opens Settings → Sharing on both sides and drives its inline confirmation;
+  `code` is the zero-padded 6-digit string and `peer_fingerprint` associates the
+  request with an exact discovery row.
 - `PairingResolved { handshake_id, outcome: "paired" | "rejected" | "timeout" }`
 - `RemoteSessionStarted { fingerprint, source_id }` / `RemoteSessionEnded`
 
@@ -330,8 +332,10 @@ instead of bare directory entries.
 - **Volume bar**: new "Remote peers" section. Discovered peers appear with
   "Pair" (if unpaired) or "Connect" (if paired). Paired peers persist
   across restarts via `peers.json`.
-- **Pairing modal** (on both sides): name, OS, 6-digit code, countdown
-  timer, Confirm/Cancel. Reuses the existing `DecisionRequired` UI pattern.
+- **Inline pairing confirmation** (on both sides): Settings → Sharing opens and
+  shows name, OS, 6-digit code, countdown, and Confirm/Cancel beneath the exact
+  discovered peer. Direct pairings without a matching discovery row use the
+  direct-address card.
 - **Disconnected state**: spinner overlay on the panel + one-line banner
   "Reconnecting to liviu-mbp…" while the driver is in backoff.
 - **Read-only badge**: small lock icon on the source row.
@@ -461,7 +465,7 @@ graph tight.
 - `src-tauri/src/remote/pairing.rs` — pairing protocol, paired-peers map, `peers.json` I/O
 - `src-tauri/src/ws/intents/remote.rs` — `Connect` / `Disconnect`
 - `src-tauri/src/ws/intents/sharing.rs` — `EnableSharing` / `SetSharedSources` / `StartPairing` / `ConfirmPairing` / `RevokePairing`
-- FE: `src/components/SettingsSharing.tsx`, `PairingRequestModal.tsx`
+- FE: `src/components/SettingsSharingTab.tsx`, `PairingConfirmation.tsx`
 
 **To modify:**
 - `src-tauri/src/vfs/mod.rs` — `pub mod sftp;`

@@ -29,11 +29,6 @@ semantics, or the WebSocket protocol.
 flowchart TB
     User[User action in the active UI] --> Owner[Feature-owned modal state]
     Backend[Backend state or asynchronous event] --> Owner
-    Pairing[Pending pairing request] --> Gate{Stack empty?}
-    Gate -- No --> Queue[Keep request pending; render nothing]
-    Queue --> Gate
-    Gate -- Yes --> Owner
-
     Owner -->|render| Layer[ModalLayer mounts and registers]
     Layer --> Stack[ModalStackProvider ordered entries]
 
@@ -118,30 +113,13 @@ independent window-level keyboard listeners.
 
 ---
 
-## 5. Pairing Request Admission
-
-A pairing prompt is security-sensitive and can arrive asynchronously, but it
-must not obscure a decision the user is already making. Therefore it has an
-admission rule in addition to normal stacking:
-
-- while any modal is active, the pending handshake remains in application
-  state but the pairing layer is not mounted;
-- when the stack becomes empty, the current handshake is admitted and the
-  pairing layer mounts;
-- after admission it behaves like a normal modal until it is confirmed,
-  cancelled, resolved, or expires;
-- a request that resolves or expires while waiting is never briefly displayed.
-
-Other asynchronous dialogs use ordinary push semantics unless their feature
-specification defines a similar admission policy.
-
----
-
-## 6. Scope and Integration Rules
+## 5. Scope and Integration Rules
 
 The stack covers full-screen overlays only. Context menus, input-history
-dropdowns, bookmark popovers, and separate viewer/diff windows are not modal
-layers.
+dropdowns, bookmark popovers, inline pairing confirmations, and separate
+viewer/diff windows are not modal layers. A pairing request opens the Sharing
+settings modal; its confirmation is rendered in that settings surface rather
+than as a second layer.
 
 When adding or converting a full-screen dialog:
 

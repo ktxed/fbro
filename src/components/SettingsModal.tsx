@@ -25,10 +25,28 @@ export function SettingsModal({ client }: SettingsModalProps) {
   const firstTabRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
-    firstTabRef.current?.focus();
-  }, []);
+    if (!state.pendingPairing) firstTabRef.current?.focus();
+  }, [state.pendingPairing]);
 
-  const close = () => dispatch({ type: "CLOSE_SETTINGS" });
+  const rejectUnansweredPairing = () => {
+    const pairing = state.pendingPairing;
+    if (!pairing || pairing.localDecision !== null) return;
+    client.sendIntent("ConfirmPairing", undefined, {
+      handshakeId: pairing.handshakeId,
+      accept: false,
+    });
+    dispatch({ type: "SET_PAIRING_DECISION", handshakeId: pairing.handshakeId, accept: false });
+  };
+
+  const close = () => {
+    rejectUnansweredPairing();
+    dispatch({ type: "CLOSE_SETTINGS" });
+  };
+
+  const openTab = (tab: SettingsTab) => {
+    if (tab !== "sharing") rejectUnansweredPairing();
+    dispatch({ type: "OPEN_SETTINGS", tab });
+  };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Escape") {
@@ -64,17 +82,17 @@ export function SettingsModal({ client }: SettingsModalProps) {
                 aria-selected={activeTab === tab.id}
                 data-testid={`settings-tab-${tab.id}`}
                 className={`settings-modal__tab${activeTab === tab.id ? " settings-modal__tab--active" : ""}`}
-                onClick={() => dispatch({ type: "OPEN_SETTINGS", tab: tab.id })}
+                onClick={() => openTab(tab.id)}
                 onKeyDown={(e) => {
                   const idx = TABS.findIndex((t) => t.id === tab.id);
                   if (e.key === "ArrowDown") {
                     e.preventDefault();
                     const next = TABS[idx + 1];
-                    if (next) dispatch({ type: "OPEN_SETTINGS", tab: next.id });
+                    if (next) openTab(next.id);
                   } else if (e.key === "ArrowUp") {
                     e.preventDefault();
                     const prev = TABS[idx - 1];
-                    if (prev) dispatch({ type: "OPEN_SETTINGS", tab: prev.id });
+                    if (prev) openTab(prev.id);
                   }
                 }}
               >
