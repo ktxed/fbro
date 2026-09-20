@@ -1456,7 +1456,7 @@ body {
 .panel__path-hint {
   flex: 0 10 auto;
   min-width: 0;
-  max-width: 45%;
+  max-width: 60%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

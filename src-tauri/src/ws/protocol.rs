@@ -668,8 +668,8 @@ pub struct EntrySchema {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(rename = "sourcePath")]
     pub source_path: Option<String>,
-    /// Compact parent-path context for entries whose names are ambiguous in a
-    /// flat virtual listing (currently duplicate search results only).
+    /// Path context shown inline with an entry name. Search results use a
+    /// compact distinguishing parent suffix; bookmarks use the full target.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(rename = "pathHint")]
     pub path_hint: Option<String>,

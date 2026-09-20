@@ -102,6 +102,14 @@ fn add_duplicate_path_hints(entries: &mut [EntrySchema]) {
     }
 }
 
+/// Show the destination beside every bookmark name. Bookmark labels are user
+/// chosen, so the target path is useful context even when labels are unique.
+fn add_bookmark_path_hints(entries: &mut [EntrySchema]) {
+    for entry in entries {
+        entry.path_hint = entry.source_path.clone();
+    }
+}
+
 async fn send_atomic_panel_patch(
     state: &SharedState,
     initiating_tx: &mpsc::Sender<ServerMessage>,
@@ -466,6 +474,8 @@ pub async fn run_scan(
 
     if crate::ws::intents::is_search_source(&source_id) {
         add_duplicate_path_hints(&mut schema_entries);
+    } else if crate::ws::intents::is_bookmarks_source(&source_id) {
+        add_bookmark_path_hints(&mut schema_entries);
     }
 
     let git_status = if driver.is_local() {
@@ -933,6 +943,24 @@ mod tests {
             entries[WINDOWED_THRESHOLD].path_hint.as_deref(),
             Some("…/last")
         );
+    }
+
+    #[test]
+    fn bookmark_path_hints_show_every_available_target_path() {
+        let mut entries = vec![
+            entry_at("Documents", "/home/alice/Documents"),
+            entry_at("projects", "/srv/work/projects"),
+            entry("missing target"),
+        ];
+
+        add_bookmark_path_hints(&mut entries);
+
+        assert_eq!(
+            entries[0].path_hint.as_deref(),
+            Some("/home/alice/Documents")
+        );
+        assert_eq!(entries[1].path_hint.as_deref(), Some("/srv/work/projects"));
+        assert_eq!(entries[2].path_hint, None);
     }
 
     #[test]
