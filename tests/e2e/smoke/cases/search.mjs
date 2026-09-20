@@ -35,8 +35,22 @@ export async function runSearchFlow(browser, observer) {
       cancelable: true,
     }));
   });
-  const input = await browser.$('[data-testid="search-file-mask-input"]');
+  let input = await browser.$('[data-testid="search-file-mask-input"]');
   await input.waitForDisplayed({ timeout: 10_000 });
+  await browser.execute(() => document.querySelector('#search-tab-input')?.focus());
+  await browser.keys("ArrowRight");
+  await browser.keys("ArrowRight");
+  await browser.waitUntil(async () => browser.execute(() => {
+    const tab = document.querySelector('#search-tab-extra');
+    return tab === document.activeElement && tab?.getAttribute("aria-selected") === "true";
+  }), { timeout: 10_000, timeoutMsg: "Search tab focus did not follow ArrowRight" });
+  await browser.keys("Home");
+  await browser.waitUntil(async () => browser.execute(() => document.activeElement?.id === "search-tab-input"), {
+    timeout: 10_000,
+    timeoutMsg: "Search Home key did not restore the first tab",
+  });
+  await browser.execute(() => document.querySelector('[data-testid="search-file-mask-input"]')?.focus());
+  input = await browser.$('[data-testid="search-file-mask-input"]');
   await browser.execute(() => {
     window.dispatchEvent(new KeyboardEvent("keydown", {
       key: "P",

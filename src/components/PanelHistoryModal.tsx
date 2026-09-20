@@ -40,7 +40,7 @@ export function PanelHistoryModal({ client, panelHistory }: PanelHistoryModalPro
   const [selectedIndex, setSelectedIndex] = useState(cursor);
 
   useEffect(() => {
-    dialogRef.current?.focus();
+    listRef.current?.focus();
   }, []);
 
   // Scroll selected item into view
@@ -97,7 +97,7 @@ export function PanelHistoryModal({ client, panelHistory }: PanelHistoryModalPro
   };
 
   return (
-    <ModalLayer modalId="panel-history" initialFocusRef={dialogRef} onClick={close} onKeyDown={onKeyDown}>
+    <ModalLayer modalId="panel-history" initialFocusRef={listRef} onClick={close} onKeyDown={onKeyDown}>
       <ResizableModal
         ref={dialogRef}
         modalId="panel-history"
@@ -111,7 +111,14 @@ export function PanelHistoryModal({ client, panelHistory }: PanelHistoryModalPro
       >
         <div className="modal__header">Navigation History</div>
         <div className="modal__body open-with__body">
-          <div className="command-palette__list open-with__list" ref={listRef}>
+          <div
+            className="command-palette__list open-with__list"
+            ref={listRef}
+            role="listbox"
+            aria-label="History entries"
+            aria-activedescendant={entries[selectedIndex] ? `panel-history-option-${selectedIndex}` : undefined}
+            tabIndex={0}
+          >
             {entries.length === 0 && (
               <div className="command-palette__empty">No history yet.</div>
             )}
@@ -123,7 +130,11 @@ export function PanelHistoryModal({ client, panelHistory }: PanelHistoryModalPro
               return (
                 <button
                   key={`${entry.sourceId}::${entry.path}::${index}`}
+                  id={`panel-history-option-${index}`}
                   type="button"
+                  role="option"
+                  aria-selected={selected}
+                  tabIndex={-1}
                   className={[
                     "command-palette__item",
                     selected ? "command-palette__item--selected" : "",
@@ -132,7 +143,6 @@ export function PanelHistoryModal({ client, panelHistory }: PanelHistoryModalPro
                   ].filter(Boolean).join(" ")}
                   data-selected={selected ? "true" : "false"}
                   onMouseDown={(e) => e.preventDefault()}
-                  onFocus={() => setSelectedIndex(index)}
                   onMouseEnter={() => setSelectedIndex(index)}
                   onClick={() => navigateToEntry(index)}
                 >

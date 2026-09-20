@@ -10,7 +10,7 @@ import { DateTimeInput } from "./DateTimeInput";
 import { ResizableModal } from "./ResizableModal";
 import { stepNumberInputOnWheel } from "../utils/numberInputWheel";
 import { ModalLayer } from "./ModalStack";
-import { isNativeActivationTarget } from "./modalKeyboard";
+import { isNativeActivationTarget, rovingIndexForKey } from "./modalKeyboard";
 
 function MnemonicLabel({ text, mnemonic }: { text: string; mnemonic: string }) {
   const idx = text.toLowerCase().indexOf(mnemonic.toLowerCase());
@@ -34,6 +34,7 @@ type RelativeUnit = "Minutes" | "Hours" | "Days";
 const UNIT_CHAR: Record<RelativeUnit, string> = { Minutes: "m", Hours: "h", Days: "d" };
 const CHAR_UNIT: Record<string, RelativeUnit> = { m: "Minutes", h: "Hours", d: "Days" };
 const SIZE_UNITS: SizeUnit[] = ["B", "KiB", "MiB", "GiB"];
+const SEARCH_TABS = ["input", "results", "extra"] as const;
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
@@ -201,8 +202,14 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
   const pathHistory = useInputHistory("search.path", setPathInput);
 
   const modalRef = useRef<HTMLDivElement>(null);
+  const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const retainTabFocusRef = useRef(false);
 
   useEffect(() => {
+    if (retainTabFocusRef.current) {
+      retainTabFocusRef.current = false;
+      return;
+    }
     if (search.activeTab === "input") {
       (maskHistory.inputRef as React.RefObject<HTMLInputElement>).current?.focus();
     } else {
@@ -213,6 +220,15 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
   const mountedSources = Object.values(sources).filter((s) => s.mounted && !s.shadow);
 
   const close = () => dispatch({ type: "CLOSE_SEARCH" });
+
+  const activateTab = (tab: PendingSearch["activeTab"], focusTab = false) => {
+    retainTabFocusRef.current = focusTab && search.activeTab !== tab;
+    dispatch({ type: "SET_SEARCH_TAB", tab });
+    if (focusTab) {
+      const index = SEARCH_TABS.indexOf(tab);
+      requestAnimationFrame(() => tabRefs.current[index]?.focus());
+    }
+  };
 
   const addPath = () => {
     const trimmed = pathInput.trim();
@@ -338,22 +354,32 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
       const target = e.target as HTMLElement;
       if (target.tagName !== "INPUT" && target.tagName !== "TEXTAREA" && target.tagName !== "SELECT") {
         e.preventDefault();
-        dispatch({ type: "SET_SEARCH_TAB", tab: "input" });
+        activateTab("input", true);
       }
     }
     if (e.key === "r" || e.key === "R") {
       const target = e.target as HTMLElement;
       if (target.tagName !== "INPUT" && target.tagName !== "TEXTAREA" && target.tagName !== "SELECT") {
         e.preventDefault();
-        dispatch({ type: "SET_SEARCH_TAB", tab: "results" });
+        activateTab("results", true);
       }
     }
     if (e.key === "e" || e.key === "E") {
       const target = e.target as HTMLElement;
       if (target.tagName !== "INPUT" && target.tagName !== "TEXTAREA" && target.tagName !== "SELECT") {
         e.preventDefault();
-        dispatch({ type: "SET_SEARCH_TAB", tab: "extra" });
+        activateTab("extra", true);
       }
+    }
+    if (e.key === "b" || e.key === "B") {
+      if ((search.status === "idle" || isDone) && paths.length > 0 && !(hasResults && search.activeTab === "results")) {
+        e.preventDefault();
+        startSearch(true);
+      }
+    }
+    if (e.key === "c" || e.key === "C") {
+      e.preventDefault();
+      close();
     }
   };
 
@@ -402,32 +428,42 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
         <div className="modal__header">Search</div>
 
         {/* Tab bar */}
-        <div className="search-modal__tabs">
-          <button
-            type="button"
-            className={`search-modal__tab${search.activeTab === "input" ? " search-modal__tab--active" : ""}`}
-            onClick={() => dispatch({ type: "SET_SEARCH_TAB", tab: "input" })}
-          >
-            <MnemonicLabel text="Search Input" mnemonic="s" />
-          </button>
-          <button
-            type="button"
-            className={`search-modal__tab${search.activeTab === "results" ? " search-modal__tab--active" : ""}`}
-            onClick={() => dispatch({ type: "SET_SEARCH_TAB", tab: "results" })}
-          >
-            <MnemonicLabel text={`Results${resultCount > 0 ? ` (${resultCount})` : ""}`} mnemonic="r" />
-            {isRunning && <span className="search-modal__tab-spinner" />}
-          </button>
-          <button
-            type="button"
-            className={`search-modal__tab${search.activeTab === "extra" ? " search-modal__tab--active" : ""}`}
-            onClick={() => dispatch({ type: "SET_SEARCH_TAB", tab: "extra" })}
-          >
-            <MnemonicLabel text="Extra" mnemonic="e" />
-          </button>
+        <div className="search-modal__tabs" role="tablist" aria-label="Search views">
+          {SEARCH_TABS.map((tab, index) => {
+            const selected = search.activeTab === tab;
+            const label = tab === "input" ? "Search Input" : tab === "results" ? `Results${resultCount > 0 ? ` (${resultCount})` : ""}` : "Extra";
+            return (
+              <button
+                key={tab}
+                ref={(node) => { tabRefs.current[index] = node; }}
+                id={`search-tab-${tab}`}
+                type="button"
+                role="tab"
+                aria-selected={selected}
+                aria-controls={`search-panel-${tab}`}
+                tabIndex={selected ? 0 : -1}
+                className={`search-modal__tab${selected ? " search-modal__tab--active" : ""}`}
+                onClick={() => activateTab(tab, true)}
+                onKeyDown={(event) => {
+                  const nextIndex = rovingIndexForKey(event.key, index, SEARCH_TABS.length, "horizontal");
+                  if (nextIndex === null) return;
+                  event.preventDefault();
+                  activateTab(SEARCH_TABS[nextIndex], true);
+                }}
+              >
+                <MnemonicLabel text={label} mnemonic={tab === "input" ? "s" : tab === "results" ? "r" : "e"} />
+                {tab === "results" && isRunning && <span className="search-modal__tab-spinner" />}
+              </button>
+            );
+          })}
         </div>
 
-        <div className="modal__body">
+        <div
+          id={`search-panel-${search.activeTab}`}
+          className="modal__body"
+          role="tabpanel"
+          aria-labelledby={`search-tab-${search.activeTab}`}
+        >
 
           {/* ── Input Tab ─────────────────────────────────────────── */}
           {search.activeTab === "input" && (

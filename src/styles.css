@@ -2206,6 +2206,15 @@ body {
   pointer-events: none;
 }
 
+.modal-layer :focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.modal-layer:focus-visible > .modal {
+  box-shadow: 0 0 0 2px var(--accent), var(--shadow-modal);
+}
+
 .modal {
   background: var(--bg-panel);
   border: 1px solid var(--border-focus);

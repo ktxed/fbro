@@ -11,7 +11,7 @@ interface PairingConfirmationProps {
 /** Security-sensitive pairing decision rendered next to the peer it applies to. */
 export function PairingConfirmation({ client, pairing }: PairingConfirmationProps) {
   const dispatch = useAppDispatch();
-  const confirmRef = useRef<HTMLButtonElement>(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
   const [now, setNow] = useState(Date.now());
 
   useEffect(() => {
@@ -21,7 +21,7 @@ export function PairingConfirmation({ client, pairing }: PairingConfirmationProp
   }, [pairing.handshakeId]);
 
   useEffect(() => {
-    if (pairing.localDecision === null) confirmRef.current?.focus({ preventScroll: true });
+    if (pairing.localDecision === null) cancelRef.current?.focus({ preventScroll: true });
   }, [pairing.handshakeId, pairing.localDecision]);
 
   const respond = (accept: boolean) => {
@@ -65,18 +65,18 @@ export function PairingConfirmation({ client, pairing }: PairingConfirmationProp
           <>
             <span className="pairing-confirmation__timer">{secondsLeft}s</span>
             <button
+              ref={cancelRef}
               className="sharing-button"
               data-command-id="pairing.cancel"
               onClick={() => respond(false)}
+              autoFocus
             >
               Cancel
             </button>
             <button
-              ref={confirmRef}
               className="sharing-button sharing-button--primary"
               data-command-id="pairing.confirm"
               onClick={() => respond(true)}
-              autoFocus
             >
               Confirm
             </button>

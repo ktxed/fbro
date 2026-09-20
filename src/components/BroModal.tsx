@@ -68,7 +68,7 @@ export function BroModal({ client, bro }: BroModalProps) {
   const fedupExcludeHistory = useInputHistory("fedup.excludePatterns", updateFedupExcludePatterns);
 
   useEffect(() => {
-    dialogRef.current?.focus();
+    listRef.current?.focus();
   }, []);
 
   useEffect(() => {
@@ -289,7 +289,7 @@ export function BroModal({ client, bro }: BroModalProps) {
   };
 
   return (
-    <ModalLayer modalId="bro" initialFocusRef={dialogRef} onClick={close} onKeyDown={onKeyDown}>
+    <ModalLayer modalId="bro" initialFocusRef={listRef} onClick={close} onKeyDown={onKeyDown}>
       <ResizableModal
         ref={dialogRef}
         modalId="bro"
@@ -305,7 +305,14 @@ export function BroModal({ client, bro }: BroModalProps) {
         <div className="modal__header">Pass To Bro...</div>
         <div className="modal__body open-with__body">
           <div className="open-with__target">{formatTarget(bro.inputs)}</div>
-          <div className="command-palette__list open-with__list" ref={listRef}>
+          <div
+            className="command-palette__list open-with__list"
+            ref={listRef}
+            role="listbox"
+            aria-label="Bros"
+            aria-activedescendant={bros[selectedIndex] ? `bro-option-${selectedIndex}` : undefined}
+            tabIndex={0}
+          >
             {bro.status === "loading" && (
               <div className="command-palette__empty">Looking up bros...</div>
             )}
@@ -320,13 +327,16 @@ export function BroModal({ client, bro }: BroModalProps) {
               return (
                 <button
                   key={item.id}
+                  id={`bro-option-${index}`}
                   type="button"
+                  role="option"
+                  aria-selected={selected}
+                  tabIndex={-1}
                   className={`command-palette__item${selected ? " command-palette__item--selected" : ""}`}
                   data-testid="bro-option"
                   data-bro-id={item.id}
                   data-selected={selected ? "true" : "false"}
                   onMouseDown={(e) => e.preventDefault()}
-                  onFocus={() => selectBro(index)}
                   onClick={() => {
                     selectBro(index);
                     if (!item.output && selectedBroParams(item).length === 0 && !isFedupBro(item)) {

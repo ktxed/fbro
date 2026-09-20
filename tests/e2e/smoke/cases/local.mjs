@@ -350,6 +350,22 @@ async function verifyLocationSortReset(browser, observer) {
   const settings = await browser.$('[data-modal-id="settings"]');
   await settings.waitForDisplayed({ timeout: 10_000 });
 
+  await browser.execute(() => document.querySelector('[data-testid="settings-tab-general"]')?.focus());
+  await browser.keys("ArrowDown");
+  await browser.keys("ArrowDown");
+  await waitFor(() => browser.execute(() => {
+    const tab = document.querySelector('[data-testid="settings-tab-sharing"]');
+    return tab === document.activeElement && tab?.getAttribute("aria-selected") === "true";
+  }), { timeout: 10_000, label: "settings roving tab focus" });
+  const focusOutline = await browser.execute(() => getComputedStyle(document.activeElement).outlineStyle);
+  if (focusOutline === "none") throw new Error("settings tab lacks a visible keyboard focus outline");
+  await browser.keys("ArrowUp");
+  await browser.keys("ArrowUp");
+  await waitFor(() => browser.execute(() => document.activeElement?.getAttribute("data-testid") === "settings-tab-general"), {
+    timeout: 10_000,
+    label: "settings roving tab focus restored",
+  });
+
   const toggle = await browser.$('[data-testid="remember-sort-per-location"]');
   if (!(await toggle.isSelected())) throw new Error("location sort toggle is not enabled in settings");
   await (await browser.$('[data-testid="remember-sort-per-location"]')).click();

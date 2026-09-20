@@ -36,12 +36,24 @@ const FOCUSABLE_SELECTOR = [
   "select:not([disabled])",
   "textarea:not([disabled])",
   "a[href]",
+  "[contenteditable='true']",
   "[tabindex]:not([tabindex='-1'])",
 ].join(",");
 
 function focusableElements(root: HTMLElement): HTMLElement[] {
-  return Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR))
+  const visible = Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR))
     .filter((element) => !element.hidden && element.offsetParent !== null);
+  return visible.filter((element) => {
+    if (!(element instanceof HTMLInputElement) || element.type !== "radio" || !element.name) return true;
+    const group = visible.filter((candidate): candidate is HTMLInputElement => (
+      candidate instanceof HTMLInputElement
+      && candidate.type === "radio"
+      && candidate.name === element.name
+      && candidate.form === element.form
+    ));
+    const selected = group.find((candidate) => candidate.checked) ?? group[0];
+    return element === selected;
+  });
 }
 
 function focusLayer(root: HTMLElement, preferred?: HTMLElement | null) {

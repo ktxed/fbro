@@ -6,8 +6,10 @@ import { IconEye, IconPlayerPlay, IconPlayerPause, IconX } from "@tabler/icons-r
 import { cancelJobWithPartialPrompt } from "../utils/jobCancel";
 import { ResizableModal } from "./ResizableModal";
 import { ModalLayer } from "./ModalStack";
+import { rovingIndexForKey } from "./modalKeyboard";
 
 const FILE_LIST_PAGE_SIZE = 25;
+const JOB_TABS = ["jobs", "procs", "cache"] as const;
 
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -605,6 +607,7 @@ export function JobsModal({ onClose, client }: { onClose: () => void; client: Ws
   const state = useAppState();
   const overlayRef = useRef<HTMLDivElement>(null);
   const [activeTab, setActiveTab] = useState<"jobs" | "procs" | "cache">("jobs");
+  const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const [expandedFileJobs, setExpandedFileJobs] = useState<Record<string, boolean>>({});
   const [filePages, setFilePages] = useState<Record<string, number>>({});
   const [, setClockTick] = useState(0);
@@ -677,28 +680,41 @@ export function JobsModal({ onClose, client }: { onClose: () => void; client: Ws
       >
         <div className="modal__header">Jobs</div>
 
-        <div className="jobs-modal__tabs">
-          <button
-            className={`jobs-modal__tab${activeTab === "jobs" ? " jobs-modal__tab--active" : ""}`}
-            onClick={() => setActiveTab("jobs")}
-          >
-            Jobs
-          </button>
-          <button
-            className={`jobs-modal__tab${activeTab === "procs" ? " jobs-modal__tab--active" : ""}`}
-            onClick={() => setActiveTab("procs")}
-          >
-            Processes{childProcs.length > 0 ? ` (${childProcs.length})` : ""}
-          </button>
-          <button
-            className={`jobs-modal__tab${activeTab === "cache" ? " jobs-modal__tab--active" : ""}`}
-            onClick={() => setActiveTab("cache")}
-          >
-            Cache
-          </button>
+        <div className="jobs-modal__tabs" role="tablist" aria-label="Job views">
+          {JOB_TABS.map((tab, index) => {
+            const selected = activeTab === tab;
+            const label = tab === "jobs" ? "Jobs" : tab === "procs" ? `Processes${childProcs.length > 0 ? ` (${childProcs.length})` : ""}` : "Cache";
+            return (
+              <button
+                key={tab}
+                ref={(node) => { tabRefs.current[index] = node; }}
+                id={`jobs-tab-${tab}`}
+                role="tab"
+                aria-selected={selected}
+                aria-controls={`jobs-panel-${tab}`}
+                tabIndex={selected ? 0 : -1}
+                className={`jobs-modal__tab${selected ? " jobs-modal__tab--active" : ""}`}
+                onClick={() => setActiveTab(tab)}
+                onKeyDown={(event) => {
+                  const nextIndex = rovingIndexForKey(event.key, index, JOB_TABS.length, "horizontal");
+                  if (nextIndex === null) return;
+                  event.preventDefault();
+                  setActiveTab(JOB_TABS[nextIndex]);
+                  tabRefs.current[nextIndex]?.focus();
+                }}
+              >
+                {label}
+              </button>
+            );
+          })}
         </div>
 
-        <div className="modal__body jobs-modal__body">
+        <div
+          id={`jobs-panel-${activeTab}`}
+          className="modal__body jobs-modal__body"
+          role="tabpanel"
+          aria-labelledby={`jobs-tab-${activeTab}`}
+        >
           {activeTab === "jobs" && (
             <>
               {fileJobs.length === 0 && outgoingJobs.length === 0 && broJobs.length === 0 && dirSizeTasks.length === 0 && queuedJobs.length === 0 && (

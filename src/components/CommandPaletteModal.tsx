@@ -128,6 +128,11 @@ export function CommandPaletteModal({ client, onOpenJobsView }: CommandPaletteMo
           <input
             ref={inputRef}
             className="command-palette__input"
+            role="combobox"
+            aria-autocomplete="list"
+            aria-expanded="true"
+            aria-controls="command-palette-list"
+            aria-activedescendant={filteredCommands[selectedIndex] ? `command-palette-option-${selectedIndex}` : undefined}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search commands…"
@@ -136,18 +141,21 @@ export function CommandPaletteModal({ client, onOpenJobsView }: CommandPaletteMo
             autoCorrect="off"
             autoCapitalize="off"
           />
-          <div className="command-palette__list" ref={listRef}>
+          <div id="command-palette-list" className="command-palette__list" ref={listRef} role="listbox">
             {filteredCommands.map((command, index) => {
               const binding = formatPrimaryBinding(command);
               const selected = index === selectedIndex;
               return (
                 <button
                   key={command.id}
+                  id={`command-palette-option-${index}`}
                   type="button"
+                  role="option"
+                  aria-selected={selected}
+                  tabIndex={-1}
                   className={`command-palette__item${selected ? " command-palette__item--selected" : ""}`}
                   data-selected={selected ? "true" : "false"}
                   onMouseDown={(e) => e.preventDefault()}
-                  onFocus={() => setSelectedIndex(index)}
                   onClick={() => executeSelectedCommand(command.id)}
                 >
                   <span className="command-palette__item-main">

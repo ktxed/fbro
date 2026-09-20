@@ -21,7 +21,7 @@ export function OpenWithModal({ client, openWith }: OpenWithModalProps) {
   const apps = openWith.apps;
 
   useEffect(() => {
-    dialogRef.current?.focus();
+    listRef.current?.focus();
   }, []);
 
   useEffect(() => {
@@ -100,7 +100,7 @@ export function OpenWithModal({ client, openWith }: OpenWithModalProps) {
   return (
     <ModalLayer
       modalId="open-with"
-      initialFocusRef={dialogRef}
+      initialFocusRef={listRef}
       onClick={close}
       onKeyDown={onKeyDown}
     >
@@ -118,7 +118,14 @@ export function OpenWithModal({ client, openWith }: OpenWithModalProps) {
         <div className="modal__header">Open With...</div>
         <div className="modal__body open-with__body">
           <div className="open-with__target">{openWith.name}</div>
-          <div className="command-palette__list open-with__list" ref={listRef}>
+          <div
+            className="command-palette__list open-with__list"
+            ref={listRef}
+            role="listbox"
+            aria-label="Applications"
+            aria-activedescendant={apps[selectedIndex] ? `open-with-option-${selectedIndex}` : undefined}
+            tabIndex={0}
+          >
             {openWith.status === "loading" && (
               <div className="command-palette__empty">Looking up applications...</div>
             )}
@@ -133,11 +140,14 @@ export function OpenWithModal({ client, openWith }: OpenWithModalProps) {
               return (
                 <button
                   key={app.id}
+                  id={`open-with-option-${index}`}
                   type="button"
+                  role="option"
+                  aria-selected={selected}
+                  tabIndex={-1}
                   className={`command-palette__item${selected ? " command-palette__item--selected" : ""}`}
                   data-selected={selected ? "true" : "false"}
                   onMouseDown={(e) => e.preventDefault()}
-                  onFocus={() => setSelectedIndex(index)}
                   onMouseEnter={() => setSelectedIndex(index)}
                   onClick={() => launchApp(app.id)}
                 >
