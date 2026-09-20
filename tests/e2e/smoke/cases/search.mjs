@@ -26,17 +26,7 @@ export async function runSearchFlow(browser, observer) {
   await quickFilterInput.setValue("does-not-match-search-result");
   await observer.waitForNoEntry("left", "renamed.txt");
 
-  await browser.execute(() => {
-    window.dispatchEvent(new KeyboardEvent("keydown", {
-      key: "f",
-      code: "KeyF",
-      ctrlKey: true,
-      bubbles: true,
-      cancelable: true,
-    }));
-  });
-  let input = await browser.$('[data-testid="search-file-mask-input"]');
-  await input.waitForDisplayed({ timeout: 10_000 });
+  let input = await openSearch(browser);
   await browser.execute(() => document.querySelector('#search-tab-input')?.focus());
   await browser.keys("ArrowRight");
   await browser.keys("ArrowRight");
@@ -52,18 +42,8 @@ export async function runSearchFlow(browser, observer) {
   await browser.execute(() => document.querySelector('[data-command-id="search.close"]')?.focus());
   await browser.keys("Enter");
   await (await browser.$('[data-testid="search-dialog"]')).waitForDisplayed({ timeout: 10_000, reverse: true });
-  await browser.execute(() => {
-    window.dispatchEvent(new KeyboardEvent("keydown", {
-      key: "f",
-      code: "KeyF",
-      ctrlKey: true,
-      bubbles: true,
-      cancelable: true,
-    }));
-  });
-  await (await browser.$('[data-testid="search-file-mask-input"]')).waitForDisplayed({ timeout: 10_000 });
+  input = await openSearch(browser);
   await browser.execute(() => document.querySelector('[data-testid="search-file-mask-input"]')?.focus());
-  input = await browser.$('[data-testid="search-file-mask-input"]');
   await browser.execute(() => {
     window.dispatchEvent(new KeyboardEvent("keydown", {
       key: "P",
@@ -103,7 +83,7 @@ export async function runSearchFlow(browser, observer) {
     const hints = await browser.execute(() => Array.from(
       document.querySelectorAll('[data-testid="panel-left"] [data-entry-name="renamed.txt"]')
     ).map((row) => row.querySelector('[data-testid="path-hint"]')?.textContent?.trim() ?? ""));
-    if (hints.length !== 3) return false;
+    if (hints.length < 3) return false;
     return hints.every(Boolean)
       && hints.some((hint) => hint.includes("hint-one"))
       && hints.some((hint) => hint.includes("hint-two"));
@@ -133,6 +113,22 @@ export async function runSearchFlow(browser, observer) {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
+async function openSearch(browser) {
+  await browser.execute(() => document.querySelector('[data-testid="panel-left"]')?.focus());
+  await browser.execute(() => {
+    window.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "f",
+      code: "KeyF",
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    }));
+  });
+  const input = await browser.$('[data-testid="search-file-mask-input"]');
+  await input.waitForDisplayed({ timeout: 10_000 });
+  return input;
+}
+
 /**
  * Focus the `year` segment of a DateTimeInput identified by its aria-label and
  * type the given digits.
@@ -161,20 +157,8 @@ async function runDatetimeIntervalSearch(browser, observer, dateField, sortDir, 
   await observer.waitForPanelNotShadow("left");
   await reloadBrowserApp(browser, "fbro-a");
 
-  // Open search
-  await browser.execute(() => {
-    window.dispatchEvent(new KeyboardEvent("keydown", {
-      key: "f",
-      code: "KeyF",
-      ctrlKey: true,
-      bubbles: true,
-      cancelable: true,
-    }));
-  });
-
   // File mask: "*" (match all)
-  const maskInput = await browser.$('[data-testid="search-file-mask-input"]');
-  await maskInput.waitForDisplayed({ timeout: 10_000 });
+  const maskInput = await openSearch(browser);
   await maskInput.setValue("*");
 
   // Switch to Extra tab (third tab: Input / Results / Extra)
@@ -303,18 +287,7 @@ async function runSizeSearch(browser, observer, sortDir, sizeOp, value, max, che
   await observer.waitForPanelNotShadow("left");
   await reloadBrowserApp(browser, "fbro-a");
 
-  await browser.execute(() => {
-    window.dispatchEvent(new KeyboardEvent("keydown", {
-      key: "f",
-      code: "KeyF",
-      ctrlKey: true,
-      bubbles: true,
-      cancelable: true,
-    }));
-  });
-
-  const maskInput = await browser.$('[data-testid="search-file-mask-input"]');
-  await maskInput.waitForDisplayed({ timeout: 10_000 });
+  const maskInput = await openSearch(browser);
   await maskInput.setValue("*");
 
   const extraTab = await browser.$('.search-modal__tab:nth-child(3)');

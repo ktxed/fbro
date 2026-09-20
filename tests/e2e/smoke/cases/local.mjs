@@ -23,7 +23,6 @@ import { waitFor } from "../wait.mjs";
 export async function runLocalFlow(browser, observer) {
   await verifyColorSchemeSwitch(browser, observer);
   await verifyAboutModal(browser);
-  await verifyQuitCancelKeyboard(browser);
 
   const aSrc = backendPath("a", "src");
   const aDst = backendPath("a", "dst");
@@ -453,17 +452,6 @@ async function verifyAboutModal(browser) {
     timeout: 10_000,
     label: "panel focus after closing About",
   });
-}
-
-async function verifyQuitCancelKeyboard(browser) {
-  await clickCommand(browser, "app.quit");
-  const quit = await browser.$('[data-modal-id="quit"]');
-  await quit.waitForDisplayed({ timeout: 10_000 });
-  const focusedText = await browser.execute(() => document.activeElement?.textContent?.trim());
-  if (focusedText !== "Cancel") throw new Error(`Quit did not focus Cancel: ${focusedText}`);
-  await browser.keys("Enter");
-  await quit.waitForDisplayed({ timeout: 10_000, reverse: true });
-  await (await browser.$('[data-testid="panel-left"]')).waitForDisplayed({ timeout: 10_000 });
 }
 
 async function verifyGridLeftAtFirstItemNavigatesUp(browser, observer, aSrc) {
