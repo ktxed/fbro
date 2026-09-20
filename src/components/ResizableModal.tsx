@@ -2,6 +2,7 @@ import { forwardRef, useEffect, useRef, useState } from "react";
 import type { KeyboardEventHandler, MouseEventHandler, PointerEventHandler, ReactNode, Ref } from "react";
 import { useAppState } from "../store";
 import type { WsClient } from "../ws/client";
+import { ModalDialog } from "./ModalDialog";
 
 type ModalSize = {
   width: number;
@@ -14,7 +15,7 @@ interface ResizableModalProps {
   modalId: string;
   client: WsClient;
   className?: string;
-  role?: string;
+  role?: "dialog" | "alertdialog";
   ariaLabel: string;
   ariaModal?: boolean;
   tabIndex?: number;
@@ -163,13 +164,13 @@ export const ResizableModal = forwardRef<HTMLDivElement, ResizableModalProps>(fu
   };
 
   return (
-    <div
+    <ModalDialog
       ref={mergeRefs(rootRef, forwardedRef)}
-      className={`modal modal--resizable ${className}`.trim()}
+      className={`modal--resizable ${className}`.trim()}
       role={role}
-      aria-modal={ariaModal}
-      aria-label={ariaLabel}
-      data-testid={testId}
+      ariaModal={ariaModal}
+      ariaLabel={ariaLabel}
+      testId={testId}
       tabIndex={tabIndex}
       style={{ width: size.width, height: size.height }}
       onClick={(e) => {
@@ -191,6 +192,6 @@ export const ResizableModal = forwardRef<HTMLDivElement, ResizableModalProps>(fu
           onPointerCancel={endResize}
         />
       ))}
-    </div>
+    </ModalDialog>
   );
 });

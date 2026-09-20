@@ -23,6 +23,7 @@ import { waitFor } from "../wait.mjs";
 export async function runLocalFlow(browser, observer) {
   await verifyColorSchemeSwitch(browser, observer);
   await verifyAboutModal(browser);
+  await verifyQuitCancelKeyboard(browser);
 
   const aSrc = backendPath("a", "src");
   const aDst = backendPath("a", "dst");
@@ -59,7 +60,9 @@ export async function runLocalFlow(browser, observer) {
   if (await duplicateCopyButton.isEnabled()) {
     throw new Error("duplicate destination copy button should be disabled");
   }
-  await clickCommand(browser, "file.copy.cancel");
+  await browser.execute(() => document.querySelector('[data-command-id="file.copy.cancel"]')?.focus());
+  await browser.keys("Enter");
+  await (await browser.$('[data-testid="operation-dialog"]')).waitForDisplayed({ timeout: 10_000, reverse: true });
 
   await createFile(browser, observer, "left", "single-copy.txt");
   fs.writeFileSync(hostPath(path.posix.join(aSrc, "single-copy.txt")), "single payload\n");
@@ -82,6 +85,11 @@ export async function runLocalFlow(browser, observer) {
   await doubleClickEntry(browser, "right", "alpha");
   await observer.waitForPanelPath("right", path.posix.join(aDst, "alpha"));
   await clickEntry(browser, "right", "note.txt");
+  await clickCommand(browser, "file.rename");
+  await browser.execute(() => document.querySelector('[data-command-id="file.rename.cancel"]')?.focus());
+  await browser.keys("Enter");
+  await (await browser.$('[data-testid="rename-dialog"]')).waitForDisplayed({ timeout: 10_000, reverse: true });
+  await observer.waitForEntry("right", "note.txt", "file");
   await clickCommand(browser, "file.rename");
   const renameInput = await browser.$('[data-testid="rename-to-input"]');
   await renameInput.waitForDisplayed({ timeout: 10_000 });
@@ -420,6 +428,14 @@ async function verifyAboutModal(browser) {
 
   const about = await browser.$('[data-testid="about-modal"]');
   await about.waitForDisplayed({ timeout: 10_000 });
+  const dialogSemantics = await browser.execute(() => {
+    const top = document.querySelector('[data-modal-id="about"][data-modal-state="top"]');
+    const dialogs = top?.querySelectorAll('[role="dialog"], [role="alertdialog"]') ?? [];
+    return { count: dialogs.length, ariaModal: dialogs[0]?.getAttribute("aria-modal") };
+  });
+  if (dialogSemantics.count !== 1 || dialogSemantics.ariaModal !== "true") {
+    throw new Error(`About modal semantics mismatch: ${JSON.stringify(dialogSemantics)}`);
+  }
   const version = await browser.$('[data-testid="about-version"]').getText();
   const commit = await browser.$('[data-testid="about-commit"]').getText();
   const profile = await browser.$('[data-testid="about-profile"]').getText();
@@ -437,6 +453,17 @@ async function verifyAboutModal(browser) {
     timeout: 10_000,
     label: "panel focus after closing About",
   });
+}
+
+async function verifyQuitCancelKeyboard(browser) {
+  await clickCommand(browser, "app.quit");
+  const quit = await browser.$('[data-modal-id="quit"]');
+  await quit.waitForDisplayed({ timeout: 10_000 });
+  const focusedText = await browser.execute(() => document.activeElement?.textContent?.trim());
+  if (focusedText !== "Cancel") throw new Error(`Quit did not focus Cancel: ${focusedText}`);
+  await browser.keys("Enter");
+  await quit.waitForDisplayed({ timeout: 10_000, reverse: true });
+  await (await browser.$('[data-testid="panel-left"]')).waitForDisplayed({ timeout: 10_000 });
 }
 
 async function verifyGridLeftAtFirstItemNavigatesUp(browser, observer, aSrc) {

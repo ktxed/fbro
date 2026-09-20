@@ -5,6 +5,7 @@ import type { WsClient } from "../ws/client";
 import { useInputHistory } from "../hooks/useInputHistory";
 import { InputHistoryDropdown } from "./InputHistoryDropdown";
 import { ModalLayer } from "./ModalStack";
+import { ModalDialog } from "./ModalDialog";
 
 interface InputModalProps {
   input: PendingInput;
@@ -47,7 +48,7 @@ export function InputModal({ input, client }: InputModalProps) {
       if (e.defaultPrevented) return;
       if (e.key === "Escape") { e.preventDefault(); close(); }
     }}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+      <ModalDialog ariaLabel={input.prompt} onClick={(e) => e.stopPropagation()}>
         <div className="modal__header">{input.prompt}</div>
         <div className="modal__body">
           <div className="modal__rename-row">
@@ -87,7 +88,7 @@ export function InputModal({ input, client }: InputModalProps) {
             Cancel
           </button>
         </div>
-      </div>
+      </ModalDialog>
     </ModalLayer>
   );
 }

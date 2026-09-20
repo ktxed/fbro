@@ -34,6 +34,11 @@ dialog types.
   shortcuts. Zoom shortcuts remain global.
 - Each modal owns its feature-specific keys on its layer or descendants.
 - Tab and Shift+Tab cycle among enabled, visible controls in the top modal.
+- Enter belongs to the focused native control. A modal-level default action
+  may run only when the event target is not another interactive control and a
+  child has not already consumed the event.
+- Modal tablists and selectable lists use roving/composite focus: one Tab stop,
+  arrows within the component, and synchronized focus and selection.
 
 ---
 
@@ -74,3 +79,7 @@ input, printable viewer shortcuts are not intercepted.
    modal owns modal input.
 5. A transient overlay outside the modal stack must participate in both panel
    and global-command guards.
+6. Escape closes or backgrounds the top modal without changing an underlying
+   job. A visibly nested confirmation or expanded state may consume the first
+   Escape before the containing modal closes.
+7. Every modal control must have a visible `:focus-visible` presentation.

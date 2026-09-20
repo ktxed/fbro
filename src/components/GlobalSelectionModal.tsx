@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useAppDispatch, useAppState, type PendingGlobalSelectionAdd } from "../store";
 import type { WsClient } from "../ws/client";
 import { ModalLayer } from "./ModalStack";
+import { ModalDialog } from "./ModalDialog";
 import { isNativeActivationTarget } from "./modalKeyboard";
 
 interface GlobalSelectionModalProps {
@@ -86,7 +87,7 @@ export function GlobalSelectionModal({ add, client }: GlobalSelectionModalProps)
 
   return (
     <ModalLayer modalId="global-selection" onClick={close} onKeyDown={handleKeyDown}>
-      <div className="modal" role="dialog" aria-label="To global selection" onClick={(e) => e.stopPropagation()}>
+      <ModalDialog ariaLabel="To global selection" onClick={(e) => e.stopPropagation()}>
         <div className="modal__header">To global selection</div>
         <div className="modal__body">
           <p className="modal__summary">
@@ -138,7 +139,7 @@ export function GlobalSelectionModal({ add, client }: GlobalSelectionModalProps)
             Cancel
           </button>
         </div>
-      </div>
+      </ModalDialog>
     </ModalLayer>
   );
 }

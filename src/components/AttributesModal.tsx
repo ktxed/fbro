@@ -3,6 +3,7 @@ import { useAppDispatch } from "../store";
 import type { PendingAttributes } from "../store";
 import type { WsClient } from "../ws/client";
 import { ModalLayer } from "./ModalStack";
+import { ModalDialog } from "./ModalDialog";
 import { isNativeActivationTarget } from "./modalKeyboard";
 
 interface AttributesModalProps {
@@ -123,7 +124,7 @@ export function AttributesModal({ attributes, client }: AttributesModalProps) {
 
   return (
     <ModalLayer modalId="attributes" ref={overlayRef} onClick={close} onKeyDown={handleKeyDown}>
-      <div className="modal modal--fixed" onClick={(e) => e.stopPropagation()}>
+      <ModalDialog ariaLabel="Set Permissions" className="modal--fixed" onClick={(e) => e.stopPropagation()}>
         <div className="modal__header">Set Permissions</div>
         <div className="modal__body">
           <p className="modal__summary">
@@ -202,7 +203,7 @@ export function AttributesModal({ attributes, client }: AttributesModalProps) {
             Cancel
           </button>
         </div>
-      </div>
+      </ModalDialog>
     </ModalLayer>
   );
 }

@@ -5,6 +5,7 @@ import type { WsClient } from "../ws/client";
 
 import { stepNumberInputOnWheel } from "../utils/numberInputWheel";
 import { ModalLayer } from "./ModalStack";
+import { ModalDialog } from "./ModalDialog";
 
 interface SettingsGeneralTabProps {
   general: GeneralSettings;
@@ -377,7 +378,11 @@ export function SettingsGeneralTab({ general, client }: SettingsGeneralTabProps)
             if (event.key === "Escape") setConfirmLocationReset(false);
           }}
         >
-          <div className="modal" data-testid="reset-location-sorts-modal" role="alertdialog" aria-modal="true" aria-label="Reset remembered sorting">
+          <ModalDialog
+            ariaLabel="Reset remembered sorting"
+            role="alertdialog"
+            testId="reset-location-sorts-modal"
+          >
             <div className="modal__header">Reset remembered sorting</div>
             <div className="modal__body">
               <p className="modal__summary">
@@ -402,7 +407,7 @@ export function SettingsGeneralTab({ general, client }: SettingsGeneralTabProps)
                 </button>
               </div>
             </div>
-          </div>
+          </ModalDialog>
         </ModalLayer>
       )}
     </div>

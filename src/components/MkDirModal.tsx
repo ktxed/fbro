@@ -5,6 +5,7 @@ import type { WsClient } from "../ws/client";
 import { useInputHistory } from "../hooks/useInputHistory";
 import { InputHistoryDropdown } from "./InputHistoryDropdown";
 import { ModalLayer } from "./ModalStack";
+import { ModalDialog } from "./ModalDialog";
 
 interface MkDirModalProps {
   mkdir: PendingMkdir;
@@ -51,7 +52,7 @@ export function MkDirModal({ mkdir, client }: MkDirModalProps) {
       if (e.defaultPrevented) return;
       if (e.key === "Escape") { e.preventDefault(); close(); }
     }}>
-      <div className="modal" role="dialog" aria-label="Create Directory" data-testid="mkdir-dialog" onClick={(e) => e.stopPropagation()}>
+      <ModalDialog ariaLabel="Create Directory" testId="mkdir-dialog" onClick={(e) => e.stopPropagation()}>
         <div className="modal__header">Create Directory</div>
         <div className="modal__body">
           <p className="modal__rename-from" title={mkdir.dirPath}>
@@ -97,7 +98,7 @@ export function MkDirModal({ mkdir, client }: MkDirModalProps) {
             Cancel
           </button>
         </div>
-      </div>
+      </ModalDialog>
     </ModalLayer>
   );
 }

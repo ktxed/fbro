@@ -49,6 +49,19 @@ export async function runSearchFlow(browser, observer) {
     timeout: 10_000,
     timeoutMsg: "Search Home key did not restore the first tab",
   });
+  await browser.execute(() => document.querySelector('[data-command-id="search.close"]')?.focus());
+  await browser.keys("Enter");
+  await (await browser.$('[data-testid="search-dialog"]')).waitForDisplayed({ timeout: 10_000, reverse: true });
+  await browser.execute(() => {
+    window.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "f",
+      code: "KeyF",
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    }));
+  });
+  await (await browser.$('[data-testid="search-file-mask-input"]')).waitForDisplayed({ timeout: 10_000 });
   await browser.execute(() => document.querySelector('[data-testid="search-file-mask-input"]')?.focus());
   input = await browser.$('[data-testid="search-file-mask-input"]');
   await browser.execute(() => {

@@ -75,6 +75,11 @@ When a feature renders a `ModalLayer`:
    `data-modal-initial-focus` or `autofocus`, the first focusable control, or
    finally the layer root.
 
+The visible dialog inside the layer is rendered through `ModalDialog` (or
+`ResizableModal`, which composes it). This provides one `dialog` or
+`alertdialog` role, an accessible label, and `aria-modal="true"` without
+duplicating dialog semantics on the overlay.
+
 User-triggered global commands that would open another modal are disabled
 while the stack is non-empty. A modal may still explicitly open another modal,
 and an asynchronous/backend-driven dialog may push above the current top.
@@ -98,6 +103,9 @@ The provider installs capture-phase `keydown` and `focusin` listeners while it
 is mounted:
 
 - `Tab` and `Shift+Tab` cycle through focusable controls in the top layer.
+  Named radio groups contribute only their checked radio, or their first
+  enabled radio when none is checked. Composite lists and tablists expose one
+  sequential Tab stop and own their arrow-key navigation.
 - Focus attempting to leave the top layer is redirected into it.
 - A key event whose target is outside the top layer is stopped and redispatched
   from the top layer. This covers browser timing cases where a focused button
@@ -132,6 +140,10 @@ When adding or converting a full-screen dialog:
    `useModalStack()` where an application-level guard is required.
 6. Test that a second layer leaves the first visible but inert, that only the
    top layer handles keys, and that focus returns correctly after each pop.
+
+Resizable dialogs retain their last pointer-selected size. Edge and corner
+handles, including the visible south-east affordance, are a pointer
+enhancement; keyboard access to dialog content does not depend on resizing.
 
 The implementation lives in `src/components/ModalStack.tsx`; shared visual
 rules live in `src/styles.css`.

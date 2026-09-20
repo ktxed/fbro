@@ -5,6 +5,7 @@ import type { WsClient } from "../ws/client";
 import { useInputHistory } from "../hooks/useInputHistory";
 import { InputHistoryDropdown } from "./InputHistoryDropdown";
 import { ModalLayer } from "./ModalStack";
+import { ModalDialog } from "./ModalDialog";
 
 interface RenameModalProps {
   rename: PendingRename;
@@ -58,7 +59,7 @@ export function RenameModal({ rename, client }: RenameModalProps) {
       if (e.defaultPrevented) return;
       if (e.key === "Escape") { e.preventDefault(); close(); }
     }}>
-      <div className="modal" role="dialog" aria-label="Rename" data-testid="rename-dialog" onClick={(e) => e.stopPropagation()}>
+      <ModalDialog ariaLabel="Rename" testId="rename-dialog" onClick={(e) => e.stopPropagation()}>
         <div className="modal__header">Rename</div>
         <div className="modal__body">
           <p className="modal__summary">
@@ -107,7 +108,7 @@ export function RenameModal({ rename, client }: RenameModalProps) {
             Cancel
           </button>
         </div>
-      </div>
+      </ModalDialog>
     </ModalLayer>
   );
 }

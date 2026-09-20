@@ -416,7 +416,7 @@ export function BroModal({ client, bro }: BroModalProps) {
                       }));
                     }}
                     onKeyDown={(e) => {
-                      if (e.key === "ArrowUp" || e.key === "ArrowDown" || e.key === "Tab") {
+                      if (e.key === "ArrowUp" || e.key === "ArrowDown") {
                         e.stopPropagation();
                       }
                       if (e.key === "Enter") {
@@ -526,7 +526,7 @@ function FedupPatternField({
   const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     history.onKeyDown(e);
     if (e.defaultPrevented) return;
-    if (e.key === "ArrowUp" || e.key === "ArrowDown" || e.key === "Tab") {
+    if (e.key === "ArrowUp" || e.key === "ArrowDown") {
       e.stopPropagation();
     }
     if (e.key === "Enter") {
@@ -579,7 +579,7 @@ function FedupPatternField({
 
 function BroParamField({ input, value, inputRef, onChange, onSubmit, onCancel }: BroParamFieldProps) {
   const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "ArrowUp" || e.key === "ArrowDown" || e.key === "Tab") {
+    if (e.key === "ArrowUp" || e.key === "ArrowDown") {
       e.stopPropagation();
     }
     if (e.key === "Enter") {

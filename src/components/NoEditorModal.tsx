@@ -3,6 +3,7 @@ import { useAppDispatch } from "../store";
 import type { PendingNoEditor } from "../store";
 import { IconCopy } from "@tabler/icons-react";
 import { ModalLayer } from "./ModalStack";
+import { ModalDialog } from "./ModalDialog";
 
 interface NoEditorModalProps {
   noEditor: PendingNoEditor;
@@ -23,7 +24,7 @@ export function NoEditorModal({ noEditor }: NoEditorModalProps) {
 
   return (
     <ModalLayer modalId="no-editor" initialFocusRef={okRef} onClick={close} onKeyDown={handleKeyDown}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+      <ModalDialog ariaLabel={`No editor available for ${noEditor.filename}`} onClick={(e) => e.stopPropagation()}>
         <div className="modal__header">file: {noEditor.filename}</div>
         <div className="modal__body">
           <div className="modal__no-editor-path">
@@ -41,7 +42,7 @@ export function NoEditorModal({ noEditor }: NoEditorModalProps) {
         <div className="modal__actions">
           <button ref={okRef} className="modal__btn modal__btn--primary" onClick={close}>OK</button>
         </div>
-      </div>
+      </ModalDialog>
     </ModalLayer>
   );
 }

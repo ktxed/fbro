@@ -351,23 +351,6 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
         } else handleClose();
         return;
       }
-      if (event.key === "Tab") {
-        const modal = modalRef.current;
-        if (!modal) return;
-        const controls = Array.from(modal.querySelectorAll<HTMLElement>(
-          'button:not([disabled]), select:not([disabled]), input:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
-        )).filter((control) => control.offsetParent !== null);
-        if (controls.length === 0) return;
-        const current = document.activeElement as HTMLElement | null;
-        const index = current ? controls.indexOf(current) : -1;
-        const next = event.shiftKey
-          ? controls[(index <= 0 ? controls.length : index) - 1]
-          : controls[(index + 1) % controls.length];
-        event.preventDefault();
-        event.stopPropagation();
-        next.focus();
-        return;
-      }
       const target = event.target;
       // Form fields keep their normal editing/navigation behaviour. The
       // overlay below still stops their events from reaching the panel.
@@ -540,8 +523,6 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
   return (
     <ModalLayer
       modalId={`git:${panelId}`}
-      role="dialog"
-      aria-modal="true"
       onKeyDown={(event) => {
         onKeyDown(event);
         event.stopPropagation();

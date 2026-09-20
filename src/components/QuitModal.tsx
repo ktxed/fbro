@@ -2,6 +2,7 @@ import { useRef } from "react";
 import { useAppDispatch, useAppState } from "../store";
 import type { WsClient } from "../ws/client";
 import { ModalLayer } from "./ModalStack";
+import { ModalDialog } from "./ModalDialog";
 
 interface QuitModalProps {
   client: WsClient;
@@ -31,7 +32,7 @@ export function QuitModal({ client }: QuitModalProps) {
         }
       }}
     >
-      <div className="modal">
+      <ModalDialog ariaLabel="Quit fbro">
         <div className="modal__header">Quit</div>
         <div className="modal__body">
           {activeJobs > 0 ? (
@@ -52,7 +53,7 @@ export function QuitModal({ client }: QuitModalProps) {
             </button>
           </div>
         </div>
-      </div>
+      </ModalDialog>
     </ModalLayer>
   );
 }

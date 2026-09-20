@@ -5,6 +5,7 @@ import type { WsClient } from "../ws/client";
 import { useInputHistory } from "../hooks/useInputHistory";
 import { InputHistoryDropdown } from "./InputHistoryDropdown";
 import { ModalLayer } from "./ModalStack";
+import { ModalDialog } from "./ModalDialog";
 
 interface TouchModalProps {
   touch: PendingTouch;
@@ -51,7 +52,7 @@ export function TouchModal({ touch, client }: TouchModalProps) {
       if (e.defaultPrevented) return;
       if (e.key === "Escape") { e.preventDefault(); close(); }
     }}>
-      <div className="modal" role="dialog" aria-label="New File" data-testid="touch-dialog" onClick={(e) => e.stopPropagation()}>
+      <ModalDialog ariaLabel="New File" testId="touch-dialog" onClick={(e) => e.stopPropagation()}>
         <div className="modal__header">New File</div>
         <div className="modal__body">
           <p className="modal__rename-from" title={touch.dirPath}>
@@ -97,7 +98,7 @@ export function TouchModal({ touch, client }: TouchModalProps) {
             Cancel
           </button>
         </div>
-      </div>
+      </ModalDialog>
     </ModalLayer>
   );
 }

@@ -2308,6 +2308,18 @@ body {
   bottom: -6px;
 }
 
+.modal__resize-handle--se::after {
+  content: "";
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: 7px;
+  height: 7px;
+  border-right: 2px solid var(--text-dim);
+  border-bottom: 2px solid var(--text-dim);
+  opacity: 0.7;
+}
+
 .modal__resize-handle--sw {
   left: -6px;
   bottom: -6px;

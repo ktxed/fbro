@@ -5,6 +5,7 @@ import type { WsClient } from "../ws/client";
 import { useInputHistory } from "../hooks/useInputHistory";
 import { InputHistoryDropdown } from "./InputHistoryDropdown";
 import { ModalLayer } from "./ModalStack";
+import { ModalDialog } from "./ModalDialog";
 
 interface GoToPathModalProps {
   goToPath: PendingGoToPath;
@@ -61,7 +62,7 @@ export function GoToPathModal({ goToPath, client }: GoToPathModalProps) {
       if (e.defaultPrevented) return;
       if (e.key === "Escape") { e.preventDefault(); close(); }
     }}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+      <ModalDialog ariaLabel="Go To Path" onClick={(e) => e.stopPropagation()}>
         <div className="modal__header">Go To Path</div>
         <div className="modal__body">
           <p className="modal__rename-from" title={goToPath.currentPath}>
@@ -107,7 +108,7 @@ export function GoToPathModal({ goToPath, client }: GoToPathModalProps) {
             Cancel
           </button>
         </div>
-      </div>
+      </ModalDialog>
     </ModalLayer>
   );
 }
