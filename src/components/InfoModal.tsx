@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { useAppDispatch, useAppState } from "../store";
 import type { PendingInfo } from "../store";
 import type { WsClient } from "../ws/client";
@@ -76,17 +76,12 @@ function CopyButton({ text }: { text: string }) {
 
 export function InfoModal({ info, client }: InfoModalProps) {
   const dispatch = useAppDispatch();
-  const overlayRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    overlayRef.current?.focus();
-  }, []);
+  const closeRef = useRef<HTMLButtonElement>(null);
 
   const close = () => dispatch({ type: "CLOSE_INFO" });
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Tab") e.preventDefault();
-    if (e.key === "Escape" || e.key === "i" || e.key === "I" || e.key === "Enter") {
+    if (e.key === "Escape" || e.key === "i" || e.key === "I") {
       e.preventDefault();
       close();
       return;
@@ -100,7 +95,7 @@ export function InfoModal({ info, client }: InfoModalProps) {
   };
 
   return (
-    <ModalLayer modalId="info" ref={overlayRef} onClick={close} onKeyDown={handleKeyDown}>
+    <ModalLayer modalId="info" initialFocusRef={closeRef} onClick={close} onKeyDown={handleKeyDown}>
       <ResizableModal
         modalId="info"
         client={client}
@@ -176,7 +171,7 @@ export function InfoModal({ info, client }: InfoModalProps) {
           </table>
         </div>
         <div className="modal__actions">
-          <button className="modal__btn modal__btn--primary" onClick={close}>Close</button>
+          <button ref={closeRef} className="modal__btn modal__btn--primary" onClick={close}>Close</button>
         </div>
       </ResizableModal>
     </ModalLayer>

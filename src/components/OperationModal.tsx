@@ -7,6 +7,7 @@ import { isArchiveSourceId, isGlobalSelectionSourceId } from "../utils/sourceId"
 import { IconAlertTriangle, IconCopy } from "@tabler/icons-react";
 import { ResizableModal } from "./ResizableModal";
 import { ModalLayer } from "./ModalStack";
+import { isEditableTarget, isNativeActivationTarget } from "./modalKeyboard";
 
 interface OperationModalProps {
   pending: PendingOp | null;
@@ -467,12 +468,6 @@ function isCopyDestNameConflictIssue(issue: CopyDestNameIssue | null) {
   return issue?.kind === "existing-destination" || issue?.kind === "same-panel-name";
 }
 
-function isFormControlTarget(target: EventTarget | null) {
-  return target instanceof HTMLInputElement
-    || target instanceof HTMLSelectElement
-    || target instanceof HTMLTextAreaElement;
-}
-
 function canSuggestResumeForPending(state: AppState, pending: PendingOp) {
   const destPanelState = pending.destPanel ? state.panels[pending.destPanel] : undefined;
   return pending.opType !== "delete"
@@ -748,16 +743,14 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
     };
 
     const handlePendingKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
-      if (e.key === "Tab") {
-        e.preventDefault();
-        return;
-      }
+      if (e.defaultPrevented) return;
       if (e.key === "Escape") {
         e.preventDefault();
         close();
         return;
       }
-      if (isFormControlTarget(e.target) && e.key !== "Enter") return;
+      if (isNativeActivationTarget(e.target) && !isEditableTarget(e.target)) return;
+      if (isEditableTarget(e.target) && e.key !== "Enter") return;
       if (e.key === "Enter") {
         e.preventDefault();
         startOp(false);
@@ -1065,19 +1058,18 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
     };
 
     const handleActiveJobKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
-      if (e.key === "Tab") {
+      if (e.defaultPrevented) return;
+      if (e.key === "Escape") {
         e.preventDefault();
+        if (confirmingCancel) setConfirmingCancel(false);
+        else close();
         return;
       }
+      if (isNativeActivationTarget(e.target)) return;
       if (isDecision) {
         if ((e.key === "a" || e.key === "A") && activeJob.decision?.supportsApplyToAll) {
           e.preventDefault();
           setApplyToAll((current) => !current);
-          return;
-        }
-        if (e.key === "Escape") {
-          e.preventDefault();
-          cancelJob();
           return;
         }
         if (e.key === "Enter" && primaryDecision) {
@@ -1093,7 +1085,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
       }
       if (isQueued || isProgress) {
         if (confirmingCancel) {
-          if (e.key === "Escape" || e.key === "Enter") {
+          if (e.key === "Enter") {
             e.preventDefault();
             setConfirmingCancel(false);
             return;
@@ -1105,18 +1097,13 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
           close();
           return;
         }
-        if (e.key === "Escape") {
-          e.preventDefault();
-          requestCancelJob();
-          return;
-        }
         if ((e.key === "r" || e.key === "R") && activeJob.supportsPause && activeJob.paused) {
           e.preventDefault();
           resumeJob();
           return;
         }
       }
-      if (e.key === "Escape" || e.key === "Enter") {
+      if (e.key === "Enter") {
         e.preventDefault();
         if (isTerminal) {
           if (requiresExplicitClose) {

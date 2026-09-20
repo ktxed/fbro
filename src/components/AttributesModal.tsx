@@ -3,6 +3,7 @@ import { useAppDispatch } from "../store";
 import type { PendingAttributes } from "../store";
 import type { WsClient } from "../ws/client";
 import { ModalLayer } from "./ModalStack";
+import { isNativeActivationTarget } from "./modalKeyboard";
 
 interface AttributesModalProps {
   attributes: PendingAttributes;
@@ -106,9 +107,12 @@ export function AttributesModal({ attributes, client }: AttributesModalProps) {
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
-      if (e.key === "Tab") { e.preventDefault(); return; }
-      if (e.key === "Enter") { e.preventDefault(); submit(); return; }
+      if (e.defaultPrevented) return;
       if (e.key === "Escape") { e.preventDefault(); close(); }
+      if (e.key === "Enter" && !isNativeActivationTarget(e.target)) {
+        e.preventDefault();
+        submit();
+      }
     },
     [submit, close],
   );
@@ -170,6 +174,12 @@ export function AttributesModal({ attributes, client }: AttributesModalProps) {
               className="attrs-octal__input"
               value={octInput}
               onChange={(e) => handleOctChange(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key !== "Enter") return;
+                e.preventDefault();
+                e.stopPropagation();
+                submit();
+              }}
               spellCheck={false}
               autoComplete="off"
             />

@@ -42,14 +42,13 @@ export function TouchModal({ touch, client }: TouchModalProps) {
   const handleKeyDown = (e: React.KeyboardEvent<HTMLElement>) => {
     history.onKeyDown(e);
     if (e.defaultPrevented) return;
-    if (e.key === "Enter")  { e.preventDefault(); submit(); }
-    if (e.key === "Escape") { e.preventDefault(); close(); }
+    if (e.key === "Enter")  { e.preventDefault(); e.stopPropagation(); submit(); }
+    if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); close(); }
   };
 
   return (
     <ModalLayer modalId="touch" onClick={close} onKeyDown={(e) => {
-      if (e.key === "Tab") { e.preventDefault(); return; }
-      if (e.key === "Enter") { e.preventDefault(); submit(); return; }
+      if (e.defaultPrevented) return;
       if (e.key === "Escape") { e.preventDefault(); close(); }
     }}>
       <div className="modal" role="dialog" aria-label="New File" data-testid="touch-dialog" onClick={(e) => e.stopPropagation()}>

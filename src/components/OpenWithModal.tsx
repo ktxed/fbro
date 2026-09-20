@@ -4,6 +4,7 @@ import { useAppDispatch, useAppState, type PendingOpenWith } from "../store";
 import type { WsClient } from "../ws/client";
 import { ResizableModal } from "./ResizableModal";
 import { ModalLayer } from "./ModalStack";
+import { isNativeActivationTarget } from "./modalKeyboard";
 
 interface OpenWithModalProps {
   client: WsClient;
@@ -69,15 +70,13 @@ export function OpenWithModal({ client, openWith }: OpenWithModalProps) {
   };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.defaultPrevented) return;
     if (e.key === "Escape") {
       e.preventDefault();
       close();
       return;
     }
-    if (e.key === "Tab") {
-      e.preventDefault();
-      return;
-    }
+    if (isNativeActivationTarget(e.target)) return;
     if (e.key === "ArrowDown") {
       e.preventDefault();
       if (apps.length > 0) {
@@ -138,6 +137,7 @@ export function OpenWithModal({ client, openWith }: OpenWithModalProps) {
                   className={`command-palette__item${selected ? " command-palette__item--selected" : ""}`}
                   data-selected={selected ? "true" : "false"}
                   onMouseDown={(e) => e.preventDefault()}
+                  onFocus={() => setSelectedIndex(index)}
                   onMouseEnter={() => setSelectedIndex(index)}
                   onClick={() => launchApp(app.id)}
                 >

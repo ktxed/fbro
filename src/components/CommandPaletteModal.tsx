@@ -11,6 +11,7 @@ import type { WsClient } from "../ws/client";
 import type { InteractiveCommand } from "../ws/types";
 import { ResizableModal } from "./ResizableModal";
 import { ModalLayer } from "./ModalStack";
+import { isNativeActivationTarget } from "./modalKeyboard";
 
 interface CommandPaletteModalProps {
   client: WsClient;
@@ -78,16 +79,14 @@ export function CommandPaletteModal({ client, onOpenJobsView }: CommandPaletteMo
   };
 
   const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.defaultPrevented) return;
     if (e.key === "Escape") {
       e.preventDefault();
       close();
       return;
     }
 
-    if (e.key === "Tab") {
-      e.preventDefault();
-      return;
-    }
+    if (isNativeActivationTarget(e.target) && e.target !== inputRef.current) return;
 
     if (e.key === "ArrowDown") {
       e.preventDefault();
@@ -148,6 +147,7 @@ export function CommandPaletteModal({ client, onOpenJobsView }: CommandPaletteMo
                   className={`command-palette__item${selected ? " command-palette__item--selected" : ""}`}
                   data-selected={selected ? "true" : "false"}
                   onMouseDown={(e) => e.preventDefault()}
+                  onFocus={() => setSelectedIndex(index)}
                   onClick={() => executeSelectedCommand(command.id)}
                 >
                   <span className="command-palette__item-main">

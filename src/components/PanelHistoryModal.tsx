@@ -5,6 +5,7 @@ import type { WsClient } from "../ws/client";
 import { archiveFilePath, isArchiveSourceId, isSearchSourceId } from "../utils/sourceId";
 import { ResizableModal } from "./ResizableModal";
 import { ModalLayer } from "./ModalStack";
+import { isNativeActivationTarget } from "./modalKeyboard";
 
 interface PanelHistoryModalProps {
   client: WsClient;
@@ -72,15 +73,13 @@ export function PanelHistoryModal({ client, panelHistory }: PanelHistoryModalPro
   };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.defaultPrevented) return;
     if (e.key === "Escape") {
       e.preventDefault();
       close();
       return;
     }
-    if (e.key === "Tab") {
-      e.preventDefault();
-      return;
-    }
+    if (isNativeActivationTarget(e.target)) return;
     if (e.key === "ArrowDown") {
       e.preventDefault();
       if (entries.length > 0) setSelectedIndex(i => Math.min(i + 1, entries.length - 1));
@@ -98,7 +97,7 @@ export function PanelHistoryModal({ client, panelHistory }: PanelHistoryModalPro
   };
 
   return (
-    <ModalLayer modalId="panel-history" onClick={close}>
+    <ModalLayer modalId="panel-history" initialFocusRef={dialogRef} onClick={close} onKeyDown={onKeyDown}>
       <ResizableModal
         ref={dialogRef}
         modalId="panel-history"
@@ -107,7 +106,6 @@ export function PanelHistoryModal({ client, panelHistory }: PanelHistoryModalPro
         ariaModal
         ariaLabel="Navigation History"
         tabIndex={-1}
-        onKeyDown={onKeyDown}
         defaultSize={{ width: 560, height: 420 }}
         minSize={{ width: 420, height: 300 }}
       >
@@ -134,6 +132,7 @@ export function PanelHistoryModal({ client, panelHistory }: PanelHistoryModalPro
                   ].filter(Boolean).join(" ")}
                   data-selected={selected ? "true" : "false"}
                   onMouseDown={(e) => e.preventDefault()}
+                  onFocus={() => setSelectedIndex(index)}
                   onMouseEnter={() => setSelectedIndex(index)}
                   onClick={() => navigateToEntry(index)}
                 >

@@ -1,4 +1,4 @@
-import { useRef, useEffect } from "react";
+import { useRef } from "react";
 import { useAppDispatch, useAppState } from "../store";
 import type { WsClient } from "../ws/client";
 import { ModalLayer } from "./ModalStack";
@@ -10,15 +10,11 @@ interface QuitModalProps {
 export function QuitModal({ client }: QuitModalProps) {
   const dispatch = useAppDispatch();
   const state = useAppState();
-  const overlayRef = useRef<HTMLDivElement>(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
 
   const activeJobs = Object.values(state.jobs).filter(
     j => j.state === "Running" || j.state === "AwaitingDecision"
   ).length;
-
-  useEffect(() => {
-    overlayRef.current?.focus();
-  }, []);
 
   const confirm = () => client.sendIntent("ConfirmQuit");
   const cancel = () => dispatch({ type: "CANCEL_QUIT" });
@@ -26,12 +22,13 @@ export function QuitModal({ client }: QuitModalProps) {
   return (
     <ModalLayer
       modalId="quit"
-      ref={overlayRef}
+      initialFocusRef={cancelRef}
       tabIndex={-1}
       onKeyDown={(e) => {
-        if (e.key === "Tab") e.preventDefault();
-        if (e.key === "Escape") cancel();
-        if (e.key === "Enter") confirm();
+        if (e.key === "Escape") {
+          e.preventDefault();
+          cancel();
+        }
       }}
     >
       <div className="modal">
@@ -50,7 +47,7 @@ export function QuitModal({ client }: QuitModalProps) {
             <button className="modal__btn modal__btn--primary" onClick={confirm}>
               Yes, quit
             </button>
-            <button className="modal__btn" onClick={cancel}>
+            <button ref={cancelRef} className="modal__btn" onClick={cancel}>
               Cancel
             </button>
           </div>

@@ -8,6 +8,7 @@ import type { BroParamItem } from "../ws/types";
 import { InputHistoryDropdown } from "./InputHistoryDropdown";
 import { ResizableModal } from "./ResizableModal";
 import { ModalLayer } from "./ModalStack";
+import { isNativeActivationTarget } from "./modalKeyboard";
 
 interface BroModalProps {
   client: WsClient;
@@ -249,15 +250,13 @@ export function BroModal({ client, bro }: BroModalProps) {
   };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.defaultPrevented) return;
     if (e.key === "Escape") {
       e.preventDefault();
       close();
       return;
     }
-    if (e.key === "Tab") {
-      e.preventDefault();
-      return;
-    }
+    if (isNativeActivationTarget(e.target)) return;
     if (e.key === "ArrowDown") {
       e.preventDefault();
       if (bros.length > 0) {
@@ -290,7 +289,7 @@ export function BroModal({ client, bro }: BroModalProps) {
   };
 
   return (
-    <ModalLayer modalId="bro" onClick={close}>
+    <ModalLayer modalId="bro" initialFocusRef={dialogRef} onClick={close} onKeyDown={onKeyDown}>
       <ResizableModal
         ref={dialogRef}
         modalId="bro"
@@ -300,7 +299,6 @@ export function BroModal({ client, bro }: BroModalProps) {
         ariaLabel="Pass To Bro"
         testId="bro-dialog"
         tabIndex={-1}
-        onKeyDown={onKeyDown}
         defaultSize={{ width: 560, height: 500 }}
         minSize={{ width: 420, height: 320 }}
       >
@@ -328,6 +326,7 @@ export function BroModal({ client, bro }: BroModalProps) {
                   data-bro-id={item.id}
                   data-selected={selected ? "true" : "false"}
                   onMouseDown={(e) => e.preventDefault()}
+                  onFocus={() => selectBro(index)}
                   onClick={() => {
                     selectBro(index);
                     if (!item.output && selectedBroParams(item).length === 0 && !isFedupBro(item)) {

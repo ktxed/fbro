@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useAppDispatch, useAppState, type PendingGlobalSelectionAdd } from "../store";
 import type { WsClient } from "../ws/client";
 import { ModalLayer } from "./ModalStack";
+import { isNativeActivationTarget } from "./modalKeyboard";
 
 interface GlobalSelectionModalProps {
   add: PendingGlobalSelectionAdd;
@@ -62,11 +63,8 @@ export function GlobalSelectionModal({ add, client }: GlobalSelectionModalProps)
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLElement>) => {
-    if (e.key === "Tab") {
-      e.preventDefault();
-      return;
-    }
-    if (e.key === "Enter") {
+    if (e.defaultPrevented) return;
+    if (e.key === "Enter" && !isNativeActivationTarget(e.target)) {
       e.preventDefault();
       submit();
       return;

@@ -42,14 +42,13 @@ export function MkDirModal({ mkdir, client }: MkDirModalProps) {
   const handleKeyDown = (e: React.KeyboardEvent<HTMLElement>) => {
     history.onKeyDown(e);
     if (e.defaultPrevented) return;
-    if (e.key === "Enter")  { e.preventDefault(); submit(); }
-    if (e.key === "Escape") { e.preventDefault(); close(); }
+    if (e.key === "Enter")  { e.preventDefault(); e.stopPropagation(); submit(); }
+    if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); close(); }
   };
 
   return (
     <ModalLayer modalId="mkdir" onClick={close} onKeyDown={(e) => {
-      if (e.key === "Tab") { e.preventDefault(); return; }
-      if (e.key === "Enter") { e.preventDefault(); submit(); return; }
+      if (e.defaultPrevented) return;
       if (e.key === "Escape") { e.preventDefault(); close(); }
     }}>
       <div className="modal" role="dialog" aria-label="Create Directory" data-testid="mkdir-dialog" onClick={(e) => e.stopPropagation()}>

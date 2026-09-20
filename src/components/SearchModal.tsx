@@ -10,6 +10,7 @@ import { DateTimeInput } from "./DateTimeInput";
 import { ResizableModal } from "./ResizableModal";
 import { stepNumberInputOnWheel } from "../utils/numberInputWheel";
 import { ModalLayer } from "./ModalStack";
+import { isNativeActivationTarget } from "./modalKeyboard";
 
 function MnemonicLabel({ text, mnemonic }: { text: string; mnemonic: string }) {
   const idx = text.toLowerCase().indexOf(mnemonic.toLowerCase());
@@ -311,11 +312,13 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
   };
 
   const handleOverlayKeyDown = (e: React.KeyboardEvent) => {
+    if (e.defaultPrevented) return;
     if (e.key === "Escape") {
       e.preventDefault();
       close();
       return;
     }
+    if (isNativeActivationTarget(e.target)) return;
     if (e.key === "Enter") {
       const target = e.target as HTMLElement;
       const isTextarea = target.tagName === "TEXTAREA";

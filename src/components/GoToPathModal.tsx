@@ -45,19 +45,20 @@ export function GoToPathModal({ goToPath, client }: GoToPathModalProps) {
     if (e.defaultPrevented) return;
     if (e.key === "Enter") {
       e.preventDefault();
+      e.stopPropagation();
       submit();
       return;
     }
     if (e.key === "Escape") {
       e.preventDefault();
+      e.stopPropagation();
       close();
     }
   };
 
   return (
     <ModalLayer modalId="go-to-path" onClick={close} onKeyDown={(e) => {
-      if (e.key === "Tab") { e.preventDefault(); return; }
-      if (e.key === "Enter") { e.preventDefault(); submit(); return; }
+      if (e.defaultPrevented) return;
       if (e.key === "Escape") { e.preventDefault(); close(); }
     }}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
