@@ -99,7 +99,12 @@ export function OpenWithModal({ client, openWith }: OpenWithModalProps) {
   };
 
   return (
-    <ModalLayer modalId="open-with" onClick={close}>
+    <ModalLayer
+      modalId="open-with"
+      initialFocusRef={dialogRef}
+      onClick={close}
+      onKeyDown={onKeyDown}
+    >
       <ResizableModal
         ref={dialogRef}
         modalId="open-with"
@@ -108,7 +113,6 @@ export function OpenWithModal({ client, openWith }: OpenWithModalProps) {
         ariaModal
         ariaLabel="Open With"
         tabIndex={-1}
-        onKeyDown={onKeyDown}
         defaultSize={{ width: 560, height: 420 }}
         minSize={{ width: 420, height: 300 }}
       >
