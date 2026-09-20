@@ -146,6 +146,7 @@ export function ModalStackProvider({ children }: { children: ReactNode }) {
         ? controls[(index <= 0 ? controls.length : index) - 1]
         : controls[(index + 1) % controls.length];
       next.focus({ preventScroll: true });
+      next.scrollIntoView({ block: "nearest", inline: "nearest" });
     };
 
     const onFocusIn = (event: FocusEvent) => {
