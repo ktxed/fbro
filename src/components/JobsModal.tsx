@@ -606,6 +606,7 @@ function ProcessRow({ proc, client }: { proc: ChildProcess; client: WsClient }) 
 export function JobsModal({ onClose, client }: { onClose: () => void; client: WsClient }) {
   const state = useAppState();
   const overlayRef = useRef<HTMLDivElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
   const [activeTab, setActiveTab] = useState<"jobs" | "procs" | "cache">("jobs");
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const [expandedFileJobs, setExpandedFileJobs] = useState<Record<string, boolean>>({});
@@ -662,6 +663,7 @@ export function JobsModal({ onClose, client }: { onClose: () => void; client: Ws
     <ModalLayer
       modalId="jobs"
       ref={overlayRef}
+      initialFocusRef={closeRef}
       onClick={onOverlayClick}
       onKeyDown={(e) => {
         if (e.key === "Escape" || e.key === "j") {
@@ -808,7 +810,7 @@ export function JobsModal({ onClose, client }: { onClose: () => void; client: Ws
         </div>
 
         <div className="modal__actions">
-          <button className="modal__btn" onClick={onClose}>Close <kbd>j</kbd></button>
+          <button ref={closeRef} className="modal__btn modal__btn--primary" type="button" onClick={onClose}>Close</button>
         </div>
       </ResizableModal>
     </ModalLayer>

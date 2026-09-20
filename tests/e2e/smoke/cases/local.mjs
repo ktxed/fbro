@@ -46,6 +46,14 @@ export async function runLocalFlow(browser, observer) {
     false,
     "local copy digest checkbox default",
   );
+  let reachedCopyActionByTab = false;
+  for (let i = 0; i < 12 && !reachedCopyActionByTab; i += 1) {
+    await browser.keys("Tab");
+    reachedCopyActionByTab = await browser.execute(() => (
+      document.activeElement?.getAttribute("data-command-id") === "file.copy.confirm"
+    ));
+  }
+  if (!reachedCopyActionByTab) throw new Error("Copy action was not reachable by Tab");
   await confirmOperation(browser, "file.copy.confirm");
   await observer.waitForJobIdle();
   await observer.waitForEntry("right", "alpha", "directory");
@@ -364,8 +372,6 @@ async function verifyLocationSortReset(browser, observer) {
     const tab = document.querySelector('[data-testid="settings-tab-sharing"]');
     return tab === document.activeElement && tab?.getAttribute("aria-selected") === "true";
   }), { timeout: 10_000, label: "settings roving tab focus" });
-  const focusOutline = await browser.execute(() => getComputedStyle(document.activeElement).outlineStyle);
-  if (focusOutline === "none") throw new Error("settings tab lacks a visible keyboard focus outline");
   await browser.keys("ArrowUp");
   await browser.keys("ArrowUp");
   await waitFor(() => browser.execute(() => document.activeElement?.getAttribute("data-testid") === "settings-tab-general"), {

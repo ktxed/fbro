@@ -2206,6 +2206,7 @@ body {
   pointer-events: none;
 }
 
+.modal-layer :focus,
 .modal-layer :focus-visible,
 .modal-layer [role="tab"]:focus {
   outline: 2px solid var(--accent);
