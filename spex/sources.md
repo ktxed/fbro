@@ -395,8 +395,9 @@ not change a Source; it activates another Panel with its own binding and view
 state. Navigating to another Source mutates the existing Panel.
 
 Tab labels are presentation, not source identity. Normal listing tabs derive
-their labels from the path, while search tabs display their `search:<job-id>`
-source ID to avoid an ambiguous `"/"` label.
+their labels from the path. Search tabs display their `search:<job-id>` source
+ID, while the Processes and Journal roots display their source names, avoiding
+an ambiguous `"/"` label for flat virtual sources.
 
 ### 6.2 Terminal tabs
 

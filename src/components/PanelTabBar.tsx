@@ -1,19 +1,34 @@
 import { useEffect, useRef, useState } from "react";
 import { IconChevronLeft, IconChevronRight, IconTerminal2, IconX } from "@tabler/icons-react";
-import type { PanelSlot, PanelState } from "../ws/types";
+import type { PanelSlot, PanelState, Source } from "../ws/types";
 import type { WsClient } from "../ws/client";
 import { isSearchSourceId } from "../utils/sourceId";
 
 const MAX_TAB_CHARS = 18;
 
-function tabTitle(panel: PanelState | undefined): string {
+function sourceTabTitle(
+  panel: PanelState,
+  sources: Record<string, Source>,
+): string | undefined {
+  if (isSearchSourceId(panel.sourceId)) return panel.sourceId;
+  if (panel.sourceId === "procs" || panel.sourceId === "journal") {
+    return sources[panel.sourceId]?.name ?? panel.sourceId;
+  }
+  return undefined;
+}
+
+function tabTitle(
+  panel: PanelState | undefined,
+  sources: Record<string, Source>,
+): string {
   if (!panel) return "…";
   if (panel.tabTitle) return panel.tabTitle;
   if (panel.tabKind === "terminal") {
     const base = basename(panel.path) || "~";
     return base;
   }
-  if (isSearchSourceId(panel.sourceId)) return panel.sourceId;
+  const sourceTitle = sourceTabTitle(panel, sources);
+  if (sourceTitle) return sourceTitle;
   return basename(panel.path) || "/";
 }
 
@@ -28,10 +43,11 @@ function basename(path: string): string {
 interface Props {
   slot: PanelSlot;
   panels: Record<string, PanelState>;
+  sources: Record<string, Source>;
   client: WsClient;
 }
 
-export function PanelTabBar({ slot, panels, client }: Props) {
+export function PanelTabBar({ slot, panels, sources, client }: Props) {
   const listRef = useRef<HTMLDivElement>(null);
   const [canLeft, setCanLeft] = useState(false);
   const [canRight, setCanRight] = useState(false);
@@ -118,10 +134,10 @@ export function PanelTabBar({ slot, panels, client }: Props) {
         {slot.tabPanelIds.map((panelId) => {
           const panel = panels[panelId];
           const isActive = panelId === slot.activePanelId;
-          const title = tabTitle(panel);
+          const title = tabTitle(panel, sources);
           const displayed =
             title.length > MAX_TAB_CHARS ? title.slice(0, MAX_TAB_CHARS - 1) + "…" : title;
-          const tooltip = panel && isSearchSourceId(panel.sourceId)
+          const tooltip = panel && sourceTabTitle(panel, sources)
             ? title
             : panel?.path ?? title;
           return (

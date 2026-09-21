@@ -2321,7 +2321,7 @@ export function Panel({
           (s) => s.tabPanelIds.length > 1,
         );
         if (!anyTabbed) return null;
-        return <PanelTabBar slot={slot} panels={appState.panels} client={client} />;
+        return <PanelTabBar slot={slot} panels={appState.panels} sources={appState.sources} client={client} />;
       })()}
 
       {panel.tabKind === "terminal" && panel.terminalSessionId !== undefined ? (
