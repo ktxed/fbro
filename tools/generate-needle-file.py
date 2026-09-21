@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import argparse
+import random
 import re
+import secrets
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
@@ -12,7 +14,9 @@ from pathlib import Path
 DEFAULT_NEEDLE = "THIS_IS_THE_NEEDLE"
 DEFAULT_POSITIONS = (Decimal("10"), Decimal("50"), Decimal("80"))
 WRITE_CHUNK_SIZE = 1024 * 1024
-FILLER_LINE = b"0123456789abcdef" * 7 + b"0123456789abc\n"  # 128 bytes
+DEFAULT_MIN_LINE_LENGTH = 40
+DEFAULT_MAX_LINE_LENGTH = 240
+FILLER_ALPHABET = b"0123456789abcdef"
 
 SIZE_UNITS = {
     "": 1,
@@ -51,6 +55,23 @@ def parse_percentage(value: str) -> Decimal:
     return percentage
 
 
+def positive_int(value: str) -> int:
+    try:
+        number = int(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(f"expected an integer, got {value!r}") from error
+    if number <= 0:
+        raise argparse.ArgumentTypeError("value must be greater than zero")
+    return number
+
+
+def parse_seed(value: str) -> int:
+    try:
+        return int(value, 0)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError("seed must be an integer (decimal or 0x-prefixed hex)") from error
+
+
 def marker_offsets(file_size: int, marker_size: int, positions: list[Decimal]) -> list[int]:
     if marker_size > file_size:
         raise ValueError("needle is larger than the requested file")
@@ -65,8 +86,29 @@ def marker_offsets(file_size: int, marker_size: int, positions: list[Decimal]) -
     return offsets
 
 
-def write_filler(output: Path, size: int) -> None:
-    chunk = (FILLER_LINE * (WRITE_CHUNK_SIZE // len(FILLER_LINE) + 1))[:WRITE_CHUNK_SIZE]
+def make_filler_template(rng: random.Random, min_line_length: int, max_line_length: int) -> bytes:
+    """Build a reusable chunk whose newline-delimited lines have random lengths."""
+    template = bytearray()
+    while len(template) + min_line_length + 1 <= WRITE_CHUNK_SIZE:
+        line_length = rng.randint(min_line_length, max_line_length)
+        available = WRITE_CHUNK_SIZE - len(template) - 1
+        line_length = min(line_length, available)
+        repeats = line_length // len(FILLER_ALPHABET) + 1
+        template.extend((FILLER_ALPHABET * repeats)[:line_length])
+        template.append(ord("\n"))
+    return bytes(template)
+
+
+def write_filler(
+    output: Path,
+    size: int,
+    rng: random.Random,
+    min_line_length: int,
+    max_line_length: int,
+) -> None:
+    # Repeating a randomized ~1 MiB template keeps multi-gigabyte generation
+    # fast and bounded in memory while avoiding uniform line lengths.
+    chunk = make_filler_template(rng, min_line_length, max_line_length)
     remaining = size
     with output.open("wb") as file:
         while remaining:
@@ -90,6 +132,23 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="PERCENT",
         help="marker positions (default: 10 50 80; a trailing %% is optional)",
     )
+    parser.add_argument(
+        "--min-line-length",
+        type=positive_int,
+        default=DEFAULT_MIN_LINE_LENGTH,
+        help=f"minimum filler line length excluding newline (default: {DEFAULT_MIN_LINE_LENGTH})",
+    )
+    parser.add_argument(
+        "--max-line-length",
+        type=positive_int,
+        default=DEFAULT_MAX_LINE_LENGTH,
+        help=f"maximum filler line length excluding newline (default: {DEFAULT_MAX_LINE_LENGTH})",
+    )
+    parser.add_argument(
+        "--seed",
+        type=parse_seed,
+        help="random seed for reproducible line lengths (default: generate and print one)",
+    )
     parser.add_argument("--force", action="store_true", help="overwrite an existing output file")
     return parser
 
@@ -99,6 +158,8 @@ def main() -> int:
     marker = args.needle.encode("utf-8")
     if not marker:
         raise SystemExit("error: needle must not be empty")
+    if args.min_line_length > args.max_line_length:
+        raise SystemExit("error: --min-line-length must not exceed --max-line-length")
     if args.output.exists() and not args.force:
         raise SystemExit(f"error: {args.output} already exists (use --force to overwrite it)")
 
@@ -108,13 +169,21 @@ def main() -> int:
         raise SystemExit(f"error: {error}") from error
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    write_filler(args.output, args.size)
+    seed = args.seed if args.seed is not None else secrets.randbits(64)
+    write_filler(
+        args.output,
+        args.size,
+        random.Random(seed),
+        args.min_line_length,
+        args.max_line_length,
+    )
     with args.output.open("r+b") as file:
         for offset in offsets:
             file.seek(offset)
             file.write(marker)
 
     print(f"Created {args.output} ({args.size} bytes)")
+    print(f"  randomized line lengths: {args.min_line_length}..{args.max_line_length} bytes (seed {seed})")
     for position, offset in zip(args.positions, offsets):
         print(f"  {position}%: byte offset {offset}, needle {args.needle!r}")
     return 0

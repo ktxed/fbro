@@ -80,6 +80,26 @@ function renderText(bytes: Uint8Array): string {
   return new TextDecoder("utf-8", { fatal: false }).decode(bytes);
 }
 
+function displayRowAtByteOffset(
+  bytes: Uint8Array,
+  relativeOffset: number,
+  dosMode: boolean,
+  wordWrap: boolean,
+): number {
+  const prefix = dosMode
+    ? renderCp437(bytes.slice(0, relativeOffset))
+    : renderText(bytes.slice(0, relativeOffset));
+  const logicalLines = prefix.split("\n");
+  if (wordWrap) return logicalLines.length - 1;
+
+  let displayRow = 0;
+  for (const completeLine of logicalLines.slice(0, -1)) {
+    displayRow += Math.max(1, Math.ceil(completeLine.length / MAX_COL));
+  }
+  displayRow += Math.floor(logicalLines[logicalLines.length - 1].length / MAX_COL);
+  return displayRow;
+}
+
 function sanitizedMermaidSvg(svg: string): SVGElement | null {
   // Mermaid serializes HTML inside foreignObject using HTML void-element
   // syntax. In particular, state-diagram notes turn Markdown line breaks into
@@ -838,9 +858,9 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
     });
   }, [findIdx, findMatches, findOpen, isSmall, vpLines, maxTopLine]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Load the byte window containing the selected backend match. When it is
-  // already buffered, position directly; otherwise the existing post-load
-  // fraction logic centres it after ReadFileChunk completes.
+  // Load the byte window containing the selected backend match, then derive
+  // its exact display row from the preceding bytes. Byte-percentage estimates
+  // are not accurate enough when line lengths vary substantially.
   useEffect(() => {
     if (!findOpen || isSmall !== false || largeFindMatches.length === 0 || !buffer) return;
     const match = largeFindMatches[Math.min(findIdx, largeFindMatches.length - 1)];
@@ -853,8 +873,8 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
         if (buffer[i] === 10) precedingNewlines++;
       }
       setBufferBaseLine(Math.max(1, match.lineNumber - precedingNewlines));
-      const fraction = (match.byteOffset - br.offset) / Math.max(1, br.end - br.offset);
-      setTopLine(clamp(Math.floor(fraction * lines.length) - Math.floor(vpLines / 2), 0, maxTopLine));
+      const matchRow = displayRowAtByteOffset(buffer, relativeOffset, dosMode, wordWrap);
+      setTopLine(clamp(matchRow - Math.floor(vpLines / 2), 0, maxTopLine));
       return;
     }
     if (loadingRef.current || fileSize === null) return;
@@ -864,9 +884,9 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
       Math.max(0, fileSize - CHUNK_SIZE),
     );
     pendingFindLineRef.current = match;
-    pendingJumpRef.current = (match.byteOffset - loadOff) / CHUNK_SIZE;
+    pendingJumpRef.current = null;
     requestChunk(loadOff, CHUNK_SIZE, "top");
-  }, [findIdx, largeFindMatches, findOpen, isSmall, buffer, fileSize, lines.length, maxTopLine, vpLines, requestChunk]);
+  }, [findIdx, largeFindMatches, findOpen, isSmall, buffer, fileSize, maxTopLine, vpLines, dosMode, wordWrap, requestChunk]);
 
   // Focus input when find opens, close when switching to non-text mode
   useEffect(() => {
