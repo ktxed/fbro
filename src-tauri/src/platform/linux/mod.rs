@@ -59,6 +59,14 @@ impl Platform for LinuxPlatform {
         let _ = Command::new("xdg-open").arg(path).spawn();
     }
 
+    fn open_url(&self, url: &str) -> Result<(), String> {
+        Command::new("xdg-open")
+            .arg(url)
+            .spawn()
+            .map(|_| ())
+            .map_err(|error| format!("Could not open the link: {error}"))
+    }
+
     fn get_thumbnail(&self, path: &str, size: u32) -> Option<(Vec<u8>, &'static str)> {
         thumbnail::generate(path, size)
     }

@@ -13,6 +13,10 @@ pub(crate) async fn handle(name: &str, args: &Value, ctx: &mut IntentContext<'_>
         refresh_git_status(args, ctx).await;
         return;
     }
+    if name == "OpenGitReviewRequest" {
+        open_review_request(args, ctx).await;
+        return;
+    }
 
     let panel_id = args.get("panelId").and_then(Value::as_str).unwrap_or("").to_string();
     let activity_id = args
@@ -106,48 +110,49 @@ pub(crate) async fn handle(name: &str, args: &Value, ctx: &mut IntentContext<'_>
             activity_id.as_deref(),
             false,
             Some(message),
+            None,
         )
         .await;
         send_error(ctx, "GIT_UNAVAILABLE", message).await;
         return;
     };
-    let result = match name {
-        "GitStagePaths" => run_paths(&root, "add", args, false),
-        "GitUnstagePaths" => run_paths(&root, "restore", args, true),
-        "GitRollbackPaths" => rollback_paths(&root, args),
+    let result: Result<Option<String>, String> = match name {
+        "GitStagePaths" => run_paths(&root, "add", args, false).map(|_| None),
+        "GitUnstagePaths" => run_paths(&root, "restore", args, true).map(|_| None),
+        "GitRollbackPaths" => rollback_paths(&root, args).map(|_| None),
         "GitCommit" => {
             let message = args.get("message").and_then(Value::as_str).unwrap_or("").trim();
             if message.is_empty() { Err("A commit message is required.".to_string()) }
-            else { crate::git::run(&root, &["commit".into(), "-m".into(), message.into()]) }
+            else { crate::git::run(&root, &["commit".into(), "-m".into(), message.into()]).map(|_| None) }
         }
         "GitSwitchBranch" => {
             let branch = args.get("branch").and_then(Value::as_str).unwrap_or("").trim();
             if branch.is_empty() { Err("A branch is required.".to_string()) }
-            else { crate::git::run(&root, &["switch".into(), branch.into()]) }
+            else { crate::git::run(&root, &["switch".into(), branch.into()]).map(|_| None) }
         },
-        "GitPull" => guarded(clean, || crate::git::run(&root, &["pull".into()])),
+        "GitPull" => guarded(clean, || crate::git::run(&root, &["pull".into()])).map(|_| None),
         "GitPush" => match args.get("forceMode").and_then(Value::as_str).unwrap_or("") {
-            "" => crate::git::run(&root, &["push".into()]),
-            "lease" => crate::git::run(&root, &["push".into(), "--force-with-lease".into()]),
-            "force" => crate::git::run(&root, &["push".into(), "--force".into()]),
+            "" => crate::git::push(&root, &["push".into()]),
+            "lease" => crate::git::push(&root, &["push".into(), "--force-with-lease".into()]),
+            "force" => crate::git::push(&root, &["push".into(), "--force".into()]),
             _ => Err("Invalid Git push force mode.".to_string()),
         },
         "GitSetUpstream" => guarded(clean, || {
             let branch = args.get("branch").and_then(Value::as_str).unwrap_or("").trim();
             if branch.is_empty() { Err("A local branch is required to set an upstream.".to_string()) }
-            else { crate::git::run(&root, &["push".into(), "--set-upstream".into(), "origin".into(), branch.into()]) }
+            else { crate::git::push(&root, &["push".into(), "--set-upstream".into(), "origin".into(), branch.into()]) }
         }),
-        "GitFetch" => crate::git::run(&root, &["fetch".into()]),
+        "GitFetch" => crate::git::run(&root, &["fetch".into()]).map(|_| None),
         // Refresh always re-scans local status (below). Also best-effort fetch so
         // ahead/behind stay current; network/remote failures must not block that.
         "GitRefresh" => {
             let _ = crate::git::run(&root, &["fetch".into()]);
-            Ok(())
+            Ok(None)
         }
-        _ => Ok(()),
+        _ => Ok(None),
     };
     match result {
-        Ok(()) => {
+        Ok(suggested_url) => {
             if let Some(operation) = operation.as_ref() {
                 crate::journal::record_git_result(operation, "completed", None);
             }
@@ -170,7 +175,7 @@ pub(crate) async fn handle(name: &str, args: &Value, ctx: &mut IntentContext<'_>
                 ctx.watcher_cmd_tx,
             )
             .await;
-            send_action_finished(ctx, &panel_id, name, activity_id.as_deref(), true, None)
+            send_action_finished(ctx, &panel_id, name, activity_id.as_deref(), true, None, suggested_url.as_deref())
                 .await;
         }
         Err(message) => {
@@ -184,6 +189,7 @@ pub(crate) async fn handle(name: &str, args: &Value, ctx: &mut IntentContext<'_>
                 activity_id.as_deref(),
                 false,
                 Some(&message),
+                None,
             )
             .await;
             send_error(ctx, "GIT_ACTION_FAILED", &message).await
@@ -270,6 +276,7 @@ async fn send_action_finished(
     activity_id: Option<&str>,
     success: bool,
     message: Option<&str>,
+    suggested_url: Option<&str>,
 ) {
     let _ = ctx
         .tx
@@ -280,6 +287,7 @@ async fn send_action_finished(
             activity_id: activity_id.map(str::to_string),
             success,
             message: message.map(str::to_string),
+            suggested_url: suggested_url.map(str::to_string),
         })
         .await;
 }
@@ -290,8 +298,28 @@ fn rollback_paths(root: &str, args: &Value) -> Result<(), String> {
     crate::git::rollback_paths(root, &paths)
 }
 
-fn guarded(clean: bool, action: impl FnOnce() -> Result<(), String>) -> Result<(), String> {
+fn guarded<T>(clean: bool, action: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
     if clean { action() } else { Err("This action requires no staged changes. Commit or unstage them before continuing.".to_string()) }
+}
+
+async fn open_review_request(args: &Value, ctx: &IntentContext<'_>) {
+    let url = args.get("url").and_then(Value::as_str).unwrap_or("").trim();
+    let parsed = tauri::Url::parse(url).ok();
+    let valid = url.len() <= 4096
+        && parsed.as_ref().is_some_and(|url| {
+            matches!(url.scheme(), "http" | "https") && url.host_str().is_some()
+        });
+    if !valid {
+        send_error(ctx, "GIT_REVIEW_URL_INVALID", "The suggested review link is invalid.").await;
+        return;
+    }
+    let platform = {
+        let state = ctx.state.lock().await;
+        Arc::clone(&state.platform)
+    };
+    if let Err(message) = platform.open_url(url) {
+        send_error(ctx, "GIT_REVIEW_OPEN_FAILED", &message).await;
+    }
 }
 
 fn run_paths(root: &str, action: &str, args: &Value, staged: bool) -> Result<(), String> {

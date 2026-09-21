@@ -1352,6 +1352,15 @@ function reducer(state: AppState, action: AppAction): AppState {
               },
             };
           }
+          if (msg.code.startsWith("GIT_REVIEW_")) {
+            return {
+              ...state,
+              transientHint: {
+                message: msg.message,
+                token: msg.timestamp,
+              },
+            };
+          }
           // Surface remote / sharing errors as toasts. Without this they
           // disappear silently and the user can't tell why Connect or
           // Pair didn't do anything.

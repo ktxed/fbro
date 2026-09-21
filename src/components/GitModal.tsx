@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { IconArrowBackUp, IconArrowDown, IconArrowUp, IconCopy, IconGitCompare, IconLoader2, IconMinus, IconPlus } from "@tabler/icons-react";
+import { IconArrowBackUp, IconArrowDown, IconArrowUp, IconCopy, IconExternalLink, IconGitCompare, IconLoader2, IconMinus, IconPlus } from "@tabler/icons-react";
 import { useAppDispatch, useAppState } from "../store";
 import type { GitChange, GitLogRef, GitRepoStatus } from "../ws/types";
 import type { WsClient } from "../ws/client";
@@ -63,6 +63,11 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
     const id = crypto.randomUUID();
     onActivityChange({ id, action: name, message, status: "running" });
     act(name, { ...args, activityId: id });
+  };
+  const openSuggestedReview = () => {
+    if (activity?.suggestedUrl) {
+      act("OpenGitReviewRequest", { url: activity.suggestedUrl });
+    }
   };
   const selectedChanges = useMemo(() => git.changes.filter(change => selectedPaths.has(change.path)), [git.changes, selectedPaths]);
   const selectedStaged = useMemo(() => selectedChanges.filter(change => isStaged(change)), [selectedChanges]);
@@ -917,6 +922,16 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
             {activity?.status === "running" && <IconLoader2 size={14} />}
             {activity?.message ?? (git.upstream ? `Tracking ${git.upstream}` : "No upstream configured")}
           </span>
+          {activity?.status === "complete" && activity.suggestedUrl && (
+            <button
+              type="button"
+              data-testid="git-open-review-request"
+              title={activity.suggestedUrl}
+              onClick={openSuggestedReview}
+            >
+              <IconExternalLink size={14} aria-hidden /> Open pull/merge request
+            </button>
+          )}
           {!git.upstream && (
             <button
               disabled={actionInFlight || !canSetUpstream}

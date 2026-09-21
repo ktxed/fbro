@@ -204,8 +204,75 @@ fn status_label(change: &GitChange) -> String {
 }
 
 pub fn run(root: &str, args: &[String]) -> Result<(), String> {
-    let output = Command::new("git").arg("-C").arg(root).args(args).output().map_err(|e| e.to_string())?;
-    if output.status.success() { Ok(()) } else { Err(String::from_utf8_lossy(&output.stderr).trim().to_string()) }
+    run_with_output(root, args).map(|_| ())
+}
+
+/// Run a push while retaining the remote's successful output. Hosting services
+/// commonly print a newly-created branch's pull/merge-request URL to stderr.
+pub fn push(root: &str, args: &[String]) -> Result<Option<String>, String> {
+    let output = run_with_output(root, args)?;
+    Ok(find_review_request_url(&output))
+}
+
+fn run_with_output(root: &str, args: &[String]) -> Result<std::process::Output, String> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(args)
+        .output()
+        .map_err(|e| e.to_string())?;
+    if output.status.success() {
+        Ok(output)
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+    }
+}
+
+fn find_review_request_url(output: &std::process::Output) -> Option<String> {
+    let text = format!(
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    find_review_request_url_in_text(&text)
+}
+
+fn find_review_request_url_in_text(text: &str) -> Option<String> {
+    let url_re = regex::Regex::new(r#"https?://[^\s<>\"'\x00-\x1f\x7f]+"#)
+        .expect("valid URL regex");
+    let lines = text.lines().collect::<Vec<_>>();
+
+    // The explanatory line and URL are separate in GitHub/GitLab output. Keep
+    // the scan close to explicit PR/MR wording so an arbitrary remote message
+    // does not turn every URL into an open-browser suggestion.
+    for (index, line) in lines.iter().enumerate() {
+        let lower = line.to_ascii_lowercase();
+        let mentions_request = lower.contains("pull request") || lower.contains("merge request");
+        if !mentions_request {
+            continue;
+        }
+        for candidate_line in &lines[index..lines.len().min(index + 4)] {
+            if let Some(url) = url_re.find(candidate_line) {
+                return Some(trim_url_punctuation(url.as_str()).to_string());
+            }
+        }
+    }
+
+    // Some servers print only a recognizable creation URL without prose.
+    let recognizable_url = url_re.find_iter(text).find_map(|candidate| {
+        let url = trim_url_punctuation(candidate.as_str());
+        let lower = url.to_ascii_lowercase();
+        (lower.contains("/pull/new/")
+            || lower.contains("/pull-requests/new")
+            || lower.contains("/merge_requests/new")
+            || lower.contains("/pullrequestcreate"))
+        .then(|| url.to_string())
+    });
+    recognizable_url
+}
+
+fn trim_url_punctuation(url: &str) -> &str {
+    url.trim_end_matches([',', '.', ';', ':', '!', '?', ')', ']', '}'])
 }
 
 /// Read a page of commit history for `root`.
@@ -541,10 +608,36 @@ mod tests {
     use std::process::Command;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use super::{commit_show, has_no_staged_changes, read_diff_content, rollback_paths, status_counts, GitChange};
+    use super::{commit_show, find_review_request_url_in_text, has_no_staged_changes, read_diff_content, rollback_paths, status_counts, GitChange};
 
     fn change(index_status: &str, worktree_status: &str) -> GitChange {
         GitChange { path: "file".into(), old_path: None, index_status: index_status.into(), worktree_status: worktree_status.into() }
+    }
+
+    #[test]
+    fn finds_github_pull_request_url_on_the_following_line() {
+        let output = "remote: Create a pull request for 'topic' on GitHub by visiting:\nremote:   https://github.com/acme/repo/pull/new/topic\n";
+        assert_eq!(
+            find_review_request_url_in_text(output).as_deref(),
+            Some("https://github.com/acme/repo/pull/new/topic")
+        );
+    }
+
+    #[test]
+    fn finds_gitlab_merge_request_url_and_trims_sentence_punctuation() {
+        let output = "remote: To create a merge request for topic, visit:\nremote: https://gitlab.example/acme/repo/-/merge_requests/new?merge_request%5Bsource_branch%5D=topic.\x1b[0m\n";
+        assert_eq!(
+            find_review_request_url_in_text(output).as_deref(),
+            Some("https://gitlab.example/acme/repo/-/merge_requests/new?merge_request%5Bsource_branch%5D=topic")
+        );
+    }
+
+    #[test]
+    fn ignores_unrelated_urls_in_push_output() {
+        assert_eq!(
+            find_review_request_url_in_text("remote: Learn more at https://example.test/docs\n"),
+            None
+        );
     }
 
     #[test]

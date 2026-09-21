@@ -3,4 +3,5 @@ export interface GitActivity {
   action: string;
   message: string;
   status: "running" | "complete" | "failed";
+  suggestedUrl?: string;
 }

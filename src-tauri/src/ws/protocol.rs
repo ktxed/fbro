@@ -271,6 +271,8 @@ pub enum ServerMessage {
         success: bool,
         #[serde(skip_serializing_if = "Option::is_none")]
         message: Option<String>,
+        #[serde(rename = "suggestedUrl", skip_serializing_if = "Option::is_none")]
+        suggested_url: Option<String>,
     },
     /// Request text input from the FE (e.g. archive password).
     InputRequired {

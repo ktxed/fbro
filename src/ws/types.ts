@@ -889,6 +889,7 @@ export interface GitActionFinishedMessage {
   activityId?: string;
   success: boolean;
   message?: string;
+  suggestedUrl?: string;
 }
 
 export interface InputRequiredMessage {

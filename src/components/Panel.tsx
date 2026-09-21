@@ -922,6 +922,7 @@ export function Panel({
       action: gitActivity.action,
       status: result.success ? "complete" : "failed",
       message: result.success ? `${gitActivity.message.replace(/…$/, "")} complete` : (result.message ?? "Git action failed"),
+      suggestedUrl: result.success ? result.suggestedUrl : undefined,
     });
   }, [appState.gitActionResult, gitActivity, panelId]);
 

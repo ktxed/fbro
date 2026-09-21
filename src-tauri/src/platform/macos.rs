@@ -88,6 +88,14 @@ impl Platform for MacOSPlatform {
         let _ = Command::new("open").arg(path).spawn();
     }
 
+    fn open_url(&self, url: &str) -> Result<(), String> {
+        Command::new("open")
+            .arg(url)
+            .spawn()
+            .map(|_| ())
+            .map_err(|error| format!("Could not open the link: {error}"))
+    }
+
     fn disk_space(&self, path: &str) -> Option<(u64, u64)> {
         use std::ffi::CString;
         let cpath = CString::new(path).ok()?;

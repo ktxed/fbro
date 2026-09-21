@@ -122,6 +122,11 @@ pub trait Platform: Send + Sync {
     /// Opens a file with the OS default application for its type. Fire-and-forget.
     fn open_file(&self, _path: &str) {}
 
+    /// Opens an HTTP(S) URL in the system browser.
+    fn open_url(&self, _url: &str) -> Result<(), String> {
+        Err("Opening web links is not supported on this platform.".to_string())
+    }
+
     /// Opens a terminal emulator at the given directory. Fire-and-forget.
     fn open_terminal(&self, _path: &str) {}
 

@@ -47,6 +47,18 @@ extern "system" {
     fn GlobalUnlock(h_mem: *mut c_void) -> i32;
 }
 
+#[link(name = "shell32")]
+extern "system" {
+    fn ShellExecuteW(
+        hwnd: *mut c_void,
+        operation: *const u16,
+        file: *const u16,
+        parameters: *const u16,
+        directory: *const u16,
+        show_command: i32,
+    ) -> isize;
+}
+
 const CF_UNICODETEXT: u32 = 13;
 const CF_HDROP: u32 = 15;
 const DROP_EFFECT_COPY: u32 = 1;
@@ -94,6 +106,26 @@ impl Platform for WindowsPlatform {
 
     fn open_file(&self, path: &str) {
         let _ = Command::new("cmd").args(["/c", "start", "", path]).spawn();
+    }
+
+    fn open_url(&self, url: &str) -> Result<(), String> {
+        let operation = to_wide("open");
+        let url = to_wide(url);
+        let result = unsafe {
+            ShellExecuteW(
+                ptr::null_mut(),
+                operation.as_ptr(),
+                url.as_ptr(),
+                ptr::null(),
+                ptr::null(),
+                1,
+            )
+        };
+        if result > 32 {
+            Ok(())
+        } else {
+            Err(format!("Could not open the link (system error {result})."))
+        }
     }
 
     fn open_terminal(&self, path: &str) {
