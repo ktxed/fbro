@@ -110,6 +110,7 @@ pub async fn dispatch(name: &str, scope: &Value, args: &Value, ctx: &mut IntentC
         | "ViewerNavigate"
         | "ViewerOpenFile"
         | "ReadFileChunk"
+        | "FindInViewerFile"
         | "SetEmbeddedViewerActive" => viewer::handle(name, args, ctx).await,
         "CompareFiles"
         | "GitViewDiff"

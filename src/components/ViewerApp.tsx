@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { IconArrowsMaximize } from "@tabler/icons-react";
 import { resolveWsUrl, WsClient } from "../ws/client";
-import type { BEMessage, FileChunkMessage, MarkdownPreviewMessage, ViewerFileChangedMessage, StateSnapshotMessage, StatePatchMessage } from "../ws/types";
+import type { BEMessage, FileChunkMessage, MarkdownPreviewMessage, ViewerFileChangedMessage, ViewerFindMatch, ViewerFindResultsMessage, StateSnapshotMessage, StatePatchMessage } from "../ws/types";
 import { applyZoom, nextZoomSize, DEFAULT_FONT_SIZE } from "../utils/zoom";
 import { ImageViewer, IMAGE_LIMIT } from "../viewers/ImageViewer";
 import { ViewerLoading } from "../viewers/ViewerLoading";
@@ -352,10 +352,17 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
   const [findOpen, setFindOpen]   = useState(false);
   const [findQuery, setFindQuery] = useState(() => initialFindQuery ?? "");
   const [findIdx, setFindIdx]     = useState(0);
+  const [largeFindMatches, setLargeFindMatches] = useState<ViewerFindMatch[]>([]);
+  const [largeFindPending, setLargeFindPending] = useState(false);
+  const [largeFindTruncated, setLargeFindTruncated] = useState(false);
+  const [largeFindError, setLargeFindError] = useState<string | null>(null);
   const findHistory = useInputHistory("viewer.find", setFindQuery);
   // Stable refs so the keyboard handler closure doesn't go stale
   const findOpenRef    = useRef(false);
   const findMatchesRef = useRef<{ line: number; start: number; end: number }[]>([]);
+  const largeFindMatchesRef = useRef<ViewerFindMatch[]>([]);
+  const findRequestIdRef = useRef("");
+  const pendingFindLineRef = useRef<ViewerFindMatch | null>(null);
 
   const [bufferBaseLine, setBufferBaseLine] = useState<number | null>(1);
   // Synchronous mirror of the current buffer's byte range — used by
@@ -370,6 +377,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
   curSourceIdRef.current = curSourceId;
   curIsLocalRef.current  = curIsLocal;
   findOpenRef.current    = findOpen;
+  largeFindMatchesRef.current = largeFindMatches;
   const effectiveMode: ViewMode = useDirect ? "image" : (mode ?? "text");
   const isImageMode = effectiveMode === "image";
 
@@ -466,6 +474,36 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
     return result;
   }, [findOpen, findQuery, lines]);
   findMatchesRef.current = findMatches;
+
+  // Large files are searched by the backend through the active VFS driver.
+  // Debouncing avoids scanning on every keystroke; request IDs make results
+  // from superseded scans harmless even though their I/O may still finish.
+  useEffect(() => {
+    if (!findOpen || !findQuery || isSmall !== false || effectiveMode !== "text") {
+      findRequestIdRef.current = "";
+      setLargeFindMatches([]);
+      setLargeFindPending(false);
+      setLargeFindTruncated(false);
+      setLargeFindError(null);
+      return;
+    }
+    const requestId = globalThis.crypto?.randomUUID?.() ?? `viewer-find-${Date.now()}-${Math.random()}`;
+    findRequestIdRef.current = requestId;
+    setLargeFindMatches([]);
+    setLargeFindPending(true);
+    setLargeFindTruncated(false);
+    setLargeFindError(null);
+    setFindIdx(0);
+    const timer = window.setTimeout(() => {
+      clientRef.current?.sendIntent("FindInViewerFile", undefined, {
+        requestId,
+        path: curPathRef.current,
+        sourceId: curSourceIdRef.current,
+        query: findQuery,
+      });
+    }, 180);
+    return () => window.clearTimeout(timer);
+  }, [findOpen, findQuery, isSmall, effectiveMode, curPath, curSourceId]);
 
   // ── Request chunk from BE ─────────────────────────────────────────────────
 
@@ -607,7 +645,20 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
         // For small files baseLine is absolute (always starts at offset 0).
         // For large files the numbers are chunk-relative — the byte offset
         // shown in the status bar gives the positional context.
-        setBufferBaseLine(1);
+        const pendingFindLine = pendingFindLineRef.current;
+        if (pendingFindLine
+          && pendingFindLine.byteOffset >= m.offset
+          && pendingFindLine.byteOffset < m.offset + bytes.length) {
+          const relativeOffset = pendingFindLine.byteOffset - m.offset;
+          let precedingNewlines = 0;
+          for (let i = 0; i < relativeOffset; i++) {
+            if (bytes[i] === 10) precedingNewlines++;
+          }
+          setBufferBaseLine(Math.max(1, pendingFindLine.lineNumber - precedingNewlines));
+          pendingFindLineRef.current = null;
+        } else {
+          setBufferBaseLine(m.offset === 0 ? 1 : null);
+        }
 
         if (m.fileSize !== undefined) setFileSize(m.fileSize);
         setBuffer(bytes);
@@ -627,6 +678,14 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
         if (msg.type === "MarkdownPreview") {
           const m = msg as MarkdownPreviewMessage;
           if (m.path === curPathRef.current) setMarkdownPreview(m);
+        }
+        if (msg.type === "ViewerFindResults") {
+          const m = msg as ViewerFindResultsMessage;
+          if (m.requestId !== findRequestIdRef.current || m.path !== curPathRef.current) return;
+          if (m.error) setLargeFindError(m.error);
+          if (m.matches.length > 0) setLargeFindMatches(previous => [...previous, ...m.matches]);
+          setLargeFindTruncated(m.truncated);
+          if (m.done) setLargeFindPending(false);
         }
         if (msg.type === "ViewerFileChanged") {
           const m = msg as ViewerFileChangedMessage;
@@ -658,6 +717,13 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
         loadingRef.current = !direct;
         setLoading(!direct);
         setBufferBaseLine(1);
+        setLargeFindMatches([]);
+        setLargeFindPending(false);
+        setLargeFindTruncated(false);
+        setLargeFindError(null);
+        findRequestIdRef.current = "";
+        pendingFindLineRef.current = null;
+        setFindIdx(0);
         bufRangeRef.current = { offset: 0, end: 0, eof: false };
         afterLoadRef.current = "top";
         pendingJumpRef.current = null;
@@ -744,41 +810,63 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
   // ── Find helpers ─────────────────────────────────────────────────────────
 
   const findNext = useCallback(() => {
-    setFindIdx(prev =>
-      findMatchesRef.current.length === 0 ? 0 :
-      (prev + 1) % findMatchesRef.current.length
-    );
-  }, []);
+    const count = isSmall === false ? largeFindMatchesRef.current.length : findMatchesRef.current.length;
+    setFindIdx(prev => count === 0 ? 0 : (prev + 1) % count);
+  }, [isSmall]);
 
   const findPrev = useCallback(() => {
-    setFindIdx(prev =>
-      findMatchesRef.current.length === 0 ? 0 :
-      (prev - 1 + findMatchesRef.current.length) % findMatchesRef.current.length
-    );
-  }, []);
+    const count = isSmall === false ? largeFindMatchesRef.current.length : findMatchesRef.current.length;
+    setFindIdx(prev => count === 0 ? 0 : (prev - 1 + count) % count);
+  }, [isSmall]);
 
   // Clamp findIdx when match count changes
+  const totalFindMatches = isSmall === false ? largeFindMatches.length : findMatches.length;
   useEffect(() => {
-    setFindIdx(prev => findMatches.length === 0 ? 0 : Math.min(prev, findMatches.length - 1));
-  }, [findMatches.length]);
+    setFindIdx(prev => totalFindMatches === 0 ? 0 : Math.min(prev, totalFindMatches - 1));
+  }, [totalFindMatches]);
 
   // Scroll to active match
   useEffect(() => {
-    if (!findOpen || findMatches.length === 0) return;
+    if (!findOpen || isSmall === false || findMatches.length === 0) return;
     const match = findMatches[Math.min(findIdx, findMatches.length - 1)];
     if (!match) return;
-    if (isSmall === false) {
-      // Large file: update the virtual scroll window to include the match
-      setTopLine(clamp(match.line - Math.floor(vpLines / 2), 0, maxTopLine));
-    }
-    // For small files (and after the topLine update re-renders the lines for large
-    // files), scroll the active <mark> into view. requestAnimationFrame ensures the
-    // DOM has been updated with the new active-match class before we query it.
+    // requestAnimationFrame ensures the DOM has been updated with the new
+    // active-match class before we query it.
     requestAnimationFrame(() => {
       document.querySelector(".viewer__find-match--active")
         ?.scrollIntoView({ block: "center", inline: "nearest" });
     });
   }, [findIdx, findMatches, findOpen, isSmall, vpLines, maxTopLine]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Load the byte window containing the selected backend match. When it is
+  // already buffered, position directly; otherwise the existing post-load
+  // fraction logic centres it after ReadFileChunk completes.
+  useEffect(() => {
+    if (!findOpen || isSmall !== false || largeFindMatches.length === 0 || !buffer) return;
+    const match = largeFindMatches[Math.min(findIdx, largeFindMatches.length - 1)];
+    if (!match) return;
+    const br = bufRangeRef.current;
+    if (match.byteOffset >= br.offset && match.byteOffset < br.end) {
+      const relativeOffset = match.byteOffset - br.offset;
+      let precedingNewlines = 0;
+      for (let i = 0; i < relativeOffset; i++) {
+        if (buffer[i] === 10) precedingNewlines++;
+      }
+      setBufferBaseLine(Math.max(1, match.lineNumber - precedingNewlines));
+      const fraction = (match.byteOffset - br.offset) / Math.max(1, br.end - br.offset);
+      setTopLine(clamp(Math.floor(fraction * lines.length) - Math.floor(vpLines / 2), 0, maxTopLine));
+      return;
+    }
+    if (loadingRef.current || fileSize === null) return;
+    const loadOff = clamp(
+      Math.floor(match.byteOffset - CHUNK_SIZE / 3),
+      0,
+      Math.max(0, fileSize - CHUNK_SIZE),
+    );
+    pendingFindLineRef.current = match;
+    pendingJumpRef.current = (match.byteOffset - loadOff) / CHUNK_SIZE;
+    requestChunk(loadOff, CHUNK_SIZE, "top");
+  }, [findIdx, largeFindMatches, findOpen, isSmall, buffer, fileSize, lines.length, maxTopLine, vpLines, requestChunk]);
 
   // Focus input when find opens, close when switching to non-text mode
   useEffect(() => {
@@ -1251,10 +1339,28 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
 
   const visStart = isSmall === true ? 0 : clamp(topLine, 0, lines.length);
 
-  const findLabel = findMatches.length === 0
-    ? (findQuery ? "No matches" : "")
-    : isSmall === false
-      ? `${Math.min(findIdx + 1, findMatches.length)}`
+  let renderedFindIdx = findIdx;
+  if (isSmall === false && largeFindMatches.length > 0) {
+    const selected = largeFindMatches[Math.min(findIdx, largeFindMatches.length - 1)];
+    const br = bufRangeRef.current;
+    if (selected && selected.byteOffset >= br.offset && selected.byteOffset < br.end) {
+      renderedFindIdx = largeFindMatches
+        .slice(0, findIdx)
+        .filter(match => match.byteOffset >= br.offset && match.byteOffset < br.end)
+        .length;
+    } else {
+      renderedFindIdx = -1;
+    }
+  }
+
+  const findLabel = isSmall === false
+    ? largeFindError
+      ? "Search failed"
+      : largeFindMatches.length === 0
+        ? (largeFindPending ? "Searching…" : (findQuery ? "No matches" : ""))
+        : `${Math.min(findIdx + 1, largeFindMatches.length)} / ${largeFindMatches.length}${largeFindPending || largeFindTruncated ? "+" : ""} · line ${largeFindMatches[Math.min(findIdx, largeFindMatches.length - 1)].lineNumber}`
+    : findMatches.length === 0
+      ? (findQuery ? "No matches" : "")
       : `${Math.min(findIdx + 1, findMatches.length)} / ${findMatches.length}`;
   const colorScheme = resolveColorScheme(colorSchemeId);
 
@@ -1439,7 +1545,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
                   <div className="viewer__wrap-row" key={i} data-ln={row.gutter}>
                     <span className="viewer__content-cell">
                       {(findOpen && findQuery)
-                        ? highlightLine(row.content, findMatches, visStart + i, findIdx, findLineFirstIdx.get(visStart + i) ?? 0)
+                        ? highlightLine(row.content, findMatches, visStart + i, renderedFindIdx, findLineFirstIdx.get(visStart + i) ?? 0)
                         : (row.content || " ")}
                     </span>
                   </div>
@@ -1458,7 +1564,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
                   {(findOpen && findQuery)
                     ? textView.visLines.map((line, i) => (
                         <React.Fragment key={i}>
-                          {highlightLine(line, findMatches, visStart + i, findIdx, findLineFirstIdx.get(visStart + i) ?? 0)}
+                          {highlightLine(line, findMatches, visStart + i, renderedFindIdx, findLineFirstIdx.get(visStart + i) ?? 0)}
                           {i < textView.visLines.length - 1 ? "\n" : ""}
                         </React.Fragment>
                       ))
@@ -1506,8 +1612,8 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
           <button className="viewer__find-nav" onClick={findPrev} title="Previous (Shift+Enter)">↑</button>
           <button className="viewer__find-nav" onClick={findNext} title="Next (Enter)">↓</button>
           <button className="viewer__find-close" onClick={() => setFindOpen(false)} title="Close (Esc)">×</button>
-          {isSmall === false && (
-            <span className="viewer__find-scope">searching loaded content</span>
+          {isSmall === false && largeFindTruncated && (
+            <span className="viewer__find-scope">first 10,000 matches</span>
           )}
         </div>
       )}

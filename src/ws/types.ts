@@ -766,6 +766,23 @@ export interface FileChunkMessage {
   fileSize?: number;
 }
 
+export interface ViewerFindMatch {
+  byteOffset: number;
+  byteLength: number;
+  lineNumber: number;
+}
+
+export interface ViewerFindResultsMessage {
+  type: "ViewerFindResults";
+  timestamp: number;
+  requestId: string;
+  path: string;
+  matches: ViewerFindMatch[];
+  done: boolean;
+  truncated: boolean;
+  error?: string;
+}
+
 export interface MarkdownPreviewMessage {
   type: "MarkdownPreview";
   timestamp: number;
@@ -1025,6 +1042,7 @@ export type BEMessage =
   | ErrorMessage
   | QuitConfirmRequiredMessage
   | FileChunkMessage
+  | ViewerFindResultsMessage
   | MarkdownPreviewMessage
   | RenameOkMessage
   | MkdirOkMessage

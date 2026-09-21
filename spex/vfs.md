@@ -432,6 +432,24 @@ the same policy; rejected warmups return non-cacheable HTTP 204. Ordinary reques
 images, visible grid thumbnails, and requested previews remain available on every
 source. Classification changes and skipped warmups are logged.
 
+### Full-file text search in the viewer
+
+Find in a fully loaded small text file remains an in-memory frontend operation.
+For larger files, find must not be limited to the viewer's current 64 KiB display
+window. The frontend sends `FindInViewerFile`; the backend streams the file through
+`VfsDriver::open_read()` and performs a case-insensitive literal scan. This keeps the
+feature independent of an installed `rg` executable and makes it work for local,
+remote, archive, and other readable VFS sources.
+
+Each occurrence is represented by its absolute byte offset, byte length, and
+one-based line number. Results are sent in batches of 256 and capped at 10,000;
+the response marks a capped result set as truncated. Byte offsets drive the
+existing chunk loader when the user selects the next or previous occurrence,
+while line numbers restore useful gutter context after an arbitrary jump. The
+scanner carries matching state across read boundaries, so an occurrence split
+between two backend read buffers is still found. Queries are debounced in the
+frontend, and request ids ensure results from superseded searches are ignored.
+
 ## Suggested next step
 
 Two very natural next steps:

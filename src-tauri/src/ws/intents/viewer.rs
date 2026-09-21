@@ -12,7 +12,7 @@ use crate::vfs::{search::SearchResultsDriver, VfsDriver};
 use crate::ws::intents::{
     arg_str, arg_u64, is_archive_source, is_journal_source, is_procs_source, is_search_source,
 };
-use crate::ws::protocol::{now, MarkdownLinkSchema, ServerMessage};
+use crate::ws::protocol::{now, MarkdownLinkSchema, ServerMessage, ViewerFindMatchSchema};
 use crate::ws::runtime::{url_encode, IntentContext};
 
 /// Effective image cap (in bytes) for the viewer + prefetch.
@@ -28,6 +28,8 @@ fn effective_image_cap_bytes(general: &GeneralSettings) -> usize {
 
 /// Files larger than this (non-image, non-cached) get a 4 KB binary probe during navigation.
 const PREFETCH_OTHER_THRESHOLD: u64 = 1 * 1024 * 1024;
+const VIEWER_FIND_BATCH_SIZE: usize = 256;
+const VIEWER_FIND_MAX_MATCHES: usize = 10_000;
 
 /// Mirrors the FE's `detectBinary()`: a null byte or >30% non-printable chars → binary.
 fn detect_binary(bytes: &[u8]) -> bool {
@@ -58,9 +60,66 @@ pub(crate) async fn handle(name: &str, args: &Value, ctx: &mut IntentContext<'_>
         "ViewerNavigate" => viewer_navigate(args, ctx).await,
         "ViewerOpenFile" => viewer_open_file(args, ctx).await,
         "ReadFileChunk" => read_file_chunk(args, ctx).await,
+        "FindInViewerFile" => find_in_viewer_file(args, ctx).await,
         "SetEmbeddedViewerActive" => set_embedded_viewer_active(args, ctx).await,
         _ => {}
     }
+}
+
+fn find_literal_matches<R: Read>(
+    mut reader: R,
+    query: &[u8],
+    max_matches: usize,
+) -> std::io::Result<(Vec<ViewerFindMatchSchema>, bool)> {
+    let needle: Vec<u8> = query.iter().map(u8::to_ascii_lowercase).collect();
+    if needle.is_empty() {
+        return Ok((Vec::new(), false));
+    }
+
+    // KMP keeps matching state across read boundaries without retaining the
+    // file. Matches intentionally don't overlap, matching the frontend's old
+    // `pos += query.length` behavior.
+    let mut prefix = vec![0usize; needle.len()];
+    for i in 1..needle.len() {
+        let mut j = prefix[i - 1];
+        while j > 0 && needle[i] != needle[j] { j = prefix[j - 1]; }
+        if needle[i] == needle[j] { j += 1; }
+        prefix[i] = j;
+    }
+
+    let mut buffer = [0u8; 64 * 1024];
+    let mut matched = 0usize;
+    let mut offset = 0u64;
+    let mut line_number = 1u64;
+    let mut recent_lines = std::collections::VecDeque::with_capacity(needle.len());
+    let mut results = Vec::new();
+
+    loop {
+        let read = reader.read(&mut buffer)?;
+        if read == 0 { break; }
+        for &raw in &buffer[..read] {
+            recent_lines.push_back(line_number);
+            if recent_lines.len() > needle.len() { recent_lines.pop_front(); }
+
+            let byte = raw.to_ascii_lowercase();
+            while matched > 0 && byte != needle[matched] { matched = prefix[matched - 1]; }
+            if byte == needle[matched] { matched += 1; }
+            if matched == needle.len() {
+                if results.len() == max_matches {
+                    return Ok((results, true));
+                }
+                results.push(ViewerFindMatchSchema {
+                    byte_offset: offset + 1 - needle.len() as u64,
+                    byte_length: needle.len() as u64,
+                    line_number: *recent_lines.front().unwrap_or(&line_number),
+                });
+                matched = 0;
+            }
+            if raw == b'\n' { line_number += 1; }
+            offset += 1;
+        }
+    }
+    Ok((results, false))
 }
 
 struct ViewFileArgs {
@@ -918,6 +977,79 @@ async fn send_markdown_preview(
     }
 }
 
+async fn find_in_viewer_file(args: &Value, ctx: &mut IntentContext<'_>) {
+    let request_id = arg_str(args, "requestId").unwrap_or("").to_string();
+    let source_id = arg_str(args, "sourceId").unwrap_or("").to_string();
+    let path = arg_str(args, "path").unwrap_or("").to_string();
+    let query = arg_str(args, "query").unwrap_or("").as_bytes().to_vec();
+    if request_id.is_empty() || path.is_empty() || query.is_empty() { return; }
+
+    // Search-result sources are references to files owned by another driver.
+    // Resolve them exactly as ReadFileChunk does so find works from those views.
+    let (effective_source_id, effective_path) = if is_search_source(&source_id) {
+        let state = ctx.state.lock().await;
+        let filename = path.rsplit_once('/').map(|(_, name)| name).unwrap_or(&path);
+        let resolved = state.drivers.get(&source_id)
+            .and_then(|drv| drv.as_any().downcast_ref::<SearchResultsDriver>())
+            .and_then(|sd| sd.resolve_real_info_by_path(&path).or_else(|| sd.resolve_real_info(filename)));
+        if let Some((real_path, real_source)) = resolved {
+            (real_source, real_path)
+        } else {
+            let best_source = state.sources.iter()
+                .filter(|(_, source)| !source.shadow && source.mounted)
+                .max_by_key(|(_, source)| if path.starts_with(&source.root_path) { source.root_path.len() } else { 0 })
+                .map(|(id, _)| id.clone())
+                .unwrap_or(source_id);
+            (best_source, path.clone())
+        }
+    } else {
+        (source_id, path.clone())
+    };
+
+    let driver = {
+        let state = ctx.state.lock().await;
+        state.drivers.get(&effective_source_id).cloned()
+    };
+    let tx = ctx.tx.clone();
+    tokio::spawn(async move {
+        let result = match driver {
+            Some(driver) => tokio::task::spawn_blocking(move || {
+                let reader = driver.open_read(&effective_path)
+                    .map_err(|error| error.to_string())?;
+                find_literal_matches(reader, &query, VIEWER_FIND_MAX_MATCHES)
+                    .map_err(|error| error.to_string())
+            }).await.map_err(|error| error.to_string()).and_then(|result| result),
+            None => Err("Viewer source is no longer available".to_string()),
+        };
+
+        match result {
+            Ok((matches, truncated)) => {
+                if matches.is_empty() {
+                    let _ = tx.send(ServerMessage::ViewerFindResults {
+                        timestamp: now(), request_id, path, matches, done: true,
+                        truncated, error: None,
+                    }).await;
+                    return;
+                }
+                let batch_count = matches.len().div_ceil(VIEWER_FIND_BATCH_SIZE);
+                for (index, batch) in matches.chunks(VIEWER_FIND_BATCH_SIZE).enumerate() {
+                    let _ = tx.send(ServerMessage::ViewerFindResults {
+                        timestamp: now(), request_id: request_id.clone(), path: path.clone(),
+                        matches: batch.to_vec(), done: index + 1 == batch_count,
+                        truncated, error: None,
+                    }).await;
+                }
+            }
+            Err(error) => {
+                let _ = tx.send(ServerMessage::ViewerFindResults {
+                    timestamp: now(), request_id, path, matches: Vec::new(), done: true,
+                    truncated: false, error: Some(error),
+                }).await;
+            }
+        }
+    });
+}
+
 async fn read_file_chunk(args: &Value, ctx: &mut IntentContext<'_>) {
     let parsed = ReadChunkArgs::from_args(args);
 
@@ -1123,9 +1255,35 @@ pub(super) fn collect_neighbors(
 
 #[cfg(test)]
 mod tests {
-    use super::{is_markdown_filename, render_markdown, safe_relative_path, sanitize_mermaid};
+    use super::{
+        find_literal_matches, is_markdown_filename, render_markdown, safe_relative_path,
+        sanitize_mermaid,
+    };
     use crate::vfs::local::LocalFsDriver;
     use std::fs;
+    use std::io::Cursor;
+
+    #[test]
+    fn viewer_find_reports_offsets_and_lines_across_read_boundaries() {
+        let mut content = vec![b'x'; 65_534];
+        content.extend_from_slice(b"NeEdLe\nneedle");
+        let (matches, truncated) = find_literal_matches(Cursor::new(content), b"needle", 10).unwrap();
+        assert!(!truncated);
+        assert_eq!(matches.len(), 2);
+        assert_eq!(matches[0].byte_offset, 65_534);
+        assert_eq!(matches[0].byte_length, 6);
+        assert_eq!(matches[0].line_number, 1);
+        assert_eq!(matches[1].byte_offset, 65_541);
+        assert_eq!(matches[1].line_number, 2);
+    }
+
+    #[test]
+    fn viewer_find_caps_pathological_match_counts() {
+        let (matches, truncated) = find_literal_matches(Cursor::new(b"aaaaaa"), b"a", 3).unwrap();
+        assert!(truncated);
+        assert_eq!(matches.len(), 3);
+        assert_eq!(matches[2].byte_offset, 2);
+    }
 
     #[test]
     fn markdown_link_extensions_are_restricted() {

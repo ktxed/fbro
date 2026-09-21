@@ -76,6 +76,17 @@ pub enum ServerMessage {
         #[serde(rename = "fileSize", skip_serializing_if = "Option::is_none")]
         file_size: Option<u64>,
     },
+    ViewerFindResults {
+        timestamp: u64,
+        #[serde(rename = "requestId")]
+        request_id: String,
+        path: String,
+        matches: Vec<ViewerFindMatchSchema>,
+        done: bool,
+        truncated: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
     /// Backend-rendered Markdown. Link destinations have already been resolved
     /// and checked; the HTML contains only inert fragment identifiers.
     MarkdownPreview {
@@ -381,6 +392,16 @@ pub enum ServerMessage {
         request_id: String,
         message: String,
     },
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct ViewerFindMatchSchema {
+    #[serde(rename = "byteOffset")]
+    pub byte_offset: u64,
+    #[serde(rename = "byteLength")]
+    pub byte_length: u64,
+    #[serde(rename = "lineNumber")]
+    pub line_number: u64,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
