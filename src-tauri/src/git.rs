@@ -410,6 +410,26 @@ pub fn commit_show(root: &str, hash: &str) -> Result<Vec<GitChange>, String> {
     Ok(parse_name_status_z(&output))
 }
 
+pub fn commit_message(root: &str, hash: &str) -> Result<String, String> {
+    let hash = hash.trim();
+    if hash.is_empty() {
+        return Err("A commit hash is required.".into());
+    }
+    // Resolve to a full object so short hashes and tags still work.
+    let resolved = String::from_utf8(git(root, &["rev-parse", "--verify", &format!("{hash}^{{commit}}")])?)
+        .map_err(|e| format!("Invalid commit hash encoding: {e}"))?
+        .trim()
+        .to_string();
+    if resolved.is_empty() {
+        return Err("Could not resolve the commit hash.".into());
+    }
+
+    // %B returns full message (subject + body), %b returns just body; we want body only
+    let output = git(root, &["log", "-1", "--pretty=format:%b", &resolved])?;
+    String::from_utf8(output)
+        .map_err(|e| format!("Invalid commit message encoding: {e}"))
+}
+
 /// Parse `git … -z --name-status` output into [`GitChange`] rows.
 fn parse_name_status_z(raw: &[u8]) -> Vec<GitChange> {
     let text = String::from_utf8_lossy(raw);

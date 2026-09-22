@@ -70,8 +70,8 @@ pub(crate) async fn handle(name: &str, args: &Value, ctx: &mut IntentContext<'_>
             send_error(ctx, "GIT_UNAVAILABLE", "No Git repository is available for this panel.").await;
             return;
         };
-        match crate::git::commit_show(&root, &hash) {
-            Ok(changes) => {
+        match (crate::git::commit_show(&root, &hash), crate::git::commit_message(&root, &hash)) {
+            (Ok(changes), Ok(message)) => {
                 let _ = ctx
                     .tx
                     .send(ServerMessage::GitCommitShowReady {
@@ -79,11 +79,12 @@ pub(crate) async fn handle(name: &str, args: &Value, ctx: &mut IntentContext<'_>
                         panel_id,
                         request_id,
                         hash,
+                        message,
                         changes,
                     })
                     .await;
             }
-            Err(message) => send_error(ctx, "GIT_COMMIT_SHOW_FAILED", &message).await,
+            (Err(message), _) | (_, Err(message)) => send_error(ctx, "GIT_COMMIT_SHOW_FAILED", &message).await,
         }
         return;
     }

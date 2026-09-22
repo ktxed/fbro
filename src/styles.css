@@ -1603,7 +1603,7 @@ body {
 .git-modal__log { flex: 1; min-height: 0; overflow: auto; }
 .git-modal__log-entry { border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent); }
 .git-modal__log-entry--expanded { background: color-mix(in srgb, var(--bg-elev) 55%, transparent); }
-.git-modal__log-row { display: flex; align-items: center; gap: 10px; min-height: 28px; padding: 3px 16px; }
+.git-modal__log-row { display: flex; align-items: center; gap: 10px; min-height: 28px; padding: 3px 16px; cursor: pointer; -webkit-user-select: none; user-select: none; }
 .git-modal__log-row:hover { background: var(--bg-hover); }
 .git-modal__log-row--active, .git-modal__log-row:focus { background: var(--bg-hover); outline: 1px solid var(--border-focus); outline-offset: -1px; }
 .git-modal__log-show {
@@ -1623,6 +1623,49 @@ body {
   font-size: calc(var(--font-size) - 1px);
 }
 .git-modal__log-show-status--error { color: var(--text-warning); }
+.git-modal__log-message {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  position: relative;
+}
+.git-modal__log-message-content {
+  font-family: monospace;
+  font-size: calc(var(--font-size) - 1px);
+  line-height: 1.4;
+  color: var(--text-dim);
+  padding: 8px 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.git-modal__log-message-load-more {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 20px;
+  background: var(--accent);
+  cursor: pointer;
+  outline: none;
+  transition: all 0.15s ease;
+  border-top: 2px solid var(--accent);
+  border-bottom: 2px solid var(--accent);
+  color: var(--bg);
+  font-size: 12px;
+  line-height: 1;
+}
+.git-modal__log-message-load-more:hover {
+  height: 24px;
+  border-top-width: 3px;
+  border-bottom-width: 3px;
+}
+.git-modal__log-message-load-more--active,
+.git-modal__log-message-load-more:focus {
+  height: 24px;
+  border-top: 3px solid var(--accent);
+  border-bottom: 3px solid var(--accent);
+  outline: 1px solid var(--border-focus);
+  outline-offset: -1px;
+}
 .git-modal__log-change {
   display: flex;
   align-items: center;

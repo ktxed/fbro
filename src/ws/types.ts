@@ -898,6 +898,7 @@ export interface GitCommitShowReadyMessage {
   panelId: string;
   requestId: string;
   hash: string;
+  message: string;
   changes: GitChange[];
 }
 

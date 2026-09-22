@@ -184,6 +184,7 @@ export interface BroCatalogState {
 export interface GitCommitShowCache {
   status: "loading" | "ready" | "error";
   requestId: string;
+  message: string;
   changes: GitChange[];
   error?: string;
 }
@@ -1604,6 +1605,7 @@ function reducer(state: AppState, action: AppAction): AppState {
                 [ready.hash]: {
                   status: "ready",
                   requestId: ready.requestId,
+                  message: ready.message,
                   changes: ready.changes,
                   error: undefined,
                 },
@@ -1847,6 +1849,7 @@ function reducer(state: AppState, action: AppAction): AppState {
             [action.hash]: {
               status: "loading",
               requestId: action.requestId,
+              message: "",
               changes: [],
               error: undefined,
             },

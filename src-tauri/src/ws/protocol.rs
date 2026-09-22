@@ -270,6 +270,7 @@ pub enum ServerMessage {
         #[serde(rename = "requestId")]
         request_id: String,
         hash: String,
+        message: String,
         changes: Vec<crate::git::GitChange>,
     },
     /// Completion signal for a mutating or remote Git action.

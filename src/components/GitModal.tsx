@@ -10,12 +10,14 @@ import type { GitActivity } from "./gitActivity";
 
 type GitTab = "changes" | "log";
 
-/** Focus target in the Log tab: a commit header or a nested file change. */
+/** Focus target in the Log tab: a commit header, message load-more, or a nested file change. */
 type LogFocus =
   | { kind: "commit"; index: number }
+  | { kind: "message"; commitIndex: number }
   | { kind: "change"; commitIndex: number; changeIndex: number };
 
 const LOG_PAGE_SIZE = 100;
+const MESSAGE_PAGE_LINES = 8;
 
 export function GitModal({ panelId, git, client, activity, onActivityChange, onClose }: { panelId: string; git: GitRepoStatus; client: WsClient; activity: GitActivity | null; onActivityChange: (activity: GitActivity) => void; onClose: () => void }) {
   const dispatch = useAppDispatch();
@@ -36,11 +38,17 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
   const logRowRefs = useRef<Array<HTMLDivElement | null>>([]);
   const logChangeRowRefs = useRef<Record<string, Array<HTMLDivElement | null>>>({});
   const logLoadMoreRef = useRef<HTMLDivElement | null>(null);
+  const logMessageLoadMoreRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const lastGitRef = useRef(git);
   const logLoadedRootRef = useRef<string | null>(null);
   const didAutoFocusLogRef = useRef(false);
   const [activeChangeIndex, setActiveChangeIndex] = useState(0);
   const [logFocus, setLogFocus] = useState<LogFocus>({ kind: "commit", index: 0 });
+  const [messageVisibleLines, setMessageVisibleLines] = useState<Record<string, number>>({});
+  const hasHiddenMessageLines = useCallback((hash: string, message: string) =>
+    commitMessageLines(message).length > (messageVisibleLines[hash] ?? MESSAGE_PAGE_LINES), [messageVisibleLines]);
+  // Commit details load asynchronously; land on the load-more bar once they arrive.
+  const pendingMessageFocusRef = useRef<string | null>(null);
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(() => new Set());
   const [rollbackPaths, setRollbackPaths] = useState<string[] | null>(null);
   const selectionAnchorRef = useRef<number | null>(null);
@@ -94,6 +102,7 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
   const expandCommit = useCallback((hash: string) => {
     const existing = gitLog?.commitShows[hash];
     const requestId = crypto.randomUUID();
+    pendingMessageFocusRef.current = hash;
     dispatch({ type: "REQUEST_GIT_COMMIT_SHOW", panelId, requestId, hash });
     if (!existing || existing.status === "error") {
       client.sendIntent("GitGetCommitShow", undefined, { panelId, requestId, hash });
@@ -172,6 +181,9 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
     if (next.kind === "commit") {
       const index = Math.max(0, Math.min(next.index, logCommits.length - 1));
       next = { kind: "commit", index };
+    } else if (next.kind === "message") {
+      const commitIndex = Math.max(0, Math.min(next.commitIndex, logCommits.length - 1));
+      next = { kind: "message", commitIndex };
     } else {
       const commitIndex = Math.max(0, Math.min(next.commitIndex, logCommits.length - 1));
       const hash = logCommits[commitIndex]?.hash;
@@ -195,6 +207,11 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
         } else {
           row?.scrollIntoView({ block: "nearest" });
         }
+      } else if (next.kind === "message") {
+        const hash = logCommits[next.commitIndex]?.hash;
+        const row = hash ? logMessageLoadMoreRefs.current[hash] : null;
+        row?.focus();
+        row?.scrollIntoView({ block: "nearest" });
       } else {
         const hash = logCommits[next.commitIndex]?.hash;
         const row = hash ? logChangeRowRefs.current[hash]?.[next.changeIndex] : null;
@@ -204,7 +221,7 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
     });
   }, [gitLog?.commitShows, logCommits]);
 
-  /** Flattened log navigation: commits + nested files of the single expanded commit. */
+  /** Flattened log navigation: commits + message + nested files of the single expanded commit. */
   const moveLogFocus = useCallback((delta: number) => {
     if (logCommits.length === 0) return;
     type Flat = LogFocus;
@@ -213,7 +230,11 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
       flat.push({ kind: "commit", index: i });
       const hash = logCommits[i].hash;
       if (expandedHash === hash && gitLog?.commitShows[hash]?.status === "ready") {
-        const changes = gitLog.commitShows[hash].changes;
+        const show = gitLog.commitShows[hash];
+        if (hasHiddenMessageLines(hash, show.message)) {
+          flat.push({ kind: "message", commitIndex: i });
+        }
+        const changes = show.changes;
         for (let c = 0; c < changes.length; c += 1) {
           flat.push({ kind: "change", commitIndex: i, changeIndex: c });
         }
@@ -223,6 +244,7 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
     const currentIdx = flat.findIndex((item) => {
       if (item.kind !== logFocus.kind) return false;
       if (item.kind === "commit" && logFocus.kind === "commit") return item.index === logFocus.index;
+      if (item.kind === "message" && logFocus.kind === "message") return item.commitIndex === logFocus.commitIndex;
       if (item.kind === "change" && logFocus.kind === "change") {
         return item.commitIndex === logFocus.commitIndex && item.changeIndex === logFocus.changeIndex;
       }
@@ -231,7 +253,35 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
     const from = currentIdx < 0 ? 0 : currentIdx;
     const to = Math.max(0, Math.min(flat.length - 1, from + delta));
     focusLogItem(flat[to]);
-  }, [expandedHash, focusLogItem, gitLog?.commitShows, logCommits, logFocus]);
+  }, [expandedHash, focusLogItem, gitLog?.commitShows, logCommits, logFocus, messageVisibleLines]);
+
+  const revealMoreMessage = useCallback((commitIndex: number) => {
+    const hash = logCommits[commitIndex]?.hash;
+    const show = hash ? gitLog?.commitShows[hash] : undefined;
+    if (!hash || show?.status !== "ready") return;
+    const total = commitMessageLines(show.message).length;
+    const nextVisible = (messageVisibleLines[hash] ?? MESSAGE_PAGE_LINES) + MESSAGE_PAGE_LINES;
+    setMessageVisibleLines((current) => ({ ...current, [hash]: nextVisible }));
+    focusLogItem(nextVisible >= total
+      ? { kind: "change", commitIndex, changeIndex: 0 }
+      : { kind: "message", commitIndex });
+  }, [focusLogItem, gitLog?.commitShows, logCommits, messageVisibleLines]);
+
+  useEffect(() => {
+    const hash = pendingMessageFocusRef.current;
+    if (!hash) return;
+    if (hash !== expandedHash) {
+      pendingMessageFocusRef.current = null;
+      return;
+    }
+    const show = gitLog?.commitShows[hash];
+    if (show?.status === "loading") return;
+    pendingMessageFocusRef.current = null;
+    const commitIndex = logCommits.findIndex((c) => c.hash === hash);
+    if (show?.status === "ready" && commitIndex >= 0 && hasHiddenMessageLines(hash, show.message)) {
+      focusLogItem({ kind: "message", commitIndex });
+    }
+  }, [expandedHash, focusLogItem, gitLog?.commitShows, hasHiddenMessageLines, logCommits]);
 
   const copyLogHash = useCallback((hash: string) => {
     void navigator.clipboard.writeText(hash);
@@ -298,6 +348,12 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
       }
       const commitIndex = Math.min(current.commitIndex, logCommits.length - 1);
       const hash = logCommits[commitIndex]?.hash;
+      if (current.kind === "message") {
+        if (expandedHash !== hash) {
+          return { kind: "commit", index: commitIndex };
+        }
+        return { kind: "message", commitIndex };
+      }
       const count = hash && gitLog?.commitShows[hash]?.status === "ready"
         ? gitLog.commitShows[hash].changes.length
         : 0;
@@ -431,10 +487,12 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
               focusLogItem({ kind: "commit", index: commitIndex });
               return;
             }
-            // Already expanded: dive into first file when available.
+            // Already expanded: dive into the message load-more bar, else the first file.
             if (logFocus.kind === "commit") {
               const show = gitLog?.commitShows[commit.hash];
-              if (show?.status === "ready" && show.changes.length > 0) {
+              if (show?.status === "ready" && hasHiddenMessageLines(commit.hash, show.message)) {
+                focusLogItem({ kind: "message", commitIndex });
+              } else if (show?.status === "ready" && show.changes.length > 0) {
                 focusLogItem({ kind: "change", commitIndex, changeIndex: 0 });
               }
             }
@@ -448,10 +506,16 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
               focusLogItem({ kind: "commit", index: logFocus.commitIndex });
               return;
             }
-            const commit = logCommits[logFocus.index];
-            if (commit && expandedHash === commit.hash) {
-              collapseCommit();
-              focusLogItem({ kind: "commit", index: logFocus.index });
+            if (logFocus.kind === "message") {
+              focusLogItem({ kind: "commit", index: logFocus.commitIndex });
+              return;
+            }
+            if (logFocus.kind === "commit") {
+              const commit = logCommits[logFocus.index];
+              if (commit && expandedHash === commit.hash) {
+                collapseCommit();
+                focusLogItem({ kind: "commit", index: logFocus.index });
+              }
             }
             return;
           }
@@ -459,6 +523,12 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
             event.preventDefault();
             event.stopPropagation();
             requestLog({ skip: logCommits.length, append: true });
+            return;
+          }
+          if ((event.key === " " || event.key === "Enter") && logFocus.kind === "message") {
+            event.preventDefault();
+            event.stopPropagation();
+            revealMoreMessage(logFocus.commitIndex);
             return;
           }
           if (logFocus.kind === "commit") {
@@ -793,6 +863,7 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
                       data-testid="git-log-row"
                       data-log-index={index}
                       onFocus={() => setLogFocus({ kind: "commit", index })}
+                      onMouseDown={(event) => { if (event.detail > 1) event.preventDefault(); }}
                       onDoubleClick={() => {
                         if (isExpanded) collapseCommit();
                         else expandCommit(commit.hash);
@@ -822,6 +893,34 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
                     </div>
                     {isExpanded && (
                       <div className="git-modal__log-show" data-testid="git-log-commit-show" aria-label={`Changes in ${commit.shortHash}`}>
+                        {show?.status === "ready" && show.message.trim() && (
+                          (() => {
+                            const messageLines = commitMessageLines(show.message);
+                            const visibleLines = messageVisibleLines[commit.hash] ?? MESSAGE_PAGE_LINES;
+                            const messageActive = logFocus.kind === "message" && logFocus.commitIndex === index;
+                            return (
+                              <div className="git-modal__log-message">
+                                <div className="git-modal__log-message-content">
+                                  {messageLines.slice(0, visibleLines).map((line, lineIdx) => (
+                                    <div key={lineIdx}>{line || <br />}</div>
+                                  ))}
+                                </div>
+                                {messageLines.length > visibleLines && (
+                                  <div
+                                    ref={(element) => { logMessageLoadMoreRefs.current[commit.hash] = element; }}
+                                    className={`git-modal__log-message-load-more${messageActive ? " git-modal__log-message-load-more--active" : ""}`}
+                                    role="button"
+                                    tabIndex={0}
+                                    aria-label="Load more message (Space or Enter)"
+                                    title="Load more (Space or Enter)"
+                                    onFocus={() => setLogFocus({ kind: "message", commitIndex: index })}
+                                    onClick={() => revealMoreMessage(index)}
+                                  >↓</div>
+                                )}
+                              </div>
+                            );
+                          })()
+                        )}
                         {show?.status === "loading" && (
                           <div className="git-modal__log-show-status">
                             <IconLoader2 size={14} className="git-modal__log-spinner" /> Loading changes…
@@ -976,6 +1075,11 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
       </ResizableModal>
     </ModalLayer>
   );
+}
+
+function commitMessageLines(message: string): string[] {
+  const trimmed = message.trim();
+  return trimmed ? trimmed.split("\n") : [];
 }
 
 function isStaged(change: GitRepoStatus["changes"][number]) {
