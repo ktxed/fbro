@@ -26,6 +26,9 @@ import type {
   OpenWithOptionsReadyMessage,
   BroInputItem,
   BroItem,
+  BroCatalogItem,
+  BroCatalogFailedMessage,
+  BroCatalogReadyMessage,
   BroOptionsFailedMessage,
   BroOptionsReadyMessage,
   GitChange,
@@ -171,6 +174,13 @@ export interface PendingBro {
   error?: string;
 }
 
+export interface BroCatalogState {
+  requestId: string | null;
+  status: "idle" | "loading" | "ready" | "error";
+  bros: BroCatalogItem[];
+  error?: string;
+}
+
 export interface GitCommitShowCache {
   status: "loading" | "ready" | "error";
   requestId: string;
@@ -216,7 +226,7 @@ export interface PendingSearch {
   searchParams: SearchParams | null;
 }
 
-export type SettingsTab = "general" | "display" | "sharing";
+export type SettingsTab = "general" | "display" | "bros" | "sharing";
 
 export interface PendingAttributes {
   panelId: string;
@@ -259,6 +269,7 @@ export interface AppState {
   pendingGlobalSelectionAdd: PendingGlobalSelectionAdd | null;
   pendingOpenWith: PendingOpenWith | null;
   pendingBro: PendingBro | null;
+  broCatalog: BroCatalogState;
   /** In-flight / loaded git log for the repository modal Log tab. */
   pendingGitLog: PendingGitLog | null;
   gitActionResult: GitActionFinishedMessage | null;
@@ -344,6 +355,7 @@ const initialState: AppState = {
   pendingGlobalSelectionAdd: null,
   pendingOpenWith: null,
   pendingBro: null,
+  broCatalog: { requestId: null, status: "idle", bros: [] },
   pendingGitLog: null,
   gitActionResult: null,
   pendingInput: null,
@@ -406,6 +418,7 @@ export type AppAction =
   | { type: "CLOSE_OPEN_WITH" }
   | { type: "OPEN_BRO"; bro: PendingBro }
   | { type: "CLOSE_BRO" }
+  | { type: "REQUEST_BRO_CATALOG"; requestId: string }
   | { type: "REQUEST_GIT_LOG"; panelId: string; requestId: string; append: boolean }
   | { type: "REQUEST_GIT_COMMIT_SHOW"; panelId: string; requestId: string; hash: string }
   | { type: "SET_GIT_LOG_EXPANDED"; hash: string | null }
@@ -1524,6 +1537,32 @@ function reducer(state: AppState, action: AppAction): AppState {
               bros: [],
             },
           };
+        case "BroCatalogReady": {
+          const ready = msg as BroCatalogReadyMessage;
+          if (state.broCatalog.requestId !== ready.requestId) return state;
+          return {
+            ...state,
+            broCatalog: {
+              requestId: ready.requestId,
+              status: "ready",
+              bros: ready.bros,
+              error: undefined,
+            },
+          };
+        }
+        case "BroCatalogFailed": {
+          const failed = msg as BroCatalogFailedMessage;
+          if (state.broCatalog.requestId !== failed.requestId) return state;
+          return {
+            ...state,
+            broCatalog: {
+              requestId: failed.requestId,
+              status: "error",
+              bros: [],
+              error: failed.message,
+            },
+          };
+        }
         case "GitLogReady": {
           const ready = msg as GitLogReadyMessage;
           if (!state.pendingGitLog || state.pendingGitLog.requestId !== ready.requestId) {
@@ -1756,6 +1795,16 @@ function reducer(state: AppState, action: AppAction): AppState {
       return { ...state, pendingContextMenu: null, pendingBro: action.bro };
     case "CLOSE_BRO":
       return { ...state, pendingBro: null };
+    case "REQUEST_BRO_CATALOG":
+      return {
+        ...state,
+        broCatalog: {
+          requestId: action.requestId,
+          status: "loading",
+          bros: [],
+          error: undefined,
+        },
+      };
     case "REQUEST_GIT_LOG": {
       const samePanel = state.pendingGitLog?.panelId === action.panelId;
       const keep = action.append && samePanel ? state.pendingGitLog!.commits : [];

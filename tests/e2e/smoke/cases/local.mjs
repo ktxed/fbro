@@ -39,6 +39,7 @@ export async function runLocalFlow(browser, observer) {
   await goToPanelPath(browser, observer, "left", aSrc);
   await observer.waitForEntry("left", "alpha", "directory");
   await clickEntry(browser, "left", "alpha");
+  await verifyBroHelp(browser);
   await clickCommand(browser, "file.copy");
   await expectCheckboxSelected(
     browser,
@@ -369,9 +370,20 @@ async function verifyLocationSortReset(browser, observer) {
   await browser.keys("ArrowDown");
   await browser.keys("ArrowDown");
   await waitFor(() => browser.execute(() => {
+    const tab = document.querySelector('[data-testid="settings-tab-bros"]');
+    const items = [...document.querySelectorAll('[data-testid="settings-bro-item"]')];
+    return tab === document.activeElement
+      && tab?.getAttribute("aria-selected") === "true"
+      && items.length > 0
+      && items.every((item) => item.querySelector("strong")?.textContent?.trim()
+        && item.querySelector("span")?.textContent?.trim());
+  }), { timeout: 10_000, label: "settings bros catalog" });
+  await browser.keys("ArrowDown");
+  await waitFor(() => browser.execute(() => {
     const tab = document.querySelector('[data-testid="settings-tab-sharing"]');
     return tab === document.activeElement && tab?.getAttribute("aria-selected") === "true";
   }), { timeout: 10_000, label: "settings roving tab focus" });
+  await browser.keys("ArrowUp");
   await browser.keys("ArrowUp");
   await browser.keys("ArrowUp");
   await waitFor(() => browser.execute(() => document.activeElement?.getAttribute("data-testid") === "settings-tab-general"), {
@@ -417,6 +429,41 @@ async function verifyLocationSortReset(browser, observer) {
   });
   await browser.keys("Escape");
   await settings.waitForDisplayed({ timeout: 10_000, reverse: true });
+}
+
+async function verifyBroHelp(browser) {
+  await openPanelContextMenu(browser, "left");
+  await clickContextMenuItem(browser, "Pass to Bro...");
+  const broDialog = await browser.$('[data-testid="bro-dialog"]');
+  await broDialog.waitForDisplayed({ timeout: 10_000 });
+
+  const zipBro = await browser.$('[data-testid="bro-option"][data-bro-id="native:zip"]');
+  await zipBro.waitForDisplayed({ timeout: 10_000 });
+  await zipBro.click();
+  const compressionLevel = await browser.$('[data-testid="bro-dialog"] input[type="number"]');
+  await compressionLevel.waitForDisplayed({ timeout: 10_000 });
+  await compressionLevel.setValue("4");
+
+  await (await browser.$('[data-testid="bro-help-button"]')).click();
+  const settings = await browser.$('[data-modal-id="settings"]');
+  await settings.waitForDisplayed({ timeout: 10_000 });
+  await waitFor(() => browser.execute(() => (
+    document.querySelector('[data-testid="settings-tab-bros"]')?.getAttribute("aria-selected") === "true"
+    && document.querySelectorAll('[data-testid="settings-bro-item"]').length > 0
+  )), { timeout: 10_000, label: "bro help catalog" });
+
+  await (await browser.$('[data-modal-id="settings"] .modal__actions .modal__btn')).click();
+  await settings.waitForDisplayed({ timeout: 10_000, reverse: true });
+  await broDialog.waitForDisplayed({ timeout: 10_000 });
+  await waitFor(() => browser.execute(() => (
+    document.activeElement?.getAttribute("data-testid") === "bro-help-button"
+  )), { timeout: 10_000, label: "bro picker focus restoration" });
+  if (await compressionLevel.getValue() !== "4") {
+    throw new Error("closing bro help reset the bro form values");
+  }
+
+  await browser.keys("Escape");
+  await broDialog.waitForDisplayed({ timeout: 10_000, reverse: true });
 }
 
 async function verifyAboutModal(browser) {

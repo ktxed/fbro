@@ -170,6 +170,26 @@ Notes:
 * `suggestedOutputDir` is optional
 * if `targetPath` is omitted, BE resolves selection-or-cursor for that panel
 
+#### `ListBroCatalog`
+
+Request the informational catalog used by Settings → Bros. Unlike `ListBros`,
+this request has no panel or selection scope. It returns every bro capability
+that is built into the running fbro or backed by an application installed on
+the current system. Multiple installations of the same capability are folded
+into one entry.
+
+```json
+{
+  "type": "Intent",
+  "name": "ListBroCatalog",
+  "args": { "requestId": "catalog-uuid" }
+}
+```
+
+BE responds with `BroCatalogReady`, whose `bros` contain `id`, `name`, and a
+user-facing `description`, or `BroCatalogFailed` with the same `requestId` and
+an error `message`.
+
 #### `LaunchBro`
 
 Launch the selected bro for a previously resolved bro request.

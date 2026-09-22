@@ -3,6 +3,7 @@ import { useAppDispatch, useAppState } from "../store";
 import type { SettingsTab } from "../store";
 import { SettingsGeneralTab } from "./SettingsGeneralTab";
 import { SettingsDisplayTab } from "./SettingsDisplayTab";
+import { SettingsBrosTab } from "./SettingsBrosTab";
 import { SettingsSharingTab } from "./SettingsSharingTab";
 import type { WsClient } from "../ws/client";
 import { ResizableModal } from "./ResizableModal";
@@ -12,6 +13,7 @@ import { rovingIndexForKey } from "./modalKeyboard";
 const TABS: { id: SettingsTab; label: string }[] = [
   { id: "general", label: "General" },
   { id: "display", label: "Display" },
+  { id: "bros", label: "Bros" },
   { id: "sharing", label: "Sharing" },
 ];
 
@@ -113,6 +115,7 @@ export function SettingsModal({ client }: SettingsModalProps) {
             {activeTab === "display" && (
               <SettingsDisplayTab general={state.settings.general} client={client} />
             )}
+            {activeTab === "bros" && <SettingsBrosTab client={client} />}
             {activeTab === "sharing" && <SettingsSharingTab client={client} />}
           </div>
         </div>

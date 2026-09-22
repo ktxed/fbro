@@ -239,6 +239,18 @@ pub enum ServerMessage {
         request_id: String,
         message: String,
     },
+    BroCatalogReady {
+        timestamp: u64,
+        #[serde(rename = "requestId")]
+        request_id: String,
+        bros: Vec<BroCatalogSchema>,
+    },
+    BroCatalogFailed {
+        timestamp: u64,
+        #[serde(rename = "requestId")]
+        request_id: String,
+        message: String,
+    },
     /// Page of `git log` for the repository modal Log tab.
     GitLogReady {
         timestamp: u64,
@@ -843,6 +855,14 @@ pub struct BroSchema {
     pub output: Option<BroOutputSchema>,
     #[serde(default)]
     pub params: Vec<BroParamSchema>,
+}
+
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct BroCatalogSchema {
+    pub id: String,
+    pub name: String,
+    pub description: String,
 }
 
 #[derive(Serialize, Clone, Debug)]

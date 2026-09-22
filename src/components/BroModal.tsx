@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { IconHelpCircle } from "@tabler/icons-react";
 
 import { useInputHistory, type InputHistory } from "../hooks/useInputHistory";
 import { useAppDispatch, useAppState, type PendingBro } from "../store";
@@ -302,7 +303,19 @@ export function BroModal({ client, bro }: BroModalProps) {
         defaultSize={{ width: 560, height: 500 }}
         minSize={{ width: 420, height: 320 }}
       >
-        <div className="modal__header">Pass To Bro...</div>
+        <div className="modal__header bro-modal__header">
+          <span>Pass To Bro...</span>
+          <button
+            className="bro-modal__help"
+            type="button"
+            aria-label="About bros"
+            title="About bros"
+            data-testid="bro-help-button"
+            onClick={() => dispatch({ type: "OPEN_SETTINGS", tab: "bros" })}
+          >
+            <IconHelpCircle size={18} aria-hidden />
+          </button>
+        </div>
         <div className="modal__body open-with__body">
           <div className="open-with__target">{formatTarget(bro.inputs)}</div>
           <div

@@ -328,6 +328,56 @@ fn list_bros_includes_copy_paths_on_every_platform() {
         .any(|bro| bro.option.id == "builtin:copy-paths"));
 }
 
+#[test]
+fn bro_catalog_includes_context_only_builtins_without_inputs() {
+    let catalog = super::list_bro_catalog();
+    for id in [
+        "builtin.compare_files",
+        "builtin.sync_bro",
+        "builtin:fedup",
+        "builtin:kill-proc",
+        "native:extract-zip",
+        "native:extract-7z",
+    ] {
+        assert!(catalog.iter().any(|entry| entry.id == id), "missing {id}");
+    }
+}
+
+#[test]
+fn bro_catalog_is_unique_sorted_and_described() {
+    let catalog = super::list_bro_catalog();
+    assert!(catalog
+        .iter()
+        .all(|entry| !entry.description.trim().is_empty()));
+
+    let mut ids = catalog
+        .iter()
+        .map(|entry| entry.id.as_str())
+        .collect::<Vec<_>>();
+    ids.sort_unstable();
+    ids.dedup();
+    assert_eq!(ids.len(), catalog.len());
+
+    let names = catalog
+        .iter()
+        .map(|entry| entry.name.to_ascii_lowercase())
+        .collect::<Vec<_>>();
+    let mut sorted_names = names.clone();
+    sorted_names.sort();
+    assert_eq!(names, sorted_names);
+}
+
+#[test]
+fn bro_catalog_collapses_multiple_installations_of_one_capability() {
+    let mut catalog = vec![
+        super::catalog_entry_for_discovered("VLC").unwrap(),
+        super::catalog_entry_for_discovered("vlc").unwrap(),
+    ];
+    super::sort_and_dedup_catalog(&mut catalog);
+    assert_eq!(catalog.len(), 1);
+    assert_eq!(catalog[0].id, "media:vlc");
+}
+
 #[cfg(windows)]
 #[test]
 fn list_bros_includes_tar_when_tar_exe_is_on_path() {

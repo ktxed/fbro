@@ -10,8 +10,8 @@ use serde_json::Value;
 use tokio::sync::watch;
 
 use crate::bro::{
-    launch_bro, list_bros, BroInputItem, BroLaunchInputKind, BroOption, BroPre, BroProtocol,
-    BroSource, LaunchRecipe, ResolvedBro,
+    launch_bro, list_bro_catalog, list_bros, BroInputItem, BroLaunchInputKind, BroOption, BroPre,
+    BroProtocol, BroSource, LaunchRecipe, ResolvedBro,
 };
 use crate::jobs::fedup::{
     fedup_result_page, format_fedup_delete_dry_run_script, format_fedup_delete_manifest,
@@ -28,7 +28,7 @@ use crate::jobs::{
 use crate::state::ChildProcessEntry;
 use crate::ws::intents::{arg_str, arg_u64, is_global_selection_source};
 use crate::ws::protocol::{
-    now, BroInputSchema, BroOutputSchema, BroParamSchema, BroPreSchema, BroSchema,
+    now, BroCatalogSchema, BroInputSchema, BroOutputSchema, BroParamSchema, BroPreSchema, BroSchema,
     FedupBroResultSchema, FileOpFileSchema, JobStartSchema, ServerMessage, SyncBroResultSchema,
 };
 use crate::ws::runtime::{resolve_panel_id, IntentContext};
@@ -36,6 +36,7 @@ use crate::ws::runtime::{resolve_panel_id, IntentContext};
 pub(crate) async fn handle(name: &str, scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
     match name {
         "ListBros" => list_bros_for_request(scope, args, ctx).await,
+        "ListBroCatalog" => list_bro_catalog_for_request(args, ctx).await,
         "LaunchBro" => launch_selected_bro(args, ctx).await,
         "KillProcess" => kill_process(args, ctx).await,
         "SaveSyncReport" => save_sync_report(args, ctx).await,
@@ -43,6 +44,44 @@ pub(crate) async fn handle(name: &str, scope: &Value, args: &Value, ctx: &mut In
         "GenerateFedupDeleteDryRun" => generate_fedup_delete_dry_run(args, ctx).await,
         "GetFedupResultPage" => get_fedup_result_page(args, ctx).await,
         _ => {}
+    }
+}
+
+async fn list_bro_catalog_for_request(args: &Value, ctx: &mut IntentContext<'_>) {
+    let request_id = arg_str(args, "requestId").unwrap_or("").to_string();
+    if request_id.is_empty() {
+        return;
+    }
+
+    match tokio::task::spawn_blocking(list_bro_catalog).await {
+        Ok(bros) => {
+            let bros = bros
+                .into_iter()
+                .map(|bro| BroCatalogSchema {
+                    id: bro.id,
+                    name: bro.name,
+                    description: bro.description,
+                })
+                .collect();
+            let _ = ctx
+                .tx
+                .send(ServerMessage::BroCatalogReady {
+                    timestamp: now(),
+                    request_id,
+                    bros,
+                })
+                .await;
+        }
+        Err(_) => {
+            let _ = ctx
+                .tx
+                .send(ServerMessage::BroCatalogFailed {
+                    timestamp: now(),
+                    request_id,
+                    message: "Bro catalog discovery failed.".to_string(),
+                })
+                .await;
+        }
     }
 }
 

@@ -77,6 +77,7 @@ pub async fn dispatch(name: &str, scope: &Value, args: &Value, ctx: &mut IntentC
         | "ProvideInput"
         | "NavigateToHistoryEntry" => navigation::handle(name, scope, args, ctx).await,
         "ListBros"
+        | "ListBroCatalog"
         | "LaunchBro"
         | "KillProcess"
         | "SaveSyncReport"

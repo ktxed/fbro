@@ -472,6 +472,12 @@ export interface BroItem {
   params: BroParamItem[];
 }
 
+export interface BroCatalogItem {
+  id: string;
+  name: string;
+  description: string;
+}
+
 export interface JobStart {
   jobId: string;
   kind: "file-op" | "fp-bro" | "search" | "outgoing-transfer" | "sync-bro" | "fedup-bro" | "remote-manifest";
@@ -863,6 +869,20 @@ export interface BroOptionsFailedMessage {
   message: string;
 }
 
+export interface BroCatalogReadyMessage {
+  type: "BroCatalogReady";
+  timestamp: number;
+  requestId: string;
+  bros: BroCatalogItem[];
+}
+
+export interface BroCatalogFailedMessage {
+  type: "BroCatalogFailed";
+  timestamp: number;
+  requestId: string;
+  message: string;
+}
+
 export interface GitLogReadyMessage {
   type: "GitLogReady";
   timestamp: number;
@@ -1065,6 +1085,8 @@ export type BEMessage =
   | OpenWithOptionsFailedMessage
   | BroOptionsReadyMessage
   | BroOptionsFailedMessage
+  | BroCatalogReadyMessage
+  | BroCatalogFailedMessage
   | GitLogReadyMessage
   | GitCommitShowReadyMessage
   | GitActionFinishedMessage

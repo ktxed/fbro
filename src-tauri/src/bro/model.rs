@@ -78,6 +78,13 @@ pub struct BroPre {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BroCatalogEntry {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BroOption {
     pub id: String,
     pub name: String,
