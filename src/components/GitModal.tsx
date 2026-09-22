@@ -47,8 +47,9 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
   const [messageVisibleLines, setMessageVisibleLines] = useState<Record<string, number>>({});
   const hasHiddenMessageLines = useCallback((hash: string, message: string) =>
     commitMessageLines(message).length > (messageVisibleLines[hash] ?? MESSAGE_PAGE_LINES), [messageVisibleLines]);
-  // Commit details load asynchronously; land on the load-more bar once they arrive.
-  const pendingMessageFocusRef = useRef<string | null>(null);
+  // Commit details load asynchronously; reveal them once they arrive.
+  const pendingExpandRevealRef = useRef<string | null>(null);
+  const logPanelRef = useRef<HTMLDivElement | null>(null);
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(() => new Set());
   const [rollbackPaths, setRollbackPaths] = useState<string[] | null>(null);
   const selectionAnchorRef = useRef<number | null>(null);
@@ -102,7 +103,7 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
   const expandCommit = useCallback((hash: string) => {
     const existing = gitLog?.commitShows[hash];
     const requestId = crypto.randomUUID();
-    pendingMessageFocusRef.current = hash;
+    pendingExpandRevealRef.current = hash;
     dispatch({ type: "REQUEST_GIT_COMMIT_SHOW", panelId, requestId, hash });
     if (!existing || existing.status === "error") {
       client.sendIntent("GitGetCommitShow", undefined, { panelId, requestId, hash });
@@ -268,19 +269,27 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
   }, [focusLogItem, gitLog?.commitShows, logCommits, messageVisibleLines]);
 
   useEffect(() => {
-    const hash = pendingMessageFocusRef.current;
+    const hash = pendingExpandRevealRef.current;
     if (!hash) return;
     if (hash !== expandedHash) {
-      pendingMessageFocusRef.current = null;
+      pendingExpandRevealRef.current = null;
       return;
     }
     const show = gitLog?.commitShows[hash];
     if (show?.status === "loading") return;
-    pendingMessageFocusRef.current = null;
+    pendingExpandRevealRef.current = null;
     const commitIndex = logCommits.findIndex((c) => c.hash === hash);
-    if (show?.status === "ready" && commitIndex >= 0 && hasHiddenMessageLines(hash, show.message)) {
+    if (commitIndex < 0) return;
+    if (show?.status === "ready" && hasHiddenMessageLines(hash, show.message)) {
       focusLogItem({ kind: "message", commitIndex });
     }
+    // Queued after focusLogItem's frame so its "nearest" scroll can't undo this.
+    requestAnimationFrame(() => {
+      const panel = logPanelRef.current;
+      const row = logRowRefs.current[commitIndex];
+      if (!panel || !row) return;
+      panel.scrollTop += row.getBoundingClientRect().top - panel.getBoundingClientRect().top;
+    });
   }, [expandedHash, focusLogItem, gitLog?.commitShows, hasHiddenMessageLines, logCommits]);
 
   const copyLogHash = useCallback((hash: string) => {
@@ -445,6 +454,15 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
           event.stopPropagation();
           if (activeTab === "log") moveLogFocus(movement);
           else focusChangeRow(activeChangeIndex + movement);
+          return;
+        }
+        // PageUp / PageDown move focus by a viewport of rows so it never lags behind the scroll.
+        if (activeTab === "log" && (event.key === "PageUp" || event.key === "PageDown")) {
+          event.preventDefault();
+          event.stopPropagation();
+          const rowHeight = logRowRefs.current[0]?.offsetHeight || 28;
+          const pageRows = Math.max(1, Math.floor((logPanelRef.current?.clientHeight ?? 0) / rowHeight) - 1);
+          moveLogFocus(event.key === "PageDown" ? pageRows : -pageRows);
           return;
         }
         // Home / End: first and last visible log item (commit or nested file).
@@ -835,7 +853,7 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
               <span>Log</span>
               <span>{gitLog?.status === "ready" ? logCommits.length : "…"}</span>
             </div>
-            <div className="git-modal__log" role="tabpanel" data-testid="git-log-panel">
+            <div ref={logPanelRef} className="git-modal__log" role="tabpanel" data-testid="git-log-panel">
               {gitLog?.status === "loading" && logCommits.length === 0 && (
                 <div className="git-modal__log-empty">
                   <IconLoader2 size={16} className="git-modal__log-spinner" /> Loading history…
