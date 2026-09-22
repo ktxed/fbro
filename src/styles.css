@@ -1491,7 +1491,7 @@ body {
 .panel__git-btn {
   flex-shrink: 0;
   max-width: min(32vw, 280px);
-  margin-left: 6px;
+  margin-right: 6px;
   box-sizing: border-box;
   height: calc(var(--font-size) + 2px);
   padding: 0 4px;
