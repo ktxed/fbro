@@ -217,11 +217,11 @@ stateDiagram-v2
       local: "1", size: String(Buffer.byteLength(mermaidMarkdown)),
       fsport: String(observer.state.fileServerPort) });
     await browser.url(`${mainUrl.split("?")[0]}?${mermaidParams}`);
-    await browser.$(".viewer__mermaid svg").waitForDisplayed({ timeout: 15_000 });
+    await browser.$(".viewer__mermaid-canvas > svg").waitForDisplayed({ timeout: 15_000 });
     const mermaidResult = await browser.execute(() => ({
-      diagrams: document.querySelectorAll(".viewer__mermaid svg").length,
+      diagrams: document.querySelectorAll(".viewer__mermaid-canvas > svg").length,
       rawBlocks: document.querySelectorAll("code.language-mermaid").length,
-      text: document.querySelector(".viewer__mermaid svg")?.textContent ?? "",
+      text: document.querySelector(".viewer__mermaid-canvas > svg")?.textContent ?? "",
     }));
     if (mermaidResult.diagrams !== 1 || mermaidResult.rawBlocks !== 0
       || !mermaidResult.text.includes("ON_DEMAND mode")
@@ -229,6 +229,34 @@ stateDiagram-v2
       || !mermaidResult.text.includes("invoiceAutomatically")) {
       throw new Error(`Mermaid state diagram did not render correctly: ${JSON.stringify(mermaidResult)}`);
     }
+
+    // Inline zoom: the toolbar is hover-revealed, so drive its buttons directly.
+    const mermaidZoom = await browser.execute(() => {
+      const svg = document.querySelector(".viewer__mermaid-canvas > svg");
+      const before = svg?.getBoundingClientRect().width ?? 0;
+      document.querySelector('.viewer__mermaid [data-mermaid-action="in"]')?.click();
+      document.querySelector('.viewer__mermaid [data-mermaid-action="in"]')?.click();
+      const zoomed = svg?.getBoundingClientRect().width ?? 0;
+      document.querySelector('.viewer__mermaid [data-mermaid-action="fit"]')?.click();
+      const fitted = svg?.getBoundingClientRect().width ?? 0;
+      return { before, zoomed, fitted };
+    });
+    if (!(mermaidZoom.zoomed > mermaidZoom.before) || Math.abs(mermaidZoom.fitted - mermaidZoom.before) > 1) {
+      throw new Error(`Mermaid inline zoom did not resize the diagram: ${JSON.stringify(mermaidZoom)}`);
+    }
+
+    // Expand overlay: Escape returns to the document without closing the viewer.
+    await browser.execute(() => {
+      document.querySelector('.viewer__mermaid [data-mermaid-action="expand"]')?.click();
+    });
+    await browser.$(".viewer__mermaid-overlay-stage > svg").waitForDisplayed({ timeout: 5_000 });
+    await browser.keys("Escape");
+    await waitFor(async () => browser.execute(() =>
+      !document.querySelector(".viewer__mermaid-overlay")
+      && document.querySelectorAll(".viewer__mermaid-canvas > svg").length === 1), {
+      timeout: 5_000,
+      label: "mermaid overlay closed by Escape",
+    });
   } catch (error) {
     measurements.error = String(error);
     measurements.viewer = await browser.execute(() => ({

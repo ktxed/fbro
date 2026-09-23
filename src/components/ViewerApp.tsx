@@ -12,6 +12,8 @@ import { isArchiveSourceId, isRemoteSourceId } from "../utils/sourceId";
 import { useInputHistory } from "../hooks/useInputHistory";
 import { InputHistoryDropdown } from "./InputHistoryDropdown";
 import { DEFAULT_COLOR_SCHEME_ID, resolveColorScheme, type ColorSchemeId } from "../theme/colorSchemes";
+import { buildMermaidBlock, mermaidSvgOf, setMermaidScale, stepMermaidScale, wheelZoomMermaid, type MermaidAction } from "../viewers/mermaidZoom";
+import { MermaidOverlay, type MermaidOverlayHandle } from "../viewers/MermaidOverlay";
 
 // Mermaid v11 lazily registers diagram modules on the first render() call —
 // initialize() alone is not enough, and the first real render can produce empty
@@ -384,6 +386,11 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
   const findRequestIdRef = useRef("");
   const pendingFindLineRef = useRef<ViewerFindMatch | null>(null);
 
+  // ── Expanded mermaid diagram (full-viewer zoom/pan overlay) ───────────────
+  const [expandedMermaid, setExpandedMermaid] = useState<SVGSVGElement | null>(null);
+  const expandedMermaidRef = useRef<SVGSVGElement | null>(null);
+  const mermaidOverlayRef = useRef<MermaidOverlayHandle>(null);
+
   const [bufferBaseLine, setBufferBaseLine] = useState<number | null>(1);
   // Synchronous mirror of the current buffer's byte range — used by
   // scrollByLines so it always computes the next chunk offset from the
@@ -397,6 +404,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
   curSourceIdRef.current = curSourceId;
   curIsLocalRef.current  = curIsLocal;
   findOpenRef.current    = findOpen;
+  expandedMermaidRef.current = expandedMermaid;
   largeFindMatchesRef.current = largeFindMatches;
   const effectiveMode: ViewMode = useDirect ? "image" : (mode ?? "text");
   const isImageMode = effectiveMode === "image";
@@ -932,6 +940,23 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
         return;
       }
 
+      // Expanded mermaid diagram owns the keyboard: Esc returns to the
+      // document, and every other viewer shortcut is held back so the content
+      // underneath can't change while it is covered.
+      if (expandedMermaidRef.current) {
+        const overlay = mermaidOverlayRef.current;
+        const pan: Record<string, [number, number]> = {
+          ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1],
+        };
+        if (e.key === "Escape") { e.preventDefault(); setExpandedMermaid(null); }
+        else if (e.key === "+" || e.key === "=") { e.preventDefault(); overlay?.zoomIn(); }
+        else if (e.key === "-") { e.preventDefault(); overlay?.zoomOut(); }
+        else if (e.key === "0") { e.preventDefault(); overlay?.fit(); }
+        else if (pan[e.key]) { e.preventDefault(); overlay?.panBy(...pan[e.key]); }
+        else if (!ctrl && !e.altKey && e.key.toLowerCase() === "m") { e.preventDefault(); toggleMaximize(); }
+        return;
+      }
+
       // When typing in the find input, only intercept Escape and Enter
       if (inFind) {
         if (e.key === "Escape") { findHistory.addToHistory(findQuery); setFindOpen(false); }
@@ -1269,6 +1294,10 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
     if (isMdExt(filenameRef.current)) getMermaid(resolveColorScheme(colorSchemeId).mermaidTheme);
   }, [colorSchemeId]);
 
+  // An expanded diagram belongs to the document it was cloned from; drop it
+  // when the preview is replaced (navigation, reload, theme) or left.
+  useEffect(() => { setExpandedMermaid(null); }, [markdownHtml, colorSchemeId]);
+
   // Inject the markdown HTML manually and render any mermaid diagrams. We
   // deliberately avoid dangerouslySetInnerHTML: React would rewrite innerHTML
   // on every re-render (resize, font-size sync, mode detect), wiping the SVG
@@ -1285,8 +1314,21 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
       anchor.removeAttribute("href");
       if (target) anchor.dataset.viewerMarkdownTarget = target;
     });
-    const handleLinkClick = (event: MouseEvent) => {
+    const handleClick = (event: MouseEvent) => {
       const element = event.target instanceof Element ? event.target : null;
+      const button = element?.closest<HTMLButtonElement>("button[data-mermaid-action]");
+      const block = button?.closest<HTMLElement>(".viewer__mermaid");
+      if (button && block && container.contains(block)) {
+        const action = button.dataset.mermaidAction as MermaidAction;
+        if (action === "in") stepMermaidScale(block, 1);
+        else if (action === "out") stepMermaidScale(block, -1);
+        else if (action === "fit") setMermaidScale(block, "fit");
+        else if (action === "expand") {
+          const svg = mermaidSvgOf(block);
+          if (svg) setExpandedMermaid(svg.cloneNode(true) as SVGSVGElement);
+        }
+        return;
+      }
       const anchor = element?.closest<HTMLAnchorElement>("a[data-viewer-markdown-target]");
       if (!anchor || !container.contains(anchor)) return;
 
@@ -1301,7 +1343,18 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
         path: target,
       });
     };
-    container.addEventListener("click", handleLinkClick);
+    container.addEventListener("click", handleClick);
+    // Ctrl/Cmd+wheel over a diagram zooms it; a plain wheel keeps scrolling
+    // the document.
+    const handleWheel = (event: WheelEvent) => {
+      if (!event.ctrlKey && !event.metaKey) return;
+      const element = event.target instanceof Element ? event.target : null;
+      const block = element?.closest<HTMLElement>(".viewer__mermaid-canvas")?.parentElement;
+      if (!block || !container.contains(block)) return;
+      event.preventDefault();
+      wheelZoomMermaid(block, event, container);
+    };
+    container.addEventListener("wheel", handleWheel, { passive: false });
     const codeBlocks = Array.from(
       container.querySelectorAll<HTMLElement>("code.language-mermaid"),
     );
@@ -1316,12 +1369,9 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
         try {
           const { svg } = await mermaid.render(`mermaid-${i}-${Date.now()}`, source);
           if (cancelled || !pre.isConnected) return;
-          const wrapper = document.createElement("div");
-          wrapper.className = "viewer__mermaid";
           const safeSvg = sanitizedMermaidSvg(svg);
           if (!safeSvg) throw new Error("Mermaid returned invalid SVG");
-          wrapper.replaceChildren(document.importNode(safeSvg, true));
-          pre.replaceWith(wrapper);
+          pre.replaceWith(buildMermaidBlock(document.importNode(safeSvg, true) as SVGSVGElement));
         } catch (err) {
           console.error("mermaid render failed:", err);
         }
@@ -1329,7 +1379,8 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
     });
     return () => {
       cancelled = true;
-      container.removeEventListener("click", handleLinkClick);
+      container.removeEventListener("click", handleClick);
+      container.removeEventListener("wheel", handleWheel);
     };
   }, [markdownHtml, markdownPreview, colorSchemeId, panelId]);
 
@@ -1537,11 +1588,20 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
           <>
             {effectiveMode === "text" && markdownMode ? (
               isSmall === true ? (
-                <div
-                  key="markdown-preview"
-                  className="viewer__markdown"
-                  ref={contentRef as React.RefObject<HTMLDivElement>}
-                />
+                <>
+                  <div
+                    key="markdown-preview"
+                    className="viewer__markdown"
+                    ref={contentRef as React.RefObject<HTMLDivElement>}
+                  />
+                  {expandedMermaid && (
+                    <MermaidOverlay
+                      ref={mermaidOverlayRef}
+                      svg={expandedMermaid}
+                      onClose={() => setExpandedMermaid(null)}
+                    />
+                  )}
+                </>
               ) : (
                 <div className="viewer__markdown-unavailable">
                   Markdown preview not available for files &gt; 1 MiB
@@ -1648,6 +1708,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
             const canEdit = curIsLocal && !isArchiveSourceId(curSourceId) && !isRemoteSourceId(curSourceId);
             const editHint = canEdit ? " · e/F4 edit" : "";
             const markdownHint = isMdExt(curFilename) ? " · 4 md" : "";
+            if (expandedMermaid) return "wheel/+/- zoom · drag/arrows pan · 0 fit · M maximize · Esc back";
             if (isImageMode) return `z zoom · j/k prev/next file · 1 text · 2 image · 3 hex${markdownHint} · M maximize${editHint}`;
             if (effectiveMode === "text") return `↑↓ PgDn/PgUp scroll · j/k prev/next · 1 text · 2 image · 3 hex${markdownHint} · M maximize · s dos · w wrap · f find${editHint}`;
             return `↑↓ PgDn/PgUp scroll · j/k prev/next file · 1 text · 2 image · 3 hex${markdownHint} · M maximize${editHint}`;

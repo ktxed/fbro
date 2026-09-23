@@ -65,6 +65,22 @@ Markdown is a distinct presentation of text rather than a second simultaneous
 toggle: only `1 Text` or `4 MD` is shown as active. When focus is in the find
 input, printable viewer shortcuts are not intercepted.
 
+Mermaid diagrams in the Markdown preview have a hover toolbar (zoom out, zoom
+in, fit, expand); `Ctrl`/`Cmd`+wheel over a diagram zooms it in place, while a
+plain wheel keeps scrolling the document. Expand shows the diagram over the
+whole viewer body, where the wheel zooms at the cursor and dragging pans.
+While it is open it owns the keyboard, and other viewer shortcuts are held back:
+
+| Key | Action |
+|---|---|
+| `+` / `=` / `-` | Zoom in / out |
+| `0` | Fit the diagram to the viewer |
+| Arrows | Pan |
+| `M` | Toggle maximize/restore |
+| `Esc` | Return to the document (the viewer stays open) |
+
+`Ctrl`/`Cmd`+`=`/`-`/`0` keep adjusting the global font size.
+
 ---
 
 ## 4. Design Rules

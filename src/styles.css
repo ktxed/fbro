@@ -4219,14 +4219,115 @@ body {
 }
 
 .viewer__mermaid {
+  position: relative;
   margin: 1em 0;
-  overflow-x: auto;
-  text-align: center;
 }
 
-.viewer__mermaid svg {
+.viewer__mermaid-canvas {
+  overflow: auto;
+}
+
+.viewer__mermaid-canvas > svg {
+  display: block;
+  margin: 0 auto;
   max-width: 100%;
   height: auto;
+}
+
+.viewer__mermaid-toolbar {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  background: var(--bg-footer);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  opacity: 0;
+  transition: opacity 0.12s;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.viewer__mermaid:hover .viewer__mermaid-toolbar,
+.viewer__mermaid-toolbar:focus-within {
+  opacity: 1;
+}
+
+.viewer__mermaid-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 2px;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.viewer__mermaid-btn:hover {
+  background: var(--bg-focused);
+  border-color: var(--border-focus);
+  color: var(--text);
+}
+
+/* Label comes from a data attribute so it never ends up in copied text. */
+.viewer__mermaid-scale::after {
+  content: attr(data-label);
+  display: inline-block;
+  min-width: 3.5em;
+  text-align: center;
+  font-family: var(--font);
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.viewer__mermaid-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.viewer__mermaid-overlay-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-header);
+}
+
+.viewer__mermaid-overlay-scale {
+  min-width: 4em;
+  text-align: center;
+  font-family: var(--font);
+  font-size: var(--font-size);
+  color: var(--text-dim);
+}
+
+.viewer__mermaid-overlay-canvas {
+  position: relative;
+  flex: 1;
+  overflow: hidden;
+}
+
+.viewer__mermaid-overlay-stage {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform-origin: center center;
 }
 
 .viewer__markdown blockquote {
