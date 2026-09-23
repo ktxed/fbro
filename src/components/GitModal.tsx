@@ -903,7 +903,14 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
                       <span className={`git-modal__log-subject-cell${commit.refs && commit.refs.length > 0 ? " git-modal__log-subject-cell--has-refs" : ""}`}>
                         <span className="git-modal__log-subject" title={commit.subject}>{commit.subject}</span>
                         {commit.refs && commit.refs.length > 0 && (
-                          <LogRefsStrip refs={commit.refs} onCopy={copyLogRef} />
+                          <LogRefsStrip
+                            refs={commit.refs}
+                            onCopy={(name) => {
+                              copyLogRef(name);
+                              // Hand focus back to the row so arrow keys keep navigating the log.
+                              focusLogItem({ kind: "commit", index });
+                            }}
+                          />
                         )}
                       </span>
                       <span className="git-modal__log-author" title={commit.authorEmail || commit.authorName}>{commit.authorName}</span>
@@ -1198,7 +1205,11 @@ function LogRefsStrip({ refs, onCopy }: { refs: GitLogRef[]; onCopy: (name: stri
       className={wrapClass}
       title={refs.map((ref) => ref.name).join(", ")}
       onClick={(event) => event.stopPropagation()}
-      onKeyDown={(event) => event.stopPropagation()}
+      onKeyDown={(event) => {
+        // Let Space/Enter activate the chip's copy button natively; everything
+        // else (arrows, Home/End, shortcuts) bubbles to the log's key handler.
+        if (event.key === " " || event.key === "Enter") event.stopPropagation();
+      }}
     >
       <span className="git-modal__log-refs" ref={scrollerRef}>
         {/* Grows when chips fit (right-aligns them); collapses to 0 when overflowing. */}
