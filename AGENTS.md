@@ -100,7 +100,9 @@ keyboard, or modal behaviour **updates the matching spec in the same commit**.
 
 **Styling and components**
 - Colours via `var(--…)` tokens in `src/styles.css`; check both `fbro-dark` and
-  `daylight`. Content rendered through `FloatingPortal` sets its own
+  `daylight`. Literal colours belong only in the `:root` /
+  `[data-color-scheme]` blocks; a deliberately fixed colour (video letterbox,
+  PDF paper) carries a comment. New tokens need a daylight value. Content rendered through `FloatingPortal` sets its own
   `data-color-scheme` (`resolveColorScheme`).
 - Custom-styled controls need `appearance: none; font: inherit` and explicit
   colours, or Windows WebView2 paints native chrome.
@@ -179,6 +181,5 @@ keyboard, or modal behaviour **updates the matching spec in the same commit**.
 Some existing code breaks the rules above. Don't copy these as precedent; fix
 them when you touch the code:
 
-- About 80 hard-coded hex colours remain in `src/styles.css`.
 - Some copy text uses "..." instead of "…".
 - Bro ids mix `builtin:` and `builtin.`.
