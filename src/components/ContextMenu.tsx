@@ -11,6 +11,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { bindingMatches, executeTargetedCommand } from "../commands/interactive";
 import { buildContextMenuItems } from "../contextMenu";
 import { useAppDispatch, useAppState, type PendingContextMenu } from "../store";
+import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { resolveColorScheme } from "../theme/colorSchemes";
 import { contextualOperationAvailable, resolveContextualTarget } from "../contextualOperations";
 import type { WsClient } from "../ws/client";
@@ -24,6 +25,7 @@ interface ContextMenuProps {
 export function ContextMenu({ client, menu }: ContextMenuProps) {
   const state = useAppState();
   const dispatch = useAppDispatch();
+  const copyToClipboard = useCopyToClipboard();
   const menuRef = useRef<HTMLDivElement>(null);
   const [highlightedIndex, setHighlightedIndex] = useState(0);
   const colorScheme = resolveColorScheme(state.settings.general.colorScheme);
@@ -163,7 +165,8 @@ export function ContextMenu({ client, menu }: ContextMenuProps) {
     }
 
     if (item.kind === "clipboard" && item.clipboardText) {
-      await navigator.clipboard.writeText(item.clipboardText);
+      const noun = item.id === "clipboard.paths" ? "full path" : "name";
+      copyToClipboard(item.clipboardText, target.count === 1 ? noun : `${target.count} ${noun}s`);
       return;
     }
 

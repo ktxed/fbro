@@ -7,6 +7,7 @@ import { ResizableModal } from "./ResizableModal";
 import { ModalLayer } from "./ModalStack";
 import { isLikelyBinaryPath } from "../utils/binaryPath";
 import type { GitActivity } from "./gitActivity";
+import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 
 type GitTab = "changes" | "log";
 
@@ -21,6 +22,7 @@ const MESSAGE_PAGE_LINES = 8;
 
 export function GitModal({ panelId, git, client, activity, onActivityChange, onClose }: { panelId: string; git: GitRepoStatus; client: WsClient; activity: GitActivity | null; onActivityChange: (activity: GitActivity) => void; onClose: () => void }) {
   const dispatch = useAppDispatch();
+  const copyToClipboard = useCopyToClipboard();
   const { pendingGitLog } = useAppState();
   const gitLog = pendingGitLog?.panelId === panelId ? pendingGitLog : null;
 
@@ -293,14 +295,12 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
   }, [expandedHash, focusLogItem, gitLog?.commitShows, hasHiddenMessageLines, logCommits]);
 
   const copyLogHash = useCallback((hash: string) => {
-    void navigator.clipboard.writeText(hash);
-    dispatch({ type: "SHOW_TRANSIENT_HINT", message: "Copied commit hash" });
-  }, [dispatch]);
+    copyToClipboard(hash, "commit hash");
+  }, [copyToClipboard]);
 
   const copyLogRef = useCallback((name: string) => {
-    void navigator.clipboard.writeText(name);
-    dispatch({ type: "SHOW_TRANSIENT_HINT", message: `Copied ${name}` });
-  }, [dispatch]);
+    copyToClipboard(name, name);
+  }, [copyToClipboard]);
 
   const handleClose = useCallback(() => {
     dispatch({ type: "CLEAR_GIT_LOG" });

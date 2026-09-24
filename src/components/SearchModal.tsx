@@ -10,6 +10,7 @@ import { DateTimeInput } from "./DateTimeInput";
 import { ResizableModal } from "./ResizableModal";
 import { stepNumberInputOnWheel } from "../utils/numberInputWheel";
 import { ModalLayer } from "./ModalStack";
+import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { isNativeActivationTarget, rovingIndexForKey } from "./modalKeyboard";
 
 function MnemonicLabel({ text, mnemonic }: { text: string; mnemonic: string }) {
@@ -63,6 +64,7 @@ interface SearchModalProps {
 
 export function SearchModal({ search, sources, client }: SearchModalProps) {
   const dispatch = useAppDispatch();
+  const copyToClipboard = useCopyToClipboard();
   const state = useAppState();
 
   const p = search.searchParams;
@@ -895,7 +897,7 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
                         title="Copy full path"
                         onClick={(e) => {
                           e.stopPropagation();
-                          navigator.clipboard.writeText(result.fullPath);
+                          copyToClipboard(result.fullPath, "full path");
                         }}
                       >⧉</button>
                     </li>

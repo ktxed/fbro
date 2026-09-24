@@ -4,6 +4,7 @@ import type { PendingNoEditor } from "../store";
 import { IconCopy } from "@tabler/icons-react";
 import { ModalLayer } from "./ModalStack";
 import { ModalDialog } from "./ModalDialog";
+import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 
 interface NoEditorModalProps {
   noEditor: PendingNoEditor;
@@ -11,6 +12,7 @@ interface NoEditorModalProps {
 
 export function NoEditorModal({ noEditor }: NoEditorModalProps) {
   const dispatch = useAppDispatch();
+  const copyToClipboard = useCopyToClipboard();
   const okRef = useRef<HTMLButtonElement>(null);
 
   const close = () => dispatch({ type: "CLOSE_NO_EDITOR" });
@@ -31,7 +33,7 @@ export function NoEditorModal({ noEditor }: NoEditorModalProps) {
             <code className="modal__no-editor-code">{noEditor.fullPath}</code>
             <button
               className="modal__job-param-copy"
-              onClick={() => navigator.clipboard.writeText(noEditor.fullPath)}
+              onClick={() => copyToClipboard(noEditor.fullPath, "path")}
               title="Copy path"
             >
               <IconCopy size={14} />

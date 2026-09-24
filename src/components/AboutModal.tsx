@@ -39,10 +39,14 @@ export function AboutModal({ client }: { client: WsClient }) {
   const close = () => dispatch({ type: "CLOSE_ABOUT" });
   const copyDiagnostics = () => {
     void navigator.clipboard.writeText(diagnostics).then(() => {
+      dispatch({ type: "SHOW_TRANSIENT_HINT", message: "Copied build info" });
       setCopied(true);
       if (copyResetRef.current !== null) window.clearTimeout(copyResetRef.current);
       copyResetRef.current = window.setTimeout(() => setCopied(false), 1500);
-    }).catch(() => setCopied(false));
+    }).catch(() => {
+      dispatch({ type: "SHOW_TRANSIENT_HINT", message: "Couldn't copy build info to the clipboard" });
+      setCopied(false);
+    });
   };
 
   return (

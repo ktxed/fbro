@@ -5,6 +5,7 @@ import type { WsClient } from "../ws/client";
 import { IconArrowUpRight, IconChevronRight, IconCopy } from "@tabler/icons-react";
 import { ResizableModal } from "./ResizableModal";
 import { ModalLayer } from "./ModalStack";
+import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 
 interface InfoModalProps {
   info: PendingInfo;
@@ -64,11 +65,12 @@ function TypeIcon({ kind, iconName }: { kind: string; iconName?: string }) {
   return <span className="modal__info-type-icon" aria-hidden>{icon}</span>;
 }
 
-function CopyButton({ text }: { text: string }) {
+function CopyButton({ text, what }: { text: string; what: string }) {
+  const copyToClipboard = useCopyToClipboard();
   return (
     <button
       className="modal__job-param-copy"
-      onClick={() => navigator.clipboard.writeText(text)}
+      onClick={() => copyToClipboard(text, what)}
       title="Copy to clipboard"
     ><IconCopy size={14} /></button>
   );
@@ -76,6 +78,7 @@ function CopyButton({ text }: { text: string }) {
 
 export function InfoModal({ info, client }: InfoModalProps) {
   const dispatch = useAppDispatch();
+  const copyToClipboard = useCopyToClipboard();
   const closeRef = useRef<HTMLButtonElement>(null);
 
   const close = () => dispatch({ type: "CLOSE_INFO" });
@@ -88,8 +91,7 @@ export function InfoModal({ info, client }: InfoModalProps) {
     }
     if (e.key === "p" || e.key === "P") {
       e.preventDefault();
-      navigator.clipboard.writeText(info.fullPath);
-      dispatch({ type: "SHOW_TRANSIENT_HINT", message: "Copied to clipboard" });
+      copyToClipboard(info.fullPath, "full path");
       return;
     }
   };
@@ -110,7 +112,7 @@ export function InfoModal({ info, client }: InfoModalProps) {
               <tr>
                 <td className="modal__info-label">Name</td>
                 <td className="modal__info-value">{info.name}</td>
-                <td><CopyButton text={info.name} /></td>
+                <td><CopyButton text={info.name} what="name" /></td>
               </tr>
               <tr>
                 <td className="modal__info-label">Type</td>
@@ -125,12 +127,12 @@ export function InfoModal({ info, client }: InfoModalProps) {
               <tr>
                 <td className="modal__info-label">Full <span className="modal__hotkey">p</span>ath</td>
                 <td className="modal__info-value" title={info.fullPath}>{info.fullPath}</td>
-                <td><CopyButton text={info.fullPath} /></td>
+                <td><CopyButton text={info.fullPath} what="full path" /></td>
               </tr>
               <tr>
                 <td className="modal__info-label">Directory</td>
                 <td className="modal__info-value" title={info.dirPath}>{info.dirPath}</td>
-                <td><CopyButton text={info.dirPath} /></td>
+                <td><CopyButton text={info.dirPath} what="directory path" /></td>
               </tr>
             </tbody>
             <tbody className="modal__info-group">
@@ -144,7 +146,7 @@ export function InfoModal({ info, client }: InfoModalProps) {
                     )}
                   </td>
                   <td>
-                    {info.size !== undefined && <CopyButton text={String(info.size)} />}
+                    {info.size !== undefined && <CopyButton text={String(info.size)} what="size" />}
                   </td>
                 </tr>
               )}
