@@ -7,7 +7,7 @@ import { isArchiveSourceId, isGlobalSelectionSourceId } from "../utils/sourceId"
 import { IconAlertTriangle } from "@tabler/icons-react";
 import { ResizableModal } from "./ResizableModal";
 import { ModalLayer } from "./ModalStack";
-import { isEditableTarget, isNativeActivationTarget } from "./modalKeyboard";
+import { isEditableTarget, isLetterKey, isNativeActivationTarget } from "./modalKeyboard";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { CopyButton } from "./CopyButton";
 
@@ -752,22 +752,22 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
         startOp(false);
         return;
       }
-      if ((e.key === "d" || e.key === "D") && !isSubmitted) {
+      if (isLetterKey(e, "d") && !isSubmitted) {
         e.preventDefault();
         setDryMode((current) => !current);
         return;
       }
-      if ((e.key === "p" || e.key === "P") && canStartInBackground && !isSubmitted) {
+      if (isLetterKey(e, "p") && canStartInBackground && !isSubmitted) {
         e.preventDefault();
         setStartPaused((current) => !current);
         return;
       }
-      if ((e.key === "a" || e.key === "A")) {
+      if (isLetterKey(e, "a")) {
         e.preventDefault();
         cycleConflictPolicy();
         return;
       }
-      if (canStartInBackground && (e.key === "b" || e.key === "B")) {
+      if (canStartInBackground && isLetterKey(e, "b")) {
         e.preventDefault();
         startOp(true);
       }
@@ -1063,7 +1063,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
       }
       if (isNativeActivationTarget(e.target)) return;
       if (isDecision) {
-        if ((e.key === "a" || e.key === "A") && activeJob.decision?.supportsApplyToAll) {
+        if (isLetterKey(e, "a") && activeJob.decision?.supportsApplyToAll) {
           e.preventDefault();
           setApplyToAll((current) => !current);
           return;
@@ -1073,7 +1073,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
           submitDecision(primaryDecision);
           return;
         }
-        if ((e.key === "s" || e.key === "S") && skipDecision) {
+        if (isLetterKey(e, "s") && skipDecision) {
           e.preventDefault();
           submitDecision(skipDecision);
           return;
@@ -1093,7 +1093,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
           close();
           return;
         }
-        if ((e.key === "r" || e.key === "R") && activeJob.supportsPause && activeJob.paused) {
+        if (isLetterKey(e, "r") && activeJob.supportsPause && activeJob.paused) {
           e.preventDefault();
           resumeJob();
           return;

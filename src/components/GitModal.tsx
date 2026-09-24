@@ -9,6 +9,7 @@ import { isLikelyBinaryPath } from "../utils/binaryPath";
 import type { GitActivity } from "./gitActivity";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { CopyButton } from "./CopyButton";
+import { shortcutLetter } from "./modalKeyboard";
 
 type GitTab = "changes" | "log";
 
@@ -423,8 +424,9 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
       // overlay below still stops their events from reaching the panel.
       if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) return;
       const key = event.key.toLowerCase();
+      const letter = shortcutLetter(event);
       const hasShortcutModifier = event.ctrlKey || event.metaKey || event.altKey;
-      if (activeTab === "changes" && key === "a" && (event.ctrlKey || event.metaKey) && !event.altKey) {
+      if (activeTab === "changes" && letter === "a" && (event.ctrlKey || event.metaKey) && !event.altKey) {
         event.preventDefault();
         event.stopPropagation();
         setSelectedPaths(new Set(git.changes.map(change => change.path)));
@@ -445,7 +447,7 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
           setTab("log");
           return;
         }
-        const movement = event.key === "ArrowUp" || key === "k" ? -1 : event.key === "ArrowDown" || key === "j" ? 1 : 0;
+        const movement = event.key === "ArrowUp" || letter === "k" ? -1 : event.key === "ArrowDown" || letter === "j" ? 1 : 0;
         if (movement) {
           event.preventDefault();
           event.stopPropagation();
@@ -548,23 +550,23 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
           }
           if (logFocus.kind === "commit") {
             const activeCommit = logCommits[logFocus.index];
-            if (activeCommit && key === "y") {
+            if (activeCommit && letter === "y") {
               event.preventDefault();
               event.stopPropagation();
               copyLogHash(activeCommit.hash);
               return;
             }
           }
-          if (logFocus.kind === "change" && (key === "v" || key === "c")) {
+          if (logFocus.kind === "change" && (letter === "v" || letter === "c")) {
             const commit = logCommits[logFocus.commitIndex];
             const change = commit && gitLog?.commitShows[commit.hash]?.status === "ready"
               ? gitLog.commitShows[commit.hash].changes[logFocus.changeIndex]
               : undefined;
             if (commit && change) {
-              if (key === "v" && isLikelyBinaryPath(change.path)) return;
+              if (letter === "v" && isLikelyBinaryPath(change.path)) return;
               event.preventDefault();
               event.stopPropagation();
-              if (key === "v") viewCommitDiff(commit.hash, change);
+              if (letter === "v") viewCommitDiff(commit.hash, change);
               else copyRawFile(commit.hash, change);
               return;
             }
@@ -577,14 +579,14 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
             toggleSelection(activeChangeIndex);
             return;
           }
-          if (activeChange && key === "v") {
+          if (activeChange && letter === "v") {
             if (isLikelyBinaryPath(activeChange.path)) return;
             event.preventDefault();
             event.stopPropagation();
             act("GitViewDiff", { targetPath: activeChange.path });
             return;
           }
-          if (activeChange && key === "s") {
+          if (activeChange && letter === "s") {
             const isStaged = activeChange.indexStatus !== " " && activeChange.indexStatus !== "?";
             event.preventDefault();
             event.stopPropagation();
@@ -602,7 +604,7 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
         c: () => { if (activeTab === "changes" && canCommit) commitRef.current?.click(); },
       };
       if (git.branches.length > 0) accelerators.b = () => branchRef.current?.focus();
-      const action = !hasShortcutModifier ? accelerators[key] : undefined;
+      const action = !hasShortcutModifier && letter ? accelerators[letter] : undefined;
       if (action) {
         event.preventDefault();
         event.stopPropagation();

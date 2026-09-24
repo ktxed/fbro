@@ -6,7 +6,7 @@ import { IconEye, IconPlayerPlay, IconPlayerPause, IconX } from "@tabler/icons-r
 import { cancelJobWithPartialPrompt } from "../utils/jobCancel";
 import { ResizableModal } from "./ResizableModal";
 import { ModalLayer } from "./ModalStack";
-import { rovingIndexForKey } from "./modalKeyboard";
+import { isLetterKey, rovingIndexForKey } from "./modalKeyboard";
 
 const FILE_LIST_PAGE_SIZE = 25;
 const JOB_TABS = ["jobs", "procs", "cache"] as const;
@@ -666,7 +666,7 @@ export function JobsModal({ onClose, client }: { onClose: () => void; client: Ws
       initialFocusRef={closeRef}
       onClick={onOverlayClick}
       onKeyDown={(e) => {
-        if (e.key === "Escape" || e.key === "j") {
+        if (e.key === "Escape" || (isLetterKey(e, "j") && !e.shiftKey)) {
           e.preventDefault();
           onClose();
         }

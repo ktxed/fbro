@@ -87,9 +87,10 @@ keyboard, or modal behaviour **updates the matching spec in the same commit**.
   (`src-tauri/src/ws/commands.rs`, `mod_binding` for Cmd/Ctrl). Wire the
   frontend in `src/commands/interactive.ts` (id lists + `executeCommand`), and
   in `src/contextualOperations.ts` / `src/contextMenu.ts` for file operations.
-- Match with `bindingMatches` — it checks physical `event.code` so macOS
-  Option/Shift and non-Latin layouts work. Letter shortcuts inside modals must
-  also match `e.code`, not just `e.key`.
+- Match registry commands with `bindingMatches`; match local letter shortcuts
+  (modals, viewers) with `isLetterKey` / `shortcutLetter` from `modalKeyboard.ts`.
+  Both fall back to physical `event.code`, so macOS Option and non-Latin
+  layouts work. Never compare `e.key` to a letter by hand.
 - Show shortcuts with `formatPrimaryBinding`, never a hard-coded label.
   Platform modifier: `modKey()` from `src/utils/platform.ts`.
 
@@ -174,8 +175,6 @@ keyboard, or modal behaviour **updates the matching spec in the same commit**.
 Some existing code breaks the rules above. Don't copy these as precedent; fix
 them when you touch the code:
 
-- Modal letter shortcuts compare raw `e.key` (`OperationModal`, `SearchModal`,
-  `InfoModal`, `JobsModal`, `ViewerApp`).
 - Shortcut hints come in three styles: `MnemonicLabel` pasted into
   `OperationModal` and `SearchModal`, a `modal__hotkey` span, and `<kbd>`.
 - Many modals set initial focus in a `useEffect` instead of `initialFocusRef`.

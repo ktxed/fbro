@@ -11,7 +11,7 @@ import { ResizableModal } from "./ResizableModal";
 import { stepNumberInputOnWheel } from "../utils/numberInputWheel";
 import { ModalLayer } from "./ModalStack";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
-import { isNativeActivationTarget, rovingIndexForKey } from "./modalKeyboard";
+import { isLetterKey, isNativeActivationTarget, rovingIndexForKey } from "./modalKeyboard";
 
 function MnemonicLabel({ text, mnemonic }: { text: string; mnemonic: string }) {
   const idx = text.toLowerCase().indexOf(mnemonic.toLowerCase());
@@ -352,34 +352,34 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
       }
     }
     // Tab shortcuts: s = Search Input, r = Results
-    if (e.key === "s" || e.key === "S") {
+    if (isLetterKey(e, "s")) {
       const target = e.target as HTMLElement;
       if (target.tagName !== "INPUT" && target.tagName !== "TEXTAREA" && target.tagName !== "SELECT") {
         e.preventDefault();
         activateTab("input", true);
       }
     }
-    if (e.key === "r" || e.key === "R") {
+    if (isLetterKey(e, "r")) {
       const target = e.target as HTMLElement;
       if (target.tagName !== "INPUT" && target.tagName !== "TEXTAREA" && target.tagName !== "SELECT") {
         e.preventDefault();
         activateTab("results", true);
       }
     }
-    if (e.key === "e" || e.key === "E") {
+    if (isLetterKey(e, "e")) {
       const target = e.target as HTMLElement;
       if (target.tagName !== "INPUT" && target.tagName !== "TEXTAREA" && target.tagName !== "SELECT") {
         e.preventDefault();
         activateTab("extra", true);
       }
     }
-    if (e.key === "b" || e.key === "B") {
+    if (isLetterKey(e, "b")) {
       if ((search.status === "idle" || isDone) && paths.length > 0 && !(hasResults && search.activeTab === "results")) {
         e.preventDefault();
         startSearch(true);
       }
     }
-    if (e.key === "c" || e.key === "C") {
+    if (isLetterKey(e, "c")) {
       e.preventDefault();
       close();
     }

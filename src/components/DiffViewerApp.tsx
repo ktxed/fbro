@@ -11,6 +11,7 @@ import type {
   StateSnapshotMessage,
 } from "../ws/types";
 import { applyZoom, DEFAULT_FONT_SIZE } from "../utils/zoom";
+import { shortcutLetter } from "./modalKeyboard";
 import { DEFAULT_COLOR_SCHEME_ID, resolveColorScheme, type ColorSchemeId } from "../theme/colorSchemes";
 
 type DiffViewMode = "split" | "unified";
@@ -253,7 +254,7 @@ export function DiffViewerApp({ requestId, windowLabel, initialColorScheme }: Di
       if (event.key === "1") setMode("split");
       if (event.key === "2") setMode("unified");
       if (!event.ctrlKey && !event.metaKey && !event.altKey) {
-        const key = event.key.toLowerCase();
+        const key = shortcutLetter(event) ?? "";
         if ((key === "j" || key === "k") && result?.navigation) {
           event.preventDefault();
           setNavigationError(null);

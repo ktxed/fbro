@@ -14,6 +14,7 @@ import { InputHistoryDropdown } from "./InputHistoryDropdown";
 import { DEFAULT_COLOR_SCHEME_ID, resolveColorScheme, type ColorSchemeId } from "../theme/colorSchemes";
 import { buildMermaidBlock, mermaidSvgOf, setMermaidScale, stepMermaidScale, wheelZoomMermaid, type MermaidAction } from "../viewers/mermaidZoom";
 import { MermaidOverlay, type MermaidOverlayHandle } from "../viewers/MermaidOverlay";
+import { isLetterKey } from "./modalKeyboard";
 
 // Mermaid v11 lazily registers diagram modules on the first render() call —
 // initialize() alone is not enough, and the first real render can produce empty
@@ -953,7 +954,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
         else if (e.key === "-") { e.preventDefault(); overlay?.zoomOut(); }
         else if (e.key === "0") { e.preventDefault(); overlay?.fit(); }
         else if (pan[e.key]) { e.preventDefault(); overlay?.panBy(...pan[e.key]); }
-        else if (!ctrl && !e.altKey && e.key.toLowerCase() === "m") { e.preventDefault(); toggleMaximize(); }
+        else if (!ctrl && !e.altKey && isLetterKey(e, "m")) { e.preventDefault(); toggleMaximize(); }
         return;
       }
 
@@ -965,7 +966,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
       }
 
       // F — open find (or previous match with Shift+F)
-      if ((e.key === "f" || e.key === "F") && !ctrl && !e.altKey) {
+      if (isLetterKey(e, "f") && !ctrl && !e.altKey) {
         e.preventDefault();
         if (effectiveMode === "text" && markdownMode) setMarkdownMode(false);
         setFindOpen(true);
@@ -976,7 +977,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
 
       // Ctrl/Cmd+A — select all textual file contents (fully loaded / small files only).
       // Always preventDefault so the browser never selects chrome (header, status, etc.).
-      if (ctrl && (e.key === "a" || e.key === "A")) {
+      if (ctrl && isLetterKey(e, "a")) {
         e.preventDefault();
         if (isSmall === true && !isImageMode && contentRef.current) {
           selectAllViewerText(contentRef.current);
@@ -985,7 +986,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
       }
 
       // F4 / E — open in preferred editor only for real local files.
-      if (e.key === "F4" || (e.key === "e" && !ctrl && !e.shiftKey && !e.altKey)) {
+      if (e.key === "F4" || (isLetterKey(e, "e") && !ctrl && !e.shiftKey && !e.altKey)) {
         if (curIsLocalRef.current && !isArchiveSourceId(curSourceIdRef.current) && !isRemoteSourceId(curSourceIdRef.current)) {
           // curPathRef.current is the full file path (e.g. /home/user/docs/file.txt).
           // edit_file expects path=directory + filename, so strip the filename.
@@ -1029,7 +1030,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
         return;
       }
 
-      if (!ctrl && !e.altKey && e.key.toLowerCase() === "m") {
+      if (!ctrl && !e.altKey && isLetterKey(e, "m")) {
         e.preventDefault();
         toggleMaximize();
         return;
@@ -1044,14 +1045,14 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
         if (v.paused) v.play().catch(() => {}); else v.pause();
         return;
       }
-      if (e.key === "k") {
+      if (isLetterKey(e, "k") && !e.shiftKey) {
         e.preventDefault();
         setNavError(null);
         if (clientRef.current) setPendingNavigation(n => n + 1);
         clientRef.current?.sendIntent("ViewerNavigate", undefined, { panelId, direction: "next" });
         return;
       }
-      if (e.key === "j") {
+      if (isLetterKey(e, "j") && !e.shiftKey) {
         e.preventDefault();
         setNavError(null);
         if (clientRef.current) setPendingNavigation(n => n + 1);
@@ -1059,11 +1060,11 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
         return;
       }
 
-      if (!ctrl && !e.altKey && e.key.toLowerCase() === "s" && effectiveMode === "text") {
+      if (!ctrl && !e.altKey && isLetterKey(e, "s") && effectiveMode === "text") {
         setDosMode(prev => !prev);
         return;
       }
-      if (!ctrl && !e.altKey && e.key.toLowerCase() === "w" && effectiveMode === "text") {
+      if (!ctrl && !e.altKey && isLetterKey(e, "w") && effectiveMode === "text") {
         setWordWrap(prev => !prev);
         return;
       }

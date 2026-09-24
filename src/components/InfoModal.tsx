@@ -7,6 +7,7 @@ import { ResizableModal } from "./ResizableModal";
 import { ModalLayer } from "./ModalStack";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { CopyButton } from "./CopyButton";
+import { isLetterKey } from "./modalKeyboard";
 
 interface InfoModalProps {
   info: PendingInfo;
@@ -74,12 +75,12 @@ export function InfoModal({ info, client }: InfoModalProps) {
   const close = () => dispatch({ type: "CLOSE_INFO" });
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Escape" || e.key === "i" || e.key === "I") {
+    if (e.key === "Escape" || isLetterKey(e, "i")) {
       e.preventDefault();
       close();
       return;
     }
-    if (e.key === "p" || e.key === "P") {
+    if (isLetterKey(e, "p")) {
       e.preventDefault();
       copyToClipboard(info.fullPath, "full path");
       return;

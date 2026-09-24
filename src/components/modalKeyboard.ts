@@ -24,6 +24,21 @@ export function isEditableTarget(target: EventTarget | null): boolean {
   return target.isContentEditable;
 }
 
+/** Lowercase Latin letter a key event stands for, or null. Uses the typed
+ *  character when it is a Latin letter and falls back to the physical key
+ *  (`KeyX`) otherwise, so letter shortcuts still work on non-Latin layouts
+ *  and with macOS Option. */
+export function shortcutLetter(event: { key: string; code: string }): string | null {
+  if (/^[a-z]$/i.test(event.key)) return event.key.toLowerCase();
+  const physical = /^Key([A-Z])$/.exec(event.code);
+  return physical ? physical[1].toLowerCase() : null;
+}
+
+/** Case-insensitive letter shortcut match; see `shortcutLetter`. */
+export function isLetterKey(event: { key: string; code: string }, letter: string): boolean {
+  return shortcutLetter(event) === letter;
+}
+
 export type RovingOrientation = "horizontal" | "vertical";
 
 export function rovingIndexForKey(
