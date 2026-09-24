@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useAppDispatch } from "../store";
 import type { PendingInput } from "../store";
 import type { WsClient } from "../ws/client";
@@ -17,10 +17,6 @@ export function InputModal({ input, client }: InputModalProps) {
   const [value, setValue] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const history = useInputHistory("input", setValue);
-
-  useEffect(() => {
-    (history.inputRef as React.RefObject<HTMLInputElement>).current?.focus();
-  }, []);
 
   const close = () => dispatch({ type: "CLOSE_INPUT" });
 
@@ -44,7 +40,7 @@ export function InputModal({ input, client }: InputModalProps) {
   };
 
   return (
-    <ModalLayer modalId="input" onClick={close} onKeyDown={(e) => {
+    <ModalLayer modalId="input" initialFocusRef={history.inputRef} onClick={close} onKeyDown={(e) => {
       if (e.defaultPrevented) return;
       if (e.key === "Escape") { e.preventDefault(); close(); }
     }}>

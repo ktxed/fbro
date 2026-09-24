@@ -48,10 +48,6 @@ export function CommandPaletteModal({ client, onOpenJobsView }: CommandPaletteMo
   }, [commands, query]);
 
   useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
-
-  useEffect(() => {
     if (filteredCommands.length === 0) {
       setSelectedIndex(0);
       return;
@@ -112,7 +108,7 @@ export function CommandPaletteModal({ client, onOpenJobsView }: CommandPaletteMo
   };
 
   return (
-    <ModalLayer modalId="command-palette" onClick={close}>
+    <ModalLayer modalId="command-palette" initialFocusRef={inputRef} onClick={close}>
       <ResizableModal
         modalId="command-palette"
         client={client}

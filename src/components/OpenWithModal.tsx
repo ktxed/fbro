@@ -21,10 +21,6 @@ export function OpenWithModal({ client, openWith }: OpenWithModalProps) {
   const apps = openWith.apps;
 
   useEffect(() => {
-    listRef.current?.focus();
-  }, []);
-
-  useEffect(() => {
     if (apps.length === 0) {
       setSelectedIndex(0);
       return;

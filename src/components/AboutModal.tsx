@@ -30,7 +30,6 @@ export function AboutModal({ client }: { client: WsClient }) {
   const dirtyLabel = info.dirty === null ? "Unknown" : info.dirty ? "Dirty" : "Clean";
 
   useEffect(() => {
-    closeRef.current?.focus();
     return () => {
       if (copyResetRef.current !== null) window.clearTimeout(copyResetRef.current);
     };
@@ -46,6 +45,7 @@ export function AboutModal({ client }: { client: WsClient }) {
   return (
     <ModalLayer
       modalId="about"
+      initialFocusRef={closeRef}
       onClick={close}
       onKeyDown={(event) => {
         if (event.key === "Escape") {

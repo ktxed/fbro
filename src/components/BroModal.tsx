@@ -69,10 +69,6 @@ export function BroModal({ client, bro }: BroModalProps) {
   const fedupExcludeHistory = useInputHistory("fedup.excludePatterns", updateFedupExcludePatterns);
 
   useEffect(() => {
-    listRef.current?.focus();
-  }, []);
-
-  useEffect(() => {
     if (bros.length === 0) {
       setSelectedIndex(0);
       setActiveFormBroId(null);

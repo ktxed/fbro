@@ -19,8 +19,8 @@ export function GoToPathModal({ goToPath, client }: GoToPathModalProps) {
 
   const history = useInputHistory("gotoPath", setValue);
 
+  // ModalLayer focuses the input (initialFocusRef); preselect its text for overtyping.
   useEffect(() => {
-    (history.inputRef as React.RefObject<HTMLInputElement>).current?.focus();
     (history.inputRef as React.RefObject<HTMLInputElement>).current?.select();
   }, []);
 
@@ -58,7 +58,7 @@ export function GoToPathModal({ goToPath, client }: GoToPathModalProps) {
   };
 
   return (
-    <ModalLayer modalId="go-to-path" onClick={close} onKeyDown={(e) => {
+    <ModalLayer modalId="go-to-path" initialFocusRef={history.inputRef} onClick={close} onKeyDown={(e) => {
       if (e.defaultPrevented) return;
       if (e.key === "Escape") { e.preventDefault(); close(); }
     }}>

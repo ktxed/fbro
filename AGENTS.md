@@ -67,7 +67,8 @@ keyboard, or modal behaviour **updates the matching spec in the same commit**.
   No `window` key listeners; use `useModalStack().hasActiveModal`, never a new
   "is X open" boolean.
 - Initial focus via `initialFocusRef` / `data-modal-initial-focus`, not a
-  `useEffect` calling `.focus()`.
+  `useEffect` calling `.focus()`. Effects may only move focus in response to a
+  later state change (a new job state, data finishing loading).
 - Enter: check `e.defaultPrevented` first, guard default actions with
   `isNativeActivationTarget` (`modalKeyboard.ts`), never submit twice. While
   submitting, disable the primary button and label it "Verb…".
@@ -178,7 +179,6 @@ keyboard, or modal behaviour **updates the matching spec in the same commit**.
 Some existing code breaks the rules above. Don't copy these as precedent; fix
 them when you touch the code:
 
-- Many modals set initial focus in a `useEffect` instead of `initialFocusRef`.
 - `.modal__btn` lacks a WebView2-safe base; `GitModal` restyles its buttons;
   `mergeRefs` is duplicated in `ModalStack` and `ResizableModal`.
 - About 80 hard-coded hex colours remain in `src/styles.css`.

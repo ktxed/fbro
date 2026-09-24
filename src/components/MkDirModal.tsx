@@ -19,10 +19,6 @@ export function MkDirModal({ mkdir, client }: MkDirModalProps) {
   const history = useInputHistory("mkdir", setValue);
 
   useEffect(() => {
-    (history.inputRef as React.RefObject<HTMLInputElement>).current?.focus();
-  }, []);
-
-  useEffect(() => {
     if (mkdir.error) setSubmitting(false);
   }, [mkdir.error]);
 
@@ -48,7 +44,7 @@ export function MkDirModal({ mkdir, client }: MkDirModalProps) {
   };
 
   return (
-    <ModalLayer modalId="mkdir" onClick={close} onKeyDown={(e) => {
+    <ModalLayer modalId="mkdir" initialFocusRef={history.inputRef} onClick={close} onKeyDown={(e) => {
       if (e.defaultPrevented) return;
       if (e.key === "Escape") { e.preventDefault(); close(); }
     }}>

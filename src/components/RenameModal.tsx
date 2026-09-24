@@ -19,8 +19,8 @@ export function RenameModal({ rename, client }: RenameModalProps) {
   const [submitting, setSubmitting] = useState(false);
   const history = useInputHistory("rename", setValue);
 
+  // ModalLayer focuses the input (initialFocusRef); preselect its text for overtyping.
   useEffect(() => {
-    (history.inputRef as React.RefObject<HTMLInputElement>).current?.focus();
     (history.inputRef as React.RefObject<HTMLInputElement>).current?.select();
   }, []);
 
@@ -55,7 +55,7 @@ export function RenameModal({ rename, client }: RenameModalProps) {
   };
 
   return (
-    <ModalLayer modalId="rename" onClick={close} onKeyDown={(e) => {
+    <ModalLayer modalId="rename" initialFocusRef={history.inputRef} onClick={close} onKeyDown={(e) => {
       if (e.defaultPrevented) return;
       if (e.key === "Escape") { e.preventDefault(); close(); }
     }}>

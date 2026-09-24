@@ -39,10 +39,6 @@ export function PanelHistoryModal({ client, panelHistory }: PanelHistoryModalPro
 
   const [selectedIndex, setSelectedIndex] = useState(cursor);
 
-  useEffect(() => {
-    listRef.current?.focus();
-  }, []);
-
   // Scroll selected item into view
   useEffect(() => {
     const selected = listRef.current?.querySelector<HTMLElement>("[data-selected='true']");

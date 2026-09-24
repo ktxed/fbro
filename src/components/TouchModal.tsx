@@ -19,10 +19,6 @@ export function TouchModal({ touch, client }: TouchModalProps) {
   const history = useInputHistory("touch", setValue);
 
   useEffect(() => {
-    (history.inputRef as React.RefObject<HTMLInputElement>).current?.focus();
-  }, []);
-
-  useEffect(() => {
     if (touch.error) setSubmitting(false);
   }, [touch.error]);
 
@@ -48,7 +44,7 @@ export function TouchModal({ touch, client }: TouchModalProps) {
   };
 
   return (
-    <ModalLayer modalId="touch" onClick={close} onKeyDown={(e) => {
+    <ModalLayer modalId="touch" initialFocusRef={history.inputRef} onClick={close} onKeyDown={(e) => {
       if (e.defaultPrevented) return;
       if (e.key === "Escape") { e.preventDefault(); close(); }
     }}>

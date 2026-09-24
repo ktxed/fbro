@@ -57,10 +57,6 @@ export function AttributesModal({ attributes, client }: AttributesModalProps) {
   const [octInput, setOctInput] = useState(modeToOct(initialMode));
 
   useEffect(() => {
-    overlayRef.current?.focus();
-  }, []);
-
-  useEffect(() => {
     if (attributes.error) {
       setSubmitting(false);
       setError(attributes.error);
@@ -123,7 +119,7 @@ export function AttributesModal({ attributes, client }: AttributesModalProps) {
   const canSubmit = !submitting && parseOctMode(octInput) !== null;
 
   return (
-    <ModalLayer modalId="attributes" ref={overlayRef} onClick={close} onKeyDown={handleKeyDown}>
+    <ModalLayer modalId="attributes" ref={overlayRef} initialFocusRef={overlayRef} onClick={close} onKeyDown={handleKeyDown}>
       <ModalDialog ariaLabel="Set Permissions" className="modal--fixed" onClick={(e) => e.stopPropagation()}>
         <div className="modal__header">Set Permissions</div>
         <div className="modal__body">
