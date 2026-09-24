@@ -435,7 +435,7 @@ type SyncRoots = (
 fn sync_bro() -> ResolvedBro {
     ResolvedBro {
         option: BroOption {
-            id: "builtin.sync_bro".to_string(),
+            id: "builtin:sync-bro".to_string(),
             name: "Sync Bro".to_string(),
             version: "1".to_string(),
             source: BroSource::Native,
@@ -455,7 +455,7 @@ fn sync_bro() -> ResolvedBro {
 fn compare_files_bro() -> ResolvedBro {
     ResolvedBro {
         option: BroOption {
-            id: "builtin.compare_files".to_string(),
+            id: "builtin:compare-files".to_string(),
             name: "Compare files".to_string(),
             version: "1".to_string(),
             source: BroSource::Native,

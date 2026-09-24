@@ -43,12 +43,12 @@ pub fn list_bro_catalog() -> Vec<BroCatalogEntry> {
 
     catalog.extend([
         catalog_entry(
-            "builtin.compare_files",
+            "builtin:compare-files",
             "Compare files",
             "Compare two text files side by side.",
         ),
         catalog_entry(
-            "builtin.sync_bro",
+            "builtin:sync-bro",
             "Sync Bro",
             "Verify that local and remote folders contain byte-identical files using BLAKE3.",
         ),

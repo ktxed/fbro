@@ -147,6 +147,7 @@ keyboard, or modal behaviour **updates the matching spec in the same commit**.
 **Bros** — `spex/bro.md`
 - New provider: copy `bro/providers/tar.rs`, register in `builtin_providers()`,
   add pre-bro scoring and a catalog entry, add tests, update `bro.md`.
+  Bro ids are `native:<kebab-name>` or `builtin:<kebab-name>`.
 - Media players get a playlist file (`LaunchArg::TargetPlaylistFile`), never
   expanded paths (ARG_MAX).
 
@@ -178,7 +179,5 @@ keyboard, or modal behaviour **updates the matching spec in the same commit**.
 
 ## Known debt
 
-Some existing code breaks the rules above. Don't copy these as precedent; fix
-them when you touch the code:
-
-- Bro ids mix `builtin:` and `builtin.`.
+None tracked right now. If you knowingly leave code that breaks a rule above,
+list it here (file + rule) so it isn't copied as precedent.

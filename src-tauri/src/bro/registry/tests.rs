@@ -332,8 +332,8 @@ fn list_bros_includes_copy_paths_on_every_platform() {
 fn bro_catalog_includes_context_only_builtins_without_inputs() {
     let catalog = super::list_bro_catalog();
     for id in [
-        "builtin.compare_files",
-        "builtin.sync_bro",
+        "builtin:compare-files",
+        "builtin:sync-bro",
         "builtin:fedup",
         "builtin:kill-proc",
         "native:extract-zip",

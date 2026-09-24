@@ -70,7 +70,7 @@ Paths are base64-url-no-pad encoded. The digest algorithm is advertised as
 
 **Goal:** prove that a local directory tree and a remote directory tree hold
 byte-identical files — i.e. that a transfer landed correctly. It is the built-in
-bro `builtin.sync_bro`, offered when one panel is local and the other remote.
+bro `builtin:sync-bro`, offered when one panel is local and the other remote.
 
 Entry points: `launch_sync_bro` (`src-tauri/src/ws/intents/bro.rs`) →
 `run_sync_bro` (`src-tauri/src/jobs/integrity_compare.rs`).

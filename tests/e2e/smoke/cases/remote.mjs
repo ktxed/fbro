@@ -245,12 +245,12 @@ export async function runRemoteFlow(browserA, observerA, browserB, observerB) {
   const broRequestId = `sync-bro-${Date.now()}`;
   observerB.sendIntent("ListBros", "left", { requestId: broRequestId });
   const broOptions = await observerB.waitForBroOptions(broRequestId, 20_000);
-  if (!broOptions.bros?.some((bro) => bro.id === "builtin.sync_bro")) {
+  if (!broOptions.bros?.some((bro) => bro.id === "builtin:sync-bro")) {
     throw new Error("Sync Bro was not offered for local/remote panel pair");
   }
   observerB.sendIntent("LaunchBro", undefined, {
     requestId: broRequestId,
-    broId: "builtin.sync_bro",
+    broId: "builtin:sync-bro",
   });
   const syncJob = await observerB.waitForJob("sync-bro", "Completed", 45_000);
   const remoteManifestJob = await observerA.waitForJob("remote-manifest", "Completed", 45_000);
