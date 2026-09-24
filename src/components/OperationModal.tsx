@@ -4,11 +4,12 @@ import type { PendingOp, Job, ConflictPolicy, VerificationPolicy, FileOpFile, Sy
 import { useAppDispatch, useAppState } from "../store";
 import type { AppState, PendingDryRun } from "../store";
 import { isArchiveSourceId, isGlobalSelectionSourceId } from "../utils/sourceId";
-import { IconAlertTriangle, IconCopy } from "@tabler/icons-react";
+import { IconAlertTriangle } from "@tabler/icons-react";
 import { ResizableModal } from "./ResizableModal";
 import { ModalLayer } from "./ModalStack";
 import { isEditableTarget, isNativeActivationTarget } from "./modalKeyboard";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
+import { CopyButton } from "./CopyButton";
 
 interface OperationModalProps {
   pending: PendingOp | null;
@@ -131,8 +132,6 @@ function FedupBroResultsView({ jobId, result, client }: { jobId: string; result:
   const canNextGroups = result.groupOffset + result.groupLimit < result.groupTotal;
   const canPrevErrors = result.errorOffset > 0;
   const canNextErrors = result.errorOffset + result.errorLimit < result.errorTotal;
-  const copyToClipboard = useCopyToClipboard();
-  const copyPath = (path: string) => copyToClipboard(path, "path");
   return (
     <div className="modal__sync-results modal__sync-results--fedup">
       <div className="modal__sync-counts">
@@ -168,17 +167,13 @@ function FedupBroResultsView({ jobId, result, client }: { jobId: string; result:
                     <div className="modal__fedup-file-list">
                       <div className="modal__fedup-file-row">
                         <span className="modal__fedup-file-role">Keep</span>
-                        <button className="modal__job-param-copy" onClick={() => copyPath(group.keeper.path)} title="Copy path">
-                          <IconCopy size={14} />
-                        </button>
+                        <CopyButton text={group.keeper.path} what="path" title="Copy path" />
                         <span className="modal__fedup-file-path" title={group.keeper.path}>{group.keeper.path}</span>
                       </div>
                       {group.duplicates.map((file) => (
                         <div key={file.path} className="modal__fedup-file-row">
                           <span className="modal__fedup-file-role">Candidate</span>
-                          <button className="modal__job-param-copy" onClick={() => copyPath(file.path)} title="Copy path">
-                            <IconCopy size={14} />
-                          </button>
+                          <CopyButton text={file.path} what="path" title="Copy path" />
                           <span className="modal__fedup-file-path" title={file.path}>{file.path}</span>
                         </div>
                       ))}
@@ -634,11 +629,11 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
                   closeDryRun();
                 }}
               >{pendingDryRun.scriptName}</button>
-              <button
-                className="modal__job-param-copy"
-                onClick={() => copyToClipboard(pendingDryRun.scriptPath, "script path")}
+              <CopyButton
+                text={pendingDryRun.scriptPath}
+                what="script path"
                 title="Copy path"
-              ><IconCopy size={14} /></button>
+              />
               {pendingDryRun.manifestPath && pendingDryRun.manifestName && (
                 <>
                   <span className="modal__job-param-label">Manifest:</span>
@@ -656,11 +651,11 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
                       closeDryRun();
                     }}
                   >{pendingDryRun.manifestName}</button>
-                  <button
-                    className="modal__job-param-copy"
-                    onClick={() => copyToClipboard(pendingDryRun.manifestPath!, "manifest path")}
+                  <CopyButton
+                    text={pendingDryRun.manifestPath!}
+                    what="manifest path"
                     title="Copy path"
-                  ><IconCopy size={14} /></button>
+                  />
                 </>
               )}
             </div>
@@ -1141,22 +1136,22 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
                 <>
                   <span className="modal__job-param-label">Inputs:</span>
                   <span className="modal__job-param-value" title={activeJob.sourcePath}>{activeJob.sourcePath}</span>
-                  <button className="modal__job-param-copy" onClick={() => copyToClipboard(activeJob.sourcePath, "source path")} title="Copy path"><IconCopy size={14} /></button>
+                  <CopyButton text={activeJob.sourcePath} what="source path" title="Copy path" />
                   {activeJob.resultPath && (<>
                     <span className="modal__job-param-label">Result:</span>
                     <span className="modal__job-param-value" title={activeJob.resultPath}>{activeJob.resultPath}</span>
-                    <button className="modal__job-param-copy" onClick={() => copyToClipboard(activeJob.resultPath!, "result path")} title="Copy path"><IconCopy size={14} /></button>
+                    <CopyButton text={activeJob.resultPath!} what="result path" title="Copy path" />
                   </>)}
                 </>
               ) : (
                 <>
                   <span className="modal__job-param-label">From:</span>
                   <span className="modal__job-param-value" title={activeJob.sourcePath}>{activeJob.sourcePath}</span>
-                  <button className="modal__job-param-copy" onClick={() => copyToClipboard(activeJob.sourcePath, "source path")} title="Copy path"><IconCopy size={14} /></button>
+                  <CopyButton text={activeJob.sourcePath} what="source path" title="Copy path" />
                   {activeJob.destPath && (<>
                     <span className="modal__job-param-label">To:</span>
                     <span className="modal__job-param-value" title={activeJob.destPath}>{activeJob.destPath}</span>
-                    <button className="modal__job-param-copy" onClick={() => copyToClipboard(activeJob.destPath!, "destination path")} title="Copy path"><IconCopy size={14} /></button>
+                    <CopyButton text={activeJob.destPath!} what="destination path" title="Copy path" />
                   </>)}
                 </>
               )}
@@ -1315,11 +1310,11 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
                       {p.currentFile ?? "…"}
                     </span>
                     {p.currentFile && (
-                      <button
-                        className="modal__job-param-copy"
-                        onClick={() => copyToClipboard(p.currentFile!, "path")}
+                      <CopyButton
+                        text={p.currentFile!}
+                        what="path"
                         title="Copy path"
-                      ><IconCopy size={14} /></button>
+                      />
                     )}
                   </div>
                 )}
@@ -1387,11 +1382,11 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
                       title={effectiveResultPath}
                       onClick={showResult}
                     >{splitParentAndName(effectiveResultPath).name}</button>
-                    <button
-                      className="modal__job-param-copy"
-                      onClick={() => copyToClipboard(effectiveResultPath, "result path")}
+                    <CopyButton
+                      text={effectiveResultPath}
+                      what="result path"
                       title="Copy path"
-                    ><IconCopy size={14} /></button>
+                    />
                   </div>
                 )}
               </>

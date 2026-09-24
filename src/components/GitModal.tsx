@@ -8,6 +8,7 @@ import { ModalLayer } from "./ModalStack";
 import { isLikelyBinaryPath } from "../utils/binaryPath";
 import type { GitActivity } from "./gitActivity";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
+import { CopyButton } from "./CopyButton";
 
 type GitTab = "changes" | "log";
 
@@ -296,10 +297,6 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
 
   const copyLogHash = useCallback((hash: string) => {
     copyToClipboard(hash, "commit hash");
-  }, [copyToClipboard]);
-
-  const copyLogRef = useCallback((name: string) => {
-    copyToClipboard(name, name);
   }, [copyToClipboard]);
 
   const handleClose = useCallback(() => {
@@ -888,16 +885,14 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
                       }}
                     >
                       <span className="git-modal__log-hash-cell">
-                        <button
-                          type="button"
+                        <CopyButton
                           className="git-modal__log-copy"
+                          text={commit.hash}
+                          what="commit hash"
                           title="Copy full hash (Y)"
                           aria-keyshortcuts="y"
                           onFocus={() => setLogFocus({ kind: "commit", index })}
-                          onClick={() => copyLogHash(commit.hash)}
-                        >
-                          <IconCopy size={14} aria-hidden />
-                        </button>
+                        />
                         <code className="git-modal__log-hash" title={commit.hash}>{commit.shortHash}</code>
                       </span>
                       <span className={`git-modal__log-subject-cell${commit.refs && commit.refs.length > 0 ? " git-modal__log-subject-cell--has-refs" : ""}`}>
@@ -905,11 +900,8 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
                         {commit.refs && commit.refs.length > 0 && (
                           <LogRefsStrip
                             refs={commit.refs}
-                            onCopy={(name) => {
-                              copyLogRef(name);
-                              // Hand focus back to the row so arrow keys keep navigating the log.
-                              focusLogItem({ kind: "commit", index });
-                            }}
+                            // Hand focus back to the row so arrow keys keep navigating the log.
+                            onCopied={() => focusLogItem({ kind: "commit", index })}
                           />
                         )}
                       </span>
@@ -1130,7 +1122,7 @@ function formatLogDate(iso: string): string {
 }
 
 /** Horizontally pannable ref chips. overflow:hidden — no native scrollbar. */
-function LogRefsStrip({ refs, onCopy }: { refs: GitLogRef[]; onCopy: (name: string) => void }) {
+function LogRefsStrip({ refs, onCopied }: { refs: GitLogRef[]; onCopied: () => void }) {
   const wrapRef = useRef<HTMLSpanElement>(null);
   const scrollerRef = useRef<HTMLSpanElement>(null);
   // Prefer trailing chips (right-aligned look). Stay pinned to the end until the user pans.
@@ -1220,16 +1212,16 @@ function LogRefsStrip({ refs, onCopy }: { refs: GitLogRef[]; onCopy: (name: stri
             className={`git-modal__log-ref git-modal__log-ref--${ref.kind}`}
           >
             <span className="git-modal__log-ref-name">{ref.name}</span>
-            <button
-              type="button"
+            <CopyButton
               className="git-modal__log-ref-copy"
               data-testid="git-log-copy-ref"
+              text={ref.name}
+              what={ref.name}
+              iconSize={12}
               aria-label={`Copy ${ref.kind} ${ref.name}`}
               title={`Copy ${ref.name}`}
-              onClick={() => onCopy(ref.name)}
-            >
-              <IconCopy size={12} aria-hidden />
-            </button>
+              onCopied={onCopied}
+            />
           </span>
         ))}
       </span>

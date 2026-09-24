@@ -2,10 +2,11 @@ import { useRef, useState, type ReactNode } from "react";
 import { useAppDispatch, useAppState } from "../store";
 import type { PendingInfo } from "../store";
 import type { WsClient } from "../ws/client";
-import { IconArrowUpRight, IconChevronRight, IconCopy } from "@tabler/icons-react";
+import { IconArrowUpRight, IconChevronRight } from "@tabler/icons-react";
 import { ResizableModal } from "./ResizableModal";
 import { ModalLayer } from "./ModalStack";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
+import { CopyButton } from "./CopyButton";
 
 interface InfoModalProps {
   info: PendingInfo;
@@ -63,17 +64,6 @@ function TypeIcon({ kind, iconName }: { kind: string; iconName?: string }) {
   );
   if (!icon) return null;
   return <span className="modal__info-type-icon" aria-hidden>{icon}</span>;
-}
-
-function CopyButton({ text, what }: { text: string; what: string }) {
-  const copyToClipboard = useCopyToClipboard();
-  return (
-    <button
-      className="modal__job-param-copy"
-      onClick={() => copyToClipboard(text, what)}
-      title="Copy to clipboard"
-    ><IconCopy size={14} /></button>
-  );
 }
 
 export function InfoModal({ info, client }: InfoModalProps) {

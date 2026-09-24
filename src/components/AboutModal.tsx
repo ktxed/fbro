@@ -1,8 +1,8 @@
-import { IconCopy } from "@tabler/icons-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useAppDispatch } from "../store";
 import type { WsClient } from "../ws/client";
+import { CopyButton } from "./CopyButton";
 import { ResizableModal } from "./ResizableModal";
 import { ModalLayer } from "./ModalStack";
 
@@ -37,16 +37,10 @@ export function AboutModal({ client }: { client: WsClient }) {
   }, []);
 
   const close = () => dispatch({ type: "CLOSE_ABOUT" });
-  const copyDiagnostics = () => {
-    void navigator.clipboard.writeText(diagnostics).then(() => {
-      dispatch({ type: "SHOW_TRANSIENT_HINT", message: "Copied build info" });
-      setCopied(true);
-      if (copyResetRef.current !== null) window.clearTimeout(copyResetRef.current);
-      copyResetRef.current = window.setTimeout(() => setCopied(false), 1500);
-    }).catch(() => {
-      dispatch({ type: "SHOW_TRANSIENT_HINT", message: "Couldn't copy build info to the clipboard" });
-      setCopied(false);
-    });
+  const onDiagnosticsCopied = (ok: boolean) => {
+    setCopied(ok);
+    if (copyResetRef.current !== null) window.clearTimeout(copyResetRef.current);
+    if (ok) copyResetRef.current = window.setTimeout(() => setCopied(false), 1500);
   };
 
   return (
@@ -119,10 +113,15 @@ export function AboutModal({ client }: { client: WsClient }) {
           </table>
         </div>
         <div className="modal__actions">
-          <button className="modal__btn about-modal__copy" type="button" onClick={copyDiagnostics}>
-            <IconCopy size={14} aria-hidden />
+          <CopyButton
+            className="modal__btn about-modal__copy"
+            text={diagnostics}
+            what="build info"
+            title="Copy build info"
+            onCopied={onDiagnosticsCopied}
+          >
             {copied ? "Copied" : "Copy build info"}
-          </button>
+          </CopyButton>
           <button ref={closeRef} className="modal__btn modal__btn--primary" type="button" onClick={close}>
             Close
           </button>

@@ -1,10 +1,9 @@
 import { useEffect, useState } from "react";
-import { IconCopy } from "@tabler/icons-react";
 import { useAppState } from "../store";
 import type { WsClient } from "../ws/client";
 import type { SharedRoot } from "../ws/types";
 import { useInputHistory } from "../hooks/useInputHistory";
-import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
+import { CopyButton } from "./CopyButton";
 import { InputHistoryDropdown } from "./InputHistoryDropdown";
 import { PairingConfirmation } from "./PairingConfirmation";
 
@@ -29,18 +28,10 @@ function formatLastEndpointAge(seconds?: number) {
 }
 
 function CopyMeta({ value, kind }: { value: string; kind: "endpoint" | "fingerprint" }) {
-  const copyToClipboard = useCopyToClipboard();
   return (
     <span className="sharing-copy-meta">
       <code className="sharing-copy-meta__value" title={value}>{value}</code>
-      <button
-        className="sharing-copy-meta__button"
-        type="button"
-        onClick={() => copyToClipboard(value, kind)}
-        title={`Copy ${kind}`}
-      >
-        <IconCopy size={12} />
-      </button>
+      <CopyButton className="sharing-copy-meta__button" text={value} what={kind} iconSize={12} />
     </span>
   );
 }
