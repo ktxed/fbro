@@ -433,7 +433,7 @@ async function verifyLocationSortReset(browser, observer) {
 
 async function verifyBroHelp(browser) {
   await openPanelContextMenu(browser, "left");
-  await clickContextMenuItem(browser, "Pass to Bro...");
+  await clickContextMenuItem(browser, "Pass to Bro…");
   const broDialog = await browser.$('[data-testid="bro-dialog"]');
   await broDialog.waitForDisplayed({ timeout: 10_000 });
 
@@ -619,10 +619,10 @@ async function verifyContextualSelectionOperations(browser, observer, [first, se
   });
   await openPanelContextMenu(browser, "left");
   const pairLabels = await menuLabels();
-  for (const expected of ["Compare", "Pass to Bro...", "Copy", "Move", "Delete", "Copy names", "Copy full paths"]) {
+  for (const expected of ["Compare", "Pass to Bro…", "Copy", "Move", "Delete", "Copy names", "Copy full paths"]) {
     if (!pairLabels.includes(expected)) throw new Error(`two-item context menu lacks ${expected}: ${JSON.stringify(pairLabels)}`);
   }
-  for (const excluded of ["Rename", "Open With..."]) {
+  for (const excluded of ["Rename", "Open With…"]) {
     if (pairLabels.includes(excluded)) throw new Error(`two-item context menu unexpectedly includes ${excluded}`);
   }
   const copyItem = await browser.$('[data-contextual-operation="file.copy"]');

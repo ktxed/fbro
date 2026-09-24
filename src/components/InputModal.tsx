@@ -78,7 +78,7 @@ export function InputModal({ input, client }: InputModalProps) {
             disabled={submitting || !value.trim()}
             onClick={submit}
           >
-            {submitting ? "Submitting..." : "OK"}
+            {submitting ? "Submitting…" : "OK"}
           </button>
           <button className="modal__btn" onClick={close}>
             Cancel

@@ -26,7 +26,7 @@ export function SettingsBrosTab({ client }: { client: WsClient }) {
           Bros process files, folders, or other entries selected in fbro.
         </p>
         {catalog.status === "loading" && (
-          <p className="settings-bros__status" role="status">Looking up bros...</p>
+          <p className="settings-bros__status" role="status">Looking up bros…</p>
         )}
         {catalog.status === "error" && (
           <div className="settings-bros__status" role="alert">

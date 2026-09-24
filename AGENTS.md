@@ -181,5 +181,4 @@ keyboard, or modal behaviour **updates the matching spec in the same commit**.
 Some existing code breaks the rules above. Don't copy these as precedent; fix
 them when you touch the code:
 
-- Some copy text uses "..." instead of "…".
 - Bro ids mix `builtin:` and `builtin.`.

@@ -504,7 +504,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
   const destNameInputRef = useRef<HTMLInputElement>(null);
   const selectedDestNameConflictRef = useRef<string | null>(null);
   // The modal stays mounted between operations, so a repeated identical copy
-  // must not inherit the previous operation's "Starting..." state.
+  // must not inherit the previous operation's "Starting…" state.
   const submittedPendingRef = useRef<PendingOp | null>(null);
   const p = activeJob?.progress;
   const isTransferTerminal = activeJob?.state === "Completed" || activeJob?.state === "Cancelled" || activeJob?.state === "Failed";

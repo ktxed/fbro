@@ -82,10 +82,10 @@ export function buildContextMenuItems(
   const isShadow = !!options.isShadow;
   const isMultiple = (options.targetCount ?? 1) > 1;
   const openWithItem: ContextMenuItem | null = options.canOpenWith && (kind === "file" || kind === "directory")
-    ? { id: "platform.open-with", kind: "openWith", label: "Open With..." }
+    ? { id: "platform.open-with", kind: "openWith", label: "Open With…" }
     : null;
   const broItem: ContextMenuItem | null = options.canPassToBro && (kind === "file" || kind === "directory")
-    ? { id: "panel.pass-to-bro", kind: "bro", label: "Pass to Bro..." }
+    ? { id: "panel.pass-to-bro", kind: "bro", label: "Pass to Bro…" }
     : null;
   const compareItem: ContextMenuItem | null = options.canCompare && kind === "file"
     ? commandItem("file.compare", "Compare", commands)

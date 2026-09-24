@@ -111,7 +111,7 @@ export function OpenWithModal({ client, openWith }: OpenWithModalProps) {
         defaultSize={{ width: 560, height: 420 }}
         minSize={{ width: 420, height: 300 }}
       >
-        <div className="modal__header">Open With...</div>
+        <div className="modal__header">Open With…</div>
         <div className="modal__body open-with__body">
           <div className="open-with__target">{openWith.name}</div>
           <div
@@ -123,7 +123,7 @@ export function OpenWithModal({ client, openWith }: OpenWithModalProps) {
             tabIndex={0}
           >
             {openWith.status === "loading" && (
-              <div className="command-palette__empty">Looking up applications...</div>
+              <div className="command-palette__empty">Looking up applications…</div>
             )}
             {openWith.status === "error" && (
               <div className="command-palette__empty">{openWith.error ?? "Failed to load applications."}</div>

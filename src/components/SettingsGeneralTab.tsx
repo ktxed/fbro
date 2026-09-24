@@ -117,10 +117,10 @@ export function SettingsGeneralTab({ general, client }: SettingsGeneralTabProps)
   const commandAction = shellCommand?.installed && shellCommand.managed ? "remove" : "install";
   const commandButtonLabel = commandBusy
     ? commandAction === "remove"
-      ? "Removing..."
-      : "Installing..."
+      ? "Removing…"
+      : "Installing…"
     : commandProbing
-      ? "Checking..."
+      ? "Checking…"
       : commandAction === "remove"
         ? "Remove fbro command"
         : shellCommand?.installed
@@ -148,7 +148,7 @@ export function SettingsGeneralTab({ general, client }: SettingsGeneralTabProps)
           <span>Use <code>fbro .</code> or <code>fbro ~/my_folder</code> from a terminal</span>
         </div>
         <div className="settings-tab__hint">
-          {commandProbing ? "Checking fbro command..." : commandHint}
+          {commandProbing ? "Checking fbro command…" : commandHint}
         </div>
         {commandStatus && (
           <div className="settings-tab__hint">

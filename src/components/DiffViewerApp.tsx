@@ -530,7 +530,7 @@ export function DiffViewerApp({ requestId, windowLabel, initialColorScheme }: Di
         </div>
       </header>
 
-      {loading && <main className="diff-viewer__status">Loading diff...</main>}
+      {loading && <main className="diff-viewer__status">Loading diff…</main>}
       {error && <main className="diff-viewer__status diff-viewer__status--error">{error}</main>}
       {result && (
         <>

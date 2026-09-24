@@ -749,7 +749,7 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
                           checked={timeOp === "relative"}
                           onChange={() => setTimeOp("relative")}
                         />
-                        <span>In the last...</span>
+                        <span>In the last…</span>
                         <input
                           type="number"
                           className="search-modal__extra-number search-modal__relative-num"

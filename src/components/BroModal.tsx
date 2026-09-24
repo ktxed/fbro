@@ -17,7 +17,7 @@ interface BroModalProps {
 }
 
 function formatTarget(inputs: PendingBro["inputs"]) {
-  if (inputs.length === 0) return "Resolving inputs...";
+  if (inputs.length === 0) return "Resolving inputs…";
   if (inputs.length === 1) return inputs[0].name;
   return `${inputs.length} items (${inputs[0].name} first)`;
 }
@@ -300,7 +300,7 @@ export function BroModal({ client, bro }: BroModalProps) {
         minSize={{ width: 420, height: 320 }}
       >
         <div className="modal__header bro-modal__header">
-          <span>Pass To Bro...</span>
+          <span>Pass To Bro…</span>
           <button
             className="bro-modal__help"
             type="button"
@@ -323,7 +323,7 @@ export function BroModal({ client, bro }: BroModalProps) {
             tabIndex={0}
           >
             {bro.status === "loading" && (
-              <div className="command-palette__empty">Looking up bros...</div>
+              <div className="command-palette__empty">Looking up bros…</div>
             )}
             {bro.status === "error" && (
               <div className="command-palette__empty">{bro.error ?? "Failed to load bros."}</div>
