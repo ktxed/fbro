@@ -25,7 +25,13 @@ This protocol defines communication between a **Backend (BE)** and one or more *
 * Single persistent WebSocket connection
 * Messages are UTF-8 JSON objects
 * One message = one JSON object
-* No binary frames in v0
+* One exception: embedded-terminal I/O uses binary frames, because PTY traffic
+  is high-frequency opaque bytes. Every binary frame is
+  `[tag:u8][session_id:u32-le][payload…]`:
+  * `0x01` BE → FE: terminal output (`ServerMessage::TerminalOutput`, never
+    serialized as JSON; see `ws/server.rs`)
+  * `0x02` FE → BE: terminal input (`WsClient.sendTerminalInput`)
+  * Frames with an unknown tag or shorter than 5 bytes are ignored.
 
 ```text
 Client (FE)  ←→  WebSocket  ←→  Server (BE)

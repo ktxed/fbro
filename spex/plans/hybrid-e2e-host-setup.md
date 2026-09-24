@@ -88,7 +88,7 @@ After the host blockers are fixed, run:
 ```bash
 npm run build
 cargo check --manifest-path src-tauri/Cargo.toml
-node --check tests/e2e/smoke.mjs
+node --check tests/e2e/smoke/index.mjs
 npm run e2e:smoke:local
 ```
 

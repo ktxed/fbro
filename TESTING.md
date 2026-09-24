@@ -197,6 +197,47 @@ The smoke test exercises these flows:
   mount `fbro-a`'s shared `/work/a` source on `fbro-b`, verify the remote source
   is read-only, copy `remote.txt` from remote `fbro-a` into local `/work/b/dst`,
   and verify the copied payload.
+- Local UI flows (`cases/local.mjs`, beyond the file operations above):
+  - Colour scheme switch applies `data-color-scheme` on `.app`.
+  - About modal from the command palette: sole top layer, one `role=dialog`
+    with `aria-modal`, build-info formats, Escape restores panel focus.
+  - Bro help: Help in Pass to Bro opens Settings › Bros; closing returns focus
+    to the Bro dialog's help button with its form values intact.
+  - Copy/Rename dialogs: defaults, Tab reachability, destination-exists
+    warning, keyboard Cancel.
+  - Contextual selection operations: inline toolbar and context-menu items for
+    1/2/3 selected entries, cursor-row targeting, folder anchors.
+  - Sort selector (Enter applies, Escape cancels, focus returns to the filter),
+    quick-filter Escape restores the full listing, per-location sort on/off,
+    Settings tab arrows and reset confirmation.
+  - Live date-sort cursor anchoring, inline image preview navigation, window
+    focus restoration, grid-mode Left navigation.
+- Git (`cases/git.mjs`, temporary repository):
+  - Inline Git row toolbar: action order, arrow-key focus without moving the
+    panel cursor, stage/unstage keep focus, rollback needs confirmation.
+  - Git modal: Log tab expansion; Changes tab j/k/arrow navigation, Space and
+    Ctrl+A selection, `s` stage toggle, Shift-click ranges, batch actions with
+    two-step rollback.
+  - Modal guards: global shortcuts are blocked while the Git modal is the top
+    layer; an in-flight action disables its button and ignores repeat keys.
+  - Journal entries for Git intents; Git metadata refreshes only on user action
+    or navigation.
+- Global selections (`cases/global-selection.mjs`): create from the context
+  menu, persistence across reload, add entries via context menu and long
+  right-click, deleting inside a selection leaves the real files intact.
+- Fedup (`cases/fedup.mjs`): launch from Pass to Bro on a global selection;
+  default ignores, case-insensitive include patterns, custom excludes.
+- Quick Edit (`cases/quick-edit.mjs`): edit in the embedded terminal, save,
+  terminal closes; journal records intent/completed/failed.
+- Viewer (`cases/viewer.mjs`): large-image loading overlay, j/k navigation
+  under rapid keypresses, broken-image alert, prefetch eligibility per storage
+  class, PDF rendering and window title, Mermaid rendering, zoom and overlay
+  Escape. Timings go to `viewer-timings.json`.
+- Search modal keyboard (`cases/search.mjs`): roving tab focus, Enter on
+  Close, global shortcuts blocked while Search is the top layer.
+
+Known gap: no case asserts the `inert` attribute on a covered modal layer
+directly; background blocking is only shown via ignored global shortcuts.
 
 ## Artifacts
 

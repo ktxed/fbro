@@ -46,8 +46,20 @@ Architecture and protocol live under [`spex/`](spex/):
 | [proto.md](spex/proto.md) | FE ↔ BE protocol |
 | [vfs.md](spex/vfs.md) | Virtual file system |
 | [sources.md](spex/sources.md) | Source hierarchy, lifecycles, and tab mapping |
+| [platform.md](spex/platform.md) | Platform abstraction layer |
+| [keyboard.md](spex/keyboard.md) | Keyboard input ownership and priority |
+| [modal-stack.md](spex/modal-stack.md) | Modal layering, focus, and restoration |
+| [modal-keyboard-audit.md](spex/modal-keyboard-audit.md) | Modal keyboard audit findings |
+| [settings.md](spex/settings.md) | Persistent settings |
+| [tabs.md](spex/tabs.md) | Tabbed panels |
+| [search.md](spex/search.md) | Search jobs and result sources |
 | [bro.md](spex/bro.md) | Bro processors |
 | [remote-fbro.md](spex/remote-fbro.md) | Peer remote |
+| [thumbnails.md](spex/thumbnails.md) | Grid-view thumbnails |
+| [virtual-panel.md](spex/virtual-panel.md) | Rendering huge directories |
+| [inline-operations.md](spex/inline-operations.md) | Inline choices toolbar |
+
+Contributor and agent conventions: [AGENTS.md](AGENTS.md).
 
 ## License
 
