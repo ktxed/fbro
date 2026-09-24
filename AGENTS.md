@@ -91,8 +91,11 @@ keyboard, or modal behaviour **updates the matching spec in the same commit**.
   (modals, viewers) with `isLetterKey` / `shortcutLetter` from `modalKeyboard.ts`.
   Both fall back to physical `event.code`, so macOS Option and non-Latin
   layouts work. Never compare `e.key` to a letter by hand.
-- Show shortcuts with `formatPrimaryBinding`, never a hard-coded label.
+- Show registry shortcuts with `formatPrimaryBinding`, never a hard-coded label.
   Platform modifier: `modKey()` from `src/utils/platform.ts`.
+- Local shortcut hints: `<MnemonicLabel text mnemonic />` underlines the key
+  when it is a letter of the label; otherwise append a `<kbd>` key cap. Either
+  way, set `aria-keyshortcuts` on the control when you can.
 
 **Styling and components**
 - Colours via `var(--…)` tokens in `src/styles.css`; check both `fbro-dark` and
@@ -175,8 +178,6 @@ keyboard, or modal behaviour **updates the matching spec in the same commit**.
 Some existing code breaks the rules above. Don't copy these as precedent; fix
 them when you touch the code:
 
-- Shortcut hints come in three styles: `MnemonicLabel` pasted into
-  `OperationModal` and `SearchModal`, a `modal__hotkey` span, and `<kbd>`.
 - Many modals set initial focus in a `useEffect` instead of `initialFocusRef`.
 - `.modal__btn` lacks a WebView2-safe base; `GitModal` restyles its buttons;
   `mergeRefs` is duplicated in `ModalStack` and `ResizableModal`.

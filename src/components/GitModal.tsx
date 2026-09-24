@@ -657,6 +657,7 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
             <>
               <select
                 ref={branchRef}
+                aria-keyshortcuts="b"
                 value={git.branch}
                 disabled={actionInFlight}
                 onChange={e => runAction("GitSwitchBranch", "Switching branch…", { branch: e.target.value })}
@@ -667,20 +668,20 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
             </>
           )}
           <span className="git-modal__toolbar-spacer" />
-          <button disabled={actionInFlight || !canPull} title={!canPull ? pullDisabledMessage : undefined} onClick={() => runAction("GitPull", "Pulling changes…")}>
+          <button disabled={actionInFlight || !canPull} title={!canPull ? pullDisabledMessage : undefined} aria-keyshortcuts="l" onClick={() => runAction("GitPull", "Pulling changes…")}>
             Pull <kbd>L</kbd>
             {git.behindCount !== undefined && git.behindCount > 0 && (
               <em className="git-modal__badge git-modal__badge--incoming"><IconArrowDown size={13} /> {git.behindCount}</em>
             )}
           </button>
-          <button disabled={actionInFlight || !canPush} title={!canPush ? pushDisabledMessage : undefined} onClick={() => runAction("GitPush", "Pushing changes…")}>
+          <button disabled={actionInFlight || !canPush} title={!canPush ? pushDisabledMessage : undefined} aria-keyshortcuts="p" onClick={() => runAction("GitPush", "Pushing changes…")}>
             Push <kbd>P</kbd>
             {git.aheadCount !== undefined && git.aheadCount > 0 && (
               <em className="git-modal__badge git-modal__badge--outgoing"><IconArrowUp size={13} /> {git.aheadCount}</em>
             )}
           </button>
-          <button data-testid="git-fetch" disabled={actionInFlight} onClick={() => runAction("GitFetch", "Fetching remote…")} title="Update remote branch information">Fetch <kbd>F</kbd></button>
-          <button data-testid="git-refresh" disabled={actionInFlight} onClick={() => runAction("GitRefresh", "Fetching and refreshing…")} title="Fetch remotes and refresh status">Refresh <kbd>R</kbd></button>
+          <button data-testid="git-fetch" disabled={actionInFlight} aria-keyshortcuts="f" onClick={() => runAction("GitFetch", "Fetching remote…")} title="Update remote branch information">Fetch <kbd>F</kbd></button>
+          <button data-testid="git-refresh" disabled={actionInFlight} aria-keyshortcuts="r" onClick={() => runAction("GitRefresh", "Fetching and refreshing…")} title="Fetch remotes and refresh status">Refresh <kbd>R</kbd></button>
         </div>
 
         <div className="git-modal__tabs" role="tablist" aria-label="Git views">
@@ -690,6 +691,7 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
               role="tab"
               aria-selected={activeTab === "changes"}
               data-testid="git-tab-changes"
+              aria-keyshortcuts="1"
               className={`git-modal__tab${activeTab === "changes" ? " git-modal__tab--active" : ""}`}
               onClick={() => setTab("changes")}
             >
@@ -701,6 +703,7 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
             role="tab"
             aria-selected={activeTab === "log"}
             data-testid="git-tab-log"
+            aria-keyshortcuts={hasChanges ? "2" : undefined}
             className={`git-modal__tab${activeTab === "log" ? " git-modal__tab--active" : ""}`}
             onClick={() => setTab("log")}
           >
@@ -1026,6 +1029,7 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
                     disabled={gitLog.status === "loading"}
                     onClick={() => requestLog({ skip: logCommits.length, append: true })}
                     title="Load more (Space)"
+                    aria-keyshortcuts="Space"
                   >
                     {gitLog.status === "loading" ? "Loading…" : <>Load more <kbd>SPACE</kbd></>}
                   </button>
@@ -1054,6 +1058,7 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
             <button
               disabled={actionInFlight || !canSetUpstream}
               title={!git.clean ? "Requires no staged changes" : git.detached ? "A detached HEAD cannot have a branch upstream" : "Push this branch to origin and configure its upstream"}
+              aria-keyshortcuts="u"
               onClick={() => runAction("GitSetUpstream", "Setting upstream…", { branch: git.branch })}
             >
               Set upstream <kbd>U</kbd>
@@ -1085,6 +1090,7 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
             <button
               ref={commitRef}
               disabled={actionInFlight || !canCommit}
+              aria-keyshortcuts="c"
               onClick={() => runAction("GitCommit", "Committing staged changes…", { message })}
             >
               Commit staged <kbd>C</kbd>

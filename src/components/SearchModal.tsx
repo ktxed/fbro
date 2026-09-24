@@ -12,18 +12,7 @@ import { stepNumberInputOnWheel } from "../utils/numberInputWheel";
 import { ModalLayer } from "./ModalStack";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { isLetterKey, isNativeActivationTarget, rovingIndexForKey } from "./modalKeyboard";
-
-function MnemonicLabel({ text, mnemonic }: { text: string; mnemonic: string }) {
-  const idx = text.toLowerCase().indexOf(mnemonic.toLowerCase());
-  if (idx < 0) return <>{text}</>;
-  return (
-    <>
-      {text.slice(0, idx)}
-      <span className="modal__mnemonic">{text[idx]}</span>
-      {text.slice(idx + 1)}
-    </>
-  );
-}
+import { MnemonicLabel } from "./MnemonicLabel";
 
 type DepthOption = "unlimited" | "current" | number;
 type MaskMode = "substring" | "wildcard" | "regex";

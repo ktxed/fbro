@@ -8,6 +8,7 @@ import { ModalLayer } from "./ModalStack";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { CopyButton } from "./CopyButton";
 import { isLetterKey } from "./modalKeyboard";
+import { MnemonicLabel } from "./MnemonicLabel";
 
 interface InfoModalProps {
   info: PendingInfo;
@@ -116,7 +117,7 @@ export function InfoModal({ info, client }: InfoModalProps) {
             </tbody>
             <tbody className="modal__info-group">
               <tr>
-                <td className="modal__info-label">Full <span className="modal__hotkey">p</span>ath</td>
+                <td className="modal__info-label"><MnemonicLabel text="Full path" mnemonic="p" /></td>
                 <td className="modal__info-value" title={info.fullPath}>{info.fullPath}</td>
                 <td><CopyButton text={info.fullPath} what="full path" /></td>
               </tr>
