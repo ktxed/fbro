@@ -1,7 +1,8 @@
 import { forwardRef, useEffect, useRef, useState } from "react";
-import type { KeyboardEventHandler, MouseEventHandler, PointerEventHandler, ReactNode, Ref } from "react";
+import type { KeyboardEventHandler, MouseEventHandler, PointerEventHandler, ReactNode } from "react";
 import { useAppState } from "../store";
 import type { WsClient } from "../ws/client";
+import { mergeRefs } from "../utils/mergeRefs";
 import { ModalDialog } from "./ModalDialog";
 
 type ModalSize = {
@@ -38,19 +39,6 @@ function clampSize(size: ModalSize, minSize: ModalSize, margin: number): ModalSi
   return {
     width: Math.min(Math.max(Math.round(size.width), minSize.width), maxWidth),
     height: Math.min(Math.max(Math.round(size.height), minSize.height), maxHeight),
-  };
-}
-
-function mergeRefs<T>(...refs: Array<Ref<T> | undefined>) {
-  return (value: T) => {
-    for (const ref of refs) {
-      if (!ref) continue;
-      if (typeof ref === "function") {
-        ref(value);
-      } else {
-        ref.current = value;
-      }
-    }
   };
 }
 

@@ -2691,7 +2691,10 @@ body {
   flex-shrink: 0;
 }
 
+/* appearance:none + explicit colors: Win10 WebView2 otherwise paints native ButtonFace. */
 .modal__btn {
+  appearance: none;
+  -webkit-appearance: none;
   background: var(--bg-footer);
   color: var(--text-dim);
   border: 1px solid var(--border);

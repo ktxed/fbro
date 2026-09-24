@@ -179,8 +179,6 @@ keyboard, or modal behaviour **updates the matching spec in the same commit**.
 Some existing code breaks the rules above. Don't copy these as precedent; fix
 them when you touch the code:
 
-- `.modal__btn` lacks a WebView2-safe base; `GitModal` restyles its buttons;
-  `mergeRefs` is duplicated in `ModalStack` and `ResizableModal`.
 - About 80 hard-coded hex colours remain in `src/styles.css`.
 - Some copy text uses "..." instead of "…".
 - Bro ids mix `builtin:` and `builtin.`.

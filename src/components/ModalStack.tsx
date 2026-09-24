@@ -10,10 +10,10 @@ import {
   useState,
   type HTMLAttributes,
   type ReactNode,
-  type Ref,
   type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
+import { mergeRefs } from "../utils/mergeRefs";
 
 interface ModalEntry {
   token: string;
@@ -181,16 +181,6 @@ export function useModalStack() {
 interface ModalLayerProps extends HTMLAttributes<HTMLDivElement> {
   modalId: string;
   initialFocusRef?: RefObject<HTMLElement | null>;
-}
-
-function mergeRefs<T>(...refs: Array<Ref<T> | undefined>) {
-  return (value: T | null) => {
-    for (const ref of refs) {
-      if (!ref) continue;
-      if (typeof ref === "function") ref(value);
-      else ref.current = value;
-    }
-  };
 }
 
 export const ModalLayer = forwardRef<HTMLDivElement, ModalLayerProps>(function ModalLayer(
