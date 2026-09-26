@@ -20,6 +20,7 @@ interface ModalEntry {
   semanticId: string;
   element: HTMLDivElement;
   restoreFocus: HTMLElement | null;
+  initialFocusRef?: RefObject<HTMLElement | null>;
 }
 
 interface ModalStackContextValue {
@@ -56,7 +57,9 @@ function focusableElements(root: HTMLElement): HTMLElement[] {
   });
 }
 
-function focusLayer(root: HTMLElement, preferred?: HTMLElement | null) {
+function focusLayer(entry: Pick<ModalEntry, "element" | "initialFocusRef">) {
+  const root = entry.element;
+  const preferred = entry.initialFocusRef?.current;
   const target = preferred && root.contains(preferred)
     ? preferred
     : root.querySelector<HTMLElement>("[data-modal-initial-focus], [autofocus]")
@@ -99,7 +102,7 @@ export function ModalStackProvider({ children }: { children: ReactNode }) {
       if (restore?.isConnected && (!top || top.element.contains(restore))) {
         restore.focus({ preventScroll: true });
       } else if (top) {
-        focusLayer(top.element);
+        focusLayer(top);
       }
     });
   }, []);
@@ -113,7 +116,7 @@ export function ModalStackProvider({ children }: { children: ReactNode }) {
       if (!(event.target instanceof Node) || !top.element.contains(event.target)) {
         event.preventDefault();
         event.stopImmediatePropagation();
-        focusLayer(top.element);
+        focusLayer(top);
         top.element.dispatchEvent(new KeyboardEvent("keydown", {
           key: event.key,
           code: event.code,
@@ -131,6 +134,8 @@ export function ModalStackProvider({ children }: { children: ReactNode }) {
       }
 
       if (event.key !== "Tab") return;
+      // A list may claim Tab as its own navigation key (see modal-stack.md §4).
+      if (event.target instanceof Element && event.target.closest("[data-modal-owns-tab]")) return;
 
       const controls = focusableElements(top.element);
       event.preventDefault();
@@ -153,7 +158,7 @@ export function ModalStackProvider({ children }: { children: ReactNode }) {
       const current = entriesRef.current;
       const top = current[current.length - 1];
       if (!top || top.element.contains(event.target as Node)) return;
-      focusLayer(top.element);
+      focusLayer(top);
     };
 
     window.addEventListener("keydown", onKeyDown, true);
@@ -204,13 +209,14 @@ export const ModalLayer = forwardRef<HTMLDivElement, ModalLayerProps>(function M
       semanticId: modalId,
       element,
       restoreFocus: active instanceof HTMLElement ? active : null,
+      initialFocusRef,
     });
     return () => context.unregister(token);
-  }, [context.register, context.unregister, modalId, token]);
+  }, [context.register, context.unregister, initialFocusRef, modalId, token]);
 
   useLayoutEffect(() => {
     if (isTop && !wasTopRef.current && rootRef.current) {
-      focusLayer(rootRef.current, initialFocusRef?.current);
+      focusLayer({ element: rootRef.current, initialFocusRef });
     }
     wasTopRef.current = isTop;
   }, [initialFocusRef, isTop]);

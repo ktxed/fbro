@@ -432,6 +432,37 @@ async function verifyLocationSortReset(browser, observer) {
 }
 
 async function verifyBroHelp(browser) {
+  // The palette closes in the same update that opens Pass to Bro; the list must
+  // still get initial focus rather than the first control (the help button).
+  await browser.execute(() => document.querySelector('[data-testid="panel-left"]')?.focus());
+  await pressWindowKey(browser, "p", { shift: true, meta: true });
+  await pressWindowKey(browser, "p", { shift: true, ctrl: true });
+  await (await browser.$(".command-palette__input")).waitForDisplayed({ timeout: 10_000 });
+  await setTextInputValue(browser, ".command-palette__input", "Pass to Bro");
+  await browser.keys("Enter");
+  await (await browser.$('[data-testid="bro-option"]')).waitForDisplayed({ timeout: 10_000 });
+  await waitFor(() => browser.execute(() => (
+    document.activeElement?.matches('[data-testid="bro-dialog"] [role="listbox"]') ?? false
+  )), { timeout: 10_000, label: "bro list initial focus after command palette" });
+  // Tab and Shift+Tab move the list selection like the arrow keys and keep focus in the list.
+  const broListState = () => browser.execute(() => ({
+    selected: Array.from(document.querySelectorAll('[data-testid="bro-option"]'))
+      .findIndex((option) => option.getAttribute("data-selected") === "true"),
+    listFocused: document.activeElement?.matches('[data-testid="bro-dialog"] [role="listbox"]') ?? false,
+  }));
+  await browser.keys("Tab");
+  await waitFor(async () => {
+    const { selected, listFocused } = await broListState();
+    return selected === 1 && listFocused;
+  }, { timeout: 10_000, label: "Tab moves bro selection down" });
+  await browser.keys(["Shift", "Tab"]);
+  await waitFor(async () => {
+    const { selected, listFocused } = await broListState();
+    return selected === 0 && listFocused;
+  }, { timeout: 10_000, label: "Shift+Tab moves bro selection up" });
+  await browser.keys("Escape");
+  await (await browser.$('[data-testid="bro-dialog"]')).waitForDisplayed({ timeout: 10_000, reverse: true });
+
   await openPanelContextMenu(browser, "left");
   await clickContextMenuItem(browser, "Pass to Bro…");
   const broDialog = await browser.$('[data-testid="bro-dialog"]');
@@ -464,6 +495,17 @@ async function verifyBroHelp(browser) {
 
   await browser.keys("Escape");
   await broDialog.waitForDisplayed({ timeout: 10_000, reverse: true });
+
+  // The backend-side Copy Paths bro confirms its clipboard write with a toast.
+  await openPanelContextMenu(browser, "left");
+  await clickContextMenuItem(browser, "Pass to Bro…");
+  const copyPathsBro = await browser.$('[data-testid="bro-option"][data-bro-id="builtin:copy-paths"]');
+  await copyPathsBro.waitForClickable({ timeout: 10_000 });
+  await copyPathsBro.click();
+  await broDialog.waitForDisplayed({ timeout: 10_000, reverse: true });
+  await waitFor(() => browser.execute(() => (
+    /^Copied (full path|\d+ full paths)$/.test(document.querySelector(".transient-hint")?.textContent ?? "")
+  )), { timeout: 10_000, label: "Copy Paths bro toast" });
 }
 
 async function verifyAboutModal(browser) {

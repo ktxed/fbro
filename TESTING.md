@@ -203,6 +203,9 @@ The smoke test exercises these flows:
     with `aria-modal`, build-info formats, Escape restores panel focus.
   - Bro help: Help in Pass to Bro opens Settings › Bros; closing returns focus
     to the Bro dialog's help button with its form values intact.
+  - Bro list keyboard: opened from the command palette, the bro list gets
+    initial focus; Tab / Shift+Tab move the selection like the arrow keys.
+  - Copy Paths bro: launching it shows a "Copied … full path(s)" toast.
   - Copy/Rename dialogs: defaults, Tab reachability, destination-exists
     warning, keyboard Cancel.
   - Contextual selection operations: inline toolbar and context-menu items for

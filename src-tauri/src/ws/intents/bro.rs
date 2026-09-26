@@ -937,6 +937,7 @@ async fn launch_selected_bro(args: &Value, ctx: &mut IntentContext<'_>) {
     match bro.option.protocol {
         BroProtocol::Fnf => {
             if matches!(bro.launch, LaunchRecipe::BuiltInCopyPaths) {
+                let what = copied_paths_noun(inputs.len());
                 let text = inputs
                     .iter()
                     .map(|i| i.path.as_str())
@@ -950,21 +951,23 @@ async fn launch_selected_bro(args: &Value, ctx: &mut IntentContext<'_>) {
                     tokio::task::spawn_blocking(move || platform.write_text_clipboard(&text))
                         .await
                         .unwrap_or_else(|_| Err("Clipboard task panicked".to_string()));
-                if let Err(message) = result {
-                    let _ = ctx
-                        .tx
-                        .send(ServerMessage::Error {
-                            timestamp: now(),
-                            code: "BRO_LAUNCH_FAILED".to_string(),
-                            message,
-                            recoverable: true,
-                            extra: Some(serde_json::json!({
-                                "requestId": parsed.request_id,
-                                "broId": parsed.bro_id,
-                            })),
-                        })
-                        .await;
-                }
+                let message = match result {
+                    Ok(()) => ServerMessage::TextClipboardWritten {
+                        timestamp: now(),
+                        what,
+                    },
+                    Err(message) => ServerMessage::Error {
+                        timestamp: now(),
+                        code: "BRO_LAUNCH_FAILED".to_string(),
+                        message,
+                        recoverable: true,
+                        extra: Some(serde_json::json!({
+                            "requestId": parsed.request_id,
+                            "broId": parsed.bro_id,
+                        })),
+                    },
+                };
+                let _ = ctx.tx.send(message).await;
                 return;
             }
             if matches!(bro.launch, LaunchRecipe::BuiltInKillProc) {
@@ -1718,6 +1721,15 @@ async fn start_fp_job(
     Ok(())
 }
 
+/// Toast noun for the Copy Paths bro, e.g. "full path" or "3 full paths".
+fn copied_paths_noun(count: usize) -> String {
+    if count == 1 {
+        "full path".to_string()
+    } else {
+        format!("{count} full paths")
+    }
+}
+
 fn validate_output_path(output_path: &str) -> Result<(), String> {
     let path = Path::new(output_path);
     let Some(parent) = path.parent() else {
@@ -1974,5 +1986,16 @@ fn build_procs_patch(procs: &std::collections::HashMap<u32, ChildProcessEntry>) 
         entity_id: None,
         version: 0,
         patch: serde_json::json!({ "procs": list }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::copied_paths_noun;
+
+    #[test]
+    fn copied_paths_noun_counts_paths() {
+        assert_eq!(copied_paths_noun(1), "full path");
+        assert_eq!(copied_paths_noun(3), "3 full paths");
     }
 }

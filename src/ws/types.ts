@@ -582,6 +582,13 @@ export interface ExternalClipboardWrittenMessage {
   itemCount: number;
 }
 
+export interface TextClipboardWrittenMessage {
+  type: "TextClipboardWritten";
+  timestamp: number;
+  /** Lowercase noun for the toast, e.g. "full path" or "3 full paths". */
+  what: string;
+}
+
 export interface FileClipboardWrittenMessage {
   type: "FileClipboardWritten";
   timestamp: number;
@@ -1080,6 +1087,7 @@ export type BEMessage =
   | ExternalClipboardReadyMessage
   | ExternalClipboardWrittenMessage
   | FileClipboardWrittenMessage
+  | TextClipboardWrittenMessage
   | ViewerFileChangedMessage
   | DryRunReadyMessage
   | OpenWithOptionsReadyMessage

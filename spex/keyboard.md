@@ -33,7 +33,9 @@ dialog types.
 - `Toolbar` uses the same conditions to suppress modal-opening and file-command
   shortcuts. Zoom shortcuts remain global.
 - Each modal owns its feature-specific keys on its layer or descendants.
-- Tab and Shift+Tab cycle among enabled, visible controls in the top modal.
+- Tab and Shift+Tab cycle among enabled, visible controls in the top modal,
+  except inside a list marked `data-modal-owns-tab` (Pass to Bro), where they
+  move the selection like ArrowDown/ArrowUp (`modal-stack.md` §4).
 - Enter belongs to the focused native control. A modal-level default action
   may run only when the event target is not another interactive control and a
   child has not already consumed the event.

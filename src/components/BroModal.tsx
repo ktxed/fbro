@@ -254,7 +254,9 @@ export function BroModal({ client, bro }: BroModalProps) {
       return;
     }
     if (isNativeActivationTarget(e.target)) return;
-    if (e.key === "ArrowDown") {
+    // Tab and Shift+Tab step through the list like the arrow keys.
+    const listTab = e.key === "Tab" && e.target === listRef.current;
+    if (e.key === "ArrowDown" || (listTab && !e.shiftKey)) {
       e.preventDefault();
       if (bros.length > 0) {
         const nextIndex = (selectedIndex + 1) % bros.length;
@@ -262,7 +264,7 @@ export function BroModal({ client, bro }: BroModalProps) {
       }
       return;
     }
-    if (e.key === "ArrowUp") {
+    if (e.key === "ArrowUp" || (listTab && e.shiftKey)) {
       e.preventDefault();
       if (bros.length > 0) {
         const nextIndex = (selectedIndex - 1 + bros.length) % bros.length;
@@ -321,6 +323,7 @@ export function BroModal({ client, bro }: BroModalProps) {
             aria-label="Bros"
             aria-activedescendant={bros[selectedIndex] ? `bro-option-${selectedIndex}` : undefined}
             tabIndex={0}
+            data-modal-owns-tab
           >
             {bro.status === "loading" && (
               <div className="command-palette__empty">Looking up bros…</div>

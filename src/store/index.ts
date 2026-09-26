@@ -39,6 +39,7 @@ import type {
   ExternalClipboardReadyMessage,
   ExternalClipboardWrittenMessage,
   FileClipboardWrittenMessage,
+  TextClipboardWrittenMessage,
   CacheStatusReadyMessage,
   PrefetchCacheStatus,
   BookmarkEntry,
@@ -1441,6 +1442,13 @@ function reducer(state: AppState, action: AppAction): AppState {
               message: `Copied raw file “${m.name}”${at}`,
               token: m.timestamp,
             },
+          };
+        }
+        case "TextClipboardWritten": {
+          const m = msg as TextClipboardWrittenMessage;
+          return {
+            ...state,
+            transientHint: { message: `Copied ${m.what}`, token: m.timestamp },
           };
         }
         case "DryRunReady": {

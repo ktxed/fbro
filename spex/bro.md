@@ -495,6 +495,7 @@ Current launch forms:
 * native `tar`: `tar -cf <outputPath> <entry names...>` with working directory set to the parent directory of the selected inputs
 * native `7z`: `7z a -mx<level> [-p<password>] <outputPath> -- <entry names...>` with working directory set to the parent directory of the selected inputs
 * built-in `Fedup Bro`: backend job that scans a global selection for exact duplicate files and returns a structured report
+* built-in `Copy Paths`: BE writes the resolved input paths, one per line, to the system clipboard and replies `TextClipboardWritten { what }` ("full path" / "N full paths"), which FE shows as a "Copied <what>" toast; a clipboard failure replies `Error` with `BRO_LAUNCH_FAILED`
 
 ### 6.3 `fnf` contract
 

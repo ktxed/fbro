@@ -192,6 +192,13 @@ pub enum ServerMessage {
         #[serde(skip_serializing_if = "Option::is_none")]
         label: Option<String>,
     },
+    /// Plain text was written to the system clipboard (e.g. the Copy Paths
+    /// bro) — FE shows a "Copied <what>" toast.
+    TextClipboardWritten {
+        timestamp: u64,
+        /// Lowercase noun for the toast, e.g. "full path" or "3 full paths".
+        what: String,
+    },
     ViewerFileChanged {
         timestamp: u64,
         path: String,

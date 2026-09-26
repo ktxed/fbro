@@ -73,7 +73,11 @@ When a feature renders a `ModalLayer`:
 3. The previous top layer becomes a background layer.
 4. Focus moves to `initialFocusRef`, an element marked
    `data-modal-initial-focus` or `autofocus`, the first focusable control, or
-   finally the layer root.
+   finally the layer root. The layer entry keeps `initialFocusRef`, so every
+   later refocus of the layer (after another layer pops without a usable
+   restoration target, or when focus is redirected back into it) uses the same
+   order. This matters when opening a dialog pops another layer in the same
+   update, e.g. the command palette closing as the dialog it launched opens.
 
 The visible dialog inside the layer is rendered through `ModalDialog` (or
 `ResizableModal`, which composes it). This provides one `dialog` or
@@ -105,7 +109,10 @@ is mounted:
 - `Tab` and `Shift+Tab` cycle through focusable controls in the top layer.
   Named radio groups contribute only their checked radio, or their first
   enabled radio when none is checked. Composite lists and tablists expose one
-  sequential Tab stop and own their arrow-key navigation.
+  sequential Tab stop and own their arrow-key navigation. A focused element
+  inside `[data-modal-owns-tab]` receives `Tab` itself instead: the Pass to
+  Bro list uses this so `Tab`/`Shift+Tab` move the selection like
+  `ArrowDown`/`ArrowUp`. `Enter` and `Escape` remain the way out of such a list.
 - Focus attempting to leave the top layer is redirected into it.
 - A key event whose target is outside the top layer is stopped and redispatched
   from the top layer. This covers browser timing cases where a focused button
