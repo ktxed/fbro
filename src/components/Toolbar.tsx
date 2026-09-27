@@ -74,7 +74,7 @@ export function Toolbar({ client, onOpenJobsView }: { client: WsClient; onOpenJo
       if (modKey(e) && e.key === "-")                    { e.preventDefault(); const s = nextZoomSize(state.fontSize, -1); applyZoom(s); client.sendIntent("SetFontSize", undefined, { value: s }); return; }
       if (modKey(e) && e.key === "0")                    { e.preventDefault(); applyZoom(DEFAULT_FONT_SIZE); client.sendIntent("SetFontSize", undefined, { value: DEFAULT_FONT_SIZE }); return; }
 
-      const blockingModalActive = hasActiveModal || !!state.pendingContextMenu;
+      const blockingModalActive = hasActiveModal || !!state.pendingContextMenu || !!state.bookmarksOpen;
       const paletteCommand = getCommand(state.commands, COMMAND_PALETTE_COMMAND_ID);
       if (!blockingModalActive && paletteCommand && paletteCommand.bindings.some((binding) => bindingMatches(e, binding))) {
         e.preventDefault();

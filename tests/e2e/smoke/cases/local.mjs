@@ -255,10 +255,92 @@ export async function runLocalFlow(browser, observer) {
 
   await verifyLocationSortReset(browser, observer);
   await verifyInlinePreviewNavigation(browser, observer, aSrc, sortDir);
+  await verifyBookmarksKeyboardNavigation(browser, observer, aSrc, sortDir);
   await goToPanelPath(browser, observer, "right", path.posix.join(aDst, "alpha"));
 
   await verifyWindowFocusRestoration(browser, observer);
   await verifyGridLeftAtFirstItemNavigatesUp(browser, observer, aSrc);
+}
+
+async function verifyBookmarksKeyboardNavigation(browser, observer, aSrc, restorePath) {
+  const bookmarkNames = Array.from({ length: 18 }, (_, index) =>
+    `bookmark-target-${String(index).padStart(2, "0")}`
+  );
+  const bookmarkPaths = bookmarkNames.map((name) => path.posix.join(aSrc, name));
+  for (const bookmarkPath of bookmarkPaths) {
+    fs.mkdirSync(hostPath(bookmarkPath), { recursive: true });
+    observer.sendIntent("AddBookmark", undefined, {
+      name: path.posix.basename(bookmarkPath),
+      path: bookmarkPath,
+    });
+  }
+  await waitFor(() => bookmarkPaths.every((bookmarkPath) =>
+    observer.state.bookmarks?.some((bookmark) => bookmark.path === bookmarkPath)), {
+    timeout: 10_000,
+    label: "bookmark keyboard fixtures",
+  });
+
+  await goToPanelPath(browser, observer, "left", aSrc);
+  await browser.execute(() => document.querySelector('[data-testid="panel-left"]')?.focus());
+  const cursorBefore = observer.state.panels.left.cursor;
+  await browser.performActions([{
+    type: "key",
+    id: "keyboard",
+    actions: [
+      { type: "keyDown", value: "\uE009" },
+      { type: "keyDown", value: "d" },
+      { type: "keyUp", value: "d" },
+      { type: "keyUp", value: "\uE009" },
+    ],
+  }]);
+  await browser.releaseActions();
+
+  const popover = await browser.$('[data-testid="bookmarks-popover"]');
+  await popover.waitForDisplayed({ timeout: 10_000 });
+
+  const selectedBookmarkPath = () => browser.execute(() =>
+    document.querySelector('[data-testid="bookmark-option"][data-selected="true"] .bookmarks-popover__item-path')?.textContent ?? null
+  );
+  if (await selectedBookmarkPath() !== bookmarkPaths[0]) {
+    throw new Error("bookmark list did not initially select its first entry");
+  }
+
+  await browser.keys("ArrowDown");
+  await waitFor(async () => await selectedBookmarkPath() === bookmarkPaths[1], {
+    timeout: 10_000,
+    label: "bookmark ArrowDown selection",
+  });
+  if (observer.state.panels.left.cursor !== cursorBefore) {
+    throw new Error("bookmark ArrowDown leaked through to the panel cursor");
+  }
+
+  const heights = await browser.execute(() => {
+    const panel = document.querySelector('[data-testid="panel-left"]');
+    const list = document.querySelector('[data-testid="bookmarks-popover"] [role="listbox"]');
+    return {
+      panel: panel?.getBoundingClientRect().height ?? 0,
+      list: list?.getBoundingClientRect().height ?? 0,
+    };
+  });
+  if (heights.list <= 0 || heights.list > heights.panel / 2 + 1) {
+    throw new Error(`bookmark list height ${heights.list} exceeds half its panel height ${heights.panel}`);
+  }
+
+  await browser.keys("Enter");
+  await observer.waitForPanelPath("left", bookmarkPaths[1]);
+  await popover.waitForDisplayed({ timeout: 10_000, reverse: true });
+
+  await goToPanelPath(browser, observer, "left", aSrc);
+  for (const bookmarkPath of bookmarkPaths) {
+    observer.sendIntent("RemoveBookmark", undefined, { path: bookmarkPath });
+    fs.rmSync(hostPath(bookmarkPath), { recursive: true });
+  }
+  await waitFor(() => bookmarkPaths.every((bookmarkPath) =>
+    !observer.state.bookmarks?.some((bookmark) => bookmark.path === bookmarkPath)), {
+    timeout: 10_000,
+    label: "bookmark keyboard fixture cleanup",
+  });
+  await goToPanelPath(browser, observer, "left", restorePath);
 }
 
 async function verifyInlinePreviewNavigation(browser, observer, aSrc, restorePath) {

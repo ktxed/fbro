@@ -213,6 +213,8 @@ The smoke test exercises these flows:
   - Sort selector (Enter applies, Escape cancels, focus returns to the filter),
     quick-filter Escape restores the full listing, per-location sort on/off,
     Settings tab arrows and reset confirmation.
+  - Bookmark popover keyboard ownership, Up/Down selection without panel-cursor movement,
+    Enter navigation, and a scroll height capped at half the owning panel.
   - Live date-sort cursor anchoring, inline image preview navigation, window
     focus restoration, grid-mode Left navigation.
 - Git (`cases/git.mjs`, temporary repository):

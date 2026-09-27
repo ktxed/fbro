@@ -33,6 +33,10 @@ dialog types.
 - `Toolbar` uses the same conditions to suppress modal-opening and file-command
   shortcuts. Zoom shortcuts remain global.
 - Each modal owns its feature-specific keys on its layer or descendants.
+- The bookmark popover moves focus into its composite list. Up/Down and
+  Home/End move the active bookmark, Enter opens it, and Escape closes the
+  popover; while it is open the underlying panel and global commands are held
+  back.
 - Embedded terminal keys go to the PTY for the shell to interpret. On macOS,
   fbro can start interactive zsh sessions with Emacs bindings when the backend
   `zshEmacsKeymap` setting is enabled; it passes `-o emacs` at launch. The

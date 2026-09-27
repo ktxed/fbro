@@ -923,6 +923,7 @@ body {
   padding: 4px 0;
   overflow-y: auto;
   flex: 1;
+  outline: none;
 }
 
 .bookmarks-popover__item {
@@ -936,6 +937,12 @@ body {
 
 .bookmarks-popover__item:hover {
   background: var(--bg-cursor);
+}
+
+.bookmarks-popover__item--selected {
+  background: var(--bg-cursor);
+  outline: 1px solid var(--border-focus);
+  outline-offset: -1px;
 }
 
 .bookmarks-popover__item--active {
@@ -963,11 +970,13 @@ body {
 }
 
 .bookmarks-popover__item-remove {
+  appearance: none;
   flex-shrink: 0;
   background: none;
   border: none;
   color: var(--text-dim);
   cursor: pointer;
+  font-family: var(--font);
   font-size: 14px;
   line-height: 1;
   padding: 0 2px;

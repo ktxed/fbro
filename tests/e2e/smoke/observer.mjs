@@ -17,6 +17,7 @@ export class FbroObserver {
       shareConfig: { enabled: false, allowIpv6: false, sharedSourceIds: [], sharedRoots: [], shareSuggestions: [], pairedPeers: [] },
       discoveredPeers: [],
       settings: { general: { colorScheme: "fbro-dark" } },
+      bookmarks: [],
       globalSelections: [],
       focus: "",
       fileServerPort: 0,
@@ -362,6 +363,7 @@ export class FbroObserver {
     if (domains.shareConfig) this.state.shareConfig = domains.shareConfig;
     if (domains.discoveredPeers) this.state.discoveredPeers = domains.discoveredPeers;
     if (domains.settings) this.state.settings = domains.settings;
+    if (domains.bookmarks) this.state.bookmarks = domains.bookmarks;
     if (domains.globalSelections) this.state.globalSelections = domains.globalSelections;
   }
 
@@ -389,6 +391,7 @@ export class FbroObserver {
       };
     }
     if (msg.domain === "discoveredPeers") this.state.discoveredPeers = patch.peers ?? [];
+    if (msg.domain === "bookmarks") this.state.bookmarks = patch.bookmarks ?? [];
     if (msg.domain === "jobs" && patch.removeJobId) delete this.state.jobs[patch.removeJobId];
     if (msg.domain === "globalSelections") this.state.globalSelections = patch.globalSelections ?? [];
   }

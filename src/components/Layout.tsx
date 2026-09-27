@@ -428,7 +428,7 @@ export function Layout({ client, jobsViewOpen, onCloseJobsView, onOpenJobsView }
   }
 
   const activeJob = state.activeJobId ? state.jobs[state.activeJobId] ?? null : null;
-  const modalActive = hasActiveModal || state.pendingContextMenu !== null;
+  const modalActive = hasActiveModal || state.pendingContextMenu !== null || state.bookmarksOpen !== null;
 
   const dragCursorClass = dragOutInProgress
     ? "layout--drag-out"
