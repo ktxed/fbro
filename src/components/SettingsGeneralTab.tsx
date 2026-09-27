@@ -4,6 +4,7 @@ import type { GeneralSettings } from "../ws/types";
 import type { WsClient } from "../ws/client";
 
 import { stepNumberInputOnWheel } from "../utils/numberInputWheel";
+import { isMac } from "../utils/platform";
 import { ModalLayer } from "./ModalStack";
 import { ModalDialog } from "./ModalDialog";
 
@@ -248,14 +249,16 @@ export function SettingsGeneralTab({ general, client }: SettingsGeneralTabProps)
             <option value="vim">Vim</option>
           </select>
         </label>
-        <label className="settings-tab__option">
-          <input
-            type="checkbox"
-            checked={general.zshEmacsKeymap}
-            onChange={(e) => send("zshEmacsKeymap", e.target.checked)}
-          />
-          <span>Use Emacs keys in new zsh terminal sessions</span>
-        </label>
+        {isMac && (
+          <label className="settings-tab__option">
+            <input
+              type="checkbox"
+              checked={general.zshEmacsKeymap}
+              onChange={(e) => send("zshEmacsKeymap", e.target.checked)}
+            />
+            <span>Use Emacs keys in new zsh terminal sessions</span>
+          </label>
+        )}
       </div>
       <div className="settings-tab__section">
         <h3 className="settings-tab__section-title">Process panel</h3>

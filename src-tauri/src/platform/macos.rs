@@ -72,6 +72,10 @@ impl Platform for MacOSPlatform {
         std::env::var("HOME").unwrap_or_else(|_| "/".to_string())
     }
 
+    fn supports_zsh_emacs_keymap(&self) -> bool {
+        true
+    }
+
     fn probe_fbro_command(&self) -> Result<ShellCommandStatus, String> {
         super::shell_command::probe_fbro_command()
     }

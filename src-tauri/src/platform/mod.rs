@@ -100,6 +100,12 @@ pub trait Platform: Send + Sync {
     /// Returns the current user's home directory.
     fn home_dir(&self) -> String;
 
+    /// Whether embedded zsh sessions may opt into Emacs line-editing bindings.
+    /// This workaround is specific to macOS Option+Arrow word navigation.
+    fn supports_zsh_emacs_keymap(&self) -> bool {
+        false
+    }
+
     /// Look up a system icon by freedesktop-style name (e.g. "text-rust", "folder").
     /// Returns (bytes, content_type) on success.
     fn find_icon(&self, _icon_name: &str) -> Option<(Vec<u8>, &'static str)> {
@@ -361,4 +367,15 @@ pub async fn create_volume_watcher(platform: Arc<dyn Platform>) -> Arc<dyn Volum
     }
     #[cfg(not(target_os = "linux"))]
     Arc::new(FallbackVolumeWatcher::new(platform))
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn zsh_emacs_keymap_support_is_macos_only() {
+        assert_eq!(
+            super::create_platform().supports_zsh_emacs_keymap(),
+            cfg!(target_os = "macos")
+        );
+    }
 }

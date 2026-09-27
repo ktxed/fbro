@@ -194,7 +194,8 @@ async fn open(panel_id: &str, args: &Value, ctx: &mut IntentContext<'_>) {
             state_guard.gui_senders.clone(),
             state_guard.pty_manager.clone(),
             panel.terminal_session,
-            state_guard.settings.general.zsh_emacs_keymap,
+            state_guard.settings.general.zsh_emacs_keymap
+                && state_guard.platform.supports_zsh_emacs_keymap(),
         )
     };
 

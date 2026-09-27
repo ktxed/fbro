@@ -41,6 +41,7 @@ Sync trait, `Send + Sync`. Grouped by purpose:
 | `home_dir() -> String` | Current user's home. Used by `NavigateHome`, panel initialisation, and the `~` resolver. |
 | `disk_space(path) -> Option<(free, total)>` | Volume capacity for the FS containing `path`. |
 | `list_volumes() -> Vec<VolumeInfo>` | Mounted (and on Linux, also unmounted) volumes. Synchronous fallback path; the async `VolumeWatcher` (§4) is preferred. |
+| `supports_zsh_emacs_keymap() -> bool` | Opts macOS into the embedded-zsh Emacs-keymap workaround. Other platforms use the default `false`. |
 
 ### 2.2 Icons & thumbnails
 
