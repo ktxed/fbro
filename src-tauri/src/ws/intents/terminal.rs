@@ -179,7 +179,7 @@ async fn open(panel_id: &str, args: &Value, ctx: &mut IntentContext<'_>) {
     let rows = args.get("rows").and_then(Value::as_u64).unwrap_or(24) as u16;
 
     // Pull the panel cwd. Refuse if shadow source (no real local cwd).
-    let (cwd, version, gui_senders, pty_manager, already_open) = {
+    let (cwd, version, gui_senders, pty_manager, already_open, zsh_emacs_keymap) = {
         let state_guard = ctx.state.lock().await;
         let Some(panel) = state_guard.panels.get(panel_id) else {
             return;
@@ -194,6 +194,7 @@ async fn open(panel_id: &str, args: &Value, ctx: &mut IntentContext<'_>) {
             state_guard.gui_senders.clone(),
             state_guard.pty_manager.clone(),
             panel.terminal_session,
+            state_guard.settings.general.zsh_emacs_keymap,
         )
     };
 
@@ -207,6 +208,7 @@ async fn open(panel_id: &str, args: &Value, ctx: &mut IntentContext<'_>) {
         &cwd,
         cols,
         rows,
+        zsh_emacs_keymap,
         ctx.tx.clone(),
         ctx.state.clone(),
         pty_manager.clone(),

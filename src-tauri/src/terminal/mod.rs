@@ -140,17 +140,30 @@ impl PtyManager {
         cwd: &str,
         cols: u16,
         rows: u16,
+        zsh_emacs_keymap: bool,
         tx: mpsc::Sender<ServerMessage>,
         state: SharedState,
         self_arc: Arc<Self>,
     ) -> Result<u32, PtyError> {
+        let shell = default_shell();
+        let mut args = vec!["-l".to_string()];
+        let shell_name = std::path::Path::new(&shell)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default();
+        if zsh_emacs_keymap
+            && (shell_name.eq_ignore_ascii_case("zsh")
+                || shell_name.eq_ignore_ascii_case("zsh.exe"))
+        {
+            args.extend(["-o".to_string(), "emacs".to_string()]);
+        }
         self.open_command(
             panel_id,
             cwd,
             cols,
             rows,
-            &default_shell(),
-            &["-l".to_string()],
+            &shell,
+            &args,
             tx,
             state,
             self_arc,

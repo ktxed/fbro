@@ -77,6 +77,7 @@ Supported keys:
 |---|---|---|---|
 | `showHiddenDefault` | `bool` | `false` | Whether new panels start with hidden files visible. Changing this also applies immediately to all open panels. |
 | `rememberSortPerLocation` | `bool` | `false` | Remember and share sorting for each local filesystem location. |
+| `zshEmacsKeymap` | `bool` | `false` | Start new interactive zsh terminals with `-o emacs`. Other shells and Quick Edit commands are unaffected. Existing terminal sessions keep their current keymap. |
 | `fedupDefaultIgnorePatterns` | `string` | `.git`, `.idea`, `.vscode`, `.venv`, `node_modules`, `__MACOSX`, `._*`, `.DS_Store`, `artifacts/e2e`, `dist/assets`, `target/debug`, `target/release`, `target/bundle`, `.m2` | Newline/comma separated wildcard name/path patterns Fedup Bro can use to skip files and folders before scanning. |
 
 Unknown key or type mismatch → `Error { code: "BAD_SETTING", recoverable: true }`.

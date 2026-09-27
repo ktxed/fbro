@@ -21,6 +21,25 @@ Built with [Tauri](https://tauri.app/) (Rust backend + React frontend). The back
 - Viewer (text/hex/markdown/mermaid/media) and file compare
 - Peer remote: pair two fbro instances, browse and transfer over SFTP
 
+## macOS terminal word navigation with zsh
+
+The embedded terminal sends `Esc b` for Option+Left and `Esc f` for
+Option+Right. fbro inherits `EDITOR` and `VISUAL` from the process that starts
+it. zsh starts with its vi insert keymap if either variable contains `vi`, and
+otherwise starts with its emacs keymap. If you want Emacs bindings regardless
+of those variables, enable **Use Emacs keys in new zsh terminal sessions** in
+Settings → General. Close and reopen the embedded terminal to apply it.
+
+If you prefer zsh's vi bindings, add these to `~/.zshrc` so both Option+Arrow
+shortcuts move by words without leaving insert mode:
+
+```zsh
+bindkey -M viins '^[b' backward-word
+bindkey -M viins '^[f' forward-word
+```
+
+Open a new terminal session after saving the file.
+
 ## Development
 
 Requirements: [Node.js](https://nodejs.org/), [Rust](https://rustup.rs/), and [Tauri 2 system deps](https://v2.tauri.app/start/prerequisites/) for your OS.

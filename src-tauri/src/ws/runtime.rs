@@ -198,6 +198,7 @@ pub(crate) fn build_state_snapshot(
                         .quick_terminal_editor
                         .program()
                         .to_string(),
+                    zsh_emacs_keymap: state.settings.general.zsh_emacs_keymap,
                 },
                 modal_sizes: state
                     .settings

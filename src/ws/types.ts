@@ -670,6 +670,7 @@ export interface GeneralSettings {
   compareExternalCommand: string;
   /** "nano" | "vim" */
   quickTerminalEditor: string;
+  zshEmacsKeymap: boolean;
 }
 
 export interface ModalSizePreference {

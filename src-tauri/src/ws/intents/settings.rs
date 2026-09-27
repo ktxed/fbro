@@ -368,6 +368,14 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
                     }
                 }
             }
+            "zshEmacsKeymap" => {
+                let Some(v) = value.as_bool() else {
+                    drop(state_guard);
+                    bad_setting(ctx.tx, "zshEmacsKeymap must be a boolean").await;
+                    return;
+                };
+                state_guard.settings.general.zsh_emacs_keymap = v;
+            }
             _ => {
                 let msg = format!("Unknown setting key: {key}");
                 drop(state_guard);
@@ -536,6 +544,7 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
                 "compareDifferMode": general.compare_differ_mode.as_str(),
                 "compareExternalCommand": general.compare_external_command,
                 "quickTerminalEditor": general.quick_terminal_editor.program(),
+                "zshEmacsKeymap": general.zsh_emacs_keymap,
             }
         }),
     };

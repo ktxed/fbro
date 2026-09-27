@@ -570,6 +570,7 @@ pub struct GeneralSettingsSchema {
     pub compare_differ_mode: String,
     pub compare_external_command: String,
     pub quick_terminal_editor: String,
+    pub zsh_emacs_keymap: bool,
 }
 
 #[derive(Serialize, Clone, Debug)]

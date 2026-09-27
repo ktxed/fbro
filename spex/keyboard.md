@@ -33,6 +33,10 @@ dialog types.
 - `Toolbar` uses the same conditions to suppress modal-opening and file-command
   shortcuts. Zoom shortcuts remain global.
 - Each modal owns its feature-specific keys on its layer or descendants.
+- Embedded terminal keys go to the PTY for the shell to interpret. fbro can
+  start interactive zsh sessions with Emacs bindings when the backend
+  `zshEmacsKeymap` setting is enabled; it passes `-o emacs` at launch. The
+  setting does not inject text into the PTY or change a running session.
 - Tab and Shift+Tab cycle among enabled, visible controls in the top modal,
   except inside a list marked `data-modal-owns-tab` (Pass to Bro), where they
   move the selection like ArrowDown/ArrowUp (`modal-stack.md` §4).

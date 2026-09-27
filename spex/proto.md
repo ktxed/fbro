@@ -114,7 +114,12 @@ selections
 jobs
 sources
 globalSelections
+settings
 ```
+
+`settings.general.zshEmacsKeymap` is a boolean in the snapshot and settings
+patches. The existing `SetGeneralOption` intent accepts that key; see
+[Settings](settings.md) for its default and effect.
 
 The `slots` domain groups panels into **tab groups**. Each slot owns one or more
 panel ids; one tab is active at a time. A single-tab slot renders identically

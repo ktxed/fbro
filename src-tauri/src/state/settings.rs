@@ -103,6 +103,10 @@ pub struct GeneralSettings {
     /// Terminal editor used by Quick Edit (nano/vim preference; Windows also probes Git, Scoop, Chocolatey, WinGet).
     #[serde(default)]
     pub quick_terminal_editor: QuickTerminalEditor,
+    /// Start interactive zsh terminals with Emacs line-editing bindings.
+    /// Other shells and Quick Edit commands keep their own keymaps.
+    #[serde(default)]
+    pub zsh_emacs_keymap: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -287,6 +291,7 @@ impl Default for GeneralSettings {
             compare_differ_mode: CompareDifferMode::default(),
             compare_external_command: String::new(),
             quick_terminal_editor: QuickTerminalEditor::default(),
+            zsh_emacs_keymap: false,
         }
     }
 }

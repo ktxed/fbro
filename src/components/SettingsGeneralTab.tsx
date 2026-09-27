@@ -215,13 +215,6 @@ export function SettingsGeneralTab({ general, client }: SettingsGeneralTabProps)
           />
           <span>Restore all panel tabs across sessions (otherwise only the active tab returns)</span>
         </label>
-        <label className="settings-tab__option">
-          <span>Quick terminal editor</span>
-          <select value={general.quickTerminalEditor} onChange={(e) => send("quickTerminalEditor", e.target.value)}>
-            <option value="nano">Nano</option>
-            <option value="vim">Vim</option>
-          </select>
-        </label>
         <div className="settings-tab__option" style={{ flexDirection: "column", alignItems: "flex-start", gap: 6 }}>
           <span>Fedup default ignore patterns</span>
           <div className="settings-tab__fedup-ignore-editor">
@@ -245,6 +238,24 @@ export function SettingsGeneralTab({ general, client }: SettingsGeneralTabProps)
             One wildcard name pattern per line. Fedup can use these to skip files and folders before scanning.
           </div>
         </div>
+      </div>
+      <div className="settings-tab__section">
+        <h3 className="settings-tab__section-title">Terminal</h3>
+        <label className="settings-tab__option">
+          <span>Quick terminal editor</span>
+          <select value={general.quickTerminalEditor} onChange={(e) => send("quickTerminalEditor", e.target.value)}>
+            <option value="nano">Nano</option>
+            <option value="vim">Vim</option>
+          </select>
+        </label>
+        <label className="settings-tab__option">
+          <input
+            type="checkbox"
+            checked={general.zshEmacsKeymap}
+            onChange={(e) => send("zshEmacsKeymap", e.target.checked)}
+          />
+          <span>Use Emacs keys in new zsh terminal sessions</span>
+        </label>
       </div>
       <div className="settings-tab__section">
         <h3 className="settings-tab__section-title">Process panel</h3>
