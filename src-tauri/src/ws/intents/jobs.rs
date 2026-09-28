@@ -961,6 +961,17 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
         }
     };
 
+    let ejecting = {
+        let state = ctx.state.lock().await;
+        state.path_on_ejecting_drive(&source_path)
+            || dest_path.as_deref().is_some_and(|path| state.path_on_ejecting_drive(path))
+            || files.iter().any(|file| state.path_on_ejecting_drive(&file.source_path))
+    };
+    if ejecting {
+        let _ = send_error(ctx, "START_FILE_OP_FAILED", "A removable drive is being ejected. Try again after it finishes.".into()).await;
+        return;
+    }
+
     if files.is_empty() {
         return;
     }

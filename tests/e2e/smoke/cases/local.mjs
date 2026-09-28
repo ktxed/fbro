@@ -23,6 +23,7 @@ import { waitFor } from "../wait.mjs";
 export async function runLocalFlow(browser, observer) {
   await verifyColorSchemeSwitch(browser, observer);
   await verifyAboutModal(browser);
+  await verifyEjectPicker(browser);
 
   const aSrc = backendPath("a", "src");
   const aDst = backendPath("a", "dst");
@@ -628,6 +629,33 @@ async function verifyAboutModal(browser) {
   await waitFor(async () => browser.execute(() => document.activeElement?.getAttribute("data-testid") === "panel-left"), {
     timeout: 10_000,
     label: "panel focus after closing About",
+  });
+}
+
+async function verifyEjectPicker(browser) {
+  await browser.execute(() => document.querySelector('[data-testid="panel-left"]')?.focus());
+  await pressWindowKey(browser, "p", { shift: true, meta: true });
+  await pressWindowKey(browser, "p", { shift: true, ctrl: true });
+  await (await browser.$(".command-palette__input")).waitForDisplayed({ timeout: 10_000 });
+  await setTextInputValue(browser, ".command-palette__input", "Eject Removable Source");
+  await browser.keys("Enter");
+  const modal = await browser.$('[data-testid="eject-modal"]');
+  await modal.waitForDisplayed({ timeout: 10_000 });
+  const state = await browser.execute(() => ({
+    top: document.querySelector('[data-modal-id="eject-source"]')?.getAttribute("data-modal-state"),
+    focused: document.activeElement?.tagName,
+    options: document.querySelectorAll('#eject-source-list option').length,
+    disabled: document.querySelector('[data-testid="eject-submit"]')?.hasAttribute("disabled"),
+  }));
+  if (state.top !== "top" || (state.focused !== "SELECT" && state.focused !== "BUTTON")) {
+    throw new Error(`Eject picker focus/layer mismatch: ${JSON.stringify(state)}`);
+  }
+  if (state.options === 0 && !state.disabled) throw new Error("Eject button enabled without a removable source");
+  await browser.keys("Escape");
+  await modal.waitForDisplayed({ timeout: 10_000, reverse: true });
+  await waitFor(() => browser.execute(() => document.activeElement?.getAttribute("data-testid") === "panel-left"), {
+    timeout: 10_000,
+    label: "panel focus after closing Eject picker",
   });
 }
 

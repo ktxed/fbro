@@ -41,6 +41,7 @@ Sync trait, `Send + Sync`. Grouped by purpose:
 | `home_dir() -> String` | Current user's home. Used by `NavigateHome`, panel initialisation, and the `~` resolver. |
 | `disk_space(path) -> Option<(free, total)>` | Volume capacity for the FS containing `path`. |
 | `list_volumes() -> Vec<VolumeInfo>` | Mounted (and on Linux, also unmounted) volumes. Synchronous fallback path; the async `VolumeWatcher` (§4) is preferred. |
+| `eject_volume(device_path, action) -> Result<()>` | macOS native removable-volume action on a blocking worker; default reports unsupported. |
 | `supports_zsh_emacs_keymap() -> bool` | Opts macOS into the embedded-zsh Emacs-keymap workaround. Other platforms use the default `false`. |
 
 ### 2.2 Icons & thumbnails
@@ -125,6 +126,7 @@ OS-specifics (udisks2 D-Bus, `/proc/mounts` polling, Windows
 pub trait VolumeWatcher: Send + Sync {
     async fn list_volumes(&self) -> Vec<VolumeInfo>;
     async fn mount(&self, device_path: &str) -> Result<String, String>;
+    async fn eject(&self, device_path: &str, action: EjectAction) -> Result<(), String>;
     async fn subscribe(&self) -> mpsc::Receiver<()>;
 }
 ```
@@ -135,10 +137,24 @@ pub trait VolumeWatcher: Send + Sync {
   unmounted user-removable media, mount on click, receive change signals over
   D-Bus). Unmounted internal/system partitions remain outside the source bar.
 * Linux without udisks2 → `ProcMountsWatcher` (poll `/proc/mounts`, no
-  mounting).
+  mounting or ejecting).
 * Other platforms → `FallbackVolumeWatcher` (wraps `Platform::list_volumes`;
-  `mount` returns `Err`; `subscribe` returns a channel that never fires, and
+  `mount` returns `Err`, eject delegates to `Platform` on a blocking worker;
+  `subscribe` returns a channel that never fires, and
   callers fall back to periodic polling).
+
+`VolumeInfo.eject` is present only for mounted removable local volumes. It
+carries a backend-only physical drive ID, drive name, mounted sibling count,
+and whole-drive capability. Linux derives these from UDisks2 Drive and Block
+objects, unmounts through Filesystem.Unmount, then uses Drive.PowerOff where
+supported or Drive.Eject for ejectable media. Flash cards and thumb drives
+without power-off support finish after all their volumes are unmounted because
+some readers advertise Ejectable without a working hardware eject command.
+macOS checks `/Volumes` against the mount
+table, excludes disk images, identifies external physical media with
+`diskutil info -plist`, and uses `diskutil unmount` or `diskutil eject` on the
+corresponding whole disk. Windows returns unsupported. No path is passed
+through a shell and neither platform forces an unmount.
 
 ---
 

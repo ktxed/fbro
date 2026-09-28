@@ -17,7 +17,7 @@ use crate::ws::protocol::{
     now, DirSizeQueueSnapshot, DirSizeTaskSchema, FileOpFileSchema, GeneralSettingsSchema,
     JobQueueSchema, LayoutDomain, ModalSizePreferenceSchema, PanelSlotSchema, PanelSnapshot,
     ServerMessage, SettingsSnapshot, ShadowSourceSchema, SourceCapabilities, SourcePeerSchema,
-    SourceSchema, StateDomains,
+    SourceEjectSchema, SourceSchema, StateDomains,
 };
 
 pub(crate) struct IntentContext<'a> {
@@ -372,6 +372,11 @@ pub(crate) fn build_sources(state: &AppState) -> Vec<SourceSchema> {
                 },
                 root_path: src.root_path.clone(),
                 mounted: src.mounted,
+                eject: state.eject_info.get(&src.id).filter(|_| src.mounted).map(|info| SourceEjectSchema {
+                    drive_name: info.drive_name.clone(),
+                    mounted_volume_count: info.mounted_volume_count,
+                    can_eject_drive: info.can_eject_drive,
+                }),
                 storage_class,
                 prefetch_eligible: storage_class.eligible(),
                 free_bytes: space.map(|(free, _)| free),
@@ -1029,7 +1034,10 @@ pub(crate) async fn handle_volumes_changed(
         let panels_to_migrate: Vec<String> = state_guard
             .panels
             .iter()
-            .filter(|(_, panel)| removed.contains(&panel.source_id))
+            .filter(|(_, panel)| {
+                removed.contains(&panel.source_id)
+                    || state_guard.sources.get(&panel.source_id).is_some_and(|source| !source.mounted && source.kind == "filesystem")
+            })
             .map(|(panel_id, _)| panel_id.clone())
             .collect();
 

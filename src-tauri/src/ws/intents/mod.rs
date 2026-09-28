@@ -4,6 +4,7 @@ pub(crate) mod bro;
 mod cache;
 mod git;
 mod compare;
+mod eject;
 pub(crate) mod global_selection;
 mod history;
 pub(crate) mod jobs;
@@ -35,6 +36,7 @@ pub async fn dispatch(name: &str, scope: &Value, args: &Value, ctx: &mut IntentC
         );
     }
     match name {
+        "EjectSource" => eject::handle(args, ctx).await,
         "RefreshPanels"
         | "Refresh"
         | "SetSort"
@@ -169,6 +171,7 @@ fn should_record_command(name: &str) -> bool {
             | "OpenFile"
             | "KillProcess"
             | "OpenTerminal"
+            | "EjectSource"
     )
 }
 

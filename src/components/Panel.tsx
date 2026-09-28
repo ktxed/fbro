@@ -352,6 +352,7 @@ function VolumeHeader({ sources, panel, onNavigateToSource, onMountSource, clien
   onMountSource: (sourceId: string) => void;
   client: WsClient;
 }) {
+  const dispatch = useAppDispatch();
   const remoteStatus = useAppState().remoteSourceStatus;
   const listRef = useRef<HTMLDivElement>(null);
   const [canLeft, setCanLeft] = useState(false);
@@ -499,9 +500,23 @@ function VolumeHeader({ sources, panel, onNavigateToSource, onMountSource, clien
           return (
             <button
               key={src.id}
+              data-source-id={src.id}
               className={classes}
               tabIndex={-1}
               onClick={onClick}
+              onContextMenu={src.eject ? (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                event.currentTarget.focus();
+                const rect = event.currentTarget.getBoundingClientRect();
+                dispatch({ type: "OPEN_SOURCE_MENU", menu: {
+                  sourceId: src.id,
+                  anchorLeft: rect.left,
+                  anchorRight: rect.right,
+                  anchorTop: rect.top,
+                  anchorBottom: rect.bottom,
+                } });
+              } : undefined}
               title={title}
             >
               {Icon ? <Icon size={14} /> : src.name}

@@ -136,6 +136,10 @@ viewer/diff windows are not modal layers. A pairing request opens the Sharing
 settings modal; its confirmation is rendered in that settings surface rather
 than as a second layer.
 
+The removable-source picker uses one `ModalLayer` and `ModalDialog`; its
+whole-drive warning is part of that dialog. The source-bar context menu is a
+transient overlay and blocks panel and toolbar keys until it closes.
+
 When adding or converting a full-screen dialog:
 
 1. Wrap its overlay with `ModalLayer` and give it a stable semantic `modalId`.

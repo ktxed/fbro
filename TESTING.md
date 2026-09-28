@@ -47,6 +47,13 @@ and multi-device volumes. Unknown devices must stay disabled. Verify unplug/remo
 updates within the discovery interval and does not reuse old viewer cache entries.
 Linux fixture tests do not replace these native platform checks.
 
+Removable-source eject requires a real-device check on native Linux with
+UDisks2 and macOS: one-volume USB key, multi-volume USB drive, busy file job,
+and a device held busy by another process. Confirm volume-only unmount leaves
+sibling volumes mounted, whole-drive eject removes all sibling sources, and
+open tabs recover to Home. The Docker smoke environment has no removable
+device; it covers the picker, keyboard ownership, empty state, and focus return.
+
 The smoke test starts two fbro backend/app instances named `fbro-a` and
 `fbro-b`, starts two local `tauri-driver` processes, drives the UI through
 WebDriver, and observes backend state over WebSocket.
@@ -201,6 +208,9 @@ The smoke test exercises these flows:
   - Colour scheme switch applies `data-color-scheme` on `.app`.
   - About modal from the command palette: sole top layer, one `role=dialog`
     with `aria-modal`, build-info formats, Escape restores panel focus.
+  - Eject removable source command from the palette: picker is the top layer,
+    initial focus is inside it, empty state disables eject, and Escape returns
+    focus to the panel.
   - Bro help: Help in Pass to Bro opens Settings › Bros; closing returns focus
     to the Bro dialog's help button with its form values intact.
   - Bro list keyboard: opened from the command palette, the bro list gets

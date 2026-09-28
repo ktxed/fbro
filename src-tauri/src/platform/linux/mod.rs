@@ -291,6 +291,7 @@ impl Platform for LinuxPlatform {
                     root_path: FALLBACK.to_string(),
                     mounted: true,
                     device_path: None,
+                    eject: None,
                 }];
             }
         };
@@ -333,6 +334,7 @@ impl Platform for LinuxPlatform {
                 root_path: mountpoint,
                 mounted: true,
                 device_path: None,
+                eject: None,
             });
         }
 
@@ -343,6 +345,7 @@ impl Platform for LinuxPlatform {
                 root_path: FALLBACK.to_string(),
                 mounted: true,
                 device_path: None,
+                eject: None,
             }];
         }
 

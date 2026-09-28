@@ -18,6 +18,32 @@ pub struct VolumeInfo {
     pub root_path: String,           // mount point path (empty if unmounted)
     pub mounted: bool,               // whether the volume is currently mounted
     pub device_path: Option<String>, // udisks2 object path for mount operations
+    pub eject: Option<EjectInfo>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EjectInfo {
+    /// Opaque physical-drive identity. Never sent to the frontend.
+    pub drive_id: String,
+    pub drive_name: String,
+    pub mounted_volume_count: usize,
+    pub can_eject_drive: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EjectAction {
+    UnmountVolume,
+    EjectDrive,
+}
+
+impl EjectAction {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "unmount-volume" => Some(Self::UnmountVolume),
+            "eject-drive" => Some(Self::EjectDrive),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -99,6 +125,11 @@ pub struct ShellCommandRemoveResult {
 pub trait Platform: Send + Sync {
     /// Returns the current user's home directory.
     fn home_dir(&self) -> String;
+
+    /// Native removable-volume action. Called on a blocking worker.
+    fn eject_volume(&self, _device_path: &str, _action: EjectAction) -> Result<(), String> {
+        Err("Eject is not supported on this platform".into())
+    }
 
     /// Whether embedded zsh sessions may opt into Emacs line-editing bindings.
     /// This workaround is specific to macOS Option+Arrow word navigation.
@@ -313,6 +344,7 @@ pub trait VolumeWatcher: Send + Sync {
     async fn list_volumes(&self) -> Vec<VolumeInfo>;
     /// Mount an unmounted volume by its device path. Returns the mount point.
     async fn mount(&self, device_path: &str) -> Result<String, String>;
+    async fn eject(&self, device_path: &str, action: EjectAction) -> Result<(), String>;
     /// Subscribe to volume change signals. Returns a channel that fires `()`
     /// whenever any volume state changes (plug/unplug, mount/unmount).
     async fn subscribe(&self) -> mpsc::Receiver<()>;
@@ -335,11 +367,22 @@ impl FallbackVolumeWatcher {
 #[async_trait::async_trait]
 impl VolumeWatcher for FallbackVolumeWatcher {
     async fn list_volumes(&self) -> Vec<VolumeInfo> {
-        self.platform.list_volumes()
+        let platform = self.platform.clone();
+        tokio::task::spawn_blocking(move || platform.list_volumes())
+            .await
+            .unwrap_or_default()
     }
 
     async fn mount(&self, _device_path: &str) -> Result<String, String> {
         Err("Mounting is not supported on this platform".to_string())
+    }
+
+    async fn eject(&self, device_path: &str, action: EjectAction) -> Result<(), String> {
+        let platform = self.platform.clone();
+        let device_path = device_path.to_string();
+        tokio::task::spawn_blocking(move || platform.eject_volume(&device_path, action))
+            .await
+            .map_err(|error| format!("Eject worker failed: {error}"))?
     }
 
     async fn subscribe(&self) -> mpsc::Receiver<()> {

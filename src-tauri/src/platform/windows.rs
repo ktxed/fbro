@@ -260,6 +260,7 @@ impl Platform for WindowsPlatform {
                 root_path: root,
                 mounted: true,
                 device_path: None,
+                eject: None,
             });
         }
 

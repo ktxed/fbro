@@ -144,6 +144,23 @@ export interface PendingContextMenu {
   targetCount: number;
 }
 
+export type EjectAction = "unmount-volume" | "eject-drive";
+
+export interface PendingEject {
+  sourceId: string | null;
+  action: EjectAction | null;
+  requestId: string | null;
+  error: string | null;
+}
+
+export interface PendingSourceMenu {
+  sourceId: string;
+  anchorLeft: number;
+  anchorRight: number;
+  anchorTop: number;
+  anchorBottom: number;
+}
+
 export interface PendingGlobalSelectionAdd {
   panelId: string;
   targetPath?: string;
@@ -268,6 +285,8 @@ export interface AppState {
   pendingPanelHistory: PendingPanelHistory | null;
   pendingDryRun: PendingDryRun | null;
   pendingContextMenu: PendingContextMenu | null;
+  pendingSourceMenu: PendingSourceMenu | null;
+  pendingEject: PendingEject | null;
   pendingGlobalSelectionAdd: PendingGlobalSelectionAdd | null;
   pendingOpenWith: PendingOpenWith | null;
   pendingBro: PendingBro | null;
@@ -354,6 +373,8 @@ const initialState: AppState = {
   pendingPanelHistory: null,
   pendingDryRun: null,
   pendingContextMenu: null,
+  pendingSourceMenu: null,
+  pendingEject: null,
   pendingGlobalSelectionAdd: null,
   pendingOpenWith: null,
   pendingBro: null,
@@ -414,6 +435,12 @@ export type AppAction =
   | { type: "CLOSE_DRY_RUN" }
   | { type: "OPEN_CONTEXT_MENU"; menu: PendingContextMenu }
   | { type: "CLOSE_CONTEXT_MENU" }
+  | { type: "OPEN_SOURCE_MENU"; menu: PendingSourceMenu }
+  | { type: "CLOSE_SOURCE_MENU" }
+  | { type: "OPEN_EJECT"; eject: PendingEject }
+  | { type: "CLOSE_EJECT" }
+  | { type: "SUBMIT_EJECT"; requestId: string; sourceId: string; action: EjectAction }
+  | { type: "SET_EJECT_SELECTION"; sourceId: string; action: EjectAction }
   | { type: "OPEN_GLOBAL_SELECTION_ADD"; add: PendingGlobalSelectionAdd }
   | { type: "CLOSE_GLOBAL_SELECTION_ADD" }
   | { type: "OPEN_OPEN_WITH"; openWith: PendingOpenWith }
@@ -1404,6 +1431,23 @@ function reducer(state: AppState, action: AppAction): AppState {
             pendingGoToPath: state.pendingGoToPath?.panelId === msg.panelId ? null : state.pendingGoToPath,
             pendingPanelHistory: state.pendingPanelHistory?.panelId === msg.panelId ? null : state.pendingPanelHistory,
           };
+        case "EjectSourceOk":
+          return {
+            ...state,
+            pendingEject: state.pendingEject?.requestId === msg.requestId ? null : state.pendingEject,
+            transientHint: {
+              message: msg.action === "eject-drive" ? "Drive ready to remove" : "Volume unmounted",
+              token: msg.timestamp,
+            },
+          };
+        case "EjectSourceFailed":
+          if (state.pendingEject?.requestId !== msg.requestId) {
+            return { ...state, transientHint: { message: msg.message, token: msg.timestamp } };
+          }
+          return {
+            ...state,
+            pendingEject: { ...state.pendingEject, requestId: null, error: msg.message },
+          };
         case "ExternalClipboardReady": {
           const m = msg as ExternalClipboardReadyMessage;
           return {
@@ -1793,6 +1837,20 @@ function reducer(state: AppState, action: AppAction): AppState {
       return { ...state, pendingContextMenu: action.menu };
     case "CLOSE_CONTEXT_MENU":
       return { ...state, pendingContextMenu: null };
+    case "OPEN_SOURCE_MENU":
+      return { ...state, pendingSourceMenu: action.menu, pendingContextMenu: null };
+    case "CLOSE_SOURCE_MENU":
+      return { ...state, pendingSourceMenu: null };
+    case "OPEN_EJECT":
+      return { ...state, pendingEject: action.eject, pendingSourceMenu: null, commandPaletteOpen: false };
+    case "CLOSE_EJECT":
+      return { ...state, pendingEject: null };
+    case "SUBMIT_EJECT":
+      if (!state.pendingEject) return state;
+      return { ...state, pendingEject: { ...state.pendingEject, sourceId: action.sourceId, action: action.action, requestId: action.requestId, error: null } };
+    case "SET_EJECT_SELECTION":
+      if (!state.pendingEject || state.pendingEject.requestId) return state;
+      return { ...state, pendingEject: { ...state.pendingEject, sourceId: action.sourceId, action: action.action, error: null } };
     case "OPEN_GLOBAL_SELECTION_ADD":
       return { ...state, pendingContextMenu: null, pendingGlobalSelectionAdd: action.add };
     case "CLOSE_GLOBAL_SELECTION_ADD":

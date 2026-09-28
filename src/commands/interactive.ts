@@ -38,6 +38,7 @@ export const GLOBAL_SHORTCUT_COMMAND_IDS = [
   "app.settings",
   "app.about",
   "app.install_fbro_command",
+  "app.eject_source",
   "panel.viewer.embed",
   "panel.navigate_source_root",
   "file.info",
@@ -568,6 +569,9 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
     case "app.open_jobs":
       context.onOpenJobsView?.();
       return !!context.onOpenJobsView;
+    case "app.eject_source":
+      dispatch({ type: "OPEN_EJECT", eject: { sourceId: null, action: null, requestId: null, error: null } });
+      return true;
     case "app.settings":
       dispatch({ type: "OPEN_SETTINGS", tab: "general" });
       return true;

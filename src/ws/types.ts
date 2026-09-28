@@ -79,6 +79,11 @@ export interface Source {
   };
   rootPath: string;
   mounted: boolean;
+  eject?: {
+    driveName: string;
+    mountedVolumeCount: number;
+    canEjectDrive: boolean;
+  };
   storageClass?: "internal-ssd" | "rotational" | "removable-external" | "remote" | "virtual" | "unknown";
   /** Missing metadata from older backends disables speculative loading. */
   prefetchEligible?: boolean;
@@ -518,6 +523,23 @@ export interface NavigateOkMessage {
   type: "NavigateOk";
   timestamp: number;
   panelId: string;
+}
+
+export interface EjectSourceOkMessage {
+  type: "EjectSourceOk";
+  timestamp: number;
+  requestId: string;
+  sourceId: string;
+  action: "unmount-volume" | "eject-drive";
+}
+
+export interface EjectSourceFailedMessage {
+  type: "EjectSourceFailed";
+  timestamp: number;
+  requestId: string;
+  sourceId: string;
+  code: string;
+  message: string;
 }
 
 export interface SyncBroResultMessage {
@@ -1079,6 +1101,8 @@ export type BEMessage =
   | TouchFileOkMessage
   | SetPermissionsOkMessage
   | NavigateOkMessage
+  | EjectSourceOkMessage
+  | EjectSourceFailedMessage
   | SyncBroResultMessage
   | FedupBroResultMessage
   | FedupBroResultPageMessage

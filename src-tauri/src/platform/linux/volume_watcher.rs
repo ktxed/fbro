@@ -4,7 +4,7 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 
 use super::udisks2::UDisks2;
-use crate::platform::{Platform, VolumeInfo, VolumeWatcher};
+use crate::platform::{EjectAction, Platform, VolumeInfo, VolumeWatcher};
 
 fn mount_path_key(path: &str) -> String {
     if path == "/" {
@@ -37,6 +37,10 @@ impl VolumeWatcher for UDisks2Watcher {
 
     async fn mount(&self, device_path: &str) -> Result<String, String> {
         self.udisks2.mount(device_path).await
+    }
+
+    async fn eject(&self, device_path: &str, action: EjectAction) -> Result<(), String> {
+        self.udisks2.eject(device_path, action).await
     }
 
     async fn subscribe(&self) -> mpsc::Receiver<()> {
@@ -84,6 +88,7 @@ mod tests {
             root_path: path.into(),
             mounted: true,
             device_path: None,
+            eject: None,
         }
     }
 
@@ -149,6 +154,10 @@ impl VolumeWatcher for ProcMountsWatcher {
     }
 
     async fn mount(&self, _device_path: &str) -> Result<String, String> {
+        Err("udisks2 is not available on this system".to_string())
+    }
+
+    async fn eject(&self, _device_path: &str, _action: EjectAction) -> Result<(), String> {
         Err("udisks2 is not available on this system".to_string())
     }
 

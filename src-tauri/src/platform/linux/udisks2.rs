@@ -4,7 +4,7 @@ use tokio::sync::mpsc;
 use zbus::zvariant::{ObjectPath, OwnedObjectPath, OwnedValue, Value};
 use zbus::Connection;
 
-use super::VolumeInfo;
+use crate::platform::{EjectAction, EjectInfo, VolumeInfo};
 
 const UDISKS2_BUS: &str = "org.freedesktop.UDisks2";
 const UDISKS2_PATH: &str = "/org/freedesktop/UDisks2";
@@ -149,6 +149,11 @@ impl UDisks2 {
                 root_path: mount_point,
                 mounted,
                 device_path: Some(path_str.to_string()),
+                eject: if mounted {
+                    eject_info(block, &objects)
+                } else {
+                    None
+                },
             });
         }
 
@@ -177,6 +182,66 @@ impl UDisks2 {
         })?;
 
         Ok(reply)
+    }
+
+    pub(super) async fn eject(&self, block_path: &str, action: EjectAction) -> Result<(), String> {
+        let objects = self.get_managed_objects().await.map_err(|e| format!("Inspect drive: {e}"))?;
+        let block = objects.iter()
+            .find(|(path, _)| path.as_str() == block_path)
+            .and_then(|(_, interfaces)| interfaces.get(BLOCK_IFACE))
+            .ok_or_else(|| "Volume is no longer available".to_string())?;
+        let info = eject_info(block, &objects)
+            .ok_or_else(|| "Volume is no longer mounted or removable".to_string())?;
+        let drive = info.drive_id.as_str();
+
+        let mut mounted_blocks: Vec<String> = objects.iter()
+            .filter_map(|(path, interfaces)| {
+                let block = interfaces.get(BLOCK_IFACE)?;
+                let fs = interfaces.get(FS_IFACE)?;
+                (prop_object_path(block, "Drive").as_deref() == Some(drive)
+                    && !prop_byte_array_list(fs, "MountPoints").is_empty())
+                    .then(|| path.as_str().to_string())
+            })
+            .collect();
+        mounted_blocks.sort();
+        if !mounted_blocks.iter().any(|path| path == block_path) {
+            return Err("Volume is no longer mounted".into());
+        }
+
+        match action {
+            EjectAction::UnmountVolume => self.unmount(block_path).await,
+            EjectAction::EjectDrive => {
+                if !info.can_eject_drive {
+                    return Err("This drive does not support safe removal".into());
+                }
+                for path in mounted_blocks {
+                    self.unmount(&path).await?;
+                }
+                let drive_props = drive_props(drive, &objects)
+                    .ok_or_else(|| "Drive is no longer available".to_string())?;
+                let method = match drive_removal_method(drive_props) {
+                    Some(DriveRemovalMethod::PowerOff) => "PowerOff",
+                    Some(DriveRemovalMethod::Eject) => "Eject",
+                    Some(DriveRemovalMethod::UnmountOnly) => return Ok(()),
+                    None => return Err("This drive does not support safe removal".into()),
+                };
+                let path = ObjectPath::try_from(drive).map_err(|e| format!("Invalid drive: {e}"))?;
+                let proxy = zbus::Proxy::new(&self.connection, UDISKS2_BUS, path, DRIVE_IFACE)
+                    .await.map_err(|e| format!("Drive proxy: {e}"))?;
+                let options: HashMap<&str, Value<'_>> = HashMap::new();
+                proxy.call::<_, _, ()>(method, &(options,)).await
+                    .map_err(|e| format!("Eject drive: {e}"))
+            }
+        }
+    }
+
+    async fn unmount(&self, block_path: &str) -> Result<(), String> {
+        let path = ObjectPath::try_from(block_path).map_err(|e| format!("Invalid volume: {e}"))?;
+        let proxy = zbus::Proxy::new(&self.connection, UDISKS2_BUS, path, FS_IFACE)
+            .await.map_err(|e| format!("Filesystem proxy: {e}"))?;
+        let options: HashMap<&str, Value<'_>> = HashMap::new();
+        proxy.call::<_, _, ()>("Unmount", &(options,)).await
+            .map_err(|e| format!("Unmount volume: {e}"))
     }
 
     /// Subscribe to udisks2 D-Bus signals. Returns a channel that fires ()
@@ -315,6 +380,56 @@ fn drive_is_removable(block: &HashMap<String, OwnedValue>, objects: &ManagedObje
     prop_bool(drive, "Removable").unwrap_or(false)
 }
 
+fn drive_props<'a>(drive_path: &str, objects: &'a ManagedObjects) -> Option<&'a HashMap<String, OwnedValue>> {
+    objects.iter()
+        .find(|(path, _)| path.as_str() == drive_path)
+        .and_then(|(_, interfaces)| interfaces.get(DRIVE_IFACE))
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DriveRemovalMethod {
+    PowerOff,
+    Eject,
+    UnmountOnly,
+}
+
+fn drive_removal_method(drive: &HashMap<String, OwnedValue>) -> Option<DriveRemovalMethod> {
+    if prop_bool(drive, "CanPowerOff").unwrap_or(false) {
+        return Some(DriveRemovalMethod::PowerOff);
+    }
+    // Card readers and USB sticks can advertise Ejectable even when their
+    // hardware has no eject command. Once all filesystems are unmounted, the
+    // flash media is safe to remove without issuing Drive.Eject.
+    let media = prop_string(drive, "Media").unwrap_or_default();
+    if media.starts_with("flash") || media == "thumb" {
+        return Some(DriveRemovalMethod::UnmountOnly);
+    }
+    prop_bool(drive, "Ejectable").unwrap_or(false).then_some(DriveRemovalMethod::Eject)
+}
+
+fn eject_info(block: &HashMap<String, OwnedValue>, objects: &ManagedObjects) -> Option<EjectInfo> {
+    let drive_id = prop_object_path(block, "Drive")?;
+    let drive = drive_props(&drive_id, objects)?;
+    if !prop_bool(drive, "Removable").unwrap_or(false) {
+        return None;
+    }
+    let mounted_volume_count = objects.values().filter(|interfaces| {
+        let Some(other_block) = interfaces.get(BLOCK_IFACE) else { return false };
+        let Some(fs) = interfaces.get(FS_IFACE) else { return false };
+        prop_object_path(other_block, "Drive").as_deref() == Some(drive_id.as_str())
+            && !prop_byte_array_list(fs, "MountPoints").is_empty()
+    }).count();
+    let vendor = prop_string(drive, "Vendor").unwrap_or_default();
+    let model = prop_string(drive, "Model").unwrap_or_default();
+    let drive_name = format!("{vendor} {model}").trim().to_string();
+    Some(EjectInfo {
+        drive_id,
+        drive_name: if drive_name.is_empty() { "Removable drive".into() } else { drive_name },
+        mounted_volume_count,
+        can_eject_drive: drive_removal_method(drive).is_some(),
+    })
+}
+
 // ── Property extraction helpers ─────────────────────────────────────────────
 
 fn prop_string(props: &HashMap<String, OwnedValue>, key: &str) -> Option<String> {
@@ -373,7 +488,9 @@ fn prop_byte_array_list(props: &HashMap<String, OwnedValue>, key: &str) -> Vec<S
 
 #[cfg(test)]
 mod tests {
-    use super::{is_user_visible_volume, mount_display_name};
+    use super::{drive_removal_method, eject_info, is_user_visible_volume, mount_display_name, DriveRemovalMethod, ManagedObjects, DRIVE_IFACE};
+    use std::collections::HashMap;
+    use zbus::zvariant::{ObjectPath, OwnedObjectPath, OwnedValue, Str};
 
     #[test]
     fn visibility_keeps_mounts_and_only_user_removable_unmounted_media() {
@@ -390,5 +507,44 @@ mod tests {
         assert_eq!(mount_display_name("/"), "/");
         assert_eq!(mount_display_name("/home"), "home");
         assert_eq!(mount_display_name("/mnt/photo archive/"), "photo archive");
+    }
+
+    #[test]
+    fn only_removable_drives_advertise_eject() {
+        let drive_path = "/org/freedesktop/UDisks2/drives/usb";
+        let block = HashMap::from([(
+            "Drive".to_string(),
+            OwnedValue::from(ObjectPath::try_from(drive_path).unwrap()),
+        )]);
+        let objects = |removable: bool| -> ManagedObjects {
+            let props = HashMap::from([
+                ("Removable".to_string(), OwnedValue::from(removable)),
+                ("CanPowerOff".to_string(), OwnedValue::from(true)),
+            ]);
+            HashMap::from([(
+                OwnedObjectPath::try_from(drive_path).unwrap(),
+                HashMap::from([(DRIVE_IFACE.to_string(), props)]),
+            )])
+        };
+        assert!(eject_info(&block, &objects(false)).is_none());
+        let info = eject_info(&block, &objects(true)).unwrap();
+        assert_eq!(info.drive_id, drive_path);
+        assert!(info.can_eject_drive);
+        assert_eq!(info.mounted_volume_count, 0);
+    }
+
+    #[test]
+    fn flash_card_without_power_off_uses_unmount_only() {
+        let props = HashMap::from([
+            ("CanPowerOff".to_string(), OwnedValue::from(false)),
+            ("Ejectable".to_string(), OwnedValue::from(true)),
+            ("Media".to_string(), OwnedValue::from(Str::from("flash_sd"))),
+        ]);
+        assert_eq!(drive_removal_method(&props), Some(DriveRemovalMethod::UnmountOnly));
+        let powered = HashMap::from([
+            ("CanPowerOff".to_string(), OwnedValue::from(true)),
+            ("Media".to_string(), OwnedValue::from(Str::from("flash_sd"))),
+        ]);
+        assert_eq!(drive_removal_method(&powered), Some(DriveRemovalMethod::PowerOff));
     }
 }

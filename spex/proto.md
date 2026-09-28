@@ -193,6 +193,20 @@ Key ideas:
 - AI can reason safely using this list
 - Jobs are validated against source capabilities
 
+Mounted removable filesystem Sources may also include `eject: { driveName,
+mountedVolumeCount, canEjectDrive }`. The absence of `eject` means the client
+must not offer an eject action. Physical device paths and drive IDs stay in
+the backend.
+
+`EjectSource` intent args are `{ sourceId, action, requestId,
+expectedMountedVolumeCount }`, where `action` is `unmount-volume` or
+`eject-drive`. The backend re-enumerates, rejects changed whole-drive volume
+counts and active/queued file jobs on affected volumes, and replies with
+`EjectSourceOk { requestId, sourceId, action }` or
+`EjectSourceFailed { requestId, sourceId, code, message }`. Eject failures
+use `EJECT_SOURCE_*` codes. Sources and affected panels are patched before a
+success reply; a partially completed operation is reconciled before failure.
+
 Important:
 
 Panels reference sources by ID

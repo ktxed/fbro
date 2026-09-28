@@ -83,6 +83,7 @@ The `Source` record supplies the frontend-visible identity and coarse policy:
 | `supports` | Fine-grained operation/navigation flags. |
 | `root_path` | Root in the driver's path space; may be empty for virtual/remote drivers. |
 | `mounted` | Whether the source currently has a usable driver. |
+| `eject` | Optional backend-projected removable-volume actions, drive label, and mounted sibling count; absent for internal, remote, virtual, and unmounted sources. |
 | `shadow` | Transient/overlay source; hidden from the source bar. |
 | `read_only` | Backend policy flag, separate from `shadow`. |
 | `sort_priority`, `icon_name` | Source-bar presentation hints. |
@@ -212,6 +213,14 @@ only while their peer connection is registered.
 The source bar renders every `Source` for which `shadow == false`; it is not
 restricted to physical volumes. Sorting uses `sort_priority`, then a
 case-insensitive name comparison.
+
+Mounted removable volumes expose a right-click menu with **Unmount volume…**
+and, when the platform supports it, **Eject entire drive…**. The command
+palette opens the same source/action picker. Unmount affects only the selected
+volume; whole-drive eject affects all mounted sibling volumes and displays a
+warning with the backend-reported count. Successful removal or unmount moves
+panels using unavailable sources to Home. The backend re-enumerates and
+validates the action before touching a device.
 
 ### 3.2 VFS drivers outside the panel-source hierarchy
 

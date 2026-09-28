@@ -1,7 +1,7 @@
 use super::{
     append_supplemental_apps, ExternalClipboardOp, ExternalClipboardPayload, OpenWithAppOption,
     OpenWithLaunch, Platform, ResolvedOpenWithApp, ShellCommandInstallResult,
-    ShellCommandRemoveResult, ShellCommandStatus, VolumeInfo,
+    ShellCommandRemoveResult, ShellCommandStatus, EjectAction, EjectInfo, VolumeInfo,
 };
 use libc;
 use std::env;
@@ -9,6 +9,7 @@ use std::ffi::{c_char, c_void, CStr, CString};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::collections::HashMap;
 
 pub struct MacOSPlatform;
 
@@ -70,6 +71,31 @@ extern "C" {
 impl Platform for MacOSPlatform {
     fn home_dir(&self) -> String {
         std::env::var("HOME").unwrap_or_else(|_| "/".to_string())
+    }
+
+    fn eject_volume(&self, device_path: &str, action: EjectAction) -> Result<(), String> {
+        let disks = mounted_removable_disks(&disk_image_mount_points());
+        let disk = disks.values().find(|disk| disk.device_path == device_path)
+            .ok_or_else(|| "Volume is no longer mounted or removable".to_string())?;
+        let target = match action {
+            EjectAction::UnmountVolume => device_path,
+            EjectAction::EjectDrive => disk.drive_id.as_str(),
+        };
+        let verb = match action {
+            EjectAction::UnmountVolume => "unmount",
+            EjectAction::EjectDrive => "eject",
+        };
+        let output = Command::new("/usr/sbin/diskutil")
+            .args([verb, target])
+            .output()
+            .map_err(|error| format!("Run diskutil {verb}: {error}"))?;
+        if output.status.success() {
+            Ok(())
+        } else {
+            let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            let detail = if detail.is_empty() { String::from_utf8_lossy(&output.stdout).trim().to_string() } else { detail };
+            Err(format!("diskutil {verb} failed: {detail}"))
+        }
     }
 
     fn supports_zsh_emacs_keymap(&self) -> bool {
@@ -247,8 +273,11 @@ impl Platform for MacOSPlatform {
             root_path: "/".to_string(),
             mounted: true,
             device_path: None,
+            eject: None,
         }];
         let ignored_mounts = disk_image_mount_points();
+        let removable_disks = mounted_removable_disks(&ignored_mounts);
+        let mounted_paths = mounted_volume_paths();
         let dir = match std::fs::read_dir("/Volumes") {
             Ok(d) => d,
             Err(_) => return volumes,
@@ -265,16 +294,22 @@ impl Platform for MacOSPlatform {
                 .filter_map(|entry| {
                     let name = entry.file_name().to_string_lossy().to_string();
                     let root_path = format!("/Volumes/{}", name);
-                    if ignored_mounts.contains(&root_path) {
+                    if ignored_mounts.contains(&root_path) || !mounted_paths.contains(&root_path) {
                         return None;
                     }
                     let id = format!("vol-{}", name);
                     Some(VolumeInfo {
                         id,
                         name,
-                        root_path,
                         mounted: true,
-                        device_path: None,
+                        device_path: removable_disks.get(&root_path).map(|disk| disk.device_path.clone()),
+                        eject: removable_disks.get(&root_path).map(|disk| EjectInfo {
+                            drive_id: disk.drive_id.clone(),
+                            drive_name: disk.drive_name.clone(),
+                            mounted_volume_count: disk.mounted_volume_count,
+                            can_eject_drive: true,
+                        }),
+                        root_path,
                     })
                 }),
         );
@@ -301,6 +336,72 @@ impl Platform for MacOSPlatform {
     fn get_thumbnail(&self, path: &str, size: u32) -> Option<(Vec<u8>, &'static str)> {
         macos_get_thumbnail(path, size).map(|bytes| (bytes, "image/png"))
     }
+}
+
+struct MountedRemovableDisk {
+    device_path: String,
+    drive_id: String,
+    drive_name: String,
+    mounted_volume_count: usize,
+}
+
+fn mounted_volume_paths() -> std::collections::HashSet<String> {
+    let mut raw: *mut libc::statfs = std::ptr::null_mut();
+    let count = unsafe { libc::getmntinfo(&mut raw, libc::MNT_NOWAIT) };
+    if count <= 0 || raw.is_null() { return std::collections::HashSet::new(); }
+    unsafe { std::slice::from_raw_parts(raw, count as usize) }
+        .iter()
+        .map(|mount| unsafe { CStr::from_ptr(mount.f_mntonname.as_ptr()) }.to_string_lossy().into_owned())
+        .collect()
+}
+
+fn diskutil_info(device: &str) -> Option<serde_json::Value> {
+    let output = Command::new("/usr/sbin/diskutil")
+        .args(["info", "-plist", device]).output().ok()?;
+    if !output.status.success() { return None; }
+    let mut child = Command::new("/usr/bin/plutil")
+        .args(["-convert", "json", "-o", "-", "-"])
+        .stdin(Stdio::piped()).stdout(Stdio::piped()).spawn().ok()?;
+    child.stdin.as_mut()?.write_all(&output.stdout).ok()?;
+    let converted = child.wait_with_output().ok()?;
+    if !converted.status.success() { return None; }
+    serde_json::from_slice(&converted.stdout).ok()
+}
+
+fn mounted_removable_disks(ignored_mounts: &std::collections::HashSet<String>) -> HashMap<String, MountedRemovableDisk> {
+    let mut raw: *mut libc::statfs = std::ptr::null_mut();
+    let count = unsafe { libc::getmntinfo(&mut raw, libc::MNT_NOWAIT) };
+    if count <= 0 || raw.is_null() { return HashMap::new(); }
+    let mounts: Vec<(String, String)> = unsafe { std::slice::from_raw_parts(raw, count as usize) }
+        .iter()
+        .map(|mount| {
+            let path = unsafe { CStr::from_ptr(mount.f_mntonname.as_ptr()) }.to_string_lossy().into_owned();
+            let device = unsafe { CStr::from_ptr(mount.f_mntfromname.as_ptr()) }.to_string_lossy().into_owned();
+            (path, device)
+        })
+        .filter(|(path, device)| device.starts_with("/dev/") && !ignored_mounts.contains(path))
+        .collect();
+    let mut candidates = Vec::new();
+    let mut counts: HashMap<String, usize> = HashMap::new();
+    for (path, device) in mounts {
+        let Some(info) = diskutil_info(&device) else { continue };
+        let Some(drive_id) = info.get("ParentWholeDisk").and_then(|v| v.as_str())
+            .or_else(|| info.get("DeviceIdentifier").and_then(|v| v.as_str())) else { continue };
+        *counts.entry(drive_id.to_string()).or_default() += 1;
+        // Disk images and synthesized devices can also report Ejectable. Keep
+        // the source action for physical external media with a known bus.
+        let removable = info.get("Internal").and_then(|v| v.as_bool()) == Some(false)
+            && info.get("VirtualOrPhysical").and_then(|v| v.as_str()) != Some("Virtual");
+        if !removable { continue; }
+        let name = info.get("MediaName").and_then(|v| v.as_str())
+            .or_else(|| info.get("VolumeName").and_then(|v| v.as_str()))
+            .unwrap_or("Removable drive").to_string();
+        candidates.push((path, device, drive_id.to_string(), name));
+    }
+    candidates.into_iter().map(|(path, device_path, drive_id, drive_name)| {
+        let mounted_volume_count = counts.get(&drive_id).copied().unwrap_or(1);
+        (path, MountedRemovableDisk { device_path, drive_id, drive_name, mounted_volume_count })
+    }).collect()
 }
 
 fn disk_image_mount_points() -> std::collections::HashSet<String> {

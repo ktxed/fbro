@@ -204,6 +204,7 @@ impl Platform for TestPlatform {
             root_path: "/".to_string(),
             mounted: true,
             device_path: None,
+            eject: None,
         }]
     }
 }

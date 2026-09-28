@@ -120,6 +120,23 @@ pub enum ServerMessage {
         #[serde(rename = "panelId")]
         panel_id: String,
     },
+    EjectSourceOk {
+        timestamp: u64,
+        #[serde(rename = "requestId")]
+        request_id: String,
+        #[serde(rename = "sourceId")]
+        source_id: String,
+        action: String,
+    },
+    EjectSourceFailed {
+        timestamp: u64,
+        #[serde(rename = "requestId")]
+        request_id: String,
+        #[serde(rename = "sourceId")]
+        source_id: String,
+        code: String,
+        message: String,
+    },
     SyncBroResult {
         timestamp: u64,
         #[serde(rename = "jobId")]
@@ -733,6 +750,8 @@ pub struct SourceSchema {
     #[serde(rename = "rootPath")]
     pub root_path: String,
     pub mounted: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub eject: Option<SourceEjectSchema>,
     #[serde(rename = "storageClass")]
     pub storage_class: crate::storage::StorageClass,
     #[serde(rename = "prefetchEligible")]
@@ -750,6 +769,14 @@ pub struct SourceSchema {
     /// the read-only badge tooltip.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub peer: Option<SourcePeerSchema>,
+}
+
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceEjectSchema {
+    pub drive_name: String,
+    pub mounted_volume_count: usize,
+    pub can_eject_drive: bool,
 }
 
 #[derive(Serialize, Clone, Debug)]

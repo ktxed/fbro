@@ -631,6 +631,15 @@ pub(crate) fn build_interactive_commands() -> Vec<InteractiveCommandSchema> {
         }],
         Some("QuickEditFile"),
     ));
+    if !cfg!(target_os = "windows") {
+        commands.push(command(
+            "app.eject_source",
+            "App",
+            "Eject Removable Source",
+            vec![],
+            None,
+        ));
+    }
     commands
 }
 

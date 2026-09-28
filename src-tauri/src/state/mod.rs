@@ -491,6 +491,8 @@ pub struct AppState {
     /// Ordered slot ids — drives the visible layout left-to-right.
     pub layout_slots: Vec<String>,
     pub sources: HashMap<String, Source>,
+    pub eject_info: HashMap<String, crate::platform::EjectInfo>,
+    pub ejecting_drives: HashSet<String>,
     pub drivers: HashMap<String, Arc<dyn VfsDriver>>,
     /// Internal copy buffer for virtual VFS entries (git raw file, …).
     pub file_clipboard: Option<FileClipboard>,
@@ -608,6 +610,15 @@ pub struct GitCompareNavigation {
 }
 
 impl AppState {
+    pub fn path_on_ejecting_drive(&self, path: &str) -> bool {
+        if path.is_empty() { return false; }
+        self.sources.iter().any(|(id, source)| {
+            source.kind == "filesystem"
+                && source.mounted
+                && self.eject_info.get(id).is_some_and(|info| self.ejecting_drives.contains(&info.drive_id))
+                && Path::new(path).starts_with(&source.root_path)
+        })
+    }
     /// Apply the preferences associated with the panel's current local path.
     /// Non-local panels keep their existing per-panel behavior.
     pub fn apply_location_settings(&mut self, panel_id: &str, is_local: bool) -> Option<SortSpec> {
@@ -712,6 +723,7 @@ impl AppState {
                 root_path: "/".to_string(),
                 mounted: true,
                 device_path: None,
+                eject: None,
             });
         }
 
@@ -839,11 +851,15 @@ impl AppState {
             std::env::var("FBRO_SPY_SOCK").unwrap_or_else(|_| "/tmp/fbro-spy.sock".to_string());
 
         let mut sources = HashMap::new();
+        let mut eject_info = HashMap::new();
         let mut drivers: HashMap<String, Arc<dyn VfsDriver>> = HashMap::new();
         let global_selections: SharedGlobalSelectionStore =
             Arc::new(std::sync::Mutex::new(GlobalSelectionStore::default()));
 
         for vol in vols {
+            if let Some(info) = vol.eject.clone() {
+                eject_info.insert(vol.id.clone(), info);
+            }
             let source = Source {
                 id: vol.id.clone(),
                 name: vol.name,
@@ -972,6 +988,8 @@ impl AppState {
             slots,
             layout_slots,
             sources,
+            eject_info,
+            ejecting_drives: HashSet::new(),
             drivers,
             file_clipboard: None,
             global_selections,
@@ -1030,6 +1048,10 @@ impl AppState {
             std::env::var("FBRO_SPY_SOCK").unwrap_or_else(|_| "/tmp/fbro-spy.sock".to_string());
 
         let new_ids: HashSet<String> = volumes.iter().map(|v| v.id.clone()).collect();
+        self.eject_info = volumes
+            .iter()
+            .filter_map(|volume| volume.eject.clone().map(|info| (volume.id.clone(), info)))
+            .collect();
         // Only consider filesystem-kind sources for removal. Virtual sources
         // (procs, bookmarks, history, archives, search) have their own
         // lifecycle and are not in the volume watcher's purview — leaving
@@ -1060,12 +1082,12 @@ impl AppState {
             };
 
             if let Some(existing) = self.sources.get_mut(&vol.id) {
+                existing.device_path = vol.device_path.clone();
+                existing.name = vol.name.clone();
                 // Update existing source if mount status or path changed
                 if existing.mounted != vol.mounted || existing.root_path != vol.root_path {
                     existing.mounted = vol.mounted;
                     existing.root_path = vol.root_path;
-                    existing.device_path = vol.device_path;
-                    existing.name = vol.name;
                     if vol.mounted {
                         existing.supports = supports.clone();
                         if !self.drivers.contains_key(&existing.id) {
@@ -1355,7 +1377,7 @@ pub fn collect_visible_thumb_paths(state: &AppState) -> std::collections::HashSe
 #[cfg(test)]
 mod tests {
     use super::{fallback_source_id_for_home_candidates, AppState};
-    use crate::platform::{Platform, VolumeInfo};
+    use crate::platform::{EjectInfo, Platform, VolumeInfo};
     use std::sync::Arc;
 
     struct TestPlatform {
@@ -1378,6 +1400,7 @@ mod tests {
                 root_path: "/".into(),
                 mounted: true,
                 device_path: None,
+                eject: None,
             }]
         }
     }
@@ -1460,6 +1483,7 @@ mod tests {
                 root_path: "/".into(),
                 mounted: true,
                 device_path: Some("/org/freedesktop/UDisks2/block_devices/root".into()),
+                eject: None,
             },
             VolumeInfo {
                 id: "removable".into(),
@@ -1467,6 +1491,7 @@ mod tests {
                 root_path: String::new(),
                 mounted: false,
                 device_path: Some("/org/freedesktop/UDisks2/block_devices/card".into()),
+                eject: None,
             },
         ]);
 
@@ -1484,6 +1509,39 @@ mod tests {
                 .collect::<Vec<_>>(),
             old_paths
         );
+        std::fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn eject_metadata_and_job_gate_follow_volume_mount_state() {
+        let home = std::env::temp_dir().join(format!("fbro-eject-state-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&home).unwrap();
+        let platform: Arc<dyn Platform> = Arc::new(TestPlatform { home: home.to_string_lossy().into_owned() });
+        let mut state = AppState::new_default(
+            platform.clone(), Default::default(), 0,
+            crate::thumb_pool::ThumbPool::start(platform, 1),
+            Arc::new(crate::fileserver::ThumbCache::new(1)),
+        );
+        let usb = VolumeInfo {
+            id: "usb".into(), name: "USB".into(), root_path: "/media/usb".into(),
+            mounted: true, device_path: Some("/org/freedesktop/UDisks2/block_devices/usb".into()),
+            eject: Some(EjectInfo { drive_id: "drive-usb".into(), drive_name: "USB".into(), mounted_volume_count: 1, can_eject_drive: true }),
+        };
+        let root = || VolumeInfo {
+            id: "root".into(), name: "/".into(), root_path: "/".into(),
+            mounted: true, device_path: None, eject: None,
+        };
+        state.rebuild_sources(vec![root(), usb]);
+        assert!(state.eject_info.contains_key("usb"));
+        state.ejecting_drives.insert("drive-usb".into());
+        assert!(state.path_on_ejecting_drive("/media/usb/file"));
+        assert!(!state.path_on_ejecting_drive("/media/usb-old/file"));
+        state.rebuild_sources(vec![root(), VolumeInfo {
+            id: "usb".into(), name: "USB".into(), root_path: String::new(),
+            mounted: false, device_path: Some("/org/freedesktop/UDisks2/block_devices/usb".into()), eject: None,
+        }]);
+        assert!(!state.eject_info.contains_key("usb"));
+        assert!(!state.path_on_ejecting_drive("/media/usb/file"));
         std::fs::remove_dir_all(home).unwrap();
     }
 }

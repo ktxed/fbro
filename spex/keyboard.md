@@ -28,7 +28,7 @@ dialog types.
 
 - `ModalStackProvider` captures key and focus events and routes them to the top
   `ModalLayer`.
-- `Layout` passes `hasActiveModal || pendingContextMenu` to panels as their
+- `Layout` passes `hasActiveModal || pendingContextMenu || pendingSourceMenu` to panels as their
   modal guard. A guarded panel suppresses keyboard actions and focus intents.
 - `Toolbar` uses the same conditions to suppress modal-opening and file-command
   shortcuts. Zoom shortcuts remain global.
@@ -50,6 +50,10 @@ dialog types.
   child has not already consumed the event.
 - Modal tablists and selectable lists use roving/composite focus: one Tab stop,
   arrows within the component, and synchronized focus and selection.
+- The removable-source picker is a `ModalLayer` opened from the command
+  palette or source context menu. Its native list control owns selection keys;
+  Escape closes and restores focus. The source menu owns arrows, Enter, and
+  Escape while open.
 
 ---
 
