@@ -193,13 +193,31 @@ mod tests {
 
     #[test]
     fn remembered_source_path_must_stay_inside_source_root() {
-        let mut paths = HashMap::new();
-        paths.insert("vol-mnt-six".to_string(), "/home/ktx/work".to_string());
+        let root = std::env::temp_dir().join(format!(
+            "fbro-remembered-{}",
+            std::process::id()
+        ));
+        let inside = root.join("inside");
+        std::fs::create_dir_all(&inside).unwrap();
+        let root_path = root.to_string_lossy().into_owned();
+        let inside_path = inside.to_string_lossy().into_owned();
+        let outside_path = std::env::temp_dir().to_string_lossy().into_owned();
 
+        let mut outside = HashMap::new();
+        outside.insert("vol-mnt-six".to_string(), outside_path);
         assert_eq!(
-            remembered_path_for_source(&paths, "vol-mnt-six", "/mnt/six"),
+            remembered_path_for_source(&outside, "vol-mnt-six", &root_path),
             None
         );
+
+        let mut contained = HashMap::new();
+        contained.insert("vol-mnt-six".to_string(), inside_path.clone());
+        assert_eq!(
+            remembered_path_for_source(&contained, "vol-mnt-six", &root_path),
+            Some(inside_path)
+        );
+
+        let _ = std::fs::remove_dir_all(root);
     }
 }
 

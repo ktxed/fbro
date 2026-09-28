@@ -8,7 +8,7 @@
 
 Built with [Tauri](https://tauri.app/) (Rust backend + React frontend). The backend owns state; the UI talks over WebSocket via intents and jobs.
 
-> Status: early (`0.1.0`). Developed primarily on Linux; other platforms may work with gaps.
+> Status: early (`0.0.1`). Developed primarily on Linux; other platforms may work with gaps.
 
 ## Features
 
@@ -20,25 +20,6 @@ Built with [Tauri](https://tauri.app/) (Rust backend + React frontend). The back
 - Embedded terminal + quick edit
 - Viewer (text/hex/markdown/mermaid/media) and file compare
 - Peer remote: pair two fbro instances, browse and transfer over SFTP
-
-## macOS terminal word navigation with zsh
-
-The embedded terminal sends `Esc b` for Option+Left and `Esc f` for
-Option+Right. fbro inherits `EDITOR` and `VISUAL` from the process that starts
-it. zsh starts with its vi insert keymap if either variable contains `vi`, and
-otherwise starts with its emacs keymap. If you want Emacs bindings regardless
-of those variables, enable **Use Emacs keys in new zsh terminal sessions** in
-Settings → General. Close and reopen the embedded terminal to apply it.
-
-If you prefer zsh's vi bindings, add these to `~/.zshrc` so both Option+Arrow
-shortcuts move by words without leaving insert mode:
-
-```zsh
-bindkey -M viins '^[b' backward-word
-bindkey -M viins '^[f' forward-word
-```
-
-Open a new terminal session after saving the file.
 
 ## Development
 
@@ -54,6 +35,19 @@ npm run tauri build
 ```
 
 Smoke tests: see [TESTING.md](TESTING.md).
+
+## Releases
+
+Publishing happens on GitHub Actions when a version tag is pushed (`0.0.1`, or a prerelease such as `0.0.1-rc.1`). The workflow builds Linux (AppImage, deb, rpm), Windows, and Apple silicon macOS, then uploads them to a draft GitHub Release. Standard runners are free on a public repository.
+
+Before tagging, the version in `src-tauri/tauri.conf.json`, `package.json`, and `src-tauri/Cargo.toml` must all match the tag. `node scripts/check-version.mjs --tag 0.0.1` checks that.
+
+```bash
+git tag 0.0.1
+git push origin 0.0.1
+```
+
+The first builds are unsigned. macOS needs a right-click Open the first time. Windows SmartScreen may warn. Intel Macs are not in the release matrix.
 
 ## Design docs
 
@@ -82,4 +76,9 @@ Contributor and agent conventions: [AGENTS.md](AGENTS.md).
 
 ## License
 
-License TBD.
+fbro is licensed under either of
+
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
+- MIT license ([LICENSE-MIT](LICENSE-MIT))
+
+at your option.

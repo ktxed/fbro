@@ -13,7 +13,7 @@ The project-level Node dependencies now install and resolve locally:
 
 `tauri-driver` is installed at:
 
-- `/home/ktx/.cargo/bin/tauri-driver`
+- `~/.cargo/bin/tauri-driver`
 
 The local smoke runner now preflights required host dependencies before it
 starts Docker or writes artifacts.
