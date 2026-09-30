@@ -1,4 +1,5 @@
-// Prevents additional console window on Windows in release, DO NOT REMOVE!!
+// Prevents an extra console for this process on Windows release builds, DO NOT REMOVE!!
+// Console-subsystem children such as git.exe still need CREATE_NO_WINDOW; see `git::git_command`.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod bookmarks;

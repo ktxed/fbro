@@ -2,7 +2,7 @@ use std::any::Any;
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::path::Path;
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Stdio};
 
 use crate::vfs::{DirChild, VfsDriver, VfsEntry, VfsError};
 use crate::ws::protocol::{FilterSpec, SortSpec};
@@ -80,7 +80,7 @@ impl GitBlobDriver {
     /// Whether `commit:repo_path` exists as a blob in the repository.
     pub fn blob_exists(repo_root: &str, commit: &str, repo_path: &str) -> bool {
         let object = format!("{commit}:{repo_path}");
-        Command::new("git")
+        crate::git::git_command()
             .arg("-C")
             .arg(repo_root)
             .args(["cat-file", "-e", &object])
@@ -93,7 +93,7 @@ impl GitBlobDriver {
 
     pub fn blob_size(repo_root: &str, commit: &str, repo_path: &str) -> Result<u64, String> {
         let object = format!("{commit}:{repo_path}");
-        let output = Command::new("git")
+        let output = crate::git::git_command()
             .arg("-C")
             .arg(repo_root)
             .args(["cat-file", "-s", &object])
@@ -120,7 +120,7 @@ struct GitShowReader {
 
 impl GitShowReader {
     fn spawn(repo_root: &str, object: &str) -> Result<Self, VfsError> {
-        let mut child = Command::new("git")
+        let mut child = crate::git::git_command()
             .arg("-C")
             .arg(repo_root)
             .arg("show")

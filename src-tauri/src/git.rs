@@ -79,8 +79,29 @@ pub struct GitLogEntry {
     pub refs: Vec<GitLogRef>,
 }
 
+/// `git` child that does not allocate a console.
+///
+/// Release builds are a GUI-subsystem process, so a console child such as
+/// `git.exe` gets its own window. Those windows steal focus, and the
+/// frontend refreshes Git status on focus, which spawns `git` again.
+pub(crate) fn git_command() -> Command {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        // CREATE_NO_WINDOW — do not allocate a console for this child.
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        let mut command = Command::new("git");
+        command.creation_flags(CREATE_NO_WINDOW);
+        command
+    }
+    #[cfg(not(windows))]
+    {
+        Command::new("git")
+    }
+}
+
 fn git(path: &str, args: &[&str]) -> Result<Vec<u8>, String> {
-    let output = Command::new("git")
+    let output = git_command()
         // These commands only inspect repository state. Prevent Git from
         // refreshing the index as an optional optimization: the Git watcher
         // would observe that write and schedule another inspection forever.
@@ -215,7 +236,7 @@ pub fn push(root: &str, args: &[String]) -> Result<Option<String>, String> {
 }
 
 fn run_with_output(root: &str, args: &[String]) -> Result<std::process::Output, String> {
-    let output = Command::new("git")
+    let output = git_command()
         .arg("-C")
         .arg(root)
         .args(args)
@@ -281,7 +302,7 @@ fn trim_url_punctuation(url: &str) -> &str {
 /// round-trip. Unborn repositories (no HEAD) return an empty page.
 pub fn log(root: &str, skip: usize, limit: usize) -> Result<(Vec<GitLogEntry>, bool), String> {
     let limit = limit.max(1);
-    let has_head = Command::new("git")
+    let has_head = git_command()
         .arg("-C")
         .arg(root)
         .args(["rev-parse", "--verify", "--quiet", "HEAD"])
@@ -591,7 +612,7 @@ fn normalize_repo_path(root: &str, target_path: &str) -> Result<String, String> 
 /// Read a blob via `git show <object>` where `object` is e.g. `HEAD:path` or
 /// `abc123^:path`. Missing objects (new file / root parent) return empty bytes.
 fn read_git_blob(root: &str, object: &str, max_bytes: u64) -> Result<Vec<u8>, String> {
-    let size = Command::new("git")
+    let size = git_command()
         .arg("-C")
         .arg(root)
         .args(["cat-file", "-s", object])
@@ -607,7 +628,7 @@ fn read_git_blob(root: &str, object: &str, max_bytes: u64) -> Result<Vec<u8>, St
         let label = object.rsplit_once(':').map(|(_, p)| p).unwrap_or(object);
         return Err(format!("{label} exceeds the compare size limit ({} MiB).", max_bytes / 1024 / 1024));
     }
-    let output = Command::new("git")
+    let output = git_command()
         .arg("-C")
         .arg(root)
         .arg("show")

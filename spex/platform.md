@@ -112,6 +112,14 @@ and the "Open with" list, `ShellExecuteEx` for launches, `OleSetClipboard` for
 file clipboard payloads in `CF_HDROP` format, `SetClipboardData(CF_UNICODETEXT)`
 for `write_text_clipboard` (Copy Paths bro).
 
+Release builds set `windows_subsystem = "windows"` (`src-tauri/src/main.rs`),
+so the process has no console. A console-subsystem child such as `git.exe`
+must be spawned with `CREATE_NO_WINDOW` (`git::git_command`). Otherwise each
+child allocates a console — on Windows 11, usually a Windows Terminal window
+that flashes and closes. Startup scans run several `git` commands per
+local panel. The window `focus` handler sends `RefreshGitStatus`, which runs
+those commands again, so each flash steals focus and the popups repeat.
+
 ---
 
 ## 4. `VolumeWatcher` (async)
