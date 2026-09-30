@@ -1044,6 +1044,7 @@ body {
   flex-shrink: 0;
   border-bottom: 1px solid var(--border);
   background: var(--bg-header);
+  -webkit-user-select: none;
   user-select: none;
 }
 
@@ -1142,6 +1143,8 @@ body {
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
+  -webkit-user-select: none;
+  user-select: none;
   /* Live listing updates are anchored explicitly to the cursor row. Native
    * browser scroll anchoring would race or double-apply that adjustment. */
   overflow-anchor: none;
@@ -1176,6 +1179,7 @@ body {
   border-radius: 4px;
   padding: 4px;
   cursor: default;
+  -webkit-user-select: none;
   user-select: none;
   background: transparent;
   overflow: hidden;
@@ -1419,6 +1423,7 @@ body {
   cursor: default;
   white-space: nowrap;
   overflow: hidden;
+  -webkit-user-select: none;
   user-select: none;
 }
 
@@ -1512,18 +1517,11 @@ body {
   flex: 0 10 auto;
   min-width: 0;
   max-width: 60%;
+  margin-left: 0.55em;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--text-dim);
-}
-
-.panel__path-hint-separator {
-  padding: 0 0.55em;
-}
-
-.panel__path-hint--symlink {
-  margin-left: 0.55em;
 }
 
 .panel__row--cursor .panel__path-hint,

@@ -2267,8 +2267,7 @@ export function Panel({
               <span className="panel__name-base">{base}</span>
               {ext && <span className="panel__name-ext">{ext}</span>}
               {entry.pathHint && (
-                <span className={`panel__path-hint${entry.kind === "symlink" ? " panel__path-hint--symlink" : ""}`} data-testid="path-hint" aria-label={entry.kind === "symlink" ? `Symbolic link target: ${entry.targetKind ?? "unavailable"}, ${entry.pathHint}` : undefined}>
-                  {entry.kind !== "symlink" && <span className="panel__path-hint-separator">·</span>}
+                <span className="panel__path-hint" data-testid="path-hint" aria-label={entry.kind === "symlink" ? `Symbolic link target: ${entry.targetKind ?? "unavailable"}, ${entry.pathHint}` : undefined}>
                   {entry.kind === "symlink" ? <LinkTargetHint entry={entry} /> : entry.pathHint}
                 </span>
               )}
