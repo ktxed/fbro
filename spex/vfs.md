@@ -152,6 +152,8 @@ interface VFSEntry {
   path: VFSPath
   name: string
   kind: "file" | "directory" | "symlink" | "other"
+  targetKind?: "file" | "directory" | "other"
+  pathHint?: string
   size?: number
   mtime?: ISO8601
 }
@@ -162,6 +164,8 @@ Rules:
 * `size` optional (directories may not know it)
 * `mtime` optional
 * Never assume filesystem semantics
+* Local symlinks retain `kind: "symlink"`; `targetKind` describes a resolvable target and `pathHint` displays its canonical path. An unavailable target has no `targetKind` and shows the stored link target as its hint.
+* Local link copies recreate the link with its stored target text, including relative targets. Local delete and rename affect the link itself. `read_link`, `create_symlink`, and `exists_no_follow` are driver hooks used by jobs; unsupported drivers return `NotSupported` for link creation.
 
 ---
 

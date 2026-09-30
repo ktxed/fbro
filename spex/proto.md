@@ -321,6 +321,7 @@ Notes:
 * BE controls ordering
 * FE MUST NOT re-sort
 * Flat virtual listings MAY include `sourcePath` plus an optional `pathHint`; search results use `pathHint` only for exact-name duplicates and compute it from the complete result set before window slicing.
+* Local symlink entries keep `kind: "symlink"`, may include `targetKind: "file" | "directory" | "other"`, and use `pathHint` for the target path. If supplied, `sourcePath` still identifies the entry itself, not the link target.
 
 ---
 

@@ -455,10 +455,14 @@ pub async fn run_scan(
         .into_iter()
         .map(|e| EntrySchema {
             browsable_archive: advertise_browsable_archives
-                && e.kind == crate::vfs::VfsKind::File
-                && crate::vfs::browsable_archive_kind(&e.name).is_some(),
+                && (e.kind == crate::vfs::VfsKind::File
+                    || (e.kind == crate::vfs::VfsKind::Symlink
+                        && e.target_kind == Some(crate::vfs::VfsKind::File)))
+                && (crate::vfs::browsable_archive_kind(&e.name).is_some()
+                    || e.path_hint.as_deref().is_some_and(|path| crate::vfs::browsable_archive_kind(path).is_some())),
             name: e.name,
             kind: e.kind.as_str().to_string(),
+            target_kind: e.target_kind.map(|kind| kind.as_str().to_string()),
             size: e.size,
             mtime: e.mtime,
             btime: e.btime,
@@ -466,7 +470,7 @@ pub async fn run_scan(
             icon_name: e.icon_name,
             cc: e.cc,
             source_path: e.source_path,
-            path_hint: None,
+            path_hint: e.path_hint,
             git_status: None,
             git_details: None,
         })
@@ -842,6 +846,7 @@ mod tests {
         EntrySchema {
             name: name.to_string(),
             kind: "file".to_string(),
+            target_kind: None,
             browsable_archive: false,
             size: None,
             mtime: None,

@@ -1011,6 +1011,8 @@ impl VfsDriver for SftpFsDriver {
                     out.push(VfsEntry {
                         name,
                         kind,
+                        target_kind: None,
+                        path_hint: None,
                         size: Some(meta.len()),
                         mtime,
                         btime: None,
@@ -1147,6 +1149,7 @@ impl VfsDriver for SftpFsDriver {
                         DirChild {
                             name: e.file_name(),
                             is_dir: meta.is_dir(),
+                            is_symlink: false,
                             size: meta.len(),
                             mtime: meta.mtime.map(|s| s as u64),
                             // See `list()` — leave permissions unset on
@@ -1809,6 +1812,8 @@ mod tests {
         VfsEntry {
             name: name.to_string(),
             kind,
+            target_kind: None,
+            path_hint: None,
             size,
             mtime: mtime.map(str::to_string),
             btime: None,

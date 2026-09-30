@@ -79,6 +79,8 @@ export interface PendingRename {
 export interface PendingInfo {
   name: string;
   kind: string;
+  targetKind?: "file" | "directory" | "other";
+  linkTarget?: string;
   fullPath: string;
   dirPath: string;
   size?: number;
@@ -1324,7 +1326,7 @@ function reducer(state: AppState, action: AppAction): AppState {
           }
           if (msg.code === "NAVIGATE_FAILED") {
             const panelId = msg.extra?.panelId as string | undefined;
-            if (!panelId) return state;
+            if (!panelId) return { ...state, transientHint: { message: msg.message, token: msg.timestamp } };
             let next = state;
             const pendingGoToPath = state.pendingGoToPath;
             if (pendingGoToPath?.panelId === panelId) {
@@ -1346,7 +1348,12 @@ function reducer(state: AppState, action: AppAction): AppState {
                 },
               };
             }
-            return next;
+            return next === state
+              ? { ...state, transientHint: { message: msg.message, token: msg.timestamp } }
+              : next;
+          }
+          if (msg.code === "NOT_A_FILE") {
+            return { ...state, transientHint: { message: msg.message, token: msg.timestamp } };
           }
           if (msg.code.startsWith("PASTE_EXTERNAL_")) {
             return {

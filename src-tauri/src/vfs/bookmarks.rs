@@ -50,6 +50,8 @@ impl VfsDriver for BookmarksDriver {
             .map(|bm| VfsEntry {
                 name: bm.name.clone(),
                 kind: VfsKind::Directory,
+                target_kind: None,
+                path_hint: None,
                 size: None,
                 mtime: None,
                 btime: None,

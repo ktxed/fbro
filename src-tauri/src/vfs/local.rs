@@ -3,16 +3,25 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
 
 use super::{
-    color_class_for_entry, format_mtime, icon_name_for_entry, DirChild, VfsDriver, VfsEntry,
-    VfsError, VfsKind,
+    color_class_for_entry, format_mtime, icon_name_for_entry, DirChild, LinkInfo, VfsDriver,
+    VfsEntry, VfsError, VfsKind,
 };
 use crate::ws::protocol::{FilterSpec, SortSpec};
+
+#[cfg(unix)]
+#[path = "local/unix.rs"]
+mod links;
+#[cfg(windows)]
+#[path = "local/windows.rs"]
+mod links;
 
 pub struct LocalFsDriver;
 
 fn compare_entries(a: &VfsEntry, b: &VfsEntry, sort: &SortSpec) -> std::cmp::Ordering {
-    let a_dir = a.kind == VfsKind::Directory;
-    let b_dir = b.kind == VfsKind::Directory;
+    let a_dir = a.kind == VfsKind::Directory
+        || (a.kind == VfsKind::Symlink && a.target_kind == Some(VfsKind::Directory));
+    let b_dir = b.kind == VfsKind::Directory
+        || (b.kind == VfsKind::Symlink && b.target_kind == Some(VfsKind::Directory));
     if a_dir != b_dir {
         return b_dir.cmp(&a_dir);
     }
@@ -40,9 +49,21 @@ fn compare_entries(a: &VfsEntry, b: &VfsEntry, sort: &SortSpec) -> std::cmp::Ord
     }
 }
 
-fn normalize_path(path: std::path::PathBuf) -> String {
+pub(crate) fn normalize_path(path: std::path::PathBuf) -> String {
     #[cfg(windows)]
-    return path.to_string_lossy().replace('\\', "/");
+    {
+        let raw = path.to_string_lossy();
+        let ordinary = if let Some(share) = raw.strip_prefix(r"\\?\UNC\") {
+            format!(r"\\{share}")
+        } else if let Some(drive) = raw.strip_prefix(r"\\?\").filter(|rest| {
+            rest.as_bytes().get(1) == Some(&b':')
+        }) {
+            drive.to_string()
+        } else {
+            raw.into_owned()
+        };
+        return ordinary.replace('\\', "/");
+    }
     #[cfg(not(windows))]
     path.to_string_lossy().to_string()
 }
@@ -182,7 +203,7 @@ impl VfsDriver for LocalFsDriver {
                 }
             }
 
-            let meta = entry.metadata().ok();
+            let meta = fs::symlink_metadata(entry.path()).ok();
             let (kind, size, mtime, btime, permissions) = if let Some(m) = meta {
                 let kind = if m.is_symlink() {
                     VfsKind::Symlink
@@ -204,9 +225,26 @@ impl VfsDriver for LocalFsDriver {
 
             let icon_name = icon_name_for_entry(&name, &kind);
             let cc = color_class_for_entry(&name, &kind);
+            let (target_kind, path_hint) = if kind == VfsKind::Symlink {
+                let link_path = entry.path();
+                let target_kind = fs::metadata(&link_path).ok().map(|target| {
+                    if target.is_dir() { VfsKind::Directory }
+                    else if target.is_file() { VfsKind::File }
+                    else { VfsKind::Other }
+                });
+                let path_hint = fs::canonicalize(&link_path)
+                    .or_else(|_| fs::read_link(&link_path))
+                    .ok()
+                    .map(normalize_path);
+                (target_kind, path_hint)
+            } else {
+                (None, None)
+            };
             entries.push(VfsEntry {
                 name,
                 kind,
+                target_kind,
+                path_hint,
                 size,
                 mtime,
                 btime,
@@ -284,7 +322,7 @@ impl VfsDriver for LocalFsDriver {
     }
 
     fn remove_file(&self, path: &str) -> Result<(), VfsError> {
-        fs::remove_file(path).map_err(|e| map_io_err(path, e))
+        links::remove(Path::new(path)).map_err(|e| map_io_err(path, e))
     }
 
     fn remove_dir_all(&self, path: &str) -> Result<(), VfsError> {
@@ -293,6 +331,23 @@ impl VfsDriver for LocalFsDriver {
 
     fn exists(&self, path: &str) -> bool {
         Path::new(path).exists()
+    }
+
+    fn exists_no_follow(&self, path: &str) -> bool {
+        fs::symlink_metadata(path).is_ok()
+    }
+
+    fn read_link(&self, path: &str) -> Result<LinkInfo, VfsError> {
+        let meta = fs::symlink_metadata(path).map_err(|e| map_io_err(path, e))?;
+        if !meta.is_symlink() {
+            return Err(VfsError::NotSupported(format!("Not a symbolic link: {path}")));
+        }
+        let target = fs::read_link(path).map_err(|e| map_io_err(path, e))?;
+        Ok(LinkInfo { target, is_dir: links::is_dir_link(path, &meta) })
+    }
+
+    fn create_symlink(&self, target: &Path, link: &str, is_dir: bool) -> Result<(), VfsError> {
+        links::create(target, Path::new(link), is_dir).map_err(|e| map_io_err(link, e))
     }
 
     fn file_size(&self, path: &str) -> Option<u64> {
@@ -326,9 +381,10 @@ impl VfsDriver for LocalFsDriver {
                 Err(_) => continue,
             };
             let name = entry.file_name().to_string_lossy().to_string();
-            let meta = entry.metadata().ok();
+            let meta = fs::symlink_metadata(entry.path()).ok();
             let is_dir = meta.as_ref().map(|m| m.is_dir()).unwrap_or(false);
-            let size = meta.as_ref().map(|m| m.len()).unwrap_or(0);
+            let is_symlink = meta.as_ref().map(|m| m.is_symlink()).unwrap_or(false);
+            let size = if is_symlink { 0 } else { meta.as_ref().map(|m| m.len()).unwrap_or(0) };
             let mtime = meta
                 .as_ref()
                 .and_then(|m| m.modified().ok())
@@ -338,6 +394,7 @@ impl VfsDriver for LocalFsDriver {
             children.push(DirChild {
                 name,
                 is_dir,
+                is_symlink,
                 size,
                 mtime,
                 permissions,
@@ -397,10 +454,48 @@ impl VfsDriver for LocalFsDriver {
 mod tests {
     use super::*;
 
+    #[cfg(windows)]
+    #[test]
+    fn canonical_paths_match_normal_source_roots() {
+        assert_eq!(normalize_path(std::path::PathBuf::from(r"\\?\C:\folder\note.txt")), "C:/folder/note.txt");
+        assert_eq!(normalize_path(std::path::PathBuf::from(r"\\?\UNC\server\share\note.txt")), "//server/share/note.txt");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn local_listing_describes_link_targets_without_losing_link_identity() {
+        struct TempDir(std::path::PathBuf);
+        impl Drop for TempDir {
+            fn drop(&mut self) { let _ = fs::remove_dir_all(&self.0); }
+        }
+        let root = TempDir(std::env::temp_dir().join(format!("fbro-local-links-{}", uuid::Uuid::new_v4())));
+        fs::create_dir_all(root.0.join("folder")).unwrap();
+        fs::write(root.0.join("note.txt"), "hello").unwrap();
+        std::os::unix::fs::symlink("folder", root.0.join("folder-link")).unwrap();
+        std::os::unix::fs::symlink("note.txt", root.0.join("file-link")).unwrap();
+        std::os::unix::fs::symlink("missing", root.0.join("broken-link")).unwrap();
+        let sort = SortSpec { by: "name".into(), order: "asc".into() };
+        let entries = LocalFsDriver.list(&root.0.to_string_lossy(), &sort, None, true).unwrap();
+        let find = |name| entries.iter().find(|entry| entry.name == name).unwrap();
+        assert_eq!(find("folder-link").kind, VfsKind::Symlink);
+        assert_eq!(find("folder-link").target_kind, Some(VfsKind::Directory));
+        assert_eq!(find("folder-link").path_hint.as_deref(), Some(root.0.join("folder").to_string_lossy().as_ref()));
+        assert_eq!(find("file-link").target_kind, Some(VfsKind::File));
+        assert_eq!(find("broken-link").target_kind, None);
+        assert_eq!(find("broken-link").path_hint.as_deref(), Some("missing"));
+        assert!(!LocalFsDriver.exists(&root.0.join("broken-link").to_string_lossy()));
+        assert!(LocalFsDriver.exists_no_follow(&root.0.join("broken-link").to_string_lossy()));
+        let children = LocalFsDriver.read_dir_entries(&root.0.to_string_lossy()).unwrap();
+        assert!(children.iter().find(|child| child.name == "folder-link").unwrap().is_symlink);
+        assert!(!children.iter().find(|child| child.name == "folder-link").unwrap().is_dir);
+    }
+
     fn dated_entry(name: &str) -> VfsEntry {
         VfsEntry {
             name: name.to_string(),
             kind: VfsKind::File,
+            target_kind: None,
+            path_hint: None,
             size: Some(0),
             mtime: Some("100".to_string()),
             btime: None,

@@ -708,6 +708,8 @@ pub struct FilterSpec {
 pub struct EntrySchema {
     pub name: String,
     pub kind: String,
+    #[serde(rename = "targetKind", skip_serializing_if = "Option::is_none")]
+    pub target_kind: Option<String>,
     #[serde(rename = "browsableArchive")]
     pub browsable_archive: bool,
     #[serde(skip_serializing_if = "Option::is_none")]

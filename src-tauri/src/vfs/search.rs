@@ -124,6 +124,8 @@ impl VfsDriver for SearchResultsDriver {
                 VfsEntry {
                     name: r.name.clone(),
                     kind: kind.clone(),
+                    target_kind: None,
+                    path_hint: None,
                     size: r.size,
                     mtime: r.mtime.clone(),
                     btime: None,

@@ -267,6 +267,8 @@ impl VfsDriver for GlobalSelectionDriver {
                 .map(|selection| VfsEntry {
                     name: selection.name.clone(),
                     kind: VfsKind::Directory,
+                    target_kind: None,
+                    path_hint: None,
                     size: Some(selection.items.len() as u64),
                     mtime: Some(selection.created_at.clone()),
                     btime: Some(selection.created_at.clone()),
@@ -286,6 +288,8 @@ impl VfsDriver for GlobalSelectionDriver {
                 .map(|item| VfsEntry {
                     name: item.path.clone(),
                     kind: kind_from_str(&item.kind),
+                    target_kind: None,
+                    path_hint: None,
                     size: item.size,
                     mtime: item.mtime.clone(),
                     btime: None,

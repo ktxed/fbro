@@ -118,7 +118,7 @@ where
         .map(|(id, _)| id.clone())
 }
 
-fn source_for_local_path(state: &crate::state::AppState, path: &str) -> Option<String> {
+pub(super) fn source_for_local_path(state: &crate::state::AppState, path: &str) -> Option<String> {
     most_specific_source_for_path(
         state.sources.iter().filter_map(|(id, source)| {
             (source.kind == "filesystem"
@@ -387,7 +387,7 @@ impl RevealArgs {
 
 async fn open_entry(scope: &Value, ctx: &mut IntentContext<'_>) {
     let panel_id = resolve_panel_id(scope, ctx.state).await;
-    let (entry_kind, entry_name, new_path, is_in_shadow, source_id, current_path) = {
+    let (entry_kind, entry_name, new_path, is_in_shadow, source_id, current_path, is_local) = {
         let state_guard = ctx.state.lock().await;
         if let Some(panel) = state_guard.panels.get(&panel_id) {
             if let Some(entry) = panel.entries.get(panel.cursor) {
@@ -399,6 +399,7 @@ async fn open_entry(scope: &Value, ctx: &mut IntentContext<'_>) {
                     panel.shadow_source.is_some(),
                     panel.source_id.clone(),
                     panel.path.clone(),
+                    driver.is_local(),
                 )
             } else {
                 return;
@@ -407,6 +408,59 @@ async fn open_entry(scope: &Value, ctx: &mut IntentContext<'_>) {
             return;
         }
     };
+
+    if entry_kind == "symlink" && is_local {
+        let link_path = new_path.clone();
+        let resolved = tokio::task::spawn_blocking(move || {
+            let target = std::fs::canonicalize(&link_path)
+                .map_err(|error| format!("Cannot follow symbolic link: {error}"))?;
+            let metadata = std::fs::metadata(&target)
+                .map_err(|error| format!("Cannot inspect symbolic link target: {error}"))?;
+            Ok::<_, String>((crate::vfs::local::normalize_path(target), metadata.is_dir(), metadata.is_file()))
+        }).await;
+        let (target, is_dir, is_file) = match resolved {
+            Ok(Ok(value)) => value,
+            Ok(Err(message)) => {
+                send_navigation_error(&panel_id, message, ctx).await;
+                return;
+            }
+            Err(error) => {
+                send_navigation_error(&panel_id, format!("Cannot follow symbolic link: {error}"), ctx).await;
+                return;
+            }
+        };
+        if is_dir {
+            let target_source_id = {
+                let state = ctx.state.lock().await;
+                source_for_local_path(&state, &target)
+            };
+            let Some(target_source_id) = target_source_id else {
+                send_navigation_error(&panel_id, format!("No mounted local source contains {target}"), ctx).await;
+                return;
+            };
+            {
+                let mut state = ctx.state.lock().await;
+                if let Some(panel) = state.panels.get_mut(&panel_id) {
+                    if panel.source_id != target_source_id {
+                        panel.source_paths.insert(panel.source_id.clone(), panel.path.clone());
+                        panel.source_id = target_source_id;
+                    }
+                }
+            }
+            navigate_to(&panel_id, &target, None, None, ctx.state, ctx.tx, ctx.scan_handles,
+                ctx.dir_size_queue, ctx.watcher_cmd_tx).await;
+        } else if is_file {
+            let target_name = Path::new(&target).file_name().map(|name| name.to_string_lossy().to_string()).unwrap_or_default();
+            match browsable_archive_kind(&target_name) {
+                Some(BrowsableArchiveKind::Zip) => enter_zip_archive(&panel_id, &target, &entry_name, ctx).await,
+                Some(BrowsableArchiveKind::SevenZip) => enter_7z_archive(&panel_id, &target, &entry_name, ctx).await,
+                None => {},
+            }
+        } else {
+            send_navigation_error(&panel_id, "Symbolic link target is not a file or directory.".into(), ctx).await;
+        }
+        return;
+    }
 
     if entry_kind == "directory"
         && is_global_selection_source(&source_id)
@@ -492,6 +546,14 @@ async fn open_entry(scope: &Value, ctx: &mut IntentContext<'_>) {
             None => {}
         }
     }
+}
+
+async fn send_navigation_error(panel_id: &str, message: String, ctx: &mut IntentContext<'_>) {
+    let _ = ctx.tx.send(ServerMessage::Error {
+        timestamp: now(), code: "NAVIGATE_FAILED".into(), message,
+        recoverable: true,
+        extra: Some(serde_json::json!({ "panelId": panel_id })),
+    }).await;
 }
 
 /// Create a SevenZipFsDriver, register a shadow source, and navigate the panel into the archive root.
@@ -1229,6 +1291,17 @@ async fn navigate_panel_to(args: &Value, ctx: &mut IntentContext<'_>) {
         };
         #[cfg(not(windows))]
         let requested_path = parsed.path.trim().to_string();
+        let requested_path = if Path::new(&requested_path).is_absolute() {
+            let candidate = requested_path.clone();
+            tokio::task::spawn_blocking(move || std::fs::canonicalize(candidate))
+                .await
+                .ok()
+                .and_then(Result::ok)
+                .map(crate::vfs::local::normalize_path)
+                .unwrap_or(requested_path)
+        } else {
+            requested_path
+        };
         let resolved_target = {
             let state_guard = ctx.state.lock().await;
             let panel = match state_guard.panels.get(&parsed.panel_id) {
@@ -1431,7 +1504,20 @@ async fn open_file(scope: &Value, ctx: &mut IntentContext<'_>) {
                 }
             } else {
                 let full_path = format!("{}/{}", path.trim_end_matches('/'), entry.name);
-                platform.open_file(&full_path);
+                if entry.kind == "symlink" {
+                    let resolved = tokio::task::spawn_blocking(move || {
+                        let target = std::fs::canonicalize(&full_path)?;
+                        Ok::<_, std::io::Error>((target.clone(), target.is_file()))
+                    }).await;
+                    match resolved {
+                        Ok(Ok((target, true))) => platform.open_file(&crate::vfs::local::normalize_path(target)),
+                        Ok(Ok(_)) => send_navigation_error(&panel_id, "Symbolic link target is not a file.".into(), ctx).await,
+                        Ok(Err(error)) => send_navigation_error(&panel_id, format!("Cannot follow symbolic link: {error}"), ctx).await,
+                        Err(error) => send_navigation_error(&panel_id, format!("Cannot follow symbolic link: {error}"), ctx).await,
+                    }
+                } else {
+                    platform.open_file(&full_path);
+                }
             }
         }
     }

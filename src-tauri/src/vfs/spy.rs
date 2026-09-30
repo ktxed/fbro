@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use serde_json::json;
 
-use super::{DirChild, VfsDriver, VfsEntry, VfsError};
+use super::{DirChild, LinkInfo, VfsDriver, VfsEntry, VfsError};
 use crate::ws::protocol::{FilterSpec, SortSpec};
 
 /// A VFS driver that wraps an inner driver and intercepts mutating operations,
@@ -142,6 +142,14 @@ impl VfsDriver for SpyFsDriver {
         self.inner.exists(path)
     }
 
+    fn exists_no_follow(&self, path: &str) -> bool {
+        self.inner.exists_no_follow(path)
+    }
+
+    fn read_link(&self, path: &str) -> Result<LinkInfo, VfsError> {
+        self.inner.read_link(path)
+    }
+
     fn file_size(&self, path: &str) -> Option<u64> {
         self.inner.file_size(path)
     }
@@ -187,6 +195,11 @@ impl VfsDriver for SpyFsDriver {
     fn remove_dir_all(&self, path: &str) -> Result<(), VfsError> {
         self.intercept("remove_dir_all", json!({ "path": path }))?;
         self.inner.remove_dir_all(path)
+    }
+
+    fn create_symlink(&self, target: &std::path::Path, link: &str, is_dir: bool) -> Result<(), VfsError> {
+        self.intercept("create_symlink", json!({ "target": target.to_string_lossy(), "link": link, "is_dir": is_dir }))?;
+        self.inner.create_symlink(target, link, is_dir)
     }
 
     fn try_rename(&self, src: &str, dst: &str) -> Result<bool, VfsError> {

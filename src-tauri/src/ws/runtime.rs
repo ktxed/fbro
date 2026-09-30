@@ -1337,6 +1337,7 @@ pub(crate) async fn update_panel_from_patch(
                     panel.entries.push(crate::ws::protocol::EntrySchema {
                         name: entry["name"].as_str().unwrap_or("").to_string(),
                         kind: entry["kind"].as_str().unwrap_or("file").to_string(),
+                        target_kind: entry["targetKind"].as_str().map(String::from),
                         browsable_archive: entry["browsableArchive"].as_bool().unwrap_or(false),
                         size: entry["size"].as_u64(),
                         mtime: entry["mtime"].as_str().map(String::from),

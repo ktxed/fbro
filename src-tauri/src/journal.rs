@@ -377,7 +377,7 @@ impl VfsDriver for JournalDriver {
             let name = event_name(&row);
             // fbro's shared VFS wire format uses Unix seconds as a string;
             // the panel formats it with `new Date(seconds * 1000)`.
-            VfsEntry { name, kind: VfsKind::File, size: Some(event_detail(&row).len() as u64), mtime: Some((row.timestamp_ms / 1_000).to_string()), btime: None, permissions: None, icon_name: Some("text-x-generic".into()), cc: Some("cc-file".into()), source_path: Some(row.id) }
+            VfsEntry { name, kind: VfsKind::File, target_kind: None, path_hint: None, size: Some(event_detail(&row).len() as u64), mtime: Some((row.timestamp_ms / 1_000).to_string()), btime: None, permissions: None, icon_name: Some("text-x-generic".into()), cc: Some("cc-file".into()), source_path: Some(row.id) }
         }).collect::<Vec<_>>();
         if sort.by == "name" && sort.order == "asc" { entries.sort_by(|a, b| a.name.cmp(&b.name)); }
         if sort.by == "name" && sort.order == "desc" { entries.sort_by(|a, b| b.name.cmp(&a.name)); }

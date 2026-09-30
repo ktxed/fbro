@@ -243,14 +243,14 @@ fn run_file_op_blocking(
                 let dst_name = destination_name(entry);
                 let dst_str = dst_drv.resolve_child(dest_dir, dst_name);
 
-                if *op_type == FileOpType::Copy && same_resolved_path(src, &dst_str) {
-                    return Err(format!("Cannot copy {src} onto itself"));
+                if (*op_type == FileOpType::Copy || entry.kind == "symlink") && same_resolved_path(src, &dst_str) {
+                    return Err(format!("Cannot place {src} onto itself or its target"));
                 }
 
                 // Try O(1) rename when the drivers can address the same local
                 // filesystem and the destination does not exist. Existing
                 // targets still use the conflict-aware copy+delete path.
-                if *op_type == FileOpType::Move && can_try_rename && !dst_drv.exists(&dst_str) {
+                if *op_type == FileOpType::Move && can_try_rename && !dst_drv.exists_no_follow(&dst_str) {
                     match src_driver.try_rename(src, &dst_str) {
                         Ok(true) => {
                             // Rename succeeded — we can't know inner file count without
@@ -282,7 +282,21 @@ fn run_file_op_blocking(
                     }
                 }
 
-                if entry.kind == "directory" {
+                if entry.kind == "symlink" && src_driver.is_local() {
+                    let copied = copy_symlink(
+                        job_id, src, &dst_str, conflict_policy, tx, decision_rx,
+                        &mut apply_to_all, src_driver, dst_drv,
+                    )?;
+                    if !copied {
+                        completed_files += 1;
+                        send_progress_sync(tx, job_id, total_files, completed_files,
+                            None, 0, 0, total_bytes_total, total_bytes_completed);
+                        continue;
+                    }
+                    completed_files += 1;
+                    send_progress_sync(tx, job_id, total_files, completed_files,
+                        None, 0, 0, total_bytes_total, total_bytes_completed);
+                } else if entry.kind == "directory" {
                     copy_dir_recursive(
                         job_id,
                         src,
@@ -309,14 +323,11 @@ fn run_file_op_blocking(
                     )?;
                 } else {
                     let mut resume_requested = false;
-                    if dst_drv.exists(&dst_str) {
-                        let resume_candidate = resume_candidate(
-                            src,
-                            &dst_str,
-                            entry.size.unwrap_or(0),
-                            src_driver,
-                            dst_drv,
-                        );
+                    if dst_drv.exists_no_follow(&dst_str) {
+                        let destination_is_link = dst_drv.read_link(&dst_str).is_ok();
+                        let resume_candidate = (!destination_is_link).then(|| resume_candidate(
+                            src, &dst_str, entry.size.unwrap_or(0), src_driver, dst_drv,
+                        )).flatten();
                         match resolve_conflict(
                             conflict_policy,
                             src,
@@ -327,7 +338,11 @@ fn run_file_op_blocking(
                             decision_rx,
                             &mut apply_to_all,
                         )? {
-                            ConflictOutcome::Overwrite => { /* proceed */ }
+                            ConflictOutcome::Overwrite => {
+                                if destination_is_link {
+                                    dst_drv.remove_file(&dst_str).map_err(|error| format!("Cannot replace destination link {dst_str}: {error}"))?;
+                                }
+                            }
                             ConflictOutcome::Resume => {
                                 resume_requested = true;
                             }
@@ -458,6 +473,57 @@ fn run_file_op_blocking(
 
 fn destination_name(entry: &FileOpEntry) -> &str {
     entry.dest_name.as_deref().unwrap_or(&entry.name)
+}
+
+/// Recreate the link itself. The temporary link keeps an existing destination
+/// intact if link creation is denied (notably on Windows).
+fn copy_symlink(
+    job_id: &str,
+    src: &str,
+    dst: &str,
+    conflict_policy: &ConflictPolicy,
+    tx: &mpsc::Sender<ServerMessage>,
+    decision_rx: &mut DecisionRx,
+    apply_to_all: &mut Option<ConflictOutcome>,
+    src_driver: &dyn VfsDriver,
+    dst_driver: &dyn VfsDriver,
+) -> Result<bool, String> {
+    if !dst_driver.is_local() {
+        return Err(format!("Cannot copy symbolic link to a destination that does not support links: {dst}"));
+    }
+    let link = src_driver.read_link(src).map_err(|error| format!("Cannot read symbolic link {src}: {error}"))?;
+    let exists = dst_driver.exists_no_follow(dst);
+    if exists {
+        match resolve_conflict(conflict_policy, src, dst, None, tx, job_id, decision_rx, apply_to_all)? {
+            ConflictOutcome::Skip => return Ok(false),
+            ConflictOutcome::Cancel => return Err(CANCELLED_ERR.into()),
+            ConflictOutcome::Overwrite | ConflictOutcome::Resume => {},
+        }
+    }
+    if let Some(parent) = dst_driver.parent_path(dst).filter(|parent| !parent.is_empty()) {
+        dst_driver.create_dir_all(&parent)
+            .map_err(|error| format!("Cannot create destination directory {parent}: {error}"))?;
+    }
+    let temp = format!("{dst}.fbro-link-{}", uuid::Uuid::new_v4());
+    dst_driver.create_symlink(&link.target, &temp, link.is_dir)
+        .map_err(|error| format!("Cannot create symbolic link {dst}: {error}"))?;
+    if exists {
+        if let Err(error) = dst_driver.remove_file(dst) {
+            let _ = dst_driver.remove_file(&temp);
+            return Err(format!("Cannot replace destination {dst}: {error}"));
+        }
+    }
+    match dst_driver.try_rename(&temp, dst) {
+        Ok(true) => Ok(true),
+        Ok(false) => {
+            let _ = dst_driver.remove_file(&temp);
+            Err(format!("Cannot place symbolic link at {dst}"))
+        }
+        Err(error) => {
+            let _ = dst_driver.remove_file(&temp);
+            Err(format!("Cannot place symbolic link at {dst}: {error}"))
+        }
+    }
 }
 
 pub(crate) fn same_resolved_path(left: &str, right: &str) -> bool {
@@ -1170,9 +1236,20 @@ fn copy_dir_recursive(
             )?;
         } else {
             let mut resume_requested = false;
-            if dst_driver.exists(&child_dst) {
-                let resume_candidate =
-                    resume_candidate(&child_src, &child_dst, child.size, src_driver, dst_driver);
+            if child.is_symlink && src_driver.is_local() {
+                let copied = copy_symlink(job_id, &child_src, &child_dst, conflict_policy,
+                    tx, decision_rx, apply_to_all, src_driver, dst_driver)?;
+                *completed_files += 1;
+                send_progress_sync(tx, job_id, *total_files, *completed_files,
+                    None, 0, 0, *total_bytes_total, *total_bytes_completed);
+                if !copied { continue; }
+                continue;
+            }
+            if dst_driver.exists_no_follow(&child_dst) {
+                let destination_is_link = dst_driver.read_link(&child_dst).is_ok();
+                let resume_candidate = (!destination_is_link).then(||
+                    resume_candidate(&child_src, &child_dst, child.size, src_driver, dst_driver)
+                ).flatten();
                 match resolve_conflict(
                     conflict_policy,
                     &child_src,
@@ -1183,7 +1260,11 @@ fn copy_dir_recursive(
                     decision_rx,
                     apply_to_all,
                 )? {
-                    ConflictOutcome::Overwrite => {}
+                    ConflictOutcome::Overwrite => {
+                        if destination_is_link {
+                            dst_driver.remove_file(&child_dst).map_err(|error| format!("Cannot replace destination link {child_dst}: {error}"))?;
+                        }
+                    }
                     ConflictOutcome::Resume => {
                         resume_requested = true;
                     }
@@ -1331,7 +1412,7 @@ fn collect_rm_lines(path: &str, kind: &str, driver: &dyn VfsDriver, lines: &mut 
         if let Ok(children) = driver.read_dir_entries(path) {
             for child in &children {
                 let child_path = driver.resolve_child(path, &child.name);
-                let child_kind = if child.is_dir { "directory" } else { "file" };
+                let child_kind = if child.is_dir { "directory" } else if child.is_symlink { "symlink" } else { "file" };
                 collect_rm_lines(&child_path, child_kind, driver, lines);
             }
         }
@@ -1355,14 +1436,15 @@ fn collect_cp_lines(
             for child in &children {
                 let child_src = src_driver.resolve_child(src, &child.name);
                 let child_dst = dst_driver.resolve_child(dst, &child.name);
-                let child_kind = if child.is_dir { "directory" } else { "file" };
+                let child_kind = if child.is_dir { "directory" } else if child.is_symlink { "symlink" } else { "file" };
                 collect_cp_lines(
                     &child_src, &child_dst, child_kind, src_driver, dst_driver, lines,
                 );
             }
         }
     } else {
-        lines.push(format!("cp {} {}", shell_quote(src), shell_quote(dst)));
+        let preserve_link = if kind == "symlink" { "-P " } else { "" };
+        lines.push(format!("cp {preserve_link}{} {}", shell_quote(src), shell_quote(dst)));
     }
 }
 
@@ -1516,6 +1598,95 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.path);
         }
+    }
+
+    #[cfg(unix)]
+    fn run_local_entry_op(op_type: FileOpType, src: &Path, kind: &str, dest: Option<&Path>) {
+        let driver = crate::vfs::local::LocalFsDriver;
+        let (tx, _rx) = mpsc::channel(64);
+        let (_cancel_tx, cancel_rx) = watch::channel(false);
+        let (_pause_tx, pause_rx) = watch::channel(false);
+        let (_decision_tx, mut decision_rx) = mpsc::channel(1);
+        let entry = FileOpEntry {
+            name: src.file_name().unwrap().to_string_lossy().to_string(),
+            dest_name: None,
+            source_path: src.to_string_lossy().to_string(),
+            size: None,
+            kind: kind.into(),
+            mtime: None,
+            permissions: None,
+        };
+        let destination = dest.map(|path| path.to_string_lossy().to_string());
+        run_file_op_blocking(
+            "link-test", &op_type, &[entry], destination.as_deref(),
+            &ConflictPolicy::Overwrite, &tx, &cancel_rx, &pause_rx,
+            &mut decision_rx, &driver,
+            dest.map(|_| &driver as &dyn VfsDriver), false,
+            &VerificationPolicy::Fail, false, false,
+            Arc::new(AtomicBool::new(false)), Arc::new(AtomicBool::new(false)),
+        ).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn local_link_copy_move_rename_and_delete_preserve_target() {
+        use std::os::unix::fs::symlink;
+        let dir = TestDir::new("link-operations");
+        let src_dir = dir.path.join("src");
+        let copy_dir = dir.path.join("copy");
+        let move_dir = dir.path.join("move");
+        for path in [&src_dir, &copy_dir, &move_dir] { fs::create_dir_all(path).unwrap(); }
+        let target = src_dir.join("target.txt");
+        fs::write(&target, "target contents").unwrap();
+        let link = src_dir.join("link.txt");
+        symlink("target.txt", &link).unwrap();
+        run_local_entry_op(FileOpType::Copy, &link, "symlink", Some(&copy_dir));
+        let copied = copy_dir.join("link.txt");
+        assert_eq!(fs::read_link(&copied).unwrap(), PathBuf::from("target.txt"));
+        assert!(fs::symlink_metadata(&copied).unwrap().is_symlink());
+        assert!(!copied.exists()); // Stored relative target text is unchanged.
+        let renamed = copy_dir.join("renamed.txt");
+        assert!(crate::vfs::local::LocalFsDriver.try_rename(&copied.to_string_lossy(), &renamed.to_string_lossy()).unwrap());
+        assert_eq!(fs::read_link(&renamed).unwrap(), PathBuf::from("target.txt"));
+        run_local_entry_op(FileOpType::Move, &link, "symlink", Some(&move_dir));
+        assert!(fs::symlink_metadata(&link).is_err());
+        assert_eq!(fs::read_link(move_dir.join("link.txt")).unwrap(), PathBuf::from("target.txt"));
+        run_local_entry_op(FileOpType::Delete, &move_dir.join("link.txt"), "symlink", None);
+        assert_eq!(fs::read_to_string(target).unwrap(), "target contents");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn directory_copy_keeps_nested_cyclic_link_without_traversal() {
+        use std::os::unix::fs::symlink;
+        let dir = TestDir::new("nested-link-copy");
+        let src = dir.path.join("src");
+        let dst = dir.path.join("dst");
+        fs::create_dir_all(src.join("folder")).unwrap();
+        fs::create_dir_all(&dst).unwrap();
+        fs::write(src.join("folder/note.txt"), "payload").unwrap();
+        symlink(".", src.join("folder/loop")).unwrap();
+        run_local_entry_op(FileOpType::Copy, &src.join("folder"), "directory", Some(&dst));
+        assert_eq!(fs::read_to_string(dst.join("folder/note.txt")).unwrap(), "payload");
+        assert_eq!(fs::read_link(dst.join("folder/loop")).unwrap(), PathBuf::from("."));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn file_overwrite_replaces_broken_link_without_creating_its_target() {
+        use std::os::unix::fs::symlink;
+        let dir = TestDir::new("broken-destination-link");
+        let src_dir = dir.path.join("src");
+        let dst_dir = dir.path.join("dst");
+        fs::create_dir_all(&src_dir).unwrap();
+        fs::create_dir_all(&dst_dir).unwrap();
+        let src = src_dir.join("file.txt");
+        fs::write(&src, "payload").unwrap();
+        symlink("missing.txt", dst_dir.join("file.txt")).unwrap();
+        run_local_entry_op(FileOpType::Copy, &src, "file", Some(&dst_dir));
+        assert_eq!(fs::read_to_string(dst_dir.join("file.txt")).unwrap(), "payload");
+        assert!(!fs::symlink_metadata(dst_dir.join("file.txt")).unwrap().is_symlink());
+        assert!(!dst_dir.join("missing.txt").exists());
     }
 
     struct FlakyReadDriver {

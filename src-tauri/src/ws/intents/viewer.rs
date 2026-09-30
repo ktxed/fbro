@@ -14,6 +14,7 @@ use crate::ws::intents::{
 };
 use crate::ws::protocol::{now, MarkdownLinkSchema, ServerMessage, ViewerFindMatchSchema};
 use crate::ws::runtime::{url_encode, IntentContext};
+use super::navigation::source_for_local_path;
 
 /// Effective image cap (in bytes) for the viewer + prefetch.
 /// When ludicrous mode is enabled, scales up to the user-configured `max_image_size_mb`.
@@ -219,7 +220,7 @@ async fn view_file(args: &Value, ctx: &mut IntentContext<'_>) {
 
     // When viewing from a search results source, resolve the real file path
     // and real source_id so the viewer uses the local filesystem driver.
-    let (effective_source_id, full_path, initial_find_query) = if is_search_source(&parsed.source_id) {
+    let (mut effective_source_id, mut full_path, initial_find_query) = if is_search_source(&parsed.source_id) {
         let state_guard = ctx.state.lock().await;
         let initial_find_query = parsed
             .source_id
@@ -285,6 +286,42 @@ async fn view_file(args: &Value, ctx: &mut IntentContext<'_>) {
         )
     };
 
+    let local_driver = {
+        let state = ctx.state.lock().await;
+        state.drivers.get(&effective_source_id).is_some_and(|driver| driver.is_local())
+    };
+    let mut viewer_filename = parsed.filename.clone();
+    if local_driver {
+        let candidate = full_path.clone();
+        let resolved = tokio::task::spawn_blocking(move || {
+            let link = std::fs::symlink_metadata(&candidate).map_err(|error| error.to_string())?;
+            if !link.is_symlink() { return Ok::<_, String>(None); }
+            let target = std::fs::canonicalize(&candidate).map_err(|error| error.to_string())?;
+            if !target.is_file() { return Err("Symbolic link target is not a file.".into()); }
+            Ok(Some(crate::vfs::local::normalize_path(target)))
+        }).await;
+        match resolved {
+            Ok(Ok(Some(target))) => {
+                viewer_filename = std::path::Path::new(&target).file_name()
+                    .map(|name| name.to_string_lossy().to_string()).unwrap_or_else(|| parsed.filename.clone());
+                full_path = target;
+                let state = ctx.state.lock().await;
+                if let Some(source_id) = source_for_local_path(&state, &full_path) {
+                    effective_source_id = source_id;
+                }
+            }
+            Ok(Ok(None)) => {},
+            Ok(Err(message)) => {
+                let _ = ctx.tx.send(ServerMessage::Error { timestamp: now(), code: "NOT_A_FILE".into(), message, recoverable: true, extra: None }).await;
+                return;
+            }
+            Err(error) => {
+                let _ = ctx.tx.send(ServerMessage::Error { timestamp: now(), code: "NOT_A_FILE".into(), message: error.to_string(), recoverable: true, extra: None }).await;
+                return;
+            }
+        }
+    }
+
     let (is_local, driver, file_server_port, image_cap_bytes, color_scheme, viewer_bg) = {
         let state_guard = ctx.state.lock().await;
         let driver = state_guard.drivers.get(&effective_source_id).cloned();
@@ -312,7 +349,7 @@ async fn view_file(args: &Value, ctx: &mut IntentContext<'_>) {
         "?viewer=1&path={}&source={}&name={}&label={}&panel={}",
         url_encode(&full_path),
         url_encode(&effective_source_id),
-        url_encode(&parsed.filename),
+        url_encode(&viewer_filename),
         url_encode(&label),
         url_encode(&parsed.panel_id),
     );
@@ -337,7 +374,7 @@ async fn view_file(args: &Value, ctx: &mut IntentContext<'_>) {
     // viewer's WS handshake task, leaving it in CONNECTING state until the
     // 2-second connect timeout fires.
     let app_handle = ctx.app_handle.clone();
-    let window_title = format!("{} — fbro viewer", parsed.filename);
+    let window_title = format!("{} — fbro viewer", viewer_filename);
     tokio::task::spawn_blocking(move || {
         let _ = tauri::WebviewWindowBuilder::new(
             &app_handle,
@@ -498,7 +535,7 @@ async fn viewer_navigate(args: &Value, ctx: &mut IntentContext<'_>) {
             let entry_info = panel
                 .entries
                 .get(new_cursor)
-                .map(|entry| (entry.name.clone(), entry.kind.clone()));
+                .map(|entry| (entry.name.clone(), entry.kind.clone(), entry.target_kind.clone()));
             let prefetch_neighbors = collect_neighbors(
                 &panel.entries,
                 new_cursor,
@@ -537,12 +574,12 @@ async fn viewer_navigate(args: &Value, ctx: &mut IntentContext<'_>) {
         return;
     }
     if let Some((new_cursor, source_id, dir_path, entry_info, prefetch_neighbors)) = nav_result {
-        if let Some((name, kind)) = entry_info {
-            if kind == "file" {
+        if let Some((name, kind, target_kind)) = entry_info {
+            if kind == "file" || (kind == "symlink" && target_kind.as_deref() == Some("file")) {
                 // When the panel is on a search results source, resolve the
                 // real full_path and source_id so the viewer reads the actual
                 // file rather than hitting the stub search driver.
-                let (effective_path, effective_source_id) = {
+                let (mut effective_path, mut effective_source_id) = {
                     let state_guard = ctx.state.lock().await;
                     if is_search_source(&source_id) {
                         state_guard
@@ -580,6 +617,49 @@ async fn viewer_navigate(args: &Value, ctx: &mut IntentContext<'_>) {
                         )
                     }
                 };
+                let mut display_name = name.clone();
+                if kind == "symlink" {
+                    let link_path = effective_path.clone();
+                    let resolved = tokio::task::spawn_blocking(move || {
+                        let target = std::fs::canonicalize(&link_path)
+                            .map_err(|error| format!("Cannot follow symbolic link: {error}"))?;
+                        if !target.is_file() {
+                            return Err("Symbolic link target is not a file.".to_string());
+                        }
+                        Ok(target)
+                    }).await;
+                    match resolved {
+                        Ok(Ok(target)) => {
+                            effective_path = crate::vfs::local::normalize_path(target.clone());
+                            display_name = target.file_name().map(|name| name.to_string_lossy().to_string()).unwrap_or(name);
+                            let state = ctx.state.lock().await;
+                            if let Some(source_id) = source_for_local_path(&state, &effective_path) {
+                                effective_source_id = source_id;
+                            }
+                        }
+                        error => {
+                            let message = match error {
+                                Ok(Err(message)) => message,
+                                Err(error) => format!("Cannot follow symbolic link: {error}"),
+                                Ok(Ok(_)) => unreachable!(),
+                            };
+                            let _ = ctx.tx.send(ServerMessage::Error {
+                                timestamp: now(), code: "NOT_A_FILE".into(), message,
+                                recoverable: true, extra: None,
+                            }).await;
+                            let cursor_patch = ServerMessage::StatePatch {
+                                timestamp: now(), domain: "panels".into(),
+                                entity_id: Some(parsed.panel_id.clone()), version: 0,
+                                patch: serde_json::json!({ "cursor": new_cursor }),
+                            };
+                            let state = ctx.state.lock().await;
+                            for gui_tx in &state.gui_senders {
+                                let _ = gui_tx.send(cursor_patch.clone()).await;
+                            }
+                            return;
+                        }
+                    }
+                }
                 let driver = ctx
                     .state
                     .lock()
@@ -639,7 +719,7 @@ async fn viewer_navigate(args: &Value, ctx: &mut IntentContext<'_>) {
                     .send(ServerMessage::ViewerFileChanged {
                         timestamp: now(),
                         path: effective_path,
-                        filename: name,
+                        filename: display_name,
                         source_id: effective_source_id.clone(),
                         panel_id: parsed.panel_id.clone(),
                         file_size,
@@ -1219,7 +1299,7 @@ pub(super) fn collect_neighbors(
     let mut i = cursor;
     while count < PREFETCH_N && i > 0 {
         i -= 1;
-        if entries[i].kind == "file" {
+        if entries[i].kind == "file" || (entries[i].kind == "symlink" && entries[i].target_kind.as_deref() == Some("file")) {
             previous.push((format!("{}/{}", base, entries[i].name), entries[i].size));
             count += 1;
         }
@@ -1228,13 +1308,13 @@ pub(super) fn collect_neighbors(
     i = cursor;
     while count < PREFETCH_N && i + 1 < entries.len() {
         i += 1;
-        if entries[i].kind == "file" {
+        if entries[i].kind == "file" || (entries[i].kind == "symlink" && entries[i].target_kind.as_deref() == Some("file")) {
             following.push((format!("{}/{}", base, entries[i].name), entries[i].size));
             count += 1;
         }
     }
     let mut neighbors = Vec::new();
-    if let Some(entry) = entries.get(cursor).filter(|e| e.kind == "file") {
+    if let Some(entry) = entries.get(cursor).filter(|e| e.kind == "file" || (e.kind == "symlink" && e.target_kind.as_deref() == Some("file"))) {
         neighbors.push((format!("{base}/{}", entry.name), entry.size));
     }
     let (first, second) = if direction == "prev" {

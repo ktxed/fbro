@@ -11,7 +11,7 @@ import {
   PANEL_SHORTCUT_COMMAND_IDS,
 } from "../commands/interactive";
 import { useAppDispatch, useAppState } from "../store";
-import { IconChevronDown, IconChevronUp, IconChevronRight, IconChevronLeft, IconArrowUpRight, IconX, IconAlertTriangle, IconActivity, IconHistory, IconGitBranch, IconGitCompare, IconLock, IconMinus, IconNetwork, IconListCheck, IconPlus, IconRestore, IconCopy, IconPhoto, IconTrash, IconPencil, IconRobot, IconArrowsMove, IconFolderOpen } from "@tabler/icons-react";
+import { IconChevronDown, IconChevronUp, IconChevronRight, IconChevronLeft, IconArrowUpRight, IconX, IconAlertTriangle, IconActivity, IconHistory, IconGitBranch, IconGitCompare, IconLock, IconMinus, IconNetwork, IconListCheck, IconPlus, IconRestore, IconCopy, IconPhoto, IconTrash, IconPencil, IconRobot, IconArrowsMove, IconFolderOpen, IconFolder, IconFile } from "@tabler/icons-react";
 import { contextualEntryIsSelected, contextualOperationAvailable, resolveContextualTarget, type ContextualTarget } from "../contextualOperations";
 
 // Maps Source.iconName (BE-provided) to a Tabler icon component for rendering
@@ -664,6 +664,17 @@ function fallbackIcon(entry: VFSEntry): React.ReactNode {
   }
 }
 
+function LinkTargetHint({ entry }: { entry: VFSEntry }) {
+  const TargetIcon = entry.targetKind === "directory" ? IconFolder : entry.targetKind === "file" ? IconFile : null;
+  return (
+    <>
+      <span aria-hidden="true">→</span>
+      {TargetIcon ? <TargetIcon className="panel__link-target-icon" size={12} aria-hidden="true" /> : " "}
+      {entry.pathHint}
+    </>
+  );
+}
+
 function EntryIcon({ entry }: { entry: VFSEntry }) {
   const [failed, setFailed] = useState(false);
   const { fileServerPort } = useAppState();
@@ -692,7 +703,7 @@ function formatBytes(s: number): string {
 }
 
 function formatSize(entry: VFSEntry, calcSet: ReadonlySet<string>, directorySizeAsCount = false): string {
-  if (entry.kind === "directory") {
+  if (entry.kind === "directory" || (entry.kind === "symlink" && entry.targetKind === "directory")) {
     if (calcSet.has(entry.name)) return "⏳";
     if (directorySizeAsCount && entry.size !== undefined) {
       return `${entry.size} item${entry.size === 1 ? "" : "s"}`;
@@ -744,7 +755,7 @@ function shouldKeepWindowFocusTarget(active: Element | null): boolean {
 }
 
 function isImagePreviewCandidate(entry: VFSEntry): boolean {
-  if (entry.kind !== "file") return false;
+  if (entry.kind !== "file" && !(entry.kind === "symlink" && entry.targetKind === "file")) return false;
   const extension = entry.name.split(".").pop()?.toLowerCase();
   return !!extension && IMAGE_PREVIEW_EXTENSIONS.has(extension);
 }
@@ -1697,7 +1708,7 @@ export function Panel({
   const entryPathFor = (entry: VFSEntry): string | null => {
     if (entry.sourcePath) return entry.sourcePath;
     if (entry.name === "..") return null;
-    if (entry.kind !== "file") return null;
+    if (entry.kind !== "file" && !(entry.kind === "symlink" && entry.targetKind === "file")) return null;
     const dir = panel.path.replace(/[/\\]+$/, "");
     return `${dir}/${entry.name}`;
   };
@@ -1884,7 +1895,7 @@ export function Panel({
     setTooltipCard(null);
     dispatch({ type: "CLOSE_CONTEXT_MENU" });
     client.sendIntent("SetCursor", "focused-panel", { index: absIndex });
-    if (entry.kind === "directory") {
+    if (entry.kind === "directory" || (entry.kind === "symlink" && entry.targetKind === "directory")) {
       client.sendIntent("OpenEntry", "focused-panel");
       return;
     }
@@ -2044,6 +2055,7 @@ export function Panel({
         data-abs-index={isTooltip ? undefined : absIndex}
         data-entry-name={isTooltip ? undefined : entry.name}
         data-entry-kind={isTooltip ? undefined : entry.kind}
+        title={entry.kind === "symlink" ? entry.pathHint : entry.pathHint ? entry.sourcePath : undefined}
         className={[
           "panel__card",
           isTooltip ? "panel__card--tooltip" : "",
@@ -2087,6 +2099,8 @@ export function Panel({
                     info: {
                       name: entry.name,
                       kind: entry.kind,
+                      targetKind: entry.targetKind,
+                      linkTarget: entry.kind === "symlink" ? entry.pathHint : undefined,
                       fullPath,
                       dirPath,
                       size: entry.size,
@@ -2104,6 +2118,11 @@ export function Panel({
           </div>
         ) : (
           <div className={`panel__card-name${colorClass ? ` ${colorClass}` : ""}`} title={entry.name}>{entry.name}</div>
+        )}
+        {entry.kind === "symlink" && entry.pathHint && (
+          <div className="panel__card-path-hint" title={entry.pathHint} aria-label={`Symbolic link target: ${entry.targetKind ?? "unavailable"}, ${entry.pathHint}`}>
+            <LinkTargetHint entry={entry} />
+          </div>
         )}
         <div className="panel__card-meta">
           <span className="panel__card-size">{formatSize(entry, calcSet, isGlobalSelectionsRoot)}</span>
@@ -2140,7 +2159,7 @@ export function Panel({
     const singleTarget = contextualTarget?.count === 1;
     // A singleton directory uses Right Arrow for drill-down and does not need
     // a shortcut bar. Directories can still participate in bulk selections.
-    const fileOperations = contextualTarget && (contextualTarget.count > 1 || entry.kind !== "directory")
+    const fileOperations = contextualTarget && (contextualTarget.count > 1 || (entry.kind !== "directory" && !(entry.kind === "symlink" && entry.targetKind === "directory")))
       ? inlineFileOperationsFor(contextualTarget)
       : [];
     return (
@@ -2151,7 +2170,7 @@ export function Panel({
         data-abs-index={absIndex}
         data-entry-name={entry.name}
         data-entry-kind={entry.kind}
-        title={entry.pathHint ? entry.sourcePath : undefined}
+        title={entry.kind === "symlink" ? entry.pathHint : entry.pathHint ? entry.sourcePath : undefined}
         className={[
           "panel__row",
           (absIndex + (panel.zebraPhase ?? 0)) % 2 === 1 ? "panel__row--alt" : "",
@@ -2248,9 +2267,9 @@ export function Panel({
               <span className="panel__name-base">{base}</span>
               {ext && <span className="panel__name-ext">{ext}</span>}
               {entry.pathHint && (
-                <span className="panel__path-hint" data-testid="path-hint">
-                  <span className="panel__path-hint-separator">·</span>
-                  {entry.pathHint}
+                <span className={`panel__path-hint${entry.kind === "symlink" ? " panel__path-hint--symlink" : ""}`} data-testid="path-hint" aria-label={entry.kind === "symlink" ? `Symbolic link target: ${entry.targetKind ?? "unavailable"}, ${entry.pathHint}` : undefined}>
+                  {entry.kind !== "symlink" && <span className="panel__path-hint-separator">·</span>}
+                  {entry.kind === "symlink" ? <LinkTargetHint entry={entry} /> : entry.pathHint}
                 </span>
               )}
               {restricted && (
@@ -2272,6 +2291,8 @@ export function Panel({
                       info: {
                         name: entry.name,
                         kind: entry.kind,
+                        targetKind: entry.targetKind,
+                        linkTarget: entry.kind === "symlink" ? entry.pathHint : undefined,
                         fullPath,
                         dirPath,
                         size: entry.size,

@@ -3,6 +3,8 @@
 export interface VFSEntry {
   name: string;
   kind: "file" | "directory" | "symlink" | "other";
+  /** Resolved type for a local symlink; absent when its target is unavailable. */
+  targetKind?: "file" | "directory" | "other";
   /** The backend can mount this file as a navigable archive shadow source. */
   browsableArchive?: boolean;
   size?: number;

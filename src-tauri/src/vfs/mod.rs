@@ -15,6 +15,7 @@ pub mod spy;
 pub mod zip;
 
 use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -202,9 +203,19 @@ pub trait VfsDriver: Send + Sync {
     fn remove_file(&self, path: &str) -> Result<(), VfsError>;
     fn remove_dir_all(&self, path: &str) -> Result<(), VfsError>;
     fn exists(&self, path: &str) -> bool;
+    /// Like `exists`, but a dangling symbolic link still exists as an entry.
+    fn exists_no_follow(&self, path: &str) -> bool {
+        self.exists(path)
+    }
+    fn read_link(&self, _path: &str) -> Result<LinkInfo, VfsError> {
+        Err(VfsError::NotSupported("symbolic links are not supported by this driver".into()))
+    }
+    fn create_symlink(&self, _target: &Path, _link: &str, _is_dir: bool) -> Result<(), VfsError> {
+        Err(VfsError::NotSupported("symbolic links are not supported by this driver".into()))
+    }
     fn file_size(&self, path: &str) -> Option<u64>;
 
-    /// List direct children (name, is_dir, size). Used by recursive copy/delete.
+    /// List direct children without following links. Used by recursive copy/delete.
     fn read_dir_entries(&self, path: &str) -> Result<Vec<DirChild>, VfsError>;
 
     // ── Same-driver fast path ───────────────────────────────────────────────
@@ -258,9 +269,16 @@ pub trait VfsDriver: Send + Sync {
 pub struct DirChild {
     pub name: String,
     pub is_dir: bool,
+    pub is_symlink: bool,
     pub size: u64,
     pub mtime: Option<u64>,
     pub permissions: Option<String>,
+}
+
+pub struct LinkInfo {
+    pub target: PathBuf,
+    /// Required to recreate a directory link on Windows; ignored on Unix.
+    pub is_dir: bool,
 }
 
 // ─── Domain types ───────────────────────────────────────────────────────────
@@ -269,6 +287,8 @@ pub struct DirChild {
 pub struct VfsEntry {
     pub name: String,
     pub kind: VfsKind,
+    pub target_kind: Option<VfsKind>,
+    pub path_hint: Option<String>,
     pub size: Option<u64>,
     pub mtime: Option<String>,
     pub btime: Option<String>, // birth time — file creation; not available on all platforms/filesystems

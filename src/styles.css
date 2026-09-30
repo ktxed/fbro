@@ -1263,6 +1263,16 @@ body {
   opacity: 1;
 }
 
+.panel__thumb-link-marker {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  display: flex;
+  color: var(--text-link);
+  background: var(--bg-panel);
+  border-radius: 2px;
+}
+
 .panel__thumb-icon[aria-hidden="true"] {
   opacity: 0;
 }
@@ -1275,6 +1285,19 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   line-height: 1.3;
+}
+
+.panel__card-path-hint {
+  color: var(--text-dim);
+  font-size: calc(var(--font-size) - 3px);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.panel__link-target-icon {
+  margin: 0 0.3em;
+  vertical-align: -0.15em;
 }
 
 .panel__card-meta {
@@ -1497,6 +1520,10 @@ body {
 
 .panel__path-hint-separator {
   padding: 0 0.55em;
+}
+
+.panel__path-hint--symlink {
+  margin-left: 0.55em;
 }
 
 .panel__row--cursor .panel__path-hint,

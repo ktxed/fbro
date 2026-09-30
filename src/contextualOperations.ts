@@ -166,7 +166,7 @@ export function contextualOperationAvailable(
     case "platform.open-with":
       return isLocalFilesystem;
     case "panel.browse-archive":
-      return target.primary.kind === "file" && target.primary.entry?.browsableArchive === true;
+      return target.primary.entry?.browsableArchive === true;
     case "panel.pass-to-bro":
       return isLocalFilesystem || isGlobalRoot || canCompareTarget(state, target);
     case "file.compare":

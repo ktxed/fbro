@@ -57,6 +57,8 @@ impl VfsDriver for HistoryDriver {
             .map(|path| VfsEntry {
                 name: last_component(path),
                 kind: VfsKind::Directory,
+                target_kind: None,
+                path_hint: None,
                 size: None,
                 mtime: None,
                 btime: None,

@@ -37,6 +37,8 @@ export async function runLocalFlow(browser, observer) {
   fs.writeFileSync(hostPath(path.posix.join(aSrc, "alpha/note.txt")), "renamed payload\n");
   fs.writeFileSync(hostPath(path.posix.join(aSrc, "alpha/remove.txt")), "delete me\n");
 
+  await verifyLocalSymlinkNavigation(browser, observer, aSrc);
+
   await goToPanelPath(browser, observer, "left", aSrc);
   await observer.waitForEntry("left", "alpha", "directory");
   await clickEntry(browser, "left", "alpha");
@@ -261,6 +263,58 @@ export async function runLocalFlow(browser, observer) {
 
   await verifyWindowFocusRestoration(browser, observer);
   await verifyGridLeftAtFirstItemNavigatesUp(browser, observer, aSrc);
+}
+
+async function verifyLocalSymlinkNavigation(browser, observer, aSrc) {
+  const linksDir = path.posix.join(aSrc, "symlink-test");
+  const hostLinksDir = hostPath(linksDir);
+  fs.mkdirSync(hostLinksDir);
+  fs.symlinkSync("../alpha", path.join(hostLinksDir, "folder-link"), "dir");
+  fs.symlinkSync("../alpha/note.txt", path.join(hostLinksDir, "file-link.txt"), "file");
+  fs.symlinkSync("missing.txt", path.join(hostLinksDir, "broken-link"), "file");
+
+  await goToPanelPath(browser, observer, "left", linksDir);
+  const folder = await observer.waitForEntry("left", "folder-link", "symlink");
+  const file = await observer.waitForEntry("left", "file-link.txt", "symlink");
+  const broken = await observer.waitForEntry("left", "broken-link", "symlink");
+  if (folder.targetKind !== "directory" || folder.pathHint !== path.posix.join(aSrc, "alpha")) {
+    throw new Error(`directory link target missing: ${JSON.stringify(folder)}`);
+  }
+  if (file.targetKind !== "file" || file.pathHint !== path.posix.join(aSrc, "alpha/note.txt")) {
+    throw new Error(`file link target missing: ${JSON.stringify(file)}`);
+  }
+  if (broken.targetKind) throw new Error("broken link unexpectedly has a target type");
+
+  await clickEntry(browser, "left", "folder-link");
+  await waitFor(async () => {
+    const hint = await browser.$('[data-testid="panel-left"] [data-entry-name="folder-link"] [data-testid="path-hint"]');
+    return (await hint.getText()).includes(folder.pathHint);
+  }, { timeout: 10_000, label: "directory link target hint" });
+  await browser.keys("ArrowRight");
+  await observer.waitForPanelPath("left", path.posix.join(aSrc, "alpha"));
+  await browser.keys("ArrowLeft");
+  await observer.waitForPanelPath("left", aSrc);
+
+  await goToPanelPath(browser, observer, "left", linksDir);
+  const fileIndex = observer.state.panels.left?.entries.findIndex((entry) => entry.name === "file-link.txt") ?? -1;
+  if (fileIndex < 1) throw new Error("file link has no previous viewer entry");
+  observer.sendIntent("SetCursor", "left", { index: fileIndex - 1 });
+  await waitFor(() => observer.state.panels.left?.cursor === fileIndex - 1, {
+    timeout: 10_000, label: "viewer cursor before file link",
+  });
+  const messageCount = observer.messages.length;
+  observer.sendIntent("ViewerNavigate", undefined, { panelId: "left", direction: "next" });
+  await waitFor(() => observer.messages.slice(messageCount).find((message) =>
+    message.type === "ViewerFileChanged" && message.path === path.posix.join(aSrc, "alpha/note.txt")), {
+    timeout: 10_000, label: "viewer follows file link",
+  });
+  await clickEntry(browser, "left", "broken-link");
+  await browser.keys("Enter");
+  await waitFor(async () => {
+    const hint = await browser.$(".transient-hint");
+    return (await hint.isDisplayed()) && (await hint.getText()).includes("Cannot follow symbolic link");
+  }, { timeout: 10_000, label: "broken link reports navigation error" });
+  if (observer.state.panels.left?.path !== linksDir) throw new Error("broken link changed panel path");
 }
 
 async function verifyBookmarksKeyboardNavigation(browser, observer, aSrc, restorePath) {

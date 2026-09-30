@@ -215,6 +215,8 @@ function openInfo(dispatch: Dispatch<AppAction>, panel: PanelState, state: AppSt
     info: {
       name: entry.name,
       kind: entry.kind,
+      targetKind: entry.targetKind,
+      linkTarget: entry.kind === "symlink" ? entry.pathHint : undefined,
       fullPath,
       dirPath,
       size: entry.size,
@@ -404,7 +406,7 @@ export function executeTargetedCommand(
 
 function openViewerIntent(client: WsClient, panel: PanelState, intentName: "ViewFile" | "EditFile") {
   const entry = currentEntry(panel);
-  if (!entry || entry.kind === "directory") return false;
+  if (!entry || entry.kind === "directory" || (entry.kind === "symlink" && entry.targetKind === "directory")) return false;
 
   if (intentName === "ViewFile") {
     client.sendIntent("ViewFile", undefined, {
@@ -465,7 +467,7 @@ function toggleSelectedDirectorySizes(client: WsClient, panel: PanelState) {
 
 function openFocusedEntry(client: WsClient, panel: PanelState, sources: Record<string, Source>) {
   const entry = currentEntry(panel);
-  if (entry && entry.kind !== "directory") {
+  if (entry && entry.kind !== "directory" && !(entry.kind === "symlink" && entry.targetKind === "directory")) {
     if (entry.browsableArchive) {
       client.sendIntent("OpenEntry", "focused-panel");
     } else if (sources[panel.sourceId]?.kind === "remote" || panel.sourceId === "journal") {

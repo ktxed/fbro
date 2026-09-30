@@ -700,6 +700,8 @@ impl VfsDriver for SevenZipFsDriver {
                 VfsEntry {
                     name: e.name.clone(),
                     kind,
+                    target_kind: None,
+                    path_hint: None,
                     size: if e.is_dir { None } else { Some(e.size) },
                     mtime: e.mtime.clone(),
                     btime: None,
@@ -810,6 +812,7 @@ impl VfsDriver for SevenZipFsDriver {
             .map(|e| DirChild {
                 name: e.name.clone(),
                 is_dir: e.is_dir,
+                is_symlink: false,
                 size: e.size,
                 mtime: e.mtime.as_ref().and_then(|s| s.parse::<u64>().ok()),
                 permissions: None,

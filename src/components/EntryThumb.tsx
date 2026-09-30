@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { VFSEntry } from "../ws/types";
 import { useAppState } from "../store";
+import { IconArrowUpRight } from "@tabler/icons-react";
 
 export interface EntryThumbProps {
   entry: VFSEntry;
@@ -16,7 +17,7 @@ export function EntryThumb({ entry, thumbUrl }: EntryThumbProps) {
 
   const iconName = entry.iconName;
   const isThumbCandidate =
-    entry.kind === "file" &&
+    (entry.kind === "file" || (entry.kind === "symlink" && entry.targetKind === "file")) &&
     !!thumbUrl &&
     !thumbFailed;
   const resolvedThumbUrl = isThumbCandidate ? thumbUrl : null;
@@ -51,6 +52,7 @@ export function EntryThumb({ entry, thumbUrl }: EntryThumbProps) {
           onError={() => setThumbFailed(true)}
         />
       )}
+      {entry.kind === "symlink" && <span className="panel__thumb-link-marker" aria-hidden><IconArrowUpRight size={15} /></span>}
     </div>
   );
 }

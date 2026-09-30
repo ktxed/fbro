@@ -314,6 +314,8 @@ impl ProcsDriver {
                 Some(VfsEntry {
                     name: entry_name,
                     kind: VfsKind::File,
+                    target_kind: None,
+                    path_hint: None,
                     size: Some(size),
                     mtime: Some(mtime.clone()),
                     btime: Some(mtime),
@@ -401,6 +403,8 @@ impl ProcsDriver {
                 Some(VfsEntry {
                     name: entry_name,
                     kind,
+                    target_kind: None,
+                    path_hint: None,
                     size: Some(size),
                     mtime: Some(mtime.clone()),
                     btime: Some(mtime),

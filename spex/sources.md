@@ -210,6 +210,11 @@ only while their peer connection is registered.
 | ZIP archive | `zip:<absolute-archive-path>` | Archive navigation | `ZipFsDriver` | `virtual` / `true` | No | Mounted on entry; removed after the last panel exits |
 | 7z archive | `7z:<absolute-archive-path>` | Archive navigation | `SevenZipFsDriver` | `virtual` / `true` | No | Mounted on entry; removed after the last panel exits |
 
+Opening a local directory symlink resolves its target and selects the mounted
+local Source containing that canonical path. The panel path and subsequent Up
+navigation use the resolved target, while the listing row and file jobs still
+identify the symlink itself.
+
 The source bar renders every `Source` for which `shadow == false`; it is not
 restricted to physical volumes. Sorting uses `sort_priority`, then a
 case-insensitive name comparison.

@@ -110,7 +110,9 @@ export function InfoModal({ info, client }: InfoModalProps) {
                 <td className="modal__info-label">Type</td>
                 <td className="modal__info-value modal__info-type">
                   <TypeIcon kind={info.kind} iconName={info.iconName} />
-                  {kindLabel(info.kind)}
+                  {info.kind === "symlink"
+                    ? `Symbolic link${info.targetKind ? ` to ${info.targetKind}` : " (target unavailable)"}`
+                    : kindLabel(info.kind)}
                 </td>
                 <td />
               </tr>
@@ -126,6 +128,13 @@ export function InfoModal({ info, client }: InfoModalProps) {
                 <td className="modal__info-value" title={info.dirPath}>{info.dirPath}</td>
                 <td><CopyButton text={info.dirPath} what="directory path" /></td>
               </tr>
+              {info.kind === "symlink" && info.linkTarget && (
+                <tr>
+                  <td className="modal__info-label">Target</td>
+                  <td className="modal__info-value" title={info.linkTarget}>{info.linkTarget}</td>
+                  <td><CopyButton text={info.linkTarget} what="target path" /></td>
+                </tr>
+              )}
             </tbody>
             <tbody className="modal__info-group">
               {info.kind !== "directory" && (

@@ -54,6 +54,9 @@ dialog types.
   palette or source context menu. Its native list control owns selection keys;
   Escape closes and restores focus. The source menu owns arrows, Enter, and
   Escape while open.
+- Enter and ArrowRight on a local directory symlink open its resolved target
+  as a panel location. F3 on a local file symlink views the target file; a
+  broken symlink reports an error instead of opening a viewer.
 
 ---
 
