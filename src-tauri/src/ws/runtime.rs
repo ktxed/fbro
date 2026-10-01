@@ -521,6 +521,11 @@ pub(crate) async fn navigate_to(
         let (source_id, current_sort, filter, show_hidden, version, panel_epoch, shadow_schema) =
             if let Some(panel) = state_guard.panels.get_mut(panel_id) {
                 let source_id = panel.source_id.clone();
+                panel.navigation_context.navigate(
+                    &source_id,
+                    new_path,
+                    panel.shadow_source.is_some(),
+                );
                 panel.path = new_path.to_string();
                 panel.entries.clear();
                 panel.cursor = 0;

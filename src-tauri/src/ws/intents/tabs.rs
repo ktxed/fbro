@@ -235,6 +235,11 @@ async fn new_tab(args: &Value, ctx: &mut IntentContext<'_>) {
             window_count: 0,
             window_version: 0,
             source_paths,
+            navigation_context: if clone_active {
+                source.navigation_context.clone()
+            } else {
+                Default::default()
+            },
             shadow_source: None,
             terminal_session: None,
             git,
@@ -434,6 +439,7 @@ async fn promote_terminal(args: &Value, ctx: &mut IntentContext<'_>) {
             window_count: 0,
             window_version: 0,
             source_paths: source.source_paths.clone(),
+            navigation_context: Default::default(),
             shadow_source: None,
             terminal_session: Some(sid),
             git: source.git.clone(),

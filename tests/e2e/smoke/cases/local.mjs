@@ -310,8 +310,30 @@ async function verifyLocalSymlinkNavigation(browser, observer, aSrc) {
   }, { timeout: 10_000, label: "directory link target hint" });
   await browser.keys("ArrowRight");
   await observer.waitForPanelPath("left", path.posix.join(aSrc, "alpha"));
+  // Children still go Up normally; the target boundary returns through the link.
+  await clickEntry(browser, "left", "nested");
+  await browser.keys("ArrowRight");
+  await observer.waitForPanelPath("left", path.posix.join(aSrc, "alpha/nested"));
   await browser.keys("ArrowLeft");
-  await observer.waitForPanelPath("left", aSrc);
+  await observer.waitForPanelPath("left", path.posix.join(aSrc, "alpha"));
+  await browser.keys("ArrowLeft");
+  await observer.waitForPanelPath("left", linksDir);
+  const expectLinkCursor = () => waitFor(() => {
+    const panel = observer.state.panels.left;
+    return panel?.entries[panel.cursor]?.name === "folder-link";
+  }, { timeout: 10_000, label: "return selects directory link" });
+  await expectLinkCursor();
+
+  await browser.keys("ArrowRight");
+  await observer.waitForPanelPath("left", path.posix.join(aSrc, "alpha"));
+  await browser.keys("[");
+  await observer.waitForPanelPath("left", linksDir);
+  await expectLinkCursor();
+  await browser.keys("]");
+  await observer.waitForPanelPath("left", path.posix.join(aSrc, "alpha"));
+  await browser.keys("ArrowLeft");
+  await observer.waitForPanelPath("left", linksDir);
+  await expectLinkCursor();
 
   await goToPanelPath(browser, observer, "left", linksDir);
   const fileIndex = observer.state.panels.left?.entries.findIndex((entry) => entry.name === "file-link.txt") ?? -1;

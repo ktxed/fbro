@@ -441,6 +441,15 @@ async fn open_entry(scope: &Value, ctx: &mut IntentContext<'_>) {
             {
                 let mut state = ctx.state.lock().await;
                 if let Some(panel) = state.panels.get_mut(&panel_id) {
+                    panel
+                        .navigation_context
+                        .enter_link(crate::state::navigation::SymlinkReturn {
+                            source_id: source_id.clone(),
+                            path: current_path.clone(),
+                            name: entry_name.clone(),
+                            target_source_id: target_source_id.clone(),
+                            target_path: target.clone(),
+                        });
                     if panel.source_id != target_source_id {
                         panel.source_paths.insert(panel.source_id.clone(), panel.path.clone());
                         panel.source_id = target_source_id;
@@ -1162,6 +1171,7 @@ async fn create_right_listing_tab(
                 .as_ref()
                 .map(|panel| panel.source_paths.clone())
                 .unwrap_or_default(),
+            navigation_context: Default::default(),
             shadow_source: None,
             terminal_session: None,
             git: base.as_ref().and_then(|panel| panel.git.clone()),
@@ -1846,7 +1856,7 @@ async fn mount_source(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) 
 
 async fn navigate_up(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
     let panel_id = resolve_panel_id(scope, ctx.state).await;
-    let (current_path, parent_path, has_shadow) = {
+    let (current_path, parent_path, has_shadow, link_return) = {
         let state_guard = ctx.state.lock().await;
         if let Some(panel) = state_guard.panels.get(&panel_id) {
             let requested_source_id = arg_str(args, "sourceId");
@@ -1877,11 +1887,51 @@ async fn navigate_up(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
                 Some(panel.path.clone()),
                 driver.parent_path(&panel.path),
                 panel.shadow_source.is_some(),
+                panel
+                    .navigation_context
+                    .link_return(&panel.source_id, &panel.path)
+                    .cloned(),
             )
         } else {
-            (None, None, false)
+            (None, None, false, None)
         }
     };
+
+    if let Some(link) = link_return {
+        {
+            let mut state = ctx.state.lock().await;
+            if !state.drivers.contains_key(&link.source_id) {
+                drop(state);
+                send_navigation_error(
+                    &panel_id,
+                    "Symbolic link origin source is no longer available.".into(),
+                    ctx,
+                )
+                .await;
+                return;
+            }
+            if let Some(panel) = state.panels.get_mut(&panel_id) {
+                panel.navigation_context.leave_link();
+                panel
+                    .source_paths
+                    .insert(panel.source_id.clone(), panel.path.clone());
+                panel.source_id = link.source_id;
+            }
+        }
+        navigate_to(
+            &panel_id,
+            &link.path,
+            Some(link.name),
+            None,
+            ctx.state,
+            ctx.tx,
+            ctx.scan_handles,
+            ctx.dir_size_queue,
+            ctx.watcher_cmd_tx,
+        )
+        .await;
+        return;
+    }
 
     if let Some(current_path) = current_path {
         if let Some(parent) = parent_path {
@@ -1938,6 +1988,16 @@ async fn navigate_to_history_entry(args: &Value, ctx: &mut IntentContext<'_>) {
         return;
     }
 
+    let cursor_hint = {
+        let mut state = ctx.state.lock().await;
+        let Some(panel) = state.panels.get_mut(&panel_id) else {
+            return;
+        };
+        panel
+            .navigation_context
+            .restore_history(&target_source_id, &target_path)
+    };
+
     // Read current panel state.
     let (current_source_id, in_shadow) = {
         let guard = ctx.state.lock().await;
@@ -1953,7 +2013,7 @@ async fn navigate_to_history_entry(args: &Value, ctx: &mut IntentContext<'_>) {
         navigate_to(
             &panel_id,
             &target_path,
-            None,
+            cursor_hint.clone(),
             None,
             ctx.state,
             ctx.tx,
@@ -1978,7 +2038,7 @@ async fn navigate_to_history_entry(args: &Value, ctx: &mut IntentContext<'_>) {
             navigate_to(
                 &panel_id,
                 &target_path,
-                None,
+                cursor_hint.clone(),
                 None,
                 ctx.state,
                 ctx.tx,
@@ -2114,7 +2174,7 @@ async fn navigate_to_history_entry(args: &Value, ctx: &mut IntentContext<'_>) {
         navigate_to(
             &panel_id,
             &target_path,
-            None,
+            cursor_hint.clone(),
             None,
             ctx.state,
             ctx.tx,
@@ -2164,7 +2224,7 @@ async fn navigate_to_history_entry(args: &Value, ctx: &mut IntentContext<'_>) {
         navigate_to(
             &panel_id,
             &target_path,
-            None,
+            cursor_hint.clone(),
             None,
             ctx.state,
             ctx.tx,
@@ -2199,7 +2259,7 @@ async fn navigate_to_history_entry(args: &Value, ctx: &mut IntentContext<'_>) {
         navigate_to(
             &panel_id,
             &target_path,
-            None,
+            cursor_hint.clone(),
             None,
             ctx.state,
             ctx.tx,

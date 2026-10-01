@@ -211,9 +211,14 @@ only while their peer connection is registered.
 | 7z archive | `7z:<absolute-archive-path>` | Archive navigation | `SevenZipFsDriver` | `virtual` / `true` | No | Mounted on entry; removed after the last panel exits |
 
 Opening a local directory symlink resolves its target and selects the mounted
-local Source containing that canonical path. The panel path and subsequent Up
-navigation use the resolved target, while the listing row and file jobs still
-identify the symlink itself.
+local Source containing that canonical path. The panel path uses the resolved
+target, while the listing row and file jobs still identify the symlink itself.
+The backend retains a per-panel return route: Up within the target's children
+uses normal parent navigation, but Up at the target directory returns to the
+source and directory where the link was opened, with the link selected. Nested
+links return in reverse entry order. History Back/Forward restores these return
+routes; Back to the link's origin also selects the link. Return routes are
+session-only and do not change the canonical paths used for file operations.
 
 The source bar renders every `Source` for which `shadow == false`; it is not
 restricted to physical volumes. Sorting uses `sort_priority`, then a

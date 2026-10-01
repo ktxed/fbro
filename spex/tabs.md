@@ -84,7 +84,7 @@ stateDiagram-v2
 
 ### 3.2 New tab (`panel.tab.new`)
 
-1. If the active panel is a local filesystem listing, clone its `source_id` and `path`; otherwise use the local source containing the user's Home directory and start at Home.
+1. If the active panel is a local filesystem listing, clone its `source_id`, `path`, and backend symlink return context; otherwise use the local source containing the user's Home directory and start at Home.
 2. Allocate a new panel id; insert it after the active tab in `tab_panel_ids`.
 3. Set `active_panel_id` to the new panel id; update `focus`.
 4. Emit targeted patches: `panel-upsert` (create:true), `slot`, `layout`, `focus`.

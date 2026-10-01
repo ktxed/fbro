@@ -26,8 +26,11 @@ The Dockerized backend app instances still run under `xvfb-run`.
 ## Smoke Tests
 
 The local smoke flow covers symlink target hints, keyboard navigation into a
-directory link and Up from its resolved path, viewer navigation through a file
-link, and errors for broken links. Rust tests cover link-preserving local file
+directory link, Up through a target child and back to the link's origin with
+cursor restoration, history Back/Forward followed by Up, viewer navigation
+through a file link, and errors for broken links. Backend return-route tests
+also cover nested links, cross-source history, and archive round trips.
+Rust tests cover link-preserving local file
 operations and avoid traversing cyclic links during directory copies. Native macOS and Windows
 symlink behavior still needs platform-specific verification.
 
