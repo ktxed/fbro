@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { useAppDispatch, useAppState, type PendingGlobalSelectionAdd } from "../store";
 import type { WsClient } from "../ws/client";
 import { ModalLayer } from "./ModalStack";
@@ -27,18 +27,11 @@ export function GlobalSelectionModal({ add, client }: GlobalSelectionModalProps)
   const [target, setTarget] = useState(state.globalSelections[0]?.id ?? CREATE_NEW);
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const selectRef = useRef<HTMLSelectElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
 
   const creating = target === CREATE_NEW;
   const summaryName = add.targetPath
     ? add.targetName
     : `${add.targetCount} selected ${add.targetCount === 1 ? "entry" : "entries"}`;
-
-  useEffect(() => {
-    if (creating) inputRef.current?.focus();
-    else selectRef.current?.focus();
-  }, [creating]);
 
   const close = () => dispatch({ type: "CLOSE_GLOBAL_SELECTION_ADD" });
 
@@ -77,6 +70,12 @@ export function GlobalSelectionModal({ add, client }: GlobalSelectionModalProps)
   };
 
   const handleNameKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.defaultPrevented) return;
+    if (e.key === "Enter") {
+      e.preventDefault();
+      submit();
+      return;
+    }
     if (e.key !== "ArrowUp" || name.trim()) return;
     const previousSelection = state.globalSelections[state.globalSelections.length - 1];
     if (!previousSelection) return;
@@ -86,7 +85,7 @@ export function GlobalSelectionModal({ add, client }: GlobalSelectionModalProps)
   };
 
   return (
-    <ModalLayer modalId="global-selection" onClick={close} onKeyDown={handleKeyDown}>
+    <ModalLayer modalId="global-selection" focusKey={creating ? "create" : "existing"} onClick={close} onKeyDown={handleKeyDown}>
       <ModalDialog ariaLabel="To global selection" onClick={(e) => e.stopPropagation()}>
         <div className="modal__header">To global selection</div>
         <div className="modal__body">
@@ -96,7 +95,8 @@ export function GlobalSelectionModal({ add, client }: GlobalSelectionModalProps)
           <div className="modal__rename-row">
             <label className="modal__rename-label">Selection:</label>
             <select
-              ref={selectRef}
+              data-modal-initial-focus={!creating || undefined}
+              data-testid="global-selection-target"
               className="modal__rename-input"
               value={target}
               onChange={(e) => {
@@ -116,7 +116,8 @@ export function GlobalSelectionModal({ add, client }: GlobalSelectionModalProps)
             <div className="modal__rename-row">
               <label className="modal__rename-label">Name:</label>
               <input
-                ref={inputRef}
+                data-modal-initial-focus
+                data-testid="global-selection-name"
                 className="modal__rename-input"
                 value={name}
                 onChange={(e) => {

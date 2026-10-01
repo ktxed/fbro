@@ -222,13 +222,20 @@ The smoke test exercises these flows:
   - Bro list keyboard: opened from the command palette, the bro list gets
     initial focus; Tab / Shift+Tab move the selection like the arrow keys.
   - Copy Paths bro: launching it shows a "Copied … full path(s)" toast.
+  - Modal default focus: Copy primary action, Rename input, conflicting copy
+    destination, Delete primary action (including reopen), completed-job Close,
+    Search mask, active Settings tab, and pairing Cancel on both peers.
+    Delete Tab reaches Background and Cancel; Enter on Cancel preserves the
+    file and restores panel focus, while Enter on Delete removes it.
   - Copy/Rename dialogs: defaults, Tab reachability, destination-exists
     warning, keyboard Cancel.
   - Contextual selection operations: inline toolbar and context-menu items for
     1/2/3 selected entries, cursor-row targeting, folder anchors.
   - Sort selector (Enter applies, Escape cancels, focus returns to the filter),
     quick-filter Escape restores the full listing, per-location sort on/off,
-    Settings tab arrows and reset confirmation.
+    Settings tab arrows and reset confirmation. Covered Settings/Bro layers
+    are inert and hidden from accessibility; reset starts on Cancel and restores
+    its trigger on Escape. Settings Tab skips inactive sidebar tabs.
   - Bookmark popover keyboard ownership, Up/Down selection without panel-cursor movement,
     Enter navigation, and a scroll height capped at half the owning panel.
   - Live date-sort cursor anchoring, inline image preview navigation, window
@@ -245,7 +252,9 @@ The smoke test exercises these flows:
     or navigation.
 - Global selections (`cases/global-selection.mjs`): create from the context
   menu, persistence across reload, add entries via context menu and long
-  right-click, deleting inside a selection leaves the real files intact.
+  right-click, focus follows existing/new selection mode, new-name Enter
+  validates, Tab/Enter adds to the existing selection, and deleting inside a
+  selection leaves the real files intact.
 - Fedup (`cases/fedup.mjs`): launch from Pass to Bro on a global selection;
   default ignores, case-insensitive include patterns, custom excludes.
 - Quick Edit (`cases/quick-edit.mjs`): edit in the embedded terminal, save,
@@ -257,8 +266,9 @@ The smoke test exercises these flows:
 - Search modal keyboard (`cases/search.mjs`): roving tab focus, Enter on
   Close, global shortcuts blocked while Search is the top layer.
 
-Known gap: no case asserts the `inert` attribute on a covered modal layer
-directly; background blocking is only shown via ignored global shortcuts.
+Native macOS and Windows modal focus and keyboard behavior still require
+verification. Smoke coverage samples the default-focus archetypes; it does not
+exercise every operation conflict and cancellation state.
 
 ## Artifacts
 

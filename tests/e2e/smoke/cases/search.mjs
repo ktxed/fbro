@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { backendPath, hostPath } from "../config.mjs";
 import { clickCommand, reloadBrowserApp } from "../browser.mjs";
+import { expectModalFocus } from "./modal-focus.mjs";
 
 export async function runSearchFlow(browser, observer) {
   const aDst = backendPath("a", "dst");
@@ -126,6 +127,7 @@ async function openSearch(browser) {
   });
   const input = await browser.$('[data-testid="search-file-mask-input"]');
   await input.waitForDisplayed({ timeout: 10_000 });
+  await expectModalFocus(browser, '[data-testid="search-file-mask-input"]', "search mask initial focus");
   return input;
 }
 

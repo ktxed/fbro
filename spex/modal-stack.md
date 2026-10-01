@@ -145,8 +145,9 @@ When adding or converting a full-screen dialog:
 1. Wrap its overlay with `ModalLayer` and give it a stable semantic `modalId`.
 2. Keep open/close and payload state with the owning feature.
 3. Put keyboard handling on the layer or its descendants, not on `window`.
-4. Optionally provide `initialFocusRef` or mark the preferred control with
-   `data-modal-initial-focus`.
+4. Declare the default focus with `initialFocusRef` or
+   `data-modal-initial-focus`, according to §6. Never use a mount effect or
+   timeout to focus the overlay after the stack has focused the control.
 5. Do not add another global `isAnyModalOpen` expression; consume
    `useModalStack()` where an application-level guard is required.
 6. Test that a second layer leaves the first visible but inert, that only the
@@ -158,3 +159,59 @@ enhancement; keyboard access to dialog content does not depend on resizing.
 
 The implementation lives in `src/components/ModalStack.tsx`; shared visual
 rules live in `src/styles.css`.
+
+## 6. Default Focus and Actions
+
+Initial focus identifies the next useful keyboard action. It is independent
+of button styling: a primary button does not automatically become the default.
+Each dialog declares its target explicitly. Disabled or hidden targets are
+ignored; the stack falls back to an enabled visible control, then the layer.
+Controls with negative `tabIndex` can be explicit initial targets, but never
+enter the sequential Tab cycle.
+
+| Dialog or phase | Default focus | Enter from that target |
+|---|---|---|
+| Rename, Create Directory, New File | Name input | Submit once |
+| Go To Path | Path input | Navigate once |
+| Generic Input / Password | Value input | Submit once |
+| Set Permissions | Apply | Apply permissions |
+| To Global Selection | Existing-selection select, or new-name input | Native select behavior; new-name input submits once |
+| Command Palette | Search input | Run the selected command |
+| Open With | Application list | Launch the selected application |
+| Pass To Bro | Bro list | Open parameters or launch the selected bro |
+| Navigation History | History list | Navigate to the selected entry |
+| About, Info, Jobs | Close | Close |
+| No editor available | OK | Close |
+| Git status/log | Close; first log item once a log-only repository's data is available | Close; log navigation owns row keys |
+| Settings | Active sidebar tab | Native tab activation |
+| Pairing within Settings | Cancel | Reject pairing |
+| Reset remembered sorting | Cancel | Dismiss confirmation |
+| Quit | Cancel | Dismiss confirmation |
+| Eject source | Source select; Cancel when no source exists | Native select behavior; Cancel closes |
+| Search: Input | File-mask input | Start an idle search once |
+| Search: Extra | Extra tab | Native tab activation |
+| Search: Results | To Results when available, otherwise Close | Mount results or close |
+| Copy / Move / Extract / Delete confirmation | Main operation button | Start the operation once |
+| Copy with a conflicting destination name | Destination-name input, text selected | Submit only after the conflict is resolved |
+| Running / queued operation | Background | Background the view; job continues |
+| Operation conflict decision | Primary decision button | Submit that decision |
+| Cancel-transfer confirmation | Keep Running | Dismiss cancellation |
+| Completed / cancelled / failed operation | Close | Close or acknowledge the result |
+| Dry-run result | Close | Close |
+
+Delete is an explicit file-operation confirmation, so its main operation
+button receives focus. Quit, reset, and pairing retain Cancel as their default.
+
+`ModalLayer.focusKey` declares an in-place workflow transition that needs a
+new default, such as a job completing, a new conflict, a cancellation prompt,
+or a pairing request arriving. The stack moves focus only when that layer is
+topmost. Ordinary progress updates and form edits do not refocus the dialog.
+Opening a nested layer restores its trigger when closed, rather than resetting
+the underlying dialog to its initial default. Later async data or explicit
+tab/form changes may move focus to the corresponding control.
+
+Enter activates the focused control, including secondary actions and Cancel.
+A modal default handler must honor `defaultPrevented` and native activation.
+Prompt fields explicitly own default submission. Letter mnemonics remain
+available from action buttons and checkboxes when they do not consume text
+editing keys; focusing the default must not disable its advertised mnemonics.

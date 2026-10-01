@@ -19,6 +19,7 @@ import {
   pressWindowKey,
 } from "../browser.mjs";
 import { waitFor } from "../wait.mjs";
+import { expectModalFocus, expectCoveredModal } from "./modal-focus.mjs";
 
 export async function runLocalFlow(browser, observer) {
   await verifyColorSchemeSwitch(browser, observer);
@@ -44,6 +45,7 @@ export async function runLocalFlow(browser, observer) {
   await clickEntry(browser, "left", "alpha");
   await verifyBroHelp(browser);
   await clickCommand(browser, "file.copy");
+  await expectModalFocus(browser, '[data-command-id="file.copy.confirm"]', "copy primary action focus");
   await expectCheckboxSelected(
     browser,
     '[data-testid="copy-save-digest-file-input"]',
@@ -67,6 +69,7 @@ export async function runLocalFlow(browser, observer) {
   await clickCommand(browser, "file.copy");
   const duplicateWarning = await browser.$('[data-testid="operation-dialog"] .modal__warning');
   await duplicateWarning.waitForDisplayed({ timeout: 10_000 });
+  await expectModalFocus(browser, '[data-testid="copy-destination-name-input"]', "conflicting destination focus");
   const duplicateCopyButton = await browser.$('[data-command-id="file.copy.confirm"]');
   if (await duplicateCopyButton.isEnabled()) {
     throw new Error("duplicate destination copy button should be disabled");
@@ -97,6 +100,7 @@ export async function runLocalFlow(browser, observer) {
   await observer.waitForPanelPath("right", path.posix.join(aDst, "alpha"));
   await clickEntry(browser, "right", "note.txt");
   await clickCommand(browser, "file.rename");
+  await expectModalFocus(browser, '[data-testid="rename-to-input"]', "rename input focus");
   await browser.execute(() => document.querySelector('[data-command-id="file.rename.cancel"]')?.focus());
   await browser.keys("Enter");
   await (await browser.$('[data-testid="rename-dialog"]')).waitForDisplayed({ timeout: 10_000, reverse: true });
@@ -109,10 +113,24 @@ export async function runLocalFlow(browser, observer) {
   await observer.waitForEntry("right", "renamed.txt", "file");
 
   await clickEntry(browser, "right", "remove.txt");
-  await clickCommand(browser, "file.delete");
-  await confirmOperation(browser, "file.delete.confirm");
+  await browser.keys("F8");
+  await expectModalFocus(browser, '[data-command-id="file.delete.confirm"]', "delete primary action focus");
+  await browser.keys("Tab");
+  await expectModalFocus(browser, '[data-command-id="file.delete.background"]', "delete background focus");
+  await browser.keys("Tab");
+  await expectModalFocus(browser, '[data-command-id="file.delete.cancel"]', "delete cancel focus");
+  await browser.keys("Enter");
+  await (await browser.$('[data-testid="operation-dialog"]')).waitForDisplayed({ timeout: 10_000, reverse: true });
+  await observer.waitForEntry("right", "remove.txt", "file");
+  await waitFor(() => browser.execute(() => document.activeElement?.getAttribute("data-testid") === "panel-right"), {
+    timeout: 10_000, label: "delete cancel restores originating panel focus",
+  });
+  await browser.keys("F8");
+  await expectModalFocus(browser, '[data-command-id="file.delete.confirm"]', "reopened delete primary action focus");
+  await browser.keys("Enter");
   await observer.waitForJobIdle();
   await observer.waitForNoEntry("right", "remove.txt");
+  await expectModalFocus(browser, '[data-command-id="job.close"]', "completed delete close focus");
   await closeTerminalJobDialog(browser);
 
   const copied = fs.readFileSync(hostPath(path.posix.join(aDst, "alpha/renamed.txt")), "utf8");
@@ -503,7 +521,16 @@ async function verifyLocationSortReset(browser, observer) {
   const settings = await browser.$('[data-modal-id="settings"]');
   await settings.waitForDisplayed({ timeout: 10_000 });
 
-  await browser.execute(() => document.querySelector('[data-testid="settings-tab-general"]')?.focus());
+  await expectModalFocus(browser, '[data-testid="settings-tab-general"]', "settings active tab focus");
+  await browser.keys("Tab");
+  const skippedInactiveTabs = await browser.execute(() => {
+    const active = document.activeElement;
+    return document.querySelector('[data-modal-id="settings"]')?.contains(active)
+      && !active?.matches('[role="tab"][aria-selected="false"]');
+  });
+  if (!skippedInactiveTabs) throw new Error("Settings Tab did not skip inactive sidebar tabs");
+  await browser.keys(["Shift", "Tab"]);
+  await expectModalFocus(browser, '[data-testid="settings-tab-general"]', "settings reverse Tab returns to active tab");
   await browser.keys("ArrowDown");
   await browser.keys("ArrowDown");
   await waitFor(() => browser.execute(() => {
@@ -551,8 +578,11 @@ async function verifyLocationSortReset(browser, observer) {
   await reset.click();
   const confirmation = await browser.$('[data-testid="reset-location-sorts-modal"]');
   await confirmation.waitForDisplayed({ timeout: 10_000 });
+  await expectCoveredModal(browser, "settings");
+  await expectModalFocus(browser, '[data-modal-id="reset-location-sorts"] .modal__btn', "reset defaults to cancel");
   await browser.keys("Escape");
   await confirmation.waitForDisplayed({ timeout: 10_000, reverse: true });
+  await expectModalFocus(browser, '[data-testid="reset-location-sorts"]', "nested reset restores trigger focus");
   if (observer.state.settings?.general?.locationSettingsCount !== 1) {
     throw new Error("cancelling location sort reset changed the cached count");
   }
@@ -615,6 +645,8 @@ async function verifyBroHelp(browser) {
   await (await browser.$('[data-testid="bro-help-button"]')).click();
   const settings = await browser.$('[data-modal-id="settings"]');
   await settings.waitForDisplayed({ timeout: 10_000 });
+  await expectCoveredModal(browser, "bro");
+  await expectModalFocus(browser, '[data-testid="settings-tab-bros"]', "bro help active settings tab focus");
   await waitFor(() => browser.execute(() => (
     document.querySelector('[data-testid="settings-tab-bros"]')?.getAttribute("aria-selected") === "true"
     && document.querySelectorAll('[data-testid="settings-bro-item"]').length > 0

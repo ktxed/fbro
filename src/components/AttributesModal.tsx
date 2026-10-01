@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useAppDispatch } from "../store";
 import type { PendingAttributes } from "../store";
 import type { WsClient } from "../ws/client";
@@ -51,7 +51,6 @@ export function AttributesModal({ attributes, client }: AttributesModalProps) {
   const dispatch = useAppDispatch();
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const overlayRef = useRef<HTMLDivElement>(null);
   const initialMode = parseMode(attributes.currentMode);
   const [mode, setMode] = useState(initialMode);
   const [octInput, setOctInput] = useState(modeToOct(initialMode));
@@ -119,7 +118,7 @@ export function AttributesModal({ attributes, client }: AttributesModalProps) {
   const canSubmit = !submitting && parseOctMode(octInput) !== null;
 
   return (
-    <ModalLayer modalId="attributes" ref={overlayRef} initialFocusRef={overlayRef} onClick={close} onKeyDown={handleKeyDown}>
+    <ModalLayer modalId="attributes" onClick={close} onKeyDown={handleKeyDown}>
       <ModalDialog ariaLabel="Set Permissions" className="modal--fixed" onClick={(e) => e.stopPropagation()}>
         <div className="modal__header">Set Permissions</div>
         <div className="modal__body">
@@ -190,12 +189,14 @@ export function AttributesModal({ attributes, client }: AttributesModalProps) {
         <div className="modal__actions">
           <button
             className="modal__btn modal__btn--primary"
+            data-modal-initial-focus
+            data-command-id="file.set_permissions.confirm"
             disabled={!canSubmit}
             onClick={submit}
           >
             {submitting ? "Applying…" : "Apply"}
           </button>
-          <button className="modal__btn" onClick={close}>
+          <button className="modal__btn" data-command-id="file.set_permissions.cancel" onClick={close}>
             Cancel
           </button>
         </div>

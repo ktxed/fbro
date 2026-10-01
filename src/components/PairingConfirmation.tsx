@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useAppDispatch } from "../store";
 import type { WsClient } from "../ws/client";
 import type { PendingPairing } from "../ws/types";
@@ -11,7 +11,6 @@ interface PairingConfirmationProps {
 /** Security-sensitive pairing decision rendered next to the peer it applies to. */
 export function PairingConfirmation({ client, pairing }: PairingConfirmationProps) {
   const dispatch = useAppDispatch();
-  const cancelRef = useRef<HTMLButtonElement>(null);
   const [now, setNow] = useState(Date.now());
 
   useEffect(() => {
@@ -19,10 +18,6 @@ export function PairingConfirmation({ client, pairing }: PairingConfirmationProp
     const id = window.setInterval(() => setNow(Date.now()), 500);
     return () => window.clearInterval(id);
   }, [pairing.handshakeId]);
-
-  useEffect(() => {
-    if (pairing.localDecision === null) cancelRef.current?.focus({ preventScroll: true });
-  }, [pairing.handshakeId, pairing.localDecision]);
 
   const respond = (accept: boolean) => {
     if (pairing.localDecision !== null) return;
@@ -65,11 +60,10 @@ export function PairingConfirmation({ client, pairing }: PairingConfirmationProp
           <>
             <span className="pairing-confirmation__timer">{secondsLeft}s</span>
             <button
-              ref={cancelRef}
+              data-modal-initial-focus
               className="sharing-button"
               data-command-id="pairing.cancel"
               onClick={() => respond(false)}
-              autoFocus
             >
               Cancel
             </button>

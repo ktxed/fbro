@@ -50,6 +50,10 @@ dialog types.
   child has not already consumed the event.
 - Modal tablists and selectable lists use roving/composite focus: one Tab stop,
   arrows within the component, and synchronized focus and selection.
+- Every modal declares its default focus according to `modal-stack.md` §6.
+  In-place workflow changes use `ModalLayer.focusKey`; progress updates do not
+  steal focus. Negative-tabindex controls are excluded from the shared Tab
+  cycle, and Enter on a focused secondary action keeps its native behavior.
 - The removable-source picker is a `ModalLayer` opened from the command
   palette or source context menu. Its native list control owns selection keys;
   Escape closes and restores focus. The source menu owns arrows, Enter, and

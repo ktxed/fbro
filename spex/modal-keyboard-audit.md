@@ -21,6 +21,18 @@ Remediation status: implemented on the `modals-consolidation` branch.
 The verdict tables are retained as the evidence and rationale for the changes,
 not as a description of the remediated implementation.
 
+Default-focus follow-up (2026-10-01): all current modal call sites were reviewed.
+The current per-dialog defaults are recorded in [Modal Stack §6](modal-stack.md#6-default-focus-and-actions).
+Operation dialogs no longer overwrite the stack's focus with a delayed overlay
+focus. Main operation, Background, decision, Keep Running, Close, and dry-run
+Close targets are explicit, including in-place phase transitions. Permissions,
+Settings, global-selection prompts, Search, and Git now declare their initial
+target without a competing mount focus effect. Pairing arrival is handled by
+the top Settings layer. The shared Tab cycle excludes negative-tabindex and
+disabled controls; the default resolver skips hidden and disabled targets.
+Global-selection name Enter submits once, and operation mnemonics remain
+available when an action button owns focus.
+
 This document audits every full-screen dialog rendered through `ModalLayer`.
 That is the project-defined boundary for a modal: context menus, history
 dropdowns, bookmark popovers, inline pairing confirmation, and separate
@@ -231,7 +243,7 @@ only owner and check `defaultPrevented`.
 
 ## 5. Test coverage
 
-Current smoke coverage verifies parts of the contract: About restores panel
+The baseline smoke coverage verified parts of the contract: About restores panel
 focus, Settings reset nesting handles Escape, Git owns navigation keys, and
 Search/Git prevent global modal shortcuts from opening above them. It does not
 systematically test focused-button Enter behavior, Tab order, initial focus,

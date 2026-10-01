@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useRef } from "react";
 import { useAppDispatch, useAppState } from "../store";
 import type { SettingsTab } from "../store";
 import { SettingsGeneralTab } from "./SettingsGeneralTab";
@@ -26,11 +26,7 @@ export function SettingsModal({ client }: SettingsModalProps) {
   const dispatch = useAppDispatch();
   const activeTab = state.pendingSettings?.activeTab ?? "general";
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
-  const activeTabIndex = TABS.findIndex((tab) => tab.id === activeTab);
-
-  useEffect(() => {
-    if (!state.pendingPairing) tabRefs.current[activeTabIndex]?.focus();
-  }, [state.pendingPairing]);
+  const unansweredPairing = state.pendingPairing?.localDecision === null;
 
   const rejectUnansweredPairing = () => {
     const pairing = state.pendingPairing;
@@ -62,9 +58,9 @@ export function SettingsModal({ client }: SettingsModalProps) {
   return (
     <ModalLayer
       modalId="settings"
+      focusKey={`pairing:${state.pendingPairing?.handshakeId ?? "none"}:${unansweredPairing}`}
       className="modal-overlay--no-click"
       onKeyDown={handleKeyDown}
-      // Trap focus: prevent Tab from escaping
     >
       <ResizableModal
         modalId="settings"
@@ -88,6 +84,7 @@ export function SettingsModal({ client }: SettingsModalProps) {
                 aria-controls={`settings-panel-${tab.id}`}
                 tabIndex={activeTab === tab.id ? 0 : -1}
                 data-testid={`settings-tab-${tab.id}`}
+                data-modal-initial-focus={activeTab === tab.id && !unansweredPairing || undefined}
                 className={`settings-modal__tab${activeTab === tab.id ? " settings-modal__tab--active" : ""}`}
                 onClick={() => openTab(tab.id)}
                 onKeyDown={(e) => {

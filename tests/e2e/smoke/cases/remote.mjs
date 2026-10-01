@@ -13,6 +13,7 @@ import {
   reloadBrowserApp,
 } from "../browser.mjs";
 import { waitFor } from "../wait.mjs";
+import { expectModalFocus } from "./modal-focus.mjs";
 
 function tinyBmp() {
   const width = 2;
@@ -93,6 +94,7 @@ export async function runRemoteFlow(browserA, observerA, browserB, observerB) {
   ]);
   await Promise.all(confirmations.map((confirmation) => confirmation.waitForDisplayed({ timeout: 20_000 })));
   for (const browser of [browserA, browserB]) {
+    await expectModalFocus(browser, '[data-command-id="pairing.cancel"]', "pairing defaults to cancel");
     const placementCorrect = await browser.execute(() => {
       const confirmation = document.querySelector('[data-testid="pairing-confirmation"]');
       if (!(confirmation instanceof HTMLElement)) return false;

@@ -195,8 +195,11 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
   const modalRef = useRef<HTMLDivElement>(null);
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const retainTabFocusRef = useRef(false);
+  const previousActiveTabRef = useRef(search.activeTab);
 
   useEffect(() => {
+    if (previousActiveTabRef.current === search.activeTab) return;
+    previousActiveTabRef.current = search.activeTab;
     if (retainTabFocusRef.current) {
       retainTabFocusRef.current = false;
       return;
@@ -204,7 +207,7 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
     if (search.activeTab === "input") {
       (maskHistory.inputRef as React.RefObject<HTMLInputElement>).current?.focus();
     } else {
-      modalRef.current?.focus();
+      modalRef.current?.querySelector<HTMLElement>("[data-modal-initial-focus]")?.focus();
     }
   }, [search.activeTab]);
 
@@ -433,6 +436,7 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
                 aria-selected={selected}
                 aria-controls={`search-panel-${tab}`}
                 tabIndex={selected ? 0 : -1}
+                data-modal-initial-focus={tab === "extra" && selected || undefined}
                 className={`search-modal__tab${selected ? " search-modal__tab--active" : ""}`}
                 onClick={() => activateTab(tab, true)}
                 onKeyDown={(event) => {
@@ -568,6 +572,7 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
                     className="search-modal__mask-input"
                     aria-label="File name"
                     data-testid="search-file-mask-input"
+                    data-modal-initial-focus
                     value={fileMask}
                     onChange={(e) => setFileMask(e.target.value)}
                     onKeyDown={(e) => {
@@ -942,13 +947,14 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
             <button
               className="modal__btn modal__btn--primary"
               data-command-id="search.to-results"
+              data-modal-initial-focus={search.activeTab === "results" || undefined}
               onClick={handleToResults}
               disabled={!search.jobId}
             >
               To Results
             </button>
           )}
-          <button className="modal__btn" data-command-id="search.close" onClick={close}>
+          <button className="modal__btn" data-modal-initial-focus={search.activeTab === "results" || undefined} data-command-id="search.close" onClick={close}>
             <MnemonicLabel text="Close" mnemonic="c" />
           </button>
         </div>

@@ -12,6 +12,7 @@ import {
   reloadBrowserApp,
 } from "../browser.mjs";
 import { waitFor } from "../wait.mjs";
+import { expectModalFocus } from "./modal-focus.mjs";
 
 const GLOBAL_SOURCE_ID = "global-selections";
 
@@ -171,7 +172,19 @@ async function expectGlobalSelectionSummary(browser, expected) {
 }
 
 async function confirmGlobalSelectionModal(browser) {
-  const button = await browser.$('.modal[aria-label="To global selection"] .modal__btn--primary');
-  await button.waitForClickable({ timeout: 10_000 });
-  await button.click();
+  await expectModalFocus(browser, '[data-testid="global-selection-target"]', "existing global selection focus");
+  const target = await browser.$('[data-testid="global-selection-target"]');
+  await target.selectByAttribute("value", "__create__");
+  await expectModalFocus(browser, '[data-testid="global-selection-name"]', "new global selection name focus");
+  const name = await browser.$('[data-testid="global-selection-name"]');
+  await name.setValue("invalid/name");
+  await browser.keys("Enter");
+  await (await browser.$('[data-modal-id="global-selection"] .modal__rename-error')).waitForDisplayed({ timeout: 10_000 });
+  await browser.keys(["Control", "a"]);
+  await browser.keys("Backspace");
+  await browser.keys("ArrowUp");
+  await expectModalFocus(browser, '[data-testid="global-selection-target"]', "global selection mode change restores select focus");
+  await browser.keys("Tab");
+  await expectModalFocus(browser, '[data-modal-id="global-selection"] .modal__btn--primary', "global selection add focus");
+  await browser.keys("Enter");
 }

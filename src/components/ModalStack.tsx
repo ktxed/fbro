@@ -43,7 +43,7 @@ const FOCUSABLE_SELECTOR = [
 
 function focusableElements(root: HTMLElement): HTMLElement[] {
   const visible = Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR))
-    .filter((element) => !element.hidden && element.offsetParent !== null);
+    .filter((element) => isAvailableFocusTarget(element) && element.tabIndex >= 0);
   return visible.filter((element) => {
     if (!(element instanceof HTMLInputElement) || element.type !== "radio" || !element.name) return true;
     const group = visible.filter((candidate): candidate is HTMLInputElement => (
@@ -57,15 +57,22 @@ function focusableElements(root: HTMLElement): HTMLElement[] {
   });
 }
 
+function isAvailableFocusTarget(element: HTMLElement): boolean {
+  return !element.hidden && element.offsetParent !== null && !element.matches(":disabled");
+}
+
 function focusLayer(entry: Pick<ModalEntry, "element" | "initialFocusRef">) {
   const root = entry.element;
   const preferred = entry.initialFocusRef?.current;
-  const target = preferred && root.contains(preferred)
+  const marked = Array.from(root.querySelectorAll<HTMLElement>("[data-modal-initial-focus], [autofocus]"))
+    .find(isAvailableFocusTarget);
+  const target = preferred && root.contains(preferred) && isAvailableFocusTarget(preferred)
     ? preferred
-    : root.querySelector<HTMLElement>("[data-modal-initial-focus], [autofocus]")
+    : marked
       ?? focusableElements(root)[0]
       ?? root;
   target.focus({ preventScroll: true });
+  target.scrollIntoView({ block: "nearest", inline: "nearest" });
 }
 
 export function ModalStackProvider({ children }: { children: ReactNode }) {
@@ -99,7 +106,7 @@ export function ModalStackProvider({ children }: { children: ReactNode }) {
       const current = entriesRef.current;
       const top = current[current.length - 1];
       const restore = removed?.restoreFocus;
-      if (restore?.isConnected && (!top || top.element.contains(restore))) {
+      if (restore?.isConnected && isAvailableFocusTarget(restore) && (!top || top.element.contains(restore))) {
         restore.focus({ preventScroll: true });
       } else if (top) {
         focusLayer(top);
@@ -186,10 +193,12 @@ export function useModalStack() {
 interface ModalLayerProps extends HTMLAttributes<HTMLDivElement> {
   modalId: string;
   initialFocusRef?: RefObject<HTMLElement | null>;
+  /** Move focus to the default control when the dialog changes workflow phase. */
+  focusKey?: string;
 }
 
 export const ModalLayer = forwardRef<HTMLDivElement, ModalLayerProps>(function ModalLayer(
-  { modalId, initialFocusRef, className = "", children, style, ...props },
+  { modalId, initialFocusRef, focusKey, className = "", children, style, ...props },
   forwardedRef,
 ) {
   const context = useContext(ModalStackContext);
@@ -197,6 +206,7 @@ export const ModalLayer = forwardRef<HTMLDivElement, ModalLayerProps>(function M
   const token = useId();
   const rootRef = useRef<HTMLDivElement>(null);
   const wasTopRef = useRef(false);
+  const previousFocusKeyRef = useRef(focusKey);
   const entryIndex = context.entries.findIndex((entry) => entry.token === token);
   const isTop = entryIndex >= 0 && entryIndex === context.entries.length - 1;
 
@@ -215,11 +225,12 @@ export const ModalLayer = forwardRef<HTMLDivElement, ModalLayerProps>(function M
   }, [context.register, context.unregister, initialFocusRef, modalId, token]);
 
   useLayoutEffect(() => {
-    if (isTop && !wasTopRef.current && rootRef.current) {
+    if (isTop && (!wasTopRef.current || previousFocusKeyRef.current !== focusKey) && rootRef.current) {
       focusLayer({ element: rootRef.current, initialFocusRef });
     }
     wasTopRef.current = isTop;
-  }, [initialFocusRef, isTop]);
+    previousFocusKeyRef.current = focusKey;
+  }, [focusKey, initialFocusRef, isTop]);
 
   const portalHost = document.querySelector<HTMLElement>(".app") ?? document.body;
 

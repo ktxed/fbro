@@ -396,12 +396,6 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
   }, [hasChanges, activeTab, logHasCommits, focusLogItem]);
 
   useEffect(() => {
-    if (!hasChanges) return;
-    const frame = requestAnimationFrame(() => closeRef.current?.focus());
-    return () => cancelAnimationFrame(frame);
-  }, []);
-
-  useEffect(() => {
     if (selectAllRef.current) {
       selectAllRef.current.indeterminate = selectedChanges.length > 0 && !allChangesSelected;
     }
@@ -615,6 +609,7 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
   return (
     <ModalLayer
       modalId={`git:${panelId}`}
+      initialFocusRef={closeRef}
       onKeyDown={(event) => {
         onKeyDown(event);
         event.stopPropagation();

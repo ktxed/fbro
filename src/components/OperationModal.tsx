@@ -530,21 +530,14 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
   };
   const closeDryRun = () => { setSubmitted(false); setDryMode(false); dispatch({ type: "CLOSE_DRY_RUN" }); };
 
-  // Re-focus when the modal appears or changes phase so terminal/decision states
-  // still receive keyboard handling after in-place transitions.
-  const isVisible = !!(pending || activeJob || pendingDryRun);
+  // The stack focuses the phase's default control, including in-place changes.
   const focusToken = pendingDryRun
     ? `dry:${pendingDryRun.scriptPath}`
     : pending
       ? `pending:${pending.opType}:${pending.sourcePanel}:${pending.destPanel ?? ""}`
       : activeJob
-        ? `job:${activeJobId ?? ""}:${activeJob.state}:${activeJob.decision?.destination ?? ""}`
+        ? `job:${activeJobId ?? ""}:${activeJob.state}:${activeJob.decision?.destination ?? ""}:${confirmingCancel}`
         : "hidden";
-  useEffect(() => {
-    if (!isVisible) return;
-    const timer = window.setTimeout(() => modalRef.current?.focus(), 0);
-    return () => window.clearTimeout(timer);
-  }, [focusToken, isVisible]);
 
   useEffect(() => {
     if (activeJob?.state !== "AwaitingDecision") {
@@ -587,7 +580,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
     const otherPanel = panelIds.find(id => id !== pendingDryRun.sourcePanel) ?? panelIds[0] ?? "";
     const title = pendingDryRun.manifestPath ? "Fedup Delete Dry-Run Generated" : "Dry Run Script Generated";
     return (
-      <ModalLayer modalId="operation:dry-run" ref={modalRef} onKeyDown={(e) => { if (e.key === "Escape") closeDryRun(); }}>
+      <ModalLayer modalId="operation:dry-run" ref={modalRef} focusKey={focusToken} onKeyDown={(e) => { if (e.key === "Escape") closeDryRun(); }}>
         <ResizableModal
           modalId="operation:dry-run"
           client={client}
@@ -650,7 +643,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
             </div>
           </div>
           <div className="modal__actions">
-            <button className="modal__btn modal__btn--primary" data-command-id="dry-run.close" onClick={closeDryRun}>Close</button>
+            <button className="modal__btn modal__btn--primary" data-modal-initial-focus data-command-id="dry-run.close" onClick={closeDryRun}>Close</button>
           </div>
         </ResizableModal>
       </ModalLayer>
@@ -734,7 +727,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
         close();
         return;
       }
-      if (isNativeActivationTarget(e.target) && !isEditableTarget(e.target)) return;
+      if (e.key === "Enter" && isNativeActivationTarget(e.target) && !isEditableTarget(e.target)) return;
       if (isEditableTarget(e.target) && e.key !== "Enter") return;
       if (e.key === "Enter") {
         e.preventDefault();
@@ -763,7 +756,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
     };
 
     return (
-      <ModalLayer modalId={`operation:${pending.opType}`} ref={modalRef} onClick={close} onKeyDown={handlePendingKeyDown}>
+      <ModalLayer modalId={`operation:${pending.opType}`} ref={modalRef} focusKey={focusToken} onClick={close} onKeyDown={handlePendingKeyDown}>
         <ResizableModal
           modalId={`operation:${pending.opType}`}
           client={client}
@@ -836,6 +829,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
                       <label htmlFor="copy-destination-name">Destination name:</label>
                       <input
                         ref={destNameInputRef}
+                        data-modal-initial-focus={isCopyDestNameConflictIssue(pendingDestNameIssue) || undefined}
                         id="copy-destination-name"
                         className="modal__rename-input modal__copy-name-input"
                         data-testid="copy-destination-name-input"
@@ -877,7 +871,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
             )}
           </div>
           <div className="modal__actions">
-            <button className="modal__btn modal__btn--primary" data-command-id={`file.${pending.opType}.confirm`} disabled={!canSubmitPending} onClick={() => startOp(false)}>
+            <button className="modal__btn modal__btn--primary" data-modal-initial-focus data-command-id={`file.${pending.opType}.confirm`} disabled={!canSubmitPending} onClick={() => startOp(false)}>
               {isSubmitted ? "Starting…" : label}
             </button>
             {canStartInBackground && (
@@ -1050,7 +1044,8 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
         else close();
         return;
       }
-      if (isNativeActivationTarget(e.target)) return;
+      if (e.key === "Enter" && isNativeActivationTarget(e.target)) return;
+      if (isEditableTarget(e.target)) return;
       if (isDecision) {
         if (isLetterKey(e, "a") && activeJob.decision?.supportsApplyToAll) {
           e.preventDefault();
@@ -1101,7 +1096,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
     };
 
     return (
-      <ModalLayer modalId={`operation:${activeJob.kind}`} ref={modalRef} onClick={isTerminal && !requiresExplicitClose ? close : undefined} onKeyDown={handleActiveJobKeyDown}>
+      <ModalLayer modalId={`operation:${activeJob.kind}`} ref={modalRef} focusKey={focusToken} onClick={isTerminal && !requiresExplicitClose ? close : undefined} onKeyDown={handleActiveJobKeyDown}>
         <ResizableModal
           modalId={isSyncBro || isFedupBro ? `operation:${activeJob.kind}:result` : `operation:${activeJob.kind}`}
           client={client}
@@ -1250,6 +1245,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
                       key={opt}
                       className={`modal__btn${opt === primaryDecision ? " modal__btn--primary" : ""}`}
                       data-command-id={`job.decision.${opt}`}
+                      data-modal-initial-focus={opt === primaryDecision || undefined}
                       onClick={() => submitDecision(opt)}
                     >
                       {opt === primaryDecision
@@ -1384,7 +1380,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
           <div className="modal__actions">
             {(isQueued || isProgress) && !confirmingCancel && (
               <>
-                <button className="modal__btn modal__btn--primary" data-command-id="job.background" onClick={close}>
+                <button className="modal__btn modal__btn--primary" data-modal-initial-focus data-command-id="job.background" onClick={close}>
                   Background
                 </button>
                 {activeJob.supportsPause && activeJob.paused ? (
@@ -1413,6 +1409,9 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
             )}
             {isTerminal && (
               <>
+                <button className="modal__btn modal__btn--primary" data-modal-initial-focus data-command-id="job.close" onClick={closeActiveJob}>
+                  Close
+                </button>
                 {isSyncBro && activeJob.state === "Completed" && syncResult && !activeJob.reportSavedPath && (
                   <button className="modal__btn" data-command-id="job.save-report" onClick={saveSyncReport}>
                     Save report…
@@ -1438,14 +1437,11 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
                     Copy Path
                   </button>
                 )}
-                <button className="modal__btn modal__btn--primary" data-command-id="job.close" onClick={closeActiveJob}>
-                  Close
-                </button>
               </>
             )}
             {confirmingCancel && (
               <>
-                <button className="modal__btn modal__btn--primary" data-command-id="job.keep-running" onClick={() => setConfirmingCancel(false)}>
+                <button className="modal__btn modal__btn--primary" data-modal-initial-focus data-command-id="job.keep-running" onClick={() => setConfirmingCancel(false)}>
                   Keep Running
                 </button>
                 {isRemoteCopy ? (
