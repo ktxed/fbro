@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { VFSEntry } from "../ws/types";
 import { useAppState } from "../store";
 import { IconArrowUpRight } from "@tabler/icons-react";
@@ -14,17 +14,55 @@ export function EntryThumb({ entry, thumbUrl }: EntryThumbProps) {
   const [iconFailed, setIconFailed] = useState(false);
   const [thumbLoaded, setThumbLoaded] = useState(false);
   const [thumbFailed, setThumbFailed] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [inViewport, setInViewport] = useState(false);
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
 
   const iconName = entry.iconName;
   const isThumbCandidate =
     (entry.kind === "file" || (entry.kind === "symlink" && entry.targetKind === "file")) &&
-    !!thumbUrl &&
-    !thumbFailed;
+    !!thumbUrl;
   const resolvedThumbUrl = isThumbCandidate ? thumbUrl : null;
 
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root || !resolvedThumbUrl) return;
+    const observer = new IntersectionObserver(([entry]) => setInViewport(entry.isIntersecting));
+    observer.observe(root);
+    return () => observer.disconnect();
+  }, [resolvedThumbUrl]);
+
+  useEffect(() => {
+    setImageUrl(null);
+    setThumbLoaded(false);
+    setThumbFailed(false);
+    if (!inViewport || !resolvedThumbUrl) return;
+    const controller = new AbortController();
+    let objectUrl: string | null = null;
+    void fetch(resolvedThumbUrl, { signal: controller.signal })
+      .then(response => {
+        if (!response.ok || response.status === 204) throw new Error("Thumbnail unavailable");
+        return response.blob();
+      })
+      .then(blob => {
+        if (controller.signal.aborted) return;
+        objectUrl = URL.createObjectURL(blob);
+        setImageUrl(objectUrl);
+      })
+      .catch(() => { if (!controller.signal.aborted) setThumbFailed(true); });
+    return () => {
+      // Release the browser connection as soon as a card leaves the viewport.
+      // Backend work already queued can warm the cache after its cooldown.
+      controller.abort();
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [inViewport, resolvedThumbUrl]);
+
+  const showThumbnail = inViewport && imageUrl !== null && !thumbFailed;
+
   return (
-    <div className="panel__thumb">
-      <div className="panel__thumb-icon" aria-hidden={thumbLoaded ? "true" : "false"}>
+    <div className="panel__thumb" ref={rootRef}>
+      <div className="panel__thumb-icon" aria-hidden={showThumbnail && thumbLoaded ? "true" : "false"}>
         {iconName && !iconFailed && fileServerPort > 0 ? (
           <img
             src={`http://127.0.0.1:${fileServerPort}/__icon__/${iconName}`}
@@ -36,16 +74,11 @@ export function EntryThumb({ entry, thumbUrl }: EntryThumbProps) {
           <span className="panel__thumb-icon-fallback">{entry.kind === "directory" ? "📁" : "📄"}</span>
         )}
       </div>
-      {resolvedThumbUrl && (
+      {showThumbnail && (
         <img
           className={`panel__thumb-img${thumbLoaded ? " panel__thumb-img--loaded" : ""}`}
-          // Defer the HTTP request until the card is actually in the
-          // viewport. Without this the browser fetches a thumbnail for
-          // every mounted card — including off-screen buffer rows — which
-          // floods the BE worker pool with stale work during fast scrolls.
-          loading="lazy"
           decoding="async"
-          src={resolvedThumbUrl}
+          src={imageUrl!}
           alt=""
           draggable={false}
           onLoad={() => setThumbLoaded(true)}

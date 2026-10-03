@@ -89,7 +89,8 @@ pub async fn dispatch(name: &str, scope: &Value, args: &Value, ctx: &mut IntentC
         "AddToGlobalSelection" | "RemoveGlobalSelections" | "RemoveGlobalSelectionItems" => {
             global_selection::handle(name, scope, args, ctx).await
         }
-        "StartFileOp"
+        "QueryThumbnailQueue"
+        | "StartFileOp"
         | "PasteExternalClipboard"
         | "WriteExternalClipboard"
         | "ProvideJobDecision"
@@ -154,6 +155,8 @@ pub async fn dispatch(name: &str, scope: &Value, args: &Value, ctx: &mut IntentC
         | "RetryLastPeer" => remote::handle(name, args, ctx).await,
         unknown => eprintln!("[fbro] Unknown intent: {unknown}"),
     }
+    let state = ctx.state.lock().await;
+    crate::ws::runtime::refresh_thumb_visibility(&state);
 }
 
 fn should_record_command(name: &str) -> bool {

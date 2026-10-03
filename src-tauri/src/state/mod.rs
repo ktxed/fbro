@@ -441,6 +441,8 @@ pub struct Panel {
     pub windowed: bool,
     pub window_start: usize,
     pub window_count: usize,
+    /// Actual grid viewport (listing epoch, first entry, entry count), excluding overscan.
+    pub thumbnail_viewport: Option<(u64, usize, usize)>,
     /// Monotonic counter for window-slice patches. Decoupled from `version`
     /// so render-slice updates from `send_window` can't be dropped by the FE
     /// version guard when interleaved with structural patches.
@@ -784,6 +786,7 @@ impl AppState {
             windowed: false,
             window_start: 0,
             window_count: 0,
+            thumbnail_viewport: None,
             window_version: 0,
             source_paths: HashMap::new(),
             navigation_context: Default::default(),
@@ -814,6 +817,7 @@ impl AppState {
             windowed: false,
             window_start: 0,
             window_count: 0,
+            thumbnail_viewport: None,
             window_version: 0,
             source_paths: HashMap::new(),
             navigation_context: Default::default(),
@@ -1309,6 +1313,7 @@ pub fn restore_tabs_from_session(
                 windowed: false,
                 window_start: 0,
                 window_count: 0,
+                thumbnail_viewport: None,
                 window_version: 0,
                 source_paths: HashMap::new(),
                 navigation_context: Default::default(),
@@ -1352,21 +1357,34 @@ pub type SharedState = Arc<Mutex<AppState>>;
 /// queue. Caller holds the AppState lock.
 pub fn collect_visible_thumb_paths(state: &AppState) -> std::collections::HashSet<String> {
     let mut paths = std::collections::HashSet::new();
-    for panel in state.panels.values() {
-        if panel.view_mode != PanelViewMode::Grid {
+    for slot_id in &state.layout_slots {
+        let Some(panel) = state
+            .slots
+            .get(slot_id)
+            .and_then(|slot| state.panels.get(&slot.active_panel_id))
+        else {
+            continue;
+        };
+        if panel.view_mode != PanelViewMode::Grid
+            || panel.tab_kind != TabKind::Listing
+            || panel.terminal_session.is_some()
+        {
             continue;
         }
         let total = panel.entries.len();
-        let (start, end) = if panel.windowed {
-            let s = panel.window_start.min(total);
-            let e = (s + panel.window_count).min(total);
-            (s, e)
-        } else {
-            (0, total)
+        let Some((epoch, start, count)) = panel.thumbnail_viewport else {
+            continue;
         };
+        if epoch != panel.panel_epoch {
+            continue;
+        }
+        let start = start.min(total);
+        let end = start.saturating_add(count).min(total);
         let dir = panel.path.trim_end_matches(|c| c == '/' || c == '\\');
         for entry in &panel.entries[start..end] {
-            if entry.kind != "file" {
+            if entry.kind != "file"
+                && !(entry.kind == "symlink" && entry.target_kind.as_deref() == Some("file"))
+            {
                 continue;
             }
             if let Some(sp) = &entry.source_path {
@@ -1384,6 +1402,57 @@ mod tests {
     use super::{fallback_source_id_for_home_candidates, AppState};
     use crate::platform::{EjectInfo, Platform, VolumeInfo};
     use std::sync::Arc;
+
+    #[test]
+    fn thumbnail_visibility_uses_actual_viewport_and_only_active_listing_tabs() {
+        let platform: Arc<dyn Platform> = Arc::new(TestPlatform { home: "/".into() });
+        let mut state = AppState::new_default(
+            platform.clone(),
+            Default::default(),
+            0,
+            crate::thumb_pool::ThumbPool::start(platform, 1),
+            Arc::new(crate::fileserver::ThumbCache::new(1)),
+        );
+        let panel = state.panels.get_mut("left").unwrap();
+        panel.view_mode = super::PanelViewMode::Grid;
+        panel.path = "/images".into();
+        panel.panel_epoch = 7;
+        panel.entries = (0..10)
+            .map(|index| crate::ws::protocol::EntrySchema {
+                name: format!("{index}.jpg"),
+                kind: "file".into(),
+                target_kind: None,
+                browsable_archive: false,
+                size: None,
+                mtime: None,
+                btime: None,
+                permissions: None,
+                icon_name: None,
+                cc: None,
+                source_path: None,
+                path_hint: None,
+                git_status: None,
+                git_details: None,
+            })
+            .collect();
+        panel.thumbnail_viewport = Some((7, 3, 2));
+        let expected =
+            std::collections::HashSet::from(["/images/3.jpg".into(), "/images/4.jpg".into()]);
+        assert_eq!(super::collect_visible_thumb_paths(&state), expected);
+        let panel = state.panels.get_mut("left").unwrap();
+        panel.windowed = true;
+        panel.window_start = 0;
+        panel.window_count = 10;
+        assert_eq!(super::collect_visible_thumb_paths(&state), expected);
+        state.panels.get_mut("left").unwrap().panel_epoch += 1;
+        assert!(super::collect_visible_thumb_paths(&state).is_empty());
+        state.panels.get_mut("left").unwrap().panel_epoch = 7;
+        state.slots.get_mut("left").unwrap().active_panel_id = "right".into();
+        assert!(super::collect_visible_thumb_paths(&state).is_empty());
+        state.slots.get_mut("left").unwrap().active_panel_id = "left".into();
+        state.panels.get_mut("left").unwrap().terminal_session = Some(1);
+        assert!(super::collect_visible_thumb_paths(&state).is_empty());
+    }
 
     struct TestPlatform {
         home: String,

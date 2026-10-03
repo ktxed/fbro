@@ -133,12 +133,24 @@ fn cache_key(canonical: &Path, mtime: i128, size: u32) -> String {
 }
 
 fn atomic_write(target: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    let tmp = target.with_extension("png.tmp");
+    // Different displayed panels can generate the same shared cache entry.
+    let tmp = target.with_extension(format!("{}.tmp", uuid::Uuid::new_v4()));
     fs::write(&tmp, bytes)?;
     fs::rename(&tmp, target)
 }
 
 pub fn generate(path: &str, size: u32) -> Option<(Vec<u8>, &'static str)> {
+    generate_cancellable(path, size, &AtomicBool::new(false))
+}
+
+pub fn generate_cancellable(
+    path: &str,
+    size: u32,
+    cancelled: &AtomicBool,
+) -> Option<(Vec<u8>, &'static str)> {
+    if cancelled.load(Ordering::Relaxed) {
+        return None;
+    }
     let p = Path::new(path);
     let kind = classify(p);
     if matches!(kind, Kind::Unknown) {
@@ -194,10 +206,15 @@ pub fn generate(path: &str, size: u32) -> Option<(Vec<u8>, &'static str)> {
     }
 
     let result = match kind {
-        Kind::Image => generate_image(&canonical, &meta, size),
-        Kind::Video => generate_video(&canonical, size),
+        Kind::Image => generate_image(&canonical, &meta, size, cancelled),
+        Kind::Video => generate_video(&canonical, size, cancelled),
         Kind::Unknown => None,
     };
+
+    // Cancellation is not a decode failure and must not poison the failure cache.
+    if cancelled.load(Ordering::Relaxed) {
+        return None;
+    }
 
     if let Some(d) = dir.as_ref() {
         let _ = fs::create_dir_all(d);
@@ -217,12 +234,33 @@ pub fn generate(path: &str, size: u32) -> Option<(Vec<u8>, &'static str)> {
     result.map(|b| (b, "image/png"))
 }
 
-fn generate_image(path: &Path, meta: &fs::Metadata, size: u32) -> Option<Vec<u8>> {
+fn generate_image(
+    path: &Path,
+    meta: &fs::Metadata,
+    size: u32,
+    cancelled: &AtomicBool,
+) -> Option<Vec<u8>> {
     if meta.len() > MAX_IMAGE_BYTES.load(Ordering::Relaxed) {
         return None;
     }
-    let img = image::open(path).ok()?;
+    if cancelled.load(Ordering::Relaxed) {
+        return None;
+    }
+    let img = image::ImageReader::new(std::io::BufReader::new(CancellableRead {
+        file: fs::File::open(path).ok()?,
+        cancelled,
+    }))
+    .with_guessed_format()
+    .ok()?
+    .decode()
+    .ok()?;
+    if cancelled.load(Ordering::Relaxed) {
+        return None;
+    }
     let thumb = img.thumbnail(size, size);
+    if cancelled.load(Ordering::Relaxed) {
+        return None;
+    }
     let mut buf = Vec::new();
     thumb
         .write_to(&mut Cursor::new(&mut buf), ImageFormat::Png)
@@ -230,8 +268,31 @@ fn generate_image(path: &Path, meta: &fs::Metadata, size: u32) -> Option<Vec<u8>
     Some(buf)
 }
 
+struct CancellableRead<'a> {
+    file: fs::File,
+    cancelled: &'a AtomicBool,
+}
+
+impl std::io::Read for CancellableRead<'_> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        if self.cancelled.load(Ordering::Relaxed) {
+            return Err(std::io::Error::other("Thumbnail cancelled"));
+        }
+        std::io::Read::read(&mut self.file, buf)
+    }
+}
+
+impl std::io::Seek for CancellableRead<'_> {
+    fn seek(&mut self, pos: std::io::SeekFrom) -> std::io::Result<u64> {
+        if self.cancelled.load(Ordering::Relaxed) {
+            return Err(std::io::Error::other("Thumbnail cancelled"));
+        }
+        std::io::Seek::seek(&mut self.file, pos)
+    }
+}
+
 #[cfg(feature = "linux-video")]
-fn generate_video(path: &Path, size: u32) -> Option<Vec<u8>> {
+fn generate_video(path: &Path, size: u32, cancelled: &AtomicBool) -> Option<Vec<u8>> {
     use ffmpeg_next as ffmpeg;
     use std::sync::Once;
     static INIT: Once = Once::new();
@@ -239,6 +300,9 @@ fn generate_video(path: &Path, size: u32) -> Option<Vec<u8>> {
         let _ = ffmpeg::init();
     });
 
+    if cancelled.load(Ordering::Relaxed) {
+        return None;
+    }
     let mut ictx = ffmpeg::format::input(&path).ok()?;
     let stream = ictx.streams().best(ffmpeg::media::Type::Video)?;
     let stream_index = stream.index();
@@ -252,6 +316,9 @@ fn generate_video(path: &Path, size: u32) -> Option<Vec<u8>> {
     let mut frames_seen = 0u32;
     let frame_skip = VIDEO_FRAME_SKIP.load(Ordering::Relaxed);
     for (s, packet) in ictx.packets() {
+        if cancelled.load(Ordering::Relaxed) {
+            return None;
+        }
         if s.index() != stream_index {
             continue;
         }
@@ -260,6 +327,9 @@ fn generate_video(path: &Path, size: u32) -> Option<Vec<u8>> {
         }
         let mut frame = ffmpeg::frame::Video::empty();
         while decoder.receive_frame(&mut frame).is_ok() {
+            if cancelled.load(Ordering::Relaxed) {
+                return None;
+            }
             frames_seen += 1;
             // Skip first few frames — many videos start on black/credits.
             if frames_seen <= frame_skip {
@@ -294,6 +364,9 @@ fn generate_video(path: &Path, size: u32) -> Option<Vec<u8>> {
                 tight.extend_from_slice(&data[off..off + row_bytes]);
             }
             let img = image::RgbaImage::from_raw(out_w, out_h, tight)?;
+            if cancelled.load(Ordering::Relaxed) {
+                return None;
+            }
             let mut buf = Vec::new();
             image::DynamicImage::ImageRgba8(img)
                 .write_to(&mut Cursor::new(&mut buf), ImageFormat::Png)
@@ -305,6 +378,46 @@ fn generate_video(path: &Path, size: u32) -> Option<Vec<u8>> {
 }
 
 #[cfg(not(feature = "linux-video"))]
-fn generate_video(_path: &Path, _size: u32) -> Option<Vec<u8>> {
+fn generate_video(_path: &Path, _size: u32, _cancelled: &AtomicBool) -> Option<Vec<u8>> {
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{Read, Seek, SeekFrom};
+
+    struct Fixture(PathBuf);
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            let _ = fs::remove_file(&self.0);
+        }
+    }
+
+    #[test]
+    fn thumbnail_cancellation_stops_further_reads_and_seeks() {
+        let fixture =
+            Fixture(std::env::temp_dir().join(format!("fbro-thumb-{}.bmp", uuid::Uuid::new_v4())));
+        fs::write(&fixture.0, b"image bytes").unwrap();
+        let cancelled = AtomicBool::new(false);
+        let mut reader = CancellableRead {
+            file: fs::File::open(&fixture.0).unwrap(),
+            cancelled: &cancelled,
+        };
+        assert_eq!(reader.read(&mut [0; 1]).unwrap(), 1);
+        cancelled.store(true, Ordering::Relaxed);
+        assert!(reader.read(&mut [0; 1]).is_err());
+        assert!(reader.seek(SeekFrom::Start(0)).is_err());
+        let canonical = fs::canonicalize(&fixture.0).unwrap();
+        let key = cache_key(
+            &canonical,
+            mtime_ns(&fs::metadata(&canonical).unwrap()),
+            128,
+        );
+        assert!(generate_cancellable(fixture.0.to_str().unwrap(), 128, &cancelled).is_none());
+        if let Some(cache) = cache_dir() {
+            assert!(!cache.join(format!("{key}.fail")).exists());
+            assert!(!cache.join(format!("{key}.png")).exists());
+        }
+    }
 }

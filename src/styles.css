@@ -1358,6 +1358,13 @@ body {
   text-overflow: ellipsis;
 }
 
+.panel__card--tooltip.panel__card--selected,
+.panel__card--tooltip.panel__card--selected:hover {
+  /* Composite translucent selection over an opaque surface so cards beneath
+     the expanded card cannot show through it. */
+  background: linear-gradient(var(--bg-selected), var(--bg-selected)), var(--bg-elev);
+}
+
 .panel__card--tooltip .panel__card-size,
 .panel__card--tooltip .panel__card-date {
   white-space: nowrap;

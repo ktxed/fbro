@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useAppDispatch, useAppState } from "../store";
-import type { ChildProcess, DirSizeTask, FileOpProgress, Job, PrefetchCacheStatus } from "../ws/types";
+import type { ChildProcess, DirSizeTask, FileOpProgress, Job, PrefetchCacheStatus, ThumbnailQueue } from "../ws/types";
 import type { WsClient } from "../ws/client";
 import { IconEye, IconPlayerPlay, IconPlayerPause, IconX } from "@tabler/icons-react";
 import { cancelJobWithPartialPrompt } from "../utils/jobCancel";
@@ -9,7 +9,7 @@ import { ModalLayer } from "./ModalStack";
 import { isLetterKey, rovingIndexForKey } from "./modalKeyboard";
 
 const FILE_LIST_PAGE_SIZE = 25;
-const JOB_TABS = ["jobs", "procs", "cache"] as const;
+const JOB_TABS = ["jobs", "thumbnails", "procs", "cache"] as const;
 
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -535,6 +535,37 @@ function DirSizeTaskRow({ task, client }: { task: DirSizeTask; client: WsClient 
   );
 }
 
+function ThumbnailQueueView({ queue }: { queue: ThumbnailQueue | null }) {
+  if (!queue) return <div className="jobs-modal__empty">Loading thumbnail queue…</div>;
+  const total = queue.running + queue.queued;
+  return (
+    <section data-testid="thumbnail-queue">
+      <div className="jobs-modal__summary">
+        <SummaryChip label="Running" value={String(queue.running)} />
+        <SummaryChip label="Queued" value={String(queue.queued)} />
+        <SummaryChip label="Concurrency limit" value={String(queue.maxConcurrent)} />
+        {queue.backgroundWaitMs > 0 && <SummaryChip label="Background resumes in" value={`${Math.ceil(queue.backgroundWaitMs / 1000)}s`} />}
+      </div>
+      {total === 0 && <div className="jobs-modal__empty">No thumbnail work queued.</div>}
+      {total > queue.tasks.length && (
+        <div className="jobs-modal__section-title">Showing first {queue.tasks.length} of {total} thumbnails</div>
+      )}
+      {queue.tasks.map((task, index) => (
+        <div className="jobs-modal__row" key={`${task.path}:${task.size}:${task.speculative}:${index}`}>
+          <div className="jobs-modal__row-header">
+            <span className="jobs-modal__type">{task.speculative ? "Thumbnail warmup" : "Thumbnail"}</span>
+            <span>{task.size} px · {task.priority === "foreground" ? "Preview" : task.priority === "visible" ? "Visible" : "Background"}</span>
+            <span className={`jobs-modal__state jobs-modal__state--${task.status.toLowerCase()}`}>{task.status}</span>
+          </div>
+          <div className="jobs-modal__paths">
+            <span className="jobs-modal__path" title={task.path}>{task.path}</span>
+          </div>
+        </div>
+      ))}
+    </section>
+  );
+}
+
 function CacheEntryRow({ label, status, client, cacheKey }: {
   label: string;
   status: PrefetchCacheStatus | null;
@@ -607,7 +638,7 @@ export function JobsModal({ onClose, client }: { onClose: () => void; client: Ws
   const state = useAppState();
   const overlayRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
-  const [activeTab, setActiveTab] = useState<"jobs" | "procs" | "cache">("jobs");
+  const [activeTab, setActiveTab] = useState<typeof JOB_TABS[number]>("jobs");
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const [expandedFileJobs, setExpandedFileJobs] = useState<Record<string, boolean>>({});
   const [filePages, setFilePages] = useState<Record<string, number>>({});
@@ -642,6 +673,14 @@ export function JobsModal({ onClose, client }: { onClose: () => void; client: Ws
     if (activeTab === "cache") {
       client.sendIntent("QueryCacheStatus", undefined, {});
     }
+  }, [activeTab, client]);
+
+  useEffect(() => {
+    if (activeTab !== "thumbnails") return;
+    const refresh = () => client.sendIntent("QueryThumbnailQueue", undefined, { requestId: crypto.randomUUID() });
+    refresh();
+    const timer = window.setInterval(refresh, 1000);
+    return () => window.clearInterval(timer);
   }, [activeTab, client]);
 
   const onOverlayClick = (e: React.MouseEvent) => {
@@ -685,7 +724,7 @@ export function JobsModal({ onClose, client }: { onClose: () => void; client: Ws
         <div className="jobs-modal__tabs" role="tablist" aria-label="Job views">
           {JOB_TABS.map((tab, index) => {
             const selected = activeTab === tab;
-            const label = tab === "jobs" ? "Jobs" : tab === "procs" ? `Processes${childProcs.length > 0 ? ` (${childProcs.length})` : ""}` : "Cache";
+            const label = tab === "jobs" ? "Jobs" : tab === "thumbnails" ? "Thumbnails" : tab === "procs" ? `Processes${childProcs.length > 0 ? ` (${childProcs.length})` : ""}` : "Cache";
             return (
               <button
                 key={tab}
@@ -784,6 +823,8 @@ export function JobsModal({ onClose, client }: { onClose: () => void; client: Ws
               )}
             </>
           )}
+
+          {activeTab === "thumbnails" && <ThumbnailQueueView queue={state.thumbnailQueue?.queue ?? null} />}
 
           {activeTab === "procs" && (
             <>

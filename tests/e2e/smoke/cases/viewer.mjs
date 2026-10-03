@@ -129,7 +129,7 @@ stateDiagram-v2
     // The backend must reject marked warmups independently of frontend flags.
     // /proc is a known virtual mount in the Linux smoke environment.
     for (const route of [
-      "/__thumb__/128/%2Fproc%2Fself%2Fmountinfo?prefetch=1",
+      `/__thumb__/128/%2Fproc%2Fself%2Fmountinfo?prefetch=1&panelId=left&panelEpoch=${observer.state.panels.left.panelEpoch}`,
       "/__remote_thumb__/missing-source/128/0/0/image.jpg?prefetch=1",
     ]) {
       const response = await fetch(`http://127.0.0.1:${observer.state.fileServerPort}${route}`);

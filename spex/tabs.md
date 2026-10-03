@@ -65,6 +65,10 @@ layoutSlots: string[];
 
 `focus` continues to address a **panel id** (the active tab's panel). All existing focus logic is unchanged.
 
+Only active listing tabs contribute their actual viewport to thumbnail
+generation priority. Creating, switching, closing, or promoting a tab refreshes
+the pool's visibility set, so hidden tabs' work waits for the background cooldown.
+
 ---
 
 ## 3. Tab Lifecycle

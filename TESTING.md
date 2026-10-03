@@ -25,6 +25,24 @@ The Dockerized backend app instances still run under `xvfb-run`.
 
 ## Smoke Tests
 
+The local smoke flow checks the thumbnail queue's backend reply, Jobs modal
+empty state, keyboard tab selection, focus preservation during refresh, and
+focus restoration on close. `cargo test --manifest-path src-tauri/Cargo.toml
+thumb_pool` covers deduplication, visibility priority and demotion, running
+and completed tasks, concurrency limits, and bounded queue snapshots.
+Thumbnail viewport smoke fixtures verify off-screen cards do not fetch,
+expanded cards update their selection fill on keyboard selection/deselection,
+off-screen requests stay queued during cooldown, and scrolling them into view
+promotes and renders them immediately. Backend tests cover the exact 12-second
+deadline, visibility demotion, unchanged viewport reports, completion resets,
+automatic worker wakeup, explicit preview bypass, small and windowed listings,
+inactive tabs, terminal surfaces, and stale listing epochs. Navigation smoke
+checks queue clearing, release of abandoned requests, and rejection of late old
+epoch requests. Backend tests cover preservation of another panel's work,
+same-location rescans, cancellation tokens, return-to-location completion races,
+and Linux read/seek cancellation without cache poisoning.
+Native macOS and Windows thumbnail providers need platform-specific checks.
+
 The local smoke flow covers symlink target hints, keyboard navigation into a
 directory link, Up through a target child and back to the link's origin with
 cursor restoration, history Back/Forward followed by Up, viewer navigation

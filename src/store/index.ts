@@ -41,6 +41,7 @@ import type {
   FileClipboardWrittenMessage,
   TextClipboardWrittenMessage,
   CacheStatusReadyMessage,
+  ThumbnailQueueReadyMessage,
   PrefetchCacheStatus,
   BookmarkEntry,
   ChildProcess,
@@ -319,6 +320,7 @@ export interface AppState {
   transientHint: { message: string; token: number } | null;
   embeddedViewer: { sourceSlotId: string } | null;
   cacheStatus: { prefetchCache: PrefetchCacheStatus } | null;
+  thumbnailQueue: ThumbnailQueueReadyMessage | null;
   bookmarks: BookmarkEntry[];
   bookmarksOpen: { panelId: string } | null;
   maximizedTerminalPanelId: string | null;
@@ -398,6 +400,7 @@ const initialState: AppState = {
   transientHint: null,
   embeddedViewer: null,
   cacheStatus: null,
+  thumbnailQueue: null,
   bookmarks: [],
   bookmarksOpen: null,
   maximizedTerminalPanelId: readMaximizedTerminalPanelId(),
@@ -1690,6 +1693,8 @@ function reducer(state: AppState, action: AppAction): AppState {
           return applyQuitConfirmRequired(state, msg);
         case "CacheStatusReady":
           return { ...state, cacheStatus: { prefetchCache: (msg as CacheStatusReadyMessage).prefetchCache } };
+        case "ThumbnailQueueReady":
+          return { ...state, thumbnailQueue: msg as ThumbnailQueueReadyMessage };
         case "TerminalClosed": {
           // Belt-and-suspenders: BE also broadcasts a StatePatch clearing terminalSessionId,
           // but handle it here too in case the patch arrives out of order or is missed.

@@ -105,6 +105,12 @@ export async function clickEntry(browser, panelId, name) {
     throw new Error(`${error.message}; ${await panelDebug(browser, panelId)}`);
   });
   await el.click();
+  // Keyboard actions use the rendered backend cursor; a click only sends an
+  // intent, so wait for its patch before issuing the next command.
+  await waitFor(() => browser.execute((selector) => {
+    const entry = document.querySelector(selector);
+    return entry?.classList.contains("panel__row--cursor") || entry?.classList.contains("panel__card--cursor");
+  }, selector), { timeout: 10_000, label: `${panelId} cursor on ${name}` });
   return el;
 }
 

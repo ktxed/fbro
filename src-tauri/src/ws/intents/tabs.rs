@@ -16,6 +16,10 @@ pub(crate) async fn handle(name: &str, _scope: &Value, args: &Value, ctx: &mut I
         "panel.terminal.promote" => promote_terminal(args, ctx).await,
         _ => {}
     }
+    let state = ctx.state.lock().await;
+    state
+        .thumb_pool
+        .set_visible(crate::state::collect_visible_thumb_paths(&state));
 }
 
 /// Allocate a new panel id within a slot. Suffixed with an epoch counter so
@@ -233,6 +237,7 @@ async fn new_tab(args: &Value, ctx: &mut IntentContext<'_>) {
             windowed: false,
             window_start: 0,
             window_count: 0,
+            thumbnail_viewport: None,
             window_version: 0,
             source_paths,
             navigation_context: if clone_active {
@@ -437,6 +442,7 @@ async fn promote_terminal(args: &Value, ctx: &mut IntentContext<'_>) {
             windowed: false,
             window_start: 0,
             window_count: 0,
+            thumbnail_viewport: None,
             window_version: 0,
             source_paths: source.source_paths.clone(),
             navigation_context: Default::default(),

@@ -152,6 +152,26 @@ pub trait Platform: Send + Sync {
         None
     }
 
+    /// Cooperative cancellation. Native providers may finish a synchronous call,
+    /// but its result must never be published after cancellation.
+    fn get_thumbnail_cancellable(
+        &self,
+        path: &str,
+        size: u32,
+        cancelled: &std::sync::atomic::AtomicBool,
+    ) -> Option<(Vec<u8>, &'static str)> {
+        use std::sync::atomic::Ordering;
+        if cancelled.load(Ordering::Relaxed) {
+            return None;
+        }
+        let result = self.get_thumbnail(path, size);
+        if cancelled.load(Ordering::Relaxed) {
+            None
+        } else {
+            result
+        }
+    }
+
     /// Opens a file in the system's default editor.
     /// Returns the full path on success, or an error message if no editor is available.
     fn open_in_editor(&self, path: &str) -> Result<String, String>;

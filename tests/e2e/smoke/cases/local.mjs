@@ -20,11 +20,13 @@ import {
 } from "../browser.mjs";
 import { waitFor } from "../wait.mjs";
 import { expectModalFocus, expectCoveredModal } from "./modal-focus.mjs";
+import { verifyThumbnailQueue } from "./thumbnails.mjs";
 
 export async function runLocalFlow(browser, observer) {
   await verifyColorSchemeSwitch(browser, observer);
   await verifyAboutModal(browser);
   await verifyEjectPicker(browser);
+  await verifyThumbnailQueue(browser, observer);
 
   const aSrc = backendPath("a", "src");
   const aDst = backendPath("a", "dst");
@@ -461,6 +463,9 @@ async function verifyInlinePreviewNavigation(browser, observer, aSrc, restorePat
   await observer.waitForAllEntries("left", [...imageNames, "03-stop.txt"]);
   observer.sendIntent("SetSort", "left", { by: "name", order: "asc" });
   await observer.waitForSort("left", "name", "asc");
+  // Observer scan replies belong to that connection. Refresh through the app
+  // so its thumbnail URLs use the backend's current listing epoch too.
+  await goToPanelPath(browser, observer, "left", fixturePath);
   await clickEntry(browser, "left", imageNames[0]);
   await browser.keys("ArrowRight");
   const firstPreview = await browser.$(`[data-entry-name="${imageNames[0]}"] [data-testid="file-inline-preview"]`);

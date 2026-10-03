@@ -322,6 +322,12 @@ pub enum ServerMessage {
         kind: String,
         prompt: String,
     },
+    ThumbnailQueueReady {
+        timestamp: u64,
+        #[serde(rename = "requestId")]
+        request_id: String,
+        queue: crate::thumb_pool::ThumbQueueSnapshot,
+    },
     CacheStatusReady {
         timestamp: u64,
         #[serde(rename = "prefetchCache")]

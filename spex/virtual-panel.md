@@ -66,6 +66,14 @@ Sent by the FE when the user scrolls in a windowed panel.
 
 The BE responds with a `StatePatch` containing `windowStart`, `windowEntries`, and `totalCount`.
 
+Grid requests also include `{ panelEpoch, visibleStart, visibleCount }` for
+the actual viewport, excluding the render buffer. The backend resolves those
+absolute indices against its own listing for thumbnail priority. Reports for
+old listing epochs are ignored. This geometry is accepted in Mode A too,
+where `RequestWindow` does not need to send a render-slice patch. Only active
+listing tabs contribute to thumbnail visibility. See [Thumbnails](thumbnails.md)
+for the 12-second background-generation cooldown.
+
 ### Extended StatePatch Fields
 
 | Field | Type | Description |

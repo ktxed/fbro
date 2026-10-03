@@ -150,12 +150,33 @@ fn handle(
         }
     }
     let req = std::str::from_utf8(&buf).unwrap_or("");
+    let query = req
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .and_then(|target| target.split_once('?'))
+        .map_or("", |(_, query)| query);
+    let panel_id = query
+        .split('&')
+        .find_map(|part| part.strip_prefix("panelId="))
+        .map(percent_decode);
+    let panel_epoch = query
+        .split('&')
+        .find_map(|part| part.strip_prefix("panelEpoch="))
+        .and_then(|value| value.parse::<u64>().ok());
     let speculative = req
         .lines()
         .next()
         .and_then(|line| line.split_whitespace().nth(1))
         .and_then(|target| target.split_once('?'))
         .is_some_and(|(_, query)| query.split('&').any(|part| part == "prefetch=1"));
+    let foreground = !speculative
+        && req
+            .lines()
+            .next()
+            .and_then(|line| line.split_whitespace().nth(1))
+            .and_then(|target| target.split_once('?'))
+            .is_some_and(|(_, query)| query.split('&').any(|part| part == "foreground=1"));
 
     // Parse path from request line: "GET /url-encoded-path HTTP/1.1"
     let url_path = match req.lines().next().and_then(|l| l.split_whitespace().nth(1)) {
@@ -186,7 +207,15 @@ fn handle(
 
     // Thumbnail requests: /__thumb__/{size}/{percent-encoded-host-path}
     if let Some(rest) = url_path.strip_prefix("/__thumb__/") {
-        return handle_thumb(stream, thumb_cache, thumb_pool, rest, speculative);
+        return handle_thumb(
+            stream,
+            thumb_cache,
+            thumb_pool,
+            rest,
+            speculative,
+            foreground,
+            panel_id.zip(panel_epoch),
+        );
     }
 
     // Remote thumbnail requests:
@@ -437,7 +466,15 @@ fn handle_thumb(
     pool: &ThumbPool,
     rest: &str,
     speculative: bool,
+    foreground: bool,
+    scope: Option<(String, u64)>,
 ) -> std::io::Result<()> {
+    let Some((panel_id, epoch)) = scope else {
+        return skip_prefetch(&mut stream);
+    };
+    if !pool.accepts_request(&panel_id, epoch) {
+        return skip_prefetch(&mut stream);
+    }
     // Parse {size}/{rest-as-path}
     let (size_str, path_part) = match rest.split_once('/') {
         Some((a, b)) => (a, b),
@@ -496,13 +533,22 @@ fn handle_thumb(
     // Submit to the worker pool. Multiple concurrent requests for the same
     // (path, size, mtime) dedupe onto a single generation, so refreshing the
     // panel doesn't multiply work.
-    let rx = pool.request(ThumbJobKey {
-        path: path.clone(),
-        size,
-        mtime,
-        speculative_generation: permit.as_ref().map(|permit| permit.generation()),
-    });
+    let rx = pool.request_scoped(
+        ThumbJobKey {
+            path: path.clone(),
+            size,
+            mtime,
+            speculative_generation: permit.as_ref().map(|permit| permit.generation()),
+            foreground,
+            owner: None,
+        },
+        &panel_id,
+        epoch,
+    );
     let bytes_opt = rx.recv().unwrap_or(None);
+    if !pool.accepts_request(&panel_id, epoch) {
+        return skip_prefetch(&mut stream);
+    }
     if permit.as_ref().is_some_and(|p| !policy.valid(p)) {
         return skip_prefetch(&mut stream);
     }

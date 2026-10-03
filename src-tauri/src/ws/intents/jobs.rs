@@ -30,6 +30,18 @@ use crate::ws::runtime::{
 
 pub(crate) async fn handle(name: &str, scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
     match name {
+        "QueryThumbnailQueue" => {
+            let pool = { Arc::clone(&ctx.state.lock().await.thumb_pool) };
+            let queue = pool.snapshot();
+            let _ = ctx
+                .tx
+                .send(ServerMessage::ThumbnailQueueReady {
+                    timestamp: now(),
+                    request_id: arg_str(args, "requestId").unwrap_or("").to_string(),
+                    queue,
+                })
+                .await;
+        }
         "StartFileOp" => start_file_op(args, ctx).await,
         "PasteExternalClipboard" => paste_external_clipboard(args, ctx).await,
         "WriteExternalClipboard" => write_external_clipboard(args, ctx).await,

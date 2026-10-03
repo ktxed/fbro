@@ -486,6 +486,21 @@ Jobs are **cooperatively suspendable**.
 }
 ```
 
+### 11.3 Thumbnail queue inspection
+
+`QueryThumbnailQueue { requestId }` is a read-only intent. It replies to the
+requesting connection with `ThumbnailQueueReady { timestamp, requestId, queue }`.
+`queue` contains `running`, `queued`, `maxConcurrent`, `backgroundWaitMs`
+(remaining background cooldown, zero when no background work is held), and `tasks` (at most
+100 entries). Each task has `path`, `size` (pixels), `status` (`Running`, `Cancelling`, or
+`Queued`), `priority` (`foreground`, `visible`, or `background`), and `speculative` (warmup).
+Counts cover the complete deduplicated pool. Tasks list running work first,
+then queued work in dispatch order, accounting for visibility demotion.
+Abandoned queued tasks disappear immediately; active tasks become `Cancelling`
+until their worker returns. Completed tasks disappear; they are not retained as file-job history.
+The Jobs modal queries immediately when its Thumbnails tab opens and once
+per second while that tab remains mounted and selected.
+
 ---
 
 ## 12. Job Decision Requests

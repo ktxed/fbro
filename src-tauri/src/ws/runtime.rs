@@ -557,6 +557,7 @@ pub(crate) async fn navigate_to(
             } else {
                 return;
             };
+        refresh_thumb_visibility(&state_guard);
         let Some(driver) = state_guard.drivers.get(&source_id).cloned() else {
             drop(state_guard);
             if let Some(handle) = recover_panel_to_home(
@@ -1402,7 +1403,28 @@ pub(crate) async fn update_panel_from_patch(
     refresh_thumb_visibility(&state_guard);
 }
 
-fn refresh_thumb_visibility(state: &crate::state::AppState) {
+pub(crate) fn refresh_thumb_visibility(state: &crate::state::AppState) {
+    let contexts = state
+        .layout_slots
+        .iter()
+        .filter_map(|slot_id| {
+            let slot = state.slots.get(slot_id)?;
+            let panel = state.panels.get(&slot.active_panel_id)?;
+            if panel.tab_kind != crate::state::TabKind::Listing
+                || panel.terminal_session.is_some()
+                || !state.drivers.get(&panel.source_id)?.supports_thumbnails()
+            {
+                return None;
+            }
+            Some((
+                panel.panel_id.clone(),
+                panel.source_id.clone(),
+                panel.path.clone(),
+                panel.panel_epoch,
+            ))
+        })
+        .collect();
+    state.thumb_pool.sync_contexts(contexts);
     let paths = crate::state::collect_visible_thumb_paths(state);
     state.thumb_pool.set_visible(paths);
 }

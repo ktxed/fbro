@@ -966,6 +966,27 @@ export interface CacheStatusReadyMessage {
   prefetchCache: PrefetchCacheStatus;
 }
 
+export interface ThumbnailQueue {
+  running: number;
+  queued: number;
+  maxConcurrent: number;
+  backgroundWaitMs: number;
+  tasks: Array<{
+    path: string;
+    size: number;
+    status: "Running" | "Queued" | "Cancelling";
+    priority: "foreground" | "visible" | "background";
+    speculative: boolean;
+  }>;
+}
+
+export interface ThumbnailQueueReadyMessage {
+  type: "ThumbnailQueueReady";
+  timestamp: number;
+  requestId: string;
+  queue: ThumbnailQueue;
+}
+
 export interface TerminalSessionOpenedMessage {
   type: "TerminalSessionOpened";
   timestamp: number;
@@ -1128,6 +1149,7 @@ export type BEMessage =
   | GitActionFinishedMessage
   | InputRequiredMessage
   | CacheStatusReadyMessage
+  | ThumbnailQueueReadyMessage
   | TerminalSessionOpenedMessage
   | TerminalClosedMessage
   | PairingRequestedMessage

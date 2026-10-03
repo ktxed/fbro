@@ -96,7 +96,11 @@ source simultaneously.
 
 A listing tab is a `Panel` record. It owns `source_id`, the current driver path,
 sort/filter/view state, cursor, selection, history, and optional shadow return
-context. A `PanelSlot` owns an ordered list of panel IDs and selects one active
+context. Thumbnail work belongs to the active panel's source/location lifetime:
+leaving that location or hiding/removing the listing clears its queue and
+signals active generation to stop. A same-location rescan preserves admitted
+work while updating the request epoch; another displayed panel retains its work
+(see [Thumbnails](thumbnails.md)). A `PanelSlot` owns an ordered list of panel IDs and selects one active
 panel. The React tab chip is only a projection of that backend state.
 
 ```mermaid

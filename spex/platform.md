@@ -51,6 +51,12 @@ Sync trait, `Send + Sync`. Grouped by purpose:
 | `find_icon(name) -> Option<(bytes, content_type)>` | Look up a freedesktop-style icon name. Default `None`. The free function `resolve_icon` falls back to embedded SVGs. |
 | `get_thumbnail(path, size) -> Option<(bytes, content_type)>` | Native thumbnailer (Windows `IShellItemImageFactory`, macOS `QLThumbnailGenerator`). MUST be safe to call from any worker thread — `ThumbPool` calls it from a thread pool. |
 
+`get_thumbnail_cancellable(path, size, &AtomicBool)` is the pool entry point.
+The default checks the flag before/after `get_thumbnail`; macOS and Windows
+native calls already in progress may finish. Linux overrides it with cooperative
+read/decode/frame checkpoints. Cancellation releases request waiters immediately;
+the pool keeps the worker marked `Cancelling` until it physically returns.
+
 ### 2.3 Launching applications
 
 | Method | Purpose |

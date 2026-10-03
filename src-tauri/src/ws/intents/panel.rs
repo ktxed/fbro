@@ -1161,6 +1161,24 @@ async fn cancel_size_calculation(scope: &Value, args: &Value, ctx: &mut IntentCo
 async fn request_window(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
     let panel_id = resolve_panel_id(scope, ctx.state).await;
     let parsed = WindowArgs::from_args(args);
+    // Viewport geometry is separate from the buffered render window, including
+    // for small directories where send_window is otherwise a no-op.
+    if let (Some(epoch), Some(start), Some(count)) = (
+        args.get("panelEpoch").and_then(Value::as_u64),
+        args.get("visibleStart").and_then(Value::as_u64),
+        args.get("visibleCount").and_then(Value::as_u64),
+    ) {
+        let mut state = ctx.state.lock().await;
+        if let Some(panel) = state.panels.get_mut(&panel_id) {
+            if panel.panel_epoch != epoch {
+                return;
+            }
+            panel.thumbnail_viewport = Some((epoch, start as usize, count as usize));
+        }
+        state
+            .thumb_pool
+            .set_visible(crate::state::collect_visible_thumb_paths(&state));
+    }
     send_window(&panel_id, parsed.start, parsed.count, ctx.state, ctx.tx).await;
 }
 

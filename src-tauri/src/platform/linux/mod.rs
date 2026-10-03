@@ -71,6 +71,15 @@ impl Platform for LinuxPlatform {
         thumbnail::generate(path, size)
     }
 
+    fn get_thumbnail_cancellable(
+        &self,
+        path: &str,
+        size: u32,
+        cancelled: &std::sync::atomic::AtomicBool,
+    ) -> Option<(Vec<u8>, &'static str)> {
+        thumbnail::generate_cancellable(path, size, cancelled)
+    }
+
     fn disk_space(&self, path: &str) -> Option<(u64, u64)> {
         use std::ffi::CString;
         let cpath = CString::new(path).ok()?;

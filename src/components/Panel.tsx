@@ -1262,6 +1262,8 @@ export function Panel({
   // (decoupled from the structural version guard), so missing one mid-drag
   // is harmless — the next frame resends with the latest scrollTop.
   const windowRafRef = useRef(0);
+  const windowEpochRef = useRef(panel.panelEpoch);
+  windowEpochRef.current = panel.panelEpoch;
   // Seed from existing state so remounting a tab does not replay an old,
   // already-consumed anchor adjustment.
   const appliedViewportAnchorRef = useRef(panel.viewportAnchor?.version ?? 0);
@@ -1293,12 +1295,15 @@ export function Panel({
         const { cols, cardHeight } = computeGridMetrics(list);
         const rowStride = cardHeight + GRID_GAP;
         const firstVisibleRow = Math.floor(scrollTop / rowStride);
-        const visibleRows = Math.ceil(viewportHeight / rowStride);
+        const visibleRows = Math.ceil((scrollTop + viewportHeight) / rowStride) - firstVisibleRow;
         const bufferRows = visibleRows; // 1 screen on each side
         const startRow = Math.max(0, firstVisibleRow - bufferRows);
         const start = startRow * cols;
         const count = (visibleRows + 2 * bufferRows) * cols;
-        client.sendIntent("RequestWindow", panelId, { start, count });
+        client.sendIntent("RequestWindow", panelId, {
+          start, count, panelEpoch: windowEpochRef.current,
+          visibleStart: firstVisibleRow * cols, visibleCount: visibleRows * cols,
+        });
         return;
       }
       const firstVisible = Math.floor(scrollTop / ROW_HEIGHT);
@@ -1309,6 +1314,11 @@ export function Panel({
       client.sendIntent("RequestWindow", panelId, { start, count });
     });
   }, [isWindowed, isGridMode, panelId, client]);
+  useEffect(() => {
+    // New listing data needs a geometry report without scrolling back to the
+    // cursor when only the buffered render slice changes length.
+    if (isGridMode) handleScroll();
+  }, [panel.panelEpoch, panel.entries.length, isGridMode, handleScroll]);
   const handleListScroll = useCallback(() => {
     captureCursorViewportOffset();
     handleScroll();
@@ -1719,7 +1729,7 @@ export function Panel({
     if (source?.kind === "remote") {
       return `http://127.0.0.1:${appState.fileServerPort}/__remote_thumb__/${encodeURIComponent(panel.sourceId)}/${size}/${encodeURIComponent(entry.mtime ?? "0")}/${encodeURIComponent(String(entry.size ?? 0))}/${encodeURIComponent(entryPath)}`;
     }
-    return `http://127.0.0.1:${appState.fileServerPort}/__thumb__/${size}/${encodeURIComponent(entryPath)}`;
+    return `http://127.0.0.1:${appState.fileServerPort}/__thumb__/${size}/${encodeURIComponent(entryPath)}?panelId=${encodeURIComponent(panelId)}&panelEpoch=${panel.panelEpoch}`;
   };
 
   // Warm the preview-size thumbnail for the cursor entry and its next neighbor
@@ -1757,11 +1767,11 @@ export function Panel({
     const timer = window.setTimeout(() => {
       for (const url of urls) {
         // Consume the response so a speculative fetch cannot retain an unread body.
-        void fetch(`${url}?prefetch=1`, { signal: controller.signal }).then(r => r.arrayBuffer()).catch(() => {});
+        void fetch(`${url}${url.includes("?") ? "&" : "?"}prefetch=1`, { signal: controller.signal }).then(r => r.arrayBuffer()).catch(() => {});
       }
     }, 200);
     return () => { window.clearTimeout(timer); controller.abort(); };
-  }, [windowFocused, panel.cursor, panel.entries, panel.windowStart, panel.viewMode, panel.supportsThumbnails, panel.sourceId, source?.kind, source?.prefetchEligible, appState.fileServerPort]);
+  }, [windowFocused, panel.cursor, panel.entries, panel.windowStart, panel.panelEpoch, panel.viewMode, panel.supportsThumbnails, panel.sourceId, source?.kind, source?.prefetchEligible, appState.fileServerPort]);
 
   const runContextualFileCommand = (
     target: ContextualTarget,
@@ -1785,7 +1795,8 @@ export function Panel({
     const targetLabel = target.count > 1 ? `${target.count} selected items` : target.primary.name;
     const available = (id: Parameters<typeof contextualOperationAvailable>[0]) =>
       contextualOperationAvailable(id, appState, target);
-    const previewUrl = entry && available("file.preview") && isImagePreviewCandidate(entry) ? thumbUrlFor(entry, PREVIEW_THUMB_SIZE) : null;
+    const previewThumbUrl = entry && available("file.preview") && isImagePreviewCandidate(entry) ? thumbUrlFor(entry, PREVIEW_THUMB_SIZE) : null;
+    const previewUrl = previewThumbUrl ? `${previewThumbUrl}${previewThumbUrl.includes("?") ? "&" : "?"}foreground=1` : null;
     const operations: InlineOperationItem[] = [];
     if (available("panel.browse-archive")) operations.push({
       id: "panel.browse-archive",
@@ -2051,7 +2062,7 @@ export function Panel({
         // underlying card sharing the same absIndex.
         key={isTooltip ? `tooltip-${absIndex}` : absIndex}
         role={isTooltip ? undefined : "row"}
-        data-testid={isTooltip ? undefined : "panel-entry"}
+        data-testid={isTooltip ? "panel-expanded-card" : "panel-entry"}
         data-abs-index={isTooltip ? undefined : absIndex}
         data-entry-name={isTooltip ? undefined : entry.name}
         data-entry-kind={isTooltip ? undefined : entry.kind}
@@ -2060,7 +2071,7 @@ export function Panel({
           "panel__card",
           isTooltip ? "panel__card--tooltip" : "",
           !isTooltip && absIndex === panel.cursor ? "panel__card--cursor" : "",
-          !isTooltip && selectionSet.has(absIndex) ? "panel__card--selected" : "",
+          selectionSet.has(absIndex) ? "panel__card--selected" : "",
           !isTooltip && dragActive && dragDropAllowed && dragHoverAbsIndex === absIndex ? "panel__card--drop-target" : "",
         ].filter(Boolean).join(" ")}
         style={style}

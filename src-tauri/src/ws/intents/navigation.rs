@@ -1166,6 +1166,7 @@ async fn create_right_listing_tab(
             windowed: false,
             window_start: 0,
             window_count: 0,
+            thumbnail_viewport: None,
             window_version: 0,
             source_paths: base
                 .as_ref()
