@@ -16,24 +16,33 @@ permissions:
   contents: write
 
 jobs:
+  matrix:
+    runs-on: ubuntu-24.04
+    outputs:
+      include: ${{ steps.set.outputs.include }}
+    steps:
+      - id: set
+        env:
+          EVENT: ${{ github.event_name }}
+          LINUX_ONLY: ${{ inputs.linux_only }}
+        run: |
+          # matrix is not available in a job-level if, so the platform list is
+          # chosen here. A manual run with "Build only Linux" omits macOS and
+          # Windows. A tag push builds every platform.
+          if [ "$EVENT" = "workflow_dispatch" ] && [ "$LINUX_ONLY" = "true" ]; then
+            include='[{"platform":"ubuntu-24.04","os":"linux","args":""}]'
+          else
+            include='[{"platform":"ubuntu-24.04","os":"linux","args":""},{"platform":"macos-latest","os":"macos","args":"--target aarch64-apple-darwin"},{"platform":"windows-latest","os":"windows","args":""}]'
+          fi
+          echo "include=$include" >> "$GITHUB_OUTPUT"
+
   release:
+    needs: matrix
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - platform: ubuntu-24.04
-            os: linux
-            args: ""
-          - platform: macos-latest
-            os: macos
-            args: "--target aarch64-apple-darwin"
-          - platform: windows-latest
-            os: windows
-            args: ""
+        include: ${{ fromJson(needs.matrix.outputs.include) }}
     runs-on: ${{ matrix.platform }}
-    # A manual run with "Build only Linux" skips macOS and Windows.
-    # A tag push ignores the input and builds every platform.
-    if: github.event_name != 'workflow_dispatch' || inputs.linux_only != 'true' || matrix.os == 'linux'
     steps:
       - uses: actions/checkout@v4
 
