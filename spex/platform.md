@@ -113,9 +113,19 @@ for "open with", `NSPasteboard` for the clipboard, `open -R` for reveal.
 The image viewer recognizes `.heic` and `.heif` on macOS and delegates decoding
 to WKWebView (Safari 17 or newer), for both HTTP images and buffered Blob images.
 The file server uses `image/heic` and `image/heif`; viewer prefetch applies the
-image size cap to both formats. Linux and Windows keep the hex preview because
-their WebViews do not provide this decoder. Native thumbnails use a separate OS
-pipeline and do not determine viewer format support.
+image size cap to both formats. Linux and Windows use the hex preview by
+default. The backend-owned `enableHeic2any` setting opts these platforms into
+HEIC2ANY conversion in the WebView: local images are fetched through the file
+server, other sources use backend-provided buffers, and the first converted
+image is displayed as PNG. The decoder is bundled and loaded on demand; no
+external service or installed codec is needed. Conversion does not preserve
+metadata or provide animation playback. Image input caps apply; decoding errors
+are shown in the preview. Superseded results are discarded and object URLs are
+released. If HEIC2ANY's older decoder rejects the container (`ERR_LIBHEIF`),
+the viewer lazily loads `heic-to` and retries locally with its newer decoder.
+macOS keeps its native path even if the persisted setting is true.
+Native thumbnails use a separate OS pipeline and do not determine viewer format
+support.
 
 ### 3.3 `WindowsPlatform`
 

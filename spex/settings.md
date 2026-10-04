@@ -77,12 +77,18 @@ Supported keys:
 |---|---|---|---|
 | `showHiddenDefault` | `bool` | `false` | Whether new panels start with hidden files visible. Changing this also applies immediately to all open panels. |
 | `rememberSortPerLocation` | `bool` | `false` | Remember and share sorting for each local filesystem location. |
+| `enableHeic2any` | `bool` | `false` | Enable local browser conversion of HEIC/HEIF previews in the embedded and detached viewers on Windows (including Windows 10) and Linux. The control is hidden on macOS, which retains native decoding. Existing image caps apply. Changes update open viewers through backend patches; conversion is preview-only and does not write files. |
 | `zshEmacsKeymap` | `bool` | `false` | On macOS, start new interactive zsh terminals with `-o emacs`. The control is hidden and the setting has no effect on other platforms. Other shells and Quick Edit commands are unaffected. Existing terminal sessions keep their current keymap. |
 | `fedupDefaultIgnorePatterns` | `string` | `.git`, `.idea`, `.vscode`, `.venv`, `node_modules`, `__MACOSX`, `._*`, `.DS_Store`, `artifacts/e2e`, `dist/assets`, `target/debug`, `target/release`, `target/bundle`, `.m2` | Newline/comma separated wildcard name/path patterns Fedup Bro can use to skip files and folders before scanning. |
 
 Unknown key or type mismatch → `Error { code: "BAD_SETTING", recoverable: true }`.
 
 ## StatePatch: settings domain
+
+Detached viewer clients receive the current `general.enableHeic2any` in their
+initial lightweight display-settings patch, as well as subsequent changes.
+HEIC2ANY decoding errors from its older libheif can fall back to the bundled,
+lazy-loaded `heic-to` browser decoder under the same toggle.
 
 When a setting changes the BE broadcasts a patch to all connected clients:
 

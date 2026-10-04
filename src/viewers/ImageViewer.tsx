@@ -1,5 +1,7 @@
 import { useState, useEffect } from "react";
-import { mimeForFile } from "./media";
+import { mimeForFile, isHeicExt } from "./media";
+import { isMac } from "../utils/platform";
+import { HeicImage } from "./HeicImage";
 import { ZoomableImage } from "./ZoomableImage";
 import { ViewerLoading } from "./ViewerLoading";
 
@@ -10,6 +12,7 @@ interface ImageViewerProps {
   fileSize: number | null;
   filename: string;
   imageLimit?: number;
+  enableHeic2any?: boolean;
 }
 
 function formatSize(n: number): string {
@@ -19,11 +22,12 @@ function formatSize(n: number): string {
   return `${(n / 1024 / 1024 / 1024).toFixed(2)} GiB`;
 }
 
-export function ImageViewer({ buffer, fileSize, filename, imageLimit }: ImageViewerProps) {
+export function ImageViewer({ buffer, fileSize, filename, imageLimit, enableHeic2any = false }: ImageViewerProps) {
   const limit = imageLimit ?? IMAGE_LIMIT;
   const [url, setUrl] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!isMac && isHeicExt(filename)) { setUrl(null); return; }
     if (!buffer) { setUrl(null); return; }
     if (fileSize !== null && fileSize > limit) { setUrl(null); return; }
     const mime = mimeForFile(filename);
@@ -43,6 +47,12 @@ export function ImageViewer({ buffer, fileSize, filename, imageLimit }: ImageVie
     );
   }
 
+  if (!isMac && isHeicExt(filename)) {
+    if (!enableHeic2any) return <div className="viewer__image-container">
+      <div className="viewer__image-notice">Enable HEIC/HEIF preview in Settings to view this image.</div>
+    </div>;
+    return <HeicImage filename={filename} buffer={buffer} maxBytes={limit} />;
+  }
   if (!url) {
     return (
       <div className="viewer__image-container">

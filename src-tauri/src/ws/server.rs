@@ -193,11 +193,12 @@ async fn handle_connection(
     } else {
         // Non-GUI clients (viewers) don't get the full snapshot but still need
         // display settings so they render consistently with the main window.
-        let (font_size, color_scheme) = {
+        let (font_size, color_scheme, enable_heic2any) = {
             let state_guard = state.lock().await;
             (
                 state_guard.font_size,
                 state_guard.settings.general.color_scheme.clone(),
+                state_guard.settings.general.enable_heic2any,
             )
         };
         let _ = send_msg(
@@ -211,6 +212,7 @@ async fn handle_connection(
                     "fontSize": font_size,
                     "general": {
                         "colorScheme": color_scheme,
+                        "enableHeic2any": enable_heic2any,
                     },
                 }),
             },

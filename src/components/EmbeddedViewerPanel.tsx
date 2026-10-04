@@ -68,11 +68,13 @@ function HexLines({ bytes }: { bytes: Uint8Array }) {
 }
 
 export function EmbeddedViewerPanel({ sourcePanelId, state, onClose }: Props) {
-  const { ludicrousMode, maxImageSizeMb } = state.settings.general;
+  const { ludicrousMode, maxImageSizeMb, enableHeic2any } = state.settings.general;
   const imageLimit = ludicrousMode
     ? maxImageSizeMb * 1024 * 1024
     : IMAGE_DIRECT_LIMIT;
 
+  const heicEnabledRef = useRef(enableHeic2any);
+  heicEnabledRef.current = enableHeic2any;
   const imageLimitRef = useRef(imageLimit);
   imageLimitRef.current = imageLimit;
 
@@ -105,7 +107,7 @@ export function EmbeddedViewerPanel({ sourcePanelId, state, onClose }: Props) {
             if (prev.kind !== "loading") return prev;
             const { file } = prev;
             const isBin = detectBinary(bytes);
-            const rendMode = isImageExt(file.filename)
+            const rendMode = isImageExt(file.filename, heicEnabledRef.current)
               ? (file.fileSize !== null && file.fileSize > imageLimitRef.current ? "hex" : "image")
               : isBin ? "hex" : "text";
             return { kind: "ready", file, buffer: bytes, mode: rendMode };
@@ -124,7 +126,7 @@ export function EmbeddedViewerPanel({ sourcePanelId, state, onClose }: Props) {
 
   const loadFile = useCallback((info: FileInfo) => {
     pendingPathRef.current = info.path;
-    const size = isImageExt(info.filename) ? imageLimitRef.current : SMALL_LIMIT;
+    const size = isImageExt(info.filename, heicEnabledRef.current) ? imageLimitRef.current : SMALL_LIMIT;
     clientRef.current?.sendIntent("ReadFileChunk", undefined, {
       path: info.path,
       sourceId: info.sourceId,
@@ -139,7 +141,7 @@ export function EmbeddedViewerPanel({ sourcePanelId, state, onClose }: Props) {
   const panelPath = state.panels[sourcePanelId]?.path;
   useEffect(() => {
     loadedPathRef.current = null;
-  }, [panelPath, sourcePanelId]);
+  }, [panelPath, sourcePanelId, enableHeic2any]);
 
   // Watch source panel cursor. Debounce to avoid flooding on fast scroll.
   useEffect(() => {
@@ -200,7 +202,7 @@ export function EmbeddedViewerPanel({ sourcePanelId, state, onClose }: Props) {
       };
 
       // For local images/PDF/video: serve directly, no round trip needed.
-      if (canUseDirect(isLocal, entry.name, fileSize, imageLimitRef.current)) {
+      if (canUseDirect(isLocal, entry.name, fileSize, imageLimitRef.current, heicEnabledRef.current)) {
         pendingPathRef.current = null;
         setViewMode({ kind: "direct", file: info });
         return;
@@ -209,7 +211,7 @@ export function EmbeddedViewerPanel({ sourcePanelId, state, onClose }: Props) {
       // Direct rendering is local-only. For remote images we still need the
       // whole image in memory, so keep the image cap; remote non-images can
       // still show a chunked text/hex preview.
-      if (isImageExt(entry.name) && fileSize !== null && fileSize > imageLimitRef.current) {
+      if (isImageExt(entry.name, heicEnabledRef.current) && fileSize !== null && fileSize > imageLimitRef.current) {
         setViewMode({ kind: "too-large", file: info });
         return;
       }
@@ -228,6 +230,7 @@ export function EmbeddedViewerPanel({ sourcePanelId, state, onClose }: Props) {
     state.sources,
     sourcePanelId,
     loadFile,
+    enableHeic2any,
   ]);
 
   // Header label
@@ -273,12 +276,15 @@ export function EmbeddedViewerPanel({ sourcePanelId, state, onClose }: Props) {
           <DirectFileViewer
             path={viewMode.file.path}
             filename={viewMode.file.filename}
+            imageLimit={imageLimit}
             fsPort={state.fileServerPort}
+            enableHeic2any={enableHeic2any}
           />
         )}
         {viewMode.kind === "ready" && viewMode.mode === "image" && (
           <ImageViewer
             buffer={viewMode.buffer}
+            enableHeic2any={enableHeic2any}
             fileSize={viewMode.file.fileSize}
             filename={viewMode.file.filename}
             imageLimit={imageLimit}

@@ -139,6 +139,7 @@ pub(crate) fn build_state_snapshot(
                     preserve_attributes: state.settings.general.preserve_attributes,
                     auto_resume_copies: state.settings.general.auto_resume_copies,
                     ludicrous_mode: state.settings.general.ludicrous_mode,
+                    enable_heic2any: state.settings.general.enable_heic2any,
                     max_image_size_mb: state.settings.general.max_image_size_mb,
                     save_panel_view_mode: state.settings.general.save_panel_view_mode,
                     remember_sort_per_location: state

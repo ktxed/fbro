@@ -34,6 +34,9 @@ pub struct GeneralSettings {
     pub auto_resume_copies: bool,
     #[serde(default)]
     pub ludicrous_mode: bool,
+    /// Opt-in browser HEIC/HEIF preview conversion on Windows and Linux.
+    #[serde(default)]
+    pub enable_heic2any: bool,
     #[serde(default = "default_max_image_size_mb")]
     pub max_image_size_mb: u64,
     /// When true, each panel's grid/list mode is persisted across sessions.
@@ -274,6 +277,7 @@ impl Default for GeneralSettings {
             preserve_attributes: true,
             auto_resume_copies: true,
             ludicrous_mode: false,
+            enable_heic2any: false,
             max_image_size_mb: 512,
             save_panel_view_mode: false,
             remember_sort_per_location: false,
@@ -438,5 +442,17 @@ mod tests {
         assert_eq!(QuickTerminalEditor::from_str("nano"), Some(QuickTerminalEditor::Nano));
         assert_eq!(QuickTerminalEditor::from_str("vim"), Some(QuickTerminalEditor::Vim));
         assert_eq!(QuickTerminalEditor::from_str("emacs"), None);
+    }
+
+    #[test]
+    fn heic_preview_is_opt_in_and_survives_settings_roundtrip() {
+        let mut encoded = serde_json::to_value(GeneralSettings::default()).unwrap();
+        encoded.as_object_mut().unwrap().remove("enable_heic2any");
+        let legacy: GeneralSettings = serde_json::from_value(encoded).unwrap();
+        assert!(!legacy.enable_heic2any);
+        let enabled = GeneralSettings { enable_heic2any: true, ..legacy };
+        let decoded: GeneralSettings = serde_json::from_str(
+            &serde_json::to_string(&enabled).unwrap()).unwrap();
+        assert!(decoded.enable_heic2any);
     }
 }

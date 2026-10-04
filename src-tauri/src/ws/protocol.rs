@@ -565,6 +565,7 @@ pub struct GeneralSettingsSchema {
     pub preserve_attributes: bool,
     pub auto_resume_copies: bool,
     pub ludicrous_mode: bool,
+    pub enable_heic2any: bool,
     pub max_image_size_mb: u64,
     pub save_panel_view_mode: bool,
     pub remember_sort_per_location: bool,

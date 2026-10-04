@@ -664,6 +664,7 @@ export interface GeneralSettings {
   preserveAttributes: boolean;
   autoResumeCopies: boolean;
   ludicrousMode: boolean;
+  enableHeic2any: boolean;
   maxImageSizeMb: number;
   savePanelViewMode: boolean;
   rememberSortPerLocation: boolean;

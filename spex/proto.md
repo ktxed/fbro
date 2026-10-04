@@ -7,6 +7,14 @@
 
 ## 1. Overview
 
+The settings snapshot's `general.enableHeic2any` boolean and settings-domain
+patches expose the opt-in HEIC/HEIF preview preference. `SetGeneralOption`
+accepts `{ "key": "enableHeic2any", "value": true | false }`; other value
+types return `BAD_SETTING`. Persistence uses `enable_heic2any` with a default
+of false for older settings files. See [settings.md](./settings.md).
+Viewer clients also receive this field in their initial lightweight settings
+patch; they do not receive a full state snapshot.
+
 This protocol defines communication between a **Backend (BE)** and one or more **Frontends (FE)** for an n-panel file manager.
 
 ### Core principles

@@ -27,6 +27,7 @@ import { runGlobalSelectionFlow } from "./cases/global-selection.mjs";
 import { runGitFlow } from "./cases/git.mjs";
 import { runLocalFlow } from "./cases/local.mjs";
 import { runViewerFlow } from "./cases/viewer.mjs";
+import { runHeicFlow } from "./cases/heic.mjs";
 import { runQuickEditFlow } from "./cases/quick-edit.mjs";
 import { runRemoteFlow } from "./cases/remote.mjs";
 import { runDatetimeSearchFlow, runSearchFlow, runSizeSearchFlow } from "./cases/search.mjs";
@@ -66,6 +67,7 @@ async function main() {
     }
     await runLocalFlow(browserA, observerA);
     await runViewerFlow(browserA, observerA);
+    await runHeicFlow(browserA, observerA);
     await runQuickEditFlow(browserA, observerA);
     await runGlobalSelectionFlow(browserA, observerA);
     await runGitFlow(browserA, observerA);

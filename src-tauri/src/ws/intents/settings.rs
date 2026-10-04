@@ -154,6 +154,14 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
                 };
                 state_guard.settings.general.auto_resume_copies = v;
             }
+            "enableHeic2any" => {
+                let Some(v) = value.as_bool() else {
+                    drop(state_guard);
+                    bad_setting(ctx.tx, "enableHeic2any must be a boolean").await;
+                    return;
+                };
+                state_guard.settings.general.enable_heic2any = v;
+            }
             "ludicrousMode" => {
                 let Some(v) = value.as_bool() else {
                     drop(state_guard);
@@ -526,6 +534,7 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
                 "preserveAttributes": general.preserve_attributes,
                 "autoResumeCopies": general.auto_resume_copies,
                 "ludicrousMode": general.ludicrous_mode,
+                "enableHeic2any": general.enable_heic2any,
                 "maxImageSizeMb": general.max_image_size_mb,
                 "savePanelViewMode": general.save_panel_view_mode,
                 "rememberSortPerLocation": general.remember_sort_per_location,

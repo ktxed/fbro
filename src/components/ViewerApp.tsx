@@ -6,8 +6,9 @@ import type { BEMessage, FileChunkMessage, MarkdownPreviewMessage, ViewerFileCha
 import { applyZoom, nextZoomSize, DEFAULT_FONT_SIZE } from "../utils/zoom";
 import { ImageViewer, IMAGE_LIMIT } from "../viewers/ImageViewer";
 import { ViewerLoading } from "../viewers/ViewerLoading";
-import { detectRenderer, isImageExt, isMdExt, isVideoExt } from "../viewers/media";
+import { detectRenderer, isHeicExt, isImageExt, isMdExt, isVideoExt } from "../viewers/media";
 import { DirectFileViewer, canUseDirect } from "../viewers/DirectFileViewer";
+import { isMac } from "../utils/platform";
 import { isArchiveSourceId, isRemoteSourceId } from "../utils/sourceId";
 import { useInputHistory } from "../hooks/useInputHistory";
 import { InputHistoryDropdown } from "./InputHistoryDropdown";
@@ -362,6 +363,8 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
   const curSourceIdRef  = useRef(initSourceId);
   const filenameRef   = useRef(initFilename);
   const curIsLocalRef = useRef(isLocal);
+  const heicEnabledRef = useRef(false);
+  const knownFileSizeRef = useRef(nativeFileSize);
   const videoRef      = useRef<HTMLVideoElement | null>(null);
 
   // 1-based file line number of the first raw line in the current buffer.
@@ -422,6 +425,23 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
     setMode(newMode);
     if (!buffer) {
       requestChunk(0, SMALL_LIMIT);
+    }
+  }
+
+  function applyHeicSetting(enabled: boolean) {
+    if (heicEnabledRef.current === enabled) return;
+    heicEnabledRef.current = enabled;
+    if (isMac || !isHeicExt(filenameRef.current)) return;
+    const direct = canUseDirect(curIsLocalRef.current, filenameRef.current,
+      knownFileSizeRef.current, effectiveImageLimit, enabled);
+    setCanDirect(direct);
+    setUseDirect(direct);
+    const oversized = knownFileSizeRef.current !== null && knownFileSizeRef.current > effectiveImageLimit;
+    setMode(enabled && !oversized ? "image" : "hex");
+    if (direct) {
+      setLoading(false);
+    } else {
+      requestChunk(0, enabled && !oversized ? effectiveImageLimit : CHUNK_SIZE);
     }
   }
 
@@ -599,7 +619,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
       setLoading(false);
       setMode(prev => {
         if (prev !== null) return prev;
-        const detected = detectRenderer(filenameRef.current, detectBinary(bytes));
+        const detected = detectRenderer(filenameRef.current, detectBinary(bytes), heicEnabledRef.current);
         if (detected === "image" && nativeFileSize > effectiveImageLimit) return "hex";
         return detected;
       });
@@ -639,7 +659,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
           setLoading(false);
         } else {
           // For known image types, request up to the effective image limit in one shot
-          const initSize = isImageExt(initFilename) ? effectiveImageLimit : SMALL_LIMIT;
+          const initSize = isImageExt(initFilename, heicEnabledRef.current) ? effectiveImageLimit : SMALL_LIMIT;
           requestChunk(0, initSize);
         }
       };
@@ -650,6 +670,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
           const fontSize = snapshot.domains.fontSize;
           if (fontSize !== undefined) { currentFontSizeRef.current = fontSize; applyZoom(fontSize); }
           setColorSchemeId(resolveColorScheme(snapshot.domains.settings?.general.colorScheme).id);
+          applyHeicSetting(snapshot.domains.settings?.general.enableHeic2any ?? false);
         }
         if (msg.type === "StatePatch") {
           const patch = msg as StatePatchMessage;
@@ -659,7 +680,8 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
             applyZoom(fontSize);
           }
           if (patch.domain === "settings") {
-            const general = patch.patch.general as { colorScheme?: string } | undefined;
+            const general = patch.patch.general as { colorScheme?: string; enableHeic2any?: boolean } | undefined;
+            if (general?.enableHeic2any !== undefined) applyHeicSetting(general.enableHeic2any);
             if (general?.colorScheme !== undefined) {
               setColorSchemeId(resolveColorScheme(general.colorScheme).id);
             }
@@ -689,14 +711,14 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
           setBufferBaseLine(m.offset === 0 ? 1 : null);
         }
 
-        if (m.fileSize !== undefined) setFileSize(m.fileSize);
+        if (m.fileSize !== undefined) { knownFileSizeRef.current = m.fileSize; setFileSize(m.fileSize); }
         setBuffer(bytes);
         setBufferOffset(m.offset);
         loadingRef.current = false;
         setLoading(false);
         setMode(prev => {
           if (prev !== null) return prev;
-          const detected = detectRenderer(filenameRef.current, detectBinary(bytes));
+          const detected = detectRenderer(filenameRef.current, detectBinary(bytes), heicEnabledRef.current);
           if (detected === "image" && m.fileSize !== undefined && m.fileSize > effectiveImageLimit) return "hex";
           return detected;
         });
@@ -722,7 +744,8 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
         curPathRef.current = m.path;
         curSourceIdRef.current = m.sourceId;
         filenameRef.current = m.filename;
-        const direct = canUseDirect(m.isLocal ?? false, m.filename, m.fileSize ?? null, effectiveImageLimit);
+        knownFileSizeRef.current = m.fileSize ?? null;
+        const direct = canUseDirect(m.isLocal ?? false, m.filename, m.fileSize ?? null, effectiveImageLimit, heicEnabledRef.current);
         // Reset viewer state for new file
         setDosMode(false);
         setMarkdownMode(isMdExt(m.filename));
@@ -760,12 +783,11 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
         if (!direct) {
           // If BE signals binary, pre-set hex mode and request only the initial
           // hex view chunk (64 KiB) rather than the full 1 MiB detection read.
-          if (m.isBinary === true) {
+          if (m.isBinary === true && !isImageExt(m.filename, heicEnabledRef.current)) {
             setMode("hex");
           }
-          const initSize = m.isBinary === true
-            ? CHUNK_SIZE
-            : isImageExt(m.filename) ? effectiveImageLimit : SMALL_LIMIT;
+          const initSize = isImageExt(m.filename, heicEnabledRef.current) ? effectiveImageLimit
+            : m.isBinary === true ? CHUNK_SIZE : SMALL_LIMIT;
           clientRef.current?.sendIntent("ReadFileChunk", undefined, {
             path: m.path, sourceId: m.sourceId, offset: 0, size: initSize,
           });
@@ -1488,7 +1510,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
               </p>
             </div>
           ) : (
-            <DirectFileViewer path={curPath} filename={curFilename} videoRef={videoRef} />
+            <DirectFileViewer path={curPath} filename={curFilename} enableHeic2any={heicEnabledRef.current} imageLimit={effectiveImageLimit} videoRef={videoRef} />
           )}
         </div>
         <div className="viewer__status">
@@ -1583,7 +1605,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
           </div>
         )}
         {!error && buffer && isImageMode && (
-          <ImageViewer buffer={buffer} fileSize={fileSize} filename={curFilename} imageLimit={effectiveImageLimit} />
+          <ImageViewer buffer={buffer} fileSize={fileSize} filename={curFilename} imageLimit={effectiveImageLimit} enableHeic2any={heicEnabledRef.current} />
         )}
         {!error && buffer && !isImageMode && (
           <>

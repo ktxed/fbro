@@ -19,8 +19,12 @@ function extOf(filename: string): string {
   return filename.split(".").pop()?.toLowerCase() ?? "";
 }
 
-export function isImageExt(filename: string): boolean {
-  return extOf(filename) in IMAGE_EXTENSIONS;
+export function isHeicExt(filename: string): boolean {
+  return ["heic", "heif"].includes(extOf(filename));
+}
+
+export function isImageExt(filename: string, enableHeic2any = false): boolean {
+  return extOf(filename) in IMAGE_EXTENSIONS || (enableHeic2any && isHeicExt(filename));
 }
 
 export function isVideoExt(filename: string): boolean {
@@ -38,10 +42,11 @@ export function isMdExt(filename: string): boolean {
 }
 
 export function mimeForFile(filename: string): string {
+  if (isHeicExt(filename)) return extOf(filename) === "heic" ? "image/heic" : "image/heif";
   return IMAGE_EXTENSIONS[extOf(filename)] ?? "application/octet-stream";
 }
 
-export function detectRenderer(filename: string, isBinary: boolean): "text" | "image" | "hex" {
-  if (isImageExt(filename)) return "image";
+export function detectRenderer(filename: string, isBinary: boolean, enableHeic2any = false): "text" | "image" | "hex" {
+  if (isImageExt(filename, enableHeic2any)) return "image";
   return isBinary ? "hex" : "text";
 }

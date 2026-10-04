@@ -1,5 +1,19 @@
 # Testing
 
+HEIC2ANY preview checks: `cargo test --manifest-path src-tauri/Cargo.toml
+heic_preview_is_opt_in` covers older settings defaulting to off and enabled
+settings serialization. `tests/e2e/smoke/cases/heic.mjs` covers the settings
+checkbox via keyboard, backend-confirmed state, modal focus restoration,
+invalid HEIC error display, and disabling conversion in an open viewer.
+The viewer check starts with the preference already enabled, covering its
+lightweight startup settings patch. Set `FBRO_HEIC_FIXTURE` to a local HEIC
+file to also check successful decoding in a freshly opened viewer, including
+the newer `heic-to` fallback for files rejected by HEIC2ANY. Local headless
+Edge checks decoded `IMG_0102.HEIC` (iPhone 16) at 3024 x 4032 and covered
+buffered input, keyboard zoom, size limits, stale results, startup patches,
+navigation to HEIF, and live toggles in both viewer modes.
+Native Windows 10 and Linux WebView integration still need verification.
+
 This project currently has a WebDriver smoke test for the Tauri app in
 `tests/e2e/smoke/index.mjs`.
 

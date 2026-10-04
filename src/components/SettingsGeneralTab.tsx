@@ -359,6 +359,14 @@ export function SettingsGeneralTab({ general, client }: SettingsGeneralTabProps)
       </div>
       <div className="settings-tab__section">
         <h3 className="settings-tab__section-title">Viewer</h3>
+        {!isMac && (
+          <label className="settings-tab__option">
+            <input type="checkbox" data-testid="settings-enable-heic2any"
+              checked={general.enableHeic2any}
+              onChange={(e) => send("enableHeic2any", e.target.checked)} />
+            <span>Preview HEIC/HEIF images with HEIC2ANY</span>
+          </label>
+        )}
         <label className="settings-tab__option">
           <input
             type="checkbox"

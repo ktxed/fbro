@@ -1,6 +1,7 @@
 import type React from "react";
 import { isLinux, isMac } from "../utils/platform";
-import { isImageExt, isVideoExt, isPdfExt } from "./media";
+import { isImageExt, isVideoExt, isPdfExt, isHeicExt } from "./media";
+import { HeicImage } from "./HeicImage";
 import { PdfViewer } from "./PdfViewer";
 import { ZoomableImage } from "./ZoomableImage";
 
@@ -22,14 +23,17 @@ export function canUseDirect(
   filename: string,
   fileSize: number | null,
   imageLimit: number = IMAGE_DIRECT_LIMIT,
+  enableHeic2any = false,
 ): boolean {
   if (!isLocal) return false;
   if (isPdfExt(filename) || isPlayableVideo(filename)) return true;
-  if (isImageExt(filename)) return fileSize !== null && fileSize < imageLimit;
+  if (isImageExt(filename, enableHeic2any)) return fileSize !== null && fileSize < imageLimit;
   return false;
 }
 
 interface DirectFileViewerProps {
+  imageLimit?: number;
+  enableHeic2any?: boolean;
   path: string;
   filename: string;
   /** Override the file server port (defaults to reading from URL query params). */
@@ -38,7 +42,7 @@ interface DirectFileViewerProps {
   videoRef?: React.Ref<HTMLVideoElement>;
 }
 
-export function DirectFileViewer({ path, filename, fsPort: fsPropPort, videoRef }: DirectFileViewerProps) {
+export function DirectFileViewer({ path, filename, fsPort: fsPropPort, videoRef, imageLimit = IMAGE_DIRECT_LIMIT, enableHeic2any = false }: DirectFileViewerProps) {
   // Serve all local files through the HTTP file server.
   // On Windows, paths don't start with / (e.g. C:/...) so we add one for valid URLs.
   // (localfile:// was used for images on Linux/macOS to avoid GStreamer intercepting
@@ -67,5 +71,11 @@ export function DirectFileViewer({ path, filename, fsPort: fsPropPort, videoRef 
     );
   }
   // Image
+  if (!isMac && isHeicExt(filename)) {
+    if (!enableHeic2any) return <div className="viewer__image-container">
+      <div className="viewer__image-notice">Enable HEIC/HEIF preview in Settings to view this image.</div>
+    </div>;
+    return <HeicImage filename={filename} source={url} maxBytes={imageLimit} />;
+  }
   return <ZoomableImage src={url} alt={filename} />;
 }
