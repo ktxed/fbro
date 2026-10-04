@@ -110,6 +110,49 @@ export async function runSearchFlow(browser, observer) {
     timeout: 5_000,
     timeoutMsg: "Mounted search result Date column stayed empty",
   });
+  await verifyDuplicateResultViewer(browser, observer);
+}
+
+async function verifyDuplicateResultViewer(browser, observer) {
+  await observer.waitForJobIdle();
+  observer.sendIntent("SetSort", "left", { by: "name", order: "asc" });
+  await observer.waitForSort("left", "name", "asc");
+  const panel = observer.state.panels.left;
+  const hits = panel.entries.map((entry, index) => ({ ...entry, index }))
+    .filter(entry => entry.name === "renamed.txt");
+  if (hits.length !== 3) throw new Error(`Expected 3 duplicate viewer fixtures, got ${hits.length}`);
+
+  const mainUrl = await browser.getUrl();
+  observer.sendIntent("SetCursor", "left", { index: hits[1].index });
+  observer.sendIntent("RequestStateSnapshot");
+  await browser.waitUntil(() => observer.state.panels.left.cursor === hits[1].index, { timeout: 10_000 });
+  // The hybrid harness renders the viewer in the host window, since backend
+  // native windows live in Docker. Navigation still uses the real viewer WS.
+  const params = new URLSearchParams({ viewer: "1", path: hits[1].sourcePath,
+    source: panel.sourceId, name: hits[1].name, label: "main", panel: "left" });
+  const expectContent = async (hit) => {
+    const expected = fs.readFileSync(hostPath(hit.sourcePath), "utf8").trim();
+    await browser.waitUntil(async () => browser.execute(expected => {
+      const content = document.querySelector(".viewer__content")?.textContent
+        ?? Array.from(document.querySelectorAll(".viewer__content-cell"))
+          .map(cell => cell.textContent).join("\n");
+      return content.trim() === expected;
+    }, expected), {
+      timeout: 10_000,
+      timeoutMsg: `Viewer did not display the actual search result ${hit.sourcePath}`,
+    });
+  };
+  try {
+    await browser.url(`${mainUrl.split("?")[0]}?${params}`);
+    await expectContent(hits[1]);
+    for (const [key, hit] of [["k", hits[2]], ["j", hits[1]], ["j", hits[0]], ["k", hits[1]]]) {
+      await browser.keys(key);
+      await expectContent(hit);
+    }
+  } finally {
+    await browser.url(mainUrl);
+    await browser.$('[data-testid="panel-left"]').waitForDisplayed({ timeout: 10_000 });
+  }
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────

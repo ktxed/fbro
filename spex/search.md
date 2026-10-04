@@ -303,6 +303,16 @@ When user clicks "To Results":
 
 ## Navigation from Search Results
 
+### Viewer files
+
+Opening the viewer resolves the backend panel's cursor entry through its
+`source_path` and looks up the exact result's owning source. Viewer j/k
+navigation uses the destination row's `source_path` in the same way. Duplicate
+filenames never identify a viewer target, and panel indices must not be used
+as indices into the search store (arrival order can differ from panel sorting).
+An unavailable result reports an error rather than opening another same-name
+file.
+
 ### NavigateToSearchResult Intent
 
 - For directories: navigates to the directory's real path

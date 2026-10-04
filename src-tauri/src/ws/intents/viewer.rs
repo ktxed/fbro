@@ -215,6 +215,27 @@ impl ReadChunkArgs {
     }
 }
 
+// Search rows are identified by their real path, since filenames can repeat.
+fn search_viewer_target(
+    driver: &SearchResultsDriver,
+    source_path: Option<&str>,
+) -> Option<(String, String)> {
+    driver.resolve_real_info_by_path(source_path?)
+}
+
+async fn send_search_viewer_error(ctx: &IntentContext<'_>) {
+    let _ = ctx
+        .tx
+        .send(ServerMessage::Error {
+            timestamp: now(),
+            code: "NOT_A_FILE".into(),
+            message: "Search result is no longer available".into(),
+            recoverable: true,
+            extra: None,
+        })
+        .await;
+}
+
 async fn view_file(args: &Value, ctx: &mut IntentContext<'_>) {
     let parsed = ViewFileArgs::from_args(args);
 
@@ -234,31 +255,24 @@ async fn view_file(args: &Value, ctx: &mut IntentContext<'_>) {
         let resolved = state_guard.drivers.get(&parsed.source_id).and_then(|drv| {
             drv.as_any()
                 .downcast_ref::<SearchResultsDriver>()
-                .and_then(|sd| sd.resolve_real_info(&parsed.filename))
+                .and_then(|sd| {
+                    let panel = state_guard.panels.get(&parsed.panel_id)?;
+                    if panel.source_id != parsed.source_id {
+                        return None;
+                    }
+                    let entry = panel.entries.get(panel.cursor)?;
+                    if entry.name != parsed.filename {
+                        return None;
+                    }
+                    search_viewer_target(sd, entry.source_path.as_deref())
+                })
         });
         if let Some((real_full_path, real_source_id)) = resolved {
             (real_source_id, real_full_path, initial_find_query)
         } else {
-            let best_source = state_guard
-                .sources
-                .iter()
-                .filter(|(_, s)| !s.shadow && s.mounted)
-                .max_by_key(|(_, s)| {
-                    let candidate =
-                        format!("{}/{}", parsed.path.trim_end_matches('/'), parsed.filename);
-                    if candidate.starts_with(&s.root_path) {
-                        s.root_path.len()
-                    } else {
-                        0
-                    }
-                })
-                .map(|(id, _)| id.clone())
-                .unwrap_or_else(|| parsed.source_id.clone());
-            (
-                best_source,
-                format!("{}/{}", parsed.path.trim_end_matches('/'), parsed.filename),
-                initial_find_query,
-            )
+            drop(state_guard);
+            send_search_viewer_error(ctx).await;
+            return;
         }
     } else if is_journal_source(&parsed.source_id) {
         let state_guard = ctx.state.lock().await;
@@ -535,7 +549,14 @@ async fn viewer_navigate(args: &Value, ctx: &mut IntentContext<'_>) {
             let entry_info = panel
                 .entries
                 .get(new_cursor)
-                .map(|entry| (entry.name.clone(), entry.kind.clone(), entry.target_kind.clone()));
+                .map(|entry| {
+                    (
+                        entry.name.clone(),
+                        entry.kind.clone(),
+                        entry.target_kind.clone(),
+                        entry.source_path.clone(),
+                    )
+                });
             let prefetch_neighbors = collect_neighbors(
                 &panel.entries,
                 new_cursor,
@@ -574,32 +595,26 @@ async fn viewer_navigate(args: &Value, ctx: &mut IntentContext<'_>) {
         return;
     }
     if let Some((new_cursor, source_id, dir_path, entry_info, prefetch_neighbors)) = nav_result {
-        if let Some((name, kind, target_kind)) = entry_info {
+        if let Some((name, kind, target_kind, source_path)) = entry_info {
             if kind == "file" || (kind == "symlink" && target_kind.as_deref() == Some("file")) {
                 // When the panel is on a search results source, resolve the
                 // real full_path and source_id so the viewer reads the actual
                 // file rather than hitting the stub search driver.
-                let (mut effective_path, mut effective_source_id) = {
+                let resolved_target = {
                     let state_guard = ctx.state.lock().await;
                     if is_search_source(&source_id) {
                         state_guard
                             .drivers
                             .get(&source_id)
                             .and_then(|drv| drv.as_any().downcast_ref::<SearchResultsDriver>())
-                            .and_then(|sd| sd.resolve_real_info(&name))
-                            .unwrap_or_else(|| {
-                                (
-                                    format!("{}/{}", dir_path.trim_end_matches('/'), name),
-                                    source_id.clone(),
-                                )
-                            })
+                            .and_then(|sd| search_viewer_target(sd, source_path.as_deref()))
                     } else if is_journal_source(&source_id) {
                         let inner_path = state_guard
                             .drivers
                             .get(&source_id)
                             .map(|driver| driver.resolve_child("", &name))
                             .unwrap_or(name.clone());
-                        (inner_path, source_id.clone())
+                        Some((inner_path, source_id.clone()))
                     } else if is_archive_source(&source_id) || is_procs_source(&source_id) {
                         let inner_path = {
                             let p = dir_path.trim_end_matches('/');
@@ -609,13 +624,18 @@ async fn viewer_navigate(args: &Value, ctx: &mut IntentContext<'_>) {
                                 format!("{}/{}", p, name)
                             }
                         };
-                        (inner_path, source_id.clone())
+                        Some((inner_path, source_id.clone()))
                     } else {
-                        (
+                        Some((
                             format!("{}/{}", dir_path.trim_end_matches('/'), name),
                             source_id.clone(),
-                        )
+                        ))
                     }
+                };
+                let Some((mut effective_path, mut effective_source_id)) = resolved_target else {
+                    ctx.viewer_prefetch.cancel_panel(&parsed.panel_id);
+                    send_search_viewer_error(ctx).await;
+                    return;
                 };
                 let mut display_name = name.clone();
                 if kind == "symlink" {
@@ -1342,6 +1362,62 @@ mod tests {
     use crate::vfs::local::LocalFsDriver;
     use std::fs;
     use std::io::Cursor;
+
+    #[test]
+    fn search_viewer_resolves_duplicate_names_in_panel_order() {
+        use crate::jobs::search::{SearchResultEntry, SearchResultStore};
+        use crate::vfs::{search::SearchResultsDriver, VfsDriver};
+        use crate::ws::protocol::SortSpec;
+
+        // Store arrival order differs from the sorted panel, and the files
+        // belong to different sources. Neither the name nor index is an ID.
+        let results = ["/repo/README.md", "/deps/README.md"]
+            .into_iter()
+            .enumerate()
+            .map(|(index, path)| SearchResultEntry {
+                name: "README.md".into(),
+                kind: "file".into(),
+                size: Some(10),
+                mtime: None,
+                parent_path: path.rsplit_once('/').unwrap().0.into(),
+                full_path: path.into(),
+                source_id: format!("vol-{index}"),
+            })
+            .collect();
+        let driver = SearchResultsDriver::new(std::sync::Arc::new(tokio::sync::Mutex::new(
+            SearchResultStore {
+                results,
+                done: true,
+            },
+        )));
+        let entries = driver
+            .list(
+                "/",
+                &SortSpec {
+                    by: "name".into(),
+                    order: "asc".into(),
+                },
+                None,
+                false,
+            )
+            .unwrap();
+
+        for (cursor, path, source) in [
+            (0, "/deps/README.md", "vol-1"),
+            (1, "/repo/README.md", "vol-0"),
+            (0, "/deps/README.md", "vol-1"),
+        ] {
+            assert_eq!(
+                super::search_viewer_target(&driver, entries[cursor].source_path.as_deref()),
+                Some((path.into(), source.into()))
+            );
+        }
+        assert_eq!(super::search_viewer_target(&driver, None), None);
+        assert_eq!(
+            super::search_viewer_target(&driver, Some("/gone/README.md")),
+            None
+        );
+    }
 
     #[test]
     fn viewer_find_reports_offsets_and_lines_across_read_boundaries() {

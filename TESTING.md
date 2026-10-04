@@ -200,7 +200,10 @@ The smoke test exercises these flows:
 - Archive browsing: create a zip file, enter it from the UI, copy a file out of
   the archive, and verify extracted content.
 - Search: search for `renamed.txt`, mount the search results source, and verify
-  the result appears in the panel.
+  the result appears in the panel. Duplicate names have distinguishing path
+  hints; the viewer displays each result's own content during forward and
+  reverse j/k navigation. Backend tests also cover exact path/source resolution
+  when search arrival order differs from panel order and results disappear.
 - Datetime search: verify the Created/Modified time filter toggle works correctly.
   Creates a file with mtime set to two years ago and btime≈now, then searches
   with a "Between" interval covering current year ±1.  The modified filter must
