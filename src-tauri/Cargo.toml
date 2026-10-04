@@ -42,6 +42,7 @@ blake3 = { version = "1", features = ["rayon", "mmap"] }
 memmap2 = "0.9"
 rusqlite = { version = "0.32", features = ["bundled"] }
 comrak = { version = "0.54.0", default-features = false }
+scraper = { version = "0.27", default-features = false }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 png = "0.17"

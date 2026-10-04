@@ -14,6 +14,20 @@ specified in [inline-operations.md](./inline-operations.md).
 
 ## 1. Frontend (FE) and Backend (BE)
 
+### Markdown viewer images
+
+The backend resolves image paths relative to the viewed Markdown file through
+its local VFS driver. Markdown image syntax and HTML `<img>` tags share the
+same policy: only verified local raster images within the viewer image size
+limit are served. Remote URLs, SVGs, and unsupported paths are not loaded.
+
+HTML fragments are parsed with an HTML5 parser and rebuilt from an allowlist:
+`img` supports `src`, escaped `alt`/`title`, and positive integer `width`/`height`;
+`p` and `div` support `align="left|center|right"`, rendered as preview CSS
+classes. Other HTML elements and attributes are discarded. Raw author HTML
+never passes directly to the webview, and Comrak's general raw-HTML option
+remains disabled.
+
 The app is composed of a BE part and a FE part. The communicate based on a websocket protocol.
 Additional details about the FE - BE protocl are available in [./proto.md](./proto.md)
 

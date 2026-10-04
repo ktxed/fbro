@@ -307,7 +307,8 @@ The smoke test exercises these flows:
 - Viewer (`cases/viewer.mjs`): MP3 audio controls and Space play/pause dispatch
   (mocked playback; native codec/audio output needs a platform check), large-image loading overlay, j/k navigation
   under rapid keypresses, broken-image alert, prefetch eligibility per storage
-  class, PDF rendering and window title, Mermaid rendering, zoom and overlay
+  class, PDF rendering and window title, local Markdown and HTML image loading
+  (including centered wrappers and explicit dimensions), Mermaid rendering, zoom and overlay
   Escape. Timings go to `viewer-timings.json`.
 - Search modal keyboard (`cases/search.mjs`): roving tab focus, Enter on
   Close, global shortcuts blocked while Search is the top layer.

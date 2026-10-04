@@ -2,6 +2,9 @@
 
 <p align="center">
   <img src="logo256.png" alt="fbro logo" width="96" height="96" />
+</p>
+
+<p align="center">
   <img src="fbro.png" alt="screen capture of fbro running on macOS" width="1576" height="1024" />
 </p>
 

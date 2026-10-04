@@ -71,6 +71,12 @@ export async function runViewerFlow(browser, observer) {
   const mermaidName = "ZZZ Mermaid state.md";
   const mermaidMarkdown = `# Mermaid state diagram
 
+![Local preview image](00.jpg)
+
+<p align="center">
+  <img src="01.jpg" alt="HTML preview image" width="96" height="96">
+</p>
+
 \`\`\`mermaid
 stateDiagram-v2
     [*] --> PENDING : confirmed request,<br/>catalogue says invoiceAutomatically
@@ -291,6 +297,16 @@ stateDiagram-v2
       fsport: String(observer.state.fileServerPort) });
     await browser.url(`${mainUrl.split("?")[0]}?${mermaidParams}`);
     await browser.$(".viewer__mermaid-canvas > svg").waitForDisplayed({ timeout: 15_000 });
+    await browser.waitUntil(() => browser.execute(() => {
+      const image = document.querySelector('.viewer__markdown img[alt="Local preview image"]');
+      return image?.complete && image.naturalWidth > 0;
+    }), { timeout: 15_000, timeoutMsg: "Markdown local image did not load" });
+    await browser.waitUntil(() => browser.execute(() => {
+      const image = document.querySelector('.viewer__markdown img[alt="HTML preview image"]');
+      return image?.complete && image.naturalWidth > 0
+        && image.width === 96 && image.height === 96
+        && getComputedStyle(image.parentElement).textAlign === "center";
+    }), { timeout: 15_000, timeoutMsg: "Centered HTML image did not load with its dimensions" });
     const mermaidResult = await browser.execute(() => ({
       diagrams: document.querySelectorAll(".viewer__mermaid-canvas > svg").length,
       rawBlocks: document.querySelectorAll("code.language-mermaid").length,

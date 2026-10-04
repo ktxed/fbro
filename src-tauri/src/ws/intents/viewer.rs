@@ -941,12 +941,77 @@ impl MarkdownUrlPolicy<'_> {
         let path = safe_relative_path(url)
             .and_then(|target| resolve_viewer_path(self.driver, self.current_path, &target))
             .filter(|path| valid_local_image(self.driver, path, self.image_cap))?;
-        Some(format!(
-            "http://127.0.0.1:{}{}",
-            self.file_server_port,
-            url_encode(&path)
-        ))
+        Some(markdown_image_url(self.file_server_port, &path))
     }
+}
+
+fn markdown_image_url(port: u16, path: &str) -> String {
+    // Windows drive paths need the same leading URL slash as POSIX paths.
+    let path = url_encode(path);
+    let separator = if path.starts_with('/') { "" } else { "/" };
+    format!("http://127.0.0.1:{port}{separator}{path}")
+}
+
+fn escape_markdown_html(text: &str) -> String {
+    text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+        .replace('"', "&quot;").replace('\'', "&#39;")
+}
+
+/// Parse HTML with the browser-grade parser, then rebuild only image markup.
+/// No original attribute or markup is passed through to the webview.
+fn render_markdown_image_html(source: &str, policy: &MarkdownUrlPolicy<'_>) -> String {
+    let fragment = scraper::Html::parse_fragment(source);
+    let mut output = String::new();
+    let mut stack = vec![(fragment.tree.root(), false)];
+    while let Some((node, closing)) = stack.pop() {
+        match node.value() {
+            scraper::Node::Element(element) => {
+                let name = element.name();
+                if closing {
+                    output.push_str(&format!("</{name}>"));
+                    continue;
+                }
+                match name {
+                    "img" => {
+                        let alt = escape_markdown_html(element.attr("alt").unwrap_or(""));
+                        let Some(source) = element.attr("src").and_then(|src| policy.image_source(src)) else {
+                            output.push_str(&alt);
+                            continue;
+                        };
+                        output.push_str(&format!("<img src=\"{}\" alt=\"{alt}\"", escape_markdown_html(&source)));
+                        for attribute in ["width", "height"] {
+                            if let Some(value) = element.attr(attribute).and_then(|value| value.parse::<u32>().ok()).filter(|value| *value > 0) {
+                                output.push_str(&format!(" {attribute}=\"{value}\""));
+                            }
+                        }
+                        if let Some(title) = element.attr("title") {
+                            output.push_str(&format!(" title=\"{}\"", escape_markdown_html(title)));
+                        }
+                        output.push('>');
+                        continue;
+                    }
+                    "p" | "div" => {
+                        output.push_str(&format!("<{name}"));
+                        if let Some(align) = element.attr("align").map(str::to_ascii_lowercase)
+                            .filter(|align| matches!(align.as_str(), "left" | "center" | "right")) {
+                            output.push_str(&format!(" class=\"viewer__markdown-align-{align}\""));
+                        }
+                        output.push('>');
+                        stack.push((node, true));
+                    }
+                    // The fragment parser inserts its own root element.
+                    "html" if node.parent().is_some_and(|parent| parent.value().is_fragment()) => {}
+                    _ => continue,
+                }
+            }
+            scraper::Node::Text(text) => { output.push_str(&escape_markdown_html(text)); continue; }
+            scraper::Node::Fragment => {}
+            _ => continue,
+        }
+        let children: Vec<_> = node.children().collect();
+        for child in children.into_iter().rev() { stack.push((child, false)); }
+    }
+    output
 }
 
 fn sanitize_mermaid(source: &str) -> String {
@@ -1007,16 +1072,22 @@ fn render_markdown(
     };
 
     for node in nodes {
-        enum Work { Link(String), Image(String), Mermaid, None }
+        enum Work { Link(String), Image(String), Html(String), Mermaid, None }
         let work = match &node.data.borrow().value {
             NodeValue::Link(link) => Work::Link(link.url.clone()),
             NodeValue::Image(link) => Work::Image(link.url.clone()),
+            NodeValue::HtmlBlock(block) => Work::Html(block.literal.clone()),
+            NodeValue::HtmlInline(html) => Work::Html(html.clone()),
             NodeValue::CodeBlock(block)
                 if block.info.split_whitespace().next().is_some_and(|lang| lang.eq_ignore_ascii_case("mermaid")) => Work::Mermaid,
             _ => Work::None,
         };
 
         match work {
+            Work::Html(source) => {
+                // Only our rebuilt allowlisted HTML bypasses Comrak's raw-HTML filter.
+                node.data.borrow_mut().value = NodeValue::Raw(render_markdown_image_html(&source, &url_policy));
+            }
             Work::Link(url) => {
                 let target = url_policy.link_target(&url);
                 if let Some(path) = target {
@@ -1356,7 +1427,7 @@ pub(super) fn collect_neighbors(
 #[cfg(test)]
 mod tests {
     use super::{
-        find_literal_matches, is_markdown_filename, render_markdown, safe_relative_path,
+        find_literal_matches, is_markdown_filename, markdown_image_url, render_markdown, safe_relative_path,
         sanitize_mermaid,
     };
     use crate::vfs::local::LocalFsDriver;
@@ -1481,18 +1552,53 @@ mod tests {
         );
 
         assert_eq!(rendered.links.len(), 1);
-        assert_eq!(rendered.links[0].path, dir.join("next.md").to_string_lossy());
+        assert_eq!(rendered.links[0].path, dir.join("next.md").to_string_lossy().replace('\\', "/"));
         assert!(rendered.html.contains("href=\"#fbro-md-0\""));
         assert!(rendered.html.contains("good"));
         assert!(rendered.html.contains("missing"));
         assert!(rendered.html.contains("web"));
         assert!(!rendered.html.contains("https://example.test"));
-        assert!(rendered.html.contains("http://127.0.0.1:43210"));
+        assert!(rendered.html.contains(&format!(
+            "src=\"{}\"", markdown_image_url(43210, &dir.join("pixel.png").to_string_lossy().replace('\\', "/")),
+        )));
         assert!(!rendered.html.contains("bad.svg"));
         assert!(!rendered.html.contains("onerror"));
         assert!(!rendered.html.contains("<img src=x"));
 
+        let html_images = render_markdown(
+            &LocalFsDriver, &current.to_string_lossy(),
+            r#"<p align="CENTER" style="background:url(https://example.test)">
+              <img src="pixel.png" alt="logo &quot; &amp; &lt;" width="96" height="96" title="Logo" onerror="alert(1)" srcset="https://example.test/x.png 2x">
+              <img src="https://example.test/x.png" alt="remote">
+              <img src="bad.svg" alt="vector">
+              <script>alert(1)</script><iframe src="pixel.png"></iframe>
+            </p>"#, 43210, 1024,
+        );
+        assert!(html_images.html.contains("<p class=\"viewer__markdown-align-center\">"));
+        assert!(html_images.html.contains("width=\"96\" height=\"96\""));
+        assert!(html_images.html.contains("alt=\"logo &quot; &amp; &lt;\""));
+        assert!(html_images.html.contains("title=\"Logo\""));
+        assert_eq!(html_images.html.matches("<img ").count(), 1);
+        for forbidden in ["onerror", "srcset", "style=", "https://", "<script", "<iframe", "bad.svg"] {
+            assert!(!html_images.html.contains(forbidden), "{forbidden}: {}", html_images.html);
+        }
+        let inline = render_markdown(
+            &LocalFsDriver, &current.to_string_lossy(),
+            "Inline <img src='pixel.png' width='invalid' height='0'> image.", 43210, 1024,
+        );
+        assert!(inline.html.contains("<img src="));
+        assert!(!inline.html.contains("width="));
+        assert!(!inline.html.contains("height="));
+
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn markdown_image_urls_have_a_path_separator_on_all_platforms() {
+        assert_eq!(markdown_image_url(43210, "C:/Users/me/logo 256.png"),
+            "http://127.0.0.1:43210/C:/Users/me/logo%20256.png");
+        assert_eq!(markdown_image_url(43210, "/home/me/logo 256.png"),
+            "http://127.0.0.1:43210/home/me/logo%20256.png");
     }
 
     #[test]

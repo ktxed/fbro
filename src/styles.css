@@ -4472,6 +4472,9 @@ body {
 .viewer__markdown hr { border: none; border-top: 1px solid var(--border); margin: 1.5em 0; }
 
 .viewer__markdown img { max-width: 100%; }
+.viewer__markdown-align-left { text-align: left; }
+.viewer__markdown-align-center { text-align: center; }
+.viewer__markdown-align-right { text-align: right; }
 
 .viewer__markdown-unavailable {
   position: absolute;
