@@ -9,7 +9,7 @@
 
 Built with [Tauri](https://tauri.app/) (Rust backend + React frontend). The backend owns state; the UI talks over WebSocket via intents and jobs.
 
-> Status: early (`0.0.1`). Developed primarily on Linux; other platforms may work with gaps.
+> Status: early (`0.0.2`). Developed primarily on Linux; other platforms may work with gaps.
 
 ## Features
 
@@ -39,13 +39,13 @@ Smoke tests: see [TESTING.md](TESTING.md).
 
 ## Releases
 
-Publishing happens on GitHub Actions when a version tag is pushed (`0.0.1`, or a prerelease such as `0.0.1-rc.1`). The workflow builds Linux (AppImage, deb, rpm), Windows, and Apple silicon macOS, then uploads them to a draft GitHub Release. Standard runners are free on a public repository.
+Publishing happens on GitHub Actions when a version tag is pushed (`0.0.2`, or a prerelease such as `0.0.2-rc.1`). The workflow builds Linux (AppImage, deb, rpm), Windows, and Apple silicon macOS, then uploads them to a draft GitHub Release. Standard runners are free on a public repository.
 
-Before tagging, the version in `src-tauri/tauri.conf.json`, `package.json`, and `src-tauri/Cargo.toml` must all match the tag. `node scripts/check-version.mjs --tag 0.0.1` checks that.
+Before tagging, the version in `src-tauri/tauri.conf.json`, `package.json`, and `src-tauri/Cargo.toml` must all match the tag. `node scripts/check-version.mjs --tag 0.0.2` checks that.
 
 ```bash
-git tag 0.0.1
-git push origin 0.0.1
+git tag 0.0.2
+git push origin 0.0.2
 ```
 
 The first builds are unsigned. macOS needs a right-click Open the first time. Windows SmartScreen may warn. Intel Macs are not in the release matrix.
