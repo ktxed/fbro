@@ -31,6 +31,10 @@ export function isVideoExt(filename: string): boolean {
   return VIDEO_EXTENSIONS.has(extOf(filename));
 }
 
+export function isAudioExt(filename: string): boolean {
+  return extOf(filename) === "mp3";
+}
+
 export function isPdfExt(filename: string): boolean {
   return PDF_EXTENSIONS.has(extOf(filename));
 }

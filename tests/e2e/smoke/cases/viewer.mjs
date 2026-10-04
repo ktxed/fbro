@@ -62,6 +62,9 @@ export async function runViewerFlow(browser, observer) {
   const heicNames = ["HEIC preview.heic", "HEIF preview.HEIF"];
   for (const name of heicNames) fs.writeFileSync(hostPath(`${directory}/${name}`), heic);
   const pdfName = "PDF preview.pdf";
+  const audioName = "MP3 preview.MP3";
+  // Renderer/keyboard fixture; playback is mocked below, not a codec test.
+  fs.writeFileSync(hostPath(`${directory}/${audioName}`), "ID3");
   fs.writeFileSync(hostPath(`${directory}/${pdfName}`), minimalPdf());
   const afterPdfName = "ZZ after PDF.txt";
   fs.writeFileSync(hostPath(`${directory}/${afterPdfName}`), "Viewer title follows navigation.\n");
@@ -249,6 +252,37 @@ stateDiagram-v2
       timeout: 10_000,
       label: "viewer window title after PDF navigation",
     });
+
+    const audioParams = new URLSearchParams({ viewer: "1", path: `${directory}/${audioName}`,
+      source: observer.state.panels.left.sourceId, name: audioName, label: "main", panel: "left",
+      local: "1", size: "3", fsport: String(observer.state.fileServerPort) });
+    await browser.url(`${mainUrl.split("?")[0]}?${audioParams}`);
+    await browser.$('[data-testid="viewer-audio"]').waitForDisplayed({ timeout: 10_000 });
+    await browser.execute(() => {
+      const audio = document.querySelector('[data-testid="viewer-audio"]');
+      let paused = true;
+      audio.dataset.playCalls = "0";
+      audio.dataset.pauseCalls = "0";
+      Object.defineProperty(audio, "paused", { get: () => paused });
+      audio.play = () => {
+        paused = false;
+        audio.dataset.playCalls = String(Number(audio.dataset.playCalls) + 1);
+        return Promise.resolve();
+      };
+      audio.pause = () => {
+        paused = true;
+        audio.dataset.pauseCalls = String(Number(audio.dataset.pauseCalls) + 1);
+      };
+    });
+    await browser.keys("Space");
+    await browser.keys("Space");
+    const audioKeys = await browser.execute(() => {
+      const audio = document.querySelector('[data-testid="viewer-audio"]');
+      return { play: audio.dataset.playCalls, pause: audio.dataset.pauseCalls, controls: audio.controls };
+    });
+    if (audioKeys.play !== "1" || audioKeys.pause !== "1" || !audioKeys.controls) {
+      throw new Error(`MP3 keyboard playback failed: ${JSON.stringify(audioKeys)}`);
+    }
 
     await observer.waitForEntry("left", mermaidName);
     const mermaidParams = new URLSearchParams({ viewer: "1", path: `${directory}/${mermaidName}`,

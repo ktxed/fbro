@@ -304,7 +304,8 @@ The smoke test exercises these flows:
   default ignores, case-insensitive include patterns, custom excludes.
 - Quick Edit (`cases/quick-edit.mjs`): edit in the embedded terminal, save,
   terminal closes; journal records intent/completed/failed.
-- Viewer (`cases/viewer.mjs`): large-image loading overlay, j/k navigation
+- Viewer (`cases/viewer.mjs`): MP3 audio controls and Space play/pause dispatch
+  (mocked playback; native codec/audio output needs a platform check), large-image loading overlay, j/k navigation
   under rapid keypresses, broken-image alert, prefetch eligibility per storage
   class, PDF rendering and window title, Mermaid rendering, zoom and overlay
   Escape. Timings go to `viewer-timings.json`.

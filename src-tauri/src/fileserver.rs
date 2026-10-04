@@ -629,6 +629,7 @@ fn parse_range(header: &str, total: u64) -> Option<(u64, u64)> {
 fn mime_for_path(path: &str) -> &'static str {
     let ext = path.rsplit('.').next().unwrap_or("").to_lowercase();
     match ext.as_str() {
+        "mp3" => "audio/mpeg",
         "mp4" => "video/mp4",
         "webm" => "video/webm",
         "ogv" => "video/ogg",
@@ -652,6 +653,12 @@ fn mime_for_path(path: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::mime_for_path;
+
+    #[test]
+    fn mp3_has_audio_content_type() {
+        assert_eq!(mime_for_path("C:/Music/song.mp3"), "audio/mpeg");
+        assert_eq!(mime_for_path("/music/song.MP3"), "audio/mpeg");
+    }
 
     #[test]
     fn heic_and_heif_have_image_content_types() {

@@ -84,6 +84,7 @@ text transformations:
 | `F` | Open find; Markdown preview first returns to raw text |
 | `E` / `F4` | Edit a real local file |
 | `J` / `K` | Previous/next file |
+| `Space` | Play/pause directly rendered local video or MP3 audio |
 | `Esc` | Close the viewer, or leave native fullscreen first on macOS |
 
 Markdown is a distinct presentation of text rather than a second simultaneous

@@ -6,7 +6,7 @@ import type { BEMessage, FileChunkMessage, MarkdownPreviewMessage, ViewerFileCha
 import { applyZoom, nextZoomSize, DEFAULT_FONT_SIZE } from "../utils/zoom";
 import { ImageViewer, IMAGE_LIMIT } from "../viewers/ImageViewer";
 import { ViewerLoading } from "../viewers/ViewerLoading";
-import { detectRenderer, isHeicExt, isImageExt, isMdExt, isVideoExt } from "../viewers/media";
+import { detectRenderer, isHeicExt, isImageExt, isMdExt, isVideoExt, isAudioExt } from "../viewers/media";
 import { DirectFileViewer, canUseDirect } from "../viewers/DirectFileViewer";
 import { isMac } from "../utils/platform";
 import { isArchiveSourceId, isRemoteSourceId } from "../utils/sourceId";
@@ -365,7 +365,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
   const curIsLocalRef = useRef(isLocal);
   const heicEnabledRef = useRef(false);
   const knownFileSizeRef = useRef(nativeFileSize);
-  const videoRef      = useRef<HTMLVideoElement | null>(null);
+  const mediaRef      = useRef<HTMLMediaElement | null>(null);
 
   // 1-based file line number of the first raw line in the current buffer.
   // null = unknown (after a scrollbar jump to an arbitrary byte offset).
@@ -1058,12 +1058,12 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
         return;
       }
 
-      // Space toggles play/pause for the directly-rendered <video>. The
+      // Space toggles play/pause for directly rendered audio/video. The
       // window keydown handler runs before the video gets focus, so the
       // browser's native space-on-focused-video shortcut never fires.
-      if (e.key === " " && videoRef.current && isVideoExt(filenameRef.current)) {
+      if (e.key === " " && mediaRef.current && (isVideoExt(filenameRef.current) || isAudioExt(filenameRef.current))) {
         e.preventDefault();
-        const v = videoRef.current;
+        const v = mediaRef.current;
         if (v.paused) v.play().catch(() => {}); else v.pause();
         return;
       }
@@ -1510,7 +1510,7 @@ export function ViewerApp({ path: initPath, sourceId: initSourceId, filename: in
               </p>
             </div>
           ) : (
-            <DirectFileViewer path={curPath} filename={curFilename} enableHeic2any={heicEnabledRef.current} imageLimit={effectiveImageLimit} videoRef={videoRef} />
+            <DirectFileViewer path={curPath} filename={curFilename} enableHeic2any={heicEnabledRef.current} imageLimit={effectiveImageLimit} mediaRef={mediaRef} />
           )}
         </div>
         <div className="viewer__status">

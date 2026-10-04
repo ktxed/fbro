@@ -4555,6 +4555,13 @@ body {
   font-size: var(--font-size);
 }
 
+.viewer__audio-container {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .viewer__video-container {
   height: 100%;
   display: flex;

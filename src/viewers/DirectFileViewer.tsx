@@ -1,6 +1,6 @@
-import type React from "react";
+import { useCallback, type RefObject } from "react";
 import { isLinux, isMac } from "../utils/platform";
-import { isImageExt, isVideoExt, isPdfExt, isHeicExt } from "./media";
+import { isImageExt, isVideoExt, isAudioExt, isPdfExt, isHeicExt } from "./media";
 import { HeicImage } from "./HeicImage";
 import { PdfViewer } from "./PdfViewer";
 import { ZoomableImage } from "./ZoomableImage";
@@ -26,7 +26,7 @@ export function canUseDirect(
   enableHeic2any = false,
 ): boolean {
   if (!isLocal) return false;
-  if (isPdfExt(filename) || isPlayableVideo(filename)) return true;
+  if (isPdfExt(filename) || isPlayableVideo(filename) || isAudioExt(filename)) return true;
   if (isImageExt(filename, enableHeic2any)) return fileSize !== null && fileSize < imageLimit;
   return false;
 }
@@ -38,11 +38,14 @@ interface DirectFileViewerProps {
   filename: string;
   /** Override the file server port (defaults to reading from URL query params). */
   fsPort?: number;
-  /** Forwarded to the underlying <video> element when the file is a video. */
-  videoRef?: React.Ref<HTMLVideoElement>;
+  /** Shared playback target for audio and video keyboard controls. */
+  mediaRef?: RefObject<HTMLMediaElement | null>;
 }
 
-export function DirectFileViewer({ path, filename, fsPort: fsPropPort, videoRef, imageLimit = IMAGE_DIRECT_LIMIT, enableHeic2any = false }: DirectFileViewerProps) {
+export function DirectFileViewer({ path, filename, fsPort: fsPropPort, mediaRef, imageLimit = IMAGE_DIRECT_LIMIT, enableHeic2any = false }: DirectFileViewerProps) {
+  const setMediaRef = useCallback((element: HTMLMediaElement | null) => {
+    if (mediaRef) mediaRef.current = element;
+  }, [mediaRef]);
   // Serve all local files through the HTTP file server.
   // On Windows, paths don't start with / (e.g. C:/...) so we add one for valid URLs.
   // (localfile:// was used for images on Linux/macOS to avoid GStreamer intercepting
@@ -66,9 +69,14 @@ export function DirectFileViewer({ path, filename, fsPort: fsPropPort, videoRef,
   if (isVideoExt(filename)) {
     return (
       <div className="viewer__video-container">
-        <video ref={videoRef} className="viewer__video" src={url} controls />
+        <video ref={setMediaRef} className="viewer__video" src={url} controls />
       </div>
     );
+  }
+  if (isAudioExt(filename)) {
+    return <div className="viewer__audio-container">
+      <audio ref={setMediaRef} src={url} controls aria-label={filename} data-testid="viewer-audio" />
+    </div>;
   }
   // Image
   if (!isMac && isHeicExt(filename)) {

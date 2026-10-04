@@ -253,6 +253,7 @@ fn get_path_info(path: &str) -> Result<PathInfo, String> {
 fn mime_for_path(path: &str) -> &'static str {
     let ext = path.rsplit('.').next().unwrap_or("").to_lowercase();
     match ext.as_str() {
+        "mp3" => "audio/mpeg",
         "png" => "image/png",
         "jpg" | "jpeg" => "image/jpeg",
         "gif" => "image/gif",
