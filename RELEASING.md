@@ -70,13 +70,17 @@ again does the same thing.
 
 ## What gets published
 
-The workflow runs on `ubuntu-22.04`, `macos-latest` with
+The workflow runs on `ubuntu-24.04`, `macos-latest` with
 `--target aarch64-apple-darwin`, and `windows-latest`. One platform failing
-does not cancel the others.
+does not cancel the others. The Linux packages need the glibc and FFmpeg
+from Ubuntu 24.04, so they do not start on Ubuntu 22.04.
 
 Assets land on the draft release, not as Actions artifacts:
 
-- Linux: AppImage, deb, and rpm.
+- Linux: AppImage, deb, and rpm. The AppImage bundles the Ubuntu 24.04
+  GStreamer plugins installed by the workflow, and WebKit plays video with
+  that set alone. `gstreamer1.0-plugins-bad` and `gstreamer1.0-libav` supply
+  the H.264 parser, decoder, and WebVTT encoder.
 - Windows: NSIS installer and MSI. These builds are unsigned, so SmartScreen
   may warn until you choose More info, then Run anyway.
 - macOS: Apple silicon disk image. This build is unsigned and not notarized.
@@ -86,3 +90,14 @@ There is no Intel Mac build and no in-app updater. The workflow always creates
 a draft and does not mark the release as a prerelease, including for tags such
 as `0.0.X-rc.1`. Tag names must match `[0-9]+.[0-9]+.[0-9]+` or
 `[0-9]+.[0-9]+.[0-9]+-*`.
+
+## Linux-only build
+
+Actions → Release → Run workflow, on `development`, with "Build only Linux"
+left checked. That run checks that the version files agree and uploads the
+AppImage, deb, and rpm as workflow artifacts. It does not publish a GitHub
+Release and does not build Windows or macOS.
+
+```bash
+gh workflow run release.yml --ref development -f linux_only=true
+```
