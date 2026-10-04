@@ -176,6 +176,7 @@ keyboard, or modal behaviour **updates the matching spec in the same commit**.
 - **Prefer battle-tested OSS over custom protocols, formats, or components.**
   List the existing options first and justify any custom work (e.g. remote
   fbro became SFTP over system ssh rather than a custom RPC).
+- Releases follow [RELEASING.md](RELEASING.md).
 
 ## Known debt
 
