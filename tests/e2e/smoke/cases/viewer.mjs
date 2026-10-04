@@ -57,6 +57,10 @@ export async function runViewerFlow(browser, observer) {
   const names = Array.from({ length: 32 }, (_, i) => `${String(i).padStart(2, "0")}.jpg`);
   for (const name of names) fs.writeFileSync(hostPath(`${directory}/${name}`), jpeg);
   fs.writeFileSync(hostPath(`${directory}/32-broken.jpg`), "not an image");
+  // Real 32×32 HEIC encoded by macOS sips; HEIF is the same container family.
+  const heic = fs.readFileSync(new URL("../fixtures/viewer.heic", import.meta.url));
+  const heicNames = ["HEIC preview.heic", "HEIF preview.HEIF"];
+  for (const name of heicNames) fs.writeFileSync(hostPath(`${directory}/${name}`), heic);
   const pdfName = "PDF preview.pdf";
   fs.writeFileSync(hostPath(`${directory}/${pdfName}`), minimalPdf());
   const afterPdfName = "ZZ after PDF.txt";
@@ -184,6 +188,41 @@ stateDiagram-v2
     if (await browser.$(".viewer__loading-overlay").isExisting()) throw new Error("image failure left loading indicator visible");
     await navigate("j", "31.jpg");
     sampleMemory("final");
+
+    const isMac = await browser.execute(() =>
+      navigator.platform.startsWith("Mac") || navigator.userAgent.includes("Mac"));
+    for (const name of heicNames) {
+      const imagePath = `${directory}/${name}`;
+      const response = await fetch(`http://127.0.0.1:${observer.state.fileServerPort}${imagePath.split("/").map(encodeURIComponent).join("/")}`);
+      const expectedMime = name.endsWith("heic") ? "image/heic" : "image/heif";
+      if (response.headers.get("content-type") !== expectedMime
+        || !Buffer.from(await response.arrayBuffer()).equals(heic)) {
+        throw new Error(`HEIC/HEIF HTTP response differs from fixture: ${name}`);
+      }
+      // Exercise HTTP and ReadFileChunk/Blob paths. The local flag only selects
+      // the renderer path; both reads still use the real local backend source.
+      for (const local of ["1", "0"]) {
+        const imageParams = new URLSearchParams({ viewer: "1", path: imagePath,
+          source: observer.state.panels.left.sourceId, name, label: "main", panel: "left",
+          local, size: String(heic.length), fsport: String(observer.state.fileServerPort) });
+        await browser.url(`${mainUrl.split("?")[0]}?${imageParams}`);
+        if (isMac) {
+          await waitReady(`HEIC/HEIF ${local === "1" ? "HTTP" : "Blob"} preview ${name}`);
+          const dimensions = await browser.execute(() => {
+            const image = document.querySelector(".viewer__image-container > img");
+            return [image.naturalWidth, image.naturalHeight];
+          });
+          if (dimensions[0] !== 32 || dimensions[1] !== 32) {
+            throw new Error(`Incorrect HEIC dimensions: ${dimensions}`);
+          }
+        } else {
+          await waitFor(() => browser.execute(() =>
+            document.querySelector(".viewer__mode-btn--active")?.textContent?.includes("Hex")), {
+            timeout: 10_000, label: `HEIC/HEIF hex fallback ${name}`,
+          });
+        }
+      }
+    }
 
     await observer.waitForEntry("left", afterPdfName);
     const pdfIndex = observer.state.panels.left.entries.findIndex(entry => entry.name === pdfName);

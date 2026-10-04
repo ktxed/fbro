@@ -597,6 +597,21 @@ fn mime_for_path(path: &str) -> &'static str {
         "bmp" => "image/bmp",
         "ico" => "image/x-icon",
         "avif" => "image/avif",
+        "heic" => "image/heic",
+        "heif" => "image/heif",
         _ => "application/octet-stream",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::mime_for_path;
+
+    #[test]
+    fn heic_and_heif_have_image_content_types() {
+        assert_eq!(mime_for_path("/photos/camera.heic"), "image/heic");
+        assert_eq!(mime_for_path("/photos/camera.HEIC"), "image/heic");
+        assert_eq!(mime_for_path("/photos/camera.heif"), "image/heif");
+        assert_eq!(mime_for_path("/photos/camera.HEIF"), "image/heif");
     }
 }

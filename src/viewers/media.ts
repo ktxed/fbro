@@ -1,5 +1,6 @@
 // ─── Multimedia provider ─────────────────────────────────────────────────────
 // Maps file extensions to renderer kinds and MIME types.
+import { isMac } from "../utils/platform";
 
 export type RendererKind = "text" | "image" | "video" | "pdf" | "hex";
 
@@ -7,6 +8,8 @@ const IMAGE_EXTENSIONS: Record<string, string> = {
   png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg",
   gif: "image/gif", webp: "image/webp", svg: "image/svg+xml",
   bmp: "image/bmp", ico: "image/x-icon", avif: "image/avif",
+  // WKWebView supports HEIC/HEIF from Safari 17. Other WebViews use hex.
+  ...(isMac ? { heic: "image/heic", heif: "image/heif" } : {}),
 };
 
 const VIDEO_EXTENSIONS = new Set(["mp4", "webm", "ogv", "mkv", "mov"]);

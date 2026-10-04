@@ -152,7 +152,11 @@ Useful environment variables:
 
 - `FBRO_E2E_VIEWER_ONLY=1`: run only the image viewer regression flow. It covers
   delayed loads, more than 21 high-resolution JPEGs, reverse/rapid navigation,
-  and recovery from an invalid image. Timings and process-memory samples are
+  and recovery from an invalid image. HEIC/HEIF fixtures verify HTTP MIME types
+  and hex fallback on Linux/Windows; on native macOS the same case checks image
+  decoding via HTTP and buffered Blobs. The Docker harness runs Linux, so native
+  macOS decoding still needs a separate check in both F3 and the embedded preview.
+  Timings and process-memory samples are
   written to `artifacts/e2e/viewer-timings.json`; they include WebDriver and a
   local forwarding server's overhead and are not a standalone rendering benchmark.
 - `FBRO_E2E_COMPOSE_FILES`: compose file list used by local smoke runs.

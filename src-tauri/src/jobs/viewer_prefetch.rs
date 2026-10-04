@@ -384,6 +384,7 @@ pub fn is_image_ext(path: &str) -> bool {
     matches!(
         path.to_lowercase().rsplit('.').next().unwrap_or(""),
         "png" | "jpg" | "jpeg" | "gif" | "bmp" | "webp" | "svg" | "ico" | "tiff" | "tif"
+            | "heic" | "heif"
     )
 }
 
@@ -395,6 +396,13 @@ mod tests {
     use crate::ws::protocol::{FilterSpec, SortSpec};
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Barrier;
+
+    #[test]
+    fn heic_and_heif_use_the_image_read_cap() {
+        for path in ["camera.heic", "camera.HEIC", "camera.heif", "camera.HEIF"] {
+            assert!(is_image_ext(path), "{path}");
+        }
+    }
 
     struct CountingDriver {
         local: bool,

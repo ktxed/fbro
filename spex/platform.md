@@ -104,6 +104,13 @@ Home from `$HOME` (which the OS always sets). Native APIs: `NSWorkspace` for
 default-app launch, `QLThumbnailGenerator` for thumbnails, `LSCopyApplications`
 for "open with", `NSPasteboard` for the clipboard, `open -R` for reveal.
 
+The image viewer recognizes `.heic` and `.heif` on macOS and delegates decoding
+to WKWebView (Safari 17 or newer), for both HTTP images and buffered Blob images.
+The file server uses `image/heic` and `image/heif`; viewer prefetch applies the
+image size cap to both formats. Linux and Windows keep the hex preview because
+their WebViews do not provide this decoder. Native thumbnails use a separate OS
+pipeline and do not determine viewer format support.
+
 ### 3.3 `WindowsPlatform`
 
 Home from `USERPROFILE`. `SHGetKnownFolderPath` for canonical folders,
