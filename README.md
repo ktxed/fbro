@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <img src="fbro.png" alt="screen capture of fbro running on macOS" width="1576" height="1024" />
+  <img src="fbro.png" alt="screen capture of fbro running on macOS" />
 </p>
 
 **fbro** is a dual-pane orthodox file manager for power users.
