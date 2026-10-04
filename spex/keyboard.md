@@ -111,6 +111,17 @@ While it is open it owns the keyboard, and other viewer shortcuts are held back:
 
 ## 4. Design Rules
 
+Empty folder listings focus the first available suggestion in the active panel
+after loading completes. Suggestions form one roving Tab stop: Up/Down and
+Home/End move between actions, while Enter/Space activate the native button
+once without also running panel entry navigation. Tab/Shift+Tab still switch
+panels. Returning from the New File dialog restores suggestion focus if the
+folder remains empty; when entries appear, focus returns to the listing.
+Create a new file is first, followed by Create a new folder where supported.
+Returning from either creation dialog to an empty listing focuses the first
+available suggestion. Inactive panels, modal-covered panels, filter inputs, and embedded terminals
+must not lose focus to suggestions.
+
 1. Derive ownership from rendered UI state; do not toggle an input mode in
    response to key presses.
 2. A full-screen dialog must use `ModalLayer` and must not install its own

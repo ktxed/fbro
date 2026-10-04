@@ -145,6 +145,15 @@ those commands again, so each flash steals focus and the popups repeat.
 
 ---
 
+### 3.4 Embedded terminals
+
+Embedded PTY resize operations run on one serialized worker per session,
+coalescing pending sizes. The WebSocket loop only queues geometry; it must
+continue draining terminal output while the OS resizes the PTY. In particular,
+Windows ConPTY resizing or shutdown can wait for output consumption. Session
+removal releases the registry lock before process termination or PTY disposal,
+and explicit close performs that blocking teardown on a worker thread.
+
 ## 4. `VolumeWatcher` (async)
 
 Separate async trait, also under `src/platform/mod.rs`. Provides

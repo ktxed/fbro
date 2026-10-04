@@ -5,6 +5,7 @@ import type { PanelState, VFSEntry, Source } from "../ws/types";
 import type { WsClient } from "../ws/client";
 import {
   executeCommand,
+  formatPrimaryBinding,
   executeTargetedCommand,
   findMatchingCommand,
   GLOBAL_SHORTCUT_COMMAND_IDS,
@@ -27,7 +28,8 @@ import { PanelTabBar } from "./PanelTabBar";
 import { PanelTerminal } from "./PanelTerminal";
 import { EntryThumb } from "./EntryThumb";
 import { isLikelyBinaryPath } from "../utils/binaryPath";
-import { isGlobalSelectionSourceId } from "../utils/sourceId";
+import { isArchiveSourceId, isGlobalSelectionSourceId, isSearchSourceId } from "../utils/sourceId";
+import { rovingIndexForKey } from "./modalKeyboard";
 import { GitModal } from "./GitModal";
 import type { GitActivity } from "./gitActivity";
 import previewThrobberUrl from "../assets/win98-flag-throbber-64nn.gif";
@@ -954,6 +956,23 @@ export function Panel({
 
   const isWindowed = panel.totalCount !== undefined && panel.totalCount > panel.entries.length;
   const totalCount = panel.totalCount ?? panel.entries.length;
+  const emptySource = sources[panel.sourceId];
+  const isFolderListing = emptySource?.kind === "filesystem" || emptySource?.kind === "remote"
+    || isArchiveSourceId(panel.sourceId) || !!panel.shadowSource;
+  const showEmptyFolder = isFolderListing && !isGlobalSelectionSourceId(panel.sourceId)
+    && !isSearchSourceId(panel.sourceId) && panel.tabKind === "listing"
+    && panel.status === "ready" && totalCount === 0;
+  const emptyActions = showEmptyFolder && !panel.filter && !panel.shadowSource ? [
+    { id: "file.touch", label: "Create a new file", capability: "Touch", testId: "empty-folder-new-file" },
+    { id: "file.mkdir", label: "Create a new folder", capability: "NewFolder", testId: "empty-folder-new-folder" },
+  ].filter((action) => emptySource?.supports.includes(action.capability)) : [];
+  const emptyActionId = emptyActions[0]?.id;
+  const emptyActionOwnedFocusRef = useRef(false);
+  const [emptyActionIndex, setEmptyActionIndex] = useState(0);
+  const focusListing = useCallback(() => {
+    const suggestion = listRef.current?.querySelector<HTMLButtonElement>(".panel__empty-actions button");
+    (suggestion ?? focusDivRef.current)?.focus({ preventScroll: true });
+  }, []);
   const windowStart = panel.windowStart ?? 0;
   const isGrid = panel.viewMode === "grid" && panel.supportsThumbnails;
   const gitHeaderState = panel.git ? (panel.git.clean ? "ready" : "warning") : null;
@@ -1148,9 +1167,21 @@ export function Panel({
     if (panel.filterModeActive && shouldFocusFilterRef.current) {
       window.setTimeout(() => filterInputRef.current?.focus(), 0);
     } else {
-      focusDivRef.current?.focus();
+      focusListing();
     }
-  }, [isFocused, modalActive, panel.filterModeActive]);
+  }, [isFocused, modalActive, panel.filterModeActive, focusListing]);
+
+  useEffect(() => {
+    setEmptyActionIndex(0);
+    if (!isFocused || modalActive || panel.filterModeActive || sortSelectorOpen) return;
+    const active = document.activeElement;
+    if (active instanceof Element && active.closest(".panel-terminal")) return;
+    if (emptyActionId) focusListing();
+    else if (emptyActionOwnedFocusRef.current) {
+      emptyActionOwnedFocusRef.current = false;
+      focusDivRef.current?.focus({ preventScroll: true });
+    }
+  }, [emptyActionId, panel.path, panel.sourceId, isFocused, modalActive, panel.filterModeActive, sortSelectorOpen, focusListing]);
 
   // A separate viewer/compare window takes OS focus. On return, WebKitGTK
   // often leaves document.activeElement on the panel (or a toolbar button)
@@ -1173,6 +1204,7 @@ export function Panel({
       // Same-node focus() is a no-op on WebKit; blur first so key routing resumes.
       if (active === el) el.blur();
       el.focus({ preventScroll: true });
+      focusListing();
     };
     window.addEventListener("focus", restoreFocus);
     void getCurrentWindow()
@@ -1191,7 +1223,7 @@ export function Panel({
       window.removeEventListener("focus", restoreFocus);
       unlisten?.();
     };
-  }, [isFocused, modalActive, panel.filterModeActive]);
+  }, [isFocused, modalActive, panel.filterModeActive, focusListing]);
 
   useEffect(() => {
     if (sortSelectorOpen) {
@@ -1530,6 +1562,7 @@ export function Panel({
   }, [openContextMenuForEntry]);
 
   function handleKeyDown(e: React.KeyboardEvent) {
+    if (e.defaultPrevented) return;
     if (modalActive) {
       e.preventDefault();
       return;
@@ -2353,7 +2386,9 @@ export function Panel({
       ref={focusDivRef}
       tabIndex={0}
       onKeyDown={handleKeyDown}
-      onFocus={() => {
+      onFocus={(event) => {
+        emptyActionOwnedFocusRef.current = event.target instanceof Element
+          && event.target.closest(".panel__empty-actions") !== null;
         if (!isFocused && !modalActive) {
           client.sendIntent("SwitchFocus", undefined, { to: panelId });
         }
@@ -2439,7 +2474,45 @@ export function Panel({
       <SortHeader sort={panel.sort} panelId={panelId} client={client} />
 
       <div className={`panel__list${isGrid ? " panel__list--grid" : ""}`} ref={listRef} onScroll={handleListScroll} onMouseDown={(e) => { if (e.target === e.currentTarget) focusDivRef.current?.focus(); }} style={modalActive ? { overflow: "hidden" } : undefined}>
-        {isGrid ? (
+        {showEmptyFolder ? (
+          <div className="panel__empty" data-testid="panel-empty-folder">
+            <p role="status">{panel.filter ? "No matching items." : `🙄 ${panel.showHidden ? "This folder is empty." : "This folder has no visible items."} Someone should probably do something about that.`}</p>
+            {emptyActions.length > 0 && (
+              <ul className="panel__empty-actions" aria-label="Suggestions" onKeyDown={(event) => {
+                if (event.defaultPrevented || modalActive) return;
+                const unmodified = !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey;
+                if (!unmodified) return;
+                const next = rovingIndexForKey(event.key, emptyActionIndex, emptyActions.length, "vertical");
+                if (next !== null) {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  setEmptyActionIndex(next);
+                  const button = event.currentTarget.querySelectorAll<HTMLButtonElement>("button")[next];
+                  button?.focus();
+                  button?.scrollIntoView({ block: "nearest" });
+                } else if (event.key === "Enter" || event.key === " ") {
+                  // Keep native button activation, but do not open a panel entry too.
+                  event.stopPropagation();
+                }
+              }}>
+                {emptyActions.map((action, index) => (
+                  <li key={action.id}>
+                    <button type="button" tabIndex={index === emptyActionIndex ? 0 : -1}
+                      data-testid={action.testId} data-command-id={action.id}
+                      onFocus={() => setEmptyActionIndex(index)}
+                      onClick={() => {
+                        if (modalActive) return;
+                        executeCommand(action.id, { state: appState, dispatch, client, panelId, panel, sources, otherPanelId });
+                      }}>
+                      <span>{action.label}</span>
+                      <kbd>{formatPrimaryBinding(appState.commands[action.id])}</kbd>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        ) : isGrid ? (
           (() => {
             const { cols, cardWidth, cardHeight } = gridMetrics;
             const totalRows = Math.ceil(totalCount / Math.max(1, cols));

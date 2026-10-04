@@ -39,6 +39,26 @@ The Dockerized backend app instances still run under `xvfb-run`.
 
 ## Smoke Tests
 
+`cargo test --manifest-path src-tauri/Cargo.toml terminal::tests` includes a
+blocked-resize regression verifying that resize requests return immediately
+and pending dimensions coalesce in order, plus a blocked-process-teardown
+regression verifying that close returns and releases the session registry.
+The Quick Edit smoke flow also
+creates a zero-byte file through the empty-folder suggestion and launches
+Quick Edit by keyboard without selecting the file again. Native ConPTY editor
+resize/close behavior still requires Windows app verification; Linux/macOS
+native editor integration and the expanded smoke flow remain unverified here.
+
+The local smoke flow covers empty-folder suggestion focus, Tab/Shift+Tab panel
+switching, Enter/Space opening one New File dialog, name-input focus,
+cancellation restoring suggestion focus, and successful creation replacing
+the indicator and restoring listing focus. It also covers arrow navigation to
+the secondary folder suggestion, a single suggestion Tab stop, folder-dialog
+cancellation, and successful folder creation. It checks list/grid empty
+presentation and filtered empty listings. These new cases have not yet been
+run in the native Linux smoke environment; native macOS and Windows focus and
+WebView styling still require verification.
+
 The local smoke flow checks the thumbnail queue's backend reply, Jobs modal
 empty state, keyboard tab selection, focus preservation during refresh, and
 focus restoration on close. `cargo test --manifest-path src-tauri/Cargo.toml

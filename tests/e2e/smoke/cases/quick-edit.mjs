@@ -4,6 +4,7 @@ import path from "node:path";
 import { clickEntry, goToPanelPath } from "../browser.mjs";
 import { backendPath, hostPath } from "../config.mjs";
 import { waitFor } from "../wait.mjs";
+import { expectModalFocus } from "./modal-focus.mjs";
 
 export async function runQuickEditFlow(browser, observer) {
   const directory = backendPath("a", "src");
@@ -22,6 +23,43 @@ export async function runQuickEditFlow(browser, observer) {
     const saved = fs.readFileSync(hostTarget, "utf8").includes("quick edit saved");
     return terminalOpened && saved && observer.state.panels.left?.terminalSessionId == null;
   }, { timeout: 10_000, label: "Quick Edit terminal completion" });
+
+  // Create a genuinely zero-byte file through the empty-folder suggestion,
+  // then invoke the same Quick Edit path without an intervening row click.
+  const emptyDirectory = path.posix.join(directory, "quick-edit-empty");
+  fs.mkdirSync(hostPath(emptyDirectory), { recursive: true });
+  await goToPanelPath(browser, observer, "left", emptyDirectory);
+  await waitFor(() => browser.execute(() =>
+    document.activeElement?.getAttribute("data-testid") === "empty-folder-new-file"),
+  { timeout: 10_000, label: "new-file suggestion before Quick Edit" });
+  await browser.keys("Enter");
+  await expectModalFocus(browser, '[data-testid="touch-name-input"]', "new empty file name focus");
+  await (await browser.$('[data-testid="touch-name-input"]')).setValue("new.txt");
+  await browser.keys("Enter");
+  await observer.waitForEntry("left", "new.txt", "file");
+  await observer.waitForPanelReady("left");
+  await waitFor(() => browser.execute(() =>
+    document.activeElement === document.querySelector('[data-testid="panel-left"]')
+      && Boolean(document.querySelector('[data-testid="panel-left"] [data-entry-name="new.txt"]'))),
+  { timeout: 10_000, label: "newly created file listing and focus" });
+  const emptyTarget = hostPath(path.posix.join(emptyDirectory, "new.txt"));
+  if (fs.statSync(emptyTarget).size !== 0) throw new Error("New file was not zero bytes");
+  // Ctrl+F4 is the Linux smoke fixture's Quick Edit binding.
+  await browser.performActions([{
+    type: "key", id: "quick-edit-keyboard", actions: [
+      { type: "keyDown", value: "\uE009" },
+      { type: "keyDown", value: "\uE034" },
+      { type: "keyUp", value: "\uE034" },
+      { type: "keyUp", value: "\uE009" },
+    ],
+  }]);
+  await browser.releaseActions();
+  terminalOpened = false;
+  await waitFor(() => {
+    if (observer.state.panels.left?.terminalSessionId != null) terminalOpened = true;
+    return terminalOpened && fs.readFileSync(emptyTarget, "utf8").includes("quick edit saved")
+      && observer.state.panels.left?.terminalSessionId == null;
+  }, { timeout: 10_000, label: "Quick Edit newly created zero-byte file completion" });
 
   observer.sendIntent("QuickEditFile", "missing-panel");
   observer.sendIntent("NavigateToSource", "left", { sourceId: "journal" });

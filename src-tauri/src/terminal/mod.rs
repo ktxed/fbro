@@ -40,12 +40,10 @@ pub struct PtySession {
     /// Set when output is rebound after a frontend reconnect. The next resize
     /// must provoke SIGWINCH even if the dimensions did not change, so a
     /// full-screen child redraws into the replacement xterm.
-    needs_redraw: AtomicBool,
+    needs_redraw: Arc<AtomicBool>,
     close_requested: Arc<AtomicBool>,
-    /// Master PTY handle — kept so we can resize. Wrapped in Arc/Mutex because
-    /// resize is a `&self` method but we want to share ownership with the
-    /// killer path during `close`.
-    master: Arc<Mutex<Box<dyn MasterPty + Send>>>,
+    /// Serialized OS resize work must never block the WebSocket output pump.
+    resize_tx: mpsc::UnboundedSender<(u16, u16)>,
     /// Killer for the child process — drop or call `kill` on close.
     killer: Box<dyn ChildKiller + Send + Sync>,
 }
@@ -240,14 +238,24 @@ impl PtyManager {
         // remove session, clear panel state, broadcast StatePatch + TerminalClosed.
         let panel_id_shared = Arc::new(Mutex::new(panel_id));
         let close_requested = Arc::new(AtomicBool::new(false));
+        let needs_redraw = Arc::new(AtomicBool::new(false));
+        let redraw = needs_redraw.clone();
+        let closing = close_requested.clone();
+        let resize_tx = spawn_resize_worker(move |cols, rows| {
+            if closing.load(Ordering::SeqCst) { return; }
+            let master = master.lock().unwrap();
+            if let Err(error) = resize_master(master.as_ref(), cols, rows, redraw.swap(false, Ordering::SeqCst)) {
+                eprintln!("[terminal] resize sid={session_id}: {error}");
+            }
+        });
         let session = PtySession {
             session_id,
             panel_id: panel_id_shared.clone(),
             writer_tx: Some(writer_tx),
             output_tx,
-            needs_redraw: AtomicBool::new(false),
+            needs_redraw,
             close_requested: close_requested.clone(),
-            master,
+            resize_tx,
             killer,
         };
         self.sessions.lock().unwrap().insert(session_id, session);
@@ -380,49 +388,24 @@ impl PtyManager {
     pub fn resize(&self, sid: u32, cols: u16, rows: u16) -> Result<(), PtyError> {
         let map = self.sessions.lock().unwrap();
         let session = map.get(&sid).ok_or(PtyError::NotFound)?;
-        let master = session.master.lock().unwrap();
-        if session.needs_redraw.swap(false, Ordering::SeqCst) {
-            let current = master.get_size().ok();
-            if current.is_some_and(|size| size.cols == cols && size.rows == rows) {
-                let redraw_rows = if rows < u16::MAX {
-                    rows.saturating_add(1)
-                } else {
-                    rows.saturating_sub(1).max(1)
-                };
-                master
-                    .resize(PtySize {
-                        rows: redraw_rows,
-                        cols: cols.max(1),
-                        pixel_width: 0,
-                        pixel_height: 0,
-                    })
-                    .map_err(|e| PtyError::Io(e.to_string()))?;
-            }
-        }
-        master
-            .resize(PtySize {
-                rows: rows.max(1),
-                cols: cols.max(1),
-                pixel_width: 0,
-                pixel_height: 0,
-            })
-            .map_err(|e| PtyError::Io(e.to_string()))?;
-        Ok(())
+        session.resize_tx.send((cols.max(1), rows.max(1))).map_err(|_| PtyError::NotFound)
     }
 
     pub fn close(&self, sid: u32) -> Option<String> {
-        let mut map = self.sessions.lock().unwrap();
-        let mut session = map.remove(&sid)?;
+        let mut session = self.sessions.lock().unwrap().remove(&sid)?;
         session.close_requested.store(true, Ordering::SeqCst);
         // Drop the writer sender first so the writer thread exits cleanly.
         session.writer_tx.take();
-        let _ = session.killer.kill();
         let pid = session.panel_id.lock().unwrap().clone();
+        // Killing/dropping a ConPTY can wait for output to drain. Keep the
+        // connection pumping output and release the session registry first.
+        thread::spawn(move || { let _ = session.killer.kill(); });
         Some(pid)
     }
 
     fn remove_exited(&self, sid: u32) {
-        if let Some(mut session) = self.sessions.lock().unwrap().remove(&sid) {
+        let session = self.sessions.lock().unwrap().remove(&sid);
+        if let Some(mut session) = session {
             session.writer_tx.take();
         }
     }
@@ -449,22 +432,14 @@ impl PtyManager {
 
     /// Close all sessions belonging to a given panel. Returns their session_ids.
     pub fn close_for_panel(&self, panel_id: &str) -> Vec<u32> {
-        let mut map = self.sessions.lock().unwrap();
+        let map = self.sessions.lock().unwrap();
         let to_remove: Vec<u32> = map
             .iter()
             .filter(|(_, s)| *s.panel_id.lock().unwrap() == panel_id)
             .map(|(k, _)| *k)
             .collect();
-        let mut closed = Vec::new();
-        for sid in to_remove {
-            if let Some(mut session) = map.remove(&sid) {
-                session.close_requested.store(true, Ordering::SeqCst);
-                session.writer_tx.take();
-                let _ = session.killer.kill();
-                closed.push(sid);
-            }
-        }
-        closed
+        drop(map);
+        to_remove.into_iter().filter(|sid| self.close(*sid).is_some()).collect()
     }
 }
 
@@ -521,13 +496,56 @@ impl Default for PtyManager {
 
 impl Drop for PtyManager {
     fn drop(&mut self) {
-        let mut map = self.sessions.lock().unwrap();
-        for (_, mut session) in map.drain() {
+        let sessions = std::mem::take(self.sessions.get_mut().unwrap());
+        for (_, mut session) in sessions {
             session.close_requested.store(true, Ordering::SeqCst);
             session.writer_tx.take();
-            let _ = session.killer.kill();
+            thread::spawn(move || { let _ = session.killer.kill(); });
         }
     }
+}
+
+fn resize_master(master: &dyn MasterPty, cols: u16, rows: u16, redraw: bool) -> Result<(), PtyError> {
+    if redraw {
+        let current = master.get_size().ok();
+        if current.is_some_and(|size| size.cols == cols && size.rows == rows) {
+            let redraw_rows = if rows < u16::MAX {
+                rows.saturating_add(1)
+            } else {
+                rows.saturating_sub(1).max(1)
+            };
+            master
+                .resize(PtySize {
+                    rows: redraw_rows,
+                    cols: cols.max(1),
+                    pixel_width: 0,
+                    pixel_height: 0,
+                })
+                .map_err(|e| PtyError::Io(e.to_string()))?;
+        }
+    }
+    master
+        .resize(PtySize {
+            rows: rows.max(1),
+            cols: cols.max(1),
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .map_err(|e| PtyError::Io(e.to_string()))?;
+    Ok(())
+}
+
+/// One worker per PTY preserves resize ordering and coalesces queued geometry.
+/// The caller never waits for an OS operation that can require output draining.
+fn spawn_resize_worker(mut resize: impl FnMut(u16, u16) + Send + 'static) -> mpsc::UnboundedSender<(u16, u16)> {
+    let (tx, mut rx) = mpsc::unbounded_channel::<(u16, u16)>();
+    thread::spawn(move || {
+        while let Some(mut size) = rx.blocking_recv() {
+            while let Ok(newer) = rx.try_recv() { size = newer; }
+            resize(size.0, size.1);
+        }
+    });
+    tx
 }
 
 fn spawn_reader(
@@ -588,6 +606,80 @@ mod tests {
     use portable_pty::ExitStatus;
 
     use super::{file_fingerprint, fingerprint_changed, quick_edit_exit, FileFingerprint, QuickEditExit};
+
+    #[test]
+    fn terminal_resize_does_not_wait_for_output_and_coalesces_pending_sizes() {
+        use std::sync::mpsc as sync;
+        use std::time::Duration;
+        let (started_tx, started_rx) = sync::channel();
+        let (release_tx, release_rx) = sync::channel();
+        let (completed_tx, completed_rx) = sync::channel();
+        let mut first = true;
+        let tx = super::spawn_resize_worker(move |cols, rows| {
+            if first {
+                first = false;
+                started_tx.send(()).unwrap();
+                let _ = release_rx.recv();
+            }
+            let _ = completed_tx.send((cols, rows));
+        });
+        tx.send((80, 24)).unwrap();
+        started_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        // These requests must return while the OS resize is waiting for the
+        // WebSocket output pump. Only the latest pending geometry is applied.
+        tx.send((100, 30)).unwrap();
+        tx.send((120, 40)).unwrap();
+        release_tx.send(()).unwrap();
+        drop(tx);
+        assert_eq!(completed_rx.recv_timeout(Duration::from_secs(5)).unwrap(), (80, 24));
+        assert_eq!(completed_rx.recv_timeout(Duration::from_secs(5)).unwrap(), (120, 40));
+        assert!(completed_rx.recv_timeout(Duration::from_secs(5)).is_err());
+    }
+
+    #[test]
+    fn terminal_close_releases_registry_before_blocking_process_teardown() {
+        use std::sync::{Arc, Mutex, mpsc as sync};
+        use std::time::Duration;
+        #[derive(Debug, Clone)]
+        struct BlockingKiller {
+            started: sync::Sender<()>,
+            release: Arc<Mutex<sync::Receiver<()>>>,
+        }
+        impl portable_pty::ChildKiller for BlockingKiller {
+            fn kill(&mut self) -> std::io::Result<()> {
+                let _ = self.started.send(());
+                let _ = self.release.lock().unwrap().recv();
+                Ok(())
+            }
+            fn clone_killer(&self) -> Box<dyn portable_pty::ChildKiller + Send + Sync> {
+                Box::new(self.clone())
+            }
+        }
+        let manager = Arc::new(super::PtyManager::new());
+        let (started, started_rx) = sync::channel();
+        let (release, release_rx) = sync::channel();
+        let (output, _output_rx) = tokio::sync::mpsc::channel(1);
+        let (resize, _resize_rx) = tokio::sync::mpsc::unbounded_channel();
+        manager.sessions.lock().unwrap().insert(1, super::PtySession {
+            session_id: 1,
+            panel_id: Arc::new(Mutex::new("left".into())),
+            writer_tx: None,
+            output_tx: Arc::new(Mutex::new(output)),
+            needs_redraw: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            close_requested: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            resize_tx: resize,
+            killer: Box::new(BlockingKiller { started, release: Arc::new(Mutex::new(release_rx)) }),
+        });
+        let (closed, closed_rx) = sync::channel();
+        let closing_manager = manager.clone();
+        std::thread::spawn(move || { let _ = closed.send(closing_manager.close(1)); });
+        started_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        let result = closed_rx.recv_timeout(Duration::from_secs(5));
+        let registry_free = manager.sessions.try_lock().map(|map| map.is_empty()).unwrap_or(false);
+        let _ = release.send(());
+        assert_eq!(result.unwrap(), Some("left".into()));
+        assert!(registry_free, "process teardown held the session registry lock");
+    }
 
     #[test]
     fn detects_quick_edit_file_changes_and_deletion() {

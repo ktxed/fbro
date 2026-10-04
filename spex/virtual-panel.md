@@ -88,6 +88,26 @@ When `totalCount` and `windowStart` are set to `null` in a patch (e.g. during na
 
 ## Cursor and Selection
 
+### Empty folder presentation
+
+In either list or grid view, a folder listing with `status: "ready"` and zero
+total visible entries renders an empty-folder indicator and a vertical list
+of available suggestions. Loading, error states, and unloaded virtual windows
+do not count as empty. Search and global-selection collections are excluded.
+
+The message is “🙄 This folder is empty. Someone should probably do something
+about that.” With hidden files disabled, the first sentence instead reads
+“🙄 This folder has no visible items.” Emptiness refers to the backend-provided
+visible listing; no additional filesystem scan is performed. A filtered empty
+listing says “No matching items.” and offers no creation suggestions.
+
+Suggestions are an ordered action list filtered by backend source capabilities.
+“Create a new file” comes first, requiring `Touch` and invoking the existing
+`file.touch` command and New File dialog. “Create a new folder” comes second,
+requiring `NewFolder` and invoking `file.mkdir` and the Create Directory dialog.
+Sources without either capability display the indicator alone. Shortcuts come from the command
+registry. Focus behavior is specified in [Keyboard](keyboard.md).
+
 - **Cursor** is always an absolute index into the full entry list, same as Mode A.
 - **Selection** is stored as an array of absolute indices on both BE and FE.
 - The FE uses a `Set` for O(1) selection lookup during rendering.

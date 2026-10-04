@@ -33,8 +33,24 @@ export async function runLocalFlow(browser, observer) {
   await createDirectory(browser, observer, "left", "alpha");
   await doubleClickEntry(browser, "left", "alpha");
   await observer.waitForPanelPath("left", path.posix.join(aSrc, "alpha"));
+  await verifyEmptyFolder(browser, observer);
   await createDirectory(browser, observer, "left", "nested");
-  await createFile(browser, observer, "left", "note.txt");
+  await doubleClickEntry(browser, "left", "nested");
+  await observer.waitForPanelPath("left", path.posix.join(aSrc, "alpha/nested"));
+  await waitFor(() => browser.execute(() =>
+    document.activeElement?.getAttribute("data-testid") === "empty-folder-new-file"),
+  { timeout: 10_000, label: "empty nested folder default focus" });
+  await browser.keys("ArrowDown");
+  await browser.keys("Enter");
+  await expectModalFocus(browser, '[data-testid="mkdir-name-input"]', "suggested folder name focus");
+  await (await browser.$('[data-testid="mkdir-name-input"]')).setValue("child");
+  await browser.keys("Enter");
+  await observer.waitForEntry("left", "child", "directory");
+  await waitFor(() => browser.execute(() =>
+    !document.querySelector('[data-testid="panel-left"] [data-testid="panel-empty-folder"]')
+      && document.activeElement === document.querySelector('[data-testid="panel-left"]')),
+  { timeout: 10_000, label: "created folder replaces suggestions and restores listing focus" });
+  await goToPanelPath(browser, observer, "left", path.posix.join(aSrc, "alpha"));
   await createFile(browser, observer, "left", "remove.txt");
 
   fs.writeFileSync(hostPath(path.posix.join(aSrc, "alpha/note.txt")), "renamed payload\n");
@@ -334,6 +350,70 @@ export async function runLocalFlow(browser, observer) {
 
   await verifyWindowFocusRestoration(browser, observer);
   await verifyGridLeftAtFirstItemNavigatesUp(browser, observer, aSrc);
+}
+
+async function verifyEmptyFolder(browser, observer) {
+  const suggestion = '[data-testid="panel-left"] [data-testid="empty-folder-new-file"]';
+  const expectSuggestionFocus = () => waitFor(() => browser.execute((selector) =>
+    document.querySelector(selector) === document.activeElement, suggestion),
+  { timeout: 10_000, label: "empty folder suggestion focus" });
+  await expectSuggestionFocus();
+  const folderSuggestion = '[data-testid="panel-left"] [data-testid="empty-folder-new-folder"]';
+  await browser.keys("ArrowDown");
+  await waitFor(() => browser.execute((selector) =>
+    document.querySelector(selector) === document.activeElement, folderSuggestion),
+  { timeout: 10_000, label: "secondary folder suggestion arrow focus" });
+  const tabStops = await browser.execute(() =>
+    document.querySelectorAll('[data-testid="panel-left"] .panel__empty-actions button[tabindex="0"]').length);
+  if (tabStops !== 1) throw new Error("Empty folder suggestions must have one Tab stop");
+  await browser.keys("Enter");
+  await expectModalFocus(browser, '[data-testid="mkdir-name-input"]', "secondary folder suggestion dialog focus");
+  await browser.keys("Escape");
+  await expectSuggestionFocus();
+  await browser.keys("g");
+  await waitFor(() => browser.execute(() =>
+    Boolean(document.querySelector('[data-testid="panel-left"] .panel__list--grid [data-testid="panel-empty-folder"]'))),
+  { timeout: 10_000, label: "empty folder indicator in grid view" });
+  await expectSuggestionFocus();
+  await browser.keys("g");
+  await waitFor(() => observer.state.panels.left?.viewMode === "list",
+    { timeout: 10_000, label: "restore list view" });
+  await browser.keys("Tab");
+  await waitFor(() => browser.execute(() =>
+    Boolean(document.activeElement?.closest('[data-testid="panel-right"]'))),
+  { timeout: 10_000, label: "Tab switches away from empty folder" });
+  await browser.performActions([{
+    type: "key", id: "empty-folder-keyboard", actions: [
+      { type: "keyDown", value: "\uE008" },
+      { type: "keyDown", value: "\uE004" },
+      { type: "keyUp", value: "\uE004" },
+      { type: "keyUp", value: "\uE008" },
+    ],
+  }]);
+  await browser.releaseActions();
+  await expectSuggestionFocus();
+  await browser.keys("Enter");
+  await expectModalFocus(browser, '[data-testid="touch-name-input"]', "empty folder new file name focus");
+  const dialogs = await browser.$$('[data-testid="touch-dialog"]');
+  if (dialogs.length !== 1) throw new Error("Empty folder Enter opened more than one dialog");
+  await browser.keys("Escape");
+  await expectSuggestionFocus();
+  await browser.keys(" ");
+  await expectModalFocus(browser, '[data-testid="touch-name-input"]', "empty folder Space activation");
+  await (await browser.$('[data-testid="touch-name-input"]')).setValue("note.txt");
+  await browser.keys("Enter");
+  await observer.waitForEntry("left", "note.txt", "file");
+  await waitFor(() => browser.execute(() =>
+    !document.querySelector('[data-testid="panel-left"] [data-testid="panel-empty-folder"]')
+      && document.activeElement === document.querySelector('[data-testid="panel-left"]')),
+  { timeout: 10_000, label: "created file replaces empty state and restores listing focus" });
+  observer.sendIntent("SetFilter", "left", { value: "no-such-empty-folder-match" });
+  await waitFor(() => browser.execute(() =>
+    document.querySelector('[data-testid="panel-left"] [data-testid="panel-empty-folder"]')?.textContent === "No matching items."
+      && !document.querySelector('[data-testid="panel-left"] [data-testid="empty-folder-new-file"]')),
+  { timeout: 10_000, label: "filtered empty listing has no creation suggestions" });
+  observer.sendIntent("SetFilter", "left", { value: "" });
+  await observer.waitForEntry("left", "note.txt", "file");
 }
 
 async function verifyLocalSymlinkNavigation(browser, observer, aSrc) {

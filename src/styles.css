@@ -2012,6 +2012,27 @@ body {
 }
 .panel__loading img { width: 32px; height: 32px; image-rendering: auto; }
 
+.panel__empty { padding: 16px; color: var(--text-dim); }
+.panel__empty p { margin: 0 0 12px; }
+.panel__empty-actions { margin: 0; padding: 0; list-style: none; }
+.panel__empty-actions li + li { margin-top: 6px; }
+.panel__empty-actions button {
+  appearance: none;
+  font: inherit;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-panel);
+  color: var(--text);
+  cursor: pointer;
+}
+.panel__empty-actions button:hover { background: var(--bg-hover); }
+.panel__empty-actions button:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 2px; }
+.panel__empty-actions kbd { font: inherit; color: var(--text-dim); }
+
 .panel__footer {
   background: var(--bg-footer);
   border-top: 1px solid var(--border);
