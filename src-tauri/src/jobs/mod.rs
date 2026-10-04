@@ -4,6 +4,7 @@ pub mod fedup;
 pub mod file_ops;
 pub mod fp_bro;
 pub mod integrity_compare;
+pub(crate) mod git;
 pub(crate) mod progress;
 pub mod scan;
 pub mod search;

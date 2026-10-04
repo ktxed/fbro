@@ -1612,7 +1612,7 @@ body {
 .git-modal__path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .git-modal__stat { flex: 0 0 auto; padding: 1px 5px; border: 1px solid var(--border); border-radius: 3px; color: var(--text-muted); }
 .git-modal__warning { margin: 8px 12px 0; padding: 6px 8px; border: 1px solid color-mix(in srgb, var(--text-warning) 42%, var(--border)); background: color-mix(in srgb, var(--text-warning) 10%, var(--bg-panel)); color: var(--text-warning); font-size: calc(var(--font-size) - 1px); line-height: 1.35; }
-.git-modal__toolbar { display: flex; align-items: center; gap: 8px; padding: 10px 16px; }
+.git-modal__toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 16px; }
 /* appearance:none + explicit colors: Win10 WebView2 otherwise paints native ButtonFace
  * (light gray enabled / muddy disabled) over the dark theme. */
 .git-modal__toolbar select,
@@ -6672,3 +6672,8 @@ body {
 .diff-table__row--active-change-start.diff-table__row--active-change-end .diff-table__line:first-child {
   box-shadow: inset 3px 0 0 var(--accent), inset 0 1px 0 color-mix(in srgb, var(--accent) 45%, transparent), inset 0 -1px 0 color-mix(in srgb, var(--accent) 45%, transparent);
 }
+
+.git-modal__branch-form { border-top: 1px solid var(--border); }
+.git-modal__branch-base { color: var(--text-dim); overflow-wrap: anywhere; }
+.git-modal__branch-form input { appearance: none; font: inherit; background: var(--bg-input); color: var(--text); border: 1px solid var(--border); border-radius: 3px; padding: 4px 8px; min-width: 140px; flex: 1; }
+.git-modal__branch-error { flex-basis: 100%; color: var(--text-warning); overflow-wrap: anywhere; }

@@ -224,3 +224,13 @@ A modal default handler must honor `defaultPrevented` and native activation.
 Prompt fields explicitly own default submission. Letter mnemonics remain
 available from action buttons and checkboxes when they do not consume text
 editing keys; focusing the default must not disable its advertised mnemonics.
+
+### Git inline branch creation
+
+New branch expands an inline form inside the existing Git layer, with no new
+modal layer. Focus moves to its name input on this user-triggered state change.
+Failure retains the name and focuses the input. Success collapses the form and
+focuses the branch selector; Cancel/Escape restores the New branch button.
+History Escape is handled before form Escape. Async log loading must not steal
+focus from the open form. While submitting, the primary action reads Creating…
+and cannot submit again. Closing a running activity backgrounds it.

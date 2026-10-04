@@ -224,6 +224,17 @@ fn status_label(change: &GitChange) -> String {
     "modified".into()
 }
 
+/// Create from current HEAD without overwriting refs or discarding work.
+pub fn create_branch(root: &str, branch: &str) -> Result<(), String> {
+    let branch = branch.trim();
+    if branch.is_empty() || branch.starts_with('-') || branch.contains("@{") {
+        return Err("A valid literal branch name is required.".into());
+    }
+    git(root, &["check-ref-format", "--branch", branch])
+        .map_err(|_| format!("Invalid branch name: {branch}"))?;
+    run(root, &["switch".into(), "--create".into(), branch.into()])
+}
+
 pub fn run(root: &str, args: &[String]) -> Result<(), String> {
     run_with_output(root, args).map(|_| ())
 }
@@ -1002,10 +1013,72 @@ mod tests {
         fs::remove_dir_all(repo).unwrap();
     }
 
+    #[test]
+    fn create_branch_preserves_work_and_switches() {
+        with_test_repo(|repo| {
+            fs::write(repo.join("tracked.txt"), "staged\n").unwrap();
+            git(repo, &["add", "tracked.txt"]);
+            fs::write(repo.join("tracked.txt"), "unstaged\n").unwrap();
+            fs::write(repo.join("new.txt"), "untracked\n").unwrap();
+            let root = repo.to_str().unwrap();
+            let before = super::git(root, &["status", "--porcelain"]).unwrap();
+            let head = super::git(root, &["rev-parse", "HEAD"]).unwrap();
+            super::create_branch(root, "feature/new-work").unwrap();
+            assert_eq!(super::inspect(root).unwrap().branch, "feature/new-work");
+            assert_eq!(super::git(root, &["rev-parse", "HEAD"]).unwrap(), head);
+            assert_eq!(super::git(root, &["status", "--porcelain"]).unwrap(), before);
+            assert_eq!(fs::read_to_string(repo.join("tracked.txt")).unwrap(), "unstaged\n");
+            assert_eq!(fs::read_to_string(repo.join("new.txt")).unwrap(), "untracked\n");
+        });
+    }
+
+    #[test]
+    fn create_branch_rejects_invalid_and_existing_names_without_mutation() {
+        with_test_repo(|repo| {
+            git(repo, &["branch", "existing"]);
+            let root = repo.to_str().unwrap();
+            let before = super::git(root, &["show-ref"]).unwrap();
+            let head = super::git(root, &["symbolic-ref", "HEAD"]).unwrap();
+            for name in ["", "-oops", "@{-1}", "bad name", "bad..name", "HEAD", "existing"] {
+                assert!(super::create_branch(root, name).is_err(), "accepted {name}");
+                assert_eq!(super::git(root, &["show-ref"]).unwrap(), before);
+                assert_eq!(super::git(root, &["symbolic-ref", "HEAD"]).unwrap(), head);
+            }
+        });
+    }
+
+    #[test]
+    fn create_branch_git_failure_leaves_head_and_refs_unchanged() {
+        with_test_repo(|repo| {
+            let root = repo.to_str().unwrap();
+            let head = super::git(root, &["symbolic-ref", "HEAD"]).unwrap();
+            let before = super::git(root, &["show-ref"]).unwrap();
+            let lock = repo.join(".git/refs/heads/blocked.lock");
+            fs::write(&lock, "locked").unwrap();
+            assert!(super::create_branch(root, "blocked").is_err());
+            assert_eq!(super::git(root, &["show-ref"]).unwrap(), before);
+            assert_eq!(super::git(root, &["symbolic-ref", "HEAD"]).unwrap(), head);
+        });
+    }
+
+    #[test]
+    fn create_branch_from_detached_head() {
+        with_test_repo(|repo| {
+            git(repo, &["switch", "--detach"]);
+            let root = repo.to_str().unwrap();
+            let head = super::git(root, &["rev-parse", "HEAD"]).unwrap();
+            super::create_branch(root, "saved-detached-work").unwrap();
+            assert_eq!(super::inspect(root).unwrap().branch, "saved-detached-work");
+            assert_eq!(super::git(root, &["rev-parse", "HEAD"]).unwrap(), head);
+        });
+    }
+
     fn with_test_repo(test: impl FnOnce(&Path)) {
         let repo = temp_repo_path();
         fs::create_dir_all(&repo).unwrap();
         git(&repo, &["init", "-q"]);
+        // Keep fixture bytes identical on hosts with core.autocrlf enabled.
+        git(&repo, &["config", "core.autocrlf", "false"]);
         git(&repo, &["config", "user.email", "fbro-tests@example.invalid"]);
         git(&repo, &["config", "user.name", "fbro tests"]);
         fs::write(repo.join("tracked.txt"), "base\n").unwrap();
@@ -1013,8 +1086,12 @@ mod tests {
         fs::write(repo.join("old.txt"), "old\n").unwrap();
         git(&repo, &["add", "."]);
         git(&repo, &["commit", "-qm", "initial"]);
+        struct Cleanup(PathBuf);
+        impl Drop for Cleanup {
+            fn drop(&mut self) { let _ = fs::remove_dir_all(&self.0); }
+        }
+        let _cleanup = Cleanup(repo.clone());
         test(&repo);
-        fs::remove_dir_all(repo).unwrap();
     }
 
     fn temp_repo_path() -> PathBuf {

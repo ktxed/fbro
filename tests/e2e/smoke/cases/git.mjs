@@ -160,6 +160,38 @@ export async function runGitFlow(browser, observer) {
   await gitButton.click();
   const gitModal = await browser.$(".git-modal");
   await gitModal.waitForDisplayed({ timeout: 10_000 });
+  // Inline branch creation must keep editing keys inside the prompt.
+  await browser.keys("n");
+  const branchInput = await browser.$('[data-testid="git-branch-name"]');
+  await waitFor(() => branchInput.isFocused(), { timeout: 5_000, label: "new branch input focus" });
+  await browser.keys("Escape");
+  await waitFor(async () => await (await browser.$('[data-testid="git-new-branch"]')).isFocused(), {
+    timeout: 5_000, label: "branch cancel focus restoration",
+  });
+  await browser.keys("n");
+  await branchInput.setValue("bad..name");
+  await browser.keys("Enter");
+  await waitFor(async () => await (await browser.$('.git-modal__branch-error')).isDisplayed(), {
+    timeout: 10_000, label: "invalid branch name error",
+  });
+  if (await branchInput.getValue() !== "bad..name") throw new Error("Branch error discarded the name");
+  const statusBeforeBranch = execFileSync("git", ["-C", hostRepo, "status", "--porcelain"], { encoding: "utf8" });
+  await branchInput.setValue("feature/smoke-new-branch");
+  await browser.keys("Enter");
+  await waitFor(() => observer.state.panels.left?.git?.branch === "feature/smoke-new-branch", {
+    timeout: 10_000, label: "created branch backend refresh",
+  });
+  await waitFor(async () => !await (await browser.$('[data-testid="git-branch-form"]')).isExisting(), {
+    timeout: 5_000, label: "branch form closes after success",
+  });
+  const branchSelect = await browser.$('.git-modal__toolbar select');
+  if (await branchSelect.getValue() !== "feature/smoke-new-branch" || !await branchSelect.isFocused()) {
+    throw new Error("New branch selector did not update and receive focus");
+  }
+  if (execFileSync("git", ["-C", hostRepo, "status", "--porcelain"], { encoding: "utf8" }) !== statusBeforeBranch) {
+    throw new Error("Branch creation changed uncommitted work");
+  }
+
   await (await browser.$('[data-testid="git-tab-log"]')).click();
   await waitFor(async () => (await browser.$('[data-testid="git-log-row"]')).isDisplayed(), {
     timeout: 10_000,

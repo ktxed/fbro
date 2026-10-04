@@ -126,6 +126,12 @@ pub(crate) async fn handle(name: &str, args: &Value, ctx: &mut IntentContext<'_>
             if message.is_empty() { Err("A commit message is required.".to_string()) }
             else { crate::git::run(&root, &["commit".into(), "-m".into(), message.into()]).map(|_| None) }
         }
+        "GitCreateBranch" => {
+            let branch = super::arg_str(args, "branch").unwrap_or("").to_string();
+            let root = root.clone();
+            crate::jobs::git::create_branch(root, branch).await
+                .map(|_| None)
+        },
         "GitSwitchBranch" => {
             let branch = args.get("branch").and_then(Value::as_str).unwrap_or("").trim();
             if branch.is_empty() { Err("A branch is required.".to_string()) }

@@ -9,6 +9,8 @@ import { isLikelyBinaryPath } from "../utils/binaryPath";
 import type { GitActivity } from "./gitActivity";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { CopyButton } from "./CopyButton";
+import { useInputHistory } from "../hooks/useInputHistory";
+import { InputHistoryDropdown } from "./InputHistoryDropdown";
 import { shortcutLetter } from "./modalKeyboard";
 
 type GitTab = "changes" | "log";
@@ -36,6 +38,11 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
   const modalRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const branchRef = useRef<HTMLSelectElement>(null);
+  const newBranchRef = useRef<HTMLButtonElement>(null);
+  const [branchFormOpen, setBranchFormOpen] = useState(false);
+  const [branchName, setBranchName] = useState("");
+  const [branchActivityId, setBranchActivityId] = useState<string | null>(null);
+  const branchHistory = useInputHistory("git-branch-name", setBranchName);
   const commitRef = useRef<HTMLButtonElement>(null);
   const selectAllRef = useRef<HTMLInputElement>(null);
   const changeRowRefs = useRef<Array<HTMLDivElement | null>>([]);
@@ -76,7 +83,38 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
     const id = crypto.randomUUID();
     onActivityChange({ id, action: name, message, status: "running" });
     act(name, { ...args, activityId: id });
+    return id;
   };
+  const closeBranchForm = () => {
+    branchHistory.close();
+    setBranchFormOpen(false);
+    requestAnimationFrame(() => newBranchRef.current?.focus());
+  };
+  const openBranchForm = () => {
+    if (actionInFlightRef.current) return;
+    if (branchFormOpen) { branchHistory.inputRef.current?.focus(); return; }
+    didAutoFocusLogRef.current = true;
+    setBranchName("");
+    setBranchActivityId(null);
+    setBranchFormOpen(true);
+  };
+  const submitBranch = () => {
+    if (!branchName.trim() || actionInFlightRef.current) return;
+    const id = runAction("GitCreateBranch", "Creating branch…", { branch: branchName.trim() });
+    if (id) setBranchActivityId(id);
+  };
+  useEffect(() => {
+    if (branchFormOpen) branchHistory.inputRef.current?.focus();
+  }, [branchFormOpen, branchHistory.inputRef]);
+  useEffect(() => {
+    if (!branchFormOpen || !branchActivityId || activity?.id !== branchActivityId) return;
+    if (activity.status === "complete") {
+      branchHistory.addToHistory(branchName);
+      branchHistory.close();
+      setBranchFormOpen(false);
+      (branchRef.current ?? newBranchRef.current)?.focus();
+    } else if (activity.status === "failed") branchHistory.inputRef.current?.focus();
+  }, [activity, branchActivityId, branchFormOpen]);
   const openSuggestedReview = () => {
     if (activity?.suggestedUrl) {
       act("OpenGitReviewRequest", { url: activity.suggestedUrl });
@@ -389,11 +427,11 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
       didAutoFocusLogRef.current = false;
       return;
     }
-    if (activeTab !== "log" || !logHasCommits || didAutoFocusLogRef.current) return;
+    if (branchFormOpen || activeTab !== "log" || !logHasCommits || didAutoFocusLogRef.current) return;
     didAutoFocusLogRef.current = true;
     const frame = requestAnimationFrame(() => focusLogItem({ kind: "commit", index: 0 }));
     return () => cancelAnimationFrame(frame);
-  }, [hasChanges, activeTab, logHasCommits, focusLogItem]);
+  }, [hasChanges, activeTab, logHasCommits, focusLogItem, branchFormOpen]);
 
   useEffect(() => {
     if (selectAllRef.current) {
@@ -402,10 +440,13 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
   }, [allChangesSelected, selectedChanges.length]);
 
   const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+      if (event.defaultPrevented) return;
       if (event.key === "Escape") {
         event.preventDefault();
         event.stopPropagation();
-        if (rollbackPaths) setRollbackPaths(null);
+        if (branchFormOpen && !actionInFlight) closeBranchForm();
+        else if (branchFormOpen && actionInFlight) handleClose();
+        else if (rollbackPaths) setRollbackPaths(null);
         else if (activeTab === "log" && expandedHash) {
           collapseCommit();
           const idx = expandedCommitIndex >= 0 ? expandedCommitIndex : 0;
@@ -590,6 +631,7 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
         }
       }
       const accelerators: Record<string, () => void> = {
+        n: openBranchForm,
         f: () => runAction("GitFetch", "Fetching remote…"),
         l: () => { if (canPull) runAction("GitPull", "Pulling changes…"); },
         p: () => { if (canPush) runAction("GitPush", "Pushing changes…"); },
@@ -662,6 +704,9 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
               <kbd>B</kbd>
             </>
           )}
+          <button ref={newBranchRef} data-testid="git-new-branch" disabled={actionInFlight || branchFormOpen} aria-keyshortcuts="n" onClick={openBranchForm}>
+            New branch… <kbd>N</kbd>
+          </button>
           <span className="git-modal__toolbar-spacer" />
           <button disabled={actionInFlight || !canPull} title={!canPull ? pullDisabledMessage : undefined} aria-keyshortcuts="l" onClick={() => runAction("GitPull", "Pulling changes…")}>
             Pull <kbd>L</kbd>
@@ -679,6 +724,17 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
           <button data-testid="git-refresh" disabled={actionInFlight} aria-keyshortcuts="r" onClick={() => runAction("GitRefresh", "Fetching and refreshing…")} title="Fetch remotes and refresh status">Refresh <kbd>R</kbd></button>
         </div>
 
+        {branchFormOpen && (
+          <form className="git-modal__branch-form git-modal__toolbar" data-testid="git-branch-form" onKeyDown={event => { if (event.key === "Enter" || event.key === " ") event.stopPropagation(); }} onSubmit={event => { event.preventDefault(); submitBranch(); }}>
+            <span className="git-modal__branch-base">From {git.branch}</span>
+            <label htmlFor={`git-branch-name-${panelId}`}>Branch name</label>
+            <input id={`git-branch-name-${panelId}`} ref={element => { branchHistory.inputRef.current = element; }} data-testid="git-branch-name" value={branchName} disabled={actionInFlight} autoComplete="off" onChange={event => setBranchName(event.target.value)} onKeyDown={branchHistory.onKeyDown} />
+            <button type="submit" data-testid="git-create-branch" disabled={actionInFlight || !branchName.trim()}>{actionInFlight ? "Creating…" : "Create & switch"}</button>
+            <button type="button" onClick={closeBranchForm} disabled={actionInFlight}>Cancel</button>
+            {activity?.id === branchActivityId && activity.status === "failed" && <div className="git-modal__branch-error" role="alert">{activity.message}</div>}
+            {branchHistory.isOpen && <InputHistoryDropdown anchorEl={branchHistory.inputRef.current} items={branchHistory.items} activeIndex={branchHistory.activeIndex} onSelect={branchHistory.selectItem} onClose={branchHistory.close} />}
+          </form>
+        )}
         <div className="git-modal__tabs" role="tablist" aria-label="Git views">
           {hasChanges && (
             <button

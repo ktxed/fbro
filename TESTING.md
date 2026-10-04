@@ -306,6 +306,8 @@ The smoke test exercises these flows:
   - Live date-sort cursor anchoring, inline image preview navigation, window
     focus restoration, grid-mode Left navigation.
 - Git (`cases/git.mjs`, temporary repository):
+  - Inline new branch: N/input focus, Escape restoration, invalid-name retry,
+    Enter create-and-switch, selector refresh, and uncommitted-work preservation.
   - Inline Git row toolbar: action order, arrow-key focus without moving the
     panel cursor, stage/unstage keep focus, rollback needs confirmation.
   - Git modal: Log tab expansion; Changes tab j/k/arrow navigation, Space and

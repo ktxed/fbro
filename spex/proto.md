@@ -621,3 +621,15 @@ Explicitly out of scope:
 * UI, TUI all speak the same protocol
 
 ---
+
+## Git branch creation
+
+`GitCreateBranch` accepts `{ panelId, branch, activityId }` and creates and
+switches to a local branch from the current HEAD at execution time. The backend
+validates literal names with Git, rejecting empty/option-like names and revision
+shorthand. Existing refs are never overwritten. Local changes are preserved;
+there is no stash, push, or upstream setup. Detached HEAD is supported.
+A short atomic job runs on the blocking pool using the existing Git activity
+lifecycle: `GitActionFinished` correlates by `activityId`, with success/failure
+and an error message. Successful panel rescan precedes completion. Closing the
+modal backgrounds the activity without interrupting an atomic switch.

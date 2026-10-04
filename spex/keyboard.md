@@ -136,3 +136,12 @@ must not lose focus to suggestions.
    job. A visibly nested confirmation or expanded state may consume the first
    Escape before the containing modal closes.
 7. Every modal control must have a visible `:focus-visible` presentation.
+
+## Git branch name entry
+
+The Git modal's New branch action uses local `N` outside editable fields. It
+opens an inline toolbar form and focuses the name input. Enter submits once;
+input history consumes its own navigation and Enter/Escape first. Escape
+collapses an idle form before closing the modal; during creation it closes the
+modal and backgrounds the activity without cancelling. Cancel restores focus
+to New branch; success restores focus to the refreshed branch selector.
