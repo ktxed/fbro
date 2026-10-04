@@ -197,7 +197,7 @@ enter the sequential Tab cycle.
 | Search: Extra | Extra tab | Native tab activation |
 | Search: Results | To Results when available, otherwise Close | Mount results or close |
 | Copy / Move / Extract / Delete confirmation | Main operation button | Start the operation once |
-| Copy with a conflicting destination name | Destination-name input, text selected | Submit only after the conflict is resolved |
+| Copy onto itself in the same panel | Destination-name input, text selected | Submit only after the destination name is changed |
 | Running / queued operation | Background | Background the view; job continues |
 | Operation conflict decision | Primary decision button | Submit that decision |
 | Cancel-transfer confirmation | Keep Running | Dismiss cancellation |
@@ -206,6 +206,10 @@ enter the sequential Tab cycle.
 
 Delete is an explicit file-operation confirmation, so its main operation
 button receives focus. Quit, reset, and pairing retain Cancel as their default.
+
+An existing destination item does not disable Copy or move focus to the name
+input. The backend job applies the selected conflict policy: Ask pauses for a
+decision, Overwrite replaces the destination, and Skip leaves it unchanged.
 
 `ModalLayer.focusKey` declares an in-place workflow transition that needs a
 new default, such as a job completing, a new conflict, a cancellation prompt,

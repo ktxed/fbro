@@ -33,6 +33,9 @@ dialog types.
 - `Toolbar` uses the same conditions to suppress modal-opening and file-command
   shortcuts. Zoom shortcuts remain global.
 - Each modal owns its feature-specific keys on its layer or descendants.
+- Single-item Copy confirmation uses `N` to focus and select the destination
+  name for editing. The label displays the mnemonic; it does not intercept
+  typing in editable fields.
 - The bookmark popover moves focus into its composite list. Up/Down and
   Home/End move the active bookmark, Enter opens it, and Escape closes the
   popover; while it is open the underlying panel and global commands are held

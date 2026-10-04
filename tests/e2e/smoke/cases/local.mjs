@@ -69,12 +69,10 @@ export async function runLocalFlow(browser, observer) {
 
   await clickEntry(browser, "left", "alpha");
   await clickCommand(browser, "file.copy");
-  const duplicateWarning = await browser.$('[data-testid="operation-dialog"] .modal__warning');
-  await duplicateWarning.waitForDisplayed({ timeout: 10_000 });
-  await expectModalFocus(browser, '[data-testid="copy-destination-name-input"]', "conflicting destination focus");
+  await expectModalFocus(browser, '[data-command-id="file.copy.confirm"]', "existing destination copy focus");
   const duplicateCopyButton = await browser.$('[data-command-id="file.copy.confirm"]');
-  if (await duplicateCopyButton.isEnabled()) {
-    throw new Error("duplicate destination copy button should be disabled");
+  if (!await duplicateCopyButton.isEnabled()) {
+    throw new Error("existing destination must allow Copy with Ask");
   }
   await browser.execute(() => document.querySelector('[data-command-id="file.copy.cancel"]')?.focus());
   await browser.keys("Enter");
@@ -84,11 +82,64 @@ export async function runLocalFlow(browser, observer) {
   fs.writeFileSync(hostPath(path.posix.join(aSrc, "single-copy.txt")), "single payload\n");
   await clickEntry(browser, "left", "single-copy.txt");
   await clickCommand(browser, "file.copy");
+  await browser.keys("n");
+  await expectModalFocus(browser, '[data-testid="copy-destination-name-input"]', "copy name accelerator focus");
+  const nameSelected = await browser.execute(() => {
+    const input = document.querySelector('[data-testid="copy-destination-name-input"]');
+    return input?.selectionStart === 0 && input?.selectionEnd === input?.value.length;
+  });
+  if (!nameSelected) throw new Error("Copy name accelerator did not select the destination name");
+  await browser.keys("n");
+  if (await (await browser.$('[data-testid="copy-destination-name-input"]')).getValue() !== "n") {
+    throw new Error("Copy name accelerator intercepted typing in the destination name");
+  }
   await setTextInputValue(browser, '[data-testid="copy-destination-name-input"]', "single-renamed.txt");
   await confirmOperation(browser, "file.copy.confirm");
   await observer.waitForJobIdle();
   await observer.waitForEntry("right", "single-renamed.txt", "file");
   await closeTerminalJobDialog(browser);
+
+  // Copy to an existing file: Ask must defer replacement until the decision.
+  await clickEntry(browser, "left", "single-copy.txt");
+  await browser.keys("F5");
+  await confirmOperation(browser, "file.copy.confirm");
+  await observer.waitForJobIdle();
+  await observer.waitForEntry("right", "single-copy.txt", "file");
+  await closeTerminalJobDialog(browser);
+  const existingCopyPath = hostPath(path.posix.join(aDst, "single-copy.txt"));
+  fs.writeFileSync(existingCopyPath, "old destination payload\n");
+  await clickEntry(browser, "left", "single-copy.txt");
+  await browser.keys("F5");
+  await expectModalFocus(browser, '[data-command-id="file.copy.confirm"]', "existing file copy focus");
+  await browser.keys("Enter");
+  await expectModalFocus(browser, '[data-command-id="job.decision.overwrite"]', "overwrite decision focus");
+  if (fs.readFileSync(existingCopyPath, "utf8") !== "old destination payload\n") {
+    throw new Error("Ask replaced the existing file before the overwrite decision");
+  }
+  await browser.keys("Enter");
+  await observer.waitForJobIdle();
+  await closeTerminalJobDialog(browser);
+  if (fs.readFileSync(existingCopyPath, "utf8") !== "single payload\n") {
+    throw new Error("Ask overwrite decision did not replace the existing file");
+  }
+  await waitFor(() => browser.execute(() => document.activeElement?.getAttribute("data-testid") === "panel-left"), {
+    timeout: 10_000, label: "copy conflict restores originating panel focus",
+  });
+
+  // An edited destination name must also allow the Overwrite policy.
+  const renamedCopyPath = hostPath(path.posix.join(aDst, "single-renamed.txt"));
+  fs.writeFileSync(renamedCopyPath, "old renamed destination\n");
+  await clickEntry(browser, "left", "single-copy.txt");
+  await browser.keys("F5");
+  await setTextInputValue(browser, '[data-testid="copy-destination-name-input"]', "single-renamed.txt");
+  await (await browser.$('[data-testid="file-conflict-policy"]')).selectByAttribute("value", "overwrite");
+  await browser.execute(() => document.querySelector('[data-command-id="file.copy.confirm"]')?.focus());
+  await browser.keys("Enter");
+  await observer.waitForJobIdle();
+  await closeTerminalJobDialog(browser);
+  if (fs.readFileSync(renamedCopyPath, "utf8") !== "single payload\n") {
+    throw new Error("Overwrite did not replace the existing edited destination");
+  }
 
   await clickEntry(browser, "left", "alpha");
   await clickCommand(browser, "file.copy");

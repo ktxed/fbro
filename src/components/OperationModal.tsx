@@ -406,14 +406,7 @@ function supportsQueuedLocalCopy(state: AppState, pending: PendingOp, dryMode: b
     && !destPanel.shadowSource;
 }
 
-function destinationPanelShowsTargetPath(
-  pending: PendingOp,
-  destPanelState: AppState["panels"][string] | undefined,
-) {
-  return !!destPanelState && (!pending.destPath || pending.destPath === destPanelState.path);
-}
-
-type CopyDestNameIssueKind = "empty" | "separator" | "existing-destination" | "same-panel-name";
+type CopyDestNameIssueKind = "empty" | "separator" | "same-panel-name";
 
 interface CopyDestNameIssue {
   kind: CopyDestNameIssueKind;
@@ -423,21 +416,13 @@ interface CopyDestNameIssue {
 function copyDestNameIssue(
   pending: PendingOp,
   destName: string,
-  destPanelState: AppState["panels"][string] | undefined,
 ): CopyDestNameIssue | null {
   if (!supportsCopyDestName(pending)) return null;
   if (!destName) return { kind: "empty", message: "Destination name is required." };
   if (/[\\/]/.test(destName)) {
     return { kind: "separator", message: "Destination name cannot contain path separators." };
   }
-  if (
-    pending.destPanel !== pending.sourcePanel
-    && destPanelState
-    && destinationPanelShowsTargetPath(pending, destPanelState)
-    && destPanelState.entries.some((entry) => entry.name === destName)
-  ) {
-    return { kind: "existing-destination", message: "Destination already contains an item with this name." };
-  }
+  // Existing destinations are resolved by the backend job's conflict policy.
   if (
     pending.destPanel === pending.sourcePanel
     && !pending.files[0].sourcePath
@@ -449,7 +434,7 @@ function copyDestNameIssue(
 }
 
 function isCopyDestNameConflictIssue(issue: CopyDestNameIssue | null) {
-  return issue?.kind === "existing-destination" || issue?.kind === "same-panel-name";
+  return issue?.kind === "same-panel-name";
 }
 
 function canSuggestResumeForPending(state: AppState, pending: PendingOp) {
@@ -510,9 +495,8 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
   const isTransferTerminal = activeJob?.state === "Completed" || activeJob?.state === "Cancelled" || activeJob?.state === "Failed";
   const { speed, samples: speedSamples } = useJobTransferSpeed(activeJobId, p?.totalBytesCopied ?? 0, isTransferTerminal);
   const pendingKey = pendingSessionKey(pending);
-  const pendingDestPanelState = pending?.destPanel ? state.panels[pending.destPanel] : undefined;
   const pendingDestNameIssue = pending && supportsCopyDestName(pending)
-    ? copyDestNameIssue(pending, destName, pendingDestPanelState)
+    ? copyDestNameIssue(pending, destName)
     : null;
   const pendingDestNameConflictKey = pending && isCopyDestNameConflictIssue(pendingDestNameIssue)
     ? `${pendingKey}:${pendingDestNameIssue?.kind}:${destName}`
@@ -734,6 +718,12 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
         startOp(false);
         return;
       }
+      if (isLetterKey(e, "n") && showDestNameInput && !isSubmitted) {
+        e.preventDefault();
+        destNameInputRef.current?.focus();
+        destNameInputRef.current?.select();
+        return;
+      }
       if (isLetterKey(e, "d") && !isSubmitted) {
         e.preventDefault();
         setDryMode((current) => !current);
@@ -791,8 +781,10 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
             {!isDelete && (
               <>
                 <div className="modal__option">
-                  <label><MnemonicLabel text="Action if file exists:" mnemonic="a" /></label>
+                  <label htmlFor="file-conflict-policy"><MnemonicLabel text="Action if file exists:" mnemonic="a" /></label>
                   <select
+                    id="file-conflict-policy"
+                    data-testid="file-conflict-policy"
                     value={selectedConflictPolicy}
                     onChange={(e) => setConflictPolicy(e.target.value as ConflictPolicy)}
                   >
@@ -826,13 +818,14 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
                 {showDestNameInput && (
                   <>
                     <div className="modal__option modal__option--field">
-                      <label htmlFor="copy-destination-name">Destination name:</label>
+                      <label htmlFor="copy-destination-name"><MnemonicLabel text="Destination name:" mnemonic="n" /></label>
                       <input
                         ref={destNameInputRef}
                         data-modal-initial-focus={isCopyDestNameConflictIssue(pendingDestNameIssue) || undefined}
                         id="copy-destination-name"
                         className="modal__rename-input modal__copy-name-input"
                         data-testid="copy-destination-name-input"
+                        aria-keyshortcuts="N"
                         value={destName}
                         onChange={(e) => setDestName(e.target.value)}
                       />

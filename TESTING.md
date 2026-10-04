@@ -250,13 +250,16 @@ The smoke test exercises these flows:
   - Bro list keyboard: opened from the command palette, the bro list gets
     initial focus; Tab / Shift+Tab move the selection like the arrow keys.
   - Copy Paths bro: launching it shows a "Copied … full path(s)" toast.
-  - Modal default focus: Copy primary action, Rename input, conflicting copy
-    destination, Delete primary action (including reopen), completed-job Close,
-    Search mask, active Settings tab, and pairing Cancel on both peers.
+  - Modal default focus: Copy primary action (including existing destinations),
+    Rename input, overwrite decision, Delete primary action (including reopen),
+    completed-job Close, Search mask, active Settings tab, and pairing Cancel
+    on both peers.
     Delete Tab reaches Background and Cancel; Enter on Cancel preserves the
     file and restores panel focus, while Enter on Delete removes it.
-  - Copy/Rename dialogs: defaults, Tab reachability, destination-exists
-    warning, keyboard Cancel.
+  - Copy/Rename dialogs: defaults, Tab reachability, keyboard Cancel, Copy `N`
+    focusing/selecting the destination name without intercepting typed `n`, and copying
+    to existing files with Ask and Overwrite (including an edited destination
+    name); content checks verify replacement happens only after the Ask decision.
   - Contextual selection operations: inline toolbar and context-menu items for
     1/2/3 selected entries, cursor-row targeting, folder anchors.
   - Sort selector (Enter applies, Escape cancels, focus returns to the filter),
