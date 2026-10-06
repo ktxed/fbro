@@ -11,6 +11,8 @@ import { isEditableTarget, isLetterKey, isNativeActivationTarget } from "./modal
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { CopyButton } from "./CopyButton";
 import { MnemonicLabel } from "./MnemonicLabel";
+import { HashGenerateBroView } from "./HashGenerateBroView";
+import { HashCheckBroView } from "./HashCheckBroView";
 
 interface OperationModalProps {
   pending: PendingOp | null;
@@ -884,6 +886,13 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
         </ResizableModal>
       </ModalLayer>
     );
+  }
+
+  if (activeJob?.kind === "hash-generate-bro") {
+    return <HashGenerateBroView job={activeJob} client={client} onClose={close} />;
+  }
+  if (activeJob?.kind === "hash-check-bro") {
+    return <HashCheckBroView job={activeJob} client={client} onClose={close} />;
   }
 
   // ── Phase 2 & 3: Progress / Decision ─────────────────────────────────────

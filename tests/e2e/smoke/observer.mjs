@@ -326,6 +326,30 @@ export class FbroObserver {
       const job = this.state.jobs[msg.jobId];
       if (job) job.syncResult = msg.result;
     }
+    if (msg.type === "HashGenerateBroResult") {
+      const job = this.state.jobs[msg.jobId];
+      if (job) job.hashGenerateResult = msg.result;
+    }
+    if (msg.type === "HashGenerateBroFileResult") {
+      const result = this.state.jobs[msg.jobId]?.hashGenerateResult;
+      if (result) result.items = result.items.map((item) => item.hashPath === msg.item.hashPath ? msg.item : item);
+    }
+    if (msg.type === "HashCheckBroResult") {
+      const job = this.state.jobs[msg.jobId];
+      if (job) job.hashCheckResult = msg.result;
+    }
+    if (msg.type === "HashCheckBroFileResult") {
+      const result = this.state.jobs[msg.jobId]?.hashCheckResult;
+      if (result) result.items = result.items.map((item) => item.hashPath === msg.item.hashPath ? msg.item : item);
+    }
+    if (msg.type === "HashCheckReportSaved") {
+      const job = this.state.jobs[msg.jobId];
+      if (job) job.reportSavedPath = msg.path;
+    }
+    if (msg.type === "HashCheckReportFailed") {
+      const job = this.state.jobs[msg.jobId];
+      if (job) job.hashCheckReportError = msg.message;
+    }
     if (msg.type === "FedupBroResult" || msg.type === "FedupBroResultPage") {
       const job = this.state.jobs[msg.jobId];
       if (job) job.fedupResult = msg.result;

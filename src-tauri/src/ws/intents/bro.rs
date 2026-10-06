@@ -28,8 +28,9 @@ use crate::jobs::{
 use crate::state::ChildProcessEntry;
 use crate::ws::intents::{arg_str, arg_u64, is_global_selection_source};
 use crate::ws::protocol::{
-    now, BroCatalogSchema, BroInputSchema, BroOutputSchema, BroParamSchema, BroPreSchema, BroSchema,
-    FedupBroResultSchema, FileOpFileSchema, JobStartSchema, ServerMessage, SyncBroResultSchema,
+    now, BroCatalogSchema, BroInputSchema, BroOutputSchema, BroParamSchema, BroPreSchema,
+    BroSchema, FedupBroResultSchema, FileOpFileSchema, JobStartSchema, ServerMessage,
+    SyncBroResultSchema,
 };
 use crate::ws::runtime::{resolve_panel_id, IntentContext};
 
@@ -541,6 +542,8 @@ async fn list_bros_for_request(scope: &Value, args: &Value, ctx: &mut IntentCont
         sync_available,
         compare_available,
         resolved_inputs,
+        hash_check_location,
+        hash_generate_location,
     ) = {
         let state_guard = ctx.state.lock().await;
         let result_panel_id =
@@ -556,6 +559,36 @@ async fn list_bros_for_request(scope: &Value, args: &Value, ctx: &mut IntentCont
             .panels
             .get(&panel_id)
             .map(|p| p.source_id.clone());
+        let hash_check_location = state_guard
+            .panels
+            .get(&panel_id)
+            .filter(|panel| {
+                state_guard
+                    .sources
+                    .get(&panel.source_id)
+                    .is_some_and(|source| source.kind == "filesystem")
+                    && state_guard
+                        .drivers
+                        .get(&panel.source_id)
+                        .is_some_and(|driver| driver.is_local())
+                    && has_selected_b3(panel, parsed.target_path.as_deref())
+            })
+            .map(|panel| (panel.source_id.clone(), panel.path.clone()));
+        let hash_generate_location = state_guard
+            .panels
+            .get(&panel_id)
+            .filter(|panel| {
+                state_guard
+                    .sources
+                    .get(&panel.source_id)
+                    .is_some_and(|source| source.kind == "filesystem")
+                    && state_guard
+                        .drivers
+                        .get(&panel.source_id)
+                        .is_some_and(|driver| driver.is_local())
+                    && has_selected_hash_input(panel, parsed.target_path.as_deref(), false)
+            })
+            .map(|panel| (panel.source_id.clone(), panel.path.clone()));
         let result = match state_guard.panels.get(&panel_id) {
             Some(panel) if is_global_selection_source(&panel.source_id) => {
                 resolve_global_selection_inputs(&state_guard, panel, parsed.target_path.as_deref())
@@ -581,6 +614,8 @@ async fn list_bros_for_request(scope: &Value, args: &Value, ctx: &mut IntentCont
             sync_available,
             compare_available,
             resolved_inputs,
+            hash_check_location,
+            hash_generate_location,
         )
     };
 
@@ -601,11 +636,15 @@ async fn list_bros_for_request(scope: &Value, args: &Value, ctx: &mut IntentCont
 
     let suggested_output_dir = parsed.suggested_output_dir.clone();
     let lookup_inputs = ranking_inputs.clone();
+    let hash_check_available = hash_check_location.is_some();
+    let hash_generate_available = hash_generate_location.is_some();
     let mut bros = match tokio::task::spawn_blocking(move || {
         list_bros(
             &lookup_inputs,
             suggested_output_dir.as_deref(),
             panel_source_id.as_deref(),
+            hash_check_available,
+            hash_generate_available,
         )
     })
     .await
@@ -628,6 +667,14 @@ async fn list_bros_for_request(scope: &Value, args: &Value, ctx: &mut IntentCont
     }
     if compare_available {
         bros.insert(0, compare_files_bro());
+    }
+    // Sync/Compare are injected after ranking; the hash checker still goes first.
+    if let Some(index) = bros
+        .iter()
+        .position(|bro| bro.option.id == "builtin:check-hashes")
+    {
+        let hash_bro = bros.remove(index);
+        bros.insert(0, hash_bro);
     }
     let input_schemas = ranking_inputs
         .iter()
@@ -681,6 +728,8 @@ async fn list_bros_for_request(scope: &Value, args: &Value, ctx: &mut IntentCont
                 target_path: parsed.target_path.clone(),
                 resolved_inputs,
                 bros,
+                hash_check_location,
+                hash_generate_location,
             },
         );
         if state_guard.bro_requests.len() > 32 {
@@ -734,6 +783,27 @@ async fn launch_selected_bro(args: &Value, ctx: &mut IntentContext<'_>) {
         );
         return;
     };
+
+    if matches!(
+        bro.launch,
+        LaunchRecipe::BuiltInCheckHashes | LaunchRecipe::BuiltInGenerateHashes
+    ) {
+        if let Err(message) = launch_hash_bro(request, &bro, &parsed, ctx).await {
+            let _ = ctx
+                .tx
+                .send(ServerMessage::Error {
+                    timestamp: now(),
+                    code: "BRO_LAUNCH_FAILED".into(),
+                    message,
+                    recoverable: true,
+                    extra: Some(
+                        serde_json::json!({"requestId": parsed.request_id, "broId": parsed.bro_id}),
+                    ),
+                })
+                .await;
+        }
+        return;
+    }
 
     if matches!(bro.launch, LaunchRecipe::BuiltInSyncBro) {
         journal_resolved_bro_launch(
@@ -1132,7 +1202,7 @@ fn journal_resolved_bro_launch(
             request.params.get(&declared.id).map(|value| {
                 let value = match declared.kind {
                     BroLaunchInputKind::Password => "<redacted>".to_string(),
-                    BroLaunchInputKind::Int => value.clone(),
+                    BroLaunchInputKind::Int | BroLaunchInputKind::Bool => value.clone(),
                 };
                 (declared.id.clone(), Value::String(value))
             })
@@ -1412,6 +1482,192 @@ async fn launch_sync_bro(
     );
 
     Ok(())
+}
+
+async fn launch_hash_bro(
+    request: crate::state::BroRequest,
+    bro: &ResolvedBro,
+    parsed: &LaunchBroArgs,
+    ctx: &mut IntentContext<'_>,
+) -> Result<(), String> {
+    use crate::jobs::check_hashes::{run_check_hashes, HashCheckOptions};
+    use crate::jobs::generate_hashes::{run_generate_hashes, HashGenerateOptions};
+    use crate::jobs::{HashCheckBroJobMeta, HashGenerateBroJobMeta};
+    let generate = matches!(bro.launch, LaunchRecipe::BuiltInGenerateHashes);
+    let title = if generate {
+        "Generate hashes"
+    } else {
+        "Check hashes"
+    };
+    validate_bro_params(bro, &parsed.params)?;
+    let location = if generate {
+        &request.hash_generate_location
+    } else {
+        &request.hash_check_location
+    };
+    let (source_id, folder) = location
+        .as_ref()
+        .ok_or_else(|| format!("{title} requires a local filesystem folder."))?;
+    let (panel, driver) = {
+        let state = ctx.state.lock().await;
+        let panel = state
+            .panels
+            .get(&request.source_panel_id)
+            .ok_or_else(|| "Hash panel is unavailable.".to_string())?;
+        if &panel.source_id != source_id || &panel.path != folder {
+            return Err("The hash folder changed. Open Pass to Bro again.".into());
+        }
+        let driver = state
+            .drivers
+            .get(source_id)
+            .filter(|driver| driver.is_local())
+            .cloned()
+            .ok_or_else(|| "Local hash source is unavailable.".to_string())?;
+        (panel.clone(), driver)
+    };
+    let worker_driver = driver.clone();
+    let target_path = request.target_path.clone();
+    let inputs = tokio::task::spawn_blocking(move || {
+        resolve_inputs(&panel, worker_driver.as_ref(), target_path.as_deref())
+    })
+    .await
+    .map_err(|e| format!("Cannot resolve hash inputs: {e}"))??;
+    journal_resolved_bro_launch(parsed, bro, &inputs);
+    let source_panel = request.source_panel_id.clone();
+    let files = bro_input_files(&inputs);
+    let (cancel_tx, cancel_rx) = watch::channel(false);
+    let (pause_tx, _) = watch::channel(false);
+    let job_id = {
+        let mut state = ctx.state.lock().await;
+        let job_id = state.job_store.next_job_id();
+        state.job_store.jobs.insert(
+            job_id.clone(),
+            AppJob {
+                job_id: job_id.clone(),
+                kind: if generate {
+                    JobKind::HashGenerateBro(HashGenerateBroJobMeta { result: None })
+                } else {
+                    JobKind::HashCheckBro(HashCheckBroJobMeta {
+                        result: None,
+                        report_saved_path: None,
+                        report_error: None,
+                    })
+                },
+                source_panel: source_panel.clone(),
+                dest_panel: None,
+                source_path: folder.clone(),
+                dest_path: None,
+                state: JobState::Running,
+                progress: FileOpProgress::default(),
+                decision: None,
+                error: None,
+                background: false,
+                paused: false,
+                handle: None,
+                cancel_tx,
+                pause_tx,
+                skip_current_file: Arc::new(AtomicBool::new(false)),
+                keep_partial_files_on_cancel: Arc::new(AtomicBool::new(false)),
+            },
+        );
+        job_id
+    };
+    let _ = ctx
+        .tx
+        .send(ServerMessage::JobStarted {
+            timestamp: now(),
+            job: JobStartSchema {
+                job_id: job_id.clone(),
+                kind: if generate {
+                    "hash-generate-bro"
+                } else {
+                    "hash-check-bro"
+                }
+                .into(),
+                op_type: title.into(),
+                files,
+                source_panel,
+                source_path: folder.clone(),
+                dest_panel: None,
+                dest_path: None,
+                initial_state: "Running".into(),
+                total_files: inputs.len(),
+                total_bytes_total: 0,
+                background: false,
+                supports_pause: false,
+                result_path: None,
+                result_panel_id: None,
+                request_id: Some(parsed.request_id.clone()),
+                search_source_id: None,
+                search_params: None,
+            },
+        })
+        .await;
+    let handle = if generate {
+        tokio::spawn(run_generate_hashes(
+            job_id.clone(),
+            HashGenerateOptions {
+                driver,
+                folder: folder.clone(),
+                inputs,
+                overwrite_existing: parsed
+                    .params
+                    .get("overwriteExisting")
+                    .is_some_and(|value| value.trim() == "true"),
+            },
+            ctx.tx.clone(),
+            cancel_rx,
+        ))
+    } else {
+        tokio::spawn(run_check_hashes(
+            job_id.clone(),
+            HashCheckOptions {
+                driver,
+                folder: folder.clone(),
+                inputs,
+                save_result: parsed
+                    .params
+                    .get("saveResult")
+                    .is_some_and(|value| value.trim() == "true"),
+            },
+            ctx.tx.clone(),
+            cancel_rx,
+        ))
+    };
+    if let Some(job) = ctx.state.lock().await.job_store.jobs.get_mut(&job_id) {
+        job.handle = Some(handle);
+    }
+    Ok(())
+}
+
+/// Inspect every selected entry without doing I/O or relying on the ranking sample.
+fn has_selected_b3(panel: &crate::state::Panel, target_path: Option<&str>) -> bool {
+    has_selected_hash_input(panel, target_path, true)
+}
+
+fn has_selected_hash_input(
+    panel: &crate::state::Panel,
+    target_path: Option<&str>,
+    sidecars: bool,
+) -> bool {
+    let is_b3 = |entry: &crate::ws::protocol::EntrySchema| {
+        entry.kind == "file" && entry.name.ends_with(".b3") == sidecars
+    };
+    if let Some(path) = target_path {
+        let name = path.rsplit(['/', '\\']).next().unwrap_or("");
+        panel
+            .entries
+            .iter()
+            .any(|entry| entry.name == name && is_b3(entry))
+    } else if panel.selection.is_empty() {
+        panel.entries.get(panel.cursor).is_some_and(is_b3)
+    } else {
+        panel
+            .selection
+            .iter()
+            .filter_map(|index| panel.entries.get(*index))
+            .any(is_b3)
+    }
 }
 
 async fn launch_fedup_bro(
@@ -1770,6 +2026,11 @@ fn validate_bro_params(bro: &ResolvedBro, params: &HashMap<String, String>) -> R
                 }
             }
             BroLaunchInputKind::Password => {}
+            BroLaunchInputKind::Bool => {
+                if !matches!(value, "true" | "false") {
+                    return Err(format!("{} must be true or false.", param.label));
+                }
+            }
         }
     }
     Ok(())
@@ -1992,6 +2253,50 @@ fn build_procs_patch(procs: &std::collections::HashMap<u32, ChildProcessEntry>) 
 #[cfg(test)]
 mod tests {
     use super::copied_paths_noun;
+
+    #[test]
+    fn generation_boolean_option_validates_wire_values() {
+        let bro = crate::bro::list_bros(&[], None, None, false, true)
+            .into_iter()
+            .find(|bro| bro.option.id == "builtin:generate-hashes")
+            .unwrap();
+        assert!(super::validate_bro_params(&bro, &std::collections::HashMap::new()).is_ok());
+        for value in ["true", "false"] {
+            assert!(super::validate_bro_params(
+                &bro,
+                &std::collections::HashMap::from([("overwriteExisting".into(), value.into())])
+            )
+            .is_ok());
+        }
+        assert!(super::validate_bro_params(
+            &bro,
+            &std::collections::HashMap::from([("overwriteExisting".into(), "yes".into())])
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn check_hashes_boolean_option_validates_wire_values() {
+        let bro = crate::bro::list_bros(&[], None, None, true, false)
+            .into_iter()
+            .find(|bro| bro.option.id == "builtin:check-hashes")
+            .unwrap();
+        assert!(super::validate_bro_params(&bro, &std::collections::HashMap::new()).is_ok());
+        for value in ["true", "false"] {
+            assert!(super::validate_bro_params(
+                &bro,
+                &std::collections::HashMap::from([("saveResult".into(), value.into())])
+            )
+            .is_ok());
+        }
+        for value in ["yes", "1", "TRUE"] {
+            assert!(super::validate_bro_params(
+                &bro,
+                &std::collections::HashMap::from([("saveResult".into(), value.into())])
+            )
+            .is_err());
+        }
+    }
 
     #[test]
     fn copied_paths_noun_counts_paths() {

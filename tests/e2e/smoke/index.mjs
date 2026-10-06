@@ -23,6 +23,8 @@ import {
 } from "./processes.mjs";
 import { runArchiveFlow } from "./cases/archive.mjs";
 import { runFedupFlow } from "./cases/fedup.mjs";
+import { runHashGenerateFlow } from "./cases/hash-generate.mjs";
+import { runHashCheckFlow } from "./cases/hash-check.mjs";
 import { runGlobalSelectionFlow } from "./cases/global-selection.mjs";
 import { runGitFlow } from "./cases/git.mjs";
 import { runLocalFlow } from "./cases/local.mjs";
@@ -62,6 +64,15 @@ async function main() {
     observerA = new FbroObserver("fbro-a", wsUrls.a);
     await observerA.connect();
 
+    if (process.env.FBRO_E2E_HASH_GENERATE_ONLY === "1") {
+      await runHashGenerateFlow(browserA, observerA);
+      await runHashCheckFlow(browserA, observerA);
+      return;
+    }
+    if (process.env.FBRO_E2E_HASH_CHECK_ONLY === "1") {
+      await runHashCheckFlow(browserA, observerA);
+      return;
+    }
     if (process.env.FBRO_E2E_VIEWER_ONLY === "1") {
       await runViewerFlow(browserA, observerA);
       return;
@@ -75,6 +86,8 @@ async function main() {
     await runGlobalSelectionFlow(browserA, observerA);
     await runGitFlow(browserA, observerA);
     await runFedupFlow(browserA, observerA);
+    await runHashCheckFlow(browserA, observerA);
+    await runHashGenerateFlow(browserA, observerA);
     await runArchiveFlow(browserA, observerA);
     await runSearchFlow(browserA, observerA);
     await runDatetimeSearchFlow(browserA, observerA);

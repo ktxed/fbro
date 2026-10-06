@@ -368,3 +368,46 @@ HTML. It writes diagnostics under `artifacts/e2e`:
   screenshots when a browser session exists.
 
 The authoritative pass/fail signal is the process exit code.
+
+## Check hashes Bro
+
+`cases/hash-check.mjs` covers first-priority discovery for mixed and orphan-only
+selections, detection beyond the 100-entry ranking sample, stale launch
+rejection, keyboard checkbox/launch/close, matching and mismatching digests,
+malformed sidecars, ignored counts, saved report content and toast, no-save
+behavior, intermediate large-file byte progress, background/reopen behavior,
+cancellation through Jobs, and panel focus restoration.
+
+Run this flow alone with `FBRO_E2E_HASH_CHECK_ONLY=1` using the normal local
+smoke command. Its large-file fixture is sparse and uses no proportional disk
+space. Rust tests in `jobs::check_hashes` cover parsing, empty files, I/O errors,
+cancellation, bounded streaming, report collisions, dangling symlinks, and save
+failures and cancellation at the report commit boundary; provider/ranking/
+parameter tests cover discovery and boolean options.
+
+The dedicated flow passed on native Linux/Wayland with the debug binary,
+including live progress over an 8 GiB sparse fixture. The frontend build and
+all 300 Rust tests passed. Native macOS and Windows integration still needs
+verification.
+
+## Generate hashes Bro coverage
+
+`cases/hash-generate.mjs` covers keyboard Bro selection, the default unchecked
+Overwrite existing checkbox, mixed selections, skip/replace outcomes, generated
+sidecars passing Check hashes, one terminal save toast, panel refresh, and exact
+focus restoration. It checks full-selection discovery beyond the 100-entry
+ranking sample and stale-folder launch rejection. An 8 GiB sparse source covers
+intermediate byte progress, background/reopen, Jobs cancellation, and preserving
+the previous sidecar. `FBRO_E2E_HASH_GENERATE_ONLY=1` runs generation and the
+Check hashes regression flow.
+
+Rust generation tests cover empty/Unicode/linebreak names, checker compatibility,
+selection filtering, existing destinations, concurrent creation, read/write/
+flush/rename errors, cleanup, cancellation before/after per-file commits, and
+full selection processing. Provider, scoring, catalog and parameter validation
+have unit coverage. Native macOS and Windows still require verification.
+
+Generation and Check hashes regression smoke flows passed on native
+Linux/Wayland with the debug app, including progress and cancellation on the
+8 GiB sources. Frontend and debug app builds passed; the complete Rust suite
+passed all 315 tests. Native macOS/Windows behavior was not verified.

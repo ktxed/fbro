@@ -42,6 +42,8 @@ export function BroModal({ client, bro }: BroModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const firstFieldRef = useRef<HTMLInputElement>(null);
+  const launchingRef = useRef(false);
+  const [submitting, setSubmitting] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [activeFormBroId, setActiveFormBroId] = useState<string | null>(null);
   const [outputs, setOutputs] = useState<Record<string, string>>({});
@@ -119,7 +121,7 @@ export function BroModal({ client, bro }: BroModalProps) {
     const selectedBro = bros[selectedIndex];
     if (!selectedBro || (!selectedBro.output && broParams.length === 0 && !isFedupBro(selectedBro))) return;
     firstFieldRef.current?.focus();
-    if (firstFieldRef.current instanceof HTMLInputElement) {
+    if (firstFieldRef.current instanceof HTMLInputElement && firstFieldRef.current.type !== "checkbox") {
       firstFieldRef.current.select();
     }
   }, [broParams.length, bros, focusFieldsTick, selectedIndex]);
@@ -196,6 +198,9 @@ export function BroModal({ client, bro }: BroModalProps) {
   }, [activeFormBro, activeFormBroIsFedup, fedupExcludePatterns, fedupIncludePatterns, missingRequiredParam, selectedInputValues]);
 
   const launchBro = (broId: string, output?: string, launchParams: Record<string, string> = {}) => {
+    if (launchingRef.current) return;
+    launchingRef.current = true;
+    setSubmitting(true);
     close();
     client.sendIntent("LaunchBro", undefined, {
       requestId: bro.requestId,
@@ -452,6 +457,18 @@ export function BroModal({ client, bro }: BroModalProps) {
               {selectedBroParams(activeFormBro).map((input, index) => {
                 const value = selectedInputValues[input.id] ?? "";
                 const isFirstField = !activeFormBro.output && index === 0;
+                if (input.kind === "bool") {
+                  return (
+                    <label className="bro-modal__fedup-checkbox" key={`${activeFormBro.id}:${input.id}`}>
+                      <BroParamField
+                        input={input} value={value} inputRef={isFirstField ? firstFieldRef : undefined}
+                        onChange={(nextValue) => setParams((current) => ({ ...current, [`${activeFormBro.id}:${input.id}`]: nextValue }))}
+                        onSubmit={launchSelected} onCancel={close}
+                      />
+                      {input.label}
+                    </label>
+                  );
+                }
                 return (
                   <div className="modal__rename-row" key={`${activeFormBro.id}:${input.id}`}>
                     <label className="modal__rename-label">{input.label}:</label>
@@ -483,6 +500,7 @@ export function BroModal({ client, bro }: BroModalProps) {
             data-testid="bro-launch-button"
             disabled={
               bro.status !== "ready"
+              || submitting
               || !selectedBro
               || (selectedBroHasLaunchInputs && !selectedBroIsActivated)
               || !!outputError
@@ -490,7 +508,7 @@ export function BroModal({ client, bro }: BroModalProps) {
             }
             onClick={launchSelected}
           >
-            Launch
+            {submitting ? "Launching…" : "Launch"}
           </button>
           <button className="modal__btn" onClick={close}>
             Cancel
@@ -590,6 +608,17 @@ function FedupPatternField({
 }
 
 function BroParamField({ input, value, inputRef, onChange, onSubmit, onCancel }: BroParamFieldProps) {
+  if (input.kind === "bool") {
+    return (
+      <input
+        ref={inputRef as React.RefObject<HTMLInputElement>}
+        type="checkbox"
+        data-testid={`bro-param-${input.id}`}
+        checked={value === "true"}
+        onChange={(e) => onChange(e.target.checked ? "true" : "false")}
+      />
+    );
+  }
   const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "ArrowUp" || e.key === "ArrowDown") {
       e.stopPropagation();

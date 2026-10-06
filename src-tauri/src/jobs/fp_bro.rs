@@ -108,6 +108,8 @@ pub async fn run_fp_bro(
         | LaunchRecipe::BuiltInKillProc
         | LaunchRecipe::BuiltInSyncBro
         | LaunchRecipe::BuiltInFedupBro
+        | LaunchRecipe::BuiltInCheckHashes
+        | LaunchRecipe::BuiltInGenerateHashes
         | LaunchRecipe::BuiltInCompareFiles => {}
     }
 }

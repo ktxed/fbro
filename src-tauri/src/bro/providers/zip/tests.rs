@@ -17,6 +17,8 @@ fn single_input_archive_name_uses_entry_name() {
         inputs: &inputs,
         suggested_output_dir: Some("/tmp/out"),
         source_id: None,
+        hash_check_available: false,
+        hash_generate_available: false,
     };
     assert_eq!(archive_file_name(&ctx), "movie.mkv.zip");
 }
@@ -39,6 +41,8 @@ fn multiple_input_archive_name_uses_panel_directory_name() {
         inputs: &inputs,
         suggested_output_dir: Some("/tmp/out"),
         source_id: None,
+        hash_check_available: false,
+        hash_generate_available: false,
     };
     assert_eq!(archive_file_name(&ctx), "source.zip");
 }
@@ -51,6 +55,8 @@ fn suggested_output_dir_wins_for_default_output_path() {
         inputs: &inputs,
         suggested_output_dir: Some("/tmp/out"),
         source_id: None,
+        hash_check_available: false,
+        hash_generate_available: false,
     };
     assert_eq!(
         default_output_path(&ctx),

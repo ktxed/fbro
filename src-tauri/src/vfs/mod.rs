@@ -182,6 +182,12 @@ pub trait VfsDriver: Send + Sync {
         }
     }
     fn open_write(&self, path: &str) -> Result<Box<dyn Write + Send>, VfsError>;
+    /// Create a new file exclusively. Never follows or overwrites an existing entry.
+    fn open_write_new(&self, _path: &str) -> Result<Box<dyn Write + Send>, VfsError> {
+        Err(VfsError::NotSupported(
+            "exclusive file creation is not supported".to_string(),
+        ))
+    }
     fn supports_write_at(&self) -> bool {
         false
     }

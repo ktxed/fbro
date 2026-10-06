@@ -164,3 +164,15 @@ input history consumes its own navigation and Enter/Escape first. Escape
 collapses an idle form before closing the modal; during creation it closes the
 modal and backgrounds the activity without cancelling. Cancel restores focus
 to New branch; success restores focus to the refreshed branch selector.
+
+Check hashes follows the Pass to Bro list/form keyboard flow. Enter activates
+its options, Space toggles Save result, and Tab reaches Launch. Its results view
+has one Close action; Enter/Escape dismiss it without cancelling a running job.
+The result scroll region accepts keyboard scrolling, while the covered panel
+and global commands remain inert. Cancellation is available through Jobs.
+
+Generate hashes follows the Check hashes results keyboard contract: the
+Overwrite existing checkbox uses native Space activation, launch occurs once
+from its primary button, and the results modal initially focuses Close.
+Enter/Escape dismiss the view without cancelling; completion retains focus and
+Jobs remains the cancellation entry point.

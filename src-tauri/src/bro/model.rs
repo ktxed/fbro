@@ -43,6 +43,7 @@ impl BroSource {
 pub enum BroLaunchInputKind {
     Int,
     Password,
+    Bool,
 }
 
 impl BroLaunchInputKind {
@@ -50,6 +51,7 @@ impl BroLaunchInputKind {
         match self {
             Self::Int => "int",
             Self::Password => "password",
+            Self::Bool => "bool",
         }
     }
 }
@@ -112,6 +114,8 @@ pub(crate) enum LaunchRecipe {
     BuiltInKillProc,
     BuiltInSyncBro,
     BuiltInFedupBro,
+    BuiltInCheckHashes,
+    BuiltInGenerateHashes,
     BuiltInCompareFiles,
 }
 
@@ -209,6 +213,8 @@ impl ResolvedBro {
             LaunchRecipe::BuiltInKillProc => serde_json::json!({ "kind": "built-in", "name": "kill-process" }),
             LaunchRecipe::BuiltInSyncBro => serde_json::json!({ "kind": "built-in", "name": "sync" }),
             LaunchRecipe::BuiltInFedupBro => serde_json::json!({ "kind": "built-in", "name": "fedup" }),
+            LaunchRecipe::BuiltInGenerateHashes => serde_json::json!({ "kind": "built-in", "name": "generate-hashes" }),
+            LaunchRecipe::BuiltInCheckHashes => serde_json::json!({ "kind": "built-in", "name": "check-hashes" }),
             LaunchRecipe::BuiltInCompareFiles => serde_json::json!({ "kind": "built-in", "name": "compare-files" }),
         }
     }
@@ -283,6 +289,8 @@ impl ResolvedBro {
             | LaunchRecipe::BuiltInKillProc
             | LaunchRecipe::BuiltInSyncBro
             | LaunchRecipe::BuiltInFedupBro
+            | LaunchRecipe::BuiltInCheckHashes
+            | LaunchRecipe::BuiltInGenerateHashes
             | LaunchRecipe::BuiltInCompareFiles => Err(
                 "This bro uses a built-in runtime and cannot be launched as a command".to_string(),
             ),

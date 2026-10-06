@@ -273,7 +273,7 @@ export interface SearchProgress {
 
 export interface Job {
   jobId: string;
-  kind: "file-op" | "fp-bro" | "search" | "outgoing-transfer" | "sync-bro" | "fedup-bro" | "remote-manifest";
+  kind: "file-op" | "fp-bro" | "search" | "outgoing-transfer" | "sync-bro" | "fedup-bro" | "hash-check-bro" | "hash-generate-bro" | "remote-manifest";
   type: string;
   state: "Queued" | "Running" | "AwaitingDecision" | "Completed" | "Cancelled" | "Failed";
   paused: boolean;
@@ -301,6 +301,9 @@ export interface Job {
   reportSavedPath?: string;
   // Fedup Bro-specific fields
   fedupResult?: FedupBroResult;
+  hashCheckResult?: HashCheckBroResult;
+  hashGenerateResult?: HashGenerateBroResult;
+  hashCheckReportError?: string;
 }
 
 export interface JobQueue {
@@ -455,7 +458,7 @@ export interface BroOutputItem {
 export interface BroParamItem {
   id: string;
   label: string;
-  kind: "int" | "password";
+  kind: "int" | "password" | "bool";
   required: boolean;
   defaultValue?: string;
   minValue?: number;
@@ -487,7 +490,7 @@ export interface BroCatalogItem {
 
 export interface JobStart {
   jobId: string;
-  kind: "file-op" | "fp-bro" | "search" | "outgoing-transfer" | "sync-bro" | "fedup-bro" | "remote-manifest";
+  kind: "file-op" | "fp-bro" | "search" | "outgoing-transfer" | "sync-bro" | "fedup-bro" | "hash-check-bro" | "hash-generate-bro" | "remote-manifest";
   opType: string;
   files: FileOpFile[];
   sourcePanel: string;
@@ -549,6 +552,72 @@ export interface SyncBroResultMessage {
   timestamp: number;
   jobId: string;
   result: SyncBroResult;
+}
+
+export interface HashGenerateBroFile {
+  sourcePath: string;
+  hashPath: string;
+  status: "pending" | "hashing" | "created" | "replaced" | "skipped" | "error" | "cancelled";
+  hash: string | null;
+  error: string | null;
+}
+export interface HashGenerateBroResult {
+  ignoredCount: number;
+  items: HashGenerateBroFile[];
+}
+export interface HashGenerateBroResultMessage {
+  type: "HashGenerateBroResult";
+  timestamp: number;
+  jobId: string;
+  result: HashGenerateBroResult;
+}
+export interface HashGenerateBroFileResultMessage {
+  type: "HashGenerateBroFileResult";
+  timestamp: number;
+  jobId: string;
+  item: HashGenerateBroFile;
+}
+
+export interface HashCheckBroFile {
+  hashPath: string;
+  counterpartPath: string;
+  status: "pending" | "checking" | "matched" | "mismatched" | "error" | "cancelled";
+  expectedHash: string | null;
+  actualHash: string | null;
+  error: string | null;
+}
+
+export interface HashCheckBroResult {
+  ignoredCount: number;
+  items: HashCheckBroFile[];
+}
+
+export interface HashCheckBroResultMessage {
+  type: "HashCheckBroResult";
+  timestamp: number;
+  jobId: string;
+  result: HashCheckBroResult;
+}
+
+export interface HashCheckBroFileResultMessage {
+  type: "HashCheckBroFileResult";
+  timestamp: number;
+  jobId: string;
+  item: HashCheckBroFile;
+}
+
+export interface HashCheckReportSavedMessage {
+  type: "HashCheckReportSaved";
+  timestamp: number;
+  jobId: string;
+  path: string;
+}
+
+export interface HashCheckReportFailedMessage {
+  type: "HashCheckReportFailed";
+  timestamp: number;
+  jobId: string;
+  message: string;
 }
 
 export interface FedupBroResultMessage {
@@ -1128,6 +1197,12 @@ export type BEMessage =
   | EjectSourceOkMessage
   | EjectSourceFailedMessage
   | SyncBroResultMessage
+  | HashGenerateBroResultMessage
+  | HashGenerateBroFileResultMessage
+  | HashCheckBroResultMessage
+  | HashCheckBroFileResultMessage
+  | HashCheckReportSavedMessage
+  | HashCheckReportFailedMessage
   | FedupBroResultMessage
   | FedupBroResultPageMessage
   | FedupReportSavedMessage

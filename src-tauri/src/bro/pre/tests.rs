@@ -32,6 +32,20 @@ fn bro(name: &str) -> ResolvedBro {
 }
 
 #[test]
+fn check_hashes_ranks_above_every_normal_fit() {
+    let inputs = vec![BroInputItem {
+        path: "/tmp/a.mp4".into(),
+        name: "a.mp4".into(),
+        kind: "file".into(),
+    }];
+    let mut hash_bro = bro("Check hashes");
+    hash_bro.option.id = "builtin:check-hashes".into();
+    let ranked = rank_bros(&inputs, vec![bro("mpv"), bro("7z"), bro("tar"), hash_bro]);
+    assert_eq!(ranked[0].option.id, "builtin:check-hashes");
+    assert!(ranked[0].option.pre.score > ranked[1].option.pre.score);
+}
+
+#[test]
 fn media_bros_sort_above_tar_for_media_selection() {
     let inputs = vec![BroInputItem {
         path: "/tmp/movie.mkv".to_string(),
@@ -107,4 +121,22 @@ fn extract_bro_sorts_above_pack_bros_for_single_archive() {
     assert_eq!(bros[0].option.name, "unzip");
     assert_eq!(bros[0].option.pre.score, 99);
     assert!(bros[0].option.pre.score > bros[1].option.pre.score);
+}
+
+#[test]
+fn generation_ranks_below_checker_and_strong_media_fit() {
+    let inputs = vec![BroInputItem {
+        path: "/tmp/movie.mp4".into(),
+        name: "movie.mp4".into(),
+        kind: "file".into(),
+    }];
+    let mut generate = bro("Generate hashes");
+    generate.option.id = "builtin:generate-hashes".into();
+    let mut check = bro("Check hashes");
+    check.option.id = "builtin:check-hashes".into();
+    let ranked = rank_bros(&inputs, vec![generate, check, bro("mpv")]);
+    assert_eq!(ranked[0].option.id, "builtin:check-hashes");
+    assert_eq!(ranked[1].option.name, "mpv");
+    assert_eq!(ranked[2].option.id, "builtin:generate-hashes");
+    assert_eq!(ranked[2].option.pre.score, 96);
 }

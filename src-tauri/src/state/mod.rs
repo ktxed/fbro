@@ -596,6 +596,9 @@ pub struct BroRequest {
     pub target_path: Option<String>,
     pub resolved_inputs: Option<Vec<crate::bro::BroInputItem>>,
     pub bros: Vec<ResolvedBro>,
+    /// Original local source and folder for a hash-check launch.
+    pub hash_check_location: Option<(String, String)>,
+    pub hash_generate_location: Option<(String, String)>,
 }
 
 #[derive(Clone, Debug)]

@@ -1,10 +1,13 @@
+pub mod check_hashes;
 pub mod dirsize;
 pub mod extract_archive;
 pub mod fedup;
 pub mod file_ops;
 pub mod fp_bro;
-pub mod integrity_compare;
+pub mod generate_hashes;
 pub(crate) mod git;
+pub(crate) mod hash;
+pub mod integrity_compare;
 pub(crate) mod progress;
 pub mod scan;
 pub mod search;
@@ -160,6 +163,8 @@ pub enum JobKind {
     OutgoingTransfer(OutgoingTransferJobMeta),
     SyncBro(SyncBroJobMeta),
     FedupBro(FedupBroJobMeta),
+    HashCheckBro(HashCheckBroJobMeta),
+    HashGenerateBro(HashGenerateBroJobMeta),
     RemoteManifest(RemoteManifestJobMeta),
 }
 
@@ -207,6 +212,16 @@ pub struct FedupBroJobMeta {
     pub inputs: Vec<BroInputItem>,
     pub report_path: String,
     pub result: Option<Arc<FedupBroResultSchema>>,
+}
+
+pub struct HashGenerateBroJobMeta {
+    pub result: Option<crate::ws::protocol::HashGenerateBroResultSchema>,
+}
+
+pub struct HashCheckBroJobMeta {
+    pub result: Option<crate::ws::protocol::HashCheckBroResultSchema>,
+    pub report_saved_path: Option<String>,
+    pub report_error: Option<String>,
 }
 
 #[allow(dead_code)]
@@ -316,7 +331,10 @@ mod tests {
 
         store.remove_from_file_queue("job-2");
 
-        assert_eq!(store.file_queue.iter().cloned().collect::<Vec<_>>(), vec!["job-1"]);
+        assert_eq!(
+            store.file_queue.iter().cloned().collect::<Vec<_>>(),
+            vec!["job-1"]
+        );
         assert_eq!(store.file_queue_running.as_deref(), Some("job-1"));
         assert_eq!(store.file_queue_completed, 1);
     }

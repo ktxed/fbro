@@ -1123,6 +1123,10 @@ function applyJobEvent(state: AppState, msg: JobEventMessage): AppState {
               ? "Outgoing transfer completed"
               : job.kind === "remote-manifest"
                 ? "Remote Sync hashing completed"
+              : job.kind === "hash-check-bro"
+                ? "Hash check completed"
+              : job.kind === "hash-generate-bro"
+                ? "Hash generation completed"
               : job.kind === "fp-bro" || job.kind === "sync-bro" || job.kind === "fedup-bro"
                 ? "Bro completed successfully"
                 : "Operation completed successfully",
@@ -1180,6 +1184,17 @@ function applyJobEvent(state: AppState, msg: JobEventMessage): AppState {
         token: msg.timestamp,
       },
     };
+  }
+
+  if (job.kind === "hash-generate-bro" && ["Completed", "Cancelled", "Failed"].includes(msg.event)
+      && !["Completed", "Cancelled", "Failed"].includes(job.state)) {
+    const saved = job.hashGenerateResult?.items.filter((item) => item.status === "created" || item.status === "replaced").length ?? 0;
+    if (saved > 0) {
+      next = { ...next, transientHint: {
+        message: `${msg.event === "Cancelled" ? "Cancelled — saved" : msg.event === "Failed" ? "Failed — saved" : "Saved"} ${saved} hash ${saved === 1 ? "file" : "files"}`,
+        token: msg.timestamp,
+      } };
+    }
   }
 
   // Sync search progress/status into pendingSearch if it belongs to this search job
@@ -1242,6 +1257,46 @@ function reducer(state: AppState, action: AppAction): AppState {
           return {
             ...state,
             jobs: { ...state.jobs, [msg.jobId]: { ...job, syncResult: msg.result } },
+          };
+        }
+        case "HashGenerateBroResult": {
+          const job = state.jobs[msg.jobId];
+          if (!job) return state;
+          return { ...state, jobs: { ...state.jobs, [msg.jobId]: { ...job, hashGenerateResult: msg.result } } };
+        }
+        case "HashGenerateBroFileResult": {
+          const job = state.jobs[msg.jobId];
+          if (!job?.hashGenerateResult) return state;
+          const result = { ...job.hashGenerateResult, items: job.hashGenerateResult.items.map((item) => item.hashPath === msg.item.hashPath ? msg.item : item) };
+          return { ...state, jobs: { ...state.jobs, [msg.jobId]: { ...job, hashGenerateResult: result } } };
+        }
+        case "HashCheckBroResult": {
+          const job = state.jobs[msg.jobId];
+          if (!job) return state;
+          return { ...state, jobs: { ...state.jobs, [msg.jobId]: { ...job, hashCheckResult: msg.result } } };
+        }
+        case "HashCheckBroFileResult": {
+          const job = state.jobs[msg.jobId];
+          if (!job?.hashCheckResult) return state;
+          const result = { ...job.hashCheckResult, items: job.hashCheckResult.items.map((item) => item.hashPath === msg.item.hashPath ? msg.item : item) };
+          return { ...state, jobs: { ...state.jobs, [msg.jobId]: { ...job, hashCheckResult: result } } };
+        }
+        case "HashCheckReportSaved": {
+          const job = state.jobs[msg.jobId];
+          if (!job) return state;
+          return {
+            ...state,
+            jobs: { ...state.jobs, [msg.jobId]: { ...job, reportSavedPath: msg.path, hashCheckReportError: undefined } },
+            transientHint: { message: `Saved hash check report to ${msg.path}`, token: msg.timestamp },
+          };
+        }
+        case "HashCheckReportFailed": {
+          const job = state.jobs[msg.jobId];
+          if (!job) return state;
+          return {
+            ...state,
+            jobs: { ...state.jobs, [msg.jobId]: { ...job, hashCheckReportError: msg.message } },
+            transientHint: { message: msg.message, token: msg.timestamp },
           };
         }
         case "FedupBroResult":

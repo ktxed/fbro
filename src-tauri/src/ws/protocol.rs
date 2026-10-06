@@ -143,6 +143,42 @@ pub enum ServerMessage {
         job_id: String,
         result: SyncBroResultSchema,
     },
+    HashGenerateBroResult {
+        timestamp: u64,
+        #[serde(rename = "jobId")]
+        job_id: String,
+        result: HashGenerateBroResultSchema,
+    },
+    HashGenerateBroFileResult {
+        timestamp: u64,
+        #[serde(rename = "jobId")]
+        job_id: String,
+        item: HashGenerateBroFileSchema,
+    },
+    HashCheckBroResult {
+        timestamp: u64,
+        #[serde(rename = "jobId")]
+        job_id: String,
+        result: HashCheckBroResultSchema,
+    },
+    HashCheckBroFileResult {
+        timestamp: u64,
+        #[serde(rename = "jobId")]
+        job_id: String,
+        item: HashCheckBroFileSchema,
+    },
+    HashCheckReportSaved {
+        timestamp: u64,
+        #[serde(rename = "jobId")]
+        job_id: String,
+        path: String,
+    },
+    HashCheckReportFailed {
+        timestamp: u64,
+        #[serde(rename = "jobId")]
+        job_id: String,
+        message: String,
+    },
     FedupBroResult {
         timestamp: u64,
         #[serde(rename = "jobId")]
@@ -1052,6 +1088,64 @@ pub struct SyncBroResultSchema {
     pub unverified: Vec<String>,
     pub local_errors: Vec<SyncBroErrorSchema>,
     pub remote_errors: Vec<SyncBroErrorSchema>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct HashGenerateBroFileSchema {
+    pub source_path: String,
+    pub hash_path: String,
+    pub status: HashGenerateStatus,
+    pub hash: Option<String>,
+    pub error: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum HashGenerateStatus {
+    Pending,
+    Hashing,
+    Created,
+    Replaced,
+    Skipped,
+    Error,
+    Cancelled,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct HashGenerateBroResultSchema {
+    pub ignored_count: usize,
+    pub items: Vec<HashGenerateBroFileSchema>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct HashCheckBroFileSchema {
+    pub hash_path: String,
+    pub counterpart_path: String,
+    pub status: HashCheckStatus,
+    pub expected_hash: Option<String>,
+    pub actual_hash: Option<String>,
+    pub error: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum HashCheckStatus {
+    Pending,
+    Checking,
+    Matched,
+    Mismatched,
+    Error,
+    Cancelled,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct HashCheckBroResultSchema {
+    pub ignored_count: usize,
+    pub items: Vec<HashCheckBroFileSchema>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

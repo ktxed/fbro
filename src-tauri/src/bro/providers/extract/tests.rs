@@ -39,6 +39,8 @@ fn default_dir_uses_archive_parent_and_stem() {
         inputs: &inputs,
         suggested_output_dir: None,
         source_id: None,
+        hash_check_available: false,
+        hash_generate_available: false,
     };
     assert_eq!(
         default_extract_dir(&ctx, ArchiveKind::Zip).as_deref(),
@@ -53,6 +55,8 @@ fn emits_single_extract_bro_for_archive_cursor() {
         inputs: &inputs,
         suggested_output_dir: None,
         source_id: None,
+        hash_check_available: false,
+        hash_generate_available: false,
     };
     let bros = ExtractProvider.list(&ctx);
     assert_eq!(bros.len(), 1);
@@ -66,6 +70,8 @@ fn no_bro_for_non_archive_or_directory_or_multiselect() {
         inputs: &[input("/home/u/stuff", "stuff", "directory")],
         suggested_output_dir: None,
         source_id: None,
+        hash_check_available: false,
+        hash_generate_available: false,
     };
     assert!(ExtractProvider.list(&ctx_dir).is_empty());
 
@@ -73,6 +79,8 @@ fn no_bro_for_non_archive_or_directory_or_multiselect() {
         inputs: &[input("/home/u/notes.txt", "notes.txt", "file")],
         suggested_output_dir: None,
         source_id: None,
+        hash_check_available: false,
+        hash_generate_available: false,
     };
     assert!(ExtractProvider.list(&ctx_txt).is_empty());
 
@@ -84,6 +92,8 @@ fn no_bro_for_non_archive_or_directory_or_multiselect() {
         inputs: &multi,
         suggested_output_dir: None,
         source_id: None,
+        hash_check_available: false,
+        hash_generate_available: false,
     };
     assert!(ExtractProvider.list(&ctx_multi).is_empty());
 }

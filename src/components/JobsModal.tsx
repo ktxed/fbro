@@ -120,6 +120,31 @@ function JobSummary({
     );
   }
 
+  if (job.kind === "hash-generate-bro" && job.hashGenerateResult) {
+    const count = (status: string) => job.hashGenerateResult!.items.filter((item) => item.status === status).length;
+    return (
+      <div className="jobs-modal__summary">
+        <SummaryChip label="Created" value={String(count("created"))} />
+        <SummaryChip label="Replaced" value={String(count("replaced"))} />
+        <SummaryChip label="Skipped" value={String(count("skipped"))} />
+        <SummaryChip label="Errors" value={String(count("error"))} />
+        <SummaryChip label="Ignored" value={String(job.hashGenerateResult.ignoredCount)} />
+      </div>
+    );
+  }
+
+  if (job.kind === "hash-check-bro" && job.hashCheckResult) {
+    const count = (status: string) => job.hashCheckResult!.items.filter((item) => item.status === status).length;
+    return (
+      <div className="jobs-modal__summary">
+        <SummaryChip label="Matches" value={String(count("matched"))} />
+        <SummaryChip label="Mismatches" value={String(count("mismatched"))} />
+        <SummaryChip label="Errors" value={String(count("error"))} />
+        <SummaryChip label="Ignored" value={String(job.hashCheckResult.ignoredCount)} />
+      </div>
+    );
+  }
+
   if (job.kind === "fedup-bro" && job.fedupResult) {
     return (
       <div className="jobs-modal__summary">
@@ -317,7 +342,7 @@ function JobRow({
               </span>
             )}
           </>
-        ) : job.kind === "fedup-bro" ? (
+        ) : (job.kind === "fedup-bro" || job.kind === "hash-check-bro" || job.kind === "hash-generate-bro") ? (
           <>
             <span className="jobs-modal__path" title={job.sourcePath}>
               Inputs: {job.sourcePath}
@@ -652,7 +677,7 @@ export function JobsModal({ onClose, client }: { onClose: () => void; client: Ws
     .filter((job): job is Job => !!job);
   const fileJobs = jobs.filter((job) => job.kind === "file-op");
   const outgoingJobs = jobs.filter((job) => job.kind === "outgoing-transfer");
-  const broJobs = jobs.filter((job) => job.kind === "fp-bro" || job.kind === "sync-bro" || job.kind === "fedup-bro" || job.kind === "remote-manifest");
+  const broJobs = jobs.filter((job) => job.kind === "fp-bro" || job.kind === "sync-bro" || job.kind === "fedup-bro" || job.kind === "hash-check-bro" || job.kind === "hash-generate-bro" || job.kind === "remote-manifest");
   const activeFileJobs = fileJobs.filter(
     (job) => !queuedJobIds.has(job.jobId)
       && (job.state === "Queued" || job.state === "Running" || job.state === "AwaitingDecision")

@@ -182,6 +182,11 @@ impl VfsDriver for SpyFsDriver {
         self.inner.open_write(path)
     }
 
+    fn open_write_new(&self, path: &str) -> Result<Box<dyn Write + Send>, VfsError> {
+        self.intercept("open_write", json!({ "path": path, "exclusive": true }))?;
+        self.inner.open_write_new(path)
+    }
+
     fn create_dir_all(&self, path: &str) -> Result<(), VfsError> {
         self.intercept("create_dir_all", json!({ "path": path }))?;
         self.inner.create_dir_all(path)

@@ -229,6 +229,13 @@ openWrite(
 ): WritableStream<Uint8Array>
 ```
 
+The synchronous Rust driver also exposes `open_write_new(path)`, which creates
+an entry exclusively and returns `AlreadyExists` for an existing file or link.
+Its default is `NotSupported`. Local filesystem drivers implement it using
+`OpenOptions::create_new(true)` and the spy driver intercepts/forwards it.
+Check hashes report jobs use this hook to resolve filename collisions without
+truncating existing entries.
+
 Driver decides:
 
 * Whether overwrite is allowed
@@ -462,3 +469,9 @@ Two very natural next steps:
 2. **Conflict resolution policy model** (per-job vs global)
 
 If you want, we can spec one of those next.
+
+Generate hashes reuses `open_write_new` for sidecar creation and same-folder
+staging. Overwrite mode flushes and closes the staged writer before
+`try_rename`; it never falls back to deleting or truncating an existing sidecar
+when atomic placement fails. Failed/cancelled writes remove only paths owned
+by that job through `remove_file`.

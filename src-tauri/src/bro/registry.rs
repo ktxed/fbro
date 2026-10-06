@@ -10,11 +10,15 @@ pub fn list_bros(
     inputs: &[BroInputItem],
     suggested_output_dir: Option<&str>,
     source_id: Option<&str>,
+    hash_check_available: bool,
+    hash_generate_available: bool,
 ) -> Vec<ResolvedBro> {
     let ctx = BroDiscoveryContext {
         inputs,
         suggested_output_dir,
         source_id,
+        hash_check_available,
+        hash_generate_available,
     };
     let bros = builtin_providers()
         .into_iter()
@@ -29,7 +33,7 @@ pub fn list_bros(
 /// launch variants (for example native and Flatpak VLC) intentionally collapse
 /// to one help entry.
 pub fn list_bro_catalog() -> Vec<BroCatalogEntry> {
-    let discovered = list_bros(&[], None, None);
+    let discovered = list_bros(&[], None, None, false, false);
     let tar_available = discovered
         .iter()
         .any(|bro| bro.option.name.eq_ignore_ascii_case("tar"));
@@ -42,6 +46,16 @@ pub fn list_bro_catalog() -> Vec<BroCatalogEntry> {
     }
 
     catalog.extend([
+        catalog_entry(
+            "builtin:generate-hashes",
+            "Generate hashes",
+            "Generate .b3 BLAKE3 sidecars for selected local files, with optional overwriting.",
+        ),
+        catalog_entry(
+            "builtin:check-hashes",
+            "Check hashes",
+            "Check local files against their .b3 BLAKE3 sidecars, with an optional saved report.",
+        ),
         catalog_entry(
             "builtin:compare-files",
             "Compare files",

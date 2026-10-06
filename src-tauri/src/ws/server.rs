@@ -377,8 +377,8 @@ async fn handle_connection(
                     }
                 }
 
+                apply_job_event_to_state(&state, &msg).await;
                 if let ServerMessage::JobEvent { ref job_id, ref event, .. } = msg {
-                    apply_job_event_to_state(&state, &msg).await;
                     if event == "Completed" || event == "Cancelled" || event == "Failed" {
                         let panels_to_rescan = {
                             let state_guard = state.lock().await;
@@ -665,6 +665,73 @@ where
 }
 
 async fn apply_job_event_to_state(state: &SharedState, msg: &ServerMessage) {
+    let generation_job_id = match msg {
+        ServerMessage::HashGenerateBroResult { job_id, .. }
+        | ServerMessage::HashGenerateBroFileResult { job_id, .. } => Some(job_id),
+        _ => None,
+    };
+    if let Some(job_id) = generation_job_id {
+        let mut state = state.lock().await;
+        if let Some(job) = state.job_store.jobs.get_mut(job_id) {
+            if let crate::jobs::JobKind::HashGenerateBro(meta) = &mut job.kind {
+                match msg {
+                    ServerMessage::HashGenerateBroResult { result, .. } => {
+                        meta.result = Some(result.clone())
+                    }
+                    ServerMessage::HashGenerateBroFileResult { item, .. } => {
+                        if let Some(row) = meta.result.as_mut().and_then(|result| {
+                            result
+                                .items
+                                .iter_mut()
+                                .find(|row| row.hash_path == item.hash_path)
+                        }) {
+                            *row = item.clone();
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        return;
+    }
+
+    let hash_job_id = match msg {
+        ServerMessage::HashCheckBroResult { job_id, .. }
+        | ServerMessage::HashCheckBroFileResult { job_id, .. }
+        | ServerMessage::HashCheckReportSaved { job_id, .. }
+        | ServerMessage::HashCheckReportFailed { job_id, .. } => Some(job_id),
+        _ => None,
+    };
+    if let Some(job_id) = hash_job_id {
+        let mut guard = state.lock().await;
+        if let Some(job) = guard.job_store.jobs.get_mut(job_id) {
+            if let crate::jobs::JobKind::HashCheckBro(meta) = &mut job.kind {
+                match msg {
+                    ServerMessage::HashCheckBroResult { result, .. } => {
+                        meta.result = Some(result.clone())
+                    }
+                    ServerMessage::HashCheckBroFileResult { item, .. } => {
+                        if let Some(row) = meta.result.as_mut().and_then(|result| {
+                            result
+                                .items
+                                .iter_mut()
+                                .find(|row| row.hash_path == item.hash_path)
+                        }) {
+                            *row = item.clone();
+                        }
+                    }
+                    ServerMessage::HashCheckReportSaved { path, .. } => {
+                        meta.report_saved_path = Some(path.clone())
+                    }
+                    ServerMessage::HashCheckReportFailed { message, .. } => {
+                        meta.report_error = Some(message.clone())
+                    }
+                    _ => {}
+                }
+            }
+        }
+        return;
+    }
     let ServerMessage::JobEvent {
         job_id,
         event,

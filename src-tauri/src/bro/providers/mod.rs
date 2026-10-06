@@ -1,8 +1,10 @@
 use crate::bro::model::{BroInputItem, LaunchArg, ResolvedBro};
 
+pub mod check_hashes;
 pub mod copy_paths;
 pub mod extract;
 pub mod fedup;
+pub mod generate_hashes;
 pub mod kill_proc;
 #[cfg(target_os = "linux")]
 pub mod linux_media;
@@ -18,6 +20,9 @@ pub struct BroDiscoveryContext<'a> {
     pub inputs: &'a [BroInputItem],
     pub suggested_output_dir: Option<&'a str>,
     pub source_id: Option<&'a str>,
+    /// Computed from the full local selection, independent of ranking samples.
+    pub hash_check_available: bool,
+    pub hash_generate_available: bool,
 }
 
 pub trait BroProvider: Send + Sync {
@@ -37,6 +42,8 @@ pub fn builtin_providers() -> Vec<Box<dyn BroProvider>> {
     let mut providers: Vec<Box<dyn BroProvider>> = Vec::new();
 
     providers.push(Box::new(copy_paths::CopyPathsProvider));
+    providers.push(Box::new(check_hashes::CheckHashesProvider));
+    providers.push(Box::new(generate_hashes::GenerateHashesProvider));
     providers.push(Box::new(fedup::FedupProvider));
     providers.push(Box::new(kill_proc::KillProcProvider));
     #[cfg(target_os = "linux")]

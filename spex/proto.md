@@ -633,3 +633,48 @@ A short atomic job runs on the blocking pool using the existing Git activity
 lifecycle: `GitActionFinished` correlates by `activityId`, with success/failure
 and an error message. Successful panel rescan precedes completion. Closing the
 modal backgrounds the activity without interrupting an atomic switch.
+
+## Check hashes Bro messages
+
+`LaunchBro` accepts `builtin:check-hashes` with
+`params: { "saveResult": "true" | "false" }`. `BroParam.kind` additionally
+supports `"bool"`; an omitted optional boolean uses the declared default.
+A normal `JobStarted` has `kind: "hash-check-bro"`, `opType: "Check hashes"`,
+`supportsPause: false`, and the original `requestId`. Progress, cancellation,
+and terminal state use the existing job messages and intents.
+
+The new backend messages are correlated by `jobId`:
+
+- `HashCheckBroResult { timestamp, jobId, result: { ignoredCount, items } }`
+  replaces the result projection with an initial/final snapshot.
+- `HashCheckBroFileResult { timestamp, jobId, item }` replaces one existing
+  row identified by `hashPath`; these updates are reliable and ordered.
+- `HashCheckReportSaved { timestamp, jobId, path }` confirms a flushed report.
+- `HashCheckReportFailed { timestamp, jobId, message }` reports saving failure
+  without discarding hash-check results or failing the completed check job.
+
+Each item contains `hashPath`, `counterpartPath`, `status`, `expectedHash`,
+`actualHash`, and `error`. The final three fields are nullable. Status values
+are `pending`, `checking`, `matched`, `mismatched`, `error`, and `cancelled`.
+The final result snapshot is sent before terminal `JobEvent`. Backend job
+metadata retains the complete result and report outcome. See `bro.md` §7.2.
+
+### Generate hashes Bro messages
+
+`LaunchBro` with `broId: "builtin:generate-hashes"` accepts
+`params.overwriteExisting` as the string `"true"` or `"false"` (default false).
+Discovery emits the usual bool parameter. `JobStarted` uses kind
+`"hash-generate-bro"`, opType `"Generate hashes"`, and the launch requestId.
+
+- `HashGenerateBroResult { timestamp, jobId, result }` carries the initial/final
+  full snapshot: `{ ignoredCount, items }`.
+- `HashGenerateBroFileResult { timestamp, jobId, item }` updates a row by hashPath.
+- Each item contains `{ sourcePath, hashPath, status, hash, error }`; hash/error
+  are nullable and status is `pending | hashing | created | replaced | skipped |
+  error | cancelled`.
+
+Result messages update backend job metadata before forwarding. Normal
+`JobEvent` byte progress and terminal lifecycle events are reused. Final results
+precede the terminal event, allowing the frontend to confirm the saved count
+without optimistic file state. Only created/replaced rows count as saved; a
+late cancellation never changes an already committed row into cancelled.

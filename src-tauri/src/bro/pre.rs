@@ -21,6 +21,18 @@ pub fn rank_bros(inputs: &[BroInputItem], mut bros: Vec<ResolvedBro>) -> Vec<Res
 }
 
 fn evaluate_bro(inputs: &[BroInputItem], bro: &BroOption) -> BroPre {
+    if bro.id == "builtin:check-hashes" {
+        return BroPre {
+            score: 101,
+            reason: "Check selected BLAKE3 sidecars".to_string(),
+        };
+    }
+    if bro.id == "builtin:generate-hashes" {
+        return BroPre {
+            score: 96,
+            reason: "Generate BLAKE3 sidecars for selected files".into(),
+        };
+    }
     if is_mpv_bro(bro) {
         return evaluate_media_bro(inputs);
     }

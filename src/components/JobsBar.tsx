@@ -120,6 +120,10 @@ export function JobsBar({ client, onOpenJobsView }: { client: WsClient; onOpenJo
         return (
           <button
             key={job.jobId}
+            data-testid="job-chip"
+            data-job-id={job.jobId}
+            data-job-kind={job.kind}
+            data-job-state={job.state}
             ref={returnFocusRef}
             className={`jobs-bar__job${isActive ? " jobs-bar__job--active" : ""}`}
             onClick={() => dispatch({ type: "SET_ACTIVE_JOB", jobId: job.jobId })}

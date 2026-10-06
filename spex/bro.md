@@ -813,6 +813,60 @@ as a side effect of report mode.
 
 ---
 
+### 7.2 Check hashes
+
+`builtin:check-hashes` is available on local filesystem panels on Linux, macOS,
+and Windows. It is offered first whenever the full backend-resolved selection
+(or explicit context-menu target) contains a regular file ending in `.b3`.
+Presence detection examines the entire selection, independently of advisory
+ranking samples, and does not inspect sidecar contents or counterparts during
+discovery. Orphan sidecars therefore still offer this Bro.
+
+Selecting it opens a launch form with a boolean `saveResult` parameter, labelled
+**Save result**, defaulting to `"false"`. The generic Bro parameter kind `bool`
+is rendered as a checkbox and uses string `"true"` / `"false"` launch values.
+
+Launch re-resolves the complete selection in the backend and rejects a changed
+source/folder. The `hash-check-bro` job captures its driver and invocation folder.
+It validates pairs against a fresh VFS directory listing: a selected regular
+`a.y.b3` corresponds to the regular sibling `a.y`. Directories, symlinks,
+unrelated entries, and orphan sidecars are ignored and counted. No recursion,
+remote/archive panels, search results, or global selections are supported in v1.
+
+Accepted sidecars contain either a bare 64-digit hexadecimal BLAKE3 digest or
+one `<digest>  <counterpart basename>` line. Hexadecimal is case-insensitive;
+LF/CRLF endings are supported. Filename-bearing lines must name the counterpart
+exactly; they cannot redirect checking to another path. Malformed, oversized
+(over 64 KiB), multiline checksum records, and unreadable files produce per-pair
+errors. Empty counterparts are checked using the empty-input BLAKE3 digest.
+
+The job streams files sequentially through VFS in bounded 1 MiB buffers, using
+the bundled `blake3` crate. Normal throttled job progress carries current-file
+and overall byte counts; reliable result messages carry per-pair transitions.
+Statuses are `pending`, `checking`, `matched`, `mismatched`, `error`, and
+`cancelled`. Mismatches and individual errors do not stop subsequent checks.
+An orphan-only selection completes with “No matching file pairs.”
+
+The resizable results modal shows pair rows, current-file and overall progress,
+and a summary of matches, mismatches, errors, and ignored entries. Its only
+action is **Close**. Close/Enter/Escape dismiss the view; running checks continue
+in the background. Results remain available through Jobs, where cancellation
+is also available. Completion does not close the modal or move focus.
+
+When `saveResult` is true, normal completion automatically writes a plain-text
+report in the captured folder, including empty results, mismatches, and errors.
+Cancelled jobs do not automatically save. Report creation is the completion
+commit boundary: a later cancellation does not relabel an already committed
+report as cancelled. Reports use
+`fbro-hash-check-<UTC Unix milliseconds>.txt`, adding a numeric suffix on
+collision. VFS exclusive creation prevents overwriting files or symlinks.
+Reports contain the time, summary counts, paths, digests, and error details.
+`HashCheckReportSaved` triggers a “Saved hash check report to <path>” toast only
+after successful flush. A save failure preserves the check results and displays
+an error without a success toast.
+
+---
+
 ## 8. Backend Responsibilities
 
 For bro requests, BE is responsible for:
@@ -851,3 +905,44 @@ Possible future protocol kinds could include:
 * interactive multi-step bro sessions
 
 Those are explicitly out of scope for v0.
+
+### 7.3 Generate hashes
+
+`builtin:generate-hashes` is offered on local filesystem panels whenever the
+full backend selection (or explicit context-menu target) includes a regular
+file whose name does not end in the exact `.b3` suffix. Discovery does not rely
+on ranking samples. Its pre-bro score is 96; Check hashes remains first, and
+strong media/archive/duplicate fits retain their existing priority.
+
+The launch form exposes `overwriteExisting`, labelled **Overwrite existing**,
+as a boolean checkbox with the default `"false"`. Launch re-resolves the full
+selection and rejects a changed source or invocation folder. The tracked
+`hash-generate-bro` job revalidates regular files using a fresh VFS listing;
+folders, symlinks, and `.b3` files are ignored and counted. There is no recursion
+or remote/archive/search/global-selection support in v1.
+
+Files are streamed sequentially through the shared bounded-memory BLAKE3
+worker. Each `a.y` produces its sibling `a.y.b3`, containing
+`<64-digit lowercase digest>  <exact basename>\n`. Names containing CR/LF use a
+bare digest line, which Check hashes also accepts. No separate summary report
+is written.
+
+Existing destinations are skipped without reading the source unless overwrite
+is enabled. Exclusive creation also skips a destination created concurrently.
+Overwriting writes and flushes an exclusive temporary file in the captured
+folder, closes it, then commits it with the local VFS rename operation. Failed
+writes/renames or cancellation before commit clean up owned outputs and preserve
+the previous sidecar. Directory/symlink destinations seen during validation are
+errors in overwrite mode, and are skipped otherwise; writes never follow them.
+Completed sidecars are retained when a later file is cancelled. Each committed
+sidecar is recorded as a `hash-generate` journal mutation.
+
+Reliable result messages expose `pending`, `hashing`, `created`, `replaced`,
+`skipped`, `error`, and `cancelled` rows. Individual errors do not stop later
+files. The resizable results modal shows current-file and overall byte progress,
+per-file outcomes, and counts. **Close** is its only action; Close/Enter/Escape
+background a running job without cancelling. Jobs supports reopening and
+cancellation, and completion preserves focus. A single terminal toast confirms
+the number of successfully saved sidecars, including partial success on
+cancellation/failure; zero saved files produce no success toast. Terminal job
+handling refreshes the source panel through the existing backend scan path.

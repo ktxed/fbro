@@ -244,3 +244,22 @@ focuses the branch selector; Cancel/Escape restores the New branch button.
 History Escape is handled before form Escape. Async log loading must not steal
 focus from the open form. While submitting, the primary action reads Creating…
 and cannot submit again. Closing a running activity backgrounds it.
+
+### Check hashes results
+
+The `operation:hash-check-bro` layer uses `ResizableModal` and initially focuses
+its only action, Close. The results scroll region is keyboard accessible.
+Close and Escape dismiss the modal and keep a running check in the background;
+Enter activates Close when focused, or dismisses from the non-interactive
+surface. Job progress and completion do not change the focus key or steal focus.
+Reopening through Jobs restores its normal opener on dismissal. Launch rejection
+uses the existing Bro modal removal handoff and transient error feedback.
+
+### Generate hashes results
+
+The `operation:hash-generate-bro` layer uses `ResizableModal` with initial focus
+on its sole **Close** action. Per-file updates and job completion do not move
+focus. The scrollable result area is keyboard reachable. Close, Escape, and
+Enter outside native activation targets dismiss/background the view without
+cancelling; Jobs owns reopening and cancellation. Shared stack restoration
+returns focus to the available opener or active listing.

@@ -322,10 +322,8 @@ fn omits_optional_seven_zip_password_when_empty() {
 
 #[test]
 fn list_bros_includes_copy_paths_on_every_platform() {
-    let bros = list_bros(&sample_inputs(), None, None);
-    assert!(bros
-        .iter()
-        .any(|bro| bro.option.id == "builtin:copy-paths"));
+    let bros = list_bros(&sample_inputs(), None, None, false, false);
+    assert!(bros.iter().any(|bro| bro.option.id == "builtin:copy-paths"));
 }
 
 #[test]
@@ -384,6 +382,13 @@ fn list_bros_includes_tar_when_tar_exe_is_on_path() {
     if crate::bro::probe::find_binary_on_path(&["tar"]).is_none() {
         return;
     }
-    let bros = list_bros(&sample_inputs(), None, None);
+    let bros = list_bros(&sample_inputs(), None, None, false, false);
     assert!(bros.iter().any(|bro| bro.option.id == "native:tar"));
+}
+
+#[test]
+fn generation_has_a_catalog_entry_without_selection() {
+    assert!(super::list_bro_catalog()
+        .iter()
+        .any(|entry| entry.id == "builtin:generate-hashes"));
 }

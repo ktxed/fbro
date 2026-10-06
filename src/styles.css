@@ -3443,6 +3443,28 @@ body {
   accent-color: var(--accent);
 }
 
+.hash-check__folder,
+.hash-check__saved {
+  overflow-wrap: anywhere;
+  color: var(--text-dim);
+}
+
+.hash-check__summary { color: var(--text); }
+.modal--hash-check .modal__body { display: flex; flex-direction: column; gap: 8px; }
+.modal--hash-check .modal__body > p { margin: 0; }
+.hash-check__rows { overflow: auto; flex: 1; min-height: 80px; }
+.hash-check__row { padding: 8px 0; border-bottom: 1px solid var(--border); }
+.hash-check__row-line { display: flex; align-items: center; gap: 8px; }
+.hash-check__name { flex: 1; min-width: 0; overflow-wrap: anywhere; color: var(--text); }
+.hash-check__status { flex-shrink: 0; }
+.hash-check__row--matched { color: var(--text-success); }
+.hash-check__row--mismatched,
+.hash-check__row--error { color: var(--text-warning); }
+.hash-check__row--pending,
+.hash-check__row--cancelled { color: var(--text-dim); }
+.hash-check__detail { margin: 4px 0 0 24px; overflow-wrap: anywhere; font-size: calc(var(--font-size) * 0.9); }
+.hash-check__hint { color: var(--text-dim); font-size: calc(var(--font-size) * 0.9); }
+
 .bro-modal__fedup-options .modal__rename-row {
   align-items: center;
 }

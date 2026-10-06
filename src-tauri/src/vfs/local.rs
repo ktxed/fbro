@@ -293,6 +293,15 @@ impl VfsDriver for LocalFsDriver {
         Ok(Box::new(f))
     }
 
+    fn open_write_new(&self, path: &str) -> Result<Box<dyn Write + Send>, VfsError> {
+        let file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)
+            .map_err(|e| map_io_err(path, e))?;
+        Ok(Box::new(file))
+    }
+
     fn supports_write_at(&self) -> bool {
         true
     }
