@@ -1,7 +1,9 @@
 import { autoUpdate, flip, FloatingPortal, offset, shift, useFloating } from "@floating-ui/react";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useAppDispatch, useAppState, type EjectAction, type PendingSourceMenu } from "../store";
 import { resolveColorScheme } from "../theme/colorSchemes";
+import { useFocusReturn } from "../hooks/useFocusReturn";
+import { handoffFocusToOpener } from "../utils/focusReturn";
 
 export function SourceContextMenu({ menu }: { menu: PendingSourceMenu }) {
   const state = useAppState();
@@ -9,7 +11,7 @@ export function SourceContextMenu({ menu }: { menu: PendingSourceMenu }) {
   const source = state.sources[menu.sourceId];
   const [highlighted, setHighlighted] = useState(0);
   const menuRef = useRef<HTMLDivElement>(null);
-  const triggerRef = useRef<HTMLElement | null>(null);
+  const returnFocusRef = useFocusReturn();
   const colorScheme = resolveColorScheme(state.settings.general.colorScheme);
   const items: Array<{ action: EjectAction; label: string }> = source?.eject
     ? [
@@ -35,15 +37,18 @@ export function SourceContextMenu({ menu }: { menu: PendingSourceMenu }) {
   useLayoutEffect(() => {
     refs.setReference(reference);
   }, [refs, reference]);
-  useLayoutEffect(() => {
-    triggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    menuRef.current?.focus();
-  }, []);
+  const setMenuRef = useCallback((node: HTMLDivElement | null) => {
+    refs.setFloating(node);
+    menuRef.current = node;
+    const cleanup = returnFocusRef(node);
+    node?.focus({ preventScroll: true });
+    return cleanup;
+  }, [refs.setFloating, returnFocusRef]);
   const close = () => {
     dispatch({ type: "CLOSE_SOURCE_MENU" });
-    triggerRef.current?.focus({ preventScroll: true });
   };
   const run = (action: EjectAction) => {
+    handoffFocusToOpener(menuRef.current);
     close();
     dispatch({ type: "OPEN_EJECT", eject: { sourceId: menu.sourceId, action, requestId: null, error: null } });
   };
@@ -77,7 +82,7 @@ export function SourceContextMenu({ menu }: { menu: PendingSourceMenu }) {
       <div className="context-menu__overlay" data-color-scheme={colorScheme.id} style={{ colorScheme: colorScheme.mode }} onMouseDown={close} onContextMenu={(event) => event.preventDefault()}>
         <div
           className="context-menu"
-          ref={(node) => { menuRef.current = node; refs.setFloating(node); }}
+          ref={setMenuRef}
           role="menu"
           tabIndex={-1}
           onKeyDown={onKeyDown}

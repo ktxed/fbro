@@ -26,6 +26,7 @@ import { runFedupFlow } from "./cases/fedup.mjs";
 import { runGlobalSelectionFlow } from "./cases/global-selection.mjs";
 import { runGitFlow } from "./cases/git.mjs";
 import { runLocalFlow } from "./cases/local.mjs";
+import { runFocusHandoffFlow } from "./cases/focus-handoff.mjs";
 import { runViewerFlow } from "./cases/viewer.mjs";
 import { runHeicFlow } from "./cases/heic.mjs";
 import { runQuickEditFlow } from "./cases/quick-edit.mjs";
@@ -65,6 +66,8 @@ async function main() {
       await runViewerFlow(browserA, observerA);
       return;
     }
+    await runFocusHandoffFlow(browserA, observerA);
+    if (process.env.FBRO_E2E_FOCUS_ONLY === "1") return;
     await runLocalFlow(browserA, observerA);
     await runViewerFlow(browserA, observerA);
     await runHeicFlow(browserA, observerA);
@@ -82,6 +85,16 @@ async function main() {
     await observerB.connect();
     await runRemoteFlow(browserA, observerA, browserB, observerB);
   } catch (error) {
+    if (browserA) {
+      const focus = await browserA.execute(() => ({
+        tag: document.activeElement?.tagName,
+        testId: document.activeElement?.getAttribute("data-testid"),
+        className: document.activeElement?.className,
+        panel: document.activeElement?.closest("[data-panel-id]")?.getAttribute("data-panel-id"),
+        modalIds: Array.from(document.querySelectorAll("[data-modal-id]"), (element) => element.getAttribute("data-modal-id")),
+      })).catch(() => null);
+      console.error("Focus at smoke failure:", focus);
+    }
     if (browserA) await browserA.saveScreenshot(path.join(artifactsDir, "screenshots", "fbro-a-failure.png")).catch(() => {});
     if (browserB) await browserB.saveScreenshot(path.join(artifactsDir, "screenshots", "fbro-b-failure.png")).catch(() => {});
     throw error;

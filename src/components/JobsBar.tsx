@@ -3,6 +3,7 @@ import { useAppState, useAppDispatch } from "../store";
 import type { WsClient } from "../ws/client";
 import { IconChevronLeft, IconChevronRight, IconListDetails, IconX } from "@tabler/icons-react";
 import { cancelJobWithPartialPrompt } from "../utils/jobCancel";
+import { usePanelFocusReturnOnRemoval } from "../hooks/useFocusReturn";
 
 const VISIBLE = 5;
 
@@ -12,6 +13,7 @@ function jobShortId(jobId: string) {
 
 export function JobsBar({ client, onOpenJobsView }: { client: WsClient; onOpenJobsView: () => void }) {
   const state = useAppState();
+  const returnFocusRef = usePanelFocusReturnOnRemoval(state.focus);
   const dispatch = useAppDispatch();
   const [scrollIndex, setScrollIndex] = useState(0);
   const queuedJobIds = new Set(state.jobQueue.jobIds);
@@ -44,9 +46,10 @@ export function JobsBar({ client, onOpenJobsView }: { client: WsClient; onOpenJo
   };
 
   return (
-    <div className="jobs-bar" onWheel={onWheel}>
+    <div className="jobs-bar" onWheel={onWheel} onMouseDown={(event) => event.preventDefault()}>
       <button
         className="jobs-bar__arrow"
+        ref={returnFocusRef}
         disabled={!canLeft}
         onClick={() => setScrollIndex(clamped - 1)}
       >
@@ -56,6 +59,7 @@ export function JobsBar({ client, onOpenJobsView }: { client: WsClient; onOpenJo
       {queueTotal > 0 && (
         <button
           className="jobs-bar__job jobs-bar__job--queue"
+          ref={returnFocusRef}
           onClick={() => {
             if (queueActiveJob) dispatch({ type: "SET_ACTIVE_JOB", jobId: queueActiveJob.jobId });
           }}
@@ -116,6 +120,7 @@ export function JobsBar({ client, onOpenJobsView }: { client: WsClient; onOpenJo
         return (
           <button
             key={job.jobId}
+            ref={returnFocusRef}
             className={`jobs-bar__job${isActive ? " jobs-bar__job--active" : ""}`}
             onClick={() => dispatch({ type: "SET_ACTIVE_JOB", jobId: job.jobId })}
           >
@@ -144,6 +149,7 @@ export function JobsBar({ client, onOpenJobsView }: { client: WsClient; onOpenJo
 
       <button
         className="jobs-bar__arrow"
+        ref={returnFocusRef}
         disabled={!canRight}
         onClick={() => setScrollIndex(clamped + 1)}
       >

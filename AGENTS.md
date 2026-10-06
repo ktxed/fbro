@@ -81,6 +81,15 @@ keyboard, or modal behaviour **updates the matching spec in the same commit**.
 - After a modal, viewer, or inline row action (e.g. copy) completes, focus
   returns to the row or panel it started from (`CopyButton`'s `onCopied`
   is the hook for inline rows).
+- Every component that takes focus must capture its opener first and hand
+  focus back on every close/removal path, including cancellation, completion,
+  and backend rejection. Restore the exact available opener; otherwise fall
+  back to the active listing. Preserve focus deliberately taken by a successor
+  or an outside click. Reuse `ModalStack` / `useFocusReturn` and the shared
+  removal refs; do not add competing focus-restoration callbacks.
+- Informational toasts and toolbar/job-bar mouse actions preserve existing
+  focus. Fix ownership and lifecycle handoffs; never add polling or hover-based
+  focus recovery loops.
 - Keep the active item visible: `scrollIntoView({ block: "nearest" })`.
 
 **Keyboard** — `spex/keyboard.md`

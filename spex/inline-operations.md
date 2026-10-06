@@ -69,6 +69,10 @@ values with plural menu labels for a selection.
   accessible target-specific name.
 - From the panel, Right Arrow enters the first choice without moving the cursor. On a navigable archive this focuses Browse archive; Enter or Space then enters the archive.
 - Inline operations that navigate away from the current row restore focus to the panel before dispatching the navigation, so keyboard input continues after the row unmounts.
+  If a backend update removes a focused choice, its ref cleanup schedules one
+  handoff to the listing. A newly focused modal, menu, or control keeps focus.
+  Shortcuts opening a temporary surface preserve the choice as that surface's
+  opener; they do not first reset focus to the panel.
   A singleton directory has no bar, so Right Arrow drills down. When a directory
   is the cursor row of a multi-selection, Right Arrow enters the bulk-operation
   bar instead; Enter still drills into the directory.

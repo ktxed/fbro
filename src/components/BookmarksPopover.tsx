@@ -6,12 +6,14 @@ import {
   shift,
   useFloating,
 } from "@floating-ui/react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useAppDispatch, useAppState } from "../store";
 import { resolveColorScheme } from "../theme/colorSchemes";
 import type { BookmarkEntry } from "../ws/types";
 import type { WsClient } from "../ws/client";
 import { rovingIndexForKey } from "./modalKeyboard";
+import { useFocusReturn } from "../hooks/useFocusReturn";
+import { handoffFocusToOpener } from "../utils/focusReturn";
 
 interface BookmarksPopoverProps {
   anchorEl: HTMLElement | null;
@@ -33,7 +35,7 @@ export function BookmarksPopover({
   const popoverRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
   const addButtonRef = useRef<HTMLButtonElement>(null);
-  const restoreFocusRef = useRef<HTMLElement | null>(null);
+  const returnFocusRef = useFocusReturn(panelId);
   const [selectedIndex, setSelectedIndex] = useState(() => {
     const currentIndex = bookmarks.findIndex((bookmark) => bookmark.path === currentPath);
     return currentIndex >= 0 ? currentIndex : 0;
@@ -51,6 +53,14 @@ export function BookmarksPopover({
     middleware: [offset(4), flip({ padding: 8 }), shift({ padding: 8 })],
   });
 
+  const setPopoverRef = useCallback((node: HTMLDivElement | null) => {
+    refs.setFloating(node);
+    popoverRef.current = node;
+    const cleanup = returnFocusRef(node);
+    if (node) (listRef.current ?? addButtonRef.current)?.focus({ preventScroll: true });
+    return cleanup;
+  }, [refs.setFloating, returnFocusRef]);
+
   useLayoutEffect(() => {
     if (anchorEl) refs.setReference(anchorEl);
   }, [refs, anchorEl]);
@@ -65,15 +75,6 @@ export function BookmarksPopover({
     observer.observe(panel);
     return () => observer.disconnect();
   }, [anchorEl]);
-
-  useLayoutEffect(() => {
-    restoreFocusRef.current = document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : null;
-    return () => {
-      if (restoreFocusRef.current?.isConnected) restoreFocusRef.current.focus({ preventScroll: true });
-    };
-  }, []);
 
   useLayoutEffect(() => {
     (listRef.current ?? addButtonRef.current)?.focus({ preventScroll: true });
@@ -151,6 +152,7 @@ export function BookmarksPopover({
   };
 
   const handleNavigate = (path: string) => {
+    handoffFocusToOpener(popoverRef.current);
     client.sendIntent("NavigatePanelTo", undefined, { panelId, path });
     close();
   };
@@ -164,10 +166,7 @@ export function BookmarksPopover({
     <FloatingPortal>
       <div
         data-color-scheme={colorScheme.id}
-        ref={(node) => {
-          refs.setFloating(node);
-          (popoverRef as React.MutableRefObject<HTMLDivElement | null>).current = node;
-        }}
+        ref={setPopoverRef}
         style={{ ...floatingStyles, colorScheme: colorScheme.mode }}
         className="bookmarks-popover"
         data-testid="bookmarks-popover"
@@ -207,7 +206,6 @@ export function BookmarksPopover({
               aria-label="Bookmarks"
               aria-activedescendant={bookmarks[selectedIndex] ? `bookmark-option-${selectedIndex}` : undefined}
               tabIndex={0}
-              autoFocus
               style={listMaxHeight === undefined ? undefined : { maxHeight: `${listMaxHeight}px` }}
             >
               {bookmarks.map((bm, index) => {

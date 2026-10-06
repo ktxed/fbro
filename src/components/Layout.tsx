@@ -29,6 +29,7 @@ import { SettingsModal } from "./SettingsModal";
 import { useModalStack } from "./ModalStack";
 import { useAppDispatch, useAppState } from "../store";
 import { EmbeddedViewerPanel } from "./EmbeddedViewerPanel";
+import { captureFocusReturnTarget, scheduleFocusReturn } from "../utils/focusReturn";
 import type { FileOpFile, FileOpType, PanelState, VFSEntry } from "../ws/types";
 import type { WsClient } from "../ws/client";
 
@@ -462,7 +463,11 @@ export function Layout({ client, jobsViewOpen, onCloseJobsView, onOpenJobsView }
                   key={id}
                   sourcePanelId={activeSourcePanelId}
                   state={state}
-                  onClose={() => dispatch({ type: "TOGGLE_EMBEDDED_VIEWER" })}
+                  onClose={() => {
+                    const target = captureFocusReturnTarget(state.focus);
+                    dispatch({ type: "TOGGLE_EMBEDDED_VIEWER" });
+                    scheduleFocusReturn(target);
+                  }}
                 />
               );
             }
@@ -595,7 +600,8 @@ export function Layout({ client, jobsViewOpen, onCloseJobsView, onOpenJobsView }
         <SettingsModal client={client} />
       )}
       {state.transientHint && (
-        <div className="transient-hint" role="status" aria-live="polite">
+        <div className="transient-hint" data-testid="transient-hint" role="status" aria-live="polite"
+          onMouseDown={(event) => event.preventDefault()}>
           {state.transientHint.message}
         </div>
       )}

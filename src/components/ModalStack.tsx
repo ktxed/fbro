@@ -14,12 +14,21 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { mergeRefs } from "../utils/mergeRefs";
+import {
+  captureFocusReturnTarget,
+  isAvailableFocusTarget,
+  registerFocusReturnTarget,
+  resolveFocusReturnTarget,
+  restoreFocusReturn,
+  scheduleFocusHandoff,
+  type FocusReturnTarget,
+} from "../utils/focusReturn";
 
 interface ModalEntry {
   token: string;
   semanticId: string;
   element: HTMLDivElement;
-  restoreFocus: HTMLElement | null;
+  focusReturn: FocusReturnTarget;
   initialFocusRef?: RefObject<HTMLElement | null>;
 }
 
@@ -57,10 +66,6 @@ function focusableElements(root: HTMLElement): HTMLElement[] {
   });
 }
 
-function isAvailableFocusTarget(element: HTMLElement): boolean {
-  return !element.hidden && element.offsetParent !== null && !element.matches(":disabled");
-}
-
 function focusLayer(entry: Pick<ModalEntry, "element" | "initialFocusRef">) {
   const root = entry.element;
   const preferred = entry.initialFocusRef?.current;
@@ -81,36 +86,37 @@ export function ModalStackProvider({ children }: { children: ReactNode }) {
   entriesRef.current = entries;
 
   const register = useCallback((entry: ModalEntry) => {
-    setEntries((current) => {
-      if (current.some((candidate) => candidate.token === entry.token)) return current;
-      const next = [...current, entry];
-      entriesRef.current = next;
-      return next;
-    });
+    const current = entriesRef.current;
+    if (current.some((candidate) => candidate.token === entry.token)) return;
+    const next = [...current, entry];
+    entriesRef.current = next;
+    setEntries(next);
   }, []);
 
   const unregister = useCallback((token: string) => {
-    let removed: ModalEntry | undefined;
-    setEntries((current) => {
-      removed = current.find((entry) => entry.token === token);
-      const next = current
-        .filter((entry) => entry.token !== token)
-        .map((entry) => removed?.restoreFocus && entry.restoreFocus && removed.element.contains(entry.restoreFocus)
-          ? { ...entry, restoreFocus: removed.restoreFocus }
-          : entry);
-      entriesRef.current = next;
-      return next;
-    });
+    const current = entriesRef.current;
+    const removed = current.find((entry) => entry.token === token);
+    if (!removed) return;
+    const wasTop = current.at(-1)?.token === token;
+    const next = current.filter((entry) => entry.token !== token)
+      .map((entry) => entry.focusReturn.element && removed.element.contains(entry.focusReturn.element)
+        ? { ...entry, focusReturn: removed.focusReturn } : entry);
+    const exposedToken = next.at(-1)?.token;
+    entriesRef.current = next;
+    setEntries(next);
 
-    requestAnimationFrame(() => {
+    if (!wasTop) return;
+    scheduleFocusHandoff(removed.focusReturn, () => {
       const current = entriesRef.current;
+      if (current.some((entry) => entry.token === token)) return;
       const top = current[current.length - 1];
-      const restore = removed?.restoreFocus;
-      if (restore?.isConnected && isAvailableFocusTarget(restore) && (!top || top.element.contains(restore))) {
-        restore.focus({ preventScroll: true });
-      } else if (top) {
-        focusLayer(top);
-      }
+      // A newly opened successor owns its default focus, not the old opener.
+      if (top && top.token !== exposedToken) return;
+      const restore = resolveFocusReturnTarget(removed.focusReturn);
+      if (top) {
+        if (restore && top.element.contains(restore)) restore.focus({ preventScroll: true });
+        else focusLayer(top);
+      } else restoreFocusReturn(removed.focusReturn);
     });
   }, []);
 
@@ -205,6 +211,7 @@ export const ModalLayer = forwardRef<HTMLDivElement, ModalLayerProps>(function M
   if (!context) throw new Error("ModalLayer must be used inside ModalStackProvider");
   const token = useId();
   const rootRef = useRef<HTMLDivElement>(null);
+  const focusReturnRef = useRef<FocusReturnTarget | null>(null);
   const wasTopRef = useRef(false);
   const previousFocusKeyRef = useRef(focusKey);
   const entryIndex = context.entries.findIndex((entry) => entry.token === token);
@@ -213,12 +220,14 @@ export const ModalLayer = forwardRef<HTMLDivElement, ModalLayerProps>(function M
   useLayoutEffect(() => {
     const element = rootRef.current;
     if (!element) return;
-    const active = document.activeElement;
+    const focusReturn = focusReturnRef.current ?? captureFocusReturnTarget();
+    focusReturnRef.current = focusReturn;
+    registerFocusReturnTarget(element, focusReturn);
     context.register({
       token,
       semanticId: modalId,
       element,
-      restoreFocus: active instanceof HTMLElement ? active : null,
+      focusReturn,
       initialFocusRef,
     });
     return () => context.unregister(token);

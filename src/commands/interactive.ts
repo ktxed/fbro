@@ -935,8 +935,6 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
           targetCount: targetsSelection ? focused.panel.selectedEntries.length : 1,
         },
       });
-      const panelDiv = document.querySelector<HTMLElement>(`[data-panel-id="${focused.panelId}"]`);
-      panelDiv?.focus();
       return true;
     }
     case "panel.toggle_hidden": {

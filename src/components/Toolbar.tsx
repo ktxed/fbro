@@ -147,6 +147,7 @@ export function Toolbar({ client, onOpenJobsView }: { client: WsClient; onOpenJo
             tabIndex={-1}
             disabled={isDisabled}
             title={key ? `${key} — ${detail}` : detail}
+            onMouseDown={(event) => event.preventDefault()}
             onClick={() => {
               if (isDisabled) return;
               executeCommand(commandId, {

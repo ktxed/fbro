@@ -369,6 +369,10 @@ async function verifyEmptyFolder(browser, observer) {
   await browser.keys("Enter");
   await expectModalFocus(browser, '[data-testid="mkdir-name-input"]', "secondary folder suggestion dialog focus");
   await browser.keys("Escape");
+  await waitFor(() => browser.execute((selector) =>
+    document.querySelector(selector) === document.activeElement, folderSuggestion),
+  { timeout: 10_000, label: "restore exact secondary folder suggestion" });
+  await browser.keys("ArrowUp");
   await expectSuggestionFocus();
   await browser.keys("g");
   await waitFor(() => browser.execute(() =>
@@ -382,15 +386,8 @@ async function verifyEmptyFolder(browser, observer) {
   await waitFor(() => browser.execute(() =>
     Boolean(document.activeElement?.closest('[data-testid="panel-right"]'))),
   { timeout: 10_000, label: "Tab switches away from empty folder" });
-  await browser.performActions([{
-    type: "key", id: "empty-folder-keyboard", actions: [
-      { type: "keyDown", value: "\uE008" },
-      { type: "keyDown", value: "\uE004" },
-      { type: "keyUp", value: "\uE004" },
-      { type: "keyUp", value: "\uE008" },
-    ],
-  }]);
-  await browser.releaseActions();
+  // Tab cycles panels; Shift+Tab is the registry's Next Source binding.
+  await browser.keys("Tab");
   await expectSuggestionFocus();
   await browser.keys("Enter");
   await expectModalFocus(browser, '[data-testid="touch-name-input"]', "empty folder new file name focus");
@@ -407,12 +404,16 @@ async function verifyEmptyFolder(browser, observer) {
     !document.querySelector('[data-testid="panel-left"] [data-testid="panel-empty-folder"]')
       && document.activeElement === document.querySelector('[data-testid="panel-left"]')),
   { timeout: 10_000, label: "created file replaces empty state and restores listing focus" });
-  observer.sendIntent("SetFilter", "left", { value: "no-such-empty-folder-match" });
+  await browser.keys("f");
+  const filter = await browser.$('[data-testid="panel-left"] .panel__filter-input');
+  await filter.waitForDisplayed({ timeout: 10_000 });
+  await filter.setValue("no-such-empty-folder-match");
   await waitFor(() => browser.execute(() =>
     document.querySelector('[data-testid="panel-left"] [data-testid="panel-empty-folder"]')?.textContent === "No matching items."
-      && !document.querySelector('[data-testid="panel-left"] [data-testid="empty-folder-new-file"]')),
+      && !document.querySelector('[data-testid="panel-left"] [data-testid="empty-folder-new-file"]')
+      && document.activeElement?.classList.contains("panel__filter-input")),
   { timeout: 10_000, label: "filtered empty listing has no creation suggestions" });
-  observer.sendIntent("SetFilter", "left", { value: "" });
+  await browser.keys("Escape");
   await observer.waitForEntry("left", "note.txt", "file");
 }
 

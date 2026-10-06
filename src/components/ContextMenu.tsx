@@ -7,11 +7,13 @@ import {
   size,
   useFloating,
 } from "@floating-ui/react";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { bindingMatches, executeTargetedCommand } from "../commands/interactive";
 import { buildContextMenuItems } from "../contextMenu";
 import { useAppDispatch, useAppState, type PendingContextMenu } from "../store";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
+import { useFocusReturn } from "../hooks/useFocusReturn";
+import { handoffFocusToOpener } from "../utils/focusReturn";
 import { resolveColorScheme } from "../theme/colorSchemes";
 import { contextualOperationAvailable, resolveContextualTarget } from "../contextualOperations";
 import type { WsClient } from "../ws/client";
@@ -27,6 +29,7 @@ export function ContextMenu({ client, menu }: ContextMenuProps) {
   const dispatch = useAppDispatch();
   const copyToClipboard = useCopyToClipboard();
   const menuRef = useRef<HTMLDivElement>(null);
+  const returnFocusRef = useFocusReturn(menu.panelId);
   const [highlightedIndex, setHighlightedIndex] = useState(0);
   const colorScheme = resolveColorScheme(state.settings.general.colorScheme);
 
@@ -114,12 +117,13 @@ export function ContextMenu({ client, menu }: ContextMenuProps) {
     setHighlightedIndex(items.findIndex((item) => item.kind !== "separator"));
   }, [items]);
 
-  useLayoutEffect(() => {
-    const focusMenu = () => menuRef.current?.focus();
-    focusMenu();
-    const rafId = window.requestAnimationFrame(focusMenu);
-    return () => window.cancelAnimationFrame(rafId);
-  }, []);
+  const setMenuRef = useCallback((node: HTMLDivElement | null) => {
+    refs.setFloating(node);
+    menuRef.current = node;
+    const cleanup = returnFocusRef(node);
+    node?.focus({ preventScroll: true });
+    return cleanup;
+  }, [refs.setFloating, returnFocusRef]);
 
   useEffect(() => {
     const panel = state.panels[menu.panelId];
@@ -137,6 +141,7 @@ export function ContextMenu({ client, menu }: ContextMenuProps) {
     const item = items[index];
     if (!item || item.kind === "separator") return;
 
+    handoffFocusToOpener(menuRef.current);
     close();
     const panel = state.panels[menu.panelId];
     const target = panel ? resolveContextualTarget(panel, menu.absIndex, {
@@ -327,10 +332,7 @@ export function ContextMenu({ client, menu }: ContextMenuProps) {
       >
         <div
           className="context-menu"
-          ref={(node) => {
-            menuRef.current = node;
-            refs.setFloating(node);
-          }}
+          ref={setMenuRef}
           role="menu"
           tabIndex={-1}
           style={floatingStyles}

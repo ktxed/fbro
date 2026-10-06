@@ -99,6 +99,16 @@ the provider rewrites restoration references held by later layers. For example,
 if focus moved `panel -> A -> B` and A disappears while B is open, closing B
 restores focus to the panel rather than to a detached element from A.
 
+If no modal remains and the opener is unavailable (detached, hidden, disabled,
+or inert), restoration falls back to the active panel's listing or empty-folder
+suggestion. A transient menu launching a dialog carries its original opener
+through the transition, even when React removes the menu before the dialog
+captures focus. Only removal of the top layer schedules a handoff; removing a
+covered layer does not disturb the top layer's focused control. A newly opened
+successor or deliberately focused outside control keeps ownership. Restoration
+runs once after removal, rather than polling for lost focus. Feature dialogs
+must not add competing panel-restoration callbacks.
+
 ---
 
 ## 4. Keyboard and Focus Ownership

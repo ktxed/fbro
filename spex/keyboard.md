@@ -28,7 +28,7 @@ dialog types.
 
 - `ModalStackProvider` captures key and focus events and routes them to the top
   `ModalLayer`.
-- `Layout` passes `hasActiveModal || pendingContextMenu || pendingSourceMenu` to panels as their
+- `Layout` passes `hasActiveModal || pendingContextMenu || pendingSourceMenu || bookmarksOpen` to panels as their
   modal guard. A guarded panel suppresses keyboard actions and focus intents.
 - `Toolbar` uses the same conditions to suppress modal-opening and file-command
   shortcuts. Zoom shortcuts remain global.
@@ -114,12 +114,16 @@ While it is open it owns the keyboard, and other viewer shortcuts are held back:
 Empty folder listings focus the first available suggestion in the active panel
 after loading completes. Suggestions form one roving Tab stop: Up/Down and
 Home/End move between actions, while Enter/Space activate the native button
-once without also running panel entry navigation. Tab/Shift+Tab still switch
-panels. Returning from the New File dialog restores suggestion focus if the
-folder remains empty; when entries appear, focus returns to the listing.
+once without also running panel entry navigation. Tab still switches panels;
+Shift+Tab retains the Next Source binding. Returning from the New File dialog
+restores suggestion focus if the folder remains empty; when entries appear,
+focus returns to the listing.
 Create a new file is first, followed by Create a new folder where supported.
-Returning from either creation dialog to an empty listing focuses the first
-available suggestion. Inactive panels, modal-covered panels, filter inputs, and embedded terminals
+Returning from either creation dialog restores the suggestion that opened it;
+if that opener is unavailable, the first available suggestion receives focus.
+If navigation completes while an overlay covers the listing, that navigation's
+initial suggestion focus waits until the listing is uncovered.
+Inactive panels, modal-covered panels, filter inputs, and embedded terminals
 must not lose focus to suggestions.
 
 1. Derive ownership from rendered UI state; do not toggle an input mode in
@@ -136,6 +140,21 @@ must not lose focus to suggestions.
    job. A visibly nested confirmation or expanded state may consume the first
    Escape before the containing modal closes.
 7. Every modal control must have a visible `:focus-visible` presentation.
+8. Temporary focus owners capture their opener before moving focus and hand it
+   back after removal. Bookmarks and context menus use `useFocusReturn`; modal
+   layers use the stack. An unavailable opener falls back to the active listing
+   or its empty-folder suggestion. A menu launching a dialog carries the
+   original opener through the handoff. Outside clicks that deliberately focus
+   another control keep that focus. Portaled owners register on their actual DOM
+   mount, not a parent effect that may run before the portal exists. Menu actions
+   hand focus to the opener before dispatching a successor dialog. Filter inputs
+   remain openers for temporary surfaces; listing navigation explicitly leaves
+   the editor, and the sort selector returns to it through its own close path.
+9. Informational toasts and mouse activation of app toolbar/job-bar actions
+   preserve existing focus. Toast arrival and expiry never move focus. A removed
+   focused inline action hands focus to its listing. Panel activation and native
+   window return remain explicit focus transitions; clearing an overlay guard
+   alone does not refocus the panel, and there is no hover or polling recovery.
 
 ## Git branch name entry
 

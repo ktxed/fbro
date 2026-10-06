@@ -31,6 +31,8 @@ import { isLikelyBinaryPath } from "../utils/binaryPath";
 import { isArchiveSourceId, isGlobalSelectionSourceId, isSearchSourceId } from "../utils/sourceId";
 import { rovingIndexForKey } from "./modalKeyboard";
 import { GitModal } from "./GitModal";
+import { scheduleFocusReturn } from "../utils/focusReturn";
+import { usePanelFocusReturnOnRemoval } from "../hooks/useFocusReturn";
 import type { GitActivity } from "./gitActivity";
 import previewThrobberUrl from "../assets/win98-flag-throbber-64nn.gif";
 
@@ -93,10 +95,12 @@ function InlineOperationButtons({ panelId, tooltipId, items }: {
   tooltipId: string;
   items: readonly InlineOperationItem[];
 }) {
+  const returnFocusRef = usePanelFocusReturnOnRemoval(panelId);
   const stopRowInteraction = (event: React.SyntheticEvent) => event.stopPropagation();
   return items.map((item) => (
     <button
       key={item.id}
+      ref={returnFocusRef}
       type="button"
       tabIndex={-1}
       className={[
@@ -926,16 +930,10 @@ export function Panel({
     if (previewReanchorFrameRef.current !== null) cancelAnimationFrame(previewReanchorFrameRef.current);
   }, []);
 
-  const restorePanelFocus = useCallback(() => {
-    // The dialog owns focus while it is open. Return it to the panel on the
-    // next frame, after React has removed the dialog from the DOM.
-    requestAnimationFrame(() => focusDivRef.current?.focus());
-  }, []);
   const closeGitModal = useCallback(() => {
     setGitOpen(false);
     setGitActivity(null);
-    restorePanelFocus();
-  }, [restorePanelFocus]);
+  }, []);
   const beginGitActivity = useCallback((activity: GitActivity) => {
     setGitActivity(activity);
   }, []);
@@ -1160,10 +1158,17 @@ export function Panel({
     if (clipped !== tooltipNameClipped) setTooltipNameClipped(clipped);
   }, [tooltipCard, tooltipNameClipped]);
 
-  // Keep focused panel's div focused so it receives keyboard events.
-  // Also re-focus when a modal closes (modalActive transitions to false).
+  // Backend panel activation owns initial focus. Temporary surfaces hand it
+  // back themselves; clearing their guard must not overwrite an exact opener.
+  const activationFocusPendingRef = useRef(true);
   useEffect(() => {
-    if (!isFocused || modalActive) return;
+    if (!isFocused) {
+      activationFocusPendingRef.current = true;
+      return;
+    }
+    if (modalActive || !activationFocusPendingRef.current) return;
+    activationFocusPendingRef.current = false;
+    if (focusDivRef.current?.contains(document.activeElement)) return;
     if (panel.filterModeActive && shouldFocusFilterRef.current) {
       window.setTimeout(() => filterInputRef.current?.focus(), 0);
     } else {
@@ -1171,9 +1176,24 @@ export function Panel({
     }
   }, [isFocused, modalActive, panel.filterModeActive, focusListing]);
 
+  // The filter input may mount only after the backend accepts SetFilterMode.
+  useEffect(() => {
+    if (isFocused && !modalActive && panel.filterModeActive && shouldFocusFilterRef.current) {
+      filterInputRef.current?.focus({ preventScroll: true });
+    }
+  }, [panel.filterModeActive]);
+
+  const emptyListingFocusPendingRef = useRef(false);
   useEffect(() => {
     setEmptyActionIndex(0);
-    if (!isFocused || modalActive || panel.filterModeActive || sortSelectorOpen) return;
+    emptyListingFocusPendingRef.current = true;
+  }, [emptyActionId, panel.path, panel.sourceId, isFocused, panel.filterModeActive, sortSelectorOpen]);
+
+  useEffect(() => {
+    // Navigation may finish while a modal closes. Complete that transition
+    // once it is uncovered; ordinary modal closes preserve their exact opener.
+    if (!emptyListingFocusPendingRef.current || !isFocused || modalActive || panel.filterModeActive || sortSelectorOpen) return;
+    emptyListingFocusPendingRef.current = false;
     const active = document.activeElement;
     if (active instanceof Element && active.closest(".panel-terminal")) return;
     if (emptyActionId) focusListing();
@@ -1254,7 +1274,7 @@ export function Panel({
     const prev = prevTerminalSessionRef.current;
     prevTerminalSessionRef.current = panel.terminalSessionId;
     if (prev !== undefined && panel.terminalSessionId === undefined) {
-      if (isFocused) focusDivRef.current?.focus();
+      if (isFocused) scheduleFocusReturn({ element: null, panelId });
       if (appState.maximizedTerminalPanelId === panelId) {
         dispatch({ type: "SET_MAXIMIZED_TERMINAL", panelId: null });
       }
@@ -1630,12 +1650,6 @@ export function Panel({
       } else if (previewContinuationRef.current) {
         cancelPreviewContinuation();
       }
-      // A shortcut typed while focus sits on an inline toolbar button would
-      // otherwise dangle: the command can move the cursor away and unmount
-      // the very button holding focus, dropping keyboard control of the panel.
-      const activeElement = document.activeElement;
-      const focusInsideInlineToolbar = activeElement instanceof HTMLElement
-        && activeElement.closest(".panel__inline-toolbar") !== null;
       executeCommand(command.id, {
         state: appState,
         dispatch,
@@ -1657,7 +1671,6 @@ export function Panel({
         getGridCols: () => computeGridMetrics(listRef.current).cols,
         getGridPageRows: () => computeGridMetrics(listRef.current).pageRows,
       });
-      if (focusInsideInlineToolbar) focusDivRef.current?.focus();
       return;
     }
   }
@@ -1699,7 +1712,14 @@ export function Panel({
 
     const matchingPanelCommand = findMatchingCommand(appState.commands, PANEL_SHORTCUT_COMMAND_IDS, e.nativeEvent, panel.viewMode);
     if (matchingPanelCommand) {
-      focusPanel();
+      // Listing navigation leaves the editor. Opening a temporary surface
+      // keeps the input as its opener so it can hand focus back on close.
+      const id = matchingPanelCommand.id;
+      if (id.startsWith("panel.cursor.") || id.startsWith("panel.selection.") || [
+        "panel.open", "panel.open_entry", "panel.navigate_up", "panel.navigate_home",
+        "panel.history.back", "panel.history.forward", "panel.refresh",
+        "panel.source.next", "panel.source.previous", "panel.bookmarks.browse", "panel.sort.open",
+      ].some((commandId) => commandId === id)) focusPanel();
       return;
     }
 

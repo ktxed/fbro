@@ -34,7 +34,10 @@ export async function startBrowser(name, host, port, application) {
 }
 
 async function waitForMainWindow(browser, name) {
-  await waitFor(() => browser.$('[data-testid="panel-left"]').then((el) => el.isExisting()), {
+  await waitFor(() => browser.execute(() =>
+    document.querySelector('[data-testid="panel-left"]')
+      && Array.from(document.querySelectorAll(".toolbar__key"))
+        .some((key) => key.textContent.trim() !== "")), {
     timeout: 30_000,
     label: `${name} main window`,
   });
@@ -74,7 +77,11 @@ export async function openSortSelector(browser, panelId, { preserveFocus = false
 }
 
 export async function clickCommand(browser, commandId) {
-  const el = await browser.$(`[data-command-id="${cssString(commandId)}"]`);
+  const selector = `[data-command-id="${cssString(commandId)}"]`;
+  // Empty-folder suggestions share command IDs with toolbar actions. Global
+  // command clicks must not accidentally activate another panel's suggestion.
+  const toolbarButton = await browser.$(`.toolbar ${selector}`);
+  const el = await toolbarButton.isExisting() ? toolbarButton : await browser.$(selector);
   await el.waitForClickable({ timeout: 10_000 });
   await el.click();
 }
@@ -137,7 +144,12 @@ export async function waitForBrowserPanelPath(browser, panelId, expectedPath, ti
 }
 
 export async function goToPanelPath(browser, observer, panelId, targetPath) {
+  // A reload can render panel placeholders before the command registry arrives.
+  await waitForMainWindow(browser, "Go To Path");
   await browser.execute((panelId) => document.querySelector(`[data-testid="panel-${panelId}"]`)?.focus(), panelId);
+  await waitFor(() => browser.execute((panelId) =>
+    document.querySelector(`[data-testid="panel-${panelId}"]`)?.classList.contains("panel--focused"), panelId),
+  { timeout: 10_000, label: `Go To Path: ${panelId} active` });
   await browser.performActions([{
     type: "key",
     id: "keyboard",

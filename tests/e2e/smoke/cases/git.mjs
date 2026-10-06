@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { backendPath, hostPath } from "../config.mjs";
-import { clickEntry, goToPanelPath } from "../browser.mjs";
+import { clickEntry, goToPanelPath, setTextInputValue } from "../browser.mjs";
 import { waitFor } from "../wait.mjs";
 
 export async function runGitFlow(browser, observer) {
@@ -176,7 +176,7 @@ export async function runGitFlow(browser, observer) {
   });
   if (await branchInput.getValue() !== "bad..name") throw new Error("Branch error discarded the name");
   const statusBeforeBranch = execFileSync("git", ["-C", hostRepo, "status", "--porcelain"], { encoding: "utf8" });
-  await branchInput.setValue("feature/smoke-new-branch");
+  await setTextInputValue(browser, '[data-testid="git-branch-name"]', "feature/smoke-new-branch");
   await browser.keys("Enter");
   await waitFor(() => observer.state.panels.left?.git?.branch === "feature/smoke-new-branch", {
     timeout: 10_000, label: "created branch backend refresh",
@@ -386,6 +386,9 @@ export async function runGitFlow(browser, observer) {
 
   await browser.keys("Escape");
   await gitModal.waitForExist({ reverse: true, timeout: 10_000 });
+  await waitFor(() => browser.execute(() =>
+    document.querySelector('[data-testid="panel-left"] .panel__git-btn') === document.activeElement),
+  { timeout: 5_000, label: "Git modal restores exact repository button opener" });
 
   await clickEntry(browser, "left", "changed.txt");
   const inlineViewDiff = await browser.$('[data-entry-name="changed.txt"] [data-testid="git-inline-view-diff"]');
