@@ -5,15 +5,17 @@ import { performance } from "node:perf_hooks";
 import { execFileSync } from "node:child_process";
 import { artifactsDir, backendPath, hostPath } from "../config.mjs";
 import { waitFor } from "../wait.mjs";
+import { clickEntry, pressWindowKey, waitForMainWindow } from "../browser.mjs";
 
 function minimalPdf() {
   const stream = "BT /F1 24 Tf 40 110 Td (fbro PDF preview) Tj ET\n";
   const objects = [
     "<< /Type /Catalog /Pages 2 0 R >>",
-    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Pages /Kids [3 0 R 6 0 R] /Count 2 >>",
     "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>",
     `<< /Length ${Buffer.byteLength(stream)} >>\nstream\n${stream}endstream`,
     "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>",
   ];
   let pdf = "%PDF-1.4\n";
   const offsets = [0];
@@ -68,6 +70,18 @@ export async function runViewerFlow(browser, observer) {
   fs.writeFileSync(hostPath(`${directory}/${pdfName}`), minimalPdf());
   const afterPdfName = "ZZ after PDF.txt";
   fs.writeFileSync(hostPath(`${directory}/${afterPdfName}`), "Viewer title follows navigation.\n");
+  const videoName = "ZZZZ Video seek.mp4";
+  const video = fs.readFileSync(new URL("../fixtures/viewer.mp4", import.meta.url));
+  fs.writeFileSync(hostPath(`${directory}/${videoName}`), video);
+  const largeName = "ZZZZZ Large.txt";
+  fs.writeFileSync(hostPath(`${directory}/${largeName}`), "large file line\n".repeat(90_000) + "END OF LARGE PREVIEW\n");
+  const binaryName = "ZZZZZZ Binary.bin";
+  fs.writeFileSync(hostPath(`${directory}/${binaryName}`), Buffer.alloc(2048, 0));
+  const linkName = "ZZZZZZZ video-link";
+  const linkPath = hostPath(`${directory}/${linkName}`);
+  if (fs.existsSync(linkPath)) fs.unlinkSync(linkPath);
+  fs.symlinkSync(videoName, linkPath);
+  fs.mkdirSync(hostPath(`${directory}/Preview folder`), { recursive: true });
   const mermaidName = "ZZZ Mermaid state.md";
   const mermaidMarkdown = `# Mermaid state diagram
 
@@ -155,8 +169,12 @@ stateDiagram-v2
     }
     measurements.storageClass = source.storageClass;
     measurements.prefetchEligible = source.prefetchEligible;
+    const sortEpoch = observer.state.panels.left.panelEpoch;
     observer.sendIntent("SetSort", "left", { by: "name", order: "asc" });
-    await observer.waitForSort("left", "name", "asc");
+    await waitFor(() => {
+      const panel = observer.state.panels.left;
+      return panel.panelEpoch !== sortEpoch && panel.status === "ready" && panel.entries.some(entry => entry.name === names[0]);
+    }, { timeout: 10_000, label: "viewer sorted listing completes before setting cursor" });
     const index = observer.state.panels.left.entries.findIndex(e => e.name === names[0]);
     observer.sendIntent("SetCursor", "left", { index });
     observer.sendIntent("SetEmbeddedViewerActive", undefined, { active: true });
@@ -185,7 +203,7 @@ stateDiagram-v2
       if (i % 8 === 0) sampleMemory(`reverse-${i}`);
     }
     await browser.execute(() => {
-      for (let i = 0; i < 12; i++) window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", bubbles: true }));
+      for (let i = 0; i < 12; i++) document.querySelector("[data-viewer-content]").dispatchEvent(new KeyboardEvent("keydown", { key: "k", bubbles: true, cancelable: true }));
     });
     await waitFor(() => browser.execute(() => document.querySelector(".viewer__filename")?.textContent === "12.jpg"),
       { timeout: 15_000, label: "rapid navigation settles on final file" });
@@ -291,6 +309,12 @@ stateDiagram-v2
     }
 
     await observer.waitForEntry("left", mermaidName);
+    const videoParams = new URLSearchParams({ viewer: "1", path: `${directory}/${videoName}`,
+      source: observer.state.panels.left.sourceId, name: videoName, label: "main", panel: "left",
+      local: "1", size: String(video.length), fsport: String(observer.state.fileServerPort) });
+    await browser.url(`${mainUrl.split("?")[0]}?${videoParams}`);
+    await checkRealVideoSeeking(browser, "full viewer");
+
     const mermaidParams = new URLSearchParams({ viewer: "1", path: `${directory}/${mermaidName}`,
       source: observer.state.panels.left.sourceId, name: mermaidName, label: "main", panel: "left",
       local: "1", size: String(Buffer.byteLength(mermaidMarkdown)),
@@ -346,10 +370,14 @@ stateDiagram-v2
       timeout: 5_000,
       label: "mermaid overlay closed by Escape",
     });
+    await runQuickPreviewChecks(browser, observer, {
+      mainUrl, directory, videoName, linkName, largeName, binaryName, mermaidName, pdfName,
+    });
   } catch (error) {
     measurements.error = String(error);
     measurements.viewer = await browser.execute(() => ({
       filename: document.querySelector(".viewer__filename")?.textContent,
+      focus: document.activeElement?.outerHTML.slice(0, 600),
       loading: document.querySelectorAll(".viewer__loading-overlay").length,
     })).catch(() => null);
     await browser.saveScreenshot(path.join(artifactsDir, "screenshots", "viewer-failure.png")).catch(() => {});
@@ -364,4 +392,216 @@ stateDiagram-v2
     observer.navigatePanelToPath("left", originalPath);
     await observer.waitForPanelPath("left", originalPath);
   }
+}
+
+async function checkRealVideoSeeking(browser, label) {
+  await waitFor(() => browser.execute(() => {
+    const video = document.querySelector("video");
+    return !!video && Number.isFinite(video.duration) && video.duration >= 14 && video.readyState >= 1;
+  }), { timeout: 15_000, label: `${label}: real clip metadata` });
+  await browser.execute(() => {
+    const video = document.querySelector("video");
+    video.pause();
+    video.currentTime = 2;
+    document.querySelector("[data-viewer-content]").focus();
+  });
+  await browser.keys("ArrowRight");
+  await waitFor(() => browser.execute(() => Math.abs(document.querySelector("video").currentTime - 7) < 0.2),
+    { timeout: 5000, label: `${label}: right seeks exactly five seconds` });
+  await browser.keys("ArrowLeft");
+  await waitFor(() => browser.execute(() => Math.abs(document.querySelector("video").currentTime - 2) < 0.2),
+    { timeout: 5000, label: `${label}: left seeks exactly five seconds` });
+  const pointer = await browser.execute(() => {
+    const video = document.querySelector("video");
+    const event = new MouseEvent("mousedown", { bubbles: true, cancelable: true });
+    video.dispatchEvent(event);
+    return { cancelled: event.defaultPrevented, controls: video.controls };
+  });
+  if (pointer.cancelled || !pointer.controls) throw new Error(`${label}: native media pointer controls blocked`);
+  // WebKit shows only its central Play overlay until playback starts once.
+  await browser.$("video").click();
+  await waitFor(() => browser.execute(() => !document.querySelector("video").paused),
+    { timeout: 5000, label: `${label}: native Play responds to mouse` });
+  await browser.execute(() => { const video = document.querySelector("video"); video.pause(); video.currentTime = 2; });
+  const rect = await browser.execute(() => {
+    const bounds = document.querySelector("video").getBoundingClientRect();
+    return { x: Math.round(bounds.left + bounds.width * 0.6), y: Math.round(bounds.bottom - 16) };
+  });
+  await browser.performActions([{
+    type: "pointer", id: "media-slider", parameters: { pointerType: "mouse" }, actions: [
+      { type: "pointerMove", duration: 0, origin: "viewport", x: rect.x, y: rect.y },
+      { type: "pause", duration: 500 },
+      { type: "pointerDown", button: 0 }, { type: "pointerUp", button: 0 },
+    ],
+  }]);
+  await browser.releaseActions();
+  await waitFor(() => browser.execute(() => {
+    const video = document.querySelector("video");
+    return video.paused && video.currentTime > 3;
+  }), { timeout: 5000, label: `${label}: native slider seeks with mouse` });
+  await browser.execute(() => document.querySelector("video").currentTime = 2);
+}
+
+async function runQuickPreviewChecks(browser, observer, fixture) {
+  const { mainUrl, directory, videoName, linkName, largeName, binaryName, mermaidName, pdfName } = fixture;
+  await browser.url(mainUrl);
+  await waitForMainWindow(browser, "quick preview");
+  await observer.waitForEntry("left", videoName);
+  const choose = async (name, displayed = name) => {
+    const oldRequest = await browser.execute(() => document.querySelector(".embedded-viewer")?.dataset.previewRequestId);
+    const index = observer.state.panels.left.entries.findIndex(entry => entry.name === name);
+    if (index < 0) throw new Error(`Quick preview fixture missing: ${name}`);
+    await clickEntry(browser, "left", name);
+    await waitFor(() => browser.execute((expected, previousRequest) =>
+      document.querySelector(".embedded-viewer")?.dataset.previewRequestId !== previousRequest
+      && document.querySelector(".embedded-viewer__header-label")?.textContent.trim() === expected, displayed, oldRequest),
+    { timeout: 10_000, label: `preview target ${displayed}` });
+  };
+  await clickEntry(browser, "left", videoName);
+  await browser.execute(() => document.querySelector('[data-testid="panel-left"]').focus());
+  await pressWindowKey(browser, "F3", { ctrl: true });
+  await browser.$('[data-testid="preview-right"] video').waitForDisplayed({ timeout: 10_000 });
+  if (!(await browser.execute(() => document.activeElement?.getAttribute("data-testid") === "panel-left"))) {
+    throw new Error("Ctrl+F3 stole source-list focus");
+  }
+  await browser.keys("Tab");
+  await waitFor(() => browser.execute(() => document.activeElement?.dataset.viewerContent === "quick"),
+    { timeout: 5000, label: "Tab enters quick preview content" });
+  await checkRealVideoSeeking(browser, "quick preview");
+  // The source listing delegates Space to the displayed video, preserving its
+  // cursor, selection and focus. Repeated keydowns must not toggle it again.
+  const sourceListingState = () => browser.execute(() => {
+    const panel = document.querySelector('[data-testid="panel-left"]');
+    return JSON.stringify({
+      cursor: panel.querySelector(".panel__row--cursor")?.dataset.absIndex,
+      selection: Array.from(panel.querySelectorAll(".panel__row--selected")).map(row => row.dataset.absIndex),
+    });
+  });
+  const sourceBeforePlayback = await sourceListingState();
+  await browser.execute(() => document.querySelector('[data-testid="panel-left"]').focus());
+  await browser.keys("Space");
+  await waitFor(() => browser.execute(() => !document.querySelector("video").paused),
+    { timeout: 5000, label: "source-list Space starts preview video" });
+  const repeatedSpace = await browser.execute(() => {
+    const event = new KeyboardEvent("keydown", { key: " ", code: "Space", repeat: true, bubbles: true, cancelable: true });
+    document.activeElement.dispatchEvent(event);
+    return { consumed: event.defaultPrevented, playing: !document.querySelector("video").paused };
+  });
+  if (!repeatedSpace.consumed || !repeatedSpace.playing) throw new Error("Held Space toggled preview playback again");
+  await browser.keys("Space");
+  await waitFor(() => browser.execute(() => document.querySelector("video").paused),
+    { timeout: 5000, label: "source-list Space pauses preview video" });
+  if (!(await browser.execute(() => document.activeElement?.getAttribute("data-testid") === "panel-left"))
+    || sourceBeforePlayback !== await sourceListingState()) {
+    throw new Error("Video Space changed source-list focus/cursor/selection");
+  }
+  // A modal owns the same arrow key while the preview remains covered.
+  await browser.execute(() => document.querySelector('[data-viewer-content="quick"]').focus());
+  await pressWindowKey(browser, ",", { ctrl: true });
+  await browser.$('[data-modal-id="settings"]').waitForDisplayed();
+  const beforeModalKey = await browser.execute(() => document.querySelector("video").currentTime);
+  await browser.keys("ArrowRight");
+  await browser.keys("Space");
+  const duringModal = await browser.execute(() => document.querySelector("video").currentTime);
+  if (Math.abs(duringModal - beforeModalKey) > 0.1
+    || !(await browser.execute(() => document.querySelector("video").paused))) throw new Error("Covered preview handled modal media keys");
+  await browser.keys("Escape");
+  await browser.$('[data-modal-id="settings"]').waitForDisplayed({ reverse: true });
+  await waitFor(() => browser.execute(() => document.activeElement?.dataset.viewerContent === "quick"),
+    { timeout: 5000, label: "modal restores its quick-preview opener" });
+  await browser.execute(() => document.querySelector('[data-testid="preview-close"]').focus());
+  await browser.keys("Tab");
+  await waitFor(() => browser.execute(() => document.activeElement?.getAttribute("data-testid") === "panel-left"),
+    { timeout: 5000, label: "last preview control returns Tab to source listing" });
+  await browser.keys("Tab");
+  await waitFor(() => browser.execute(() => document.activeElement?.dataset.viewerContent === "quick"),
+    { timeout: 5000, label: "source Tab re-enters preview" });
+  if (await browser.$(".embedded-viewer .viewer__mode-btns").isExisting()) {
+    throw new Error("Quick preview contains full-viewer options");
+  }
+
+  // Observe the real outgoing intent while retaining normal backend dispatch.
+  await browser.execute(() => {
+    window.__previewIntents = [];
+    const send = WebSocket.prototype.send;
+    WebSocket.prototype.send = function(data) {
+      if (typeof data === "string") {
+        const message = JSON.parse(data);
+        if (message.type === "Intent") window.__previewIntents.push(message);
+      }
+      return send.call(this, data);
+    };
+  });
+  await browser.keys(["j", "k", "m", "e", "w", "s", "f", "1", "2", "3", "4"]);
+  const excluded = await browser.execute(() => ({
+    find: !!document.querySelector(".embedded-viewer .viewer__find-bar"),
+    video: !!document.querySelector(".embedded-viewer video"),
+    commands: window.__previewIntents.filter(message => ["ViewerNavigate", "EditFile"].includes(message.name)),
+  }));
+  if (excluded.find || !excluded.video || excluded.commands.length) {
+    throw new Error(`Quick preview accepted excluded actions: ${JSON.stringify(excluded)}`);
+  }
+  await browser.keys("F3");
+  await waitFor(() => browser.execute(() => window.__previewIntents.some(message => message.name === "ViewFile")),
+    { timeout: 5000, label: "F3 promotes displayed preview file" });
+  const promotion = await browser.execute(() => window.__previewIntents.find(message => message.name === "ViewFile").args);
+  if (promotion.filePath !== `${directory}/${videoName}` || promotion.panelId !== "left") {
+    throw new Error(`Open viewer targeted the hidden panel: ${JSON.stringify(promotion)}`);
+  }
+  if (!(await browser.$('[data-testid="preview-right"]').isExisting())) throw new Error("Open viewer removed quick preview");
+  await browser.$('[data-testid="preview-open-viewer"]').click();
+  const openings = await browser.execute(() => window.__previewIntents.filter(message => message.name === "ViewFile"));
+  if (openings.length !== 2) throw new Error("Open viewer button did not dispatch exactly once");
+
+  await choose(linkName, videoName);
+  await checkRealVideoSeeking(browser, "symlink quick preview");
+  await choose(largeName);
+  await waitFor(() => browser.execute(() => document.querySelector(".embedded-viewer .viewer__content")?.textContent.includes("large file line")),
+    { timeout: 10_000, label: "large text loaded in preview" });
+  const textWasSelected = await browser.execute(() => document.querySelector('[data-testid="panel-left"] .panel__row--cursor').classList.contains("panel__row--selected"));
+  await browser.execute(() => document.querySelector('[data-testid="panel-left"]').focus());
+  await browser.keys("Space");
+  await waitFor(async () => await browser.execute(() => document.querySelector('[data-testid="panel-left"] .panel__row--cursor').classList.contains("panel__row--selected")) !== textWasSelected,
+    { timeout: 5000, label: "non-video preview keeps source-list Space selection" });
+  await browser.execute(() => document.querySelector('[data-viewer-content="quick"]').focus());
+  await browser.keys(["w", "s", "f", "3"]);
+  if (await browser.$(".embedded-viewer .viewer__find-bar, .embedded-viewer .viewer--dos, .embedded-viewer .viewer__text--wrap").isExisting()) {
+    throw new Error("Quick text preview enabled a full-viewer transformation");
+  }
+  await browser.keys("End");
+  await waitFor(() => browser.execute(() => document.querySelector(".embedded-viewer .viewer__content")?.textContent.includes("END OF LARGE PREVIEW")),
+    { timeout: 10_000, label: "large preview reaches content beyond 1 MiB" });
+  await choose(binaryName);
+  await waitFor(() => browser.execute(() => document.querySelector(".embedded-viewer .viewer__pre")?.textContent.includes("000007f0")),
+    { timeout: 10_000, label: "binary preview includes bytes beyond old 64-row limit" });
+  await choose(pdfName);
+  await browser.$('.embedded-viewer .viewer__pdf-page[data-rendered="true"] canvas').waitForDisplayed({ timeout: 15_000 });
+  await browser.execute(() => document.querySelector('[data-viewer-content="quick"]').focus());
+  await browser.keys("End");
+  await waitFor(() => browser.execute(() => document.querySelector(".embedded-viewer .viewer__pdf").scrollTop > 0),
+    { timeout: 5000, label: "PDF keyboard scroll in preview" });
+  await choose(mermaidName);
+  await browser.$(".embedded-viewer .viewer__mermaid-canvas > svg").waitForDisplayed({ timeout: 15_000 });
+  await browser.execute(() => {
+    document.querySelector('[data-viewer-content="quick"]').focus();
+    document.querySelector('.embedded-viewer [data-mermaid-action="expand"]').click();
+  });
+  await browser.$(".embedded-viewer .viewer__mermaid-overlay").waitForDisplayed();
+  const beforeDiagramKey = await browser.execute(() => window.__previewIntents.filter(message => message.name === "ViewFile").length);
+  await browser.keys("F3");
+  const afterDiagramKey = await browser.execute(() => window.__previewIntents.filter(message => message.name === "ViewFile").length);
+  if (afterDiagramKey !== beforeDiagramKey) throw new Error("Expanded diagram forwarded F3 to the covered preview");
+  await browser.keys("Escape");
+  await browser.$(".embedded-viewer .viewer__mermaid-overlay").waitForDisplayed({ reverse: true });
+  if (!(await browser.$('[data-testid="preview-right"]').isExisting())) throw new Error("Diagram Escape closed preview");
+
+  await choose("Preview folder");
+  if (!(await browser.$('[data-testid="preview-open-viewer"]').getAttribute("disabled"))) {
+    throw new Error("Directory preview offers Open viewer");
+  }
+  await browser.execute(() => document.querySelector('[data-testid="preview-right"]').focus());
+  await browser.keys("Escape");
+  await browser.$('[data-testid="preview-right"]').waitForDisplayed({ reverse: true });
+  await waitFor(() => browser.execute(() => document.activeElement?.getAttribute("data-testid") === "panel-left"),
+    { timeout: 5000, label: "closing preview restores source-list focus" });
 }

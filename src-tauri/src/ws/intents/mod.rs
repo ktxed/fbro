@@ -113,6 +113,7 @@ pub async fn dispatch(name: &str, scope: &Value, args: &Value, ctx: &mut IntentC
         | "CloseViewerWindow"
         | "ViewerNavigate"
         | "ViewerOpenFile"
+        | "ResolveViewerFile"
         | "ReadFileChunk"
         | "FindInViewerFile"
         | "SetEmbeddedViewerActive" => viewer::handle(name, args, ctx).await,

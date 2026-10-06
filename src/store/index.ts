@@ -1241,6 +1241,9 @@ function reducer(state: AppState, action: AppAction): AppState {
     case "BE_MESSAGE": {
       const msg = action.msg;
       switch (msg.type) {
+        case "ViewerFileReady":
+          // Request-local reply; the preview session owns this ephemeral target.
+          return state;
         case "Welcome":
           return { ...state, sessionId: msg.sessionId, fileServerPort: msg.fileServerPort };
         case "StateSnapshot":

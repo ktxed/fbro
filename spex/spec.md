@@ -14,6 +14,22 @@ specified in [inline-operations.md](./inline-operations.md).
 
 ## 1. Frontend (FE) and Backend (BE)
 
+### Shared viewer content
+
+The separate F3 window and Ctrl+F3 quick preview use `FileViewer` for content
+loading, automatic renderer detection, chunked scrolling, and rendering.
+`ViewerApp` owns native window title/maximize/fullscreen/close behavior;
+`EmbeddedViewerPanel` owns cursor-following, panel focus, and its minimal header.
+Window URL configuration is parsed by the window host and passed explicitly to
+shared content. Existing native media elements, PDF.js, image/HEIC renderers and
+Mermaid remain the rendering providers; there is no second preview renderer.
+
+Quick preview omits full-viewer controls and their keyboard handlers. It renders
+Markdown by default but keeps file navigation in the source listing. The backend
+resolves its target using the same logic as F3. Open viewer opens that displayed
+target while retaining quick preview; it does not derive a file from the hidden
+panel's selection. See [Keyboard](keyboard.md) and [Protocol](proto.md).
+
 ### Markdown viewer images
 
 The backend resolves image paths relative to the viewed Markdown file through

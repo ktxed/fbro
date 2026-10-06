@@ -10,10 +10,10 @@ export function hexDecode(hex: string): Uint8Array {
 /** Returns true if the byte array appears to be binary (not plain text). */
 export function detectBinary(bytes: Uint8Array): boolean {
   const sample = bytes.slice(0, 4096);
-  for (let i = 0; i < sample.length; i++) {
-    const b = sample[i];
-    if (b === 0) return true;
-    if (b < 8 || (b > 13 && b < 32)) return true;
+  let nonText = 0;
+  for (const byte of sample) {
+    if (byte === 0) return true;
+    if (byte < 9 || (byte > 13 && byte < 32) || byte === 127) nonText++;
   }
-  return false;
+  return sample.length > 0 && nonText / sample.length > 0.3;
 }

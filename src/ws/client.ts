@@ -38,6 +38,7 @@ export class WsClient {
   private wsUrl: string;
   private pending: (FEMessage | IntentMessage)[] = [];
   private terminalListeners = new Map<number, TerminalOutputListener>();
+  private messageListeners = new Set<(message: BEMessage) => void>();
 
   constructor(clientKind: "gui" | "viewer" = "gui", wsUrl = DEFAULT_WS_URL) {
     this.clientKind = clientKind;
@@ -47,6 +48,12 @@ export class WsClient {
   onMessage: (msg: BEMessage) => void = () => {};
   onConnected: () => void = () => {};
   onDisconnected: () => void = () => {};
+
+  /** Request-local consumers share the GUI connection without replacing its reducer. */
+  subscribeMessages(listener: (message: BEMessage) => void) {
+    this.messageListeners.add(listener);
+    return () => { this.messageListeners.delete(listener); };
+  }
 
   subscribeTerminalOutput(sessionId: number, cb: TerminalOutputListener) {
     this.terminalListeners.set(sessionId, cb);
@@ -124,6 +131,7 @@ export class WsClient {
       try {
         const msg = JSON.parse(event.data as string) as BEMessage;
         this.onMessage(msg);
+        for (const listener of this.messageListeners) listener(msg);
       } catch (e) {
         console.error("Failed to parse BE message", e);
       }
@@ -181,6 +189,7 @@ export class WsClient {
 
   destroy() {
     this.destroyed = true;
+    this.messageListeners.clear();
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     if (this.connectTimer) clearTimeout(this.connectTimer);
     this.ws?.close();

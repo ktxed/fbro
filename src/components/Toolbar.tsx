@@ -70,6 +70,7 @@ export function Toolbar({ client, onOpenJobsView }: { client: WsClient; onOpenJo
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      if (e.defaultPrevented) return;
       if (modKey(e) && (e.key === "=" || e.key === "+")) { e.preventDefault(); const s = nextZoomSize(state.fontSize, 1);  applyZoom(s); client.sendIntent("SetFontSize", undefined, { value: s }); return; }
       if (modKey(e) && e.key === "-")                    { e.preventDefault(); const s = nextZoomSize(state.fontSize, -1); applyZoom(s); client.sendIntent("SetFontSize", undefined, { value: s }); return; }
       if (modKey(e) && e.key === "0")                    { e.preventDefault(); applyZoom(DEFAULT_FONT_SIZE); client.sendIntent("SetFontSize", undefined, { value: DEFAULT_FONT_SIZE }); return; }

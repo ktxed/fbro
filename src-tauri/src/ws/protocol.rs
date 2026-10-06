@@ -252,6 +252,12 @@ pub enum ServerMessage {
         /// Lowercase noun for the toast, e.g. "full path" or "3 full paths".
         what: String,
     },
+    ViewerFileReady {
+        timestamp: u64,
+        #[serde(rename = "requestId")]
+        request_id: String,
+        target: ViewerTargetSchema,
+    },
     ViewerFileChanged {
         timestamp: u64,
         path: String,
@@ -1239,4 +1245,26 @@ pub fn now() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0)
+}
+
+/// A backend-resolved target shared by quick preview and the windowed viewer.
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct ViewerFileSchema {
+    pub panel_id: String,
+    pub path: String,
+    pub source_id: String,
+    pub filename: String,
+    pub file_size: Option<u64>,
+    pub is_local: bool,
+    pub initial_find_query: Option<String>,
+}
+
+#[derive(Serialize, Clone, Debug)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum ViewerTargetSchema {
+    File { file: ViewerFileSchema },
+    Directory { name: String },
+    Empty,
+    Error { message: String },
 }

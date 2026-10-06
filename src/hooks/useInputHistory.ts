@@ -63,6 +63,9 @@ export function useInputHistory(
 
   useEffect(() => {
     const captureDown = (e: KeyboardEvent) => {
+      // Several prompt/viewer histories can coexist. Only the focused input
+      // (or the input we temporarily blurred for AltGraph) owns this shortcut.
+      if (!inputRef.current || (document.activeElement !== inputRef.current && !blurredByUs.current)) return;
       if (e.key === "Alt" || e.key === "AltGraph" || e.code === "AltLeft" || e.code === "AltRight") {
         altHeldRef.current = true;
         if (e.code === "AltRight" && e.key !== "Alt") {

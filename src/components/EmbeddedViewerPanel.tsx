@@ -1,305 +1,189 @@
-import React, { useEffect, useRef, useState, useCallback } from "react";
-import { resolveWsUrl, WsClient } from "../ws/client";
+import { useCallback, useEffect, useImperativeHandle, useRef, useState, type KeyboardEvent, type MouseEvent, type Ref } from "react";
+import { IconExternalLink, IconX } from "@tabler/icons-react";
 import type { AppState } from "../store";
-import type { FileChunkMessage } from "../ws/types";
-import { canUseDirect, DirectFileViewer } from "../viewers/DirectFileViewer";
-import { ImageViewer } from "../viewers/ImageViewer";
+import type { ViewerTarget } from "../ws/types";
+import type { WsClient } from "../ws/client";
+import { FileViewer, type FileViewerHandle } from "./FileViewer";
+import { isVideoExt } from "../viewers/media";
 import { IMAGE_DIRECT_LIMIT } from "../viewers/DirectFileViewer";
-import { isImageExt } from "../viewers/media";
-import { hexDecode, detectBinary } from "../viewers/utils";
+import { findMatchingCommand, formatPrimaryBinding, getCommand, GLOBAL_SHORTCUT_COMMAND_IDS } from "../commands/interactive";
+import { useFocusReturn } from "../hooks/useFocusReturn";
+import { isAvailableFocusTarget } from "../utils/focusReturn";
 
-const SMALL_LIMIT = 1 * 1024 * 1024;   // 1 MiB — same as viewer
-const DEBOUNCE_MS = 80;
-const HEX_COLS = 16;
-
-interface FileInfo {
-  path: string;
-  sourceId: string;
-  filename: string;
-  fileSize: number | null;
-  isLocal: boolean;
+export interface EmbeddedViewerHandle {
+  toggleVideoPlayback: (repeat: boolean) => boolean;
 }
 
-type ViewMode =
-  | { kind: "empty" }
-  | { kind: "directory"; name: string }
-  | { kind: "direct"; file: FileInfo }
-  | { kind: "loading"; file: FileInfo }
-  | { kind: "ready"; file: FileInfo; buffer: Uint8Array; mode: "text" | "image" | "hex" }
-  | { kind: "too-large"; file: FileInfo }
-  | { kind: "error"; file: FileInfo; message: string };
-
 interface Props {
+  ref?: Ref<EmbeddedViewerHandle>;
+  panelId: string;
   sourcePanelId: string;
   state: AppState;
+  client: WsClient;
+  blocked: boolean;
   onClose: () => void;
 }
 
-function formatSize(n: number): string {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KiB`;
-  return `${(n / 1024 / 1024).toFixed(1)} MiB`;
-}
+/** Quick-preview host: target resolution and panel focus, with shared file content. */
+export function EmbeddedViewerPanel({ ref, panelId, sourcePanelId, state, client, blocked, onClose }: Props) {
+  const [target, setTarget] = useState<ViewerTarget | { kind: "loading" }>({ kind: "loading" });
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const viewerRef = useRef<FileViewerHandle | null>(null);
+  const contentHandoffRef = useRef(false);
+  const [contentRequestId, setContentRequestId] = useState("");
+  const focusReturnRef = useFocusReturn(sourcePanelId);
+  const requestRef = useRef("");
+  const setRootRef = useCallback((element: HTMLDivElement | null) => {
+    rootRef.current = element;
+    return focusReturnRef(element);
+  }, [focusReturnRef]);
+  const sourcePanel = state.panels[sourcePanelId];
+  const focused = state.focus === panelId;
+  const { ludicrousMode, maxImageSizeMb, enableHeic2any, colorScheme } = state.settings.general;
+  const imageLimit = ludicrousMode ? maxImageSizeMb * 1024 * 1024 : IMAGE_DIRECT_LIMIT;
+  const file = target.kind === "file" ? target.file : null;
+  useImperativeHandle(ref, () => ({
+    toggleVideoPlayback: repeat => !blocked && !!file && isVideoExt(file.filename)
+      && (viewerRef.current?.togglePlayback(repeat) ?? false),
+  }), [blocked, file]);
+  const fileKey = file ? JSON.stringify([file.sourceId, file.path, contentRequestId]) : "";
+  const viewCommand = getCommand(state.commands, "file.view");
+  const viewBinding = viewCommand ? formatPrimaryBinding(viewCommand) : "";
 
-function HexLines({ bytes }: { bytes: Uint8Array }) {
-  const lines: React.ReactElement[] = [];
-  const maxRows = 64; // show at most 64 rows = 1024 bytes
-  const limit = Math.min(bytes.length, maxRows * HEX_COLS);
-  for (let off = 0; off < limit; off += HEX_COLS) {
-    const row = bytes.slice(off, off + HEX_COLS);
-    const hex = Array.from(row).map(b => b.toString(16).padStart(2, "0")).join(" ");
-    const asc = Array.from(row).map(b => (b >= 0x20 && b < 0x7f) ? String.fromCharCode(b) : ".").join("");
-    lines.push(
-      <div key={off} className="embedded-viewer__hex-row">
-        <span className="embedded-viewer__hex-addr">{off.toString(16).padStart(8, "0")}</span>
-        <span className="embedded-viewer__hex-bytes">{hex.padEnd(HEX_COLS * 3 - 1)}</span>
-        <span className="embedded-viewer__hex-asc">{asc}</span>
-      </div>
-    );
-  }
-  if (bytes.length > limit) {
-    lines.push(
-      <div key="ellipsis" className="embedded-viewer__hex-ellipsis">
-        … {bytes.length - limit} more bytes
-      </div>
-    );
-  }
-  return <>{lines}</>;
-}
+  useEffect(() => client.subscribeMessages(message => {
+    if (message.type === "ViewerFileReady" && message.requestId === requestRef.current) {
+      const root = rootRef.current;
+      // Move focus to the persistent host before replacing a keyed content
+      // session. A later effect hands it to the new content, never an outside owner.
+      if (root?.querySelector("[data-viewer-content]")?.contains(document.activeElement)) {
+        contentHandoffRef.current = true;
+        root.focus({ preventScroll: true });
+      }
+      setTarget(message.target);
+      setContentRequestId(message.requestId);
+    }
+  }), [client]);
 
-export function EmbeddedViewerPanel({ sourcePanelId, state, onClose }: Props) {
-  const { ludicrousMode, maxImageSizeMb, enableHeic2any } = state.settings.general;
-  const imageLimit = ludicrousMode
-    ? maxImageSizeMb * 1024 * 1024
-    : IMAGE_DIRECT_LIMIT;
-
-  const heicEnabledRef = useRef(enableHeic2any);
-  heicEnabledRef.current = enableHeic2any;
-  const imageLimitRef = useRef(imageLimit);
-  imageLimitRef.current = imageLimit;
-
-  const [viewMode, setViewMode] = useState<ViewMode>({ kind: "empty" });
-  const clientRef = useRef<WsClient | null>(null);
-  const pendingPathRef = useRef<string | null>(null);
-  // Tracks the path we have already loaded/are loading — prevents re-requesting
-  // the same file when the panel receives unrelated state patches (which increment
-  // `version`) while the cursor hasn't actually moved.
-  const loadedPathRef = useRef<string | null>(null);
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Create own WsClient for ReadFileChunk isolation.
+  // Cursor/entry identity is only an invalidation signal. The backend resolves
+  // the actual target, including search rows, symlinks and opaque VFS paths.
+  const entry = sourcePanel?.entries[sourcePanel.cursor - (sourcePanel.windowStart ?? 0)];
+  const revision = JSON.stringify([sourcePanelId, sourcePanel?.sourceId, sourcePanel?.path,
+    sourcePanel?.cursor, entry?.name, entry?.sourcePath, entry?.size, entry?.mtime, imageLimit]);
   useEffect(() => {
-    let cancelled = false;
-    resolveWsUrl().then((wsUrl) => {
-      if (cancelled) return;
-      const client = new WsClient("viewer", wsUrl);
-      clientRef.current = client;
+    const requestId = crypto.randomUUID();
+    requestRef.current = requestId;
+    const timer = setTimeout(() => {
+      client.sendIntent("ResolveViewerFile", undefined, { panelId: sourcePanelId, requestId });
+    }, 80);
+    return () => { clearTimeout(timer); requestRef.current = ""; };
+  }, [client, sourcePanelId, revision]);
 
-      client.onMessage = (msg) => {
-        if (msg.type === "FileChunk") {
-          const m = msg as FileChunkMessage;
-          // Ignore stale chunks (cursor moved while chunk was in flight).
-          if (m.path !== pendingPathRef.current) return;
-          pendingPathRef.current = null;
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!focused || blocked || !root || root.contains(document.activeElement)) return;
+    (root.querySelector<HTMLElement>("[data-viewer-content]") ?? root).focus({ preventScroll: true });
+  }, [focused, blocked]);
 
-          const bytes = hexDecode(m.data);
-          setViewMode(prev => {
-            if (prev.kind !== "loading") return prev;
-            const { file } = prev;
-            const isBin = detectBinary(bytes);
-            const rendMode = isImageExt(file.filename, heicEnabledRef.current)
-              ? (file.fileSize !== null && file.fileSize > imageLimitRef.current ? "hex" : "image")
-              : isBin ? "hex" : "text";
-            return { kind: "ready", file, buffer: bytes, mode: rendMode };
-          });
-        }
-      };
+  useEffect(() => {
+    contentHandoffRef.current = false;
+    const root = rootRef.current;
+    if (!blocked && root && document.activeElement === root) {
+      root.querySelector<HTMLElement>("[data-viewer-content]")?.focus({ preventScroll: true });
+    }
+  }, [fileKey, blocked]);
 
-      client.connect();
+  const openViewer = () => {
+    if (!file || blocked) return;
+    client.sendIntent("ViewFile", undefined, {
+      panelId: sourcePanelId, sourceId: file.sourceId, filePath: file.path,
+      filename: file.filename, initialFindQuery: file.initialFindQuery,
     });
-    return () => {
-      cancelled = true;
-      clientRef.current?.destroy();
-      clientRef.current = null;
-    };
-  }, []);
+  };
+  const returnToListing = () => client.sendIntent("SwitchFocus", undefined, { to: sourcePanelId });
 
-  const loadFile = useCallback((info: FileInfo) => {
-    pendingPathRef.current = info.path;
-    const size = isImageExt(info.filename, heicEnabledRef.current) ? imageLimitRef.current : SMALL_LIMIT;
-    clientRef.current?.sendIntent("ReadFileChunk", undefined, {
-      path: info.path,
-      sourceId: info.sourceId,
-      offset: 0,
-      size,
-    });
-    setViewMode({ kind: "loading", file: info });
-  }, []);
-
-  // Reset loaded-path guard when the directory changes so navigating into a
-  // new folder and back shows fresh content.
-  const panelPath = state.panels[sourcePanelId]?.path;
-  useEffect(() => {
-    loadedPathRef.current = null;
-  }, [panelPath, sourcePanelId, enableHeic2any]);
-
-  // Watch source panel cursor. Debounce to avoid flooding on fast scroll.
-  useEffect(() => {
-    const panel = state.panels[sourcePanelId];
-    if (!panel) return;
-
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => {
-      // In windowed (virtual scroll) mode panel.entries is only the loaded
-      // window slice; panel.windowStart holds the absolute offset of that
-      // window. Use the window-relative index to find the current entry.
-      const windowStart = panel.windowStart ?? 0;
-      const localIndex = panel.cursor - windowStart;
-      const entry = localIndex >= 0 && localIndex < panel.entries.length
-        ? panel.entries[localIndex]
-        : undefined;
-
-      if (!entry) {
-        // Cursor is outside the currently loaded window (large directory,
-        // fast scroll). Keep the existing preview — the window will catch up
-        // shortly and version will increment, re-triggering this effect.
-        if ((panel.totalCount ?? panel.entries.length) > 0) return;
-        // Genuinely empty directory.
-        loadedPathRef.current = null;
-        setViewMode({ kind: "empty" });
-        return;
+  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.defaultPrevented || blocked) return;
+    if (findMatchingCommand(state.commands, ["file.view"], event.nativeEvent)) {
+      event.preventDefault(); event.stopPropagation(); openViewer(); return;
+    }
+    if (findMatchingCommand(state.commands, ["panel.viewer.embed"], event.nativeEvent)) {
+      event.preventDefault(); event.stopPropagation(); onClose(); return;
+    }
+    // Application commands/zoom remain global; file operations for the hidden
+    // listing never receive quick-preview keys.
+    if (((event.ctrlKey || event.metaKey) && ["=", "+", "-", "0"].includes(event.key))
+      || ((event.ctrlKey || event.metaKey || event.altKey)
+        && findMatchingCommand(state.commands, GLOBAL_SHORTCUT_COMMAND_IDS.filter(id => id.startsWith("app.")), event.nativeEvent))) return;
+    if (event.key === "Escape") {
+      event.preventDefault(); event.stopPropagation(); onClose(); return;
+    }
+    if (event.key === "Tab") {
+      const root = rootRef.current;
+      if (!root) return;
+      const controls = Array.from(root.querySelectorAll<HTMLElement>(
+        "button:not(:disabled), [tabindex='0'], video[controls], audio[controls], a[href]",
+      )).filter(isAvailableFocusTarget);
+      const active = document.activeElement;
+      // The content root is the initial Tab destination. Native Tab traverses
+      // its controls and the header; the boundaries return to the source list.
+      if ((event.shiftKey && (active === controls[0] || active === root))
+        || (!event.shiftKey && active === controls[controls.length - 1])) {
+        event.preventDefault(); returnToListing();
       }
-      if (entry.kind === "directory") {
-        loadedPathRef.current = null;
-        setViewMode({ kind: "directory", name: entry.name });
-        return;
-      }
+      event.stopPropagation();
+      return;
+    }
+    // A quick preview never forwards its keys to file-operation shortcuts for
+    // the hidden listing in this slot. Content already handled its own keys.
+    event.stopPropagation();
+  };
 
-      const source = state.sources[panel.sourceId];
-      // Search-result entries carry the real absolute path on `sourcePath`.
-      // Their panel sits on a virtual `search:N` source rooted at "/", so the
-      // synthetic `panel.path + entry.name` would be a meaningless "/name" —
-      // the BE would resolve the real file by filename and return the real
-      // path, which the FE wouldn't recognise as the one it requested.
-      const isLocal = source?.kind === "filesystem" || !!entry.sourcePath;
-      const base = panel.path.endsWith("/") ? panel.path : panel.path + "/";
-      const path = entry.sourcePath
-        ?? (panel.path ? `${base}${entry.name}` : entry.name);
-
-      // Guard: skip if we're already showing or loading this exact file.
-      // This prevents duplicate ReadFileChunk requests when unrelated panel
-      // patches increment `version` while the cursor hasn't moved.
-      if (path === loadedPathRef.current) return;
-      loadedPathRef.current = path;
-
-      const fileSize = entry.size ?? null;
-      const info: FileInfo = {
-        path,
-        sourceId: panel.sourceId,
-        filename: entry.name,
-        fileSize,
-        isLocal,
-      };
-
-      // For local images/PDF/video: serve directly, no round trip needed.
-      if (canUseDirect(isLocal, entry.name, fileSize, imageLimitRef.current, heicEnabledRef.current)) {
-        pendingPathRef.current = null;
-        setViewMode({ kind: "direct", file: info });
-        return;
-      }
-
-      // Direct rendering is local-only. For remote images we still need the
-      // whole image in memory, so keep the image cap; remote non-images can
-      // still show a chunked text/hex preview.
-      if (isImageExt(entry.name, heicEnabledRef.current) && fileSize !== null && fileSize > imageLimitRef.current) {
-        setViewMode({ kind: "too-large", file: info });
-        return;
-      }
-
-      loadFile(info);
-    }, DEBOUNCE_MS);
-
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-    };
-  }, [
-    state.panels[sourcePanelId]?.cursor,
-    state.panels[sourcePanelId]?.sourceId,
-    state.panels[sourcePanelId]?.path,
-    state.panels[sourcePanelId]?.version,
-    state.sources,
-    sourcePanelId,
-    loadFile,
-    enableHeic2any,
-  ]);
-
-  // Header label
-  const headerLabel = (() => {
-    if (viewMode.kind === "directory") return `📁 ${viewMode.name}`;
-    if (viewMode.kind === "empty") return "No file selected";
-    const { file } = viewMode as { file: FileInfo };
-    return `${file.filename}${file.fileSize !== null ? "  ·  " + formatSize(file.fileSize) : ""}`;
-  })();
+  const handleMouseDown = (event: MouseEvent<HTMLDivElement>) => {
+    if (blocked) return;
+    const element = event.target instanceof Element ? event.target : null;
+    // Leave native controls and selectable content alone. Focusing the content
+    // root enables media keys without cancelling the pointer's default action.
+    if (!element?.closest("button, input, textarea, select, video, audio, embed, a")) {
+      rootRef.current?.querySelector<HTMLElement>("[data-viewer-content]")?.focus({ preventScroll: true });
+    }
+  };
 
   return (
-    <div className="embedded-viewer" onMouseDown={(e) => e.preventDefault()}>
-      <div className="embedded-viewer__header">
-        <span className="embedded-viewer__header-label">{headerLabel}</span>
-        <button
-          className="embedded-viewer__close"
-          title="Close preview (Q)"
-          onClick={(e) => { e.stopPropagation(); onClose(); }}
-        >
-          ×
-        </button>
+    <div className={`embedded-viewer${focused ? " embedded-viewer--focused panel--focused" : ""}`}
+      data-testid={`preview-${panelId}`} data-panel-id={panelId} data-preview-request-id={contentRequestId} tabIndex={0}
+      ref={setRootRef}
+      onKeyDown={handleKeyDown} onMouseDown={handleMouseDown}
+      onFocus={event => {
+        if (event.target === event.currentTarget && !blocked && !contentHandoffRef.current) {
+          rootRef.current?.querySelector<HTMLElement>("[data-viewer-content]")?.focus({ preventScroll: true });
+        }
+        if (!focused && !blocked) client.sendIntent("SwitchFocus", undefined, { to: panelId });
+      }}>
+      <div className="embedded-viewer__content">
+        {file ? <FileViewer key={fileKey} ref={viewerRef}
+          path={file.path} sourceId={file.sourceId} filename={file.filename}
+          panelId={sourcePanelId} isLocal={file.isLocal} nativeFileSize={file.fileSize}
+          fsPort={state.fileServerPort} imageLimit={imageLimit} enableHeic2any={enableHeic2any}
+          initialColorScheme={colorScheme} presentation="quick" blocked={blocked} onClose={onClose} />
+          : <div className="embedded-viewer__placeholder" role={target.kind === "error" ? "alert" : "status"}>
+            {target.kind === "directory" ? "Directory" : target.kind === "empty" ? "No file selected"
+              : target.kind === "error" ? target.message : "Loading…"}
+          </div>}
       </div>
-      <div className="embedded-viewer__content" style={{ height: "100%" }}>
-        {viewMode.kind === "empty" && (
-          <div className="embedded-viewer__placeholder">No file selected</div>
-        )}
-        {viewMode.kind === "directory" && (
-          <div className="embedded-viewer__placeholder">📁 Directory</div>
-        )}
-        {viewMode.kind === "loading" && (
-          <div className="embedded-viewer__placeholder">Loading…</div>
-        )}
-        {viewMode.kind === "too-large" && (
-          <div className="embedded-viewer__placeholder">
-            File too large to preview
-            {viewMode.file.fileSize !== null && ` (${formatSize(viewMode.file.fileSize)})`}
-          </div>
-        )}
-        {viewMode.kind === "error" && (
-          <div className="embedded-viewer__placeholder">Error: {viewMode.message}</div>
-        )}
-        {viewMode.kind === "direct" && (
-          <DirectFileViewer
-            path={viewMode.file.path}
-            filename={viewMode.file.filename}
-            imageLimit={imageLimit}
-            fsPort={state.fileServerPort}
-            enableHeic2any={enableHeic2any}
-          />
-        )}
-        {viewMode.kind === "ready" && viewMode.mode === "image" && (
-          <ImageViewer
-            buffer={viewMode.buffer}
-            enableHeic2any={enableHeic2any}
-            fileSize={viewMode.file.fileSize}
-            filename={viewMode.file.filename}
-            imageLimit={imageLimit}
-          />
-        )}
-        {viewMode.kind === "ready" && viewMode.mode === "text" && (
-          <pre className="embedded-viewer__text">
-            {new TextDecoder("utf-8", { fatal: false }).decode(viewMode.buffer)}
-          </pre>
-        )}
-        {viewMode.kind === "ready" && viewMode.mode === "hex" && (
-          <div className="embedded-viewer__hex">
-            <HexLines bytes={viewMode.buffer} />
-          </div>
-        )}
+      <div className="embedded-viewer__header">
+        <span className="embedded-viewer__header-label">
+          {file?.filename ?? (target.kind === "directory" ? target.name : "Quick preview")}
+        </span>
+        <button type="button" className="viewer__mode-btn" data-testid="preview-open-viewer"
+          disabled={!file || blocked} onClick={openViewer}
+          title={`Open viewer${viewBinding ? ` (${viewBinding})` : ""}`}>
+          <IconExternalLink size={14} aria-hidden /> Open viewer
+          {viewBinding && <kbd>{viewBinding}</kbd>}
+        </button>
+        <button type="button" className="embedded-viewer__close" data-testid="preview-close"
+          title="Close preview (Esc)" aria-label="Close preview" onClick={onClose}>
+          <IconX size={14} aria-hidden />
+        </button>
       </div>
     </div>
   );

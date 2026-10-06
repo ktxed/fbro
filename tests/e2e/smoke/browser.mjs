@@ -33,7 +33,7 @@ export async function startBrowser(name, host, port, application) {
   return browser;
 }
 
-async function waitForMainWindow(browser, name) {
+export async function waitForMainWindow(browser, name) {
   await waitFor(() => browser.execute(() =>
     document.querySelector('[data-testid="panel-left"]')
       && Array.from(document.querySelectorAll(".toolbar__key"))

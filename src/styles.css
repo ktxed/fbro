@@ -268,7 +268,10 @@ body {
   overflow: hidden;
 }
 
+.embedded-viewer--focused { border-color: var(--border-focus); }
+
 .embedded-viewer__header {
+  order: -1;
   display: flex;
   align-items: center;
   padding: 3px 4px 3px 8px;
@@ -288,6 +291,8 @@ body {
 }
 
 .embedded-viewer__close {
+  appearance: none;
+  font: inherit;
   flex-shrink: 0;
   width: 18px;
   height: 18px;
@@ -302,7 +307,7 @@ body {
 }
 
 .embedded-viewer__close:hover {
-  background: rgba(255, 255, 255, 0.12);
+  background: var(--bg-focused);
   color: var(--text);
 }
 
@@ -318,44 +323,6 @@ body {
   justify-content: center;
   height: 100%;
   color: var(--text-dim);
-  font-size: var(--font-size);
-}
-
-.embedded-viewer__text {
-  height: 100%;
-  overflow: auto;
-  margin: 0;
-  padding: 8px;
-  font-size: var(--font-size);
-  font-family: var(--font-mono, monospace);
-  white-space: pre-wrap;
-  word-break: break-all;
-  color: var(--text);
-  box-sizing: border-box;
-}
-
-.embedded-viewer__hex {
-  height: 100%;
-  overflow: auto;
-  padding: 6px 8px;
-  font-size: var(--font-size);
-  font-family: var(--font-mono, monospace);
-  color: var(--text);
-}
-
-.embedded-viewer__hex-row {
-  display: flex;
-  gap: 12px;
-  white-space: pre;
-  line-height: 1.5;
-}
-
-.embedded-viewer__hex-addr { color: var(--text-dim); }
-.embedded-viewer__hex-asc  { color: var(--accent); }
-
-.embedded-viewer__hex-ellipsis {
-  color: var(--text-dim);
-  padding-top: 4px;
   font-size: var(--font-size);
 }
 
@@ -4151,6 +4118,8 @@ body {
 }
 
 .viewer__mode-btn {
+  appearance: none;
+  font: inherit;
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -4177,6 +4146,7 @@ body {
 }
 
 .viewer__body {
+  min-height: 0;
   flex: 1;
   overflow: hidden;
   position: relative;
@@ -4613,6 +4583,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
+  /* Fixed black letterbox around video in either color scheme. */
   background: #000;
 }
 

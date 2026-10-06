@@ -336,6 +336,7 @@ function SortSelector({
 
 interface PanelProps {
   panelId: string;
+  onPreviewVideoSpace?: (repeat: boolean) => boolean;
   panel: PanelState;
   isFocused: boolean;
   modalActive: boolean;
@@ -753,6 +754,7 @@ function isRestricted(entry: VFSEntry): boolean {
 function shouldKeepWindowFocusTarget(active: Element | null): boolean {
   if (!(active instanceof HTMLElement)) return false;
   if (active.closest(".panel-terminal")) return true;
+  if (active.closest(".embedded-viewer")) return true;
   if (active.closest(".dt-input")) return true;
   if (active.isContentEditable) return true;
   return active instanceof HTMLInputElement
@@ -768,6 +770,7 @@ function isImagePreviewCandidate(entry: VFSEntry): boolean {
 
 export function Panel({
   panelId,
+  onPreviewVideoSpace,
   panel,
   isFocused,
   modalActive,
@@ -1597,6 +1600,14 @@ export function Panel({
       return;
     }
     const unmodified = !e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey;
+    // Space can operate the displayed video without moving listing focus.
+    // Inputs and inline/native controls retain their own Space behavior.
+    if (e.target === focusDivRef.current && unmodified && e.key === " "
+      && onPreviewVideoSpace?.(e.repeat)) {
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
     if (unmodified && e.key === "ArrowRight" && panel.viewMode === "list") {
       const cursorRow = listRef.current?.querySelector<HTMLElement>(`[data-abs-index="${panel.cursor}"]`);
       // Singleton directories have no toolbar, so Right drills down. A

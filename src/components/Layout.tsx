@@ -28,8 +28,7 @@ import { SearchModal } from "./SearchModal";
 import { SettingsModal } from "./SettingsModal";
 import { useModalStack } from "./ModalStack";
 import { useAppDispatch, useAppState } from "../store";
-import { EmbeddedViewerPanel } from "./EmbeddedViewerPanel";
-import { captureFocusReturnTarget, scheduleFocusReturn } from "../utils/focusReturn";
+import { EmbeddedViewerPanel, type EmbeddedViewerHandle } from "./EmbeddedViewerPanel";
 import type { FileOpFile, FileOpType, PanelState, VFSEntry } from "../ws/types";
 import type { WsClient } from "../ws/client";
 
@@ -149,6 +148,7 @@ export function Layout({ client, jobsViewOpen, onCloseJobsView, onOpenJobsView }
   const state = useAppState();
   const dispatch = useAppDispatch();
   const { hasActiveModal } = useModalStack();
+  const previewHandles = useRef(new Map<string, EmbeddedViewerHandle>());
   const [dragCandidate, setDragCandidate] = useState<DragCandidate | null>(null);
   const [activeDrag, setActiveDrag] = useState<ActiveDragSession | null>(null);
   const [dragOutInProgress, setDragOutInProgress] = useState(false);
@@ -461,12 +461,15 @@ export function Layout({ client, jobsViewOpen, onCloseJobsView, onOpenJobsView }
               return (
                 <EmbeddedViewerPanel
                   key={id}
+                  ref={handle => { if (handle) previewHandles.current.set(id, handle); else previewHandles.current.delete(id); }}
+                  panelId={id}
                   sourcePanelId={activeSourcePanelId}
                   state={state}
+                  client={client}
+                  blocked={modalActive}
                   onClose={() => {
-                    const target = captureFocusReturnTarget(state.focus);
+                    client.sendIntent("SwitchFocus", undefined, { to: activeSourcePanelId });
                     dispatch({ type: "TOGGLE_EMBEDDED_VIEWER" });
-                    scheduleFocusReturn(target);
                   }}
                 />
               );
@@ -482,6 +485,14 @@ export function Layout({ client, jobsViewOpen, onCloseJobsView, onOpenJobsView }
             >
               <Panel
                 panelId={id}
+                onPreviewVideoSpace={repeat => {
+                  if (modalActive || !state.embeddedViewer
+                    || state.slots[state.embeddedViewer.sourceSlotId]?.activePanelId !== id) return false;
+                  for (const previewId of panelIds) {
+                    if (previewHandles.current.get(previewId)?.toggleVideoPlayback(repeat)) return true;
+                  }
+                  return false;
+                }}
                 panel={panel}
                 isFocused={state.focus === id}
                 modalActive={modalActive}

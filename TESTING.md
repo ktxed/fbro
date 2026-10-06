@@ -220,7 +220,8 @@ flowchart LR
 
 Useful environment variables:
 
-- `FBRO_E2E_VIEWER_ONLY=1`: run only the image viewer regression flow. It covers
+- `FBRO_E2E_VIEWER_ONLY=1` or runner argument `--viewer-only`: run only the viewer regression flow.
+  `npm run e2e:smoke:local_debug -- --viewer-only` builds and runs it locally. It covers
   delayed loads, more than 21 high-resolution JPEGs, reverse/rapid navigation,
   and recovery from an invalid image. HEIC/HEIF fixtures verify HTTP MIME types
   and hex fallback on Linux/Windows; on native macOS the same case checks image
@@ -341,7 +342,23 @@ The smoke test exercises these flows:
   default ignores, case-insensitive include patterns, custom excludes.
 - Quick Edit (`cases/quick-edit.mjs`): edit in the embedded terminal, save,
   terminal closes; journal records intent/completed/failed.
-- Viewer (`cases/viewer.mjs`): MP3 audio controls and Space play/pause dispatch
+- Viewer (`cases/viewer.mjs`): full and quick-preview seeking with a real
+  15-second H.264 MP4 fixture (`fixtures/viewer.mp4`, generated using FFmpeg's
+  color source, no external media), native slider mouse seeking, media pointer
+  events remain uncancelled,
+  Ctrl+F3 preserves listing focus, Tab enters preview, excluded quick-preview
+  actions stay inactive, source-list Space plays/pauses the preview video without
+  changing focus/selection (including repeat and modal guards), ordinary text
+  retains Space selection,
+  F3/Open viewer dispatch the displayed source/path,
+  preview persists, symlink media rendering, chunked text beyond 1 MiB, binary
+  content beyond the former 64-row limit, PDF rendering/keyboard scrolling and Markdown/Mermaid rendering,
+  modal guards and exact preview-opener restoration, Tab boundaries,
+  nested Escape and source-list focus restoration. The promotion check observes
+  the real outgoing intent; the frontend-only Docker harness cannot inspect the
+  backend's separate native window or its OS focus handoff. Native macOS and
+  Windows controls/focus still require platform checks.
+  MP3 audio controls and Space play/pause dispatch
   (mocked playback; native codec/audio output needs a platform check), large-image loading overlay, j/k navigation
   under rapid keypresses, broken-image alert, prefetch eligibility per storage
   class, PDF rendering and window title, local Markdown and HTML image loading

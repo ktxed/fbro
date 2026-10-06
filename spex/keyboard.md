@@ -67,7 +67,43 @@ dialog types.
 
 ---
 
-## 3. Separate viewer window
+## 3. Quick preview and separate viewer
+
+`Ctrl+F3` (macOS: the registry's `Cmd+3`) toggles quick preview in the other
+panel slots. It leaves focus in the source listing and follows its backend
+cursor and active tab. Tab enters the preview content; Tab/Shift+Tab traverse
+content and header controls and return to the source listing at the boundaries.
+Clicking the preview activates its panel through `SwitchFocus` without cancelling
+native media pointer events or text selection.
+
+Quick preview shares file loading and rendering with F3, but chooses its
+renderer automatically. Markdown defaults to the rendered document. It has no
+renderer selectors, DOS, word wrap, find, editing, file-navigation letters, or
+maximize action; their shortcuts are also inactive. Scroll, image zoom/pan,
+PDF and diagram controls, and native audio/video controls remain available.
+Media Space toggles playback; Left/Right seek five seconds, bounded by the clip.
+When quick preview displays a video, unmodified Space in its source listing
+also plays/pauses that video, preserving listing focus and selection. Holding
+Space does not repeatedly toggle playback. Other files keep the usual selection
+or directory-size action; inputs, native controls and covered panels keep their
+own keyboard ownership.
+PDF uses the same arrows, PageUp/PageDown and Home/End scrolling as text.
+A native button keeps its Space/Enter activation without a second viewer action.
+
+The header's **Open viewer** action and the registry's `file.view` binding open
+the displayed backend-resolved file, rather than the hidden listing in the
+preview slot. Quick preview remains open. Closing the separate window preserves
+its available opener in the preview; closing quick preview returns to the source
+listing. Escape first dismisses an expanded diagram, then closes the preview.
+
+Viewer keyboard and copy handlers are scoped to their content root. Background
+previews do not respond to keys from menus or modals. The source listing explicitly
+delegates video Space to the shared playback action. Input history
+handles Alt+Down only for its own focused input. Replacing a preview content
+session hands focus through its persistent panel root without taking an outside
+control's focus.
+
+### Separate viewer window
 
 The viewer uses number keys for renderer selection and letters for actions or
 text transformations:
@@ -85,6 +121,7 @@ text transformations:
 | `E` / `F4` | Edit a real local file |
 | `J` / `K` | Previous/next file |
 | `Space` | Play/pause directly rendered local video or MP3 audio |
+| `Left` / `Right` | Seek directly rendered media backward/forward five seconds |
 | `Esc` | Close the viewer, or leave native fullscreen first on macOS |
 
 Markdown is a distinct presentation of text rather than a second simultaneous

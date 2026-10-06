@@ -1,6 +1,7 @@
 import { useRef, useState, useCallback, useEffect, useImperativeHandle, type Ref } from "react";
 import { IconMinus, IconPlus, IconArrowsMinimize, IconX } from "@tabler/icons-react";
 import { useZoomPan, WHEEL_FACTOR } from "./useZoomPan";
+import { useFocusReturn } from "../hooks/useFocusReturn";
 import { mermaidNaturalSize } from "./mermaidZoom";
 
 const SCALE_MIN = 0.1;
@@ -27,6 +28,7 @@ interface Props {
  * through the imperative handle.
  */
 export function MermaidOverlay({ svg, onClose, ref }: Props) {
+  const focusReturnRef = useFocusReturn();
   const containerRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const [natural, setNatural] = useState<{ width: number; height: number } | null>(null);
@@ -71,7 +73,7 @@ export function MermaidOverlay({ svg, onClose, ref }: Props) {
   const { scale, tx, ty } = zoom;
 
   return (
-    <div className="viewer__mermaid-overlay" role="dialog" aria-label="Mermaid diagram">
+    <div className="viewer__mermaid-overlay" ref={focusReturnRef} role="dialog" aria-label="Mermaid diagram">
       <div className="viewer__mermaid-overlay-toolbar">
         <button type="button" className="viewer__mode-btn" onClick={() => zoomAt(1 / WHEEL_FACTOR)} title="Zoom out (-)" aria-label="Zoom out">
           <IconMinus size={14} aria-hidden />

@@ -12,7 +12,7 @@ use crate::vfs::{search::SearchResultsDriver, VfsDriver};
 use crate::ws::intents::{
     arg_str, arg_u64, is_archive_source, is_journal_source, is_procs_source, is_search_source,
 };
-use crate::ws::protocol::{now, MarkdownLinkSchema, ServerMessage, ViewerFindMatchSchema};
+use crate::ws::protocol::{now, MarkdownLinkSchema, ServerMessage, ViewerFileSchema, ViewerTargetSchema, ViewerFindMatchSchema};
 use crate::ws::runtime::{url_encode, IntentContext};
 use super::navigation::source_for_local_path;
 
@@ -56,6 +56,7 @@ async fn driver_file_size(driver: Option<Arc<dyn VfsDriver>>, path: String) -> O
 pub(crate) async fn handle(name: &str, args: &Value, ctx: &mut IntentContext<'_>) {
     match name {
         "ViewFile" => view_file(args, ctx).await,
+        "ResolveViewerFile" => resolve_panel_viewer_file(args, ctx).await,
         "EditFile" => edit_file(args, ctx).await,
         "CloseViewerWindow" => close_viewer_window(args, ctx).await,
         "ViewerNavigate" => viewer_navigate(args, ctx).await,
@@ -123,11 +124,14 @@ fn find_literal_matches<R: Read>(
     Ok((results, false))
 }
 
+#[derive(Clone)]
 struct ViewFileArgs {
     panel_id: String,
     path: String,
     source_id: String,
     filename: String,
+    file_path: Option<String>,
+    initial_find_query: Option<String>,
 }
 
 impl ViewFileArgs {
@@ -137,6 +141,8 @@ impl ViewFileArgs {
             path: arg_str(args, "path").unwrap_or("").to_string(),
             source_id: arg_str(args, "sourceId").unwrap_or("").to_string(),
             filename: arg_str(args, "filename").unwrap_or("").to_string(),
+            file_path: arg_str(args, "filePath").map(String::from),
+            initial_find_query: arg_str(args, "initialFindQuery").map(String::from),
         }
     }
 }
@@ -236,105 +242,215 @@ async fn send_search_viewer_error(ctx: &IntentContext<'_>) {
         .await;
 }
 
-async fn view_file(args: &Value, ctx: &mut IntentContext<'_>) {
-    let parsed = ViewFileArgs::from_args(args);
-
+async fn resolve_viewer_file(
+    parsed: &ViewFileArgs,
+    ctx: &IntentContext<'_>,
+) -> Result<ViewerFileSchema, String> {
     // When viewing from a search results source, resolve the real file path
     // and real source_id so the viewer uses the local filesystem driver.
-    let (mut effective_source_id, mut full_path, initial_find_query) = if is_search_source(&parsed.source_id) {
-        let state_guard = ctx.state.lock().await;
-        let initial_find_query = parsed
-            .source_id
-            .strip_prefix("search:")
-            .and_then(|job_id| state_guard.job_store.jobs.get(job_id))
-            .and_then(|job| match &job.kind {
-                JobKind::Search(meta) => meta.params.content_query.clone(),
-                _ => None,
-            })
-            .filter(|query| !query.is_empty());
-        let resolved = state_guard.drivers.get(&parsed.source_id).and_then(|drv| {
-            drv.as_any()
-                .downcast_ref::<SearchResultsDriver>()
-                .and_then(|sd| {
-                    let panel = state_guard.panels.get(&parsed.panel_id)?;
-                    if panel.source_id != parsed.source_id {
-                        return None;
-                    }
-                    let entry = panel.entries.get(panel.cursor)?;
-                    if entry.name != parsed.filename {
-                        return None;
-                    }
-                    search_viewer_target(sd, entry.source_path.as_deref())
+    let (mut effective_source_id, mut full_path, initial_find_query) =
+        if let Some(path) = &parsed.file_path {
+            (
+                parsed.source_id.clone(),
+                path.clone(),
+                parsed.initial_find_query.clone(),
+            )
+        } else if is_search_source(&parsed.source_id) {
+            let (driver, source_path, query) = {
+                let state = ctx.state.lock().await;
+                let query = parsed
+                    .source_id
+                    .strip_prefix("search:")
+                    .and_then(|job_id| state.job_store.jobs.get(job_id))
+                    .and_then(|job| match &job.kind {
+                        JobKind::Search(meta) => meta.params.content_query.clone(),
+                        _ => None,
+                    })
+                    .filter(|query| !query.is_empty());
+                let source_path = state
+                    .panels
+                    .get(&parsed.panel_id)
+                    .filter(|panel| panel.source_id == parsed.source_id)
+                    .and_then(|panel| panel.entries.get(panel.cursor))
+                    .filter(|entry| entry.name == parsed.filename)
+                    .and_then(|entry| entry.source_path.clone());
+                (
+                    state.drivers.get(&parsed.source_id).cloned(),
+                    source_path,
+                    query,
+                )
+            };
+            let resolved = tokio::task::spawn_blocking(move || {
+                driver.and_then(|driver| {
+                    driver
+                        .as_any()
+                        .downcast_ref::<SearchResultsDriver>()
+                        .and_then(|search| search_viewer_target(search, source_path.as_deref()))
                 })
-        });
-        if let Some((real_full_path, real_source_id)) = resolved {
-            (real_source_id, real_full_path, initial_find_query)
+            })
+            .await
+            .map_err(|error| format!("Could not resolve search viewer target: {error}"))?;
+            let (path, source_id) =
+                resolved.ok_or_else(|| "Search result is no longer available".to_string())?;
+            (source_id, path, query)
         } else {
-            drop(state_guard);
-            send_search_viewer_error(ctx).await;
-            return;
-        }
-    } else if is_journal_source(&parsed.source_id) {
-        let state_guard = ctx.state.lock().await;
-        let inner_path = state_guard
-            .drivers
-            .get(&parsed.source_id)
-            .map(|driver| driver.resolve_child("", &parsed.filename))
-            .unwrap_or_else(|| parsed.filename.clone());
-        (parsed.source_id.clone(), inner_path, None)
-    } else if is_archive_source(&parsed.source_id) || is_procs_source(&parsed.source_id) {
-        let inner_path = {
-            let p = parsed.path.trim_end_matches('/');
-            if p.is_empty() {
-                parsed.filename.clone()
-            } else {
-                format!("{}/{}", p, parsed.filename)
+            let driver = {
+                let state = ctx.state.lock().await;
+                state.drivers.get(&parsed.source_id).cloned()
             }
+            .ok_or_else(|| "Viewer source is no longer available".to_string())?;
+            let base = if is_journal_source(&parsed.source_id) {
+                String::new()
+            } else {
+                parsed.path.clone()
+            };
+            let filename = parsed.filename.clone();
+            let path = tokio::task::spawn_blocking(move || driver.resolve_child(&base, &filename))
+                .await
+                .map_err(|error| format!("Could not resolve viewer path: {error}"))?;
+            (parsed.source_id.clone(), path, None)
         };
-        (parsed.source_id.clone(), inner_path, None)
-    } else {
-        (
-            parsed.source_id.clone(),
-            format!("{}/{}", parsed.path.trim_end_matches('/'), parsed.filename),
-            None,
-        )
-    };
 
     let local_driver = {
         let state = ctx.state.lock().await;
-        state.drivers.get(&effective_source_id).is_some_and(|driver| driver.is_local())
+        state
+            .drivers
+            .get(&effective_source_id)
+            .is_some_and(|driver| driver.is_local())
     };
     let mut viewer_filename = parsed.filename.clone();
     if local_driver {
         let candidate = full_path.clone();
-        let resolved = tokio::task::spawn_blocking(move || {
-            let link = std::fs::symlink_metadata(&candidate).map_err(|error| error.to_string())?;
-            if !link.is_symlink() { return Ok::<_, String>(None); }
-            let target = std::fs::canonicalize(&candidate).map_err(|error| error.to_string())?;
-            if !target.is_file() { return Err("Symbolic link target is not a file.".into()); }
-            Ok(Some(crate::vfs::local::normalize_path(target)))
-        }).await;
+        let resolved =
+            tokio::task::spawn_blocking(move || resolve_local_viewer_path(&candidate)).await;
         match resolved {
             Ok(Ok(Some(target))) => {
-                viewer_filename = std::path::Path::new(&target).file_name()
-                    .map(|name| name.to_string_lossy().to_string()).unwrap_or_else(|| parsed.filename.clone());
+                viewer_filename = std::path::Path::new(&target)
+                    .file_name()
+                    .map(|name| name.to_string_lossy().to_string())
+                    .unwrap_or_else(|| parsed.filename.clone());
                 full_path = target;
                 let state = ctx.state.lock().await;
                 if let Some(source_id) = source_for_local_path(&state, &full_path) {
                     effective_source_id = source_id;
                 }
             }
-            Ok(Ok(None)) => {},
-            Ok(Err(message)) => {
-                let _ = ctx.tx.send(ServerMessage::Error { timestamp: now(), code: "NOT_A_FILE".into(), message, recoverable: true, extra: None }).await;
-                return;
-            }
-            Err(error) => {
-                let _ = ctx.tx.send(ServerMessage::Error { timestamp: now(), code: "NOT_A_FILE".into(), message: error.to_string(), recoverable: true, extra: None }).await;
-                return;
-            }
+            Ok(Ok(None)) => {}
+            Ok(Err(message)) => return Err(message),
+            Err(error) => return Err(format!("Could not resolve viewer file: {error}")),
         }
     }
+
+    if full_path.contains('\0') {
+        return Err("Invalid viewer path".into());
+    }
+    let driver = {
+        let state = ctx.state.lock().await;
+        state.drivers.get(&effective_source_id).cloned()
+    }
+    .ok_or_else(|| "Viewer source is no longer available".to_string())?;
+    let file_size = driver_file_size(Some(Arc::clone(&driver)), full_path.clone()).await;
+    Ok(ViewerFileSchema {
+        panel_id: parsed.panel_id.clone(),
+        path: full_path,
+        source_id: effective_source_id,
+        filename: viewer_filename,
+        file_size,
+        is_local: driver.is_local(),
+        initial_find_query,
+    })
+}
+
+fn resolve_local_viewer_path(path: &str) -> Result<Option<String>, String> {
+    let link = std::fs::symlink_metadata(path)
+        .map_err(|error| format!("Could not inspect viewer file: {error}"))?;
+    if !link.is_symlink() {
+        if !link.is_file() {
+            return Err("Viewer target is not a file".into());
+        }
+        return Ok(None);
+    }
+    let target = std::fs::canonicalize(path)
+        .map_err(|error| format!("Could not resolve symbolic link: {error}"))?;
+    if !target.is_file() {
+        return Err("Symbolic link target is not a file".into());
+    }
+    Ok(Some(crate::vfs::local::normalize_path(target)))
+}
+
+async fn resolve_panel_viewer_file(args: &Value, ctx: &IntentContext<'_>) {
+    let panel_id = arg_str(args, "panelId").unwrap_or("");
+    let request_id = arg_str(args, "requestId").unwrap_or("").to_string();
+    // Clone the authoritative cursor entry before any blocking driver call.
+    let entry = {
+        let state = ctx.state.lock().await;
+        state.panels.get(panel_id).map(|panel| {
+            (
+                panel.source_id.clone(),
+                panel.path.clone(),
+                panel.entries.get(panel.cursor).cloned(),
+            )
+        })
+    };
+    let target = match entry {
+        Some((source_id, path, Some(entry))) => {
+            if entry.kind == "directory"
+                || (entry.kind == "symlink" && entry.target_kind.as_deref() == Some("directory"))
+            {
+                ViewerTargetSchema::Directory { name: entry.name }
+            } else {
+                let parsed = ViewFileArgs {
+                    panel_id: panel_id.into(),
+                    source_id,
+                    path,
+                    filename: entry.name,
+                    file_path: None,
+                    initial_find_query: None,
+                };
+                match resolve_viewer_file(&parsed, ctx).await {
+                    Ok(file) => ViewerTargetSchema::File { file },
+                    Err(message) => ViewerTargetSchema::Error { message },
+                }
+            }
+        }
+        _ => ViewerTargetSchema::Empty,
+    };
+    let _ = ctx
+        .tx
+        .send(ServerMessage::ViewerFileReady {
+            timestamp: now(),
+            request_id,
+            target,
+        })
+        .await;
+}
+
+async fn view_file(args: &Value, ctx: &mut IntentContext<'_>) {
+    let parsed = ViewFileArgs::from_args(args);
+    let file = match resolve_viewer_file(&parsed, ctx).await {
+        Ok(file) => file,
+        Err(message) => {
+            let _ = ctx
+                .tx
+                .send(ServerMessage::Error {
+                    timestamp: now(),
+                    code: "NOT_A_FILE".into(),
+                    message,
+                    recoverable: true,
+                    extra: None,
+                })
+                .await;
+            return;
+        }
+    };
+    let ViewerFileSchema {
+        path: full_path,
+        source_id: effective_source_id,
+        filename: viewer_filename,
+        file_size,
+        initial_find_query,
+        ..
+    } = file;
 
     let (is_local, driver, file_server_port, image_cap_bytes, color_scheme, viewer_bg) = {
         let state_guard = ctx.state.lock().await;
@@ -356,8 +472,6 @@ async fn view_file(args: &Value, ctx: &mut IntentContext<'_>) {
             viewer_bg,
         )
     };
-    let file_size = driver_file_size(driver.clone(), full_path.clone()).await;
-
     let label = format!("viewer-{}", uuid::Uuid::new_v4());
     let mut query_string = format!(
         "?viewer=1&path={}&source={}&name={}&label={}&panel={}",
@@ -1433,6 +1547,86 @@ mod tests {
     use crate::vfs::local::LocalFsDriver;
     use std::fs;
     use std::io::Cursor;
+
+    struct ViewerTestDir(std::path::PathBuf);
+    impl ViewerTestDir {
+        fn new() -> Self {
+            let path = std::env::temp_dir().join(format!("fbro-viewer-{}", uuid::Uuid::new_v4()));
+            fs::create_dir_all(&path).unwrap();
+            Self(path)
+        }
+    }
+    impl Drop for ViewerTestDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn viewer_target_rejects_missing_files_and_directories() {
+        let temp = ViewerTestDir::new();
+        let file = temp.0.join("clip.mp4");
+        fs::write(&file, b"video").unwrap();
+        assert_eq!(
+            super::resolve_local_viewer_path(file.to_str().unwrap()).unwrap(),
+            None
+        );
+        assert!(super::resolve_local_viewer_path(temp.0.to_str().unwrap()).is_err());
+        assert!(super::resolve_local_viewer_path(temp.0.join("gone").to_str().unwrap()).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn viewer_target_resolves_symlinks_and_rejects_broken_or_directory_links() {
+        use std::os::unix::fs::symlink;
+        let temp = ViewerTestDir::new();
+        let file = temp.0.join("clip.mp4");
+        fs::write(&file, b"video").unwrap();
+        let link = temp.0.join("clip-link");
+        symlink(&file, &link).unwrap();
+        assert_eq!(
+            super::resolve_local_viewer_path(link.to_str().unwrap()).unwrap(),
+            Some(crate::vfs::local::normalize_path(
+                fs::canonicalize(&file).unwrap()
+            ))
+        );
+        let dir_link = temp.0.join("dir-link");
+        symlink(&temp.0, &dir_link).unwrap();
+        assert!(super::resolve_local_viewer_path(dir_link.to_str().unwrap()).is_err());
+        fs::remove_file(&file).unwrap();
+        assert!(super::resolve_local_viewer_path(link.to_str().unwrap()).is_err());
+    }
+
+    #[test]
+    fn viewer_target_reply_has_correlated_camel_case_file_descriptor() {
+        let message = crate::ws::protocol::ServerMessage::ViewerFileReady {
+            timestamp: 1,
+            request_id: "preview-request".into(),
+            target: crate::ws::protocol::ViewerTargetSchema::File {
+                file: crate::ws::protocol::ViewerFileSchema {
+                    panel_id: "left".into(),
+                    path: "/clips/video.mp4".into(),
+                    source_id: "volume".into(),
+                    filename: "video.mp4".into(),
+                    file_size: Some(42),
+                    is_local: true,
+                    initial_find_query: None,
+                },
+            },
+        };
+        let wire = serde_json::to_value(message).unwrap();
+        assert_eq!(wire["type"], "ViewerFileReady");
+        assert_eq!(wire["requestId"], "preview-request");
+        assert_eq!(wire["target"]["file"]["panelId"], "left");
+        assert_eq!(wire["target"]["file"]["sourceId"], "volume");
+        assert_eq!(wire["target"]["file"]["fileSize"], 42);
+        assert_eq!(wire["target"]["file"]["isLocal"], true);
+        let explicit = super::ViewFileArgs::from_args(&serde_json::json!({
+            "panelId": "left", "sourceId": "volume", "filename": "video.mp4",
+            "filePath": "/clips/video.mp4",
+        }));
+        assert_eq!(explicit.file_path.as_deref(), Some("/clips/video.mp4"));
+    }
 
     #[test]
     fn search_viewer_resolves_duplicate_names_in_panel_order() {

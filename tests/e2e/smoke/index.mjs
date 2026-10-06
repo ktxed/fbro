@@ -73,7 +73,7 @@ async function main() {
       await runHashCheckFlow(browserA, observerA);
       return;
     }
-    if (process.env.FBRO_E2E_VIEWER_ONLY === "1") {
+    if (process.env.FBRO_E2E_VIEWER_ONLY === "1" || process.argv.includes("--viewer-only")) {
       await runViewerFlow(browserA, observerA);
       return;
     }

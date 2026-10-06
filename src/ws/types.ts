@@ -923,6 +923,29 @@ export interface SetPermissionsOkMessage {
   panelId: string;
 }
 
+export interface ViewerFile {
+  panelId: string;
+  path: string;
+  sourceId: string;
+  filename: string;
+  fileSize: number | null;
+  isLocal: boolean;
+  initialFindQuery: string | null;
+}
+
+export type ViewerTarget =
+  | { kind: "file"; file: ViewerFile }
+  | { kind: "directory"; name: string }
+  | { kind: "empty" }
+  | { kind: "error"; message: string };
+
+export interface ViewerFileReadyMessage {
+  type: "ViewerFileReady";
+  timestamp: number;
+  requestId: string;
+  target: ViewerTarget;
+}
+
 export interface ViewerFileChangedMessage {
   type: "ViewerFileChanged";
   timestamp: number;
@@ -1213,6 +1236,7 @@ export type BEMessage =
   | FileClipboardWrittenMessage
   | TextClipboardWrittenMessage
   | ViewerFileChangedMessage
+  | ViewerFileReadyMessage
   | DryRunReadyMessage
   | OpenWithOptionsReadyMessage
   | OpenWithOptionsFailedMessage

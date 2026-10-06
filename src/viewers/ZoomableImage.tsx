@@ -1,6 +1,7 @@
 import { useRef, useState, useCallback, useEffect, useMemo } from "react";
 import { ViewerLoading } from "./ViewerLoading";
 import { useZoomPan } from "./useZoomPan";
+import { isLetterKey, isNativeActivationTarget } from "../components/modalKeyboard";
 
 const SCALE_MAX = 16;
 const SCALE_CLICK = 2;   // jump-to scale on click
@@ -47,15 +48,19 @@ export function ZoomableImage({ src, alt }: Props) {
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key !== "z" && e.key !== "Z") return;
+      if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || !isLetterKey(e, "z")) return;
+      if (isNativeActivationTarget(e.target) || root?.dataset.viewerBlocked === "true") return;
+      e.preventDefault();
+      e.stopPropagation();
       setZoom(prev =>
         prev.scale > 1
           ? { scale: 1, tx: 0, ty: 0 }
           : { scale: SCALE_CLICK, tx: 0, ty: 0 }
       );
     };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
+    const root = containerRef.current?.closest<HTMLElement>("[data-viewer-content]") ?? containerRef.current;
+    root?.addEventListener("keydown", handler);
+    return () => root?.removeEventListener("keydown", handler);
   }, [setZoom]);
 
   const { scale, tx, ty } = zoom;

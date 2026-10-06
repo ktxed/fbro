@@ -28,6 +28,34 @@ This protocol defines communication between a **Backend (BE)** and one or more *
 
 ---
 
+### Viewer targets
+
+`ResolveViewerFile` is read-only and accepts `{ panelId, requestId }`. The backend
+resolves the panel's authoritative cursor through the same resolver used by
+`ViewFile`, including real search-result sources and local symlink targets.
+The request-local `ViewerFileReady` reply contains `{ timestamp, requestId,
+target }`, where `target.kind` is `file`, `directory`, `empty`, or `error`:
+
+- `file` carries `file: { panelId, path, sourceId, filename, fileSize, isLocal,
+  initialFindQuery }`; unknown size/query are `null`.
+- `directory` carries `name`; `error` carries `message`; `empty` has no payload.
+
+`ViewFile` also accepts optional `filePath` and `initialFindQuery`, alongside
+`panelId`, `sourceId`, and `filename`. An explicit file path identifies a resolved
+preview target independently of the panel's current cursor. The backend checks
+its registered driver and validates local files/symlinks again before opening.
+Legacy `{ path, filename }` calls keep their existing behavior.
+
+The preview receives resolver replies through a request-local subscription on
+the GUI connection; the main reducer leaves authoritative state unchanged.
+Superseded resolver replies are ignored by request ID. Each displayed content
+session uses the same isolated viewer client as F3; replacing its source/path
+tears down that session and discards its late WebSocket/HTTP results. This avoids
+matching chunks from different sources by path alone without changing existing
+`FileChunk` or `MarkdownPreview` wire formats.
+
+---
+
 ## 2. Transport & Framing
 
 * Single persistent WebSocket connection

@@ -151,7 +151,7 @@ export function PdfViewer({ url, filename }: PdfViewerProps) {
   }, [filename, url]);
 
   return (
-    <div ref={containerRef} className="viewer__pdf" aria-busy={!document && !error}>
+    <div ref={containerRef} className="viewer__pdf" tabIndex={0} aria-label={filename} aria-busy={!document && !error}>
       {!document && !error && <ViewerLoading />}
       {error && <div className="viewer__pdf-error" role="alert">{error}</div>}
       {document && Array.from({ length: document.numPages }, (_, index) => (

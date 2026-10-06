@@ -519,3 +519,13 @@ Use this checklist to keep the layers separate:
    referencing an unknown ID.
 9. Test capability gating, path resolution, multi-panel use, teardown, and
    unavailable-source recovery.
+
+## Viewer target resolution
+
+Quick preview and F3 share the backend viewer resolver. A preview invalidates its
+target when the source panel cursor/location/entry changes, then asks the backend
+for that cursor's file. Search entries are resolved by real path, preserving the
+correct source when names repeat. Local file symlinks resolve to the target file
+and its source; directory links are directory placeholders. Open viewer carries
+the resolved source/path, so a later source-panel cursor change cannot silently
+open a different file.
