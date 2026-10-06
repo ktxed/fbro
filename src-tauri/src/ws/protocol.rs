@@ -1074,6 +1074,7 @@ pub struct SearchProgressSchema {
     pub scanned: u64,
     pub matched: u64,
     pub current_path: String,
+    pub estimated_percent: u8,
     pub new_results: Vec<SearchResultSchema>,
 }
 

@@ -1,7 +1,7 @@
 use std::io::Read;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex as SyncMutex};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use regex::Regex;
 use tokio::sync::{mpsc, watch, Mutex, Semaphore};
@@ -196,7 +196,7 @@ fn resolve_time_filter(
 
 // ─── Content matching ─────────────────────────────────────────────────────────
 
-fn file_contains_query(path: &str, query_lower: &str) -> bool {
+fn file_contains_query(path: &str, query_lower: &str, cancel: &watch::Receiver<bool>) -> bool {
     let Ok(mut file) = std::fs::File::open(path) else {
         return false;
     };
@@ -207,6 +207,9 @@ fn file_contains_query(path: &str, query_lower: &str) -> bool {
     let mut prev_tail = Vec::new();
 
     loop {
+        if *cancel.borrow() {
+            return false;
+        }
         let n = match file.read(&mut buf) {
             Ok(0) => break,
             Ok(n) => n,
@@ -247,6 +250,70 @@ struct WorkItem {
     depth: u32,
     /// Inherited source_id for this directory.
     source_id: String,
+}
+
+/// Activity is independent of matches: even a no-hit search reports the work
+/// done by its blocking readers. Folder state is sampled atomically so a
+/// concurrently discovered child cannot produce an inconsistent estimate.
+#[derive(Default)]
+struct SearchActivity {
+    scanned: AtomicU64,
+    folders: SyncMutex<FolderActivity>,
+}
+
+#[derive(Default)]
+struct FolderActivity {
+    discovered: u64,
+    completed: u64,
+    active: Vec<(usize, String)>,
+}
+
+impl SearchActivity {
+    fn discover(&self) {
+        self.folders.lock().unwrap().discovered += 1;
+    }
+
+    fn abandon_discovery(&self) {
+        self.folders.lock().unwrap().discovered -= 1;
+    }
+
+    fn start(&self, worker: usize, path: &str) {
+        self.folders
+            .lock()
+            .unwrap()
+            .active
+            .push((worker, path.to_string()));
+    }
+
+    fn finish(&self, worker: usize, completed: bool) {
+        let mut folders = self.folders.lock().unwrap();
+        folders.active.retain(|(id, _)| *id != worker);
+        if completed {
+            folders.completed += 1;
+        }
+    }
+
+    fn snapshot(&self, matched: u64, completed: bool) -> SearchProgressSchema {
+        let folders = self.folders.lock().unwrap();
+        let estimated_percent = if completed {
+            100
+        } else if folders.discovered == 0 {
+            0
+        } else {
+            (folders.completed.saturating_mul(100) / folders.discovered).min(99) as u8
+        };
+        SearchProgressSchema {
+            scanned: self.scanned.load(Ordering::Relaxed),
+            matched,
+            current_path: folders
+                .active
+                .last()
+                .map(|(_, path)| path.clone())
+                .unwrap_or_default(),
+            estimated_percent,
+            new_results: Vec::new(),
+        }
+    }
 }
 
 // ─── Main worker ─────────────────────────────────────────────────────────────
@@ -299,25 +366,35 @@ pub async fn run_search(
         now_epoch,
     );
 
-    // Work queue: (dir_path, depth)
-    let work_tx_cap = 4096;
-    let (work_tx, work_rx) = async_channel::bounded::<WorkItem>(work_tx_cap);
-    let (result_tx, mut result_rx) = mpsc::channel::<SearchResultEntry>(1024);
+    // Workers both produce and consume directory work. A bounded frontier
+    // deadlocks when every worker is waiting to enqueue children into a full
+    // queue. Keep the frontier nonblocking; active I/O remains limited to eight
+    // workers and the independent result collector provides backpressure.
+    let (work_tx, work_rx) = async_channel::unbounded::<WorkItem>();
+    let (result_tx, result_rx) = mpsc::channel::<SearchResultEntry>(1024);
 
     // Pending counter: tracks work items that have been queued but not yet
     // fully processed (including their subdirs). When this reaches zero and
     // the queue is empty the search is done.
     let pending = Arc::new(AtomicUsize::new(0));
+    let activity = Arc::new(SearchActivity::default());
 
     // Seed the work queue with root paths
     for root in &params.paths {
         let source_id = resolve_source_id_for_path_local(&path_source_map, root);
         pending.fetch_add(1, Ordering::SeqCst);
-        let _ = work_tx.try_send(WorkItem {
-            dir_path: root.clone(),
-            depth: 0,
-            source_id,
-        });
+        activity.discover();
+        if work_tx
+            .try_send(WorkItem {
+                dir_path: root.clone(),
+                depth: 0,
+                source_id,
+            })
+            .is_err()
+        {
+            pending.fetch_sub(1, Ordering::SeqCst);
+            activity.abandon_discovery();
+        }
     }
 
     let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT));
@@ -330,7 +407,7 @@ pub async fn run_search(
     let worker_count = MAX_CONCURRENT;
     let mut worker_handles = Vec::with_capacity(worker_count);
 
-    for _ in 0..worker_count {
+    for worker in 0..worker_count {
         let work_rx = work_rx.clone();
         let work_tx = Arc::clone(&work_tx_arc);
         let result_tx = result_tx.clone();
@@ -339,6 +416,7 @@ pub async fn run_search(
         let content_query_lower = Arc::clone(&content_query_lower);
         let path_source_map = Arc::clone(&path_source_map);
         let pending = Arc::clone(&pending);
+        let activity = Arc::clone(&activity);
         let max_depth = max_depth;
         let cancel_rx = cancel_rx_clone.clone();
         let size_op = params.size_op;
@@ -385,6 +463,8 @@ pub async fn run_search(
                 let cancel_check = cancel_rx.clone();
                 let time_date_field = time_date_field.clone();
 
+                activity.start(worker, &dir_path);
+                let reader_activity = Arc::clone(&activity);
                 let entries = tokio::task::spawn_blocking(move || {
                     read_dir_entries(
                         &dir_path,
@@ -399,6 +479,7 @@ pub async fn run_search(
                         time_from,
                         time_to,
                         time_date_field.as_deref(),
+                        &reader_activity,
                     )
                 })
                 .await;
@@ -406,6 +487,7 @@ pub async fn run_search(
                 let (matched, subdirs) = match entries {
                     Ok(Some(r)) => r,
                     _ => {
+                        activity.finish(worker, !*cancel_rx.borrow());
                         pending.fetch_sub(1, Ordering::SeqCst);
                         continue;
                     }
@@ -413,6 +495,7 @@ pub async fn run_search(
 
                 for entry in matched {
                     if result_tx.send(entry).await.is_err() {
+                        activity.finish(worker, false);
                         pending.fetch_sub(1, Ordering::SeqCst);
                         return;
                     }
@@ -421,6 +504,9 @@ pub async fn run_search(
                 // Push subdirs onto work queue if depth allows
                 if max_depth.map_or(true, |max| current_depth < max) {
                     for subdir in subdirs {
+                        if *cancel_rx.borrow() {
+                            break;
+                        }
                         let sub_source_id =
                             resolve_source_id_for_path_local(&path_source_map, &subdir);
                         let source_id = if sub_source_id.is_empty() {
@@ -429,17 +515,24 @@ pub async fn run_search(
                             sub_source_id
                         };
                         pending.fetch_add(1, Ordering::SeqCst);
-                        let _ = work_tx
-                            .send(WorkItem {
+                        activity.discover();
+                        let queued = work_tx
+                            .try_send(WorkItem {
                                 dir_path: subdir,
                                 depth: current_depth + 1,
                                 source_id,
                             })
-                            .await;
+                            .is_ok();
+                        if !queued {
+                            pending.fetch_sub(1, Ordering::SeqCst);
+                            activity.abandon_discovery();
+                            break;
+                        }
                     }
                 }
 
                 // This work item is fully processed
+                activity.finish(worker, true);
                 pending.fetch_sub(1, Ordering::SeqCst);
             }
         });
@@ -451,89 +544,11 @@ pub async fn run_search(
     drop(work_tx);
     drop(result_tx);
 
-    // Collector: accumulate results and flush to FE periodically
-    let mut batch: Vec<SearchResultEntry> = Vec::new();
-    let mut scanned: u64 = 0;
-    let mut matched_count: u64 = 0;
-    let mut last_flush = Instant::now();
-    let mut current_path = String::new();
-    let cancelled;
-
-    loop {
-        // Check cancel
-        if *cancel_rx.borrow() {
-            cancelled = true;
-            break;
-        }
-
-        // Check if all workers are done AND result channel is empty
-        // We detect this by try_recv exhaustion after workers finish
-        match tokio::time::timeout(Duration::from_millis(50), result_rx.recv()).await {
-            Ok(Some(entry)) => {
-                scanned += 1;
-                matched_count += 1;
-                current_path = entry.parent_path.clone();
-                batch.push(entry);
-
-                let should_flush =
-                    batch.len() >= FLUSH_BATCH || last_flush.elapsed() >= FLUSH_INTERVAL;
-                if should_flush {
-                    flush_batch(
-                        &job_id,
-                        &mut batch,
-                        scanned,
-                        matched_count,
-                        &current_path,
-                        &store,
-                        &tx,
-                    )
-                    .await;
-                    last_flush = Instant::now();
-                }
-            }
-            Ok(None) => {
-                // Channel closed — all workers done
-                cancelled = false;
-                break;
-            }
-            Err(_) => {
-                // Timeout — flush partial batch if pending
-                if !batch.is_empty() && last_flush.elapsed() >= FLUSH_INTERVAL {
-                    flush_batch(
-                        &job_id,
-                        &mut batch,
-                        scanned,
-                        matched_count,
-                        &current_path,
-                        &store,
-                        &tx,
-                    )
-                    .await;
-                    last_flush = Instant::now();
-                }
-                continue;
-            }
-        }
-    }
-
-    // Wait for all workers to finish
+    let matched_count = collect_results(&job_id, result_rx, &activity, &store, &tx).await;
     for h in worker_handles {
         let _ = h.await;
     }
-
-    // Final flush
-    if !batch.is_empty() {
-        flush_batch(
-            &job_id,
-            &mut batch,
-            scanned,
-            matched_count,
-            &current_path,
-            &store,
-            &tx,
-        )
-        .await;
-    }
+    let cancelled = *cancel_rx.borrow();
 
     // Mark store done
     {
@@ -549,13 +564,53 @@ pub async fn run_search(
             event: event.to_string(),
             files: None,
             progress: None,
-            search_progress: None,
+            search_progress: Some(activity.snapshot(matched_count, !cancelled)),
             decision: None,
             error: None,
             result_path: None,
             result_panel_id: None,
         })
         .await;
+}
+
+async fn collect_results(
+    job_id: &str,
+    mut result_rx: mpsc::Receiver<SearchResultEntry>,
+    activity: &SearchActivity,
+    store: &Arc<Mutex<SearchResultStore>>,
+    tx: &mpsc::Sender<ServerMessage>,
+) -> u64 {
+    // The timer runs independently of result arrivals, including while a
+    // worker is reading a large directory or file that has no matches.
+    let mut batch: Vec<SearchResultEntry> = Vec::new();
+    let mut matched_count: u64 = 0;
+    let mut interval = tokio::time::interval(FLUSH_INTERVAL);
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    flush_batch(job_id, &mut batch, activity, matched_count, store, tx).await;
+    // interval's first tick is immediate; the initial snapshot was sent above.
+    interval.tick().await;
+
+    loop {
+        tokio::select! {
+            entry = result_rx.recv() => {
+                let Some(entry) = entry else { break };
+                matched_count += 1;
+                batch.push(entry);
+                if batch.len() >= FLUSH_BATCH {
+                    flush_batch(job_id, &mut batch, activity, matched_count, store, tx).await;
+                }
+            }
+            _ = interval.tick() => {
+                flush_batch(job_id, &mut batch, activity, matched_count, store, tx).await;
+            }
+        }
+        // Keep draining after cancellation so workers cannot get stuck sending
+        // results to a full channel while we wait for them to exit.
+    }
+
+    // Always send final counters, even if there were no matching entries.
+    flush_batch(job_id, &mut batch, activity, matched_count, store, tx).await;
+    matched_count
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -575,6 +630,7 @@ fn read_dir_entries(
     time_from: Option<i64>,
     time_to: Option<i64>,
     time_date_field: Option<&str>,
+    activity: &SearchActivity,
 ) -> Option<(Vec<SearchResultEntry>, Vec<String>)> {
     if *cancel.borrow() {
         return None;
@@ -588,6 +644,7 @@ fn read_dir_entries(
         if *cancel.borrow() {
             return None;
         }
+        activity.scanned.fetch_add(1, Ordering::Relaxed);
         let meta = match entry.metadata() {
             Ok(m) => m,
             Err(_) => continue,
@@ -608,7 +665,12 @@ fn read_dir_entries(
         // Content filter (only for files)
         if !is_dir {
             if let Some(ref query) = content_query_lower {
-                if !file_contains_query(&full_path, query) {
+                // Pipes, sockets, devices, and symlinks are not regular content
+                // files. Opening them may block waiting for an external writer.
+                if !meta.is_file() {
+                    continue;
+                }
+                if !file_contains_query(&full_path, query, cancel) {
                     continue;
                 }
             }
@@ -682,15 +744,20 @@ fn read_dir_entries(
         });
     }
 
-    Some((matched, subdirs))
+    // Cancellation can arrive during the last entry's content read, with no
+    // next iteration to observe it. That folder was abandoned, not completed.
+    if *cancel.borrow() {
+        None
+    } else {
+        Some((matched, subdirs))
+    }
 }
 
 async fn flush_batch(
     job_id: &str,
     batch: &mut Vec<SearchResultEntry>,
-    scanned: u64,
+    activity: &SearchActivity,
     matched: u64,
-    current_path: &str,
     store: &Arc<Mutex<SearchResultStore>>,
     tx: &mpsc::Sender<ServerMessage>,
 ) {
@@ -720,10 +787,8 @@ async fn flush_batch(
             files: None,
             progress: None,
             search_progress: Some(SearchProgressSchema {
-                scanned,
-                matched,
-                current_path: current_path.to_string(),
                 new_results,
+                ..activity.snapshot(matched, false)
             }),
             decision: None,
             error: None,
@@ -731,4 +796,338 @@ async fn flush_batch(
             result_panel_id: None,
         })
         .await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::{Path, PathBuf};
+
+    struct TempDir(PathBuf);
+
+    impl TempDir {
+        fn new() -> Self {
+            static NEXT: AtomicUsize = AtomicUsize::new(0);
+            let path = std::env::temp_dir().join(format!(
+                "fbro-search-{}-{}",
+                std::process::id(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            ));
+            std::fs::create_dir_all(&path).unwrap();
+            Self(path)
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn params(root: &Path, depth: SearchDepth) -> SearchParams {
+        SearchParams {
+            paths: vec![root.to_string_lossy().into_owned()],
+            depth,
+            file_mask: Some("*.txt".into()),
+            mask_mode: MaskMode::Wildcard,
+            content_query: None,
+            size_op: None,
+            size_value: None,
+            size_max: None,
+            time_op: None,
+            time_value: None,
+            time_to: None,
+            time_date_field: None,
+        }
+    }
+
+    async fn search_messages(params: SearchParams, cancelled: bool) -> (Vec<ServerMessage>, usize) {
+        let (tx, mut rx) = mpsc::channel(256);
+        let (cancel_tx, cancel_rx) = watch::channel(cancelled);
+        let store = Arc::new(Mutex::new(SearchResultStore::new()));
+        let worker_store = Arc::clone(&store);
+        let worker = tokio::spawn(run_search(
+            "search-test".into(),
+            params,
+            Arc::new(vec![]),
+            worker_store,
+            tx,
+            cancel_rx,
+        ));
+        let mut messages = Vec::new();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while let Some(message) = rx.recv().await {
+                messages.push(message);
+            }
+            worker.await.unwrap();
+        })
+        .await
+        .expect("search did not terminate");
+        drop(cancel_tx);
+        let results = store.lock().await;
+        assert!(results.done);
+        (messages, results.results.len())
+    }
+
+    fn terminal(messages: &[ServerMessage]) -> (&str, &SearchProgressSchema) {
+        match messages.last().unwrap() {
+            ServerMessage::JobEvent {
+                event,
+                search_progress: Some(progress),
+                ..
+            } => (event, progress),
+            message => panic!("missing final search activity: {message:?}"),
+        }
+    }
+
+    #[test]
+    fn folder_estimate_revises_and_current_folder_remains_active() {
+        let activity = SearchActivity::default();
+        activity.discover();
+        activity.start(0, "first");
+        activity.discover();
+        activity.start(1, "second");
+        assert_eq!(activity.snapshot(0, false).current_path, "second");
+        activity.finish(1, true);
+        let snapshot = activity.snapshot(0, false);
+        assert_eq!(snapshot.current_path, "first");
+        assert_eq!(snapshot.estimated_percent, 50);
+        activity.discover();
+        assert_eq!(activity.snapshot(0, false).estimated_percent, 33);
+        activity.abandon_discovery();
+        activity.finish(0, true);
+        assert!(activity.snapshot(0, false).current_path.is_empty());
+        assert_eq!(activity.snapshot(0, false).estimated_percent, 99);
+        assert_eq!(activity.snapshot(0, true).estimated_percent, 100);
+        assert_eq!(
+            SearchActivity::default()
+                .snapshot(0, false)
+                .estimated_percent,
+            0
+        );
+    }
+
+    #[test]
+    fn cancelled_folder_does_not_advance_the_estimate() {
+        let activity = SearchActivity::default();
+        activity.discover();
+        activity.start(0, "partially-read");
+        assert_eq!(activity.snapshot(0, false).estimated_percent, 0);
+        activity.finish(0, false);
+        let cancelled = activity.snapshot(0, false);
+        assert_eq!(cancelled.estimated_percent, 0);
+        assert!(cancelled.current_path.is_empty());
+    }
+
+    #[tokio::test]
+    async fn activity_ticks_without_results_while_a_folder_is_active() {
+        let activity = Arc::new(SearchActivity::default());
+        activity.discover();
+        activity.start(0, "slow-folder");
+        activity.scanned.store(1, Ordering::Relaxed);
+        let worker_activity = Arc::clone(&activity);
+        let store = Arc::new(Mutex::new(SearchResultStore::new()));
+        // Keep the results channel open without sending a match, as happens
+        // while a blocking worker is reading a large file or directory.
+        let (results_tx, results_rx) = mpsc::channel(1);
+        let (tx, mut rx) = mpsc::channel(8);
+        let collector = tokio::spawn(async move {
+            collect_results("slow-search", results_rx, &worker_activity, &store, &tx).await
+        });
+        for _ in 0..3 {
+            let message = tokio::time::timeout(Duration::from_secs(2), rx.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            match message {
+                ServerMessage::JobEvent {
+                    event,
+                    search_progress: Some(progress),
+                    ..
+                } => {
+                    assert_eq!(event, "Progress");
+                    assert_eq!(progress.current_path, "slow-folder");
+                    assert_eq!(progress.scanned, 1);
+                    assert_eq!(progress.matched, 0);
+                    assert_eq!(progress.estimated_percent, 0);
+                    assert!(progress.new_results.is_empty());
+                }
+                message => panic!("unexpected activity: {message:?}"),
+            }
+        }
+        activity.finish(0, true);
+        drop(results_tx);
+        assert_eq!(collector.await.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn inspected_counts_include_nonmatches_and_depth_limits() {
+        let dir = TempDir::new();
+        std::fs::write(dir.0.join("match.txt"), "hit").unwrap();
+        std::fs::write(dir.0.join("other.bin"), "miss").unwrap();
+        std::fs::create_dir(dir.0.join("child")).unwrap();
+        std::fs::write(dir.0.join("child/nested.txt"), "hit").unwrap();
+        for (depth, scanned, matched) in [
+            (SearchDepth::Current, 3, 1),
+            (SearchDepth::Depth(1), 4, 2),
+            (SearchDepth::Unlimited, 4, 2),
+        ] {
+            let (messages, results) = search_messages(params(&dir.0, depth), false).await;
+            let (event, progress) = terminal(&messages);
+            assert_eq!(event, "Completed");
+            assert_eq!(progress.scanned, scanned);
+            assert_eq!(progress.matched, matched);
+            assert_eq!(results as u64, matched);
+            assert_eq!(progress.estimated_percent, 100);
+            assert!(progress.current_path.is_empty());
+            for message in &messages[..messages.len() - 1] {
+                if let ServerMessage::JobEvent {
+                    search_progress: Some(progress),
+                    ..
+                } = message
+                {
+                    assert!(progress.estimated_percent < 100);
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn no_hits_multiple_roots_and_unreadable_folder_have_final_counts() {
+        let first = TempDir::new();
+        let second = TempDir::new();
+        std::fs::write(first.0.join("one.bin"), "miss").unwrap();
+        std::fs::write(second.0.join("two.bin"), "miss").unwrap();
+        let mut search = params(&first.0, SearchDepth::Unlimited);
+        search.paths.push(second.0.to_string_lossy().into_owned());
+        search
+            .paths
+            .push(first.0.join("missing").to_string_lossy().into_owned());
+        let (messages, results) = search_messages(search, false).await;
+        let (event, progress) = terminal(&messages);
+        assert_eq!(event, "Completed");
+        assert_eq!(progress.scanned, 2);
+        assert_eq!(progress.matched, 0);
+        assert_eq!(results, 0);
+        assert_eq!(progress.estimated_percent, 100);
+    }
+
+    #[tokio::test]
+    async fn directory_backlog_over_the_old_capacity_does_not_drop_work() {
+        let dir = TempDir::new();
+        std::fs::write(dir.0.join("marker.txt"), "hit").unwrap();
+        let mut search = params(&dir.0, SearchDepth::Current);
+        // Each requested root must get processed, even while every worker is
+        // busy. Repeated roots keep this saturation fixture small on disk.
+        search.paths = vec![dir.0.to_string_lossy().into_owned(); 4097];
+        let (messages, results) = search_messages(search, false).await;
+        let (event, progress) = terminal(&messages);
+        assert_eq!(event, "Completed");
+        assert_eq!(progress.scanned, 4097);
+        assert_eq!(progress.matched, 4097);
+        assert_eq!(results, 4097);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn inaccessible_directory_is_skipped_and_accessible_sibling_is_searched() {
+        use std::os::unix::fs::PermissionsExt;
+
+        // Root can bypass mode bits; this fixture exercises real denial under
+        // the ordinary desktop user's identity.
+        if unsafe { libc::geteuid() } == 0 {
+            return;
+        }
+        struct RestorePermissions(PathBuf);
+        impl Drop for RestorePermissions {
+            fn drop(&mut self) {
+                let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o700));
+            }
+        }
+        let dir = TempDir::new();
+        let blocked = dir.0.join("blocked");
+        let accessible = dir.0.join("accessible");
+        std::fs::create_dir(&blocked).unwrap();
+        std::fs::create_dir(&accessible).unwrap();
+        std::fs::write(blocked.join("hidden.txt"), "hidden").unwrap();
+        std::fs::write(accessible.join("visible.txt"), "hit").unwrap();
+        let _restore = RestorePermissions(blocked.clone());
+        std::fs::set_permissions(&blocked, std::fs::Permissions::from_mode(0)).unwrap();
+        assert!(std::fs::read_dir(&blocked).is_err());
+        let (messages, results) =
+            search_messages(params(&dir.0, SearchDepth::Unlimited), false).await;
+        let (event, progress) = terminal(&messages);
+        assert_eq!(event, "Completed");
+        assert_eq!(progress.scanned, 3);
+        assert_eq!(progress.matched, 1);
+        assert_eq!(results, 1);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn content_search_skips_a_fifo_without_waiting_for_a_writer() {
+        let dir = TempDir::new();
+        let path = std::ffi::CString::new(dir.0.join("pipe.txt").to_str().unwrap()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(path.as_ptr(), 0o600) }, 0);
+        std::fs::write(dir.0.join("regular.txt"), "needle").unwrap();
+        let mut search = params(&dir.0, SearchDepth::Unlimited);
+        search.content_query = Some("needle".into());
+        let (messages, results) = search_messages(search, false).await;
+        let (event, progress) = terminal(&messages);
+        assert_eq!(event, "Completed");
+        assert_eq!(progress.scanned, 2);
+        assert_eq!(progress.matched, 1);
+        assert_eq!(results, 1);
+    }
+
+    #[tokio::test]
+    async fn cancelled_and_empty_searches_report_the_correct_terminal_estimate() {
+        let dir = TempDir::new();
+        let (messages, _) = search_messages(params(&dir.0, SearchDepth::Current), false).await;
+        assert_eq!(terminal(&messages).1.estimated_percent, 100);
+        let (messages, _) = search_messages(params(&dir.0, SearchDepth::Current), true).await;
+        let (event, progress) = terminal(&messages);
+        assert_eq!(event, "Cancelled");
+        assert_eq!(progress.scanned, 0);
+        assert_eq!(progress.estimated_percent, 0);
+    }
+
+    #[test]
+    fn content_reader_observes_cancellation() {
+        let dir = TempDir::new();
+        let path = dir.0.join("content.txt");
+        std::fs::write(&path, "needle").unwrap();
+        let (tx, rx) = watch::channel(false);
+        assert!(file_contains_query(path.to_str().unwrap(), "needle", &rx));
+        tx.send(true).unwrap();
+        assert!(!file_contains_query(path.to_str().unwrap(), "needle", &rx));
+    }
+
+    #[test]
+    fn cancellation_during_the_last_entry_abandons_the_folder() {
+        let dir = TempDir::new();
+        std::fs::write(dir.0.join("last.txt"), "miss").unwrap();
+        let (tx, rx) = watch::channel(false);
+        let activity = SearchActivity::default();
+        let result = read_dir_entries(
+            dir.0.to_str().unwrap(),
+            "",
+            &|_| {
+                tx.send(true).unwrap();
+                false
+            },
+            &None,
+            &rx,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            &activity,
+        );
+        assert!(result.is_none());
+        assert_eq!(activity.scanned.load(Ordering::Relaxed), 1);
+    }
 }

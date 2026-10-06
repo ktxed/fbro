@@ -4,6 +4,7 @@ import type { WsClient } from "../ws/client";
 import { IconChevronLeft, IconChevronRight, IconListDetails, IconX } from "@tabler/icons-react";
 import { cancelJobWithPartialPrompt } from "../utils/jobCancel";
 import { usePanelFocusReturnOnRemoval } from "../hooks/useFocusReturn";
+import { SearchProgressBar } from "./SearchProgressBar";
 
 const VISIBLE = 5;
 
@@ -116,6 +117,7 @@ export function JobsBar({ client, onOpenJobsView }: { client: WsClient; onOpenJo
         const searchPct = job.kind === "search" && job.searchMatched !== undefined
           ? `${job.searchMatched} hits`
           : null;
+        const searchRunning = job.kind === "search" && job.state === "Running";
 
         return (
           <button
@@ -126,12 +128,32 @@ export function JobsBar({ client, onOpenJobsView }: { client: WsClient; onOpenJo
             data-job-state={job.state}
             ref={returnFocusRef}
             className={`jobs-bar__job${isActive ? " jobs-bar__job--active" : ""}`}
+            title={searchRunning ? job.searchCurrentPath : undefined}
             onClick={() => dispatch({ type: "SET_ACTIVE_JOB", jobId: job.jobId })}
           >
-            <span className="jobs-bar__job-label">{typeLabel}</span>
-            {job.state === "Queued" && <span className="jobs-bar__job-pct">Queued</span>}
-            {searchPct !== null && <span className="jobs-bar__job-pct">{searchPct}</span>}
-            {pct !== null && searchPct === null && <span className="jobs-bar__job-pct">{pct}%</span>}
+            {job.kind === "search" ? (
+              <span className="jobs-bar__search">
+                <span className="jobs-bar__search-summary">
+                  <span className="jobs-bar__job-label">{typeLabel}</span>
+                  <span className="jobs-bar__job-pct">
+                    {searchRunning
+                      ? job.searchEstimatedPercent === undefined ? "Searching…" : `Estimated ${job.searchEstimatedPercent}%`
+                      : job.state}
+                  </span>
+                  <span className="jobs-bar__job-pct">{searchPct}</span>
+                </span>
+                {(searchRunning || job.searchEstimatedPercent !== undefined) && (
+                  <SearchProgressBar percent={job.searchEstimatedPercent} running={searchRunning} />
+                )}
+                {searchRunning && (
+                  <span className="jobs-bar__search-path" data-testid="search-current-folder" title={job.searchCurrentPath}>
+                    {job.searchCurrentPath ? `Scanning: ${job.searchCurrentPath}` : "Searching…"}
+                  </span>
+                )}
+              </span>
+            ) : <span className="jobs-bar__job-label">{typeLabel}</span>}
+            {job.kind !== "search" && job.state === "Queued" && <span className="jobs-bar__job-pct">Queued</span>}
+            {job.kind !== "search" && pct !== null && <span className="jobs-bar__job-pct">{pct}%</span>}
             <span
               className="jobs-bar__job-close"
               role="button"

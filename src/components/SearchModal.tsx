@@ -13,6 +13,7 @@ import { ModalLayer } from "./ModalStack";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { isLetterKey, isNativeActivationTarget, rovingIndexForKey } from "./modalKeyboard";
 import { MnemonicLabel } from "./MnemonicLabel";
+import { SearchProgressBar } from "./SearchProgressBar";
 
 type DepthOption = "unlimited" | "current" | number;
 type MaskMode = "substring" | "wildcard" | "regex";
@@ -453,6 +454,19 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
           })}
         </div>
 
+        {isRunning && (
+          <div className="search-modal__activity" data-testid="search-activity">
+            <div className="search-modal__progress-counts">
+              <span>{search.matched} result{search.matched !== 1 ? "s" : ""} found, {search.scanned} items scanned</span>
+              <span>{search.estimatedPercent === undefined ? "Searching…" : `Estimated ${search.estimatedPercent}%`}</span>
+            </div>
+            <SearchProgressBar percent={search.estimatedPercent} running />
+            <span className="search-modal__progress-path" title={search.currentPath} data-testid="search-current-folder">
+              {search.currentPath ? `Scanning: ${search.currentPath}` : "Searching…"}
+            </span>
+          </div>
+        )}
+
         <div
           id={`search-panel-${search.activeTab}`}
           className="modal__body"
@@ -849,23 +863,11 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
           {/* ── Results Tab ───────────────────────────────────────── */}
           {search.activeTab === "results" && (
             <div className="search-modal__results-pane">
-              {isRunning && (
-                <div className="search-modal__progress-info">
-                  <span className="search-modal__progress-counts">
-                    {search.matched} result{search.matched !== 1 ? "s" : ""} found
-                    {search.scanned > 0 && `, ${search.scanned} items scanned`}
-                  </span>
-                  {search.currentPath && (
-                    <span className="search-modal__progress-path" title={search.currentPath}>
-                      Scanning: {search.currentPath}
-                    </span>
-                  )}
-                </div>
-              )}
-              {isDone && hasResults && (
-                <div className="search-modal__progress-info search-modal__progress-info--done">
-                  {search.matched} result{search.matched !== 1 ? "s" : ""} found
+              {isDone && (
+                <div className="search-modal__progress-info search-modal__progress-info--done" data-testid="search-summary">
+                  {search.matched} result{search.matched !== 1 ? "s" : ""} found, {search.scanned} items scanned
                   {search.status === "cancelled" ? " (search cancelled)" : ""}
+                  {search.status === "failed" ? " (search failed)" : ""}
                 </div>
               )}
 

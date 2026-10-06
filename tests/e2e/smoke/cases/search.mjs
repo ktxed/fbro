@@ -1,8 +1,155 @@
 import fs from "node:fs";
 import path from "node:path";
-import { backendPath, hostPath } from "../config.mjs";
+import { artifactsDir, backendPath, hostPath } from "../config.mjs";
 import { clickCommand, reloadBrowserApp } from "../browser.mjs";
 import { expectModalFocus } from "./modal-focus.mjs";
+import { waitFor } from "../wait.mjs";
+
+/** A sparse regular file keeps content search active until truncated or cancelled. */
+export async function runSearchActivityFlow(browser, observer) {
+  if (process.platform !== "linux") return;
+  const root = backendPath("a", "src", "search-activity");
+  const fixture = fs.mkdtempSync(`${hostPath(root)}-`);
+  const longFolder = "long-folder-".repeat(8);
+  const folder = path.join(fixture, longFolder);
+  fs.mkdirSync(folder);
+  const searchRoot = path.posix.join(`${root}${fixture.slice(hostPath(root).length)}`, longFolder);
+  const slowFile = path.join(folder, "slow.txt");
+  fs.writeFileSync(path.join(folder, "nonmatch.bin"), "not a name match");
+  const openSlowFile = () => {
+    const descriptor = fs.openSync(slowFile, "w+");
+    fs.ftruncateSync(descriptor, 2 ** 40); // Sparse: no terabyte of disk allocation.
+    return descriptor;
+  };
+  let writer = openSlowFile();
+  let jobId;
+  const previousScheme = observer.state.settings?.general?.colorScheme ?? "fbro-dark";
+  const releaseReader = () => {
+    if (writer === null) return;
+    fs.ftruncateSync(writer, 0);
+    fs.closeSync(writer);
+    writer = null;
+  };
+  const panelHasFocus = () => browser.execute(() =>
+    document.activeElement === document.querySelector('[data-testid="panel-left"]'));
+  try {
+    observer.navigatePanelToPath("left", searchRoot);
+    await observer.waitForPanelPath("left", searchRoot);
+    await observer.waitForPanelNotShadow("left");
+    await reloadBrowserApp(browser, "fbro-a");
+
+    const start = async (background = false) => {
+      const input = await openSearch(browser);
+      await input.setValue("*.txt");
+      await (await browser.$('[data-testid="search-content-input"]')).setValue("absent-needle");
+      await clickCommand(browser, background ? "search.background" : "search.start");
+      const chip = await browser.$('[data-testid="job-chip"][data-job-kind="search"][data-job-state="Running"]');
+      await chip.waitForDisplayed({ timeout: 10_000 });
+      jobId = await chip.getAttribute("data-job-id");
+      await browser.waitUntil(async () => (await (await chip.$('[data-testid="search-current-folder"]')).getAttribute("title")) === searchRoot, {
+        timeout: 10_000, timeoutMsg: "No-hit search did not show its active folder",
+      });
+      if (!(await chip.getText()).includes("0 hits")) throw new Error("No-hit search reported a match");
+    };
+
+    await start();
+    const activity = await browser.$('[data-testid="search-dialog"] [data-testid="search-activity"]');
+    await activity.waitForDisplayed({ timeout: 10_000 });
+    const currentFolder = await browser.$('[data-testid="search-dialog"] [data-testid="search-current-folder"]');
+    if ((await currentFolder.getAttribute("title")) !== searchRoot) {
+      throw new Error("Search dialog did not show the active no-hit folder");
+    }
+    const modalBar = await browser.$('[data-testid="search-dialog"] [role="progressbar"]');
+    if ((await modalBar.getAttribute("aria-valuenow")) !== "0") {
+      throw new Error("Search dialog did not show the backend estimate");
+    }
+    for (const scheme of ["fbro-dark", "daylight"]) {
+      observer.sendIntent("SetGeneralOption", undefined, { key: "colorScheme", value: scheme });
+      await waitFor(() => browser.execute(scheme =>
+        document.querySelector('.app')?.getAttribute("data-color-scheme") === scheme, scheme), {
+        timeout: 10_000, label: `search activity ${scheme} theme`,
+      });
+      const layout = await browser.execute(() => {
+        const folder = document.querySelector('[data-testid="search-dialog"] [data-testid="search-current-folder"]');
+        const progress = document.querySelector('[data-testid="search-dialog"] .search-progress__fill');
+        return { ellipsis: getComputedStyle(folder).textOverflow, accent: getComputedStyle(progress).backgroundColor };
+      });
+      if (layout.ellipsis !== "ellipsis" || layout.accent === "rgba(0, 0, 0, 0)") {
+        throw new Error(`Incorrect search activity styling in ${scheme}: ${JSON.stringify(layout)}`);
+      }
+      await browser.saveScreenshot(path.join(artifactsDir, "screenshots", `search-activity-${scheme}.png`));
+    }
+
+    // Activity remains visible on Input and Extra, with roving keyboard tabs.
+    await browser.execute(() => document.querySelector('#search-tab-results')?.focus());
+    await browser.keys("Home");
+    await expectModalFocus(browser, "#search-tab-input", "search activity Input tab");
+    if (!await activity.isDisplayed()) throw new Error("Search activity disappeared on Input");
+    await browser.keys("End");
+    await expectModalFocus(browser, "#search-tab-extra", "search activity Extra tab");
+    if (!await activity.isDisplayed()) throw new Error("Search activity disappeared on Extra");
+    // Hold the reader past another backend activity interval before checking
+    // focus. Jobs are connection-local, so this flow inspects the GUI snapshot.
+    await browser.execute(async () => { await new Promise(resolve => setTimeout(resolve, 250)); });
+    await expectModalFocus(browser, "#search-tab-extra", "search updates preserve tab focus");
+
+    await browser.keys("Escape");
+    await (await browser.$('[data-testid="search-dialog"]')).waitForDisplayed({ timeout: 10_000, reverse: true });
+    await waitFor(panelHasFocus, { timeout: 10_000, label: "background search restores panel focus" });
+    const chip = await browser.$(`[data-testid="job-chip"][data-job-id="${jobId}"]`);
+    const chipFolder = await chip.$('[data-testid="search-current-folder"]');
+    if ((await chipFolder.getAttribute("title")) !== searchRoot) {
+      throw new Error("Background search chip did not show its active folder");
+    }
+    if ((await (await chip.$('[role="progressbar"]')).getAttribute("aria-valuenow")) !== "0") {
+      throw new Error("Background search chip did not show its estimate");
+    }
+    // Keyboard activation reopens the job at the same backend estimate.
+    await browser.execute(jobId => document.querySelector(`[data-job-id="${jobId}"]`)?.focus(), jobId);
+    await browser.keys("Enter");
+    await activity.waitForDisplayed({ timeout: 10_000 });
+    await browser.execute(() => document.querySelector('[data-command-id="search.cancel"]')?.focus());
+    await browser.keys("Enter");
+    releaseReader();
+    await browser.waitUntil(async () => (await chip.getAttribute("data-job-state")) === "Cancelled", {
+      timeout: 10_000, timeoutMsg: "Search activity did not stop after keyboard cancellation",
+    });
+    if ((await (await chip.$('[role="progressbar"]')).getAttribute("aria-valuenow")) !== "0") {
+      throw new Error("Cancelled folder incorrectly advanced the estimate");
+    }
+    await clickCommand(browser, "search.close");
+    if (await chip.$('.search-progress__activity').isExisting()) {
+      throw new Error("Cancelled search kept animating");
+    }
+
+    writer = openSlowFile();
+    await start(true);
+    await waitFor(panelHasFocus, { timeout: 10_000, label: "direct background search preserves panel focus" });
+    releaseReader();
+    const completedChip = await browser.$(`[data-testid="job-chip"][data-job-id="${jobId}"]`);
+    await browser.waitUntil(async () => (await completedChip.getAttribute("data-job-state")) === "Completed", {
+      timeout: 10_000, timeoutMsg: "No-hit search did not complete",
+    });
+    await browser.waitUntil(async () => (await (await completedChip.$('[role="progressbar"]')).getAttribute("aria-valuenow")) === "100", {
+      timeout: 10_000, timeoutMsg: "Completed search chip did not reach 100 percent",
+    });
+    if (await completedChip.$('.search-progress__activity').isExisting()) {
+      throw new Error("Completed search kept animating");
+    }
+    await completedChip.click();
+    const summary = await browser.$('[data-testid="search-summary"]');
+    await summary.waitForDisplayed({ timeout: 10_000 });
+    if (!(await summary.getText()).includes("0 results found, 2 items scanned")) {
+      throw new Error(`Incorrect final no-hit counters: ${await summary.getText()}`);
+    }
+    await clickCommand(browser, "search.close");
+  } finally {
+    observer.sendIntent("SetGeneralOption", undefined, { key: "colorScheme", value: previousScheme });
+    releaseReader();
+    if (jobId) observer.sendIntent("CancelJob", undefined, { jobId });
+    fs.rmSync(fixture, { recursive: true, force: true });
+  }
+}
 
 export async function runSearchFlow(browser, observer) {
   const aDst = backendPath("a", "dst");

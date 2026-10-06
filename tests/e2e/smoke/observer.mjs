@@ -435,6 +435,7 @@ export class FbroObserver {
       job.searchScanned = msg.searchProgress.scanned;
       job.searchMatched = msg.searchProgress.matched;
       job.searchCurrentPath = msg.searchProgress.currentPath;
+      job.searchEstimatedPercent = msg.searchProgress.estimatedPercent;
     }
     if (msg.decision) job.decision = msg.decision;
     if (msg.error) job.error = msg.error;

@@ -1572,14 +1572,10 @@ async fn cancel_job(args: &Value, ctx: &mut IntentContext<'_>) {
                     send_cancelled_event = true;
                 }
                 JobKind::Search(_) => {
-                    // Signal the cancel watch so workers stop gracefully, then
-                    // abort the spawned task immediately for a fast stop.
+                    // Let the collector drain workers and publish final activity
+                    // before Cancelled. Aborting it loses buffered results and
+                    // can strand workers on a full results channel.
                     let _ = job.cancel_tx.send(true);
-                    if let Some(handle) = job.handle.take() {
-                        handle.abort();
-                    }
-                    job.state = JobState::Cancelled;
-                    send_cancelled_event = true;
                 }
                 JobKind::OutgoingTransfer(meta) => {
                     let _ = &meta.peer_fp;

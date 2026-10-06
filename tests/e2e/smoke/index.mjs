@@ -34,7 +34,7 @@ import { runViewerFlow } from "./cases/viewer.mjs";
 import { runHeicFlow } from "./cases/heic.mjs";
 import { runQuickEditFlow } from "./cases/quick-edit.mjs";
 import { runRemoteFlow } from "./cases/remote.mjs";
-import { runDatetimeSearchFlow, runSearchFlow, runSizeSearchFlow } from "./cases/search.mjs";
+import { runDatetimeSearchFlow, runSearchActivityFlow, runSearchFlow, runSizeSearchFlow } from "./cases/search.mjs";
 
 async function main() {
   let browserA;
@@ -64,6 +64,11 @@ async function main() {
     browserA = await startBrowser("fbro-a", webdriverHosts.a, webdriverPorts.a, appA);
     observerA = new FbroObserver("fbro-a", wsUrls.a);
     await observerA.connect();
+
+    if (process.env.FBRO_E2E_SEARCH_ACTIVITY_ONLY === "1") {
+      await runSearchActivityFlow(browserA, observerA);
+      return;
+    }
 
     if (process.env.FBRO_E2E_GIT_ONLY === "1") {
       await runGitInitFlow(browserA, observerA);
@@ -97,6 +102,7 @@ async function main() {
     await runHashCheckFlow(browserA, observerA);
     await runHashGenerateFlow(browserA, observerA);
     await runArchiveFlow(browserA, observerA);
+    await runSearchActivityFlow(browserA, observerA);
     await runSearchFlow(browserA, observerA);
     await runDatetimeSearchFlow(browserA, observerA);
     await runSizeSearchFlow(browserA, observerA);

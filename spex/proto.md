@@ -522,6 +522,22 @@ Jobs are **cooperatively suspendable**.
 }
 ```
 
+Search `JobEvent`s carry `searchProgress: { scanned, matched, currentPath,
+estimatedPercent, newResults }`. `scanned` counts inspected entries independently
+of matches. `currentPath` identifies the most recently started still-active
+worker folder (empty when no folder is active). Initial and periodic activity
+updates are sent even with an empty `newResults` array, approximately every
+200 ms. Result batches may also emit when they reach 50 entries.
+
+`estimatedPercent` is the integer percentage of completed / discovered folders,
+capped at 99 while running; discovering more folders can revise it downward.
+The frontend displays the estimate without calculating its own total and uses
+an indeterminate bar if older payloads omit the field. Search terminal events
+also carry `searchProgress`, after buffered results and final counters have been
+flushed. `Completed` reports 100; `Cancelled` retains the final estimate below
+100. Terminal snapshots have an empty current path and no new results. Search
+cancellation drains workers before sending its terminal event.
+
 ### 11.3 Thumbnail queue inspection
 
 `QueryThumbnailQueue { requestId }` is a read-only intent. It replies to the

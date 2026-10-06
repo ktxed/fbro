@@ -187,6 +187,7 @@ pub struct SearchProgressSchema {
     pub scanned: u64,
     pub matched: u64,
     pub current_path: String,
+    pub estimated_percent: u8,
     pub new_results: Vec<SearchResultSchema>,
 }
 ```
@@ -225,6 +226,7 @@ interface SearchProgress {
   scanned: number;
   matched: number;
   currentPath: string;
+  estimatedPercent?: number;
   newResults: SearchResult[];
 }
 ```
@@ -240,8 +242,9 @@ interface PendingSearch {
   scanned: number;
   matched: number;
   currentPath: string;
+  estimatedPercent?: number;
   status: "idle" | "running" | "completed" | "cancelled" | "failed";
-  activeTab: "input" | "results";
+  activeTab: "input" | "results" | "extra";
   requestId: string | null;
   searchParams: SearchParams | null;
 }
@@ -251,7 +254,8 @@ interface PendingSearch {
 
 ### SearchModal
 
-**Two tabs**: "Search Input" (mnemonic: s) and "Results" (mnemonic: r)
+**Three tabs**: "Search Input" (mnemonic: s), "Results" (mnemonic: r),
+and "Extra" (mnemonic: e, size and datetime filters).
 
 #### Input tab sections
 
@@ -261,7 +265,11 @@ interface PendingSearch {
 
 #### Results tab
 
-- Progress info while running (matched count, scanned count, current path)
+- A persistent activity strip below the tabs remains visible on Input, Results,
+  and Extra while running: estimated progress bar, matched count, inspected-entry
+  count, and current folder. Activity updates never move focus.
+- Completed searches show final matched and inspected-entry counts, including
+  searches with zero results; cancellation and failure are identified explicitly.
 - Result list (capped at 500 displayed, with warning if more)
 - Each result shows icon, name, parent path, copy path button
 - Double-click navigates to the result's location
@@ -276,7 +284,10 @@ interface PendingSearch {
 
 ### Integration Points
 
-- **JobsBar**: Shows active search jobs, clicking reopens SearchModal with results
+- **JobsBar**: Search chips show the same backend estimate and current folder,
+  plus the hit count. Long folders truncate with a full-path tooltip. Clicking
+  or keyboard activation reopens SearchModal with cached activity and results.
+  Completion, cancellation, and failure stop animation.
 - **Layout.tsx**: Renders SearchModal when `state.pendingSearch` is not null
 - **CommandPalette**: "panel.filter.open" command opens filter mode (related but separate from search)
 
@@ -337,10 +348,34 @@ file.
 | `CONTENT_READ_BUF` | 64 KiB |
 
 - **Worker pool**: 8 concurrent workers
-- **Work queue**: Bounded channel with 4096 capacity
+- **Work queue**: An unbounded `async-channel` directory frontier. Enqueuing
+  children never waits for a consumer: the same eight workers produce and
+  consume directories, so a bounded frontier can deadlock with all workers
+  waiting to enqueue. Active directory reads remain limited to eight and the
+  independent result collector retains its bounded 1024-entry channel.
 - **Result channel**: 1024 capacity
-- **Flush batching**: 50 results or 200ms interval
-- **Content reading**: 64 KiB chunks with boundary carry-over
+- **Flush batching**: 50 results or 200ms interval. The 200ms timer emits activity
+  even when no results arrive, including during a large content read.
+- **Activity accounting**: `scanned` counts directory entries inspected before
+  metadata and search filters, rather than matches. `currentPath` is the most
+  recently started still-active worker folder, or empty when none is active.
+- **Estimate**: `estimatedPercent` is completed folders / discovered folders,
+  capped at 99 while running. It may decrease as more folders are discovered;
+  no preliminary traversal is performed. Only successful completion reports 100.
+  The bar continues to animate during unchanged estimates; reduced-motion
+  preferences disable animation. Older payloads without the estimate use an
+  indeterminate bar.
+- **Cancellation**: signal workers and drain their result channel rather than
+  aborting the collector. Content readers check cancellation between chunks.
+  Final counts and buffered results arrive before the terminal event; terminal
+  `searchProgress` has no new results and retains the estimate for cancellation.
+  Both successful and cancelled terminal events clear the current folder.
+- **Access failures**: attempt each directory listing once; unreadable directories
+  and entries whose metadata cannot be read are skipped without retrying or
+  stopping accessible sibling traversal. Directory symlinks are not followed.
+- **Content reading**: only regular files, in 64 KiB chunks with boundary
+  carry-over. Pipes, sockets, devices, and symlinks are skipped when a content
+  filter is active; searching their names remains supported.
 - **UI cap**: First 500 results shown in modal, full list available in panel
 
 ## Code Locations
@@ -418,6 +453,7 @@ The codebase has two separate filtering concepts:
     "scanned": 1500,
     "matched": 42,
     "currentPath": "/home/user/docs",
+    "estimatedPercent": 37,
     "newResults": [
       {
         "name": "notes.txt",

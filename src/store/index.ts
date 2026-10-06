@@ -248,6 +248,7 @@ export interface PendingSearch {
   scanned: number;
   matched: number;
   currentPath: string;
+  estimatedPercent?: number;
   status: "idle" | "running" | "completed" | "cancelled" | "failed";
   activeTab: "input" | "results" | "extra";
   // Used to correlate the StartSearch intent with the JobStarted message
@@ -1081,8 +1082,21 @@ function applyQuitConfirmRequired(state: AppState, msg: QuitConfirmRequiredMessa
 }
 
 function applyJobEvent(state: AppState, msg: JobEventMessage): AppState {
-  const job = state.jobs[msg.jobId];
-  if (!job) return state;
+  const previousJob = state.jobs[msg.jobId];
+  if (!previousJob) return state;
+  const sp = previousJob.kind === "search" ? msg.searchProgress : undefined;
+  // Terminal events can carry the final search snapshot too. Empty activity
+  // updates retain the results array instead of copying it every 200 ms.
+  const job = sp ? {
+    ...previousJob,
+    searchResults: sp.newResults.length > 0
+      ? [...(previousJob.searchResults ?? []), ...sp.newResults]
+      : previousJob.searchResults,
+    searchScanned: sp.scanned,
+    searchMatched: sp.matched,
+    searchCurrentPath: sp.currentPath,
+    searchEstimatedPercent: sp.estimatedPercent,
+  } : previousJob;
   const files = msg.files ?? job.files;
 
   let updated: Job;
@@ -1092,22 +1106,7 @@ function applyJobEvent(state: AppState, msg: JobEventMessage): AppState {
       updated = { ...job, files, state: "Queued", paused: false, decision: undefined };
       break;
     case "Progress":
-      if (job.kind === "search" && msg.searchProgress) {
-        // Accumulate search results
-        const sp = msg.searchProgress;
-        updated = {
-          ...job,
-          files,
-          state: "Running",
-          paused: false,
-          searchResults: [...(job.searchResults ?? []), ...sp.newResults],
-          searchScanned: sp.scanned,
-          searchMatched: sp.matched,
-          searchCurrentPath: sp.currentPath,
-        };
-      } else {
-        updated = { ...job, files, state: "Running", paused: false, progress: msg.progress ?? job.progress, decision: undefined };
-      }
+      updated = { ...job, files, state: "Running", paused: false, progress: msg.progress ?? job.progress, decision: undefined };
       break;
     case "DecisionRequired":
       updated = { ...job, files, state: "AwaitingDecision", decision: msg.decision };
@@ -1211,36 +1210,27 @@ function applyJobEvent(state: AppState, msg: JobEventMessage): AppState {
     }
   }
 
-  // Sync search progress/status into pendingSearch if it belongs to this search job
+  // Reuse the cached job snapshot when this search is open, including the
+  // final estimate and counters on terminal events.
   if (job.kind === "search" && state.pendingSearch?.jobId === msg.jobId) {
-    if (msg.event === "Progress" && msg.searchProgress) {
-      const sp = msg.searchProgress;
-      next = {
-        ...next,
-        pendingSearch: {
-          ...state.pendingSearch,
-          results: [...state.pendingSearch.results, ...sp.newResults],
+    const status = msg.event === "Completed" ? "completed"
+      : msg.event === "Cancelled" ? "cancelled"
+      : msg.event === "Failed" ? "failed"
+      : state.pendingSearch.status;
+    next = {
+      ...next,
+      pendingSearch: {
+        ...state.pendingSearch,
+        ...(sp ? {
+          results: updated.searchResults ?? [],
           scanned: sp.scanned,
           matched: sp.matched,
           currentPath: sp.currentPath,
-        },
-      };
-    } else if (msg.event === "Completed") {
-      next = {
-        ...next,
-        pendingSearch: { ...state.pendingSearch, status: "completed" },
-      };
-    } else if (msg.event === "Cancelled") {
-      next = {
-        ...next,
-        pendingSearch: { ...state.pendingSearch, status: "cancelled" },
-      };
-    } else if (msg.event === "Failed") {
-      next = {
-        ...next,
-        pendingSearch: { ...state.pendingSearch, status: "failed" },
-      };
-    }
+          estimatedPercent: sp.estimatedPercent,
+        } : {}),
+        status,
+      },
+    };
   }
 
   return next;
@@ -1868,6 +1858,7 @@ function reducer(state: AppState, action: AppAction): AppState {
             scanned: activatedJob.searchScanned ?? 0,
             matched: activatedJob.searchMatched ?? 0,
             currentPath: activatedJob.searchCurrentPath ?? "",
+            estimatedPercent: activatedJob.searchEstimatedPercent,
             status: activatedJob.state === "Running" ? "running"
               : activatedJob.state === "Completed" ? "completed"
               : activatedJob.state === "Cancelled" ? "cancelled"
@@ -2112,6 +2103,7 @@ function reducer(state: AppState, action: AppAction): AppState {
           scanned: 0,
           matched: 0,
           currentPath: "",
+          estimatedPercent: undefined,
           status: "idle",
           requestId: action.requestId,
         },

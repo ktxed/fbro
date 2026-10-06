@@ -268,6 +268,7 @@ export interface SearchProgress {
   scanned: number;
   matched: number;
   currentPath: string;
+  estimatedPercent?: number;
   newResults: SearchResult[];
 }
 
@@ -296,6 +297,7 @@ export interface Job {
   searchScanned?: number;
   searchMatched?: number;
   searchCurrentPath?: string;
+  searchEstimatedPercent?: number;
   // Sync Bro-specific fields
   syncResult?: SyncBroResult;
   reportSavedPath?: string;

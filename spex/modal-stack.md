@@ -218,6 +218,11 @@ enter the sequential Tab cycle.
 Delete is an explicit file-operation confirmation, so its main operation
 button receives focus. Quit, reset, and pairing retain Cancel as their default.
 
+Search's running activity strip is visible below the tabs on every tab. Its
+progress bar, counters, and current folder are informational and never take
+focus. Periodic activity, result arrival, and completion preserve existing
+focus; normal stack restoration still owns backgrounding and dismissal.
+
 An existing destination item does not disable Copy or move focus to the name
 input. The backend job applies the selected conflict policy: Ask pauses for a
 decision, Overwrite replaces the destination, and Skip leaves it unchanged.

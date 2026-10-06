@@ -2217,6 +2217,8 @@ body {
 }
 
 .jobs-bar__job {
+  appearance: none;
+  font: inherit;
   display: flex;
   align-items: center;
   gap: 4px;
@@ -2264,6 +2266,60 @@ body {
   flex-shrink: 0;
   color: var(--accent);
   font-size: var(--font-size);
+}
+
+.jobs-bar__search {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  text-align: left;
+}
+
+.jobs-bar__search-summary {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.jobs-bar__search-path {
+  color: var(--text-dim);
+  font-size: calc(var(--font-size) - 1px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.search-progress {
+  display: block;
+  position: relative;
+  height: 4px;
+  flex-shrink: 0;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--border);
+}
+
+.search-progress__fill {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+
+.search-progress__activity {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 25%;
+  background: var(--accent);
+  opacity: 0.5;
+  animation: search-progress-activity 1.4s linear infinite;
+}
+
+@keyframes search-progress-activity {
+  from { left: -25%; }
+  to { left: 100%; }
 }
 
 .jobs-bar__job-close {
@@ -5085,6 +5141,13 @@ body {
   to { transform: rotate(360deg); }
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .search-progress__activity,
+  .search-modal__tab-spinner {
+    animation: none;
+  }
+}
+
 /* ── Results tab ─────────────────────────────────────────────────────────── */
 
 .search-modal__results-pane {
@@ -5103,6 +5166,23 @@ body {
   flex-direction: column;
   gap: 2px;
   flex-shrink: 0;
+}
+
+.search-modal__activity {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  gap: 5px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+  font-size: var(--font-size);
+  color: var(--text-dim);
+}
+
+.search-modal__activity .search-modal__progress-counts {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 .search-modal__progress-counts {

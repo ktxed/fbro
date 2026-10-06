@@ -1,5 +1,20 @@
 # Testing
 
+Search activity: `cargo test --manifest-path src-tauri/Cargo.toml jobs::search::tests`
+covers no-hit heartbeats during active work, inspected-entry counts, concurrent
+folder selection, estimates that revise as folders are discovered, depth limits,
+multiple roots, inaccessible/empty directories, and cancellation. Regressions
+cover a directory backlog exceeding the former 4096-entry queue, real permission
+denial with an accessible sibling, and skipping a FIFO during content search.
+The search activity smoke flow uses a sparse regular file to keep content
+scanning active; it checks all search tabs, background/reopened job activity,
+keyboard cancellation, focus
+preservation/restoration, final no-hit counts, both themes, and long-path styling.
+Run it independently with `FBRO_E2E_SEARCH_ACTIVITY_ONLY=1` using the local smoke
+commands below. Native macOS and Windows search styling and focus need verification.
+The focused Rust tests and native Linux/Wayland activity smoke flow passed,
+including the `fbro-dark` and `daylight` presentations.
+
 HEIC2ANY preview checks: `cargo test --manifest-path src-tauri/Cargo.toml
 heic_preview_is_opt_in` covers older settings defaulting to off and enabled
 settings serialization. `tests/e2e/smoke/cases/heic.mjs` covers the settings
