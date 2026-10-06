@@ -226,13 +226,46 @@ fn status_label(change: &GitChange) -> String {
 
 /// Create from current HEAD without overwriting refs or discarding work.
 pub fn create_branch(root: &str, branch: &str) -> Result<(), String> {
+    let branch = validate_branch_name(root, branch)?;
+    run(root, &["switch".into(), "--create".into(), branch.into()])
+}
+
+fn validate_branch_name<'a>(root: &str, branch: &'a str) -> Result<&'a str, String> {
     let branch = branch.trim();
     if branch.is_empty() || branch.starts_with('-') || branch.contains("@{") {
         return Err("A valid literal branch name is required.".into());
     }
     git(root, &["check-ref-format", "--branch", branch])
-        .map_err(|_| format!("Invalid branch name: {branch}"))?;
-    run(root, &["switch".into(), "--create".into(), branch.into()])
+        .map_err(|e| format!("Invalid branch name: {branch}. {e}"))?;
+    Ok(branch)
+}
+
+/// Initialize only an existing directory, leaving its contents untouched.
+pub fn init_repository(path: &Path, branch: &str) -> Result<String, String> {
+    let path = path.canonicalize().map_err(|e| format!("Cannot access repository folder: {e}"))?;
+    if !path.is_dir() {
+        return Err("The repository target must be an existing folder.".into());
+    }
+    path.to_str().ok_or("The repository folder path is not valid UTF-8.")?;
+    // Match normal panel paths, including ordinary drive/UNC paths on Windows.
+    let root = crate::vfs::local::normalize_path(path.clone());
+    let branch = validate_branch_name(&root, branch)?;
+    // A .git file identifies a worktree, and even an invalid marker must not
+    // be overwritten. A bare repository has no .git child.
+    match std::fs::symlink_metadata(path.join(".git")) {
+        Ok(_) => return Err("This folder already contains Git repository metadata.".into()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(format!("Cannot check repository metadata: {e}")),
+    }
+    if let Ok(git_dir) = git(&root, &["rev-parse", "--absolute-git-dir"]) {
+        let git_dir = String::from_utf8_lossy(&git_dir);
+        if Path::new(git_dir.trim()).canonicalize().ok().as_ref() == Some(&path) {
+            return Err("This folder already contains a bare Git repository.".into());
+        }
+    }
+    run(&root, &["init".into(), format!("--initial-branch={branch}")])
+        .map_err(|e| format!("Cannot initialize Git repository: {e}"))?;
+    Ok(root)
 }
 
 pub fn run(root: &str, args: &[String]) -> Result<(), String> {
@@ -1071,6 +1104,95 @@ mod tests {
             assert_eq!(super::inspect(root).unwrap().branch, "saved-detached-work");
             assert_eq!(super::git(root, &["rev-parse", "HEAD"]).unwrap(), head);
         });
+    }
+
+    #[test]
+    fn init_repository_preserves_contents_and_uses_requested_branch() {
+        with_empty_folder(|repo| {
+            fs::write(repo.join("notes.txt"), b"existing work\n").unwrap();
+            let path = super::init_repository(repo, "feature/start").unwrap();
+            let status = super::inspect(&path).unwrap();
+            assert_eq!(status.branch, "feature/start");
+            assert_eq!(status.untracked_count, 1);
+            assert_eq!(status.staged_count, 0);
+            assert!(super::git(&path, &["rev-parse", "--verify", "HEAD"]).is_err());
+            assert_eq!(fs::read(repo.join("notes.txt")).unwrap(), b"existing work\n");
+            assert_eq!(fs::read_dir(repo).unwrap().count(), 2);
+        });
+    }
+
+    #[test]
+    fn init_repository_rejects_invalid_names_without_creating_metadata() {
+        with_empty_folder(|repo| {
+            for name in ["", "-oops", "@{-1}", "bad name", "bad..name", "HEAD"] {
+                assert!(super::init_repository(repo, name).is_err(), "accepted {name}");
+                assert!(!repo.join(".git").exists());
+            }
+            super::init_repository(repo, "main").unwrap();
+            assert_eq!(super::inspect(repo.to_str().unwrap()).unwrap().branch, "main");
+        });
+    }
+
+    #[test]
+    fn init_repository_rejects_existing_repositories_and_git_files() {
+        with_test_repo(|repo| {
+            let root = repo.to_str().unwrap();
+            let head = super::git(root, &["symbolic-ref", "HEAD"]).unwrap();
+            let config = fs::read(repo.join(".git/config")).unwrap();
+            assert!(super::init_repository(repo, "replacement").is_err());
+            assert_eq!(super::git(root, &["symbolic-ref", "HEAD"]).unwrap(), head);
+            assert_eq!(fs::read(repo.join(".git/config")).unwrap(), config);
+        });
+        with_empty_folder(|repo| {
+            fs::write(repo.join(".git"), "gitdir: missing\n").unwrap();
+            assert!(super::init_repository(repo, "main").is_err());
+            assert_eq!(fs::read_to_string(repo.join(".git")).unwrap(), "gitdir: missing\n");
+        });
+        with_empty_folder(|repo| {
+            git(repo, &["init", "--bare", "-q"]);
+            let config = fs::read(repo.join("config")).unwrap();
+            assert!(super::init_repository(repo, "main").is_err());
+            assert!(!repo.join(".git").exists());
+            assert_eq!(fs::read(repo.join("config")).unwrap(), config);
+        });
+    }
+
+    #[test]
+    fn init_repository_allows_nested_repository_without_changing_parent_head() {
+        with_test_repo(|repo| {
+            let root = repo.to_str().unwrap();
+            let head = super::git(root, &["symbolic-ref", "HEAD"]).unwrap();
+            let child = repo.join("nested");
+            fs::create_dir(&child).unwrap();
+            let nested = super::init_repository(&child, "nested-main").unwrap();
+            let status = super::inspect(&nested).unwrap();
+            assert_eq!(Path::new(&status.root).canonicalize().unwrap(), child.canonicalize().unwrap());
+            assert_eq!(status.branch, "nested-main");
+            assert_eq!(super::git(root, &["symbolic-ref", "HEAD"]).unwrap(), head);
+        });
+    }
+
+    #[test]
+    fn init_repository_rejects_files_and_missing_folders() {
+        with_empty_folder(|repo| {
+            let file = repo.join("file.txt");
+            fs::write(&file, "data").unwrap();
+            assert!(super::init_repository(&file, "main").is_err());
+            assert!(super::init_repository(&repo.join("missing"), "main").is_err());
+            assert!(!repo.join("missing").exists());
+            assert_eq!(fs::read_to_string(file).unwrap(), "data");
+        });
+    }
+
+    fn with_empty_folder(test: impl FnOnce(&Path)) {
+        let repo = temp_repo_path();
+        fs::create_dir_all(&repo).unwrap();
+        struct Cleanup(PathBuf);
+        impl Drop for Cleanup {
+            fn drop(&mut self) { let _ = fs::remove_dir_all(&self.0); }
+        }
+        let _cleanup = Cleanup(repo.clone());
+        test(&repo);
     }
 
     fn with_test_repo(test: impl FnOnce(&Path)) {

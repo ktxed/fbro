@@ -10,6 +10,7 @@ import { RenameModal } from "./RenameModal";
 import { AttributesModal } from "./AttributesModal";
 import { InfoModal } from "./InfoModal";
 import { MkDirModal } from "./MkDirModal";
+import { GitInitModal } from "./GitInitModal";
 import { TouchModal } from "./TouchModal";
 import { NoEditorModal } from "./NoEditorModal";
 import { GoToPathModal } from "./GoToPathModal";
@@ -565,6 +566,9 @@ export function Layout({ client, jobsViewOpen, onCloseJobsView, onOpenJobsView }
       )}
       {state.pendingMkdir && (
         <MkDirModal mkdir={state.pendingMkdir} client={client} />
+      )}
+      {state.pendingGitInit && (
+        <GitInitModal key={`${state.pendingGitInit.panelId}:${state.pendingGitInit.targetPath}`} gitInit={state.pendingGitInit} client={client} />
       )}
       {state.pendingTouch && (
         <TouchModal touch={state.pendingTouch} client={client} />

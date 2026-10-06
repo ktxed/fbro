@@ -339,6 +339,25 @@ pub enum ServerMessage {
         message: String,
         changes: Vec<crate::git::GitChange>,
     },
+    /// Correlated completion for initialization of an existing local folder.
+    InitGitRepositoryOk {
+        timestamp: u64,
+        #[serde(rename = "panelId")]
+        panel_id: String,
+        #[serde(rename = "requestId")]
+        request_id: String,
+        path: String,
+        branch: String,
+    },
+    InitGitRepositoryFailed {
+        timestamp: u64,
+        #[serde(rename = "panelId")]
+        panel_id: String,
+        #[serde(rename = "requestId")]
+        request_id: String,
+        code: String,
+        message: String,
+    },
     /// Completion signal for a mutating or remote Git action.
     GitActionFinished {
         timestamp: u64,

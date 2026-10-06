@@ -187,6 +187,7 @@ enter the sequential Tab cycle.
 | Dialog or phase | Default focus | Enter from that target |
 |---|---|---|
 | Rename, Create Directory, New File | Name input | Submit once |
+| Initialize Git repository | Initial branch input (defaults to main) | Submit once |
 | Go To Path | Path input | Navigate once |
 | Generic Input / Password | Value input | Submit once |
 | Set Permissions | Apply | Apply permissions |
@@ -234,6 +235,17 @@ A modal default handler must honor `defaultPrevented` and native activation.
 Prompt fields explicitly own default submission. Letter mnemonics remain
 available from action buttons and checkboxes when they do not consume text
 editing keys; focusing the default must not disable its advertised mnemonics.
+
+### Git repository initialization
+
+Git initialization uses its own fixed `git-init` layer with `ModalDialog`.
+It shows the captured target folder and one branch input. Initialize precedes
+Cancel; during submission the input and primary action are disabled, the primary
+reads Initializing…, and the secondary reads Close. Escape/Close backgrounds
+the atomic job without cancelling it. A matching failure retains the form and
+input for retry; success removes the layer. The shared stack restores focus on
+every removal path, including menu/palette handoffs. Late results do not replace
+a newer form or take focus from it.
 
 ### Git inline branch creation
 

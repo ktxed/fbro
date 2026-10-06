@@ -334,6 +334,12 @@ But **v0 should not rely on it**.
 
 ## 6. Jobs & VFS interaction
 
+Local Git repository jobs use `VfsDriver::local_path` to resolve the native
+folder before invoking the existing system Git adapter. `is_local` gates this
+capability; virtual/remote drivers remain unsupported. The local spy driver
+forwards native path mapping to its wrapped driver. Git owns repository metadata
+creation, while the backend job owns validation, execution, and panel refresh.
+
 Jobs are **VFS consumers**, never owners.
 
 Example: Copy job loop:

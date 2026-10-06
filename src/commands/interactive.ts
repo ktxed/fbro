@@ -94,6 +94,7 @@ export const PANEL_SHORTCUT_COMMAND_IDS = [
   "panel.toggle_view_mode",
   "panel.sort.open",
   "panel.git.actions",
+  "git.init",
   "panel.bookmarks.open",
   "panel.bookmarks.browse",
   "panel.toggle_embedded_terminal",
@@ -381,6 +382,9 @@ export function executeTargetedCommand(
   const explicitPath = target.scope === "selection" ? undefined : target.fullPath;
 
   switch (commandId) {
+    case "git.init":
+      if (target.kind !== "directory" || files.length !== 1) return false;
+      return openGitInit(context.state, context.dispatch, target.panelId, target.fullPath);
     case "panel.pass_to_bro":
       return context.state.panels[target.panelId]
         ? openPassToBro(context.state, context.dispatch, context.client, context.state.panels[target.panelId], explicitPath)
@@ -402,6 +406,21 @@ export function executeTargetedCommand(
     default:
       return false;
   }
+}
+
+function openGitInit(state: AppState, dispatch: Dispatch<AppAction>, panelId: string, targetPath: string) {
+  const panel = state.panels[panelId];
+  const source = panel ? state.sources[panel.sourceId] : undefined;
+  if (!panel || !source || source.kind !== "filesystem" || !source.mounted
+    || source.shadow || source.capabilities.readOnly || panel.shadowSource || panel.tabKind !== "listing") {
+    dispatch({ type: "SHOW_TRANSIENT_HINT", message: "Git initialization is available only on writable local filesystem folders." });
+    return false;
+  }
+  dispatch({
+    type: "OPEN_GIT_INIT",
+    gitInit: { panelId, sourceId: panel.sourceId, targetPath, requestId: "", submitting: false },
+  });
+  return true;
 }
 
 function openViewerIntent(client: WsClient, panel: PanelState, intentName: "ViewFile" | "EditFile") {
@@ -702,6 +721,8 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
         mkdir: { sourcePanel: focused.panelId, dirPath: focused.panel.path },
       });
       return true;
+    case "git.init":
+      return focused ? openGitInit(state, dispatch, focused.panelId, focused.panel.path) : false;
     case "file.delete":
       if (!focused || !sourceCapability("DeleteSelection")) return false;
       return openFileOp(state, dispatch, focused.panel, "delete");

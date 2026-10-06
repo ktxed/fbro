@@ -9,6 +9,10 @@ use crate::ws::protocol::{now, FileOpFileSchema, ServerMessage};
 use crate::ws::runtime::{quiet_rescan_panel, rescan_panel, selected_names_for, IntentContext};
 
 pub(crate) async fn handle(name: &str, args: &Value, ctx: &mut IntentContext<'_>) {
+    if name == "InitGitRepository" {
+        init_repository(args, ctx).await;
+        return;
+    }
     if name == "RefreshGitStatus" {
         refresh_git_status(args, ctx).await;
         return;
@@ -200,6 +204,117 @@ pub(crate) async fn handle(name: &str, args: &Value, ctx: &mut IntentContext<'_>
             )
             .await;
             send_error(ctx, "GIT_ACTION_FAILED", &message).await
+        }
+    }
+}
+
+fn init_target_in_panel(panel_path: &str, target_path: &str) -> bool {
+    let target = Path::new(target_path);
+    let panel = Path::new(panel_path);
+    !target_path.is_empty()
+        && !target.components().any(|c| matches!(c, Component::ParentDir))
+        && (target == panel || target.parent() == Some(panel))
+}
+
+#[cfg(test)]
+mod init_tests {
+    use super::*;
+
+    #[test]
+    fn initialization_target_is_the_current_folder_or_one_direct_child() {
+        assert!(init_target_in_panel("/work/project/", "/work/project"));
+        assert!(init_target_in_panel("/work/project", "/work/project/child"));
+        assert!(!init_target_in_panel("/work/project", ""));
+        assert!(!init_target_in_panel("/work/project", "/work/other"));
+        assert!(!init_target_in_panel("/work/project", "/work/project/../other"));
+        assert!(!init_target_in_panel("/work/project", "/work/project/child/nested"));
+    }
+
+    #[test]
+    fn initialization_replies_use_correlated_camel_case_fields() {
+        let ok = serde_json::to_value(ServerMessage::InitGitRepositoryOk {
+            timestamp: 1, panel_id: "left".into(), request_id: "init-1".into(),
+            path: "/work/project".into(), branch: "main".into(),
+        }).unwrap();
+        assert_eq!(ok["type"], "InitGitRepositoryOk");
+        assert_eq!(ok["panelId"], "left");
+        assert_eq!(ok["requestId"], "init-1");
+        let failed = serde_json::to_value(ServerMessage::InitGitRepositoryFailed {
+            timestamp: 1, panel_id: "left".into(), request_id: "init-2".into(),
+            code: "GIT_INIT_FAILED".into(), message: "Cannot initialize".into(),
+        }).unwrap();
+        assert_eq!(failed["type"], "InitGitRepositoryFailed");
+        assert_eq!(failed["panelId"], "left");
+        assert_eq!(failed["requestId"], "init-2");
+        assert_eq!(failed["code"], "GIT_INIT_FAILED");
+    }
+}
+
+async fn init_repository(args: &Value, ctx: &mut IntentContext<'_>) {
+    let panel_id = super::arg_str(args, "panelId").unwrap_or("").to_string();
+    let source_id = super::arg_str(args, "sourceId").unwrap_or("").to_string();
+    let target = super::arg_str(args, "targetPath").unwrap_or("").to_string();
+    let branch = super::arg_str(args, "branch").unwrap_or("").trim().to_string();
+    let request_id = super::arg_str(args, "requestId").unwrap_or("").to_string();
+    let operation = crate::journal::record_git_intent(
+        "InitGitRepository", args, Some(&target), Some(&source_id),
+    );
+    let driver = {
+        let state = ctx.state.lock().await;
+        (|| -> Result<_, String> {
+            if request_id.is_empty() {
+                return Err("A request id is required.".into());
+            }
+            let panel = state.panels.get(&panel_id).ok_or("The target panel is no longer available.")?;
+            let source = state.sources.get(&source_id).ok_or("The target source is no longer available.")?;
+            if panel.source_id != source_id || !init_target_in_panel(&panel.path, &target) {
+                return Err("The panel location changed. Reopen Git initialization for the target folder.".into());
+            }
+            if source.kind != "filesystem" || !source.mounted || source.shadow || source.read_only
+                || panel.shadow_source.is_some() || panel.tab_kind != TabKind::Listing
+            {
+                return Err("Git initialization is available only on writable local filesystem folders.".into());
+            }
+            state.drivers.get(&source_id).cloned().ok_or("The target filesystem is no longer available.".into())
+        })()
+    };
+    let result = match driver {
+        Ok(driver) => crate::jobs::git::init_repository(driver, target.clone(), branch.clone()).await,
+        Err(message) => Err(message),
+    };
+    match result {
+        Ok(path) => {
+            if let Some(operation) = operation.as_ref() {
+                crate::journal::record_git_result(operation, "completed", None);
+            }
+            let panels = {
+                let state = ctx.state.lock().await;
+                state.panels.iter().filter(|(_, panel)| {
+                    panel.tab_kind == TabKind::Listing
+                        && state.drivers.get(&panel.source_id).is_some_and(|driver| driver.is_local())
+                        && (Path::new(&panel.path).starts_with(&target)
+                            || Path::new(&target).starts_with(&panel.path)
+                            || panel.git.as_ref().is_some_and(|repo| Path::new(&target).starts_with(&repo.root)))
+                }).map(|(id, panel)| {
+                    let cursor = panel.entries.get(panel.cursor).map(|entry| entry.name.clone());
+                    (id.clone(), cursor, selected_names_for(&state, id))
+                }).collect::<Vec<_>>()
+            };
+            for (id, cursor, selection) in panels {
+                rescan_panel(&id, ctx.state, ctx.tx, ctx.scan_handles, cursor, selection,
+                    ctx.dir_size_queue, ctx.watcher_cmd_tx).await;
+            }
+            let _ = ctx.tx.send(ServerMessage::InitGitRepositoryOk {
+                timestamp: now(), panel_id, request_id, path, branch,
+            }).await;
+        }
+        Err(message) => {
+            if let Some(operation) = operation.as_ref() {
+                crate::journal::record_git_result(operation, "failed", Some(&message));
+            }
+            let _ = ctx.tx.send(ServerMessage::InitGitRepositoryFailed {
+                timestamp: now(), panel_id, request_id, code: "GIT_INIT_FAILED".into(), message,
+            }).await;
         }
     }
 }

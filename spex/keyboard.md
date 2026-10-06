@@ -193,6 +193,16 @@ must not lose focus to suggestions.
    window return remain explicit focus transitions; clearing an overlay guard
    alone does not refocus the panel, and there is no hover or polling recovery.
 
+## Git repository initialization
+
+`git.init` (Initialize Git repository…) has no default binding and is available
+from the palette and single-directory local context menus. The palette targets
+the current folder; the menu targets its directory entry. Its branch input
+initially receives focus and Enter submits once. Input history consumes its own
+keys first; Enter on Cancel closes without submission. Escape closes an idle
+form or backgrounds a started initialization. Panels and global commands remain
+blocked while the dialog is open, and the shared focus handoff restores its opener.
+
 ## Git branch name entry
 
 The Git modal's New branch action uses local `N` outside editable fields. It

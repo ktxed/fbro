@@ -102,6 +102,10 @@ impl VfsDriver for SpyFsDriver {
         self.inner.is_local()
     }
 
+    fn local_path(&self, path: &str) -> Option<std::path::PathBuf> {
+        self.inner.local_path(path)
+    }
+
     fn supports_thumbnails(&self) -> bool {
         self.inner.supports_thumbnails()
     }

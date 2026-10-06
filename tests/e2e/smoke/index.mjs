@@ -27,6 +27,7 @@ import { runHashGenerateFlow } from "./cases/hash-generate.mjs";
 import { runHashCheckFlow } from "./cases/hash-check.mjs";
 import { runGlobalSelectionFlow } from "./cases/global-selection.mjs";
 import { runGitFlow } from "./cases/git.mjs";
+import { runGitInitFlow } from "./cases/git-init.mjs";
 import { runLocalFlow } from "./cases/local.mjs";
 import { runFocusHandoffFlow } from "./cases/focus-handoff.mjs";
 import { runViewerFlow } from "./cases/viewer.mjs";
@@ -64,6 +65,12 @@ async function main() {
     observerA = new FbroObserver("fbro-a", wsUrls.a);
     await observerA.connect();
 
+    if (process.env.FBRO_E2E_GIT_ONLY === "1") {
+      await runGitInitFlow(browserA, observerA);
+      await runGitFlow(browserA, observerA);
+      return;
+    }
+
     if (process.env.FBRO_E2E_HASH_GENERATE_ONLY === "1") {
       await runHashGenerateFlow(browserA, observerA);
       await runHashCheckFlow(browserA, observerA);
@@ -85,6 +92,7 @@ async function main() {
     await runQuickEditFlow(browserA, observerA);
     await runGlobalSelectionFlow(browserA, observerA);
     await runGitFlow(browserA, observerA);
+    await runGitInitFlow(browserA, observerA);
     await runFedupFlow(browserA, observerA);
     await runHashCheckFlow(browserA, observerA);
     await runHashGenerateFlow(browserA, observerA);

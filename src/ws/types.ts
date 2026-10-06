@@ -1038,6 +1038,24 @@ export interface GitActionFinishedMessage {
   suggestedUrl?: string;
 }
 
+export interface InitGitRepositoryOkMessage {
+  type: "InitGitRepositoryOk";
+  timestamp: number;
+  panelId: string;
+  requestId: string;
+  path: string;
+  branch: string;
+}
+
+export interface InitGitRepositoryFailedMessage {
+  type: "InitGitRepositoryFailed";
+  timestamp: number;
+  panelId: string;
+  requestId: string;
+  code: string;
+  message: string;
+}
+
 export interface InputRequiredMessage {
   type: "InputRequired";
   timestamp: number;
@@ -1247,6 +1265,8 @@ export type BEMessage =
   | GitLogReadyMessage
   | GitCommitShowReadyMessage
   | GitActionFinishedMessage
+  | InitGitRepositoryOkMessage
+  | InitGitRepositoryFailedMessage
   | InputRequiredMessage
   | CacheStatusReadyMessage
   | ThumbnailQueueReadyMessage

@@ -322,6 +322,20 @@ The smoke test exercises these flows:
   - Live date-sort cursor anchoring, inline image preview navigation, window
     focus restoration, grid-mode Left navigation.
 - Git (`cases/git.mjs`, temporary repository):
+  - Repository initialization (`cases/git-init.mjs`): directory context-menu
+    and current-folder palette targets, default/custom branch, Enter/Cancel,
+    Escape and background completion, modal guards, single submission,
+    invalid-name retry, existing-repository rejection, nested repositories,
+    preserved files, Git decoration refresh, and opener focus restoration.
+    `FBRO_E2E_GIT_ONLY=1` runs initialization and the existing Git flow.
+    Rust `git::` tests cover initialization, unsupported drivers, spy native-path
+    mapping, target validation, and correlated reply serialization. The focused
+    initialization and existing Git flows passed on native Linux/Wayland with
+    the debug binary. A genuinely empty repository is also checked with hidden
+    files shown (`.git` is visible) and hidden (creation suggestions return),
+    followed by creating a zero-byte file and invoking Ctrl+F4 without another
+    row click. Native macOS and Windows initialization still require
+    platform verification.
   - Inline new branch: N/input focus, Escape restoration, invalid-name retry,
     Enter create-and-switch, selector refresh, and uncommitted-work preservation.
   - Inline Git row toolbar: action order, arrow-key focus without moving the

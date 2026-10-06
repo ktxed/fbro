@@ -662,6 +662,30 @@ lifecycle: `GitActionFinished` correlates by `activityId`, with success/failure
 and an error message. Successful panel rescan precedes completion. Closing the
 modal backgrounds the activity without interrupting an atomic switch.
 
+## Git repository initialization
+
+`InitGitRepository` accepts `{ panelId, sourceId, targetPath, branch, requestId }`.
+The palette targets the active panel's current folder; a single-directory
+context-menu action targets that directory. The backend verifies the panel's
+source and that the target is its current folder or a direct child. Only
+mounted, writable local filesystem sources and listing tabs are supported.
+
+A short atomic Git job resolves the native path through the source driver and
+runs system Git on the blocking pool. The folder must already exist. Literal
+branch names use the same Git validation as branch creation; existing `.git`
+files/directories and bare repository roots are rejected. A folder underneath
+an existing parent repository may become an independent nested repository.
+Initialization preserves existing files without staging, committing, or setting
+a remote. Related local panels rescan while preserving cursor and selection.
+
+Replies are `InitGitRepositoryOk { timestamp, panelId, requestId, path, branch }`
+and `InitGitRepositoryFailed { timestamp, panelId, requestId, code, message }`,
+where the failure code is `GIT_INIT_FAILED`. Every attempt and its outcome are
+recorded in the journal. The modal defaults the branch to `main`, closes on its
+matching success, and retains input on matching failure. Closing during work
+backgrounds initialization; a late reply cannot close or change a newer form.
+Background results provide transient feedback.
+
 ## Check hashes Bro messages
 
 `LaunchBro` accepts `builtin:check-hashes` with

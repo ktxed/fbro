@@ -10,6 +10,7 @@ export type ContextualOperationId =
   | "panel.pass-to-bro"
   | "file.compare"
   | "git.view-diff"
+  | "git.init"
   | "git.stage"
   | "git.unstage"
   | "git.rollback"
@@ -48,6 +49,7 @@ export const OPERATION_CARDINALITY: Record<ContextualOperationId, OperationCardi
   "panel.pass-to-bro": { min: 1 },
   "file.compare": { min: 1, max: 2 },
   "git.view-diff": { min: 1, max: 1 },
+  "git.init": { min: 1, max: 1 },
   "git.stage": { min: 1, max: 1 },
   "git.unstage": { min: 1, max: 1 },
   "git.rollback": { min: 1, max: 1 },
@@ -176,6 +178,9 @@ export function contextualOperationAvailable(
         && target.primary.kind === "file"
         && !!target.primary.entry?.gitStatus
         && !isLikelyBinaryPath(target.primary.fullPath || target.primary.name);
+    case "git.init":
+      return isLocalFilesystem && !source.capabilities.readOnly && panel.tabKind === "listing"
+        && target.primary.kind === "directory";
     case "git.stage":
     case "git.unstage":
     case "git.rollback":

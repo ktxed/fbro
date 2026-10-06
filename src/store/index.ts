@@ -98,6 +98,15 @@ export interface PendingMkdir {
   error?: string;
 }
 
+export interface PendingGitInit {
+  panelId: string;
+  sourceId: string;
+  targetPath: string;
+  requestId: string;
+  submitting: boolean;
+  error?: string;
+}
+
 export interface PendingTouch {
   sourcePanel: string;
   dirPath: string;
@@ -282,6 +291,7 @@ export interface AppState {
   pendingRename: PendingRename | null;
   pendingInfo: PendingInfo | null;
   pendingMkdir: PendingMkdir | null;
+  pendingGitInit: PendingGitInit | null;
   pendingTouch: PendingTouch | null;
   pendingNoEditor: PendingNoEditor | null;
   pendingGoToPath: PendingGoToPath | null;
@@ -371,6 +381,7 @@ const initialState: AppState = {
   pendingRename: null,
   pendingInfo: null,
   pendingMkdir: null,
+  pendingGitInit: null,
   pendingTouch: null,
   pendingNoEditor: null,
   pendingGoToPath: null,
@@ -429,6 +440,9 @@ export type AppAction =
   | { type: "CLOSE_INFO" }
   | { type: "OPEN_MKDIR"; mkdir: PendingMkdir }
   | { type: "CLOSE_MKDIR" }
+  | { type: "OPEN_GIT_INIT"; gitInit: PendingGitInit }
+  | { type: "SUBMIT_GIT_INIT"; requestId: string }
+  | { type: "CLOSE_GIT_INIT" }
   | { type: "OPEN_TOUCH"; touch: PendingTouch }
   | { type: "CLOSE_TOUCH" }
   | { type: "OPEN_NO_EDITOR"; noEditor: PendingNoEditor }
@@ -1489,6 +1503,18 @@ function reducer(state: AppState, action: AppAction): AppState {
           return { ...state, pendingRename: null };
         case "MkdirOk":
           return { ...state, pendingMkdir: null };
+        case "InitGitRepositoryOk":
+          return {
+            ...state,
+            pendingGitInit: state.pendingGitInit?.requestId === msg.requestId
+              ? null : state.pendingGitInit,
+            transientHint: { message: "Initialized Git repository", token: msg.timestamp },
+          };
+        case "InitGitRepositoryFailed":
+          if (state.pendingGitInit?.requestId === msg.requestId) {
+            return { ...state, pendingGitInit: { ...state.pendingGitInit, submitting: false, error: msg.message } };
+          }
+          return { ...state, transientHint: { message: msg.message, token: msg.timestamp } };
         case "TouchFileOk":
           return { ...state, pendingTouch: null };
         case "SetPermissionsOk":
@@ -1868,6 +1894,14 @@ function reducer(state: AppState, action: AppAction): AppState {
       return { ...state, pendingMkdir: action.mkdir };
     case "CLOSE_MKDIR":
       return { ...state, pendingMkdir: null };
+    case "OPEN_GIT_INIT":
+      return { ...state, pendingGitInit: action.gitInit };
+    case "SUBMIT_GIT_INIT":
+      return state.pendingGitInit
+        ? { ...state, pendingGitInit: { ...state.pendingGitInit, requestId: action.requestId, submitting: true, error: undefined } }
+        : state;
+    case "CLOSE_GIT_INIT":
+      return { ...state, pendingGitInit: null };
     case "OPEN_TOUCH":
       return { ...state, pendingTouch: action.touch };
     case "CLOSE_TOUCH":

@@ -558,6 +558,13 @@ pub(crate) fn build_interactive_commands() -> Vec<InteractiveCommandSchema> {
             None,
         ),
         command(
+            "git.init",
+            "Git",
+            "Initialize Git repository…",
+            vec![],
+            None,
+        ),
+        command(
             "panel.bookmarks.open",
             "Panel",
             "Bookmarks…",

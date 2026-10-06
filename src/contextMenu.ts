@@ -21,6 +21,7 @@ export interface ContextMenuOptions {
   canPassToBro?: boolean;
   canCompare?: boolean;
   canGitDiff?: boolean;
+  canGitInit?: boolean;
   canAddToGlobalSelection?: boolean;
   canCopy?: boolean;
   canMove?: boolean;
@@ -101,6 +102,7 @@ export function buildContextMenuItems(
     ...(options.canPlatform ? [platformItem()] : []),
     ...(compareItem ? [compareItem] : []),
     ...(gitDiffItem ? [gitDiffItem] : []),
+    ...(options.canGitInit && kind === "directory" ? [commandItem("git.init", "Initialize Git repository…", commands)] : []),
     ...(broItem ? [broItem] : []),
     ...(globalSelectionItem ? [globalSelectionItem] : []),
     ...(openWithItem ? [openWithItem] : []),
