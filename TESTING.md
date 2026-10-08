@@ -54,6 +54,20 @@ The Dockerized backend app instances still run under `xvfb-run`.
 
 ## Smoke Tests
 
+Search result actions (`cases/search.mjs`): set
+`FBRO_E2E_SEARCH_ACTIONS_ONLY=1` with the local smoke command to run the isolated
+flow. It covers keyboard and mouse Jump to location on duplicate names, exact
+parent/cursor targeting in the same panel (including hidden files),
+multi-selection eligibility,
+Open With menu-to-modal keyboard ownership and focus restoration, directory
+results, full-path launch through a registered test desktop application,
+stale same-name picker closure, and deleted-result rejection. Both themes are
+covered. The navigation unit tests run with
+`cargo test --manifest-path src-tauri/Cargo.toml search_navigation_tests`.
+Native macOS and Windows search-action behavior still needs verification.
+The navigation tests and isolated native Linux/Wayland smoke flow passed,
+including `fbro-dark` and `daylight`.
+
 Focus handoff regressions (`cases/focus-handoff.mjs`) cover synced-panel
 self-copy rejection, clicking and expiring its warning toast, the first arrow
 moving the backend cursor, non-repository Git/bookmarks closure, exact inline

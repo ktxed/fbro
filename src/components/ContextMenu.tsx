@@ -17,7 +17,6 @@ import { handoffFocusToOpener } from "../utils/focusReturn";
 import { resolveColorScheme } from "../theme/colorSchemes";
 import { contextualOperationAvailable, resolveContextualTarget } from "../contextualOperations";
 import type { WsClient } from "../ws/client";
-import type { VFSEntry } from "../ws/types";
 
 interface ContextMenuProps {
   client: WsClient;
@@ -36,12 +35,8 @@ export function ContextMenu({ client, menu }: ContextMenuProps) {
   const items = useMemo(
     () => {
       const panel = state.panels[menu.panelId];
-      const target = panel ? resolveContextualTarget(panel, menu.absIndex, {
-        name: menu.name,
-        kind: menu.kind as VFSEntry["kind"],
-        size: menu.size,
-      }) : null;
-      if (!target) return [];
+      const target = panel ? resolveContextualTarget(panel, menu.absIndex) : null;
+      if (!target || target.primary.fullPath !== menu.fullPath || target.primary.kind !== menu.kind) return [];
       const can = (id: Parameters<typeof contextualOperationAvailable>[0]) => contextualOperationAvailable(id, state, target);
       return buildContextMenuItems(
         state.commands,
@@ -133,10 +128,11 @@ export function ContextMenu({ client, menu }: ContextMenuProps) {
       return;
     }
     const entry = panel.entries[menu.absIndex - (panel.windowStart ?? 0)];
-    if (!entry || entry.name !== menu.name) {
+    if (!entry || entry.name !== menu.name || entry.kind !== menu.kind
+      || (entry.sourcePath ?? `${menu.dirPath}/${entry.name}`) !== menu.fullPath) {
       close();
     }
-  }, [close, menu.absIndex, menu.dirPath, menu.name, menu.panelId, state.panels]);
+  }, [close, menu.absIndex, menu.dirPath, menu.fullPath, menu.kind, menu.name, menu.panelId, state.panels]);
 
   const runItem = async (index: number) => {
     const item = items[index];
@@ -145,12 +141,8 @@ export function ContextMenu({ client, menu }: ContextMenuProps) {
     handoffFocusToOpener(menuRef.current);
     close();
     const panel = state.panels[menu.panelId];
-    const target = panel ? resolveContextualTarget(panel, menu.absIndex, {
-      name: menu.name,
-      kind: menu.kind as VFSEntry["kind"],
-      size: menu.size,
-    }) : null;
-    if (!target) return;
+    const target = panel ? resolveContextualTarget(panel, menu.absIndex) : null;
+    if (!target || target.primary.fullPath !== menu.fullPath || target.primary.kind !== menu.kind) return;
 
     if (item.kind === "command" && item.commandId) {
       executeTargetedCommand(

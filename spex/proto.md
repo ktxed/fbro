@@ -272,6 +272,11 @@ Rules:
 * Versions MUST be monotonic per domain/entity
 * FE MUST request snapshot if versions skip
 
+Panel navigation's loading patch includes `path`, `sourceId`, and `showHidden`
+together. Jump to a hidden search-result file enables the panel's existing
+Show hidden flag before scanning, so clients receive the visibility change
+atomically with the destination and can display the focused file.
+
 ---
 
 ## 7. Panel Model (v0)

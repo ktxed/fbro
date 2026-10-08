@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { artifactsDir, backendPath, hostPath } from "../config.mjs";
-import { clickCommand, reloadBrowserApp } from "../browser.mjs";
+import { clickCommand, openPanelContextMenu, reloadBrowserApp } from "../browser.mjs";
 import { expectModalFocus } from "./modal-focus.mjs";
 import { waitFor } from "../wait.mjs";
 
@@ -299,6 +299,232 @@ async function verifyDuplicateResultViewer(browser, observer) {
   } finally {
     await browser.url(mainUrl);
     await browser.$('[data-testid="panel-left"]').waitForDisplayed({ timeout: 10_000 });
+  }
+}
+
+// A registered desktop application records launches without opening a real editor.
+function installSearchOpenWithFixture() {
+  const stateRoot = path.join(artifactsDir, "fbro-a", "state");
+  const appDir = path.join(stateRoot, "home", ".local", "share", "applications");
+  const configDir = path.join(stateRoot, "config");
+  const script = backendPath("a", "src", "search-open-with.sh");
+  const launchLog = backendPath("a", "src", "search-open-with.log");
+  const desktopId = "fbro-search-smoke.desktop";
+  fs.mkdirSync(appDir, { recursive: true });
+  fs.mkdirSync(configDir, { recursive: true });
+  fs.writeFileSync(hostPath(script), `#!/bin/sh\nprintf '%s\\n' "$1" >> '${launchLog}'\n`, { mode: 0o755 });
+  const files = new Map([
+    [path.join(appDir, desktopId), `[Desktop Entry]\nType=Application\nName=fbro search smoke opener\nExec=${script} %f\nMimeType=text/plain;inode/directory;\nTerminal=false\n`],
+    [path.join(appDir, "mimeinfo.cache"), `[MIME Cache]\ntext/plain=${desktopId};\ninode/directory=${desktopId};\n`],
+    [path.join(configDir, "mimeapps.list"), `[Default Applications]\ntext/plain=${desktopId};\ninode/directory=${desktopId};\n`],
+  ]);
+  const previous = new Map([...files.keys()].map(file => [file, fs.existsSync(file) ? fs.readFileSync(file) : null]));
+  for (const [file, content] of files) fs.writeFileSync(file, content);
+  return {
+    launchLog: hostPath(launchLog),
+    cleanup() {
+      for (const [file, content] of previous) {
+        if (content === null) fs.rmSync(file, { force: true });
+        else fs.writeFileSync(file, content);
+      }
+      fs.rmSync(hostPath(script), { force: true });
+    },
+  };
+}
+
+export async function runSearchActionsFlow(browser, observer) {
+  const root = backendPath("a", "dst", "search-actions");
+  for (const folder of ["one", "two"]) {
+    fs.mkdirSync(hostPath(path.posix.join(root, folder)), { recursive: true });
+    fs.writeFileSync(hostPath(path.posix.join(root, folder, "result.txt")), `${folder}\n`);
+  }
+  const directory = path.posix.join(root, "result-folder");
+  fs.mkdirSync(hostPath(directory), { recursive: true });
+  const deletedPath = path.posix.join(root, "result-gone.txt");
+  const hiddenPath = path.posix.join(root, "two", ".result.txt");
+  fs.writeFileSync(hostPath(hiddenPath), "hidden result\n");
+  fs.writeFileSync(hostPath(deletedPath), "remove after searching\n");
+  const fixture = installSearchOpenWithFixture();
+  const previousScheme = observer.state.settings?.general?.colorScheme ?? "fbro-dark";
+  const otherPath = observer.state.panels.right.path;
+  const panelSelector = '[data-testid="panel-left"]';
+  const jumpSelector = `${panelSelector} [data-inline-operation="panel.jump-to-location"]`;
+  const dialogSelector = '[data-testid="open-with-dialog"]';
+  const panelHasFocus = () => browser.execute(selector => document.activeElement === document.querySelector(selector), panelSelector);
+  const launches = () => fs.existsSync(fixture.launchLog)
+    ? fs.readFileSync(fixture.launchLog, "utf8").trim().split("\n").filter(Boolean) : [];
+  const waitForState = (condition, label) => {
+    const start = observer.messages.length;
+    return waitFor(() => {
+      observer.sendIntent("RequestStateSnapshot");
+      return observer.messages.slice(start).some(message => message.type === "StateSnapshot") && condition();
+    }, { timeout: 10_000, interval: 250, label });
+  };
+  try {
+    observer.navigatePanelToPath("left", root);
+    await observer.waitForPanelPath("left", root);
+    await observer.waitForPanelNotShadow("left");
+    await reloadBrowserApp(browser, "fbro-a");
+    await (await openSearch(browser)).setValue("*result*");
+    await clickCommand(browser, "search.start");
+    await clickCommand(browser, "search.to-results");
+    await observer.waitForSearchResultsMounted("left");
+    await observer.waitForJobIdle();
+    const sourceId = observer.state.panels.left.sourceId;
+    const jobId = sourceId.slice("search:".length);
+    const remount = async () => {
+      await browser.$(`[data-testid="job-chip"][data-job-id="${jobId}"]`).click();
+      await clickCommand(browser, "search.to-results");
+      await observer.waitForSearchResultsMounted("left");
+      await observer.waitForPanelReady("left");
+      await browser.waitUntil(async () => browser.execute(() =>
+        [...document.querySelectorAll('[data-testid="panel-left"] [data-entry-name="result.txt"]')].length === 2
+      ), { timeout: 10_000, timeoutMsg: "Search results did not remount" });
+    };
+    const choose = async fullPath => {
+      const index = observer.state.panels.left.entries.findIndex(entry => entry.sourcePath === fullPath);
+      if (index < 0) throw new Error(`Missing search result ${fullPath}`);
+      const row = await browser.$(`${panelSelector} [data-abs-index="${index}"]`);
+      await row.waitForDisplayed({ timeout: 10_000 });
+      await row.click();
+      await browser.waitUntil(async () => (await row.getAttribute("class"))?.includes("panel__row--cursor"), {
+        timeout: 10_000, timeoutMsg: `Cursor did not reach ${fullPath}`,
+      });
+      await waitForState(() => observer.state.panels.left.cursor === index, `cursor snapshot for ${fullPath}`);
+      return index;
+    };
+    const openWith = async (fullPath, keyboard = true) => {
+      await choose(fullPath);
+      await openPanelContextMenu(browser, "left");
+      const item = await browser.$('[data-contextual-operation="platform.open-with"]');
+      await item.waitForDisplayed({ timeout: 10_000 });
+      if (keyboard) {
+        const steps = await browser.execute(() => [...document.querySelectorAll('.context-menu [role="menuitem"]')]
+          .findIndex(item => item.getAttribute("data-contextual-operation") === "platform.open-with"));
+        for (let step = 0; step < steps; step++) await browser.keys("ArrowDown");
+        await browser.keys("Enter");
+      } else await item.click();
+      await browser.$(dialogSelector).waitForDisplayed({ timeout: 10_000 });
+      await expectModalFocus(browser, `${dialogSelector} [role="listbox"]`, "search Open With initial focus");
+      await browser.waitUntil(async () => browser.execute(() => [...document.querySelectorAll('[data-testid="open-with-dialog"] [role="option"]')]
+        .some(option => option.textContent.includes("fbro search smoke opener"))), {
+        timeout: 10_000, timeoutMsg: "Registered search fixture application was not offered",
+      });
+    };
+
+    const firstPath = path.posix.join(root, "one", "result.txt");
+    const secondPath = path.posix.join(root, "two", "result.txt");
+    await choose(firstPath);
+    await browser.keys(" ");
+    await waitForState(() => observer.state.panels.left.selectedEntries.length === 1, "first search selection");
+    await browser.$(jumpSelector).waitForDisplayed({ timeout: 10_000 });
+    await openPanelContextMenu(browser, "left");
+    await browser.$('[data-contextual-operation="platform.open-with"]').waitForDisplayed({ timeout: 10_000 });
+    await browser.keys("Escape");
+    await choose(secondPath);
+    await browser.keys(" ");
+    await waitForState(() => observer.state.panels.left.selectedEntries.length === 2, "two search selections");
+    if (await browser.$(jumpSelector).isExisting()) throw new Error("Multi-selection exposed Jump to location");
+    await openPanelContextMenu(browser, "left");
+    if (await browser.$('[data-contextual-operation="platform.open-with"]').isExisting()) {
+      throw new Error("Multi-selection exposed Open With");
+    }
+    await browser.keys("Escape");
+    await browser.$(`${panelSelector} .panel__selection-clear`).click();
+    await waitForState(() => observer.state.panels.left.selectedEntries.length === 0, "cleared search selection");
+
+    for (const [scheme, fullPath, keyboard] of [["fbro-dark", firstPath, true], ["daylight", secondPath, false]]) {
+      observer.sendIntent("SetGeneralOption", undefined, { key: "colorScheme", value: scheme });
+      await waitForState(() => observer.state.settings.general.colorScheme === scheme, `search actions ${scheme}`);
+      await openWith(fullPath, keyboard);
+      const cursor = observer.state.panels.left.cursor;
+      await browser.keys("ArrowDown");
+      await waitForState(() => observer.state.panels.left.cursor === cursor, "covered search cursor");
+      await browser.keys("Escape");
+      await browser.$(dialogSelector).waitForDisplayed({ timeout: 10_000, reverse: true });
+      await browser.waitUntil(panelHasFocus, { timeout: 10_000, timeoutMsg: "Open With did not return listing focus" });
+      await choose(fullPath);
+      const jump = await browser.$(jumpSelector);
+      await jump.waitForDisplayed({ timeout: 10_000 });
+      if (keyboard) {
+        await browser.keys("ArrowRight");
+        await browser.waitUntil(async () => browser.execute(selector =>
+          document.activeElement === document.querySelector(selector), jumpSelector), {
+          timeout: 10_000, timeoutMsg: "Right Arrow did not focus Jump to location",
+        });
+        await browser.keys("Enter");
+      } else await jump.click();
+      await observer.waitForPanelPath("left", path.posix.dirname(fullPath));
+      await observer.waitForPanelNotShadow("left");
+      await observer.waitForPanelReady("left");
+      await browser.waitUntil(() => observer.state.panels.left.entries[observer.state.panels.left.cursor]?.name === "result.txt", {
+        timeout: 10_000, timeoutMsg: "Jump did not place cursor on result file",
+      });
+      await browser.waitUntil(panelHasFocus, { timeout: 10_000, timeoutMsg: "Jump did not retain listing focus" });
+      if (observer.state.panels.right.path !== otherPath) throw new Error("Jump changed the other panel");
+      await remount();
+    }
+
+    await openWith(secondPath);
+    const beforeLaunch = launches().length;
+    const fixtureIndex = await browser.execute(() => [...document.querySelectorAll('[data-testid="open-with-dialog"] [role="option"]')]
+      .findIndex(option => option.textContent.includes("fbro search smoke opener")));
+    for (let step = 0; step < fixtureIndex; step++) await browser.keys("ArrowDown");
+    await browser.keys("Enter");
+    await browser.waitUntil(() => launches().length === beforeLaunch + 1, { timeout: 10_000, timeoutMsg: "Open With did not launch exactly once" });
+    if (launches().at(-1) !== secondPath) throw new Error(`Open With launched the wrong duplicate: ${launches().at(-1)}`);
+    await browser.waitUntil(panelHasFocus, { timeout: 10_000 });
+
+    await openWith(directory, false);
+    await browser.keys("Escape");
+    await browser.waitUntil(panelHasFocus, { timeout: 10_000 });
+    await browser.execute(() => {
+      const send = WebSocket.prototype.send;
+      WebSocket.prototype.send = function (data) {
+        WebSocket.prototype.send = send;
+        window.__searchActionsSocket = this;
+        return send.call(this, data);
+      };
+    });
+    await openWith(firstPath);
+    // Reversing the sort swaps same-name results at the saved absolute index.
+    observer.sendIntent("SetSort", "left", { by: "name", order: "desc" });
+    await observer.waitForSort("left", "name", "desc");
+    await observer.waitForPanelReady("left");
+    // Deliver the changed backend snapshot on the picker's own GUI connection.
+    await browser.execute(() => window.__searchActionsSocket.send(JSON.stringify({
+      type: "Intent", timestamp: Date.now(), name: "RequestStateSnapshot", args: {},
+    })));
+    await browser.$(dialogSelector).waitForDisplayed({ timeout: 10_000, reverse: true });
+    await browser.waitUntil(panelHasFocus, { timeout: 10_000, timeoutMsg: "Stale picker did not return focus" });
+
+    fs.rmSync(hostPath(deletedPath));
+    await choose(deletedPath);
+    await browser.$(jumpSelector).click();
+    await browser.waitUntil(async () => {
+      const text = await browser.$('[data-testid="transient-hint"]').getText().catch(() => "");
+      return text.includes(deletedPath);
+    }, {
+      timeout: 10_000, timeoutMsg: "Deleted search result was not rejected",
+    });
+    if (observer.state.panels.left.sourceId !== sourceId) throw new Error("Rejected jump discarded search results");
+    await browser.waitUntil(panelHasFocus, { timeout: 10_000, timeoutMsg: "Rejected jump lost listing focus" });
+    if (launches().length !== beforeLaunch + 1) throw new Error("Open With launched more than once");
+
+    await choose(hiddenPath);
+    await browser.$(jumpSelector).click();
+    await observer.waitForPanelPath("left", path.posix.dirname(hiddenPath));
+    await observer.waitForPanelReady("left");
+    await waitForState(() => {
+      const panel = observer.state.panels.left;
+      return panel.showHidden && panel.entries[panel.cursor]?.name === ".result.txt";
+    }, "hidden search result cursor");
+    await browser.waitUntil(panelHasFocus, { timeout: 10_000 });
+    console.log("Search actions passed: duplicate jumps, Open With launch, selection, stale targets, focus, both themes.");
+  } finally {
+    await browser.execute(() => { delete window.__searchActionsSocket; }).catch(() => {});
+    fixture.cleanup();
+    observer.sendIntent("SetGeneralOption", undefined, { key: "colorScheme", value: previousScheme });
   }
 }
 

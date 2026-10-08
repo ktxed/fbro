@@ -51,6 +51,7 @@ the applicable general operations.
 | Item | Cardinality | Eligibility / behavior |
 |---|---:|---|
 | Browse archive | exactly 1 | Backend-advertised navigable archive; always the first choice and activation enters the existing archive shadow source |
+| Jump to location | exactly 1 | Search-result file with a real `sourcePath`; follows Browse archive, opens its containing folder in the same panel, and places the cursor on the file |
 | View Git diff, Stage / Unstage, Rollback | exactly 1 | Single changed Git file; rollback retains its in-place confirmation |
 | Preview | exactly 1 | Image file on a thumbnail-capable source; hover/focus shows the thumbnail and activation opens the viewer |
 | Compare | 1–2 | Exactly two selected files, or a single selected file that differs from the file under the cursor — the own panel's lone selection, otherwise the other panel's single selection (a cross-panel pair with one selection per panel) |
@@ -59,7 +60,9 @@ the applicable general operations.
 | Rename | exactly 1 | Mounted local filesystem advertises `Rename`, or global-selection root |
 
 Context-menu-only operations use the same model: Open With and platform reveal
-accept exactly one item; adding to a global selection accepts one or more.
+accept exactly one item. Open With also accepts path-backed search-result
+files and directories, using their exact `sourcePath`; platform reveal retains
+its mounted-local-filesystem eligibility. Adding to a global selection accepts one or more.
 Copying names or full paths accepts one or more and uses newline-separated
 values with plural menu labels for a selection.
 

@@ -40,10 +40,11 @@ export function OpenWithModal({ client, openWith }: OpenWithModalProps) {
       return;
     }
     const entry = panel.entries[openWith.absIndex - (panel.windowStart ?? 0)];
-    if (!entry || entry.name !== openWith.name) {
+    if (!entry || entry.name !== openWith.name || entry.kind !== openWith.kind
+      || (entry.sourcePath ?? `${openWith.dirPath}/${entry.name}`) !== openWith.fullPath) {
       dispatch({ type: "CLOSE_OPEN_WITH" });
     }
-  }, [dispatch, openWith.absIndex, openWith.dirPath, openWith.name, openWith.panelId, state.panels]);
+  }, [dispatch, openWith.absIndex, openWith.dirPath, openWith.fullPath, openWith.kind, openWith.name, openWith.panelId, state.panels]);
 
   const close = () => dispatch({ type: "CLOSE_OPEN_WITH" });
 
@@ -107,6 +108,7 @@ export function OpenWithModal({ client, openWith }: OpenWithModalProps) {
         className="command-palette open-with"
         ariaModal
         ariaLabel="Open With"
+        testId="open-with-dialog"
         tabIndex={-1}
         defaultSize={{ width: 560, height: 420 }}
         minSize={{ width: 420, height: 300 }}

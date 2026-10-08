@@ -109,6 +109,11 @@ successor or deliberately focused outside control keeps ownership. Restoration
 runs once after removal, rather than polling for lost focus. Feature dialogs
 must not add competing panel-restoration callbacks.
 
+The Open With picker retains the context menu's exact target identity. If a
+listing change replaces the saved row with a different full path, even with
+the same name and kind, the picker closes through the normal stack removal
+and restores its opener. It never retargets a pending application launch.
+
 ---
 
 ## 4. Keyboard and Focus Ownership

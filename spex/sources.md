@@ -334,6 +334,12 @@ Code outside the driver must not infer semantics from path punctuation. When a
 virtual entry references a real file, `VfsEntry.source_path` carries the real
 path explicitly.
 
+Search-result Jump to location and Open With use this full-path identity,
+including when results share a filename or arrive in a different order than
+the panel listing. Jump hands the same panel to a mounted local source after
+validating the target, with a cursor hint for the file. It removes only that
+panel's shadow context; the search source, driver, store, and job remain registered.
+
 ---
 
 ## 5. Shadow Sources and return context

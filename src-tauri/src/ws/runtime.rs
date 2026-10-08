@@ -614,6 +614,7 @@ pub(crate) async fn navigate_to(
             patch: serde_json::json!({
                 "path": new_path,
                 "sourceId": source_id,
+                "showHidden": show_hidden,
                 "panelEpoch": panel_epoch,
                 "entries": [],
                 "cursor": 0,

@@ -2928,10 +2928,32 @@ async fn start_search(args: &Value, ctx: &mut IntentContext<'_>) {
     }
 }
 
+fn search_result_destination(
+    driver: &dyn crate::vfs::VfsDriver,
+    full_path: &str,
+    kind: &str,
+) -> Result<(String, Option<String>), String> {
+    if !Path::new(full_path).is_absolute() || !driver.exists(full_path) {
+        return Err(format!("Search result is no longer available: {full_path}"));
+    }
+    if kind == "directory" {
+        return Ok((full_path.to_string(), None));
+    }
+    let parent = driver
+        .parent_path(full_path)
+        .filter(|path| driver.exists(path))
+        .ok_or_else(|| format!("Search result folder is no longer available: {full_path}"))?;
+    let name = Path::new(full_path)
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .ok_or_else(|| format!("Search result has no filename: {full_path}"))?;
+    Ok((parent, Some(name)))
+}
+
 async fn navigate_to_search_result(args: &Value, ctx: &mut IntentContext<'_>) {
     let panel_id_arg = arg_str(args, "panelId").unwrap_or("").to_string();
     let full_path = arg_str(args, "fullPath").unwrap_or("").to_string();
-    let kind = arg_str(args, "kind").unwrap_or("file");
+    let kind = arg_str(args, "kind").unwrap_or("file").to_string();
 
     if full_path.is_empty() {
         return;
@@ -2944,44 +2966,61 @@ async fn navigate_to_search_result(args: &Value, ctx: &mut IntentContext<'_>) {
         panel_id_arg
     };
 
-    // Determine target path and cursor hint
-    let (nav_path, cursor_hint) = if kind == "directory" {
-        (full_path.clone(), None)
-    } else {
-        // Navigate to the parent directory with cursor on the file
-        let parent = std::path::Path::new(&full_path)
-            .parent()
-            .map(|p| p.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "/".to_string());
-        let name = std::path::Path::new(&full_path)
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned());
-        (parent, name)
+    let prepared = {
+        let state = ctx.state.lock().await;
+        let Some(panel) = state.panels.get(&panel_id) else {
+            return;
+        };
+        super::navigation::source_for_local_path(&state, &full_path)
+            .or_else(|| fallback_local_source_id(&state, &full_path))
+            .and_then(|source_id| {
+                state
+                    .drivers
+                    .get(&source_id)
+                    .cloned()
+                    .filter(|driver| driver.is_local())
+                    .map(|driver| (source_id, driver, panel.panel_epoch))
+            })
+    };
+    let Some((real_source_id, driver, panel_epoch)) = prepared else {
+        let _ = send_error(
+            ctx,
+            "NAVIGATE_FAILED",
+            format!("Search result is not on an available local source: {full_path}"),
+        )
+        .await;
+        return;
+    };
+
+    // Validate outside the state lock, before leaving the search listing.
+    let destination = tokio::task::spawn_blocking(move || {
+        search_result_destination(driver.as_ref(), &full_path, &kind)
+    })
+    .await
+    .unwrap_or_else(|error| Err(format!("Could not resolve search result: {error}")));
+    let (nav_path, cursor_hint) = match destination {
+        Ok(destination) => destination,
+        Err(message) => {
+            let _ = send_error(ctx, "NAVIGATE_FAILED", message).await;
+            return;
+        }
     };
 
     // Tear down the search shadow source from the panel before navigating
     {
         let mut state = ctx.state.lock().await;
-        // Find the best real source for the target path (before taking panel mut ref)
-        let real_source_id = state
-            .sources
-            .iter()
-            .filter(|(_, s)| !s.shadow && s.mounted)
-            .max_by_key(|(_, s)| {
-                if nav_path.starts_with(&s.root_path) {
-                    s.root_path.len()
-                } else {
-                    0
-                }
-            })
-            .map(|(id, _)| id.clone())
-            .unwrap_or_default();
-
-        if let Some(panel) = state.panels.get_mut(&panel_id) {
-            if !real_source_id.is_empty() {
-                panel.source_id = real_source_id;
-            }
-            panel.shadow_source = None;
+        let Some(panel) = state.panels.get_mut(&panel_id) else {
+            return;
+        };
+        if panel.panel_epoch != panel_epoch {
+            return;
+        }
+        panel.source_id = real_source_id;
+        panel.shadow_source = None;
+        // A search can find dotfiles even when this panel hides them. Reveal
+        // them so the scan can actually place the cursor on the requested file.
+        if cursor_hint.as_deref().is_some_and(|name| name.starts_with('.')) {
+            panel.show_hidden = true;
         }
     }
 
@@ -3175,4 +3214,65 @@ async fn send_error(
             extra: None,
         })
         .await
+}
+
+#[cfg(test)]
+mod search_navigation_tests {
+    use super::search_result_destination;
+    use crate::vfs::local::{normalize_path, LocalFsDriver};
+    use std::{fs, path::PathBuf};
+
+    struct TestDir(PathBuf);
+
+    impl TestDir {
+        fn new() -> Self {
+            let path = std::env::temp_dir().join(format!("fbro-search-nav-{}", uuid::Uuid::new_v4()));
+            fs::create_dir_all(&path).unwrap();
+            Self(path)
+        }
+    }
+
+    impl Drop for TestDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn search_result_jump_uses_exact_parent_for_duplicate_names() {
+        let temp = TestDir::new();
+        for folder in ["first folder", "second ü"] {
+            let parent = temp.0.join(folder);
+            fs::create_dir(&parent).unwrap();
+            let file = parent.join("same.txt");
+            fs::write(&file, folder).unwrap();
+            assert_eq!(
+                search_result_destination(&LocalFsDriver, &normalize_path(file), "file").unwrap(),
+                (normalize_path(parent), Some("same.txt".to_string()))
+            );
+        }
+    }
+
+    #[test]
+    fn search_result_jump_rejects_deleted_file_even_with_same_name_elsewhere() {
+        let temp = TestDir::new();
+        let parent = temp.0.join("removed");
+        fs::create_dir(&parent).unwrap();
+        let file = parent.join("same.txt");
+        fs::write(&file, "removed").unwrap();
+        fs::write(temp.0.join("same.txt"), "survivor").unwrap();
+        fs::remove_file(&file).unwrap();
+        assert!(search_result_destination(&LocalFsDriver, &normalize_path(file), "file").is_err());
+        assert!(search_result_destination(&LocalFsDriver, "same.txt", "file").is_err());
+    }
+
+    #[test]
+    fn search_result_directory_navigation_keeps_existing_drill_down_behavior() {
+        let temp = TestDir::new();
+        let path = normalize_path(temp.0.clone());
+        assert_eq!(
+            search_result_destination(&LocalFsDriver, &path, "directory").unwrap(),
+            (path, None)
+        );
+    }
 }

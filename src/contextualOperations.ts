@@ -1,12 +1,13 @@
 import type { AppState } from "./store";
 import { isLikelyBinaryPath } from "./utils/binaryPath";
-import { isGlobalSelectionSourceId } from "./utils/sourceId";
+import { isGlobalSelectionSourceId, isSearchSourceId } from "./utils/sourceId";
 import type { FileOpFile, PanelState, VFSEntry } from "./ws/types";
 
 export type ContextualOperationId =
   | "platform.reveal"
   | "platform.open-with"
   | "panel.browse-archive"
+  | "panel.jump-to-location"
   | "panel.pass-to-bro"
   | "file.compare"
   | "git.view-diff"
@@ -46,6 +47,7 @@ export const OPERATION_CARDINALITY: Record<ContextualOperationId, OperationCardi
   "platform.reveal": { min: 1, max: 1 },
   "platform.open-with": { min: 1, max: 1 },
   "panel.browse-archive": { min: 1, max: 1 },
+  "panel.jump-to-location": { min: 1, max: 1 },
   "panel.pass-to-bro": { min: 1 },
   "file.compare": { min: 1, max: 2 },
   "git.view-diff": { min: 1, max: 1 },
@@ -105,7 +107,7 @@ export function resolveContextualTarget(panel: PanelState, absIndex: number, ren
   const entries = panel.selectedEntries.map((entry) => ({
     ...entry,
     fullPath: fullPathFor(dirPath, entry),
-    ...(entry.name === primary.name ? { entry: primaryEntry } : {}),
+    ...(sameContextualEntry(entry, primary) ? { entry: primaryEntry } : {}),
   }));
   return {
     panelId: panel.panelId,
@@ -158,6 +160,7 @@ export function contextualOperationAvailable(
   const isGlobal = isGlobalSelectionSourceId(panel.sourceId);
   const isGlobalRoot = isGlobal && panel.path === "";
   const isGlobalInside = isGlobal && panel.path !== "";
+  const isSearchResult = isSearchSourceId(panel.sourceId) && !!target.primary.sourcePath;
   const isLocalFilesystem = source.kind === "filesystem"
     && !panel.shadowSource
     && !source.shadow
@@ -165,8 +168,11 @@ export function contextualOperationAvailable(
 
   switch (operationId) {
     case "platform.reveal":
-    case "platform.open-with":
       return isLocalFilesystem;
+    case "platform.open-with":
+      return isLocalFilesystem || isSearchResult;
+    case "panel.jump-to-location":
+      return isSearchResult && target.primary.kind === "file";
     case "panel.browse-archive":
       return target.primary.entry?.browsableArchive === true;
     case "panel.pass-to-bro":

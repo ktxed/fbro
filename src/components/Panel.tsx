@@ -114,6 +114,7 @@ function InlineOperationButtons({ panelId, tooltipId, items }: {
       data-tooltip-content={item.label}
       data-preview-url={item.preview?.url}
       data-preview-name={item.preview?.name}
+      title={item.label}
       aria-label={item.ariaLabel}
       onMouseDown={stopRowInteraction}
       onDoubleClick={stopRowInteraction}
@@ -1871,6 +1872,21 @@ export function Panel({
       run: () => {
         focusPanel();
         client.sendIntent("OpenEntry", panelId);
+      },
+    });
+    if (available("panel.jump-to-location")) operations.push({
+      id: "panel.jump-to-location",
+      testId: "file-inline-jump-to-location",
+      label: "Jump to location",
+      ariaLabel: `Jump to location of ${target.primary.name}`,
+      icon: <IconArrowUpRight size={13} aria-hidden />,
+      run: () => {
+        focusPanel();
+        client.sendIntent("NavigateToSearchResult", undefined, {
+          panelId,
+          fullPath: target.primary.fullPath,
+          kind: target.primary.kind,
+        });
       },
     });
     if (previewUrl) operations.push({

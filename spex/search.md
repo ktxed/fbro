@@ -328,8 +328,31 @@ file.
 
 - For directories: navigates to the directory's real path
 - For files: navigates to parent directory with cursor on the file
-- Tears down the search shadow source before navigating
-- Resolves the best real source for the target path
+- Resolves a mounted local source using path-component boundaries and the
+  macOS local-source fallback; unrelated and remote sources are not candidates
+- Validates the exact target through that source's driver in blocking work
+  before clearing the panel's search shadow context; unavailable targets show
+  a navigation error and leave the results mounted
+- Leaves the registered search source and job intact so results can be reopened
+
+### Mounted result actions
+
+The cursor row of a single file exposes **Jump to location** in the existing
+inline toolbar, after Browse archive when available. It sends
+`NavigateToSearchResult { panelId, fullPath, kind }` using the row's
+`sourcePath`. The same panel opens the parent directory, places the cursor on
+the file, and retains listing focus. Right Arrow enters the toolbar and
+Enter/Space activates its focused choice.
+Jumping to a dotfile enables Show hidden in that panel so the destination
+listing can display and focus the requested file.
+
+Single file and directory results with a real `sourcePath` expose **Open With…**
+in their context menu. The existing application picker sends
+`ListOpenWithApps` for the exact full path and launches the chosen application
+through `LaunchOpenWithApp`. Both actions are omitted for multi-selection.
+Context menus and pickers validate the saved full-path identity as well as
+name and kind; if a live listing moves a different same-name result into the
+saved index, the surface closes and restores its opener instead of retargeting.
 
 ### RemoveSearchSource Intent
 
