@@ -254,6 +254,17 @@ a newer form or take focus from it.
 
 ### Git inline branch creation
 
+The branch picker opens a searchable popup inside the existing Git layer's DOM,
+outside the dialog's clipping surface, without registering another modal layer.
+Floating UI manages popup positioning and initial/return focus; the modal stack
+continues to own containment and Tab cycling. The search field is the popup's
+single Tab stop and uses virtual list focus. Escape consumes only the dropdown
+first; selection or dismissal returns focus to its trigger unless another
+control deliberately took focus. Closing the Git layer retains the stack's
+normal opener restoration. Async log arrival does not take focus after picker
+interaction. Filtering and highlighting are temporary UI state; the displayed
+current branch changes only from backend status, including after rejection.
+
 New branch expands an inline form inside the existing Git layer, with no new
 modal layer. Focus moves to its name input on this user-triggered state change.
 Failure retains the name and focuses the input. Success collapses the form and

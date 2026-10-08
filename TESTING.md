@@ -353,6 +353,13 @@ The smoke test exercises these flows:
     platform verification.
   - Inline new branch: N/input focus, Escape restoration, invalid-name retry,
     Enter create-and-switch, selector refresh, and uncommitted-work preservation.
+  - Searchable branch dropdown: case-insensitive substring filtering, clearing
+    and empty results, arrows/Home/End, keyboard/pointer checkout, single
+    submission, current-branch no-op, backend-confirmed value, checkout rejection,
+    busy guards, Escape priority, Tab dismissal, opener/successor focus, active
+    result scrolling, directly focused option activation, and both color
+    schemes with viewport/modal containment.
+    Native macOS and Windows picker behavior requires platform verification.
   - Inline Git row toolbar: action order, arrow-key focus without moving the
     panel cursor, stage/unstage keep focus, rollback needs confirmation.
   - Git modal: Log tab expansion; Changes tab j/k/arrow navigation, Space and

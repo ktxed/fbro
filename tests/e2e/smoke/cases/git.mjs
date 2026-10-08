@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { backendPath, hostPath } from "../config.mjs";
+import { artifactsDir, backendPath, hostPath } from "../config.mjs";
 import { clickEntry, goToPanelPath, setTextInputValue } from "../browser.mjs";
 import { waitFor } from "../wait.mjs";
 
@@ -21,6 +21,14 @@ export async function runGitFlow(browser, observer) {
   fs.writeFileSync(path.join(hostRepo, "removed.txt"), "restore me\n");
   git(hostRepo, ["add", "changed.txt", "inline.txt", "nested/inside.txt", "stage.txt", "removed.txt"]);
   git(hostRepo, ["commit", "-qm", "initial"]);
+  const initialBranch = execFileSync("git", ["-C", hostRepo, "branch", "--show-current"], { encoding: "utf8" }).trim();
+  git(hostRepo, ["branch", "feature/Fix-login"]);
+  git(hostRepo, ["branch", "release/fix-logging"]);
+  for (let index = 0; index < 24; index++) git(hostRepo, ["branch", `picker-scroll-${String(index).padStart(2, "0")}`]);
+  git(hostRepo, ["switch", "-qc", "feature/picker-rejected"]);
+  fs.writeFileSync(path.join(hostRepo, "changed.txt"), "conflicting branch\n");
+  git(hostRepo, ["commit", "-qam", "conflicting branch"]);
+  git(hostRepo, ["switch", "-q", initialBranch]);
   fs.writeFileSync(path.join(hostRepo, "changed.txt"), "after\n");
   fs.writeFileSync(path.join(hostRepo, "inline.txt"), "after inline\n");
   fs.writeFileSync(path.join(hostRepo, "nested", "inside.txt"), "after nested\n");
@@ -184,13 +192,14 @@ export async function runGitFlow(browser, observer) {
   await waitFor(async () => !await (await browser.$('[data-testid="git-branch-form"]')).isExisting(), {
     timeout: 5_000, label: "branch form closes after success",
   });
-  const branchSelect = await browser.$('.git-modal__toolbar select');
-  if (await branchSelect.getValue() !== "feature/smoke-new-branch" || !await branchSelect.isFocused()) {
+  const branchSelect = await browser.$('[data-testid="git-branch-picker"]');
+  if (await branchSelect.getAttribute("data-branch") !== "feature/smoke-new-branch" || !await branchSelect.isFocused()) {
     throw new Error("New branch selector did not update and receive focus");
   }
   if (execFileSync("git", ["-C", hostRepo, "status", "--porcelain"], { encoding: "utf8" }) !== statusBeforeBranch) {
     throw new Error("Branch creation changed uncommitted work");
   }
+  await runGitBranchPickerFlow(browser, observer);
 
   await (await browser.$('[data-testid="git-tab-log"]')).click();
   await waitFor(async () => (await browser.$('[data-testid="git-log-row"]')).isDisplayed(), {
@@ -375,6 +384,11 @@ export async function runGitFlow(browser, observer) {
   });
   await browser.keys("r");
   const heldRefreshCount = await browser.execute(() => window.__fbroHeldGitRefreshCount);
+  const busyPicker = await browser.$('[data-testid="git-branch-picker"]');
+  if (await busyPicker.getAttribute("aria-disabled") !== "true") throw new Error("Branch picker was enabled during Git activity");
+  await busyPicker.click();
+  await browser.keys("ArrowDown");
+  if (await browser.$('[data-testid="git-branch-dropdown"]').isExisting()) throw new Error("Busy branch picker opened");
   await browser.execute(() => {
     WebSocket.prototype.send = window.__fbroOriginalWsSend;
     delete window.__fbroOriginalWsSend;
@@ -477,6 +491,162 @@ export async function runGitFlow(browser, observer) {
     timeout: 10_000,
     label: "Git refresh after navigating back to repository",
   });
+}
+
+async function runGitBranchPickerFlow(browser, observer) {
+  const pickerSelector = '[data-testid="git-branch-picker"]';
+  const searchSelector = '[data-testid="git-branch-search"]';
+  const popupSelector = '[data-testid="git-branch-dropdown"]';
+  const picker = await browser.$(pickerSelector);
+  const originalBranch = observer.state.panels.left.git.branch;
+  const originalScheme = observer.state.settings.general.colorScheme;
+  const cursor = observer.state.panels.left.cursor;
+  const optionNames = () => browser.execute(() => [...document.querySelectorAll('[data-testid="git-branch-option"]')].map(option => option.textContent.trim()));
+  const activeName = () => browser.execute(() => document.querySelector('[data-testid="git-branch-option"][data-active="true"]')?.textContent.trim());
+  const sentCount = () => browser.execute(() => window.__pickerSwitches.length);
+  const expectClosed = () => waitFor(async () => !await browser.$(popupSelector).isExisting(), { timeout: 5_000, label: "branch dropdown dismissed" });
+  const expectPickerFocus = () => waitFor(() => picker.isFocused(), { timeout: 5_000, label: "branch picker focus restored" });
+  const open = async (key = "Enter") => {
+    await browser.keys("b");
+    await expectPickerFocus();
+    await browser.keys(key);
+    await waitFor(async () => await browser.$(searchSelector).isFocused(), { timeout: 5_000, label: "branch search input focus" });
+  };
+  await browser.execute(() => {
+    window.__pickerOriginalSend = WebSocket.prototype.send;
+    window.__pickerSwitches = [];
+    window.__pickerHold = false;
+    WebSocket.prototype.send = function(data) {
+      const message = typeof data === "string" ? JSON.parse(data) : null;
+      if (message?.type === "Intent" && message.name === "GitSwitchBranch") {
+        window.__pickerSwitches.push(message);
+        if (window.__pickerHold) {
+          window.__pickerHeldSend = { socket: this, data };
+          return;
+        }
+      }
+      return window.__pickerOriginalSend.call(this, data);
+    };
+  });
+  try {
+    await open();
+    for (const scheme of ["fbro-dark", "daylight"]) {
+      observer.sendIntent("SetGeneralOption", undefined, { key: "colorScheme", value: scheme });
+      await waitFor(() => browser.execute(scheme => document.querySelector('[data-testid="git-branch-dropdown"]')?.getAttribute("data-color-scheme") === scheme, scheme), { timeout: 5_000, label: `branch dropdown ${scheme} theme` });
+      const contained = await browser.execute(() => {
+        const popup = document.querySelector('[data-testid="git-branch-dropdown"]');
+        const bounds = popup.getBoundingClientRect();
+        return !!popup.closest('[data-modal-state="top"]') && bounds.left >= 0 && bounds.top >= 0 && bounds.right <= window.innerWidth && bounds.bottom <= window.innerHeight;
+      });
+      if (!contained) throw new Error(`Branch dropdown escaped its modal or viewport in ${scheme}`);
+      await browser.saveScreenshot(path.join(artifactsDir, "screenshots", `git-branch-picker-${scheme}.png`));
+    }
+    await browser.keys("End");
+    const activeVisible = await browser.execute(() => {
+      const row = document.querySelector('[data-testid="git-branch-option"][data-active="true"]').getBoundingClientRect();
+      const list = document.querySelector('.git-branch-picker__list').getBoundingClientRect();
+      return row.top >= list.top - 1 && row.bottom <= list.bottom + 1;
+    });
+    if (!activeVisible) throw new Error("Active branch was not scrolled into view");
+    await setTextInputValue(browser, searchSelector, "FIX");
+    const expected = ["feature/Fix-login", "release/fix-logging"];
+    if ((await optionNames()).join("|") !== expected.join("|")) throw new Error("Branch search did not match case-insensitive substrings");
+    for (const [key, name] of [["End", expected[1]], ["ArrowUp", expected[0]], ["ArrowDown", expected[1]], ["Home", expected[0]]]) {
+      await browser.keys(key);
+      if (await activeName() !== name || !await browser.$(searchSelector).isFocused()) throw new Error(`Branch navigation failed for ${key}`);
+    }
+    if (observer.state.panels.left.cursor !== cursor || await sentCount() !== 0) throw new Error("Branch search/navigation changed backend selection");
+    await setTextInputValue(browser, searchSelector, "no-such-branch");
+    await browser.keys("ArrowDown");
+    await browser.keys("Enter");
+    if ((await optionNames()).length !== 0 || !await browser.$(`${popupSelector} [role="status"]`).isDisplayed() || await sentCount() !== 0) throw new Error("Empty branch search submitted a switch");
+    await setTextInputValue(browser, searchSelector, "");
+    if ((await optionNames()).length !== observer.state.panels.left.git.branches.length) throw new Error("Clearing branch search did not restore the list");
+    await browser.keys("Escape");
+    await expectClosed();
+    await expectPickerFocus();
+    if (!await browser.$(".git-modal").isDisplayed()) throw new Error("Branch search Escape closed the Git modal");
+
+    await open("ArrowDown");
+    if (await browser.$(searchSelector).getValue() !== "") throw new Error("Branch search query survived reopening");
+    await browser.keys("Tab");
+    await expectClosed();
+    if (await picker.isFocused()) throw new Error("Branch dropdown took focus back after Tab");
+    await open("Space");
+    await browser.keys(["Shift", "Tab"]);
+    await expectClosed();
+
+    await open();
+    await browser.$(".git-modal__eyebrow").click();
+    await expectClosed();
+    if (!await browser.execute(() => document.querySelector('[data-modal-id="git:left"]').contains(document.activeElement))) throw new Error("Outside dismissal lost Git modal focus");
+    await open();
+    await browser.$('[data-testid="git-new-branch"]').click();
+    await expectClosed();
+    await waitFor(async () => await browser.$('[data-testid="git-branch-name"]').isFocused(), { timeout: 5_000, label: "outside click keeps successor input focus" });
+    await browser.keys("Escape");
+
+    await open();
+    await setTextInputValue(browser, searchSelector, originalBranch);
+    await browser.keys("Enter");
+    await expectClosed();
+    await expectPickerFocus();
+    if (await sentCount() !== 0) throw new Error("Choosing the current branch sent a switch");
+
+    await open();
+    await setTextInputValue(browser, searchSelector, "Fix-login");
+    await browser.execute((selector) => {
+      window.__pickerHold = true;
+      const input = document.querySelector(selector);
+      for (let count = 0; count < 2; count++) input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    }, searchSelector);
+    await expectClosed();
+    await expectPickerFocus();
+    if (await sentCount() !== 1 || await picker.getAttribute("aria-disabled") !== "true") throw new Error("Branch switch did not guard duplicate/busy submissions");
+    if (await picker.getAttribute("data-branch") !== originalBranch || observer.state.panels.left.git.branch !== originalBranch) throw new Error("Branch picker optimistically changed the branch");
+    await picker.click();
+    await browser.keys("ArrowDown");
+    if (await browser.$(popupSelector).isExisting()) throw new Error("Picker reopened during checkout");
+    await browser.execute(() => {
+      window.__pickerHold = false;
+      const held = window.__pickerHeldSend;
+      window.__pickerOriginalSend.call(held.socket, held.data);
+    });
+    await waitFor(async () => observer.state.panels.left.git.branch === "feature/Fix-login" && await picker.getAttribute("data-branch") === "feature/Fix-login" && await picker.getAttribute("aria-disabled") === "false", { timeout: 10_000, label: "backend-confirmed branch switch" });
+
+    await picker.click();
+    await waitFor(async () => await browser.$(searchSelector).isFocused(), { timeout: 5_000, label: "pointer opens branch search" });
+    await setTextInputValue(browser, searchSelector, "fix-logging");
+    await browser.$('[data-testid="git-branch-option"]').click();
+    await expectClosed();
+    await waitFor(async () => observer.state.panels.left.git.branch === "release/fix-logging" && await picker.getAttribute("aria-disabled") === "false", { timeout: 10_000, label: "pointer branch selection" });
+    await expectPickerFocus();
+
+    await open();
+    await setTextInputValue(browser, searchSelector, "picker-rejected");
+    await browser.keys("Enter");
+    await expectClosed();
+    await waitFor(async () => await picker.getAttribute("aria-disabled") === "false" && /overwritten|commit your changes/i.test(await browser.$(".git-modal__activity").getText()), { timeout: 10_000, label: "rejected branch switch feedback" });
+    if (observer.state.panels.left.git.branch !== "release/fix-logging" || await picker.getAttribute("data-branch") !== "release/fix-logging") throw new Error("Rejected checkout changed the picker value");
+    await expectPickerFocus();
+    if (await sentCount() !== 3) throw new Error("Unexpected branch switch count");
+    await open();
+    await setTextInputValue(browser, searchSelector, "fix");
+    await browser.execute(() => [...document.querySelectorAll('[data-testid="git-branch-option"]')].find(option => option.textContent.trim() === "release/fix-logging").focus());
+    await browser.keys("Enter");
+    await expectClosed();
+    await expectPickerFocus();
+    if (await sentCount() !== 3) throw new Error("Enter activated the highlight instead of the directly focused branch option");
+  } finally {
+    observer.sendIntent("SetGeneralOption", undefined, { key: "colorScheme", value: originalScheme });
+    await browser.execute(() => {
+      WebSocket.prototype.send = window.__pickerOriginalSend;
+      delete window.__pickerOriginalSend;
+      delete window.__pickerSwitches;
+      delete window.__pickerHold;
+      delete window.__pickerHeldSend;
+    });
+  }
 }
 
 async function panelGitStatus(browser, name) {

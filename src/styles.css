@@ -1582,7 +1582,6 @@ body {
 .git-modal__toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 16px; }
 /* appearance:none + explicit colors: Win10 WebView2 otherwise paints native ButtonFace
  * (light gray enabled / muddy disabled) over the dark theme. */
-.git-modal__toolbar select,
 .git-modal__toolbar button,
 .git-modal__selection-toolbar button,
 .git-modal__log-more button,
@@ -1599,10 +1598,25 @@ body {
   color: var(--text);
   cursor: pointer;
 }
-.git-modal__toolbar select {
+.git-modal__toolbar .git-branch-picker__trigger {
   background: var(--bg-input);
   color: var(--text);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 320px;
 }
+.git-branch-picker__trigger > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.git-branch-picker__trigger > svg { flex-shrink: 0; }
+.git-modal__toolbar .git-branch-picker__trigger[aria-disabled="true"] { opacity: 0.45; cursor: not-allowed; }
+.git-branch-picker__popup { z-index: 3; display: flex; flex-direction: column; width: 340px; box-sizing: border-box; padding: 8px; gap: 8px; border: 1px solid var(--border-focus); border-radius: 4px; background: var(--bg-panel); color: var(--text); box-shadow: var(--shadow-modal); overflow: hidden; }
+.git-branch-picker__popup input { appearance: none; -webkit-appearance: none; font: inherit; width: 100%; min-width: 0; box-sizing: border-box; flex-shrink: 0; padding: 5px 8px; border: 1px solid var(--border); border-radius: 3px; background: var(--bg-input); color: var(--text); }
+.git-branch-picker__list { min-height: 0; overflow-y: auto; }
+.git-branch-picker__option { appearance: none; -webkit-appearance: none; font: inherit; display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; padding: 5px 8px; border: 1px solid transparent; border-radius: 3px; background: var(--bg-panel); color: var(--text); text-align: left; cursor: pointer; }
+.git-branch-picker__option > span { min-width: 0; overflow-wrap: anywhere; }
+.git-branch-picker__option > svg { flex-shrink: 0; color: var(--accent); }
+.git-branch-picker__option[data-active="true"], .git-branch-picker__option:hover { background: var(--bg-focused); border-color: var(--border-focus); }
+.git-branch-picker__empty { padding: 8px; color: var(--text-dim); }
 .git-modal__toolbar button:hover:not(:disabled),
 .git-modal__selection-toolbar button:hover:not(:disabled),
 .git-modal__log-more button:hover:not(:disabled),

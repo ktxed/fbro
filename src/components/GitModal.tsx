@@ -12,6 +12,7 @@ import { CopyButton } from "./CopyButton";
 import { useInputHistory } from "../hooks/useInputHistory";
 import { InputHistoryDropdown } from "./InputHistoryDropdown";
 import { shortcutLetter } from "./modalKeyboard";
+import { GitBranchPicker } from "./GitBranchPicker";
 
 type GitTab = "changes" | "log";
 
@@ -37,7 +38,7 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
   const staged = useMemo(() => git.changes.filter(c => c.indexStatus !== " " && c.indexStatus !== "?"), [git]);
   const modalRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
-  const branchRef = useRef<HTMLSelectElement>(null);
+  const branchRef = useRef<HTMLButtonElement>(null);
   const newBranchRef = useRef<HTMLButtonElement>(null);
   const [branchFormOpen, setBranchFormOpen] = useState(false);
   const [branchName, setBranchName] = useState("");
@@ -692,15 +693,14 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
         <div className="git-modal__toolbar">
           {git.branches.length > 0 && (
             <>
-              <select
+              <GitBranchPicker
                 ref={branchRef}
-                aria-keyshortcuts="b"
+                branches={git.branches}
                 value={git.branch}
                 disabled={actionInFlight}
-                onChange={e => runAction("GitSwitchBranch", "Switching branch…", { branch: e.target.value })}
-              >
-                {git.branches.map(branch => <option key={branch} value={branch}>{branch}</option>)}
-              </select>
+                onInteract={() => { didAutoFocusLogRef.current = true; }}
+                onSelect={branch => runAction("GitSwitchBranch", "Switching branch…", { branch })}
+              />
               <kbd>B</kbd>
             </>
           )}
