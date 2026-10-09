@@ -1581,7 +1581,7 @@ checksum = "caf1079563223d5d59d83c85886a56e586cfd5c1a26292e971a0fa266531ac5a"
 
 [[package]]
 name = "fbro"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "async-channel",
  "async-trait",

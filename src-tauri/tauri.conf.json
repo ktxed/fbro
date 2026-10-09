@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "fbro",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "identifier": "dev.fbro.app",
   "build": {
     "frontendDist": "../dist",
