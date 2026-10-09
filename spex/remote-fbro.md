@@ -25,6 +25,8 @@ no system `sshd` and no external `ssh`/`sftp` binary.
 - **Discovery & pairing:** peers are found via mDNS (`_fbro-remote._tcp.local`,
   `src-tauri/src/remote/discovery.rs`). Pairing is an explicit confirm-on-both-
   ends handshake; authentication is **Ed25519 public key** (no passwords).
+  The client accepts only the paired raw Ed25519 host key and rejects SSH
+  certificates. RSA support is disabled in the embedded SSH library.
 - **Read-only by default:** a mounted remote source advertises `readOnly` and
   does not expose write capabilities (`DeleteSelection`, `NewFolder`, …).
 

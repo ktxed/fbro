@@ -264,7 +264,7 @@ stateDiagram-v2
       local: "1", size: String(fs.statSync(hostPath(`${directory}/${pdfName}`)).size),
       fsport: String(observer.state.fileServerPort) });
     await browser.url(`${mainUrl.split("?")[0]}?${pdfParams}`);
-    await browser.$('.viewer__pdf-page[data-rendered="true"] canvas').waitForDisplayed({ timeout: 15_000 });
+    await browser.$('.viewer__pdf-page:first-child[data-rendered="true"] canvas').waitForDisplayed({ timeout: 15_000 });
     if (await browser.$(".viewer__pdf-error").isExisting()) throw new Error("PDF viewer reported an error");
     await browser.keys("k");
     await waitFor(() => browser.execute(expected =>
@@ -575,7 +575,7 @@ async function runQuickPreviewChecks(browser, observer, fixture) {
   await waitFor(() => browser.execute(() => document.querySelector(".embedded-viewer .viewer__pre")?.textContent.includes("000007f0")),
     { timeout: 10_000, label: "binary preview includes bytes beyond old 64-row limit" });
   await choose(pdfName);
-  await browser.$('.embedded-viewer .viewer__pdf-page[data-rendered="true"] canvas').waitForDisplayed({ timeout: 15_000 });
+  await browser.$('.embedded-viewer .viewer__pdf-page:first-child[data-rendered="true"] canvas').waitForDisplayed({ timeout: 15_000 });
   await browser.execute(() => document.querySelector('[data-viewer-content="quick"]').focus());
   await browser.keys("End");
   await waitFor(() => browser.execute(() => document.querySelector(".embedded-viewer .viewer__pdf").scrollTop > 0),

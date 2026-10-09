@@ -293,11 +293,15 @@ impl russh::server::Handler for ConnectionHandler {
     async fn channel_open_session(
         &mut self,
         channel: Channel<Msg>,
+        reply: russh::server::ChannelOpenHandle,
         _session: &mut Session,
-    ) -> Result<bool, Self::Error> {
-        let mut guard = self.channels.lock().await;
-        guard.insert(channel.id(), channel);
-        Ok(true)
+    ) -> Result<(), Self::Error> {
+        {
+            let mut guard = self.channels.lock().await;
+            guard.insert(channel.id(), channel);
+        }
+        reply.accept().await;
+        Ok(())
     }
 
     async fn channel_eof(

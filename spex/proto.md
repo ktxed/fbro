@@ -290,6 +290,11 @@ Incremental update scoped to a domain.
 Rules:
 
 * Versions MUST be monotonic per domain/entity
+* Backend delivery of panel patches MUST preserve newer authoritative state:
+  delayed structural patches cannot restore older cursor/selection or decrease
+  the version. Streamed scans still apply queued entries and completion status.
+  Window-only patches use their independent `windowVersion` and do not change
+  the structural version.
 * FE MUST request snapshot if versions skip
 
 Panel navigation's loading patch includes `path`, `sourceId`, and `showHidden`

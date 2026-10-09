@@ -24,6 +24,8 @@ export async function startBrowser(name, host, port, application) {
     port,
     path: "/",
     logLevel: "warn",
+    // Preserve v9's first-match semantics for existing collection readiness checks.
+    strictSelectors: false,
     capabilities: {
       "tauri:options": { application },
     },
@@ -193,12 +195,11 @@ export async function openPanelContextMenu(browser, panelId) {
 export async function longRightClickEntry(browser, panelId, name, holdMs = 500) {
   const el = await browser.$(`[data-testid="panel-${panelId}"] [data-testid="panel-entry"][data-entry-name="${cssString(name)}"]`);
   await el.waitForDisplayed({ timeout: 10_000 });
-  await browser.executeAsync(({ panelId, name, holdMs }, done) => {
+  await browser.execute(async ({ panelId, name, holdMs }) => {
     const escaped = globalThis.CSS?.escape ? CSS.escape(name) : String(name).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
     const el = document.querySelector(`[data-testid="panel-${panelId}"] [data-testid="panel-entry"][data-entry-name="${escaped}"]`);
     if (!el) {
-      done(`missing entry ${name}`);
-      return;
+      throw new Error(`missing entry ${name}`);
     }
     const rect = el.getBoundingClientRect();
     const eventInit = {
@@ -211,11 +212,9 @@ export async function longRightClickEntry(browser, panelId, name, holdMs = 500) 
       view: window,
     };
     el.dispatchEvent(new MouseEvent("mousedown", eventInit));
-    window.setTimeout(() => {
-      el.dispatchEvent(new MouseEvent("mouseup", { ...eventInit, buttons: 0 }));
-      el.dispatchEvent(new MouseEvent("contextmenu", { ...eventInit, buttons: 0 }));
-      done(null);
-    }, holdMs);
+    await new Promise((resolve) => window.setTimeout(resolve, holdMs));
+    el.dispatchEvent(new MouseEvent("mouseup", { ...eventInit, buttons: 0 }));
+    el.dispatchEvent(new MouseEvent("contextmenu", { ...eventInit, buttons: 0 }));
   }, { panelId, name, holdMs });
   const menu = await browser.$(".context-menu");
   await menu.waitForDisplayed({ timeout: 10_000 });

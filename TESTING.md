@@ -1,5 +1,37 @@
 # Testing
 
+Dependency refresh (2026-10-09): `npm ci`, `npm ls --depth=0`, `npm run build`,
+`npm run test:build-info`, the Tauri debug build, all 362 Rust tests, and
+`cargo check --manifest-path tools/lfs-spy/Cargo.toml --locked` passed.
+The SFTP tests additionally cover accepting only the paired raw Ed25519 host
+key, rejecting another key, and rejecting a certificate for the paired key.
+The WebdriverIO 10 harness uses its documented `strictSelectors: false`
+compatibility setting for existing collection readiness checks and async
+`execute` for long right-clicks. Bro/PDF readiness targets are explicit, and
+Search viewer fixtures use an isolated folder to avoid prior-flow duplicates.
+Four panel-patch regression tests cover delayed scan selection replay, current
+and independent window patches, queued streamed entries/completion, and scan
+errors. Replay preserves newer selection/cursor and never decreases the panel
+version while retaining pending scan data and completion. The focused Linux
+hash-generation/check smoke flow passed.
+The final rebuilt application's focused native Linux/Wayland remote smoke
+flow also passed: pairing, browsing, transfer completion, cancellation on both
+peers, retry after cancellation, and focus restoration.
+The complete native Linux/Wayland smoke suite passed with the final debug
+binary, including local operations, viewers, Git, hashing, archives, Search,
+and remote operations.
+
+The dependency audit reports two low npm findings in Mermaid/KaTeX
+([GHSA-238p-pmpm-9mq7](https://github.com/advisories/GHSA-238p-pmpm-9mq7)),
+down from 26 findings. RustSec reports zero backend/helper vulnerabilities,
+down from six backend vulnerabilities. Backend dependency warnings remain for
+`glib` 0.18.5 unsoundness and unmaintained `instant`/`proc-macro-error`.
+PDF.js is pinned to 5.5.207, before the scripting regression in
+[GHSA-hq66-cqwq-w95j](https://github.com/advisories/GHSA-hq66-cqwq-w95j), retaining
+the legacy library/worker polyfills removed by PDF.js 6. Node.js 22.19+ is
+required; the source-build Docker image now uses Node 24. Native macOS/Windows
+and rebuilding that full source-build image remain unverified.
+
 Remote transfer cancellation: focused `remote::`, `vfs::sftp::tests`, and
 `jobs::file_ops::tests` tests cover cancellation during blocking reads, rejecting
 reopens/reconnects, peer/token isolation, UI job removal, late lifecycle events,
@@ -101,11 +133,10 @@ backend removal of focused inline controls, outside-click panel switching,
 empty-folder suggestions, toolbar activation, and terminal/toast preservation.
 They run before the local UI flows; `FBRO_E2E_FOCUS_ONLY=1` runs only this flow.
 The focus handoff, local UI, and Git flows passed on native Linux/Wayland with
-the debug binary, including exact Git repository button restoration. The full
-suite later stopped in the Search viewer fixture check: it expected three
-`renamed.txt` results, but the earlier local flow also creates
-`dst/alpha/renamed.txt`, producing four. Native macOS and Windows focus behavior
-still needs verification.
+the debug binary, including exact Git repository button restoration. Search
+viewer fixtures now use their own folder, avoiding the earlier local flow's
+`dst/alpha/renamed.txt` and keeping the expected three duplicate-name results.
+Native macOS and Windows focus behavior still needs verification.
 
 `cargo test --manifest-path src-tauri/Cargo.toml terminal::tests` includes a
 blocked-resize regression verifying that resize requests return immediately

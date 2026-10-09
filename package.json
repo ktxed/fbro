@@ -3,6 +3,9 @@
   "private": true,
   "version": "0.0.3",
   "type": "module",
+  "engines": {
+    "node": ">=22.19.0"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
@@ -16,28 +19,28 @@
     "test:build-info": "node --test tests/build-info.test.mjs"
   },
   "dependencies": {
-    "@floating-ui/react": "^0.27.19",
-    "@fontsource/jetbrains-mono": "^5.2.8",
-    "@tabler/icons-react": "^3.41.1",
-    "@tauri-apps/api": "^2",
+    "@floating-ui/react": "^0.27.20",
+    "@fontsource/jetbrains-mono": "^5.3.0",
+    "@tabler/icons-react": "^3.49.0",
+    "@tauri-apps/api": "^2.12.2",
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/xterm": "^5.5.0",
     "heic-to": "1.6.5",
     "heic2any": "0.0.4",
-    "mermaid": "^11.14.0",
-    "pdfjs-dist": "^5.7.284",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
+    "mermaid": "^11.17.2",
+    "pdfjs-dist": "5.5.207",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
     "react-tooltip": "^5.30.1"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2",
-    "@types/react": "^19.0.0",
-    "@types/react-dom": "^19.0.0",
-    "@vitejs/plugin-react": "^4.3.4",
-    "typescript": "^5.6.2",
-    "vite": "^5.4.8",
-    "webdriverio": "^9.20.0",
-    "ws": "^8.18.3"
+    "@tauri-apps/cli": "^2.12.1",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "typescript": "^5.9.3",
+    "vite": "^8.3.4",
+    "webdriverio": "^10.0.2",
+    "ws": "^8.22.0"
   }
 }

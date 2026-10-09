@@ -27,7 +27,7 @@ Built with [Tauri](https://tauri.app/) (Rust backend + React frontend). The back
 
 ## Development
 
-Requirements: [Node.js](https://nodejs.org/), [Rust](https://rustup.rs/), and [Tauri 2 system deps](https://v2.tauri.app/start/prerequisites/) for your OS.
+Requirements: [Node.js](https://nodejs.org/) 22.19 or newer, current stable [Rust](https://rustup.rs/), and [Tauri 2 system deps](https://v2.tauri.app/start/prerequisites/) for your OS.
 
 ```bash
 npm install

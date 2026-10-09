@@ -1,4 +1,7 @@
+FROM node:24-bookworm-slim AS node
 FROM rust:1-bookworm AS builder
+
+COPY --from=node /usr/local/ /usr/local/
 
 ENV DEBIAN_FRONTEND=noninteractive
 WORKDIR /app
@@ -19,8 +22,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libswresample-dev \
     libswscale-dev \
     llvm-dev \
-    nodejs \
-    npm \
     patchelf \
     p7zip-full \
     pkg-config \

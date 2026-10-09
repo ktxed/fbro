@@ -766,7 +766,7 @@ async function verifyBroHelp(browser) {
   await (await browser.$(".command-palette__input")).waitForDisplayed({ timeout: 10_000 });
   await setTextInputValue(browser, ".command-palette__input", "Pass to Bro");
   await browser.keys("Enter");
-  await (await browser.$('[data-testid="bro-option"]')).waitForDisplayed({ timeout: 10_000 });
+  await (await browser.$('[data-testid="bro-option"][data-selected="true"]')).waitForDisplayed({ timeout: 10_000 });
   await waitFor(() => browser.execute(() => (
     document.activeElement?.matches('[data-testid="bro-dialog"] [role="listbox"]') ?? false
   )), { timeout: 10_000, label: "bro list initial focus after command palette" });

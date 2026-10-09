@@ -152,7 +152,8 @@ export async function runSearchActivityFlow(browser, observer) {
 }
 
 export async function runSearchFlow(browser, observer) {
-  const aDst = backendPath("a", "dst");
+  // Keep duplicate-name fixtures separate from files created by earlier flows.
+  const aDst = backendPath("a", "dst", "search-viewer-fixtures");
   const hostDst = hostPath(aDst);
   fs.mkdirSync(hostDst, { recursive: true });
   fs.writeFileSync(path.join(hostDst, "renamed.txt"), "root result\n");
@@ -243,13 +244,13 @@ export async function runSearchFlow(browser, observer) {
   if (await uniqueHint.isExisting()) {
     throw new Error("Unique search result unexpectedly received a path hint");
   }
-  const hintedRow = await browser.$('[data-testid="panel-left"] [data-entry-name="renamed.txt"]');
+  const hintedRow = (await browser.$$('[data-testid="panel-left"] [data-entry-name="renamed.txt"]'))[0];
   const hintedRowTitle = await hintedRow.getAttribute("title");
   if (!hintedRowTitle?.endsWith("/renamed.txt")) {
     throw new Error(`Duplicate search result did not expose its full path as a tooltip: ${hintedRowTitle}`);
   }
   await browser.waitUntil(async () => {
-    const dateCell = await browser.$('[data-testid="panel-left"] [data-entry-name="renamed.txt"] .panel__mtime');
+    const dateCell = await hintedRow.$('.panel__mtime');
     if (!await dateCell.isExisting()) return false;
     const text = await dateCell.getText();
     return text.trim().length > 0;

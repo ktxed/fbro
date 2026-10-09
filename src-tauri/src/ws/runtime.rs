@@ -1346,6 +1346,23 @@ pub(crate) async fn update_panel_from_patch(
             && patch.get("entries").is_none()
             && patch.get("appendEntries").is_none();
 
+        // Intent handlers and atomic scans commit state before broadcasting.
+        // Their delivery can lag behind a newer interaction; replay must not
+        // restore an older selection or roll the structural version backwards.
+        // Streamed scans commit batches and completion here rather than before
+        // sending. Preserve those entries/status even after a newer interaction,
+        // but do not replay their scan-start cursor/selection or older version.
+        let is_stale = !is_window_only && version < panel.version;
+        let is_pending_scan = patch.get("appendEntries").is_some()
+            || patch.get("status").and_then(|v| v.as_str()) == Some("error")
+            || (patch.get("status").and_then(|v| v.as_str()) == Some("ready")
+                && patch.get("total").is_some()
+                && patch.get("entries").is_none()
+                && !is_window_patch);
+        if is_stale && !is_pending_scan {
+            return;
+        }
+
         if !is_window_patch {
             if let Some(entries) = patch
                 .get("appendEntries")
@@ -1379,10 +1396,16 @@ pub(crate) async fn update_panel_from_patch(
                 _ => PanelStatus::Loading,
             };
         }
-        if let Some(cursor) = patch.get("cursor").and_then(|value| value.as_u64()) {
+        if let Some(cursor) = patch.get("cursor")
+            .and_then(|value| value.as_u64())
+            .filter(|_| !is_stale)
+        {
             panel.cursor = cursor as usize;
         }
-        if let Some(selection) = patch.get("selection").and_then(|value| value.as_array()) {
+        if let Some(selection) = patch.get("selection")
+            .and_then(|value| value.as_array())
+            .filter(|_| !is_stale)
+        {
             panel.selection = selection
                 .iter()
                 .filter_map(|value| value.as_u64().map(|index| index as usize))
@@ -1407,7 +1430,7 @@ pub(crate) async fn update_panel_from_patch(
             panel.window_version = window_version;
         }
         if !is_window_only {
-            panel.version = version;
+            panel.version = panel.version.max(version);
         }
     }
     // Visibility set may have changed (new entries, new window slice, mode
@@ -1439,6 +1462,141 @@ pub(crate) fn refresh_thumb_visibility(state: &crate::state::AppState) {
     state.thumb_pool.sync_contexts(contexts);
     let paths = crate::state::collect_visible_thumb_paths(state);
     state.thumb_pool.set_visible(paths);
+}
+
+#[cfg(test)]
+mod patch_tests {
+    use super::*;
+    use crate::platform::{Platform, VolumeInfo};
+    use serde_json::json;
+
+    struct TestPlatform;
+
+    impl Platform for TestPlatform {
+        fn home_dir(&self) -> String {
+            "/".into()
+        }
+
+        fn open_in_editor(&self, _path: &str) -> Result<String, String> {
+            unreachable!()
+        }
+
+        fn list_volumes(&self) -> Vec<VolumeInfo> {
+            vec![]
+        }
+    }
+
+    fn test_state() -> SharedState {
+        let platform: Arc<dyn Platform> = Arc::new(TestPlatform);
+        Arc::new(tokio::sync::Mutex::new(AppState::new_default(
+            platform.clone(),
+            HashMap::new(),
+            0,
+            crate::thumb_pool::ThumbPool::start(platform, 1),
+            Arc::new(crate::fileserver::ThumbCache::new(1)),
+        )))
+    }
+
+    #[tokio::test]
+    async fn delayed_scan_patch_preserves_newer_selection_and_version() {
+        let state = test_state();
+        {
+            let mut guard = state.lock().await;
+            let panel = guard.panels.get_mut("left").unwrap();
+            panel.version = 3;
+            panel.selection = vec![2];
+        }
+        update_panel_from_patch(
+            &state,
+            "left",
+            &json!({"selection": [], "status": "ready"}),
+            2,
+        )
+        .await;
+        let guard = state.lock().await;
+        let panel = &guard.panels["left"];
+        assert_eq!(panel.selection, vec![2]);
+        assert_eq!(panel.version, 3);
+    }
+
+    #[tokio::test]
+    async fn current_patch_and_independently_versioned_window_still_apply() {
+        let state = test_state();
+        state.lock().await.panels.get_mut("left").unwrap().version = 3;
+        update_panel_from_patch(&state, "left", &json!({"selection": [2]}), 3).await;
+        update_panel_from_patch(
+            &state,
+            "left",
+            &json!({"windowEntries": [], "windowStart": 7, "windowVersion": 4}),
+            2,
+        )
+        .await;
+        let guard = state.lock().await;
+        let panel = &guard.panels["left"];
+        assert_eq!(panel.selection, vec![2]);
+        assert_eq!(panel.version, 3);
+        assert_eq!(panel.window_start, 7);
+        assert_eq!(panel.window_version, 4);
+    }
+
+    #[tokio::test]
+    async fn queued_streamed_scan_keeps_entries_and_completion_after_newer_selection() {
+        let state = test_state();
+        {
+            let mut guard = state.lock().await;
+            let panel = guard.panels.get_mut("left").unwrap();
+            panel.version = 5;
+            panel.cursor = 2;
+            panel.selection = vec![2];
+            panel.entries.clear();
+            panel.status = PanelStatus::Loading;
+        }
+        update_panel_from_patch(
+            &state,
+            "left",
+            &json!({"appendEntries": [{"name": "queued.txt", "kind": "file"}]}),
+            3,
+        )
+        .await;
+        update_panel_from_patch(
+            &state,
+            "left",
+            &json!({"status": "ready", "total": 1, "cursor": 0, "selection": []}),
+            4,
+        )
+        .await;
+        let guard = state.lock().await;
+        let panel = &guard.panels["left"];
+        assert_eq!(panel.entries[0].name, "queued.txt");
+        assert!(matches!(panel.status, PanelStatus::Ready));
+        assert_eq!(panel.cursor, 2);
+        assert_eq!(panel.selection, vec![2]);
+        assert_eq!(panel.version, 5);
+    }
+
+    #[tokio::test]
+    async fn queued_scan_error_finishes_loading_without_reverting_selection() {
+        let state = test_state();
+        {
+            let mut guard = state.lock().await;
+            let panel = guard.panels.get_mut("left").unwrap();
+            panel.version = 5;
+            panel.selection = vec![2];
+            panel.status = PanelStatus::Loading;
+        }
+        update_panel_from_patch(
+            &state,
+            "left",
+            &json!({"status": "error", "error": "list failed"}),
+            3,
+        )
+        .await;
+        let guard = state.lock().await;
+        let panel = &guard.panels["left"];
+        assert!(matches!(panel.status, PanelStatus::Error(_)));
+        assert_eq!(panel.selection, vec![2]);
+        assert_eq!(panel.version, 5);
+    }
 }
 
 fn build_panel_snapshot(panel: &Panel, supports_thumbnails: bool) -> PanelSnapshot {

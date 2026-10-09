@@ -35,7 +35,7 @@ sha2 = "0.10"
 hkdf = "0.12"
 base64 = "0.22"
 mdns-sd = "0.11"
-russh = { version = "0.54", default-features = false, features = ["ring", "rsa", "flate2"] }
+russh = { version = "0.64.1", default-features = false, features = ["ring", "flate2"] }
 russh-sftp = "2.1"
 bytes = "1"
 blake3 = { version = "1", features = ["rayon", "mmap"] }

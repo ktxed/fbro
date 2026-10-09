@@ -837,9 +837,17 @@ impl russh::client::Handler for ClientHandler {
 
     async fn check_server_key(
         &mut self,
-        server_public_key: &russh::keys::PublicKey,
+        server_public_key: &russh::keys::PublicKeyOrCertificate,
     ) -> Result<bool, Self::Error> {
         use russh::keys::ssh_key::public::KeyData;
+        // Pairing pins raw Ed25519 keys; SSH certificates are not a trust source.
+        let russh::keys::PublicKeyOrCertificate::PublicKey {
+            key: server_public_key,
+            ..
+        } = server_public_key
+        else {
+            return Ok(false);
+        };
         let raw = match server_public_key.key_data() {
             KeyData::Ed25519(ed) => ed.0,
             _ => return Ok(false),
@@ -1795,6 +1803,57 @@ impl Drop for SftpReadStream {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn host_private_key(seed: [u8; 32]) -> russh::keys::PrivateKey {
+        use russh::keys::ssh_key::private::{Ed25519Keypair, Ed25519PrivateKey};
+        let private = Ed25519PrivateKey::from_bytes(&seed);
+        Ed25519Keypair {
+            public: (&private).into(),
+            private,
+        }
+        .into()
+    }
+
+    #[tokio::test]
+    async fn host_key_pinning_accepts_only_the_paired_raw_key() {
+        use russh::client::Handler;
+        let seed = [1; 32];
+        let public = host_private_key(seed).public_key().clone();
+        let raw = ed25519_dalek::SigningKey::from_bytes(&seed)
+            .verifying_key()
+            .to_bytes();
+        let mut handler = ClientHandler {
+            expected_fp: fingerprint_of(&raw),
+        };
+        assert!(handler.check_server_key(&public.into()).await.unwrap());
+        let other = host_private_key([2; 32]).public_key().clone();
+        assert!(!handler.check_server_key(&other.into()).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn host_key_pinning_rejects_certificates_for_the_paired_key() {
+        use russh::client::Handler;
+        use russh::keys::ssh_key::certificate::{Builder, CertType};
+        let seed = [1; 32];
+        let key = host_private_key(seed);
+        let mut builder = Builder::new(
+            vec![0; 16],
+            key.public_key().key_data().clone(),
+            0,
+            u64::MAX,
+        )
+        .unwrap();
+        builder.cert_type(CertType::Host).unwrap();
+        builder.valid_principal("fbro").unwrap();
+        let certificate = builder.sign(&key).unwrap();
+        let raw = ed25519_dalek::SigningKey::from_bytes(&seed)
+            .verifying_key()
+            .to_bytes();
+        let mut handler = ClientHandler {
+            expected_fp: fingerprint_of(&raw),
+        };
+        assert!(!handler.check_server_key(&certificate.into()).await.unwrap());
+    }
 
     #[test]
     fn transfer_tokens_survive_reconnects_and_are_released_at_job_end() {
