@@ -5933,6 +5933,8 @@ body {
 }
 
 .sharing-input {
+  appearance: none;
+  font: inherit;
   min-width: 0;
   background: var(--bg-input);
   color: var(--text);
@@ -5947,6 +5949,19 @@ body {
 .sharing-input:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.sharing-folder-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 0.8fr) auto;
+  gap: 8px;
+  padding: 14px;
+}
+
+.sharing-folder-error {
+  color: var(--text-danger);
+  margin: 0;
+  padding: 0 14px 12px;
 }
 
 .sharing-note,

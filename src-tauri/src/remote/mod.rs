@@ -14,3 +14,4 @@ pub mod pair_transport;
 pub mod pairing;
 pub mod server;
 pub mod share_state;
+pub mod shared_folder;

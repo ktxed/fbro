@@ -218,6 +218,37 @@ transfer to accumulate.
 
 ## 5. Relevant settings
 
+### Shared folders
+
+Settings → Sharing retains the source/Home/bookmark checkboxes and adds a
+Search-style path input, suggestions select, and Add button. Current folder is
+offered from the active local filesystem listing; source/Home/bookmark
+suggestions come from the backend. Selecting a suggestion fills the input.
+Enter or Add submits once, shows “Adding…”, and waits for backend confirmation.
+Failures retain the entered path and show an inline error. Input history uses
+the existing Alt+Down interaction; Escape dismisses history before Settings.
+Folder configuration remains available while remote access is off.
+
+`AddSharedFolder` validates an existing, enumerable local directory with the
+running user's actual permissions on a blocking worker. `~` expands to Home;
+relative paths resolve against the supplied local panel, otherwise Home.
+Canonical-equivalent existing shares are reused. New roots have stable hashed
+IDs, basename labels, and `origin: "folder"`. Their local VFS drivers are
+internal registry entries, independent of mounted volume Sources. Peers receive
+the same read-only SFTP capabilities as existing shares, including thumbnails,
+integrity manifests, and transfers. Normal filesystem permissions apply to
+each child read; validation does not recursively preflight the tree.
+
+Added folders form a separate checkbox group. Unchecking removes the root and
+its internal driver. Version-2 share.json persists folder roots alongside older
+source/Home/bookmark roots; startup recreates the drivers even if a saved folder
+is temporarily unavailable. Such folders remain removable in Settings, and
+remote access fails normally until their paths become accessible again.
+
+Sharing patches broadcast to GUI/observer connections with increasing versions;
+clients discard older sharing patches. New roots appear on the peer's next
+Connect/Retry last; existing remote mounts do not automatically discover shares.
+
 - `settings.general.stream_thumbnails` — gates remote (and local) thumbnail
   generation; when off, peers advertise no thumbnail support.
 - Sharing toggles (`EnableSharing`, `SetSharedTargets`, `SetSharedSources`,

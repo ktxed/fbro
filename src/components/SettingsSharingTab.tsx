@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { useAppState } from "../store";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useAppDispatch, useAppState } from "../store";
 import type { WsClient } from "../ws/client";
 import type { SharedRoot } from "../ws/types";
 import { useInputHistory } from "../hooks/useInputHistory";
@@ -52,12 +52,14 @@ function mergeShareTargets(selected: SharedRoot[], suggestions: SharedRoot[]) {
 function originRank(origin: SharedRoot["origin"]) {
   if (origin === "source") return 0;
   if (origin === "home") return 1;
-  return 2;
+  if (origin === "bookmark") return 2;
+  return 3;
 }
 
 function originLabel(origin: SharedRoot["origin"]) {
   if (origin === "source") return "source";
   if (origin === "home") return "home";
+  if (origin === "folder") return "folder";
   return "bookmark";
 }
 
@@ -70,19 +72,20 @@ function ShareTargetGroup({
   label: string;
   targets: SharedRoot[];
   sharedSet: Set<string>;
-  onToggle: (targetId: string) => void;
+  onToggle: (targetId: string, control: HTMLInputElement) => void;
 }) {
   return (
     <div className="sharing-source-group">
       <div className="sharing-source-group__label">{label}</div>
       <ul className="sharing-source-list">
         {targets.map((target) => (
-          <li key={target.id}>
+          <li key={target.id} data-share-target-id={target.id} data-share-path={target.path}>
             <label className="sharing-source">
               <input
                 type="checkbox"
                 checked={sharedSet.has(target.id)}
-                onChange={() => onToggle(target.id)}
+                aria-label={`Share ${target.name}: ${target.path}`}
+                onChange={(event) => onToggle(target.id, event.currentTarget)}
               />
               <span className="sharing-source__main">
                 <strong>
@@ -105,6 +108,7 @@ function ShareTargetGroup({
  */
 export function SettingsSharingTab({ client }: SettingsSharingTabProps) {
   const state = useAppState();
+  const dispatch = useAppDispatch();
   const share = state.shareConfig;
   const discovered = state.discoveredPeers;
   const pairing = state.pendingPairing;
@@ -114,7 +118,42 @@ export function SettingsSharingTab({ client }: SettingsSharingTabProps) {
   const shareTargets = mergeShareTargets(share.sharedRoots, share.shareSuggestions);
   const sharedSet = new Set(share.sharedRoots.map((root) => root.id));
   const sourceTargets = shareTargets.filter((target) => target.origin === "source");
-  const suggestedTargets = shareTargets.filter((target) => target.origin !== "source");
+  const suggestedTargets = shareTargets.filter((target) => target.origin === "home" || target.origin === "bookmark");
+  const folderTargets = shareTargets.filter((target) => target.origin === "folder");
+  const folderInput = state.sharedFolderInput;
+  const setFolderPath = useCallback((path: string) => dispatch({ type: "SET_SHARED_FOLDER_INPUT", path }), [dispatch]);
+  const folderHistory = useInputHistory("sharing.folder", setFolderPath);
+  const submittingFolder = folderInput.requestId !== null;
+  const submittedRequestRef = useRef<string | null>(folderInput.requestId);
+  submittedRequestRef.current = folderInput.requestId;
+  const [folderSuggestion, setFolderSuggestion] = useState("");
+  useEffect(() => {
+    if (!folderInput.path && !submittingFolder) setFolderSuggestion("");
+  }, [folderInput.path, submittingFolder]);
+  const activePanel = state.panels[state.focus];
+  const activeSource = activePanel && state.sources[activePanel.sourceId];
+  const currentFolder = activePanel?.tabKind === "listing" && activeSource?.kind === "filesystem"
+    && activeSource.mounted && !activeSource.shadow ? activePanel.path : undefined;
+  const folderSuggestions = [
+    ...(currentFolder ? [{ id: "current", name: "Current folder", path: currentFolder }] : []),
+    ...share.shareSuggestions,
+  ];
+  const focusFolderInput = () => {
+    folderHistory.inputRef.current?.focus();
+    folderHistory.inputRef.current?.scrollIntoView({ block: "nearest" });
+  };
+
+  const addFolder = () => {
+    if (!state.connected || submittedRequestRef.current || !folderInput.path.trim()) return;
+    const requestId = globalThis.crypto.randomUUID();
+    submittedRequestRef.current = requestId;
+    folderHistory.addToHistory(folderInput.path);
+    folderHistory.close();
+    dispatch({ type: "SUBMIT_SHARED_FOLDER", requestId });
+    client.sendIntent("AddSharedFolder", undefined, {
+      requestId, path: folderInput.path, panelId: state.focus,
+    });
+  };
 
   // Map peer fingerprint → arbitrary mounted source_id (used both for
   // the "live" stale-override and to feed DisconnectRemotePeer when
@@ -155,10 +194,16 @@ export function SettingsSharingTab({ client }: SettingsSharingTabProps) {
     client.sendIntent("SetSharingIpv6", undefined, { allowIpv6: !share.allowIpv6 });
   };
 
-  const toggleShareTarget = (targetId: string) => {
+  const toggleShareTarget = (targetId: string, control: HTMLInputElement) => {
     const next = new Set(sharedSet);
     if (next.has(targetId)) next.delete(targetId);
     else next.add(targetId);
+    // The folder row disappears when the backend confirms removal. Hand its
+    // focused control to the input before removal; outside focus stays put.
+    if (folderTargets.some((target) => target.id === targetId)
+      && sharedSet.has(targetId) && document.activeElement === control) {
+      focusFolderInput();
+    }
     client.sendIntent("SetSharedTargets", undefined, {
       targetIds: Array.from(next),
     });
@@ -301,7 +346,7 @@ export function SettingsSharingTab({ client }: SettingsSharingTabProps) {
       <section className="sharing-stats" aria-label="Sharing status">
         <div className="sharing-stat">
           <span className="sharing-stat__value">{sharedSet.size}</span>
-          <span className="sharing-stat__label">shared sources</span>
+          <span className="sharing-stat__label">shared folders</span>
         </div>
         <div className="sharing-stat">
           <span className="sharing-stat__value">{share.pairedPeers.length}</span>
@@ -570,10 +615,78 @@ export function SettingsSharingTab({ client }: SettingsSharingTabProps) {
           </div>
           <span className="sharing-chip">read-only</span>
         </div>
+        <div className="sharing-folder-row">
+          <input
+            ref={folderHistory.inputRef as React.RefObject<HTMLInputElement>}
+            className="sharing-input"
+            data-testid="sharing-folder-path"
+            aria-label="Folder to share"
+            aria-keyshortcuts="Alt+ArrowDown"
+            aria-invalid={!!folderInput.error}
+            aria-describedby={folderInput.error ? "sharing-folder-error" : undefined}
+            type="text"
+            value={folderInput.path}
+            readOnly={submittingFolder}
+            onChange={(event) => { setFolderPath(event.target.value); setFolderSuggestion(""); }}
+            onKeyDown={(event) => {
+              folderHistory.onKeyDown(event);
+              if (event.defaultPrevented) return;
+              if (event.key === "Enter") { event.preventDefault(); addFolder(); }
+            }}
+            placeholder="Add a folder path…"
+            spellCheck={false}
+            autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="off"
+          />
+          {folderHistory.isOpen && (
+            <InputHistoryDropdown
+              anchorEl={folderHistory.inputRef.current}
+              items={folderHistory.items}
+              activeIndex={folderHistory.activeIndex}
+              onSelect={folderHistory.selectItem}
+              onClose={folderHistory.close}
+            />
+          )}
+          <select
+            className="sharing-input sharing-folder-suggestions"
+            data-testid="sharing-folder-suggestions"
+            aria-label="Suggested folder to share"
+            value={folderSuggestion}
+            disabled={submittingFolder}
+            onChange={(event) => {
+              const id = event.target.value;
+              setFolderSuggestion(id);
+              const suggestion = folderSuggestions.find((candidate) => candidate.id === id);
+              if (suggestion) setFolderPath(suggestion.path);
+            }}
+          >
+            <option value="">Suggested folder…</option>
+            {folderSuggestions.map((suggestion) => (
+              <option key={suggestion.id} value={suggestion.id}>{suggestion.name}: {suggestion.path}</option>
+            ))}
+          </select>
+          <button
+            type="button"
+            className="sharing-button sharing-button--primary"
+            data-command-id="sharing.folder.add"
+            disabled={!state.connected || submittingFolder || !folderInput.path.trim()}
+            onClick={() => { focusFolderInput(); addFolder(); }}
+          >{submittingFolder ? "Adding…" : "Add"}</button>
+        </div>
+        {folderInput.error && (
+          <p id="sharing-folder-error" className="sharing-folder-error" role="alert" data-testid="sharing-folder-error">
+            {folderInput.error}
+          </p>
+        )}
+        <p className="sharing-note">Enter a folder path or choose a suggestion. Alt+Down shows previous paths.</p>
         {shareTargets.length === 0 ? (
           <p className="sharing-empty">No local folders to share.</p>
         ) : (
           <>
+            {folderTargets.length > 0 && (
+              <ShareTargetGroup label="Added folders" targets={folderTargets} sharedSet={sharedSet} onToggle={toggleShareTarget} />
+            )}
             {sourceTargets.length > 0 && (
               <ShareTargetGroup
                 label="Sources"

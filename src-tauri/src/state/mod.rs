@@ -87,11 +87,11 @@ pub struct PairedPeer {
 }
 
 /// In-process configuration controlling whether this fbro shares any of its
-/// sources on the LAN and which peers are trusted. In v1, `enabled` and
-/// `shared_source_ids` are volatile (reset on restart); only `paired_peers`
-/// is persisted via `~/.config/fbro/peers.json`.
+/// sources on the LAN and which peers are trusted. Sharing choices persist in
+/// share.json; paired peers persist separately in peers.json.
 #[derive(Clone, Debug, Default)]
 pub struct ShareConfig {
+    pub version: u64,
     pub enabled: bool,
     pub allow_ipv6: bool,
     pub shared_source_ids: HashSet<String>,
@@ -104,6 +104,7 @@ pub enum SharedRootOrigin {
     Source,
     Home,
     Bookmark,
+    Folder,
 }
 
 impl SharedRootOrigin {
@@ -112,6 +113,7 @@ impl SharedRootOrigin {
             SharedRootOrigin::Source => "source",
             SharedRootOrigin::Home => "home",
             SharedRootOrigin::Bookmark => "bookmark",
+            SharedRootOrigin::Folder => "folder",
         }
     }
 
@@ -119,6 +121,7 @@ impl SharedRootOrigin {
         match value {
             "home" => SharedRootOrigin::Home,
             "bookmark" => SharedRootOrigin::Bookmark,
+            "folder" => SharedRootOrigin::Folder,
             _ => SharedRootOrigin::Source,
         }
     }
@@ -141,15 +144,16 @@ pub fn share_root_id_for_path(origin: &SharedRootOrigin, path: &str) -> String {
             let hash = blake3::hash(format!("{}:{path}", origin.as_str()).as_bytes());
             format!("home-{}", &hash.to_hex()[..10])
         }
-        SharedRootOrigin::Bookmark => {
+        SharedRootOrigin::Bookmark | SharedRootOrigin::Folder => {
             let hash = blake3::hash(format!("{}:{path}", origin.as_str()).as_bytes());
             let label = Path::new(path)
                 .file_name()
                 .and_then(|name| name.to_str())
                 .map(sanitize_share_id_part)
                 .filter(|part| !part.is_empty())
-                .unwrap_or_else(|| "bookmark".to_string());
-            format!("bookmark-{label}-{}", &hash.to_hex()[..10])
+                .unwrap_or_else(|| origin.as_str().to_string());
+            let hash_length = if matches!(origin, SharedRootOrigin::Folder) { 16 } else { 10 };
+            format!("{}-{label}-{}", origin.as_str(), &hash.to_hex()[..hash_length])
         }
     }
 }
@@ -302,7 +306,8 @@ pub fn migrate_saved_shared_roots(
     if !saved_roots.is_empty() {
         return saved_roots
             .into_iter()
-            .filter(|root| source_id_for_local_path(sources, &root.path).is_some())
+            .filter(|root| matches!(root.origin, SharedRootOrigin::Folder)
+                || source_id_for_local_path(sources, &root.path).is_some())
             .collect();
     }
     saved_source_ids
@@ -986,6 +991,7 @@ impl AppState {
                 .map(|root| root.source_id.clone())
                 .collect();
             ShareConfig {
+                version: 0,
                 enabled: saved.enabled,
                 allow_ipv6: saved.allow_ipv6,
                 shared_source_ids,
@@ -993,6 +999,8 @@ impl AppState {
                 paired_peers,
             }
         };
+
+        crate::remote::shared_folder::sync_drivers(&mut drivers, &share_config.shared_roots);
 
         AppState {
             panels,

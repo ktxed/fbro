@@ -264,6 +264,14 @@ fn build_discovered_peers(state: &AppState) -> Vec<crate::remote::discovery::Dis
     out
 }
 
+pub(crate) fn build_share_config_patch(state: &mut AppState) -> ServerMessage {
+    state.share_config.version += 1;
+    ServerMessage::StatePatch {
+        timestamp: now(), domain: "shareConfig".into(), entity_id: None,
+        version: state.share_config.version, patch: build_share_config(state),
+    }
+}
+
 pub(crate) fn build_share_config(state: &AppState) -> serde_json::Value {
     let paired: Vec<serde_json::Value> = state
         .share_config
@@ -316,6 +324,7 @@ pub(crate) fn build_share_config(state: &AppState) -> serde_json::Value {
             .iter()
             .collect::<Vec<_>>(),
         "sharedRoots": roots,
+        "version": state.share_config.version,
         "shareSuggestions": suggestions,
         "pairedPeers": paired,
         "fingerprint": state.identity.as_ref().map(|i| i.fingerprint.clone()),

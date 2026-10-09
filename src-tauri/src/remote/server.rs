@@ -922,7 +922,7 @@ impl SftpHandler {
             let Some(driver) = guard.drivers.get(&root.source_id) else {
                 continue;
             };
-            if !guard.sources.contains_key(&root.source_id) {
+            if !share_root_available(&guard, root) {
                 continue;
             }
             items.push(SourceMetadataItem {
@@ -1980,6 +1980,12 @@ fn has_dotdot(path: &str) -> bool {
     path.split('/').any(|seg| seg == "..")
 }
 
+fn share_root_available(state: &crate::state::AppState, root: &crate::state::SharedRoot) -> bool {
+    state.drivers.contains_key(&root.source_id)
+        && (matches!(root.origin, crate::state::SharedRootOrigin::Folder)
+            || state.sources.contains_key(&root.source_id))
+}
+
 async fn resolve_source(
     state: &SharedState,
     root_id: &str,
@@ -2158,7 +2164,7 @@ impl russh_sftp::server::Handler for SftpHandler {
             shared.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
             shared
                 .into_iter()
-                .filter(|root| guard.sources.contains_key(&root.source_id))
+                .filter(|root| share_root_available(&guard, root))
                 .map(|root| DirEntry {
                     name: root.id,
                     is_dir: true,
@@ -2437,7 +2443,7 @@ impl russh_sftp::server::Handler for SftpHandler {
         let mut items: Vec<serde_json::Value> = Vec::new();
         for root in guard.share_config.shared_roots.iter() {
             if let Some(driver) = guard.drivers.get(&root.source_id) {
-                if !guard.sources.contains_key(&root.source_id) {
+                if !share_root_available(&guard, root) {
                     continue;
                 }
                 items.push(serde_json::json!({

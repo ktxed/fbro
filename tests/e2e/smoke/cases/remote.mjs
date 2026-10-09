@@ -11,6 +11,7 @@ import {
   expectCheckboxSelected,
   pressWindowKey,
   reloadBrowserApp,
+  setTextInputValue,
 } from "../browser.mjs";
 import { waitFor } from "../wait.mjs";
 import { expectModalFocus } from "./modal-focus.mjs";
@@ -68,12 +69,72 @@ export async function runRemoteFlow(browserA, observerA, browserB, observerB) {
   await observerA.waitForEntry("left", "Projects", "directory");
   await observerA.waitForEntry("left", "SyncBro", "directory");
 
-  const sharedTarget = observerA.state.shareConfig.shareSuggestions
-    ?.find((target) => target.origin === "home" && target.path === aHome);
-  if (!sharedTarget) throw new Error("no Home share target suggestion");
+  // Exercise the folder widget before enabling sharing, including keyboard
+  // submission, rejection, removal, history, and both colour schemes.
+  await browserA.execute(() => document.querySelector('[data-testid="panel-left"]')?.focus());
+  await waitFor(() => observerA.state.focus === "left", { timeout: 10_000, label: "sharing opener panel active" });
+  await pressWindowKey(browserA, ",", { ctrl: true });
+  const settingsA = await browserA.$('[data-modal-id="settings"]');
+  await settingsA.waitForDisplayed({ timeout: 10_000 });
+  await (await browserA.$('[data-testid="settings-tab-sharing"]')).click();
+  const folderInput = await browserA.$('[data-testid="sharing-folder-path"]');
+  const suggestions = await browserA.$('[data-testid="sharing-folder-suggestions"]');
+  await suggestions.selectByAttribute("value", "current");
+  if (await folderInput.getValue() !== aHome) throw new Error("Current folder suggestion used the wrong panel path");
+  await folderInput.click();
+  await browserA.keys("Enter");
+  const sharedTarget = await waitFor(() => observerA.state.shareConfig.sharedRoots
+    .find((target) => target.origin === "folder" && target.path === aHome),
+  { timeout: 10_000, label: "current folder shared through UI" });
   const sharedTargetId = sharedTarget.id;
+  await waitFor(async () => await folderInput.getValue() === "", { timeout: 10_000, label: "accepted folder input clears" });
+  await expectModalFocus(browserA, '[data-testid="sharing-folder-path"]', "folder Enter preserves input focus");
+  if (observerA.state.sources[sharedTarget.sourceId]) throw new Error("folder share created a panel source");
 
-  observerA.sendIntent("SetSharedTargets", undefined, { targetIds: [sharedTargetId] });
+  // Add a canonical equivalent; it must remain a single share.
+  await setTextInputValue(browserA, '[data-testid="sharing-folder-path"]', `${aHome}/.`);
+  await browserA.keys("Enter");
+  await waitFor(async () => await folderInput.getValue() === "", { timeout: 10_000, label: "duplicate folder accepted" });
+  if (observerA.state.shareConfig.sharedRoots.length !== 1) throw new Error("canonical-equivalent share was duplicated");
+
+  const typedFolder = path.posix.join(aHome, "Projects/Deep");
+  for (const scheme of ["fbro-dark", "daylight"]) {
+    observerA.sendIntent("SetGeneralOption", undefined, { key: "colorScheme", value: scheme });
+    await waitFor(() => browserA.execute((scheme) => document.querySelector(".app")?.dataset.colorScheme === scheme, scheme),
+      { timeout: 10_000, label: `sharing theme ${scheme}` });
+    const rejectedPath = path.posix.join(aHomeDownloads, "remote.txt");
+    await setTextInputValue(browserA, '[data-testid="sharing-folder-path"]', rejectedPath);
+    await folderInput.click();
+    await browserA.keys("Enter");
+    await (await browserA.$('[data-testid="sharing-folder-error"]')).waitForDisplayed({ timeout: 10_000 });
+    if (await folderInput.getValue() !== rejectedPath) throw new Error("rejected folder path was discarded");
+    await expectModalFocus(browserA, '[data-testid="sharing-folder-path"]', "rejected folder preserves focus");
+    if (observerA.state.shareConfig.sharedRoots.length !== 1) throw new Error("rejection changed sharing state");
+
+    await setTextInputValue(browserA, '[data-testid="sharing-folder-path"]', typedFolder);
+    const patchStart = observerA.messages.length;
+    await (await browserA.$('[data-command-id="sharing.folder.add"]')).click();
+    const typedTarget = await waitFor(() => observerA.state.shareConfig.sharedRoots.find((target) => target.path === typedFolder),
+      { timeout: 10_000, label: "typed arbitrary folder added" });
+    await expectModalFocus(browserA, '[data-testid="sharing-folder-path"]', "Add returns focus to input");
+    const patches = observerA.messages.slice(patchStart).filter((message) => message.type === "StatePatch" && message.domain === "shareConfig");
+    if (patches.length !== 1) throw new Error(`folder Add submitted ${patches.length} times`);
+    const checkbox = await browserA.$(`[data-share-target-id="${typedTarget.id}"] input`);
+    await checkbox.click();
+    await waitFor(() => !observerA.state.shareConfig.sharedRoots.some((target) => target.id === typedTarget.id),
+      { timeout: 10_000, label: "folder unchecked and removed" });
+    await expectModalFocus(browserA, '[data-testid="sharing-folder-path"]', "removed folder returns focus to input");
+    await browserA.saveScreenshot(path.join(artifactsDir, "screenshots", `sharing-folders-${scheme}.png`));
+  }
+  await browserA.keys(["Alt", "ArrowDown", "Alt"]);
+  await (await browserA.$(".input-history")).waitForDisplayed({ timeout: 10_000 });
+  await browserA.keys("Escape");
+  if (!(await settingsA.isDisplayed())) throw new Error("history Escape closed Settings");
+  await browserA.keys("Escape");
+  await settingsA.waitForDisplayed({ timeout: 10_000, reverse: true });
+  await waitFor(() => browserA.execute(() => document.activeElement === document.querySelector('[data-testid="panel-left"]')),
+    { timeout: 10_000, label: "Sharing restores originating listing focus" });
+
   observerA.sendIntent("EnableSharing", undefined, { enabled: true });
   observerB.sendIntent("EnableSharing", undefined, { enabled: true });
   await waitFor(() => observerA.state.shareConfig.enabled, { timeout: 20_000, label: "fbro-a sharing enabled" });
@@ -86,7 +147,6 @@ export async function runRemoteFlow(browserA, observerA, browserB, observerB) {
   await (await browserB.$('[data-testid="direct-pair-address"]')).setValue("fbro-a:7880");
   await (await browserB.$('[data-command-id="sharing.pair-direct"]')).click();
 
-  const settingsA = await browserA.$('[data-modal-id="settings"]');
   await settingsA.waitForDisplayed({ timeout: 20_000 });
   const confirmations = await Promise.all([
     browserA.$('[data-testid="pairing-confirmation"]'),
@@ -133,7 +193,7 @@ export async function runRemoteFlow(browserA, observerA, browserB, observerB) {
   });
   const remoteSource = Object.values(observerB.state.sources)
     .find((source) => source.kind === "remote" && source.id.endsWith(`:${sharedTargetId}`));
-  if (!remoteSource) throw new Error("remote Home source did not mount");
+  if (!remoteSource) throw new Error("remote arbitrary folder source did not mount");
   if (!remoteSource.capabilities?.readOnly) throw new Error("remote source is not marked read-only");
   if (!observerB.state.panels.left?.supportsThumbnails && observerB.state.panels.left?.sourceId === remoteSource.id) {
     throw new Error("remote panel unexpectedly lacks thumbnail support");

@@ -220,6 +220,14 @@ enter the sequential Tab cycle.
 | Completed / cancelled / failed operation | Close | Close or acknowledge the result |
 | Dry-run result | Close | Close |
 
+Sharing's folder widget stays within the existing Settings layer and does not
+change initial focus. Its Enter handler respects input history's consumed event,
+and pending submission disables Add while retaining a focusable read-only path
+input. Add and removal of a focused custom-folder checkbox hand focus to that
+input before disabling/removing the action. Async completion and errors preserve
+the current focus; Escape dismisses history first, then Settings restores its
+normal opener through ModalStack.
+
 Delete is an explicit file-operation confirmation, so its main operation
 button receives focus. Quit, reset, and pairing retain Cancel as their default.
 

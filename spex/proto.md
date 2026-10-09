@@ -7,6 +7,26 @@
 
 ## 1. Overview
 
+### Adding a shared folder
+
+`AddSharedFolder { requestId, path, panelId? }` adds an accessible local folder to
+remote sharing. The backend normalizes and validates the path; optional panelId
+provides the local base for relative paths, otherwise Home is used.
+It replies to the requesting connection with
+`AddSharedFolderOk { timestamp, requestId, targetId, path }` or
+`AddSharedFolderFailed { timestamp, requestId, code, message }`.
+Failures use `FOLDER_PATH_REQUIRED`, `FOLDER_NOT_FOUND`, `NOT_A_FOLDER`,
+`FOLDER_ACCESS_DENIED`, or `FOLDER_UNAVAILABLE`. Success broadcasts the
+authoritative shareConfig patch before the acknowledgement. Equivalent existing
+paths return their existing target ID without adding a duplicate.
+
+`SharedRoot.origin` additionally accepts `folder`; for these roots sourceId is an
+internal local-driver registry key, not a panel Source. shareConfig snapshots
+include `version`, and shareConfig StatePatch versions increase monotonically;
+older patches are discarded. Existing sharing intents and share-file formats
+remain supported. A connection loss releases the input's pending state and
+retains its path for review/retry after the next snapshot.
+
 The settings snapshot's `general.enableHeic2any` boolean and settings-domain
 patches expose the opt-in HEIC/HEIF preview preference. `SetGeneralOption`
 accepts `{ "key": "enableHeic2any", "value": true | false }`; other value

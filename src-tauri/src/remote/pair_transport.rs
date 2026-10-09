@@ -668,21 +668,11 @@ async fn emit_discovered_peers_patch(state: &SharedState) {
 }
 
 async fn emit_share_config_patch(state: &SharedState) {
-    let payload = {
-        let g = state.lock().await;
-        crate::ws::runtime::build_share_config(&g)
+    let message = {
+        let mut g = state.lock().await;
+        crate::ws::runtime::build_share_config_patch(&mut g)
     };
-    emit_to_fe(
-        state,
-        ServerMessage::StatePatch {
-            timestamp: now(),
-            domain: "shareConfig".to_string(),
-            entity_id: None,
-            version: 0,
-            patch: payload,
-        },
-    )
-    .await;
+    emit_to_fe(state, message).await;
 }
 
 async fn emit_to_fe(state: &SharedState, msg: ServerMessage) {

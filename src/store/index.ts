@@ -312,6 +312,7 @@ export interface AppState {
   pendingSearch: PendingSearch | null;
   pendingAttributes: PendingAttributes | null;
   pendingSettings: PendingSettings | null;
+  sharedFolderInput: { path: string; requestId: string | null; error?: string };
   commandPaletteOpen: boolean;
   aboutOpen: boolean;
   activeSortSelectorPanelId: string | null;
@@ -406,6 +407,7 @@ const initialState: AppState = {
   activeSortSelectorPanelId: null,
   discoveredPeers: [],
   shareConfig: { enabled: false, allowIpv6: false, sharedSourceIds: [], sharedRoots: [], shareSuggestions: [], pairedPeers: [] },
+  sharedFolderInput: { path: "", requestId: null },
   pendingPairing: null,
   remoteSourceStatus: {},
 
@@ -496,6 +498,8 @@ export type AppAction =
   | { type: "CLOSE_ATTRIBUTES" }
   | { type: "OPEN_SETTINGS"; tab: SettingsTab }
   | { type: "CLOSE_SETTINGS" }
+  | { type: "SET_SHARED_FOLDER_INPUT"; path: string }
+  | { type: "SUBMIT_SHARED_FOLDER"; requestId: string }
   | { type: "SET_PAIRING_DECISION"; handshakeId: string; accept: boolean }
   | { type: "SET_MAXIMIZED_TERMINAL"; panelId: string | null };
 
@@ -963,6 +967,7 @@ function applyPatch(state: AppState, msg: StatePatchMessage): AppState {
   }
 
   if (msg.domain === "shareConfig") {
+    if (msg.version < (state.shareConfig.version ?? 0)) return state;
     const enabled = msg.patch.enabled as boolean | undefined;
     const allowIpv6 = msg.patch.allowIpv6 as boolean | undefined;
     const sharedSourceIds = msg.patch.sharedSourceIds as string[] | undefined;
@@ -973,6 +978,7 @@ function applyPatch(state: AppState, msg: StatePatchMessage): AppState {
     return {
       ...state,
       shareConfig: {
+        version: msg.version,
         enabled: enabled ?? state.shareConfig.enabled,
         allowIpv6: allowIpv6 ?? state.shareConfig.allowIpv6,
         sharedSourceIds: sharedSourceIds ?? state.shareConfig.sharedSourceIds,
@@ -1241,7 +1247,12 @@ function reducer(state: AppState, action: AppAction): AppState {
     case "CONNECTED":
       return { ...state, connected: true };
     case "DISCONNECTED":
-      return { ...state, connected: false, sessionId: null };
+      return {
+        ...state, connected: false, sessionId: null,
+        sharedFolderInput: state.sharedFolderInput.requestId
+          ? { ...state.sharedFolderInput, requestId: null, error: "Connection lost. Check shared folders after reconnecting, then retry if needed." }
+          : state.sharedFolderInput,
+      };
     case "BE_MESSAGE": {
       const msg = action.msg;
       switch (msg.type) {
@@ -1489,6 +1500,21 @@ function reducer(state: AppState, action: AppAction): AppState {
           }
           console.error("BE error:", msg.code, msg.message);
           return state;
+        case "AddSharedFolderOk":
+          return {
+            ...state,
+            sharedFolderInput: state.sharedFolderInput.requestId === msg.requestId
+              ? { path: "", requestId: null } : state.sharedFolderInput,
+            transientHint: { message: "Shared folder", token: msg.timestamp },
+          };
+        case "AddSharedFolderFailed":
+          if (state.sharedFolderInput.requestId !== msg.requestId) return state;
+          return {
+            ...state,
+            sharedFolderInput: { ...state.sharedFolderInput, requestId: null, error: msg.message },
+            transientHint: state.pendingSettings?.activeTab !== "sharing"
+              ? { message: msg.message, token: msg.timestamp } : state.transientHint,
+          };
         case "RenameOk":
           return { ...state, pendingRename: null };
         case "MkdirOk":
@@ -1919,6 +1945,12 @@ function reducer(state: AppState, action: AppAction): AppState {
       return { ...state, pendingSettings: { activeTab: action.tab }, pendingContextMenu: null };
     case "CLOSE_SETTINGS":
       return { ...state, pendingSettings: null };
+    case "SET_SHARED_FOLDER_INPUT":
+      if (state.sharedFolderInput.requestId) return state;
+      return { ...state, sharedFolderInput: { path: action.path, requestId: null } };
+    case "SUBMIT_SHARED_FOLDER":
+      if (state.sharedFolderInput.requestId) return state;
+      return { ...state, sharedFolderInput: { ...state.sharedFolderInput, requestId: action.requestId, error: undefined } };
     case "SET_PAIRING_DECISION":
       if (state.pendingPairing?.handshakeId !== action.handshakeId) return state;
       return {

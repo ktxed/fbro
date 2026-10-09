@@ -65,6 +65,14 @@ async function main() {
     observerA = new FbroObserver("fbro-a", wsUrls.a);
     await observerA.connect();
 
+    if (process.env.FBRO_E2E_REMOTE_ONLY === "1") {
+      browserB = await startBrowser("fbro-b", webdriverHosts.b, webdriverPorts.b, appB);
+      observerB = new FbroObserver("fbro-b", wsUrls.b);
+      await observerB.connect();
+      await runRemoteFlow(browserA, observerA, browserB, observerB);
+      return;
+    }
+
     if (process.env.FBRO_E2E_SEARCH_ACTIVITY_ONLY === "1") {
       await runSearchActivityFlow(browserA, observerA);
       return;

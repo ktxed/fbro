@@ -189,11 +189,18 @@ flowchart TD
     DriverOnly --> GitDiff["Git diff snapshot<br/>request-owned"]
     DriverOnly --> GitBlob["Git blob clipboard<br/>clipboard-owned"]
     DriverOnly --> Spy["Spy wrapper<br/>decorates LocalFsDriver"]
+    DriverOnly --> SharedFolder["Local folder shares<br/>sharing-owned LocalFsDriver"]
 ```
 
 “Base” here means directly selectable and non-shadow, not necessarily local or
 persistent across application restarts. Remote Sources, for example, exist
 only while their peer connection is registered.
+
+User-entered folder shares own internal `share-folder:<target-id>` driver keys
+without corresponding local panel Sources. Sharing registers/removes these
+drivers and restores them from share.json, independently of volume inventory.
+The peer mounts each shared root as a normal remote Source. See
+[Remote fbro](remote-fbro.md#shared-folders).
 
 ---
 

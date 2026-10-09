@@ -253,6 +253,42 @@ fn empty_test_state() -> SharedState {
     )))
 }
 
+#[tokio::test]
+async fn shared_folder_is_listed_resolved_and_removed_without_a_panel_source() {
+    let state = empty_test_state();
+    let root = SharedRoot {
+        id: "folder-test".into(), name: "Folder".into(), path: "/outside/volumes".into(),
+        source_id: "share-folder:folder-test".into(), origin: SharedRootOrigin::Folder,
+        icon_name: Some("folder".into()),
+    };
+    {
+        let mut guard = state.lock().await;
+        guard.sources.clear();
+        guard.drivers.clear();
+        guard.drivers.insert(root.source_id.clone(), Arc::new(RecordingDriver::default()));
+        guard.share_config.shared_roots = vec![root.clone()];
+    }
+    let mut handler = SftpHandler::new(state.clone(), "peer-test".into());
+    let metadata: serde_json::Value = serde_json::from_slice(&handler.sources_metadata_json().await.unwrap()).unwrap();
+    assert_eq!(metadata[0]["id"], root.id);
+    assert_eq!(metadata[0]["read_only"], true);
+    let handle = handler.opendir(1, "/".into()).await.unwrap();
+    let listing = handler.readdir(2, handle.handle).await.unwrap();
+    assert_eq!(listing.files.len(), 1);
+    assert_eq!(listing.files[0].filename, root.id);
+    let (_, path, driver_id, _, _) = resolve_source(&state, &root.id).await.unwrap();
+    assert_eq!(path, root.path);
+    assert_eq!(driver_id, root.source_id);
+    {
+        let mut guard = state.lock().await;
+        guard.share_config.shared_roots.clear();
+        crate::remote::shared_folder::sync_drivers(&mut guard.drivers, &[]);
+    }
+    assert!(resolve_source(&state, &root.id).await.is_none());
+    let metadata: serde_json::Value = serde_json::from_slice(&handler.sources_metadata_json().await.unwrap()).unwrap();
+    assert_eq!(metadata, serde_json::json!([]));
+}
+
 fn test_manifest_job() -> Arc<Mutex<ManifestJobState>> {
     Arc::new(Mutex::new(ManifestJobState {
         updated_at: unix_millis_now(),

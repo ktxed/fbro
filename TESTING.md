@@ -1,5 +1,18 @@
 # Testing
 
+Arbitrary remote folders: `cargo test --manifest-path src-tauri/Cargo.toml remote::`
+covers local folder validation, relative/Home path normalization, permission
+denial, canonical deduplication, internal driver lifetime without panel Sources,
+SFTP root discovery/resolution/removal, and share-file persistence including
+legacy loading. The remote smoke flow checks Current folder suggestions,
+typed-path Add, single submission, rejection retaining the input, unsharing,
+input history Escape, focus preservation/restoration, both themes, and paired
+read-only browsing/copying/thumbnails/integrity of the resulting folder share.
+Run it independently with `FBRO_E2E_REMOTE_ONLY=1` and the local smoke commands
+below. Native macOS and Windows path, ACL, focus, and WebView checks remain needed.
+The frontend/Tauri debug builds, 39 remote Rust tests, and isolated native
+Linux/Wayland remote smoke flow passed, including both colour schemes.
+
 Search activity: `cargo test --manifest-path src-tauri/Cargo.toml jobs::search::tests`
 covers no-hit heartbeats during active work, inspected-entry counts, concurrent
 folder selection, estimates that revise as folders are discovered, depth limits,
@@ -313,8 +326,9 @@ The smoke test exercises these flows:
   "In range" operators.  Uses the sort-test files with known byte sizes: 500 B,
   100 B, and 10 B.  Asserts that only the correct file matches each filter and
   that all other files are excluded from results.
-- Remote sharing: enable sharing on both instances, pair `fbro-b` to `fbro-a`,
-  mount `fbro-a`'s shared `/work/a` source on `fbro-b`, verify the remote source
+- Remote sharing: configure arbitrary folders through the Sharing widget,
+  enable sharing on both instances, pair `fbro-b` to `fbro-a`,
+  mount `fbro-a`'s shared Home folder on `fbro-b`, verify the remote source
   is read-only, copy `remote.txt` from remote `fbro-a` into local `/work/b/dst`,
   and verify the copied payload.
 - Local UI flows (`cases/local.mjs`, beyond the file operations above):

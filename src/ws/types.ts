@@ -140,6 +140,7 @@ export interface PairedPeer {
 }
 
 export interface ShareConfig {
+  version?: number;
   enabled: boolean;
   allowIpv6: boolean;
   sharedSourceIds: string[];
@@ -156,7 +157,7 @@ export interface SharedRoot {
   name: string;
   path: string;
   sourceId: string;
-  origin: "source" | "home" | "bookmark";
+  origin: "source" | "home" | "bookmark" | "folder";
   iconName?: string;
 }
 
@@ -1221,7 +1222,25 @@ export interface CompareDiffFailedMessage {
 
 // ─── Union types ─────────────────────────────────────────────────────────────
 
+export interface AddSharedFolderOkMessage {
+  type: "AddSharedFolderOk";
+  timestamp: number;
+  requestId: string;
+  targetId: string;
+  path: string;
+}
+
+export interface AddSharedFolderFailedMessage {
+  type: "AddSharedFolderFailed";
+  timestamp: number;
+  requestId: string;
+  code: string;
+  message: string;
+}
+
 export type BEMessage =
+  | AddSharedFolderOkMessage
+  | AddSharedFolderFailedMessage
   | WelcomeMessage
   | StateSnapshotMessage
   | StatePatchMessage

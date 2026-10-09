@@ -26,6 +26,13 @@ dialog types.
 
 ## 2. Current Implementation
 
+Settings Sharing's folder input uses Enter to add the entered path exactly once;
+its suggestion select keeps native keyboard behavior. Alt+Down opens existing
+input history, whose arrows/Enter select a path and whose Escape closes history
+before Settings. Add hands focus to the path input before submission; unchecking
+a focused user-added folder does likewise before its row is removed. Replies
+and sharing patches do not move focus. Covered Settings controls remain inert.
+
 - `ModalStackProvider` captures key and focus events and routes them to the top
   `ModalLayer`.
 - `Layout` passes `hasActiveModal || pendingContextMenu || pendingSourceMenu || bookmarksOpen` to panels as their

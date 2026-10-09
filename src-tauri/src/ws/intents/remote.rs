@@ -24,7 +24,7 @@ use crate::vfs::sftp::{RemoteSourceInfo, SftpDriverConfig, SftpFsDriver};
 use crate::vfs::VfsDriver;
 use crate::ws::intents::sharing::ensure_identity;
 use crate::ws::protocol::{now, ServerMessage};
-use crate::ws::runtime::{build_share_config, build_sources_json, IntentContext};
+use crate::ws::runtime::{build_sources_json, IntentContext};
 
 pub async fn handle(name: &str, args: &Value, ctx: &mut IntentContext<'_>) {
     match name {
@@ -415,20 +415,11 @@ async fn push_sources_patch(ctx: &mut IntentContext<'_>) {
 }
 
 async fn push_share_config_patch(ctx: &mut IntentContext<'_>) {
-    let payload = {
-        let state = ctx.state.lock().await;
-        build_share_config(&state)
+    let message = {
+        let mut state = ctx.state.lock().await;
+        crate::ws::runtime::build_share_config_patch(&mut state)
     };
-    let _ = ctx
-        .tx
-        .send(ServerMessage::StatePatch {
-            timestamp: now(),
-            domain: "shareConfig".to_string(),
-            entity_id: None,
-            version: 0,
-            patch: payload,
-        })
-        .await;
+    let _ = ctx.tx.send(message).await;
 }
 
 async fn send_error(ctx: &mut IntentContext<'_>, code: &str, message: &str) {

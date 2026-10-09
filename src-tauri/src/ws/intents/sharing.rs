@@ -16,13 +16,14 @@ use crate::remote::keys::{self, Identity};
 use crate::remote::pairing;
 use crate::remote::share_state::{self, ShareState};
 use crate::ws::protocol::{now, ServerMessage};
-use crate::ws::runtime::{build_share_config, build_sources_json, IntentContext};
+use crate::ws::runtime::{build_sources_json, IntentContext};
 
 pub async fn handle(name: &str, args: &Value, ctx: &mut IntentContext<'_>) {
     match name {
         "EnableSharing" => enable_sharing(args, ctx).await,
         "SetSharingIpv6" => set_ipv6_enabled(args, ctx).await,
         "SetSharedTargets" => set_shared_targets(args, ctx).await,
+        "AddSharedFolder" => add_shared_folder(args, ctx).await,
         "SetSharedSources" => set_shared_sources(args, ctx).await,
         "StartPairing" => start_pairing(args, ctx).await,
         "ConfirmPairing" => confirm_pairing(args, ctx).await,
@@ -264,10 +265,11 @@ async fn persist_share_state(ctx: &mut IntentContext<'_>) {
             shared_roots: state.share_config.shared_roots.clone(),
         }
     };
-    if let Err(e) = share_state::save(&share_state::default_share_path(), &snapshot) {
+    let saved = tokio::task::spawn_blocking(move || share_state::save(&share_state::default_share_path(), &snapshot)).await;
+    if !matches!(&saved, Ok(Ok(()))) {
         // Don't fail the intent — sharing still works in memory; the user
         // just loses the auto-restore on next launch.
-        eprintln!("[sharing] failed to persist share.json: {e}");
+        eprintln!("[sharing] failed to persist share.json: {saved:?}");
     }
 }
 
@@ -410,6 +412,9 @@ async fn set_shared_targets(args: &Value, ctx: &mut IntentContext<'_>) {
             .into_iter()
             .filter(|root| ids.contains(&root.id))
             .filter_map(|mut root| {
+                if matches!(root.origin, crate::state::SharedRootOrigin::Folder) {
+                    return Some(root);
+                }
                 let source_id = crate::state::source_id_for_local_path(&state.sources, &root.path)?;
                 root.source_id = source_id;
                 Some(root)
@@ -427,11 +432,64 @@ async fn update_shared_roots(roots: Vec<crate::state::SharedRoot>, ctx: &mut Int
         .collect();
     {
         let mut state = ctx.state.lock().await;
+        crate::remote::shared_folder::sync_drivers(&mut state.drivers, &roots);
         state.share_config.shared_source_ids = filtered_source_ids;
         state.share_config.shared_roots = roots;
     }
     persist_share_state(ctx).await;
     broadcast_share_status(ctx).await;
+}
+
+async fn add_shared_folder(args: &Value, ctx: &mut IntentContext<'_>) {
+    use super::arg_str;
+    let request_id = arg_str(args, "requestId").unwrap_or_default().to_string();
+    let raw = arg_str(args, "path").unwrap_or_default().to_string();
+    let (base, home, existing) = {
+        let state = ctx.state.lock().await;
+        let home = state.platform.home_dir();
+        let panel = arg_str(args, "panelId").and_then(|id| state.panels.get(id));
+        let base = panel.filter(|panel| {
+            state.sources.get(&panel.source_id).is_some_and(|source|
+                source.kind == "filesystem" && source.mounted && !source.shadow)
+        }).map(|panel| panel.path.clone()).unwrap_or_else(|| home.clone());
+        (base, home, state.share_config.shared_roots.clone())
+    };
+    let result = tokio::task::spawn_blocking(move ||
+        crate::remote::shared_folder::validate(&raw, &base, &home, &existing)
+    ).await;
+    let root = match result {
+        Ok(Ok(root)) => root,
+        result => {
+            let (code, message) = match result {
+                Ok(Err(error)) => (error.code, error.message),
+                Err(error) => ("FOLDER_UNAVAILABLE", format!("Cannot validate folder: {error}")),
+                Ok(Ok(_)) => unreachable!(),
+            };
+            let _ = ctx.tx.send(ServerMessage::AddSharedFolderFailed {
+                timestamp: now(), request_id, code: code.into(), message,
+            }).await;
+            return;
+        }
+    };
+    // Merge with live state after validation; don't replace another connection's picks.
+    let root = {
+        let mut state = ctx.state.lock().await;
+        if let Some(existing) = state.share_config.shared_roots.iter()
+            .find(|existing| existing.id == root.id || existing.path == root.path)
+        {
+            existing.clone()
+        } else {
+            state.share_config.shared_roots.push(root.clone());
+            let roots = state.share_config.shared_roots.clone();
+            crate::remote::shared_folder::sync_drivers(&mut state.drivers, &roots);
+            root
+        }
+    };
+    persist_share_state(ctx).await;
+    broadcast_share_status(ctx).await;
+    let _ = ctx.tx.send(ServerMessage::AddSharedFolderOk {
+        timestamp: now(), request_id, target_id: root.id, path: root.path,
+    }).await;
 }
 
 async fn revoke_pairing(args: &Value, ctx: &mut IntentContext<'_>) {
@@ -725,20 +783,13 @@ async fn stop_sharing_server(ctx: &mut IntentContext<'_>) {
 }
 
 async fn broadcast_share_status(ctx: &mut IntentContext<'_>) {
-    let payload = {
-        let state = ctx.state.lock().await;
-        build_share_config(&state)
+    let (message, senders) = {
+        let mut state = ctx.state.lock().await;
+        (crate::ws::runtime::build_share_config_patch(&mut state), state.gui_senders.clone())
     };
-    let _ = ctx
-        .tx
-        .send(ServerMessage::StatePatch {
-            timestamp: now(),
-            domain: "shareConfig".to_string(),
-            entity_id: None,
-            version: 0,
-            patch: payload,
-        })
-        .await;
+    for sender in senders {
+        let _ = sender.send(message.clone()).await;
+    }
 }
 
 async fn send_error(ctx: &mut IntentContext<'_>, code: &str, message: &str) {

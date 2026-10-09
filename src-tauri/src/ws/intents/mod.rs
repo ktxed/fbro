@@ -143,6 +143,7 @@ pub async fn dispatch(name: &str, scope: &Value, args: &Value, ctx: &mut IntentC
             tabs::handle(name, scope, args, ctx).await
         }
         "EnableSharing"
+        | "AddSharedFolder"
         | "SetSharedTargets"
         | "SetSharedSources"
         | "SetSharingIpv6"
@@ -164,6 +165,7 @@ fn should_record_command(name: &str) -> bool {
     matches!(
         name,
         "GitCreateBranch"
+            | "AddSharedFolder"
             | "InitGitRepository"
             | "StartFileOp"
             | "RenameFile"

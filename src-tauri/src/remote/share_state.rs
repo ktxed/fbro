@@ -197,6 +197,14 @@ mod tests {
             origin: SharedRootOrigin::Home,
             icon_name: None,
         });
+        want.shared_roots.push(SharedRoot {
+            id: "folder-projects-test".into(),
+            name: "Projects".into(),
+            path: "/outside/volumes/Projects".into(),
+            source_id: "share-folder:folder-projects-test".into(),
+            origin: SharedRootOrigin::Folder,
+            icon_name: Some("folder".into()),
+        });
         save(&p, &want).expect("save");
         let got = load(&p).expect("load");
         assert_eq!(got, want);

@@ -358,6 +358,21 @@ pub enum ServerMessage {
         code: String,
         message: String,
     },
+    AddSharedFolderOk {
+        timestamp: u64,
+        #[serde(rename = "requestId")]
+        request_id: String,
+        #[serde(rename = "targetId")]
+        target_id: String,
+        path: String,
+    },
+    AddSharedFolderFailed {
+        timestamp: u64,
+        #[serde(rename = "requestId")]
+        request_id: String,
+        code: String,
+        message: String,
+    },
     /// Completion signal for a mutating or remote Git action.
     GitActionFinished {
         timestamp: u64,
