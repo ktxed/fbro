@@ -57,8 +57,9 @@ channel — no extra ports, no exec channel.
 | `/.fbro-manifest/start/{b64 path}` | Begin building an integrity manifest on the remote (Sync Bro) |
 | `/.fbro-manifest/status/{job_id}` | Poll manifest progress / collect the finished manifest |
 | `/.fbro-manifest/cancel/{job_id}` | Cancel a remote manifest job |
-| `/.fbro-transfer-context/{job_id}` | Tag the current read session with a job id (resumable transfers) |
-| `/.fbro-integrity/result/{job_id}/{b64 path}` | Read the server's streaming digest for a transfer |
+| `/.fbro-transfer-context/{token}` | Tag the current read session with a transfer identity |
+| `/.fbro-transfer-status/{token}` | Read `{ "cancelled": boolean }` for this peer’s transfer |
+| `/.fbro-integrity/result/{token}/{b64 path}` | Read the server's streaming digest for a transfer |
 | `/.fbro-integrity/file/{b64 path}` | Read a full-file blake3 digest of a remote file |
 
 Paths are base64-url-no-pad encoded. The digest algorithm is advertised as
@@ -188,14 +189,14 @@ same bytes (`compare_transfer_digests`):
 1. **Remote full-file digest** — read from `/.fbro-integrity/file/{b64 path}`
    (`file_digest`).
 2. **Server streaming digest** — computed on the remote *as it serves the bytes*
-   and read from `/.fbro-integrity/result/{job_id}/{b64 path}` (`transfer_digest`).
+   and read from `/.fbro-integrity/result/{token}/{b64 path}` (`transfer_digest`).
    The server accumulates this with `OrderedTransferDigest`, which buffers
    out-of-order chunks in a `BTreeMap`, hashes contiguous runs (`drain_contiguous`),
    and finalizes once every byte is covered.
 3. **Local destination digest** — hashed from the file just written.
 
 Size and hash must agree across all three. The streaming digest is tied to the
-job by the `/.fbro-transfer-context/{job_id}` marker, which the client opens
+job by the `/.fbro-transfer-context/{token}` marker, which the client opens
 (`mark_remote_transfer_context`) before reading so the server knows which
 transfer to accumulate.
 
@@ -207,6 +208,21 @@ transfer to accumulate.
   a verification mismatch uses `kind: "verification"` with `retry` / `skip` /
   `abort`. Conflict policy may also be preset (`ask` / `skip` / `overwrite` /
   `resume`).
+- **Outgoing cancellation is final on both peers.** Each client operation owns a
+  UUID token, stable across retries/reconnects and distinct from its local job id.
+  Cancellation records `(authenticated peer fingerprint, client transfer key)`
+  in shared backend memory for the app lifetime, including after UI job removal.
+  Further opens/reads with that identity return SFTP `PermissionDenied`; a status
+  control read reports cancellation without registering or restarting a transfer.
+  The client checks status before attempts and after stream errors, preserves a
+  typed cancellation through read-ahead, stops its workers, and reports `Cancelled`
+  without automatic resume or a verification prompt. Blocking reads and remote
+  verification hashing observe cancellation before returning their result.
+  Browsing, other transfers, and queued jobs continue; a new copy uses a fresh token.
+  Older servers returning `NoSuchFile`/`OpUnsupported` for status retain legacy
+  behavior. Both peers must be updated for reliable cancellation propagation.
+  This reuses the existing SFTP control mechanism: SFTP v3 has no cancellation
+  status, and russh-sftp’s server handler cannot attach a custom status message.
 - **Cancel keeps or deletes partials.** A job carries
   `keep_partial_files_on_cancel`. For remote copies the cancel dialog offers
   *Keep Partials* vs *Delete Partials*. Rule: a freshly started copy

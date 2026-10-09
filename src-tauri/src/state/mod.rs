@@ -509,6 +509,8 @@ pub struct AppState {
     pub focus: String,
     pub platform: Arc<dyn Platform>,
     pub job_store: JobStore,
+    /// Cancelled remote transfer identities survive SFTP reconnects and UI removal.
+    pub cancelled_remote_transfers: HashSet<(String, String)>,
     pub open_with_requests: HashMap<String, OpenWithRequest>,
     pub bro_requests: HashMap<String, BroRequest>,
     pub compare_sessions: HashMap<String, CompareSession>,
@@ -1033,6 +1035,7 @@ impl AppState {
             thumb_pool,
             thumb_cache,
             discovered_peers: HashMap::new(),
+            cancelled_remote_transfers: HashSet::new(),
             share_config,
             identity: None,
             remote_server_handle: None,

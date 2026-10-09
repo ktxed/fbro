@@ -759,6 +759,9 @@ fn copy_file_with_progress(
             }
             Err(CopyFileError::Fatal(e)) => return Err(e),
             Err(CopyFileError::Recoverable(e)) => {
+                if *cancel_rx.borrow() {
+                    return Err(CANCELLED_ERR.to_string());
+                }
                 if !auto_resume_copies || !can_resume {
                     return Err(e);
                 }
@@ -790,6 +793,9 @@ fn copy_file_with_progress(
                 }
                 match resolve_verification_mismatch(src, dst, &e, tx, job_id, decision_rx)? {
                     VerificationOutcome::Retry => {
+                        if *cancel_rx.borrow() {
+                            return Err(CANCELLED_ERR.to_string());
+                        }
                         resume_next_attempt = false;
                         send_progress_sync_with_status(
                             tx,
@@ -878,12 +884,22 @@ fn copy_file_once_with_progress(
 
     let mut reader = if resume_offset > 0 {
         src_driver.open_read_at(src, resume_offset).map_err(|e| {
-            CopyFileError::Recoverable(format!("Cannot resume {src} at byte {resume_offset}: {e}"))
+            if matches!(e, crate::vfs::VfsError::Cancelled) {
+                CopyFileError::Fatal(CANCELLED_ERR.to_string())
+            } else {
+                CopyFileError::Recoverable(format!(
+                    "Cannot resume {src} at byte {resume_offset}: {e}"
+                ))
+            }
         })?
     } else {
-        src_driver
-            .open_read(src)
-            .map_err(|e| CopyFileError::Fatal(format!("Cannot open {src}: {e}")))?
+        src_driver.open_read(src).map_err(|e| {
+            if matches!(e, crate::vfs::VfsError::Cancelled) {
+                CopyFileError::Fatal(CANCELLED_ERR.to_string())
+            } else {
+                CopyFileError::Fatal(format!("Cannot open {src}: {e}"))
+            }
+        })?
     };
 
     if resume_offset == 0 {
@@ -932,9 +948,22 @@ fn copy_file_once_with_progress(
             return Err(CopyFileError::Fatal(CANCELLED_ERR.to_string()));
         }
 
-        let n = reader
-            .read(&mut buf)
-            .map_err(|e| CopyFileError::Recoverable(format!("Read error on {src}: {e}")))?;
+        let read = reader.read(&mut buf);
+        let remote_cancelled = read.as_ref().err().is_some_and(|error| {
+            error
+                .get_ref()
+                .and_then(|inner| inner.downcast_ref::<crate::vfs::VfsError>())
+                .is_some_and(|error| matches!(error, crate::vfs::VfsError::Cancelled))
+        });
+        if remote_cancelled || *cancel_rx.borrow() {
+            drop(writer);
+            if resume_offset == 0 && !keep_partial_files_on_cancel.load(Ordering::Relaxed) {
+                let _ = dst_driver.remove_file(dst);
+            }
+            return Err(CopyFileError::Fatal(CANCELLED_ERR.to_string()));
+        }
+        let n =
+            read.map_err(|e| CopyFileError::Recoverable(format!("Read error on {src}: {e}")))?;
         if n == 0 {
             break;
         }
@@ -969,11 +998,19 @@ fn copy_file_once_with_progress(
 
     let remote_digest = if resume_offset > 0 {
         src_driver.file_digest(src).map_err(|e| {
-            CopyFileError::Verification(format!("Verification failed for {src}: {e}"))
+            if matches!(e, crate::vfs::VfsError::Cancelled) {
+                CopyFileError::Fatal(CANCELLED_ERR.to_string())
+            } else {
+                CopyFileError::Verification(format!("Verification failed for {src}: {e}"))
+            }
         })?
     } else {
         src_driver.transfer_digest(job_id, src).map_err(|e| {
-            CopyFileError::Verification(format!("Verification failed for {src}: {e}"))
+            if matches!(e, crate::vfs::VfsError::Cancelled) {
+                CopyFileError::Fatal(CANCELLED_ERR.to_string())
+            } else {
+                CopyFileError::Verification(format!("Verification failed for {src}: {e}"))
+            }
         })?
     };
 
@@ -1000,6 +1037,10 @@ fn copy_file_once_with_progress(
         })?;
         compare_transfer_digests(src, dst, &remote_digest, &stream_digest, &dest_digest)
             .map_err(CopyFileError::Verification)?;
+    }
+
+    if *cancel_rx.borrow() {
+        return Err(CopyFileError::Fatal(CANCELLED_ERR.to_string()));
     }
 
     if save_digest_file {
@@ -1692,6 +1733,9 @@ mod tests {
     struct FlakyReadDriver {
         fail_after: Option<u64>,
         failed: Arc<AtomicBool>,
+        cancel_reads: bool,
+        cancel_on_open: bool,
+        opens: std::sync::atomic::AtomicUsize,
     }
 
     struct FlakyReader {
@@ -1699,6 +1743,7 @@ mod tests {
         pos: u64,
         fail_at: Option<u64>,
         failed: Arc<AtomicBool>,
+        cancel_reads: bool,
     }
 
     impl Read for FlakyReader {
@@ -1706,6 +1751,9 @@ mod tests {
             if let Some(fail_at) = self.fail_at {
                 if self.pos >= fail_at {
                     self.failed.store(true, Ordering::SeqCst);
+                    if self.cancel_reads {
+                        return Err(std::io::Error::other(VfsError::Cancelled));
+                    }
                     return Err(std::io::Error::new(
                         std::io::ErrorKind::TimedOut,
                         "test timeout",
@@ -1728,6 +1776,9 @@ mod tests {
             Self {
                 fail_after,
                 failed: Arc::new(AtomicBool::new(false)),
+                cancel_reads: false,
+                cancel_on_open: false,
+                opens: std::sync::atomic::AtomicUsize::new(0),
             }
         }
 
@@ -1788,6 +1839,10 @@ mod tests {
         }
 
         fn open_read_at(&self, path: &str, offset: u64) -> Result<Box<dyn Read + Send>, VfsError> {
+            self.opens.fetch_add(1, Ordering::SeqCst);
+            if self.cancel_on_open {
+                return Err(VfsError::Cancelled);
+            }
             let mut file = fs::File::open(path).map_err(|e| VfsError::IOError(e.to_string()))?;
             file.seek(SeekFrom::Start(offset))
                 .map_err(|e| VfsError::IOError(e.to_string()))?;
@@ -1799,6 +1854,7 @@ mod tests {
                 pos: offset,
                 fail_at,
                 failed: self.failed.clone(),
+                cancel_reads: self.cancel_reads,
             }))
         }
 
@@ -1857,6 +1913,78 @@ mod tests {
 
     fn bytes(len: usize) -> Vec<u8> {
         (0..len).map(|i| ((i * 31 + 7) % 251) as u8).collect()
+    }
+
+    #[test]
+    fn remote_cancellation_never_retries_or_prompts_and_honors_partial_policy() {
+        let dir = TestDir::new("remote-cancel");
+        let data = bytes(2 * 1024 * 1024 + 113);
+        let src = dir.path.join("source.bin");
+        fs::write(&src, &data).unwrap();
+        for (resume, keep, cancel_on_open) in [
+            (false, false, false),
+            (false, true, false),
+            (true, false, false),
+            (false, false, true),
+        ] {
+            let dst = dir
+                .path
+                .join(format!("dest-{resume}-{keep}-{cancel_on_open}.bin"));
+            if resume {
+                fs::write(&dst, &data[..1536 * 1024]).unwrap();
+            }
+            let mut driver = FlakyReadDriver::new(Some(1152 * 1024));
+            driver.cancel_reads = true;
+            driver.cancel_on_open = cancel_on_open;
+            let (tx, mut rx) = mpsc::channel(64);
+            let (_cancel_tx, cancel_rx) = watch::channel(false);
+            let (_pause_tx, pause_rx) = watch::channel(false);
+            let (_decision_tx, mut decision_rx) = mpsc::channel(1);
+            let err = copy_file_with_progress(
+                "job-test",
+                &src.to_string_lossy(),
+                &dst.to_string_lossy(),
+                data.len() as u64,
+                &tx,
+                &cancel_rx,
+                &pause_rx,
+                1,
+                0,
+                data.len() as u64,
+                0,
+                &driver,
+                &crate::vfs::local::LocalFsDriver,
+                &mut decision_rx,
+                &VerificationPolicy::Prompt,
+                false,
+                true,
+                Arc::new(AtomicBool::new(false)),
+                resume,
+                Arc::new(AtomicBool::new(keep)),
+            )
+            .unwrap_err();
+            assert_eq!(err, CANCELLED_ERR);
+            assert_eq!(
+                driver.opens.load(Ordering::SeqCst),
+                1,
+                "cancellation must bypass automatic resume"
+            );
+            assert_eq!(dst.exists(), resume || keep);
+            if dst.exists() {
+                assert_eq!(fs::read(&dst).unwrap(), data[..1152 * 1024]);
+            }
+            while let Ok(msg) = rx.try_recv() {
+                if let ServerMessage::JobEvent {
+                    event, progress, ..
+                } = msg
+                {
+                    assert_ne!(event, "DecisionRequired");
+                    assert!(!progress
+                        .and_then(|p| p.status_text)
+                        .is_some_and(|s| s.contains("Resuming transfer after read error")));
+                }
+            }
+        }
     }
 
     #[test]

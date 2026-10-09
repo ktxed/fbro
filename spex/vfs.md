@@ -481,3 +481,13 @@ staging. Overwrite mode flushes and closes the staged writer before
 `try_rename`; it never falls back to deleting or truncating an existing sidecar
 when atomic placement fails. Failed/cancelled writes remove only paths owned
 by that job through `remove_file`.
+
+### Transfer cancellation errors
+
+`VfsError::Cancelled` is an intentional, non-retryable cancellation. SFTP drivers
+preserve this typed error inside synchronous `Read` I/O errors; copy jobs inspect
+the type rather than matching text. Cancellation bypasses auto-resume and
+verification decisions. Interrupted fresh copies follow the keep-partials choice;
+resumed copies retain their existing partial. `begin_file_op`/`end_file_op` scope
+SFTP UUID transfer identities and dedicated connections; connection replacement
+retains the identity, and operation completion releases it.

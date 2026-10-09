@@ -1090,6 +1090,7 @@ function applyQuitConfirmRequired(state: AppState, msg: QuitConfirmRequiredMessa
 function applyJobEvent(state: AppState, msg: JobEventMessage): AppState {
   const previousJob = state.jobs[msg.jobId];
   if (!previousJob) return state;
+  if (previousJob.state === "Cancelled" && msg.event !== "Cancelled") return state;
   const sp = previousJob.kind === "search" ? msg.searchProgress : undefined;
   // Terminal events can carry the final search snapshot too. Empty activity
   // updates retain the results array instead of copying it every 200 ms.

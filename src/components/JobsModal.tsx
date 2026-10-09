@@ -264,7 +264,7 @@ function JobRow({
   const visibleFiles = filesExpanded ? job.files.slice(fileStart, fileEnd) : [];
 
   return (
-    <div className={`jobs-modal__row${isActive ? " jobs-modal__row--active" : ""}`}>
+    <div className={`jobs-modal__row${isActive ? " jobs-modal__row--active" : ""}`} data-testid="job-row" data-job-id={job.jobId}>
       <div className="jobs-modal__row-header">
         {prefix}
         <span className="jobs-modal__type">{typeLabel}</span>
@@ -294,6 +294,7 @@ function JobRow({
               <button
                 className="jobs-modal__cancel"
                 title="Force cancel"
+                data-testid="job-cancel"
                 onClick={() => cancelJobWithPartialPrompt(client, state, job)}
               >
                 <IconX size={12} /> Cancel

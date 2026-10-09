@@ -277,6 +277,81 @@ export async function runRemoteFlow(browserA, observerA, browserB, observerB) {
   if (copied !== "remote payload\n") throw new Error("remote copied file content mismatch");
   await closeTerminalJobDialog(browserB);
 
+  // Cancel at the serving instance while the receiver has auto-resume enabled.
+  // A sparse file keeps the transfer active without allocating a large fixture.
+  observerB.sendIntent("SetGeneralOption", undefined, { key: "autoResumeCopies", value: true });
+  await waitFor(() => observerB.state.settings.general.autoResumeCopies === true, {
+    timeout: 10_000, label: "remote auto-resume enabled for cancellation regression",
+  });
+  const cancelName = "cancel-transfer.bin";
+  const nextName = "after-cancel.txt";
+  const cancelSize = 2 * 1024 * 1024 * 1024;
+  const cancelFixture = path.join(aHomeDownloadsHost, cancelName);
+  const fixtureFd = fs.openSync(cancelFixture, "w");
+  try { fs.ftruncateSync(fixtureFd, cancelSize); } finally { fs.closeSync(fixtureFd); }
+  fs.writeFileSync(path.join(aHomeDownloadsHost, nextName), "next transfer payload\n");
+  observerB.sendIntent("Refresh", "left");
+  await observerB.waitForEntry("left", cancelName, "file", 20_000);
+  await observerB.waitForEntry("left", nextName, "file", 20_000);
+  await browserA.execute(() => document.querySelector('[data-testid="panel-left"]')?.focus());
+  await browserA.keys("j");
+  const jobsModal = await browserA.$('[data-modal-id="jobs"]');
+  await jobsModal.waitForDisplayed({ timeout: 10_000 });
+  const coveredCursor = observerA.state.panels.left.cursor;
+  await browserA.keys("ArrowDown");
+  if (observerA.state.panels.left.cursor !== coveredCursor) throw new Error("Jobs modal allowed covered panel navigation");
+  const startCopy = (name, size) => observerB.sendIntent("StartFileOp", undefined, {
+    opType: "copy", files: [{ name, kind: "file", size }], sourcePanel: "left", destPanel: "right",
+    destPath: bDst, conflictPolicy: "overwrite", verificationPolicy: "prompt", saveDigestFile: false,
+    background: true,
+  });
+  startCopy(cancelName, cancelSize);
+  const incoming = await waitFor(() => Object.values(observerB.state.jobs).find(job =>
+    job.kind === "file-op" && job.files?.some(file => file.name === cancelName)),
+  { timeout: 10_000, label: "remote copy started" });
+  const outgoing = await waitFor(() => Object.values(observerA.state.jobs).find(job =>
+    job.kind === "outgoing-transfer" && job.state === "Running"
+    && job.progress?.currentFile?.endsWith(cancelName) && job.progress.totalBytesCopied > 0),
+  { timeout: 10_000, label: "outgoing transfer actively serving bytes" });
+  const cancelSelector = `[data-job-id="${outgoing.jobId}"] [data-testid="job-cancel"]`;
+  await browserA.$(cancelSelector).waitForDisplayed({ timeout: 10_000 });
+  let reachedCancel = false;
+  for (let index = 0; index < 40 && !reachedCancel; index++) {
+    await browserA.keys("Tab");
+    reachedCancel = await browserA.execute(selector => document.activeElement === document.querySelector(selector), cancelSelector);
+  }
+  if (!reachedCancel) throw new Error("Outgoing cancellation is unreachable by keyboard");
+  await browserA.keys("Enter");
+  await waitFor(() => observerA.state.jobs[outgoing.jobId]?.state === "Cancelled" && observerB.state.jobs[incoming.jobId]?.state === "Cancelled", {
+    timeout: 15_000, label: "both sides acknowledge outgoing cancellation",
+  });
+  startCopy(nextName, "next transfer payload\n".length);
+  const next = await waitFor(() => Object.values(observerB.state.jobs).find(job =>
+    job.state === "Completed" && job.files?.some(file => file.name === nextName)),
+  { timeout: 20_000, label: "next remote copy completes after cancellation" });
+  if (next.error) throw new Error(`Next remote copy failed: ${next.error}`);
+  if (fs.readFileSync(hostPath(path.posix.join(bDst, nextName)), "utf8") !== "next transfer payload\n") {
+    throw new Error("Copy after cancellation has incorrect content");
+  }
+  if (fs.existsSync(hostPath(path.posix.join(bDst, cancelName)))) throw new Error("Cancelled fresh transfer left an unwanted partial");
+  await browserA.keys("Escape");
+  await jobsModal.waitForDisplayed({ timeout: 10_000, reverse: true });
+  await waitFor(() => browserA.execute(() => document.activeElement === document.querySelector('[data-testid="panel-left"]')), {
+    timeout: 10_000, label: "outgoing cancellation returns focus to its opener",
+  });
+  const cancelledBytes = observerA.state.jobs[outgoing.jobId].progress.totalBytesCopied;
+  // Wait past the outgoing completion timer and ensure neither job revives.
+  const stableUntil = Date.now() + 2_000;
+  await waitFor(() => {
+    if (observerA.state.jobs[outgoing.jobId]?.state !== "Cancelled" || observerB.state.jobs[incoming.jobId]?.state !== "Cancelled" || observerA.state.jobs[outgoing.jobId].progress.totalBytesCopied !== cancelledBytes) {
+      throw new Error("Cancelled transfer revived or continued serving bytes");
+    }
+    return Date.now() >= stableUntil;
+  }, { timeout: 5_000, label: "cancelled transfer remains terminal" });
+  observerB.sendIntent("Refresh", "left");
+  await observerB.waitForEntry("left", "remote.txt", "file", 10_000);
+  fs.unlinkSync(cancelFixture);
+
   observerB.sendIntent("NavigateToSource", "left", { sourceId: remoteSource.id });
   await waitFor(() => {
     const panel = observerB.state.panels.left;

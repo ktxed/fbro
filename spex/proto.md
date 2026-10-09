@@ -535,6 +535,14 @@ Jobs are **cooperatively suspendable**.
 
 ### 11.2 JobEvent
 
+`Cancelled` is absorbing. Late progress, decisions, and resume events cannot
+reactivate a cancelled job. A worker’s late `Completed`/`Failed` acknowledgement
+is normalized to `Cancelled`, allowing queue cleanup after the worker drains.
+The frontend also ignores non-cancellation lifecycle events for cancelled jobs.
+Cancelling an outgoing transfer broadcasts `Cancelled` to all GUI/observer
+state clients, including the requesting connection.
+
+
 ```json
 {
   "type": "JobEvent",

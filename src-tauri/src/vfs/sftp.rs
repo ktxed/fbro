@@ -129,6 +129,8 @@ struct DriverState {
     /// lets the remote fbro see separate outgoing transfer jobs even when
     /// two local copy jobs read from the same mounted remote source.
     job_connections: Mutex<HashMap<String, Arc<Connection>>>,
+    /// Stable identities for file operations, independent of their reconnecting sessions.
+    transfer_tokens: Mutex<HashMap<String, String>>,
 }
 
 enum SessionState {
@@ -253,6 +255,7 @@ impl SftpFsDriver {
             force_reconnect: Notify::new(),
             shutdown: Notify::new(),
             job_connections: Mutex::new(HashMap::new()),
+            transfer_tokens: Mutex::new(HashMap::new()),
         });
         // Spawn the supervisor on the dedicated runtime so it stays alive
         // for the driver's lifetime. The runtime's `shutdown_background()`
@@ -372,9 +375,33 @@ impl SftpFsDriver {
             self.shared_sftp().await?
         };
 
-        match f(sftp).await {
-            Ok(v) => Ok(v),
+        let token = if let Some(job_id) = job_id.as_deref() {
+            Some(self.transfer_token(job_id).await)
+        } else {
+            None
+        };
+        let result = async {
+            if let Some(token) = token.as_deref() {
+                if remote_transfer_cancelled(&sftp, token).await? {
+                    return Ok(None);
+                }
+                mark_remote_transfer_context(&sftp, token).await?;
+            }
+            f(sftp.clone()).await.map(Some)
+        }
+        .await;
+        match result {
+            Ok(Some(v)) => Ok(v),
+            Ok(None) => Err(VfsError::Cancelled),
             Err(e) => {
+                if let Some(token) = token.as_deref() {
+                    if remote_transfer_cancelled(&sftp, token)
+                        .await
+                        .unwrap_or(false)
+                    {
+                        return Err(VfsError::Cancelled);
+                    }
+                }
                 if is_connection_fatal(&e) {
                     if let Some(job_id) = job_id {
                         self.drop_job_connection(&job_id).await;
@@ -451,6 +478,16 @@ impl SftpFsDriver {
             .or_insert_with(|| conn)
             .clone();
         Ok(conn.sftp.clone())
+    }
+
+    async fn transfer_token(&self, job_id: &str) -> String {
+        self.state
+            .transfer_tokens
+            .lock()
+            .await
+            .entry(job_id.to_string())
+            .or_insert_with(|| uuid::Uuid::new_v4().to_string())
+            .clone()
     }
 
     async fn drop_job_connection(&self, job_id: &str) {
@@ -858,17 +895,50 @@ fn current_file_op_job_id() -> Option<String> {
     CURRENT_FILE_OP_JOB.with(|slot| slot.borrow().clone())
 }
 
-async fn mark_remote_transfer_context(sftp: &SftpSession, job_id: &str) {
-    if !job_id
-        .bytes()
-        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b':'))
-    {
-        return;
-    }
-    let path = format!("/.fbro-transfer-context/{job_id}");
-    let _ = sftp
+async fn mark_remote_transfer_context(
+    sftp: &SftpSession,
+    token: &str,
+) -> Result<(), russh_sftp::client::error::Error> {
+    let path = format!("/.fbro-transfer-context/{token}");
+    let file = sftp
         .open_with_flags(path, russh_sftp::protocol::OpenFlags::READ)
-        .await;
+        .await?;
+    drop(file);
+    Ok(())
+}
+
+/// A missing status path means the peer predates cancellation propagation.
+async fn remote_transfer_cancelled(
+    sftp: &SftpSession,
+    token: &str,
+) -> Result<bool, russh_sftp::client::error::Error> {
+    use russh_sftp::client::error::Error;
+    use russh_sftp::protocol::{OpenFlags, StatusCode};
+    use tokio::io::AsyncReadExt;
+    let mut file = match sftp
+        .open_with_flags(format!("/.fbro-transfer-status/{token}"), OpenFlags::READ)
+        .await
+    {
+        Ok(file) => file,
+        Err(Error::Status(status))
+            if matches!(
+                status.status_code,
+                StatusCode::NoSuchFile | StatusCode::OpUnsupported
+            ) =>
+        {
+            return Ok(false)
+        }
+        Err(error) => return Err(error),
+    };
+    let mut data = Vec::new();
+    file.read_to_end(&mut data).await?;
+    #[derive(Deserialize)]
+    struct TransferStatus {
+        cancelled: bool,
+    }
+    serde_json::from_slice::<TransferStatus>(&data)
+        .map(|status| status.cancelled)
+        .map_err(|error| Error::UnexpectedBehavior(format!("invalid transfer status: {error}")))
 }
 
 fn build_filter_regex(filter: Option<&FilterSpec>) -> Option<regex::Regex> {
@@ -967,7 +1037,10 @@ impl VfsDriver for SftpFsDriver {
                 *slot = None;
             }
         });
-        self.block_on(self.drop_job_connection(job_id));
+        self.block_on(async {
+            self.drop_job_connection(job_id).await;
+            self.state.transfer_tokens.lock().await.remove(job_id);
+        });
     }
 
     fn list(
@@ -1070,14 +1143,13 @@ impl VfsDriver for SftpFsDriver {
     fn open_read_at(&self, path: &str, offset: u64) -> Result<Box<dyn Read + Send>, VfsError> {
         let abs = self.absolute(path);
         let job_id = current_file_op_job_id();
-        let marker_job_id = job_id.clone();
+        let transfer_token = job_id
+            .as_deref()
+            .map(|id| self.block_on(self.transfer_token(id)));
         let probe_abs = abs.clone();
         let (sftp, file_size) = self.block_on(async move {
             self.with_sftp(|sftp| async move {
                 use russh_sftp::protocol::OpenFlags;
-                if let Some(job_id) = marker_job_id.as_deref() {
-                    mark_remote_transfer_context(&sftp, job_id).await;
-                }
                 let file = sftp.open_with_flags(&probe_abs, OpenFlags::READ).await?;
                 let size = file.metadata().await?.len();
                 drop(file);
@@ -1086,8 +1158,14 @@ impl VfsDriver for SftpFsDriver {
             .await
         })?;
         let (tx, rx) = mpsc::channel(SFTP_READ_AHEAD_CHUNKS * 2);
-        self.rt()
-            .spawn(run_read_ahead(sftp, abs, offset, file_size, tx));
+        self.rt().spawn(run_read_ahead(
+            sftp,
+            abs,
+            offset,
+            file_size,
+            tx,
+            transfer_token,
+        ));
         Ok(Box::new(SftpReadStream {
             driver: SftpFsDriverRef(self as *const SftpFsDriver),
             rx,
@@ -1166,14 +1244,10 @@ impl VfsDriver for SftpFsDriver {
 
     fn read_chunk(&self, path: &str, offset: u64, size: usize) -> Result<Vec<u8>, VfsError> {
         let abs = self.absolute(path);
-        let job_id = current_file_op_job_id();
         self.block_on(async move {
             self.with_sftp(|sftp| async move {
                 use russh_sftp::protocol::OpenFlags;
                 use tokio::io::{AsyncReadExt, AsyncSeekExt};
-                if let Some(job_id) = job_id.as_deref() {
-                    mark_remote_transfer_context(&sftp, job_id).await;
-                }
                 let mut file = sftp.open_with_flags(&abs, OpenFlags::READ).await?;
                 file.seek(std::io::SeekFrom::Start(offset)).await?;
                 let mut buf = vec![0u8; size];
@@ -1206,7 +1280,8 @@ impl VfsDriver for SftpFsDriver {
         }
         let abs = self.absolute(path);
         let encoded_path = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(abs.as_bytes());
-        let control_path = format!("/.fbro-integrity/result/{job_id}/{encoded_path}");
+        let token = self.block_on(self.transfer_token(job_id));
+        let control_path = format!("/.fbro-integrity/result/{token}/{encoded_path}");
         let response = self.block_on(async move {
             self.with_sftp(|sftp| async move {
                 use russh_sftp::protocol::OpenFlags;
@@ -1426,7 +1501,7 @@ unsafe impl Send for SftpFsDriverRef {}
 
 struct SftpReadStream {
     driver: SftpFsDriverRef,
-    rx: mpsc::Receiver<Result<Vec<u8>, String>>,
+    rx: mpsc::Receiver<Result<Vec<u8>, VfsError>>,
     current: Vec<u8>,
     current_pos: usize,
     done: bool,
@@ -1466,7 +1541,9 @@ impl Read for SftpReadStream {
                 }
                 Some(Err(e)) => {
                     self.done = true;
-                    self.mark_broken();
+                    if !matches!(e, VfsError::Cancelled) {
+                        self.mark_broken();
+                    }
                     return Err(io::Error::new(io::ErrorKind::Other, e));
                 }
             }
@@ -1500,7 +1577,8 @@ async fn run_read_ahead(
     abs: String,
     start_offset: u64,
     file_size: u64,
-    out_tx: mpsc::Sender<Result<Vec<u8>, String>>,
+    out_tx: mpsc::Sender<Result<Vec<u8>, VfsError>>,
+    transfer_token: Option<String>,
 ) {
     if file_size == 0 || start_offset >= file_size {
         return;
@@ -1512,13 +1590,14 @@ async fn run_read_ahead(
     let (result_tx, mut result_rx) = mpsc::channel::<ReadAheadResult>(worker_count * 2);
     let mut work_txs = Vec::with_capacity(worker_count);
 
+    let mut workers = tokio::task::JoinSet::new();
     for worker_idx in 0..worker_count {
         let (work_tx, work_rx) = mpsc::channel::<ReadWork>(1);
         work_txs.push(work_tx);
         let worker_sftp = sftp.clone();
         let worker_abs = abs.clone();
         let worker_result_tx = result_tx.clone();
-        tokio::spawn(async move {
+        workers.spawn(async move {
             read_ahead_worker(
                 worker_idx,
                 worker_sftp,
@@ -1549,18 +1628,24 @@ async fn run_read_ahead(
         .await
         {
             let _ = out_tx
-                .send(Err("read-ahead worker closed before dispatch".to_string()))
+                .send(Err(VfsError::IOError(
+                    "read-ahead worker closed before dispatch".to_string(),
+                )))
                 .await;
             return;
         }
     }
 
     while next_emit_seq < total_chunks {
-        let Some(result) = result_rx.recv().await else {
+        let result = tokio::select! {
+            _ = out_tx.closed() => return,
+            result = result_rx.recv() => result,
+        };
+        let Some(result) = result else {
             let _ = out_tx
-                .send(Err(
-                    "read-ahead workers stopped before transfer completed".to_string()
-                ))
+                .send(Err(VfsError::IOError(
+                    "read-ahead workers stopped before transfer completed".to_string(),
+                )))
                 .await;
             return;
         };
@@ -1582,14 +1667,30 @@ async fn run_read_ahead(
                     .await
                     {
                         let _ = out_tx
-                            .send(Err("read-ahead worker closed before dispatch".to_string()))
+                            .send(Err(VfsError::IOError(
+                                "read-ahead worker closed before dispatch".to_string(),
+                            )))
                             .await;
                         return;
                     }
                 }
             }
             ReadAheadResult::Error(e) => {
-                let _ = out_tx.send(Err(e)).await;
+                let cancelled = if let Some(token) = transfer_token.as_deref() {
+                    remote_transfer_cancelled(&sftp, token)
+                        .await
+                        .unwrap_or(false)
+                } else {
+                    false
+                };
+                workers.abort_all();
+                while workers.join_next().await.is_some() {}
+                let error = if cancelled {
+                    VfsError::Cancelled
+                } else {
+                    VfsError::IOError(e)
+                };
+                let _ = out_tx.send(Err(error)).await;
                 return;
             }
         }
@@ -1694,6 +1795,47 @@ impl Drop for SftpReadStream {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn transfer_tokens_survive_reconnects_and_are_released_at_job_end() {
+        let driver = dummy_driver();
+        driver.begin_file_op("job-1");
+        let first = driver.block_on(driver.transfer_token("job-1"));
+        driver.block_on(driver.drop_job_connection("job-1"));
+        assert_eq!(first, driver.block_on(driver.transfer_token("job-1")));
+        assert_ne!(first, driver.block_on(driver.transfer_token("job-2")));
+        driver.end_file_op("job-1");
+        assert!(!driver.block_on(async {
+            driver
+                .state
+                .transfer_tokens
+                .lock()
+                .await
+                .contains_key("job-1")
+        }));
+        assert_ne!(first, driver.block_on(driver.transfer_token("job-1")));
+    }
+
+    #[test]
+    fn read_stream_preserves_typed_cancellation() {
+        let driver = dummy_driver();
+        let (tx, rx) = mpsc::channel(1);
+        tx.try_send(Err(VfsError::Cancelled)).unwrap();
+        let mut reader = SftpReadStream {
+            driver: SftpFsDriverRef(&driver as *const _),
+            rx,
+            current: Vec::new(),
+            current_pos: 0,
+            done: false,
+            job_id: Some("job-1".into()),
+        };
+        let error = reader.read(&mut [0; 8]).unwrap_err();
+        assert!(matches!(
+            error.get_ref().unwrap().downcast_ref::<VfsError>(),
+            Some(VfsError::Cancelled)
+        ));
+        assert!(reader.done);
+    }
 
     fn dummy_driver() -> SftpFsDriver {
         let id = Arc::new(Identity {

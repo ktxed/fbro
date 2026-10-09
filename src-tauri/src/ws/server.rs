@@ -368,7 +368,7 @@ async fn handle_connection(
 
     loop {
         tokio::select! {
-            Some(msg) = rx.recv() => {
+            Some(mut msg) = rx.recv() => {
                 if let ServerMessage::StatePatch { ref domain, ref entity_id, ref patch, version, .. } = msg {
                     if domain == "panels" {
                         if let Some(panel_id) = entity_id {
@@ -377,7 +377,9 @@ async fn handle_connection(
                     }
                 }
 
-                apply_job_event_to_state(&state, &msg).await;
+                if !apply_job_event_to_state(&state, &mut msg).await {
+                    continue;
+                }
                 if let ServerMessage::JobEvent { ref job_id, ref event, .. } = msg {
                     if event == "Completed" || event == "Cancelled" || event == "Failed" {
                         let panels_to_rescan = {
@@ -664,7 +666,7 @@ where
     }
 }
 
-async fn apply_job_event_to_state(state: &SharedState, msg: &ServerMessage) {
+pub(crate) async fn apply_job_event_to_state(state: &SharedState, msg: &mut ServerMessage) -> bool {
     let generation_job_id = match msg {
         ServerMessage::HashGenerateBroResult { job_id, .. }
         | ServerMessage::HashGenerateBroFileResult { job_id, .. } => Some(job_id),
@@ -692,7 +694,7 @@ async fn apply_job_event_to_state(state: &SharedState, msg: &ServerMessage) {
                 }
             }
         }
-        return;
+        return true;
     }
 
     let hash_job_id = match msg {
@@ -730,7 +732,7 @@ async fn apply_job_event_to_state(state: &SharedState, msg: &ServerMessage) {
                 }
             }
         }
-        return;
+        return true;
     }
     let ServerMessage::JobEvent {
         job_id,
@@ -743,7 +745,7 @@ async fn apply_job_event_to_state(state: &SharedState, msg: &ServerMessage) {
         ..
     } = msg
     else {
-        return;
+        return true;
     };
 
     let mut state_guard = state.lock().await;
@@ -762,6 +764,15 @@ async fn apply_job_event_to_state(state: &SharedState, msg: &ServerMessage) {
         .unwrap_or(false);
 
     if let Some(job) = state_guard.job_store.jobs.get_mut(job_id) {
+        if job.state == JobState::Cancelled && event != "Cancelled" {
+            if matches!(event.as_str(), "Completed" | "Failed") {
+                // The worker has drained. Acknowledge cancellation so its queue
+                // can advance, without letting a late terminal event revive it.
+                *event = "Cancelled".to_string();
+            } else {
+                return false;
+            }
+        }
         if let Some(files) = files {
             match &mut job.kind {
                 crate::jobs::JobKind::FileOp(meta) => {
@@ -871,7 +882,8 @@ async fn apply_job_event_to_state(state: &SharedState, msg: &ServerMessage) {
             let store = store.clone();
             drop(state_guard);
             store.lock().await.done = true;
-            return;
+            return true;
         }
     }
+    true
 }

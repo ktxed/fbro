@@ -11,6 +11,7 @@ use russh_sftp::server::Handler as SftpServerHandler;
 #[derive(Default)]
 struct RecordingDriver {
     read_paths: StdMutex<Vec<String>>,
+    cancel_during_read: StdMutex<Option<(SharedState, String)>>,
 }
 
 impl VfsDriver for RecordingDriver {
@@ -80,6 +81,10 @@ impl VfsDriver for RecordingDriver {
 
     fn read_chunk(&self, path: &str, offset: u64, size: usize) -> Result<Vec<u8>, VfsError> {
         self.read_paths.lock().unwrap().push(path.to_string());
+        if let Some((state, job_id)) = self.cancel_during_read.lock().unwrap().take() {
+            let mut state = state.blocking_lock();
+            cancel_outgoing_test_job(&mut state, &job_id);
+        }
         let data = b"payload";
         let start = offset as usize;
         if start >= data.len() {
@@ -588,4 +593,237 @@ fn manifest_status_serializes_file_byte_progress() {
     assert_eq!(json["currentPath"], "movie.mkv");
     assert_eq!(json["currentFileBytesTotal"], 100);
     assert_eq!(json["currentFileBytesHashed"], 40);
+}
+
+
+fn cancel_outgoing_test_job(state: &mut AppState, job_id: &str) {
+    let job = state.job_store.jobs.get_mut(job_id).unwrap();
+    let JobKind::OutgoingTransfer(meta) = &job.kind else {
+        panic!("outgoing job expected")
+    };
+    state
+        .cancelled_remote_transfers
+        .insert((meta.peer_fp.clone(), meta.transfer_key.clone()));
+    job.cancel_tx.send(true).unwrap();
+    job.state = JobState::Cancelled;
+}
+
+async fn open_test_transfer(handler: &mut SftpHandler, token: &str) -> Result<Handle, StatusCode> {
+    handler
+        .open(
+            1,
+            format!("/.fbro-transfer-context/{token}"),
+            OpenFlags::READ,
+            FileAttributes::default(),
+        )
+        .await
+        .unwrap();
+    handler
+        .open(
+            2,
+            "/home-abc123/Downloads/file.jpg".into(),
+            OpenFlags::READ,
+            FileAttributes::default(),
+        )
+        .await
+}
+
+#[tokio::test]
+async fn cancelled_transfer_rejects_reopens_and_reconnects_but_allows_new_jobs_and_peers() {
+    let driver = Arc::new(RecordingDriver::default());
+    let state = test_state_with_shared_home_and_volume(driver.clone());
+    let (tx, mut rx) = tokio::sync::mpsc::channel(32);
+    state.lock().await.gui_senders.push(tx);
+    let mut handler = SftpHandler::new(state.clone(), "peer".into());
+    let file = open_test_transfer(&mut handler, "cancel-token")
+        .await
+        .unwrap();
+    let job_id = handler.transfers["client:cancel-token"].job_id.clone();
+    handler.read(3, file.handle.clone(), 0, 3).await.unwrap();
+    while rx.try_recv().is_ok() {}
+    cancel_outgoing_test_job(&mut *state.lock().await, &job_id);
+    assert_eq!(
+        handler
+            .read(4, file.handle.clone(), 3, 4)
+            .await
+            .unwrap_err(),
+        StatusCode::PermissionDenied
+    );
+    assert_eq!(
+        open_test_transfer(&mut handler, "cancel-token")
+            .await
+            .unwrap_err(),
+        StatusCode::PermissionDenied
+    );
+    handler
+        .note_file_opened(
+            "client:cancel-token",
+            "/home-abc123/Downloads/file.jpg",
+            Some(7),
+        )
+        .await;
+    handler.close(5, file.handle).await.unwrap();
+    finish_outgoing_transfer(state.clone(), job_id.clone()).await;
+    assert_eq!(
+        state.lock().await.job_store.jobs[&job_id].state,
+        JobState::Cancelled
+    );
+    assert!(
+        rx.try_recv().is_err(),
+        "late progress/completion must not be emitted"
+    );
+    assert_eq!(driver.read_paths.lock().unwrap().len(), 1);
+    let mut reconnect = SftpHandler::new(state.clone(), "peer".into());
+    assert_eq!(
+        open_test_transfer(&mut reconnect, "cancel-token")
+            .await
+            .unwrap_err(),
+        StatusCode::PermissionDenied
+    );
+    assert!(
+        reconnect.transfers.is_empty(),
+        "retry must not create a replacement job"
+    );
+    let status = reconnect
+        .open(
+            6,
+            "/.fbro-transfer-status/cancel-token".into(),
+            OpenFlags::READ,
+            FileAttributes::default(),
+        )
+        .await
+        .unwrap();
+    let status = reconnect.read(7, status.handle, 0, 128).await.unwrap();
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&status.data).unwrap(),
+        serde_json::json!({"cancelled": true})
+    );
+    // Even removal of the UI job cannot revoke cancellation.
+    state.lock().await.job_store.jobs.remove(&job_id);
+    assert_eq!(
+        open_test_transfer(&mut reconnect, "cancel-token")
+            .await
+            .unwrap_err(),
+        StatusCode::PermissionDenied
+    );
+    let fresh = open_test_transfer(&mut reconnect, "fresh-token")
+        .await
+        .unwrap();
+    assert_eq!(
+        reconnect.read(8, fresh.handle, 0, 7).await.unwrap().data,
+        b"payload"
+    );
+    let mut other_peer = SftpHandler::new(state, "other-peer".into());
+    let fresh = open_test_transfer(&mut other_peer, "cancel-token")
+        .await
+        .unwrap();
+    assert_eq!(
+        other_peer.read(9, fresh.handle, 0, 7).await.unwrap().data,
+        b"payload"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn cancellation_during_blocking_read_discards_bytes_and_keeps_job_cancelled() {
+    let driver = Arc::new(RecordingDriver::default());
+    let state = test_state_with_shared_home_and_volume(driver.clone());
+    let mut handler = SftpHandler::new(state.clone(), "peer".into());
+    let file = open_test_transfer(&mut handler, "cancel-during-read")
+        .await
+        .unwrap();
+    let job_id = handler.transfers["client:cancel-during-read"]
+        .job_id
+        .clone();
+    *driver.cancel_during_read.lock().unwrap() = Some((state.clone(), job_id.clone()));
+    assert_eq!(
+        handler.read(3, file.handle, 0, 7).await.unwrap_err(),
+        StatusCode::PermissionDenied
+    );
+    let transfer = &handler.transfers["client:cancel-during-read"];
+    assert_eq!(transfer.progress.total_bytes_copied, 0);
+    assert_eq!(
+        state.lock().await.job_store.jobs[&job_id].state,
+        JobState::Cancelled
+    );
+}
+
+#[tokio::test]
+async fn cancelled_job_ignores_late_lifecycle_events_in_backend_state() {
+    let state = empty_test_state();
+    let transfer = start_outgoing_transfer(&state, "peer", "client:test")
+        .await
+        .unwrap();
+    cancel_outgoing_test_job(&mut *state.lock().await, &transfer.job_id);
+    for event in [
+        "Progress",
+        "DecisionRequired",
+        "Completed",
+        "Failed",
+        "Resumed",
+    ] {
+        let mut message = ServerMessage::JobEvent {
+            timestamp: now(),
+            job_id: transfer.job_id.clone(),
+            event: event.into(),
+            files: None,
+            progress: None,
+            search_progress: None,
+            decision: None,
+            error: None,
+            result_path: None,
+            result_panel_id: None,
+        };
+        let accepted = crate::ws::server::apply_job_event_to_state(&state, &mut message).await;
+        if matches!(event, "Completed" | "Failed") {
+            assert!(accepted);
+            assert!(
+                matches!(message, ServerMessage::JobEvent { event, .. } if event == "Cancelled")
+            );
+        } else {
+            assert!(!accepted, "{event} must not be forwarded");
+        }
+        assert_eq!(
+            state.lock().await.job_store.jobs[&transfer.job_id].state,
+            JobState::Cancelled
+        );
+    }
+}
+
+
+#[tokio::test(flavor = "multi_thread")]
+async fn cancellation_during_remote_verification_discards_digest() {
+    let driver = Arc::new(RecordingDriver::default());
+    let state = test_state_with_shared_home_and_volume(driver.clone());
+    let mut handler = SftpHandler::new(state.clone(), "peer".into());
+    open_test_transfer(&mut handler, "cancel-verification")
+        .await
+        .unwrap();
+    let job_id = handler.transfers["client:cancel-verification"]
+        .job_id
+        .clone();
+    *driver.cancel_during_read.lock().unwrap() = Some((state, job_id));
+    let encoded =
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(b"/home-abc123/Downloads/file.jpg");
+    assert_eq!(
+        handler.full_file_digest_json(&encoded).await.unwrap_err(),
+        StatusCode::PermissionDenied
+    );
+}
+
+#[tokio::test]
+async fn delayed_completion_cannot_change_cancelled_transfer() {
+    let state = empty_test_state();
+    let transfer = start_outgoing_transfer(&state, "peer", "client:timer-test")
+        .await
+        .unwrap();
+    let (tx, mut rx) = tokio::sync::mpsc::channel(8);
+    state.lock().await.gui_senders.push(tx);
+    schedule_outgoing_completion(state.clone(), transfer.job_id.clone(), 0);
+    cancel_outgoing_test_job(&mut *state.lock().await, &transfer.job_id);
+    tokio::time::sleep(OUTGOING_COMPLETE_IDLE + Duration::from_millis(100)).await;
+    assert_eq!(
+        state.lock().await.job_store.jobs[&transfer.job_id].state,
+        JobState::Cancelled
+    );
+    assert!(rx.try_recv().is_err());
 }

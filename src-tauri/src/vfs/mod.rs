@@ -447,6 +447,7 @@ impl VfsKind {
 
 #[derive(Debug)]
 pub enum VfsError {
+    Cancelled,
     NotFound(String),
     PermissionDenied(String),
     AlreadyExists(String),
@@ -457,6 +458,7 @@ pub enum VfsError {
 impl std::fmt::Display for VfsError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            VfsError::Cancelled => write!(f, "Cancelled"),
             VfsError::NotFound(s) => write!(f, "NotFound: {s}"),
             VfsError::PermissionDenied(s) => write!(f, "PermissionDenied: {s}"),
             VfsError::AlreadyExists(s) => write!(f, "AlreadyExists: {s}"),
@@ -465,6 +467,8 @@ impl std::fmt::Display for VfsError {
         }
     }
 }
+
+impl std::error::Error for VfsError {}
 
 pub fn format_mtime(t: SystemTime) -> Option<String> {
     t.duration_since(UNIX_EPOCH).ok().map(|d| {

@@ -1,5 +1,17 @@
 # Testing
 
+Remote transfer cancellation: focused `remote::`, `vfs::sftp::tests`, and
+`jobs::file_ops::tests` tests cover cancellation during blocking reads, rejecting
+reopens/reconnects, peer/token isolation, UI job removal, late lifecycle events,
+stable transfer identities, typed streaming cancellation, no retry/prompt, and
+fresh/resumed partial cleanup. The remote smoke flow cancels an active outgoing
+transfer by keyboard, checks that both peers stay cancelled beyond the completion
+timer, that a fresh remote transfer completes, browsing remains available, and
+Jobs restores its opener focus. Run with `FBRO_E2E_REMOTE_ONLY=1` using the local
+commands below. All 355 Rust tests, the frontend/Tauri debug build, and the native
+Linux/Wayland remote smoke flow passed. Native macOS and Windows checks remain
+required.
+
 Arbitrary remote folders: `cargo test --manifest-path src-tauri/Cargo.toml remote::`
 covers local folder validation, relative/Home path normalization, permission
 denial, canonical deduplication, internal driver lifetime without panel Sources,

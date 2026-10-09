@@ -195,6 +195,7 @@ pub struct FpBroJobMeta {
 #[allow(dead_code)]
 pub struct OutgoingTransferJobMeta {
     pub peer_fp: String,
+    pub transfer_key: String,
     pub completion_generation: u64,
 }
 

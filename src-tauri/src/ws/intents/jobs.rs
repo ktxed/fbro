@@ -1533,9 +1533,23 @@ async fn provide_job_decision(args: &Value, ctx: &mut IntentContext<'_>) {
 async fn cancel_job(args: &Value, ctx: &mut IntentContext<'_>) {
     let parsed = JobIdArgs::from_args(args);
     let mut send_cancelled_event = false;
+    let mut broadcast_outgoing_cancel = false;
     let mut queue_changed = false;
     {
         let mut state_guard = ctx.state.lock().await;
+        if state_guard
+            .job_store
+            .jobs
+            .get(&parsed.job_id)
+            .is_some_and(|job| {
+                matches!(
+                    job.state,
+                    JobState::Completed | JobState::Failed | JobState::Cancelled
+                )
+            })
+        {
+            return;
+        }
         let file_queued_pending = state_guard
             .job_store
             .file_queue
@@ -1554,6 +1568,21 @@ async fn cancel_job(args: &Value, ctx: &mut IntentContext<'_>) {
             .unwrap_or(false);
         if fp_queued {
             state_guard.job_store.remove_from_fp_queue(&parsed.job_id);
+        }
+
+        let cancelled_transfer = state_guard
+            .job_store
+            .jobs
+            .get(&parsed.job_id)
+            .and_then(|job| {
+                if let JobKind::OutgoingTransfer(meta) = &job.kind {
+                    Some((meta.peer_fp.clone(), meta.transfer_key.clone()))
+                } else {
+                    None
+                }
+            });
+        if let Some(identity) = cancelled_transfer {
+            state_guard.cancelled_remote_transfers.insert(identity);
         }
 
         if let Some(job) = state_guard.job_store.jobs.get_mut(&parsed.job_id) {
@@ -1582,6 +1611,7 @@ async fn cancel_job(args: &Value, ctx: &mut IntentContext<'_>) {
                     let _ = job.cancel_tx.send(true);
                     job.state = JobState::Cancelled;
                     send_cancelled_event = true;
+                    broadcast_outgoing_cancel = true;
                 }
                 JobKind::RemoteManifest(meta) => {
                     let _ = (&meta.root, &meta.peer_fp);
@@ -1609,21 +1639,27 @@ async fn cancel_job(args: &Value, ctx: &mut IntentContext<'_>) {
             }
         }
 
-        let _ = ctx
-            .tx
-            .send(ServerMessage::JobEvent {
-                timestamp: now(),
-                job_id: parsed.job_id,
-                event: "Cancelled".to_string(),
-                files: None,
-                progress: None,
-                search_progress: None,
-                decision: None,
-                error: None,
-                result_path: None,
-                result_panel_id: None,
-            })
-            .await;
+        let message = ServerMessage::JobEvent {
+            timestamp: now(),
+            job_id: parsed.job_id,
+            event: "Cancelled".to_string(),
+            files: None,
+            progress: None,
+            search_progress: None,
+            decision: None,
+            error: None,
+            result_path: None,
+            result_panel_id: None,
+        };
+        if broadcast_outgoing_cancel {
+            let senders = ctx.state.lock().await.gui_senders.clone();
+            for sender in senders {
+                if !sender.same_channel(ctx.tx) {
+                    let _ = sender.try_send(message.clone());
+                }
+            }
+        }
+        let _ = ctx.tx.send(message).await;
     }
     if queue_changed {
         send_job_queue_patch(ctx.state, ctx.tx).await;

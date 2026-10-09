@@ -508,13 +508,16 @@ impl SftpHandler {
 
     async fn ensure_transfer(&mut self, key: &str) -> Option<&mut OutgoingTransfer> {
         if !self.transfers.contains_key(key) {
-            let transfer = start_outgoing_transfer(&self.state, &self.peer_fp).await?;
+            let transfer = start_outgoing_transfer(&self.state, &self.peer_fp, key).await?;
             self.transfers.insert(key.to_string(), transfer);
         }
         self.transfers.get_mut(key)
     }
 
     async fn note_file_opened(&mut self, transfer_key: &str, path: &str, size: Option<u64>) {
+        if self.transfer_cancelled_for(transfer_key).await {
+            return;
+        }
         let state = self.state.clone();
         let Some(transfer) = self.ensure_transfer(transfer_key).await else {
             return;
@@ -584,6 +587,9 @@ impl SftpHandler {
         if len == 0 {
             return;
         }
+        if self.transfer_cancelled_for(transfer_key).await {
+            return;
+        }
         let state = self.state.clone();
         let Some(transfer) = self.ensure_transfer(transfer_key).await else {
             return;
@@ -625,7 +631,7 @@ impl SftpHandler {
         size: Option<u64>,
         completed: bool,
     ) {
-        if !completed {
+        if !completed || self.transfer_cancelled_for(transfer_key).await {
             return;
         }
         let state = self.state.clone();
@@ -671,7 +677,16 @@ impl SftpHandler {
         }
     }
 
-    fn transfer_cancelled_for(&self, transfer_key: &str) -> bool {
+    async fn transfer_cancelled_for(&self, transfer_key: &str) -> bool {
+        if self
+            .state
+            .lock()
+            .await
+            .cancelled_remote_transfers
+            .contains(&(self.peer_fp.clone(), transfer_key.to_string()))
+        {
+            return true;
+        }
         self.transfers
             .get(transfer_key)
             .map(|transfer| *transfer.cancel_rx.borrow())
@@ -725,11 +740,24 @@ impl SftpHandler {
         let size = driver
             .file_size(&driver_path)
             .ok_or(StatusCode::NoSuchFile)?;
+        if let Some(key) = self.session_transfer_key.as_deref() {
+            if self.transfer_cancelled_for(key).await {
+                return Err(StatusCode::PermissionDenied);
+            }
+        }
+        let cancel_rx = self
+            .session_transfer_key
+            .as_deref()
+            .and_then(|key| self.transfers.get(key))
+            .map(|transfer| transfer.cancel_rx.clone());
         let digest = tokio::task::spawn_blocking(move || {
             let mut hasher = blake3::Hasher::new();
             let mut offset = 0u64;
             let chunk_size = 1024 * 1024usize;
             while offset < size {
+                if cancel_rx.as_ref().is_some_and(|rx| *rx.borrow()) {
+                    return Err(VfsError::Cancelled);
+                }
                 let remaining = size.saturating_sub(offset).min(chunk_size as u64) as usize;
                 let chunk = driver.read_chunk(&driver_path, offset, remaining)?;
                 if chunk.is_empty() {
@@ -737,6 +765,9 @@ impl SftpHandler {
                 }
                 offset = offset.saturating_add(chunk.len() as u64);
                 hasher.update(&chunk);
+            }
+            if cancel_rx.as_ref().is_some_and(|rx| *rx.borrow()) {
+                return Err(VfsError::Cancelled);
             }
             if offset != size {
                 return Err(VfsError::IOError(format!(
@@ -1053,9 +1084,19 @@ impl Drop for SftpHandler {
     }
 }
 
-async fn start_outgoing_transfer(state: &SharedState, peer_fp: &str) -> Option<OutgoingTransfer> {
+async fn start_outgoing_transfer(
+    state: &SharedState,
+    peer_fp: &str,
+    transfer_key: &str,
+) -> Option<OutgoingTransfer> {
     let (job_id, cancel_rx, senders, peer_label) = {
         let mut guard = state.lock().await;
+        if guard
+            .cancelled_remote_transfers
+            .contains(&(peer_fp.to_string(), transfer_key.to_string()))
+        {
+            return None;
+        }
         let peer_name = guard
             .share_config
             .paired_peers
@@ -1072,6 +1113,7 @@ async fn start_outgoing_transfer(state: &SharedState, peer_fp: &str) -> Option<O
                 job_id: job_id.clone(),
                 kind: JobKind::OutgoingTransfer(OutgoingTransferJobMeta {
                     peer_fp: peer_fp.to_string(),
+                    transfer_key: transfer_key.to_string(),
                     completion_generation: 0,
                 }),
                 source_panel: String::new(),
@@ -1142,6 +1184,9 @@ async fn start_outgoing_transfer(state: &SharedState, peer_fp: &str) -> Option<O
 }
 
 async fn emit_outgoing_progress(state: &SharedState, transfer: &mut OutgoingTransfer, force: bool) {
+    if *transfer.cancel_rx.borrow() {
+        return;
+    }
     if !force && transfer.last_emit.elapsed() < OUTGOING_PROGRESS_INTERVAL {
         return;
     }
@@ -1164,6 +1209,9 @@ async fn emit_outgoing_progress(state: &SharedState, transfer: &mut OutgoingTran
     let senders = {
         let mut guard = state.lock().await;
         if let Some(job) = guard.job_store.jobs.get_mut(&transfer.job_id) {
+            if job.state == JobState::Cancelled || *job.cancel_tx.borrow() {
+                return;
+            }
             job.state = JobState::Running;
             job.progress = transfer.progress.clone();
             if let JobKind::OutgoingTransfer(meta) = &mut job.kind {
@@ -1184,7 +1232,7 @@ async fn finish_outgoing_transfer(state: SharedState, job_id: String) {
             return;
         };
         let event = match job.state {
-            JobState::Cancelled => "Cancelled",
+            JobState::Cancelled => return,
             JobState::Failed => "Failed",
             JobState::Completed => return,
             _ => {
@@ -1294,6 +1342,9 @@ fn emit_remote_manifest_progress_sync(state: &SharedState, job_id: &str, progres
     let (senders, schema) = {
         let mut guard = state.blocking_lock();
         if let Some(job) = guard.job_store.jobs.get_mut(job_id) {
+            if job.state == JobState::Cancelled || *job.cancel_tx.borrow() {
+                return;
+            }
             job.state = JobState::Running;
             job.progress = progress.clone();
         }
@@ -1436,9 +1487,11 @@ fn schedule_outgoing_completion(state: SharedState, job_id: String, generation: 
                 .jobs
                 .get(&job_id)
                 .and_then(|job| match &job.kind {
-                    JobKind::OutgoingTransfer(meta) => {
-                        Some(meta.completion_generation == generation)
-                    }
+                    JobKind::OutgoingTransfer(meta) => Some(
+                        job.state != JobState::Cancelled
+                            && !*job.cancel_tx.borrow()
+                            && meta.completion_generation == generation,
+                    ),
                     _ => None,
                 })
                 .unwrap_or(false)
@@ -1525,6 +1578,13 @@ fn transfer_context_from_marker_path(path: &str) -> Option<String> {
         return None;
     }
     Some(format!("client:{token}"))
+}
+
+fn transfer_status_from_path(path: &str) -> Option<String> {
+    let token = path
+        .trim_start_matches('/')
+        .strip_prefix(".fbro-transfer-status/")?;
+    transfer_context_from_marker_path(&format!("/.fbro-transfer-context/{token}"))
 }
 
 fn integrity_result_from_path(path: &str) -> Option<(String, String)> {
@@ -2008,6 +2068,7 @@ async fn resolve_source(
 
 fn vfs_err_to_status(e: VfsError) -> StatusCode {
     match e {
+        VfsError::Cancelled => StatusCode::PermissionDenied,
         VfsError::NotFound(_) => StatusCode::NoSuchFile,
         VfsError::PermissionDenied(_) => StatusCode::PermissionDenied,
         VfsError::AlreadyExists(_) => StatusCode::Failure,
@@ -2085,7 +2146,7 @@ impl russh_sftp::server::Handler for SftpHandler {
         _extensions: HashMap<String, String>,
     ) -> Result<Version, Self::Error> {
         if self.version.is_some() {
-            return Err(StatusCode::ConnectionLost);
+            return Err(StatusCode::PermissionDenied);
         }
         self.version = Some(version);
         Ok(Version::new())
@@ -2114,7 +2175,7 @@ impl russh_sftp::server::Handler for SftpHandler {
             ..
         }) = self.handles.remove(&handle)
         {
-            let completed = completed || !self.transfer_cancelled_for(&transfer_key);
+            let completed = completed || !self.transfer_cancelled_for(&transfer_key).await;
             self.note_file_closed(&transfer_key, &display_path, size, completed)
                 .await;
         } else {
@@ -2267,6 +2328,15 @@ impl russh_sftp::server::Handler for SftpHandler {
         if has_dotdot(&filename) {
             return Err(StatusCode::PermissionDenied);
         }
+        if let Some(transfer_key) = transfer_status_from_path(&filename) {
+            let cancelled = self.transfer_cancelled_for(&transfer_key).await;
+            let data = serde_json::to_vec(&serde_json::json!({ "cancelled": cancelled }))
+                .map_err(|_| StatusCode::Failure)?;
+            let handle = self.fresh_handle();
+            self.handles
+                .insert(handle.clone(), HandleState::ControlData { data });
+            return Ok(Handle { id, handle });
+        }
         if let Some(transfer_key) = transfer_context_from_marker_path(&filename) {
             self.session_transfer_key = Some(transfer_key);
             let handle = self.fresh_handle();
@@ -2335,6 +2405,9 @@ impl russh_sftp::server::Handler for SftpHandler {
             .session_transfer_key
             .clone()
             .unwrap_or_else(|| outgoing_transfer_key(&display_path));
+        if self.transfer_cancelled_for(&transfer_key).await {
+            return Err(StatusCode::PermissionDenied);
+        }
         let driver_path = compose_driver_path(&root, &rest);
         if !driver.exists(&driver_path) {
             return Err(StatusCode::NoSuchFile);
@@ -2354,6 +2427,10 @@ impl russh_sftp::server::Handler for SftpHandler {
         );
         self.note_file_opened(&transfer_key, &display_path, size)
             .await;
+        if self.transfer_cancelled_for(&transfer_key).await {
+            self.handles.remove(&handle);
+            return Err(StatusCode::PermissionDenied);
+        }
         Ok(Handle { id, handle })
     }
 
@@ -2395,8 +2472,8 @@ impl russh_sftp::server::Handler for SftpHandler {
         let display_path = display_path.clone();
         let transfer_key = transfer_key.clone();
         let total = *size;
-        if self.transfer_cancelled_for(&transfer_key) {
-            return Err(StatusCode::ConnectionLost);
+        if self.transfer_cancelled_for(&transfer_key).await {
+            return Err(StatusCode::PermissionDenied);
         }
 
         // EOF detection upfront avoids a driver round-trip when the client
@@ -2420,12 +2497,18 @@ impl russh_sftp::server::Handler for SftpHandler {
                 .await
                 .map_err(|_| StatusCode::Failure)?
                 .map_err(vfs_err_to_status)?;
+        if self.transfer_cancelled_for(&transfer_key).await {
+            return Err(StatusCode::PermissionDenied);
+        }
         if data.is_empty() {
             return Err(StatusCode::Eof);
         }
         let read_len = data.len();
         self.note_file_read(&transfer_key, &display_path, offset, &data, read_len, total)
             .await;
+        if self.transfer_cancelled_for(&transfer_key).await {
+            return Err(StatusCode::PermissionDenied);
+        }
         Ok(Data { id, data })
     }
 
