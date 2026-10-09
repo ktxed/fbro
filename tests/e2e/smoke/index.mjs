@@ -33,6 +33,7 @@ import { runFocusHandoffFlow } from "./cases/focus-handoff.mjs";
 import { runViewerFlow } from "./cases/viewer.mjs";
 import { runHeicFlow } from "./cases/heic.mjs";
 import { runQuickEditFlow } from "./cases/quick-edit.mjs";
+import { verifyThumbnailQueue } from "./cases/thumbnails.mjs";
 import { runRemoteFlow } from "./cases/remote.mjs";
 import { runDatetimeSearchFlow, runSearchActionsFlow, runSearchActivityFlow, runSearchFlow, runSizeSearchFlow } from "./cases/search.mjs";
 
@@ -64,6 +65,11 @@ async function main() {
     browserA = await startBrowser("fbro-a", webdriverHosts.a, webdriverPorts.a, appA);
     observerA = new FbroObserver("fbro-a", wsUrls.a);
     await observerA.connect();
+
+    if (process.env.FBRO_E2E_THUMBNAILS_ONLY === "1") {
+      await verifyThumbnailQueue(browserA, observerA);
+      return;
+    }
 
     if (process.env.FBRO_E2E_REMOTE_ONLY === "1") {
       browserB = await startBrowser("fbro-b", webdriverHosts.b, webdriverPorts.b, appB);

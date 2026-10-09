@@ -143,6 +143,12 @@ pub trait Platform: Send + Sync {
         None
     }
 
+    /// Whether fbro manages thumbnail generation settings and its disk cache.
+    /// Native OS providers do not expose these controls.
+    fn supports_managed_thumbnails(&self) -> bool {
+        false
+    }
+
     /// Generate a thumbnail for a real OS file path at the requested size (px,
     /// longer edge). Returns (PNG bytes, content_type) on success. Default impl
     /// returns None — platforms override to call native thumbnail providers
@@ -434,6 +440,14 @@ pub async fn create_volume_watcher(platform: Arc<dyn Platform>) -> Arc<dyn Volum
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn managed_thumbnails_are_linux_only() {
+        assert_eq!(
+            super::create_platform().supports_managed_thumbnails(),
+            cfg!(target_os = "linux")
+        );
+    }
+
     #[test]
     fn zsh_emacs_keymap_support_is_macos_only() {
         assert_eq!(

@@ -49,6 +49,7 @@ Sync trait, `Send + Sync`. Grouped by purpose:
 | Method | Purpose |
 |---|---|
 | `find_icon(name) -> Option<(bytes, content_type)>` | Look up a freedesktop-style icon name. Default `None`. The free function `resolve_icon` falls back to embedded SVGs. |
+| `supports_managed_thumbnails() -> bool` | Default `false`; Linux returns `true`. Exposed as a read-only settings capability to show fbro's generation/cache controls and Jobs thumbnail view only where applicable. |
 | `get_thumbnail(path, size) -> Option<(bytes, content_type)>` | Native thumbnailer (Windows `IShellItemImageFactory`, macOS `QLThumbnailGenerator`). MUST be safe to call from any worker thread — `ThumbPool` calls it from a thread pool. |
 
 `get_thumbnail_cancellable(path, size, &AtomicBool)` is the pool entry point.

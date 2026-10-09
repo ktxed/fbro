@@ -1,11 +1,30 @@
 import fs from "node:fs";
 import path from "node:path";
 import { backendPath, hostPath } from "../config.mjs";
-import { clickEntry, goToPanelPath } from "../browser.mjs";
+import { clickEntry, goToPanelPath, pressWindowKey } from "../browser.mjs";
 import { waitFor } from "../wait.mjs";
 import { expectModalFocus } from "./modal-focus.mjs";
 
 export async function verifyThumbnailQueue(browser, observer) {
+  await browser.execute(() => document.querySelector('[data-testid="panel-left"]')?.focus());
+  await pressWindowKey(browser, ",", { ctrl: true });
+  await pressWindowKey(browser, ",", { meta: true });
+  await (await browser.$('[data-modal-id="settings"]')).waitForDisplayed({ timeout: 10_000 });
+  await (await browser.$('[data-testid="settings-tab-display"]')).click();
+  const managed = observer.state.settings.general.supportsManagedThumbnails;
+  for (const testId of ["managed-thumbnail-settings", "thumbnail-cache-settings"]) {
+    if (await (await browser.$(`[data-testid="${testId}"]`)).isExisting() !== managed) {
+      throw new Error(`${testId} visibility does not match the backend thumbnail capability`);
+    }
+  }
+  if (!await (await browser.$('[data-testid="stream-thumbnails"]')).isDisplayed()) {
+    throw new Error("Thumbnail streaming setting must remain available on every platform");
+  }
+  await browser.keys("Escape");
+  await (await browser.$('[data-modal-id="settings"]')).waitForDisplayed({ timeout: 10_000, reverse: true });
+  await waitFor(() => browser.execute(() => document.activeElement?.getAttribute("data-testid") === "panel-left"),
+    { timeout: 10_000, label: "thumbnail settings focus return" });
+
   const requestId = `thumbnail-queue-${Date.now()}`;
   observer.sendIntent("QueryThumbnailQueue", undefined, { requestId });
   await waitFor(() => observer.messages.some((message) =>
@@ -20,6 +39,21 @@ export async function verifyThumbnailQueue(browser, observer) {
   await browser.keys("Tab");
   await expectModalFocus(browser, "#jobs-tab-jobs", "jobs tab focus");
   await browser.keys("ArrowRight");
+  if (!observer.state.settings.general.supportsManagedThumbnails) {
+    if (await (await browser.$("#jobs-tab-thumbnails")).isExisting()) {
+      throw new Error("Native thumbnail provider exposes the managed thumbnail Jobs tab");
+    }
+    await expectModalFocus(browser, "#jobs-tab-procs", "native provider skips thumbnail tab");
+    await browser.keys("Home");
+    await expectModalFocus(browser, "#jobs-tab-jobs", "native provider first tab");
+    await browser.keys("End");
+    await expectModalFocus(browser, "#jobs-tab-cache", "native provider last tab");
+    await browser.keys("Escape");
+    await (await browser.$('[data-modal-id="jobs"]')).waitForDisplayed({ timeout: 10_000, reverse: true });
+    await waitFor(() => browser.execute(() => document.activeElement?.getAttribute("data-testid") === "panel-left"),
+      { timeout: 10_000, label: "native provider Jobs focus return" });
+    return;
+  }
   await expectModalFocus(browser, "#jobs-tab-thumbnails", "thumbnail tab keyboard focus");
   await waitFor(async () => (await (await browser.$('[data-testid="thumbnail-queue"]')).getText())
     .includes("No thumbnail work queued."), { timeout: 10_000, label: "thumbnail queue empty state" });

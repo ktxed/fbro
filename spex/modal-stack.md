@@ -172,8 +172,9 @@ Resizable dialogs retain their last pointer-selected size. Edge and corner
 handles, including the visible south-east affordance, are a pointer
 enhancement; keyboard access to dialog content does not depend on resizing.
 
-The Jobs dialog has Jobs, Thumbnails, Processes, and Cache views in one roving
-tablist. Left/Right and Home/End select and focus a view; Tab skips inactive
+The Jobs dialog has Jobs, Processes, and Cache views, plus Thumbnails when the
+backend reports `supportsManagedThumbnails`, in one roving tablist.
+Left/Right and Home/End select and focus a visible view; Tab skips inactive
 tabs. Thumbnail queue refreshes preserve focus, and Escape closes the dialog
 without cancelling thumbnail generation.
 

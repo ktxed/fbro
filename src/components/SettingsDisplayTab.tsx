@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { GeneralSettings } from "../ws/types";
 import type { WsClient } from "../ws/client";
-import { isLinux } from "../utils/platform";
 import { stepNumberInputOnWheel } from "../utils/numberInputWheel";
 import { COLOR_SCHEMES, resolveColorScheme } from "../theme/colorSchemes";
 
@@ -143,7 +142,7 @@ export function SettingsDisplayTab({ general, client }: SettingsDisplayTabProps)
     </div>
   );
 
-  if (!isLinux) {
+  if (!general.supportsManagedThumbnails) {
     return (
       <div className="settings-tab">
         {colorSchemeSection}
@@ -156,6 +155,7 @@ export function SettingsDisplayTab({ general, client }: SettingsDisplayTabProps)
         <label className="settings-tab__option">
           <input
             type="checkbox"
+            data-testid="stream-thumbnails"
             checked={general.streamThumbnails}
             onChange={(e) => send("streamThumbnails", e.target.checked)}
           />
@@ -169,7 +169,7 @@ export function SettingsDisplayTab({ general, client }: SettingsDisplayTabProps)
     <div className="settings-tab">
       {colorSchemeSection}
       {compareSection}
-      <div className="settings-tab__section">
+      <div className="settings-tab__section" data-testid="managed-thumbnail-settings">
         <h3 className="settings-tab__section-title">Thumbnails</h3>
         <p className="settings-tab__hint">
           fbro generates thumbnails for images and videos itself on Linux,
@@ -186,6 +186,7 @@ export function SettingsDisplayTab({ general, client }: SettingsDisplayTabProps)
         <label className="settings-tab__option">
           <input
             type="checkbox"
+            data-testid="stream-thumbnails"
             checked={general.streamThumbnails}
             onChange={(e) => send("streamThumbnails", e.target.checked)}
           />
@@ -222,7 +223,7 @@ export function SettingsDisplayTab({ general, client }: SettingsDisplayTabProps)
           />
         </label>
       </div>
-      <div className="settings-tab__section">
+      <div className="settings-tab__section" data-testid="thumbnail-cache-settings">
         <h3 className="settings-tab__section-title">Cache</h3>
         <div className="settings-tab__path-row">
           <span className="settings-tab__path-label">Directory</span>

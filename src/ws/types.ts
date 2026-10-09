@@ -741,6 +741,8 @@ export interface GeneralSettings {
   savePanelViewMode: boolean;
   rememberSortPerLocation: boolean;
   locationSettingsCount: number;
+  /** Backend capability: fbro manages generation settings and the disk cache. */
+  supportsManagedThumbnails: boolean;
   enableVideoThumbnails: boolean;
   thumbnailMaxImageSizeMb: number;
   thumbnailVideoFrameSkip: number;

@@ -55,6 +55,10 @@ fn decode_proc_mount_field(field: &str) -> String {
 }
 
 impl Platform for LinuxPlatform {
+    fn supports_managed_thumbnails(&self) -> bool {
+        true
+    }
+
     fn open_file(&self, path: &str) {
         let _ = Command::new("xdg-open").arg(path).spawn();
     }

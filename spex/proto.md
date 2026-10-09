@@ -583,8 +583,11 @@ Counts cover the complete deduplicated pool. Tasks list running work first,
 then queued work in dispatch order, accounting for visibility demotion.
 Abandoned queued tasks disappear immediately; active tasks become `Cancelling`
 until their worker returns. Completed tasks disappear; they are not retained as file-job history.
-The Jobs modal queries immediately when its Thumbnails tab opens and once
-per second while that tab remains mounted and selected.
+The read-only `settings.general.supportsManagedThumbnails` snapshot field is
+provided by the backend PAL (true on Linux, false on macOS/Windows). The Jobs modal
+shows its Thumbnails tab only when this capability is true, and queries immediately
+when the tab opens and once per second while it remains mounted and selected.
+The query itself remains available on all platforms.
 
 ---
 

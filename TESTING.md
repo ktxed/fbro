@@ -128,6 +128,16 @@ presentation and filtered empty listings. These cases passed in the native
 Linux/Wayland smoke environment; native macOS and Windows focus and WebView
 styling still require verification.
 
+The local smoke flow checks Display generation/cache controls against the backend's
+`supportsManagedThumbnails` capability and retains the streaming toggle on all
+platforms. The Jobs check covers the thumbnail tab on Linux and skips it in
+Arrow/Home/End navigation for native providers, restoring focus on close.
+`cargo test --manifest-path src-tauri/Cargo.toml managed_thumbnails_are_linux_only`
+checks the PAL capability on the compiled host platform.
+Run the focused flow with `FBRO_E2E_THUMBNAILS_ONLY=1` using the local smoke commands.
+The capability unit test, frontend/Tauri debug builds, and focused Linux/Wayland
+thumbnail smoke passed. Native macOS/Windows visibility and keyboard checks remain
+unverified.
 The local smoke flow checks the thumbnail queue's backend reply, Jobs modal
 empty state, keyboard tab selection, focus preservation during refresh, and
 focus restoration on close. `cargo test --manifest-path src-tauri/Cargo.toml

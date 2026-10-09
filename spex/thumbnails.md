@@ -206,7 +206,8 @@ decode work.
 
 ### 6.5 Queue inspection
 
-The Jobs modal includes a **Thumbnails** tab showing running and queued
+On platforms with `settings.general.supportsManagedThumbnails` (Linux), the
+Jobs modal includes a **Thumbnails** tab showing running and queued
 counts, the current concurrency limit, and up to the first 100 tasks in
 dispatch order (running first). Rows show the host path, requested pixel size,
 visibility priority, and whether the task is a speculative warmup. Duplicate
@@ -216,7 +217,9 @@ While background work waits, the summary shows its remaining cooldown.
 The backend returns an atomic, read-only pool snapshot through
 `QueryThumbnailQueue` / `ThumbnailQueueReady` (see [Protocol](proto.md)). The
 frontend refreshes it once per second only while the tab is selected. This
-works with all platform thumbnail providers. Closing the modal leaves work
+query works with all platform thumbnail providers, but the UI hides the tab for
+native macOS/Windows providers. Arrow/Home/End navigation uses the visible tabs.
+Closing the modal leaves work
 running; the view adds no cancellation or reordering controls.
 
 ---
@@ -314,8 +317,9 @@ at the start of generation).
 ## 9. Settings → Display tab
 
 The Display tab (`SettingsDisplayTab.tsx`) exposes the Linux thumbnailer knobs
-and cache management. On non-Linux platforms it shows an informational note
-only (those platforms delegate entirely to the OS).
+and cache management, gated by the backend's `supportsManagedThumbnails`
+capability. On macOS/Windows it hides those controls and shows an informational
+note about native providers. The thumbnail streaming toggle remains on all platforms.
 
 | Control | Setting key | Intent |
 |---------|-------------|--------|

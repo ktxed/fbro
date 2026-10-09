@@ -662,6 +662,7 @@ function ProcessRow({ proc, client }: { proc: ChildProcess; client: WsClient }) 
 
 export function JobsModal({ onClose, client }: { onClose: () => void; client: WsClient }) {
   const state = useAppState();
+  const tabs = JOB_TABS.filter((tab) => tab !== "thumbnails" || state.settings.general.supportsManagedThumbnails);
   const overlayRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const [activeTab, setActiveTab] = useState<typeof JOB_TABS[number]>("jobs");
@@ -748,7 +749,7 @@ export function JobsModal({ onClose, client }: { onClose: () => void; client: Ws
         <div className="modal__header">Jobs</div>
 
         <div className="jobs-modal__tabs" role="tablist" aria-label="Job views">
-          {JOB_TABS.map((tab, index) => {
+          {tabs.map((tab, index) => {
             const selected = activeTab === tab;
             const label = tab === "jobs" ? "Jobs" : tab === "thumbnails" ? "Thumbnails" : tab === "procs" ? `Processes${childProcs.length > 0 ? ` (${childProcs.length})` : ""}` : "Cache";
             return (
@@ -763,10 +764,10 @@ export function JobsModal({ onClose, client }: { onClose: () => void; client: Ws
                 className={`jobs-modal__tab${selected ? " jobs-modal__tab--active" : ""}`}
                 onClick={() => setActiveTab(tab)}
                 onKeyDown={(event) => {
-                  const nextIndex = rovingIndexForKey(event.key, index, JOB_TABS.length, "horizontal");
+                  const nextIndex = rovingIndexForKey(event.key, index, tabs.length, "horizontal");
                   if (nextIndex === null) return;
                   event.preventDefault();
-                  setActiveTab(JOB_TABS[nextIndex]);
+                  setActiveTab(tabs[nextIndex]);
                   tabRefs.current[nextIndex]?.focus();
                 }}
               >

@@ -43,6 +43,12 @@ flowchart LR
 
 `settings` is included in the `StateSnapshot` envelope sent to every client on connect, so clients always have the current settings without a separate request.
 
+`settings.general.supportsManagedThumbnails` is a read-only backend capability,
+true on Linux and false for macOS/Windows native providers. It gates the Display
+generation/cache controls and the Jobs modal's Thumbnails tab. It is not persisted
+or writable through `SetGeneralOption`. Thumbnail streaming remains configurable
+on all platforms. Settings patches merge with the snapshot and preserve this flag.
+
 ```json
 {
   "type": "StateSnapshot",

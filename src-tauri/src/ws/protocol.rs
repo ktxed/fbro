@@ -646,6 +646,7 @@ pub struct GeneralSettingsSchema {
     pub save_panel_view_mode: bool,
     pub remember_sort_per_location: bool,
     pub location_settings_count: usize,
+    pub supports_managed_thumbnails: bool,
     pub enable_video_thumbnails: bool,
     pub thumbnail_max_image_size_mb: u64,
     pub thumbnail_video_frame_skip: u32,

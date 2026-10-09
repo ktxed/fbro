@@ -60,6 +60,8 @@ and sharing patches do not move focus. Covered Settings controls remain inert.
   child has not already consumed the event.
 - Modal tablists and selectable lists use roving/composite focus: one Tab stop,
   arrows within the component, and synchronized focus and selection.
+  Jobs omits Thumbnails for native OS providers; arrows and Home/End navigate
+  only the views enabled by the backend's `supportsManagedThumbnails` capability.
 - Every modal declares its default focus according to `modal-stack.md` §6.
   In-place workflow changes use `ModalLayer.focusKey`; progress updates do not
   steal focus. Negative-tabindex controls are excluded from the shared Tab
