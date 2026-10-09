@@ -1,547 +1,256 @@
 # Testing
 
-Dependency refresh (2026-10-09): `npm ci`, `npm ls --depth=0`, `npm run build`,
-`npm run test:build-info`, the Tauri debug build, all 362 Rust tests, and
-`cargo check --manifest-path tools/lfs-spy/Cargo.toml --locked` passed.
-The SFTP tests additionally cover accepting only the paired raw Ed25519 host
-key, rejecting another key, and rejecting a certificate for the paired key.
-The WebdriverIO 10 harness uses its documented `strictSelectors: false`
-compatibility setting for existing collection readiness checks and async
-`execute` for long right-clicks. Bro/PDF readiness targets are explicit, and
-Search viewer fixtures use an isolated folder to avoid prior-flow duplicates.
-Four panel-patch regression tests cover delayed scan selection replay, current
-and independent window patches, queued streamed entries/completion, and scan
-errors. Replay preserves newer selection/cursor and never decreases the panel
-version while retaining pending scan data and completion. The focused Linux
-hash-generation/check smoke flow passed.
-The final rebuilt application's focused native Linux/Wayland remote smoke
-flow also passed: pairing, browsing, transfer completion, cancellation on both
-peers, retry after cancellation, and focus restoration.
-The complete native Linux/Wayland smoke suite passed with the final debug
-binary, including local operations, viewers, Git, hashing, archives, Search,
-and remote operations.
+Run commands from the repository root. Use unit tests for backend logic and
+WebDriver smoke tests for application behavior, keyboard handling, and focus.
 
-The dependency audit reports two low npm findings in Mermaid/KaTeX
-([GHSA-238p-pmpm-9mq7](https://github.com/advisories/GHSA-238p-pmpm-9mq7)),
-down from 26 findings. RustSec reports zero backend/helper vulnerabilities,
-down from six backend vulnerabilities. Backend dependency warnings remain for
-`glib` 0.18.5 unsoundness and unmaintained `instant`/`proc-macro-error`.
-PDF.js is pinned to 5.5.207, before the scripting regression in
-[GHSA-hq66-cqwq-w95j](https://github.com/advisories/GHSA-hq66-cqwq-w95j), retaining
-the legacy library/worker polyfills removed by PDF.js 6. Node.js 22.19+ is
-required; the source-build Docker image now uses Node 24. Native macOS/Windows
-and rebuilding that full source-build image remain unverified.
+## Build and unit tests
 
-Remote transfer cancellation: focused `remote::`, `vfs::sftp::tests`, and
-`jobs::file_ops::tests` tests cover cancellation during blocking reads, rejecting
-reopens/reconnects, peer/token isolation, UI job removal, late lifecycle events,
-stable transfer identities, typed streaming cancellation, no retry/prompt, and
-fresh/resumed partial cleanup. The remote smoke flow cancels an active outgoing
-transfer by keyboard, checks that both peers stay cancelled beyond the completion
-timer, that a fresh remote transfer completes, browsing remains available, and
-Jobs restores its opener focus. Run with `FBRO_E2E_REMOTE_ONLY=1` using the local
-commands below. All 355 Rust tests, the frontend/Tauri debug build, and the native
-Linux/Wayland remote smoke flow passed. Native macOS and Windows checks remain
-required.
-
-Arbitrary remote folders: `cargo test --manifest-path src-tauri/Cargo.toml remote::`
-covers local folder validation, relative/Home path normalization, permission
-denial, canonical deduplication, internal driver lifetime without panel Sources,
-SFTP root discovery/resolution/removal, and share-file persistence including
-legacy loading. The remote smoke flow checks Current folder suggestions,
-typed-path Add, single submission, rejection retaining the input, unsharing,
-input history Escape, focus preservation/restoration, both themes, and paired
-read-only browsing/copying/thumbnails/integrity of the resulting folder share.
-Run it independently with `FBRO_E2E_REMOTE_ONLY=1` and the local smoke commands
-below. Native macOS and Windows path, ACL, focus, and WebView checks remain needed.
-The frontend/Tauri debug builds, 39 remote Rust tests, and isolated native
-Linux/Wayland remote smoke flow passed, including both colour schemes.
-
-Search activity: `cargo test --manifest-path src-tauri/Cargo.toml jobs::search::tests`
-covers no-hit heartbeats during active work, inspected-entry counts, concurrent
-folder selection, estimates that revise as folders are discovered, depth limits,
-multiple roots, inaccessible/empty directories, and cancellation. Regressions
-cover a directory backlog exceeding the former 4096-entry queue, real permission
-denial with an accessible sibling, and skipping a FIFO during content search.
-The search activity smoke flow uses a sparse regular file to keep content
-scanning active; it checks all search tabs, background/reopened job activity,
-keyboard cancellation, focus
-preservation/restoration, final no-hit counts, both themes, and long-path styling.
-Run it independently with `FBRO_E2E_SEARCH_ACTIVITY_ONLY=1` using the local smoke
-commands below. Native macOS and Windows search styling and focus need verification.
-The focused Rust tests and native Linux/Wayland activity smoke flow passed,
-including the `fbro-dark` and `daylight` presentations.
-
-HEIC2ANY preview checks: `cargo test --manifest-path src-tauri/Cargo.toml
-heic_preview_is_opt_in` covers older settings defaulting to off and enabled
-settings serialization. `tests/e2e/smoke/cases/heic.mjs` covers the settings
-checkbox via keyboard, backend-confirmed state, modal focus restoration,
-invalid HEIC error display, and disabling conversion in an open viewer.
-The viewer check starts with the preference already enabled, covering its
-lightweight startup settings patch. Set `FBRO_HEIC_FIXTURE` to a local HEIC
-file to also check successful decoding in a freshly opened viewer, including
-the newer `heic-to` fallback for files rejected by HEIC2ANY. Local headless
-Edge checks decoded `IMG_0102.HEIC` (iPhone 16) at 3024 x 4032 and covered
-buffered input, keyboard zoom, size limits, stale results, startup patches,
-navigation to HEIF, and live toggles in both viewer modes.
-Native Windows 10 and Linux WebView integration still need verification.
-
-This project currently has a WebDriver smoke test for the Tauri app in
-`tests/e2e/smoke/index.mjs`.
-
-## Requirements
-
-Install the normal project dependencies first:
+Install Node.js 22.19+, current stable Rust, and the Tauri system dependencies
+listed in [README.md](README.md#development), then install the locked packages:
 
 ```bash
-npm install
+npm ci
 ```
 
-The smoke test also requires:
-
-- Docker with Compose support, accessible by the current user.
-- `tauri-driver` in `PATH`.
-- `WebKitWebDriver` in `PATH`.
-- System runtime dependencies for building and running a Tauri/WebKitGTK app.
-- `zip` for the archive scenario.
-
-On Linux/Wayland, use the system `WebKitWebDriver` plus `tauri-driver`; the
-local WebDriver-controlled app windows can be run with `GDK_BACKEND=wayland`.
-The Dockerized backend app instances still run under `xvfb-run`.
-
-## Smoke Tests
-
-Search result actions (`cases/search.mjs`): set
-`FBRO_E2E_SEARCH_ACTIONS_ONLY=1` with the local smoke command to run the isolated
-flow. It covers keyboard and mouse Jump to location on duplicate names, exact
-parent/cursor targeting in the same panel (including hidden files),
-multi-selection eligibility,
-Open With menu-to-modal keyboard ownership and focus restoration, directory
-results, full-path launch through a registered test desktop application,
-stale same-name picker closure, and deleted-result rejection. Both themes are
-covered. The navigation unit tests run with
-`cargo test --manifest-path src-tauri/Cargo.toml search_navigation_tests`.
-Native macOS and Windows search-action behavior still needs verification.
-The navigation tests and isolated native Linux/Wayland smoke flow passed,
-including `fbro-dark` and `daylight`.
-
-Focus handoff regressions (`cases/focus-handoff.mjs`) cover synced-panel
-self-copy rejection, clicking and expiring its warning toast, the first arrow
-moving the backend cursor, non-repository Git/bookmarks closure, exact inline
-and filter opener restoration, menu-to-modal transitions, missing openers,
-backend removal of focused inline controls, outside-click panel switching,
-empty-folder suggestions, toolbar activation, and terminal/toast preservation.
-They run before the local UI flows; `FBRO_E2E_FOCUS_ONLY=1` runs only this flow.
-The focus handoff, local UI, and Git flows passed on native Linux/Wayland with
-the debug binary, including exact Git repository button restoration. Search
-viewer fixtures now use their own folder, avoiding the earlier local flow's
-`dst/alpha/renamed.txt` and keeping the expected three duplicate-name results.
-Native macOS and Windows focus behavior still needs verification.
-
-`cargo test --manifest-path src-tauri/Cargo.toml terminal::tests` includes a
-blocked-resize regression verifying that resize requests return immediately
-and pending dimensions coalesce in order, plus a blocked-process-teardown
-regression verifying that close returns and releases the session registry.
-The Quick Edit smoke flow also
-creates a zero-byte file through the empty-folder suggestion and launches
-Quick Edit by keyboard without selecting the file again. Native ConPTY editor
-resize/close behavior still requires Windows app verification; Linux/macOS
-real-editor integration still requires verification. The expanded Quick Edit
-flow passed on native Linux/Wayland using the fake-nano smoke fixture.
-
-The local smoke flow covers empty-folder suggestion focus, Tab panel
-switching, Enter/Space opening one New File dialog, name-input focus,
-cancellation restoring suggestion focus, and successful creation replacing
-the indicator and restoring listing focus. It also covers arrow navigation to
-the secondary folder suggestion, a single suggestion Tab stop, folder-dialog
-cancellation, and successful folder creation. It checks list/grid empty
-presentation and filtered empty listings. These cases passed in the native
-Linux/Wayland smoke environment; native macOS and Windows focus and WebView
-styling still require verification.
-
-The local smoke flow checks Display generation/cache controls against the backend's
-`supportsManagedThumbnails` capability and retains the streaming toggle on all
-platforms. The Jobs check covers the thumbnail tab on Linux and skips it in
-Arrow/Home/End navigation for native providers, restoring focus on close.
-`cargo test --manifest-path src-tauri/Cargo.toml managed_thumbnails_are_linux_only`
-checks the PAL capability on the compiled host platform.
-Run the focused flow with `FBRO_E2E_THUMBNAILS_ONLY=1` using the local smoke commands.
-The capability unit test, frontend/Tauri debug builds, and focused Linux/Wayland
-thumbnail smoke passed. Native macOS/Windows visibility and keyboard checks remain
-unverified.
-The local smoke flow checks the thumbnail queue's backend reply, Jobs modal
-empty state, keyboard tab selection, focus preservation during refresh, and
-focus restoration on close. `cargo test --manifest-path src-tauri/Cargo.toml
-thumb_pool` covers deduplication, visibility priority and demotion, running
-and completed tasks, concurrency limits, and bounded queue snapshots.
-Thumbnail viewport smoke fixtures verify off-screen cards do not fetch,
-expanded cards update their selection fill on keyboard selection/deselection,
-off-screen requests stay queued during cooldown, and scrolling them into view
-promotes and renders them immediately. Backend tests cover the exact 12-second
-deadline, visibility demotion, unchanged viewport reports, completion resets,
-automatic worker wakeup, explicit preview bypass, small and windowed listings,
-inactive tabs, terminal surfaces, and stale listing epochs. Navigation smoke
-checks queue clearing, release of abandoned requests, and rejection of late old
-epoch requests. Backend tests cover preservation of another panel's work,
-same-location rescans, cancellation tokens, return-to-location completion races,
-and Linux read/seek cancellation without cache poisoning.
-Native macOS and Windows thumbnail providers need platform-specific checks.
-
-The local smoke flow covers symlink target hints, keyboard navigation into a
-directory link, Up through a target child and back to the link's origin with
-cursor restoration, history Back/Forward followed by Up, viewer navigation
-through a file link, and errors for broken links. Backend return-route tests
-also cover nested links, cross-source history, and archive round trips.
-Rust tests cover link-preserving local file
-operations and avoid traversing cyclic links during directory copies. Native macOS and Windows
-symlink behavior still needs platform-specific verification.
-
-Storage-policy regressions are covered by backend tests:
+The standard checks are:
 
 ```bash
-cargo test --manifest-path src-tauri/Cargo.toml storage
-cargo test --manifest-path src-tauri/Cargo.toml viewer_prefetch
-cargo test --manifest-path src-tauri/Cargo.toml thumb_pool
+npm run build
+npm run test:build-info
+node --test tests/check-version.test.mjs
+cargo test --manifest-path src-tauri/Cargo.toml --locked
+cargo check --manifest-path tools/lfs-spy/Cargo.toml --locked
 ```
 
-Linux fixtures cover internal NVMe/SATA, rotational disks, USB/MMC readers,
-removable PCI devices, remote mounts, partitions, mapped/mixed devices, unresolved
-members, hidden nested mounts, symlink targets, and device replacement. Instrumented
-viewer and thumbnail tests verify rejected work does not call its provider and
-foreground thumbnails still work. Windows storage-descriptor fixtures also run on
-Linux, but do not exercise Win32 device queries. Tests inject registries only in test code;
-there is no runtime eligibility override.
+`npm run build` runs TypeScript checking and the production frontend build.
+There is no separate frontend lint command. The Node tests cover build metadata
+and release-version consistency. Rust tests cover backend behavior and adapters;
+the last command checks the optional local-filesystem spy helper.
 
-On native macOS and Windows, additionally verify source `storageClass` and
-`prefetchEligible` on internal SSDs, external SSDs/card readers, network volumes,
-and multi-device volumes. Unknown devices must stay disabled. Verify unplug/remount
-updates within the discovery interval and does not reuse old viewer cache entries.
-Linux fixture tests do not replace these native platform checks.
-
-Removable-source eject requires a real-device check on native Linux with
-UDisks2 and macOS: one-volume USB key, multi-volume USB drive, busy file job,
-and a device held busy by another process. Confirm volume-only unmount leaves
-sibling volumes mounted, whole-drive eject removes all sibling sources, and
-open tabs recover to Home. The Docker smoke environment has no removable
-device; it covers the picker, keyboard ownership, empty state, and focus return.
-
-The smoke test starts two fbro backend/app instances named `fbro-a` and
-`fbro-b`, starts two local `tauri-driver` processes, drives the UI through
-WebDriver, and observes backend state over WebSocket.
-
-Run the default smoke test:
+For dependency changes, also run `npm audit`. With `cargo-audit` installed,
+audit both Rust lockfiles:
 
 ```bash
-npm run e2e:smoke
+cargo audit --file src-tauri/Cargo.lock
+cargo audit --file tools/lfs-spy/Cargo.lock
 ```
 
-This uses `docker-compose.e2e.yml`. That image builds the app inside Docker,
-which is reproducible but slower.
+## Linux smoke tests
 
-For faster local iteration, build the app once on the host and run the host
-runtime image:
+The smoke runner is [tests/e2e/smoke/index.mjs](tests/e2e/smoke/index.mjs).
+It drives native frontend windows with WebDriver and checks backend state over
+WebSocket. Two backend app instances, `fbro-a` and `fbro-b`, run in Docker under
+Xvfb. Their files and settings live under `artifacts/e2e`.
 
-```bash
-npm run tauri -- build --no-bundle
-FBRO_E2E_COMPOSE_FILES=docker-compose.e2e.host.yml GDK_BACKEND=wayland npm run e2e:smoke:local
-```
+### Requirements
 
-The host-runtime compose file builds only a runtime image and bind-mounts
-`src-tauri/target/release/fbro` into both containers. Both `fbro-a` and
-`fbro-b` use the same image.
+In addition to the normal build dependencies, the host needs:
 
-For backend/debug iteration, build the debug binary and use the debug local
-script:
+- Docker with Compose, accessible by the current user.
+- `tauri-driver` and `WebKitWebDriver` in `PATH`.
+- A graphical session for the native app windows.
+- `git` and `zip` for the Git and archive fixtures.
+
+The commands below use Wayland. On an X11 session, omit `GDK_BACKEND=wayland`.
+Run one smoke suite at a time: the default ports and Compose services are shared.
+The containers reset their fixture directories and settings at startup.
+
+### Recommended: debug build
 
 ```bash
 GDK_BACKEND=wayland npm run e2e:smoke:local_debug
 ```
 
-This uses `docker-compose.e2e.host.yml` plus `docker-compose.e2e.debug.yml`,
-bind-mounts `src-tauri/target/debug/fbro` into both containers, and launches
-the frontend-only app windows from the same debug binary. The script builds
-that binary with `tauri build --debug --no-bundle` first; a plain `cargo build`
-is not enough for this harness because it creates a dev-mode binary that tries
-to load `http://localhost:5173`.
+This builds the app with `tauri build --debug --no-bundle`, then uses
+[docker-compose.e2e.host.yml](docker-compose.e2e.host.yml) and
+[docker-compose.e2e.debug.yml](docker-compose.e2e.debug.yml). The host frontend
+windows and Docker backends use the same debug binary.
 
-### Hybrid Host/Docker Layout
+Use the Tauri build command for smoke binaries. A plain `cargo build` produces
+a development app that expects the Vite server at `http://localhost:5173`.
+Finish building before starting the tests; concurrent builds can replace the
+frontend assets while Tauri is embedding them.
 
-The local smoke mode is hybrid: WebDriver and the frontend-only app windows run
-on the host, while the two backend-capable fbro instances run in Docker. The
-host app windows connect to the Dockerized instances over WebSocket.
-
-```mermaid
-flowchart LR
-  subgraph Host["Host"]
-    Smoke["tests/e2e/smoke/index.mjs"]
-    TD_A["tauri-driver :4444"]
-    TD_B["tauri-driver :4445"]
-    WK_A["WebKitWebDriver :4446"]
-    WK_B["WebKitWebDriver :4447"]
-    FE_A["frontend-only fbro-a window"]
-    FE_B["frontend-only fbro-b window"]
-    Bin["src-tauri/target/release/fbro\nor target/debug/fbro"]
-    Artifacts["artifacts/e2e"]
-  end
-
-  subgraph Docker["Docker Compose"]
-    Runtime["fbro-e2e-host runtime image"]
-    A["container fbro-a\nWS :17878 -> :7878\nfileserver :17881"]
-    B["container fbro-b\nWS :27878 -> :7878\nfileserver :27881"]
-    WorkA["/work/a + /state/a"]
-    WorkB["/work/b + /state/b"]
-  end
-
-  Smoke --> TD_A
-  Smoke --> TD_B
-  TD_A --> WK_A --> FE_A
-  TD_B --> WK_B --> FE_B
-
-  FE_A -->|"ws://127.0.0.1:17878"| A
-  FE_B -->|"ws://127.0.0.1:27878"| B
-  Smoke -->|"observer WebSocket"| A
-  Smoke -->|"observer WebSocket"| B
-
-  Bin -->|"bind-mounted read-only"| A
-  Bin -->|"bind-mounted read-only"| B
-  Runtime --> A
-  Runtime --> B
-  Artifacts -->|"bind mount"| WorkA
-  Artifacts -->|"bind mount"| WorkB
-  A --- WorkA
-  B --- WorkB
-  B <-->|"pairing + remote SFTP"| A
-```
-
-Useful environment variables:
-
-- `FBRO_E2E_VIEWER_ONLY=1` or runner argument `--viewer-only`: run only the viewer regression flow.
-  `npm run e2e:smoke:local_debug -- --viewer-only` builds and runs it locally. It covers
-  delayed loads, more than 21 high-resolution JPEGs, reverse/rapid navigation,
-  and recovery from an invalid image. HEIC/HEIF fixtures verify HTTP MIME types
-  and hex fallback on Linux/Windows; on native macOS the same case checks image
-  decoding via HTTP and buffered Blobs. The Docker harness runs Linux, so native
-  macOS decoding still needs a separate check in both F3 and the embedded preview.
-  Timings and process-memory samples are
-  written to `artifacts/e2e/viewer-timings.json`; they include WebDriver and a
-  local forwarding server's overhead and are not a standalone rendering benchmark.
-- `FBRO_E2E_COMPOSE_FILES`: compose file list used by local smoke runs.
-- `FBRO_APP_BINARY`: host app binary used by the frontend-only WebDriver
-  windows. The debug script sets this to `src-tauri/target/debug/fbro`.
-- `FBRO_E2E_ARTIFACTS`: artifact output directory. Defaults to `artifacts/e2e`.
-- `FBRO_E2E_KEEP_DOCKER=1`: keep Docker containers after the run for debugging.
-- `FBRO_A_WEBDRIVER_PORT`, `FBRO_B_WEBDRIVER_PORT`: tauri-driver HTTP ports.
-- `FBRO_A_NATIVE_WEBDRIVER_PORT`, `FBRO_B_NATIVE_WEBDRIVER_PORT`: native
-  WebKitWebDriver ports used under tauri-driver.
-
-By default the smoke harness runs Docker cleanup in `finally`:
+### Host release build
 
 ```bash
-docker compose ... down --remove-orphans
+npm run tauri -- build --no-bundle
+FBRO_APP_BINARY=src-tauri/target/release/fbro \
+  FBRO_E2E_COMPOSE_FILES=docker-compose.e2e.host.yml \
+  GDK_BACKEND=wayland npm run e2e:smoke:local
 ```
 
-Viewer diagnostics use the existing backend stderr log: `[viewer navigation]`
-reports navigation preparation time, `[viewer http]` distinguishes cache hits
-from disk reads, `[viewer prefetch]` reports scheduling/read/eviction activity
-and allocated cache bytes, and `[thumbnail]` reports queue waits and generation
-times. The prefetch cache is limited to 21 entries and 256 MiB, with two readers;
-foreground loads do not wait for a prefetch slot.
+This builds only the Docker runtime image and mounts the host release binary
+into both containers. Setting `FBRO_APP_BINARY` explicitly keeps the frontend
+and backend on the intended build.
 
-Run the deterministic prefetch regression tests with:
+### Build the backend app in Docker
 
 ```bash
-cargo test --manifest-path src-tauri/Cargo.toml viewer_prefetch
+npm run tauri -- build --no-bundle
+FBRO_APP_BINARY=src-tauri/target/release/fbro GDK_BACKEND=wayland npm run e2e:smoke
 ```
 
-## What The Smoke Test Covers
+The default [docker-compose.e2e.yml](docker-compose.e2e.yml) builds the backend
+app inside Docker. The first command builds the binary for the native frontend
+windows. This mode is slower than the host-runtime modes.
 
-The smoke test exercises these flows:
+### Run a focused flow
 
-- Local file operations on `fbro-a`:
-  - Create directories and files.
-  - Copy from left to right panel.
-  - Rename and verify renamed content.
-  - Delete and verify removal.
-  - Sort entries by name, size, and date in both directions.
-- Archive browsing: create a zip file, enter it from the UI, copy a file out of
-  the archive, and verify extracted content.
-- Search: search for `renamed.txt`, mount the search results source, and verify
-  the result appears in the panel. Duplicate names have distinguishing path
-  hints; the viewer displays each result's own content during forward and
-  reverse j/k navigation. Backend tests also cover exact path/source resolution
-  when search arrival order differs from panel order and results disappear.
-- Datetime search: verify the Created/Modified time filter toggle works correctly.
-  Creates a file with mtime set to two years ago and btime≈now, then searches
-  with a "Between" interval covering current year ±1.  The modified filter must
-  exclude the stale-mtime file (mtime outside the interval); the created filter
-  must include it if the filesystem reports birth time.
-- File size search: verify the size filter works for both "Bigger than" and
-  "In range" operators.  Uses the sort-test files with known byte sizes: 500 B,
-  100 B, and 10 B.  Asserts that only the correct file matches each filter and
-  that all other files are excluded from results.
-- Remote sharing: configure arbitrary folders through the Sharing widget,
-  enable sharing on both instances, pair `fbro-b` to `fbro-a`,
-  mount `fbro-a`'s shared Home folder on `fbro-b`, verify the remote source
-  is read-only, copy `remote.txt` from remote `fbro-a` into local `/work/b/dst`,
-  and verify the copied payload.
-- Local UI flows (`cases/local.mjs`, beyond the file operations above):
-  - Colour scheme switch applies `data-color-scheme` on `.app`.
-  - About modal from the command palette: sole top layer, one `role=dialog`
-    with `aria-modal`, build-info formats, Escape restores panel focus.
-  - Eject removable source command from the palette: picker is the top layer,
-    initial focus is inside it, empty state disables eject, and Escape returns
-    focus to the panel.
-  - Bro help: Help in Pass to Bro opens Settings › Bros; closing returns focus
-    to the Bro dialog's help button with its form values intact.
-  - Bro list keyboard: opened from the command palette, the bro list gets
-    initial focus; Tab / Shift+Tab move the selection like the arrow keys.
-  - Copy Paths bro: launching it shows a "Copied … full path(s)" toast.
-  - Modal default focus: Copy primary action (including existing destinations),
-    Rename input, overwrite decision, Delete primary action (including reopen),
-    completed-job Close, Search mask, active Settings tab, and pairing Cancel
-    on both peers.
-    Delete Tab reaches Background and Cancel; Enter on Cancel preserves the
-    file and restores panel focus, while Enter on Delete removes it.
-  - Copy/Rename dialogs: defaults, Tab reachability, keyboard Cancel, Copy `N`
-    focusing/selecting the destination name without intercepting typed `n`, and copying
-    to existing files with Ask and Overwrite (including an edited destination
-    name); content checks verify replacement happens only after the Ask decision.
-  - Contextual selection operations: inline toolbar and context-menu items for
-    1/2/3 selected entries, cursor-row targeting, folder anchors.
-  - Sort selector (Enter applies, Escape cancels, focus returns to the filter),
-    quick-filter Escape restores the full listing, per-location sort on/off,
-    Settings tab arrows and reset confirmation. Covered Settings/Bro layers
-    are inert and hidden from accessibility; reset starts on Cancel and restores
-    its trigger on Escape. Settings Tab skips inactive sidebar tabs.
-  - Bookmark popover keyboard ownership, Up/Down selection without panel-cursor movement,
-    Enter navigation, and a scroll height capped at half the owning panel.
-  - Live date-sort cursor anchoring, inline image preview navigation, window
-    focus restoration, grid-mode Left navigation.
-- Git (`cases/git.mjs`, temporary repository):
-  - Repository initialization (`cases/git-init.mjs`): directory context-menu
-    and current-folder palette targets, default/custom branch, Enter/Cancel,
-    Escape and background completion, modal guards, single submission,
-    invalid-name retry, existing-repository rejection, nested repositories,
-    preserved files, Git decoration refresh, and opener focus restoration.
-    `FBRO_E2E_GIT_ONLY=1` runs initialization and the existing Git flow.
-    Rust `git::` tests cover initialization, unsupported drivers, spy native-path
-    mapping, target validation, and correlated reply serialization. The focused
-    initialization and existing Git flows passed on native Linux/Wayland with
-    the debug binary. A genuinely empty repository is also checked with hidden
-    files shown (`.git` is visible) and hidden (creation suggestions return),
-    followed by creating a zero-byte file and invoking Ctrl+F4 without another
-    row click. Native macOS and Windows initialization still require
-    platform verification.
-  - Inline new branch: N/input focus, Escape restoration, invalid-name retry,
-    Enter create-and-switch, selector refresh, and uncommitted-work preservation.
-  - Searchable branch dropdown: case-insensitive substring filtering, clearing
-    and empty results, arrows/Home/End, keyboard/pointer checkout, single
-    submission, current-branch no-op, backend-confirmed value, checkout rejection,
-    busy guards, Escape priority, Tab dismissal, opener/successor focus, active
-    result scrolling, directly focused option activation, and both color
-    schemes with viewport/modal containment.
-    Native macOS and Windows picker behavior requires platform verification.
-  - Inline Git row toolbar: action order, arrow-key focus without moving the
-    panel cursor, stage/unstage keep focus, rollback needs confirmation.
-  - Git modal: Log tab expansion; Changes tab j/k/arrow navigation, Space and
-    Ctrl+A selection, `s` stage toggle, Shift-click ranges, batch actions with
-    two-step rollback.
-  - Modal guards: global shortcuts are blocked while the Git modal is the top
-    layer; an in-flight action disables its button and ignores repeat keys.
-  - Journal entries for Git intents; Git metadata refreshes only on user action
-    or navigation.
-- Global selections (`cases/global-selection.mjs`): create from the context
-  menu, persistence across reload, add entries via context menu and long
-  right-click, focus follows existing/new selection mode, new-name Enter
-  validates, Tab/Enter adds to the existing selection, and deleting inside a
-  selection leaves the real files intact.
-- Fedup (`cases/fedup.mjs`): launch from Pass to Bro on a global selection;
-  default ignores, case-insensitive include patterns, custom excludes.
-- Quick Edit (`cases/quick-edit.mjs`): edit in the embedded terminal, save,
-  terminal closes; journal records intent/completed/failed.
-- Viewer (`cases/viewer.mjs`): full and quick-preview seeking with a real
-  15-second H.264 MP4 fixture (`fixtures/viewer.mp4`, generated using FFmpeg's
-  color source, no external media), native slider mouse seeking, media pointer
-  events remain uncancelled,
-  Ctrl+F3 preserves listing focus, Tab enters preview, excluded quick-preview
-  actions stay inactive, source-list Space plays/pauses the preview video without
-  changing focus/selection (including repeat and modal guards), ordinary text
-  retains Space selection,
-  F3/Open viewer dispatch the displayed source/path,
-  preview persists, symlink media rendering, chunked text beyond 1 MiB, binary
-  content beyond the former 64-row limit, PDF rendering/keyboard scrolling and Markdown/Mermaid rendering,
-  modal guards and exact preview-opener restoration, Tab boundaries,
-  nested Escape and source-list focus restoration. The promotion check observes
-  the real outgoing intent; the frontend-only Docker harness cannot inspect the
-  backend's separate native window or its OS focus handoff. Native macOS and
-  Windows controls/focus still require platform checks.
-  MP3 audio controls and Space play/pause dispatch
-  (mocked playback; native codec/audio output needs a platform check), large-image loading overlay, j/k navigation
-  under rapid keypresses, broken-image alert, prefetch eligibility per storage
-  class, PDF rendering and window title, local Markdown and HTML image loading
-  (including centered wrappers and explicit dimensions), Mermaid rendering, zoom and overlay
-  Escape. Timings go to `viewer-timings.json`.
-- Search modal keyboard (`cases/search.mjs`): roving tab focus, Enter on
-  Close, global shortcuts blocked while Search is the top layer.
+Set one of these flags before the debug command. For example:
 
-Native macOS and Windows modal focus and keyboard behavior still require
-verification. Smoke coverage samples the default-focus archetypes; it does not
-exercise every operation conflict and cancellation state.
+```bash
+FBRO_E2E_REMOTE_ONLY=1 GDK_BACKEND=wayland npm run e2e:smoke:local_debug
+```
 
-## Artifacts
+| Flag | Runs |
+| --- | --- |
+| `FBRO_E2E_FOCUS_ONLY=1` | Focus handoffs and modal ownership |
+| `FBRO_E2E_THUMBNAILS_ONLY=1` | Thumbnail settings, Jobs queue, and viewport behavior |
+| `FBRO_E2E_VIEWER_ONLY=1` | Viewer and preview regressions |
+| `FBRO_E2E_GIT_ONLY=1` | Repository initialization and Git operations |
+| `FBRO_E2E_HASH_CHECK_ONLY=1` | Check hashes |
+| `FBRO_E2E_HASH_GENERATE_ONLY=1` | Generate hashes, followed by Check hashes |
+| `FBRO_E2E_SEARCH_ACTIVITY_ONLY=1` | Search progress, background jobs, and cancellation |
+| `FBRO_E2E_SEARCH_ACTIONS_ONLY=1` | Search-result actions and focus |
+| `FBRO_E2E_REMOTE_ONLY=1` | Sharing, pairing, browsing, transfers, and cancellation |
 
-The smoke test does not currently emit a formal test report such as JUnit or
-HTML. It writes diagnostics under `artifacts/e2e`:
+The viewer flow also accepts `--viewer-only`:
 
-- `final-tree.txt`: final filesystem tree for both instances.
-- `fbro-a.log`, `fbro-b.log`: container app logs.
-- `logs/tauri-driver-a.log`, `logs/tauri-driver-b.log`: local driver logs.
-- `transcripts/fbro-a.json`, `transcripts/fbro-b.json`: WebSocket observer
-  transcripts.
-- `screenshots/fbro-a-failure.png`, `screenshots/fbro-b-failure.png`: failure
-  screenshots when a browser session exists.
+```bash
+GDK_BACKEND=wayland npm run e2e:smoke:local_debug -- --viewer-only
+```
 
-The authoritative pass/fail signal is the process exit code.
+Set `FBRO_HEIC_FIXTURE=/absolute/path/to/image.heic` on a full run to check
+successful optional HEIC conversion. Without it, the HEIC conversion flow
+checks settings, invalid-file errors, and switching an open viewer back to Hex.
 
-## Check hashes Bro
+## Smoke coverage
 
-`cases/hash-check.mjs` covers first-priority discovery for mixed and orphan-only
-selections, detection beyond the 100-entry ranking sample, stale launch
-rejection, keyboard checkbox/launch/close, matching and mismatching digests,
-malformed sidecars, ignored counts, saved report content and toast, no-save
-behavior, intermediate large-file byte progress, background/reopen behavior,
-cancellation through Jobs, and panel focus restoration.
+The full suite runs every flow below. Case files are in
+[tests/e2e/smoke/cases](tests/e2e/smoke/cases/); those assertions are the detailed
+coverage reference.
 
-Run this flow alone with `FBRO_E2E_HASH_CHECK_ONLY=1` using the normal local
-smoke command. Its large-file fixture is sparse and uses no proportional disk
-space. Rust tests in `jobs::check_hashes` cover parsing, empty files, I/O errors,
-cancellation, bounded streaming, report collisions, dangling symlinks, and save
-failures and cancellation at the report commit boundary; provider/ranking/
-parameter tests cover discovery and boolean options.
+| Area | Case files | Main checks |
+| --- | --- | --- |
+| Local files and UI | `local.mjs` | Create, copy, overwrite, rename, delete, sort, filtering, empty-folder suggestions, settings, bookmarks, Bros, clipboard feedback, grid navigation, and symlink routes |
+| Focus and modals | `focus-handoff.mjs`, `modal-focus.mjs`, and checks throughout the suite | Initial focus, exact opener restoration, covered layers ignoring keys, one submission per activation, nested Escape, backend rejection/removal, outside clicks, and preserving focus during toasts or toolbar actions |
+| Thumbnails | `thumbnails.mjs` (also called by the local flow) | Platform capability controls, Jobs tab navigation, queue refresh preserving focus, visible-card loading, off-screen cooldown, viewport promotion, selection fill, and abandoning old requests |
+| Viewers | `viewer.mjs` | Large and delayed images, rapid/reverse navigation, invalid-image recovery, text and binary content, PDF, Markdown/HTML images, Mermaid, zoom, audio/video controls, preview keyboard ownership, and opener restoration |
+| HEIC conversion | `heic.mjs` | Backend-confirmed opt-in settings, startup settings delivery, errors, optional real-file decoding, and live disabling |
+| Quick Edit | `quick-edit.mjs` | Edit/save in the embedded terminal, terminal closure, journal entries, and editing a newly created empty file |
+| Global selections | `global-selection.mjs` | Creation, reload persistence, adding through menus and long right-clicks, keyboard selection, focus, and removing references without deleting files |
+| Git | `git-init.mjs`, `git.mjs` | Initialization, branch creation/filtering/checkout, validation and busy states, stage/unstage/rollback, changes/log navigation, journal entries, modal guards, and focus |
+| Fedup | `fedup.mjs` | Global-selection input, default ignores, case-insensitive includes, and custom excludes |
+| Hashes | `hash-check.mjs`, `hash-generate.mjs` | Discovery, stale targets, options, matching/malformed sidecars, skip/overwrite, reports/toasts, progress, background/reopen, cancellation, and preserving existing sidecars |
+| Archives | `archive.mjs` | Enter a ZIP, copy a file out, and verify its content |
+| Search | `search.mjs` | Activity without hits, inspected counts, cancellation, duplicate-name hints and viewer paths, Jump to location, Open With, stale/deleted targets, modal keys, and date/size filters |
+| Remote | `remote.mjs` | Folder suggestions and typed shares, validation/history, unsharing, pairing, read-only browsing, copying, thumbnails, integrity, cancellation on both peers, and a fresh transfer after cancellation |
 
-The dedicated flow passed on native Linux/Wayland with the debug binary,
-including live progress over an 8 GiB sparse fixture. The frontend build and
-all 300 Rust tests passed. Native macOS and Windows integration still needs
-verification.
+Several UI flows check both `fbro-dark` and `daylight`. Modal tests sample common
+focus and cancellation paths; they do not cover every operation/conflict state.
+Search viewer fixtures are isolated from files created by earlier flows.
+Created-time search checks depend on filesystem birth-time support.
+Hash progress/cancellation tests use sparse 8 GiB files, so their apparent size
+does not require 8 GiB of allocated disk space.
 
-## Generate hashes Bro coverage
+## Focused Rust tests
 
-`cases/hash-generate.mjs` covers keyboard Bro selection, the default unchecked
-Overwrite existing checkbox, mixed selections, skip/replace outcomes, generated
-sidecars passing Check hashes, one terminal save toast, panel refresh, and exact
-focus restoration. It checks full-selection discovery beyond the 100-entry
-ranking sample and stale-folder launch rejection. An 8 GiB sparse source covers
-intermediate byte progress, background/reopen, Jobs cancellation, and preserving
-the previous sidecar. `FBRO_E2E_HASH_GENERATE_ONLY=1` runs generation and the
-Check hashes regression flow.
+Append a filter to the Rust test command:
 
-Rust generation tests cover empty/Unicode/linebreak names, checker compatibility,
-selection filtering, existing destinations, concurrent creation, read/write/
-flush/rename errors, cleanup, cancellation before/after per-file commits, and
-full selection processing. Provider, scoring, catalog and parameter validation
-have unit coverage. Native macOS and Windows still require verification.
+```bash
+cargo test --manifest-path src-tauri/Cargo.toml --locked patch_tests
+```
 
-Generation and Check hashes regression smoke flows passed on native
-Linux/Wayland with the debug app, including progress and cancellation on the
-8 GiB sources. Frontend and debug app builds passed; the complete Rust suite
-passed all 315 tests. Native macOS/Windows behavior was not verified.
+| Filter | Coverage |
+| --- | --- |
+| `patch_tests` | Delayed scan patches preserving newer cursor/selection/version, queued entries/completion/errors, and independent window updates |
+| `remote::` | Share validation/persistence, SFTP root resolution, transfer isolation, cancellation, and late lifecycle events |
+| `vfs::sftp::tests` | SFTP reads/cancellation and paired Ed25519 host-key pinning, including rejection of mismatched keys and certificates |
+| `jobs::file_ops::tests` | File-operation and remote-transfer cleanup/cancellation |
+| `jobs::search::tests` | Activity/counts, estimates, roots/depth, large directory backlogs, permission errors, FIFO avoidance, and cancellation |
+| `search_navigation_tests` | Exact source/path resolution, result ordering, and missing results |
+| `git::` | Repository operations, target/driver validation, native-path mapping, and replies |
+| `jobs::check_hashes` | Parsing, streaming, I/O errors, report collisions, symlinks, and cancellation at report commit |
+| `jobs::generate_hashes` | Selection, filename handling, checker compatibility, destination races, I/O failures, cleanup, and per-file commit cancellation |
+| `terminal::tests` | Nonblocking resize/close, pending resize coalescing, and session registry release |
+| `storage` | Device classification and prefetch eligibility |
+| `viewer_prefetch` | Scheduling, cache limits, storage policy, and cancellation |
+| `thumb_pool` | Deduplication, visibility priority, cooldown/wakeup, concurrency, stale epochs, and navigation cleanup |
+| `managed_thumbnails_are_linux_only` | Managed-thumbnail capability on the compiled host platform |
+| `heic_preview_is_opt_in` | Older settings defaulting to off and enabled-setting serialization |
+
+## Failure diagnostics
+
+A zero exit code means the smoke run passed. The runner does not produce JUnit
+or HTML reports. By default, diagnostics are written under `artifacts/e2e`:
+
+| Artifact | Contains |
+| --- | --- |
+| `final-tree.txt` | Final fixture filesystem trees for both instances |
+| `fbro-a.log`, `fbro-b.log` | Container app stderr/stdout |
+| `logs/tauri-driver-a.log`, `logs/tauri-driver-b.log` | Host driver/app logs |
+| `transcripts/fbro-a.json`, `transcripts/fbro-b.json` | Backend WebSocket messages observed during the run |
+| `screenshots/` | Failure captures and screenshots from individual cases |
+| `viewer-timings.json` | Viewer timings and process-memory samples |
+
+Viewer timings include WebDriver and forwarding-server overhead; use them to
+investigate regressions rather than as standalone rendering benchmarks.
+Backend log prefixes identify viewer navigation, HTTP reads/cache hits, prefetch,
+and thumbnail work: `[viewer navigation]`, `[viewer http]`, `[viewer prefetch]`,
+and `[thumbnail]`.
+
+Useful overrides:
+
+| Variable | Purpose |
+| --- | --- |
+| `FBRO_E2E_KEEP_DOCKER=1` | Keep backend containers after the run for inspection |
+| `FBRO_E2E_ARTIFACTS` | Change the runner's diagnostic output directory |
+| `FBRO_APP_BINARY` | Select the host app binary; the debug script sets it automatically |
+| `FBRO_E2E_COMPOSE_FILES` | Select Compose files; separate multiple files with `:` on Linux |
+| `FBRO_A_WEBDRIVER_PORT`, `FBRO_B_WEBDRIVER_PORT` | Change host tauri-driver ports (defaults: 4444, 4445) |
+| `FBRO_A_NATIVE_WEBDRIVER_PORT`, `FBRO_B_NATIVE_WEBDRIVER_PORT` | Change WebKitWebDriver ports (defaults: 4446, 4447) |
+
+The Compose files mount `artifacts/e2e` explicitly. If changing the artifact
+location, adjust the Compose mounts and fixture roots as well. The runner's
+configuration is in [config.mjs](tests/e2e/smoke/config.mjs).
+
+The runner stops drivers after each run. It also removes the Compose services
+unless `FBRO_E2E_KEEP_DOCKER=1` is set. After an interrupted debug run,
+clean up retained containers with:
+
+```bash
+docker compose -f docker-compose.e2e.host.yml -f docker-compose.e2e.debug.yml down --remove-orphans
+```
+
+## Checks that need native hardware or another OS
+
+The automated smoke environment exercises Linux. Linux fixtures, including
+Windows storage-descriptor fixtures, do not validate native macOS or Windows
+APIs. Check the affected platforms when changing these areas:
+
+- **Keyboard, focus, and styling:** Cmd/Ctrl shortcuts, modal stacking, exact
+  opener restoration, both themes, and WebView controls. The smoke harness checks
+  viewer-launch intents but cannot verify the backend's separate native viewer
+  window or its OS focus handoff.
+- **Media:** Native audio output and codec support; the MP3 smoke case mocks
+  playback. Check HEIC/HEIF decoding in both F3 and embedded preview, including
+  macOS native decoding and optional conversion on Linux/Windows.
+- **Terminals:** Real editor resize and close on Linux/macOS and Windows ConPTY.
+  Quick Edit smoke uses the fake-nano fixture.
+- **Files and storage:** Native symlinks, path/ACL behavior, thumbnail providers,
+  internal/external SSDs, card readers, network and multi-device volumes. Check
+  `storageClass`/`prefetchEligible`, keep unknown devices ineligible, and confirm
+  unplug/remount updates without reusing stale viewer cache entries.
+- **Eject:** Real removable devices on Linux with UDisks2 and on macOS. Test
+  single- and multi-volume drives, active file jobs, and externally busy devices.
+  Volume-only unmount must preserve siblings; whole-drive eject must remove them
+  and recover open tabs to Home. Docker covers only the picker and its empty state.
+
+## Keeping this guide current
+
+Update the coverage and focused-run tables when adding or changing test flows.
+Keep dated run results, test counts, dependency advisories, and platform results
+in the relevant PR or implementation plan. The
+[dependency refresh record](spex/plans/2026-10-09-dependency-refresh.md) contains
+that change's validation results and remaining audit warnings.
