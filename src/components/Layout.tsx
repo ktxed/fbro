@@ -266,13 +266,14 @@ export function Layout({ client, jobsViewOpen, onCloseJobsView, onOpenJobsView }
     };
   }, [activeDrag, client, dispatch, dragCandidate, state.panels]);
 
+  const activeToast = state.notifications.toastQueue[0];
   useEffect(() => {
-    if (!state.transientHint) return;
+    if (!activeToast) return;
     const timer = window.setTimeout(() => {
-      dispatch({ type: "CLOSE_TRANSIENT_HINT" });
+      dispatch({ type: "EXPIRE_NOTIFICATION_TOAST", id: activeToast.id });
     }, 2400);
     return () => window.clearTimeout(timer);
-  }, [dispatch, state.transientHint]);
+  }, [dispatch, activeToast]);
 
   useEffect(() => {
     const unlisten = listen<{ success: boolean }>("drag-out-complete", () => {
@@ -614,10 +615,12 @@ export function Layout({ client, jobsViewOpen, onCloseJobsView, onOpenJobsView }
       {state.pendingSettings && (
         <SettingsModal client={client} />
       )}
-      {state.transientHint && (
-        <div className="transient-hint" data-testid="transient-hint" role="status" aria-live="polite"
+      {activeToast && (
+        <div className={`transient-hint transient-hint--${activeToast.level}`} data-testid="transient-hint"
+          data-notification-id={activeToast.id} data-pending-count={state.notifications.toastQueue.length}
+          role="status" aria-live="polite"
           onMouseDown={(event) => event.preventDefault()}>
-          {state.transientHint.message}
+          {activeToast.message}
         </div>
       )}
     </>

@@ -16,7 +16,8 @@
     "e2e:smoke:local": "FBRO_E2E_LOCAL=1 node tests/e2e/smoke/index.mjs",
     "e2e:smoke:local_debug": "tauri build --debug --no-bundle && FBRO_APP_BINARY=src-tauri/target/debug/fbro FBRO_E2E_COMPOSE_FILES=docker-compose.e2e.host.yml:docker-compose.e2e.debug.yml FBRO_E2E_LOCAL=1 node tests/e2e/smoke/index.mjs",
     "e2e:smoke:runner": "node tests/e2e/smoke/index.mjs",
-    "test:build-info": "node --test tests/build-info.test.mjs"
+    "test:build-info": "node --test tests/build-info.test.mjs",
+    "test:notifications": "node --test --test-isolation=none tests/notifications.test.mjs"
   },
   "dependencies": {
     "@floating-ui/react": "^0.27.20",

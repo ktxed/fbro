@@ -296,8 +296,7 @@ async fn prepare_panel_home_recovery(
     } else {
         format!("Panel source became unavailable. Recovered to home. {reason}")
     };
-    let _ = tx
-        .send(ServerMessage::Error {
+    let _ = crate::notifications::send_feedback(state, tx, ServerMessage::Error {
             timestamp: crate::ws::protocol::now(),
             code: "PANEL_RECOVERED_HOME".to_string(),
             message,

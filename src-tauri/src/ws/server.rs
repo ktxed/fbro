@@ -154,6 +154,19 @@ async fn handle_connection(
     )
     .await;
 
+    // Subscribe before capturing the initial GUI snapshot. The service lock
+    // captures the notification history and its delivery cursor atomically.
+    let notifications = state.lock().await.notifications.clone();
+    let (notification_snapshot, mut notification_rx) = if is_state_client {
+        notifications.subscribe()
+    } else {
+        // Viewer windows have no store or toasts, so they must not accumulate
+        // an unread application-lifetime subscriber queue.
+        let (_, receiver) = mpsc::unbounded_channel();
+        (notifications.snapshot(), receiver)
+    };
+    let mut notification_delivered_version = notification_snapshot.version;
+
     let (snapshot, panel_ids, is_reconnect) = if is_gui {
         let (panel_ids, is_reconnect) = {
             let mut state_guard = state.lock().await;
@@ -188,7 +201,10 @@ async fn handle_connection(
         (None, vec![], false)
     };
 
-    if let Some(snapshot) = snapshot {
+    if let Some(mut snapshot) = snapshot {
+        if let ServerMessage::StateSnapshot { domains, .. } = &mut snapshot {
+            domains.notifications = notification_snapshot;
+        }
         let _ = send_msg(&mut ws_tx, &snapshot).await;
     } else {
         // Non-GUI clients (viewers) don't get the full snapshot but still need
@@ -366,9 +382,31 @@ async fn handle_connection(
         .await;
     }
 
-    loop {
+    'connection: loop {
         tokio::select! {
-            Some(mut msg) = rx.recv() => {
+            Some(update) = notification_rx.recv(), if is_state_client => {
+                notification_delivered_version = update.version;
+                if send_msg(&mut ws_tx, &update.into_server_message()).await.is_err() {
+                    break;
+                }
+            }
+            Some(msg) = rx.recv() => {
+                let Some(mut msg) = prepare_connection_job_message(&state, msg).await else {
+                    continue;
+                };
+                if is_state_client {
+                    if let ServerMessage::StateSnapshot { domains, .. } = &mut msg {
+                        let updates = notification_updates_before_snapshot(
+                            &notifications, &mut domains.notifications, &mut notification_rx,
+                            &mut notification_delivered_version,
+                        ).await;
+                        for update in updates {
+                            if send_msg(&mut ws_tx, &update.into_server_message()).await.is_err() {
+                                break 'connection;
+                            }
+                        }
+                    }
+                }
                 if let ServerMessage::StatePatch { ref domain, ref entity_id, ref patch, version, .. } = msg {
                     if domain == "panels" {
                         if let Some(panel_id) = entity_id {
@@ -377,9 +415,6 @@ async fn handle_connection(
                     }
                 }
 
-                if !apply_job_event_to_state(&state, &mut msg).await {
-                    continue;
-                }
                 if let ServerMessage::JobEvent { ref job_id, ref event, .. } = msg {
                     if event == "Completed" || event == "Cancelled" || event == "Failed" {
                         let panels_to_rescan = {
@@ -491,7 +526,9 @@ async fn handle_connection(
                     Some(Ok(Message::Text(text))) => {
                         match serde_json::from_str::<ClientMessage>(&text) {
                             Ok(ClientMessage::Intent { name, scope, args, .. }) => {
-                                eprintln!("[fbro] intent: {name} scope={scope} args={args}");
+                                if let Some(trace) = intent_trace(&name, &scope, &args) {
+                                    eprintln!("{trace}");
+                                }
                                 if !is_state_client && name == "OpenPathInRightPanel" {
                                     queue_cli_open_request(
                                         &state,
@@ -666,6 +703,85 @@ where
     }
 }
 
+pub(crate) async fn prepare_connection_job_message(
+    state: &SharedState,
+    mut message: ServerMessage,
+) -> Option<ServerMessage> {
+    if let ServerMessage::AppliedWorkerMessage { mut message } = message {
+        // Cancellation can occur after producer application but before socket
+        // delivery. Preserve its presentation rules without replaying state.
+        if let ServerMessage::JobEvent { job_id, event, .. } = message.as_mut() {
+            let guard = state.lock().await;
+            if let Some(job) = guard.job_store.jobs.get(job_id) {
+                if !reconcile_cancelled_job_event(&job.state, event) {
+                    return None;
+                }
+            }
+        }
+        return Some(*message);
+    }
+    apply_job_event_to_state(state, &mut message)
+        .await
+        .then_some(message)
+}
+
+fn reconcile_cancelled_job_event(state: &JobState, event: &mut String) -> bool {
+    if *state == JobState::Cancelled && event != "Cancelled" {
+        if matches!(event.as_str(), "Completed" | "Failed") {
+            // Acknowledge drained workers without reviving a cancelled job.
+            *event = "Cancelled".to_string();
+        } else {
+            return false;
+        }
+    }
+    true
+}
+
+fn intent_trace(name: &str, scope: &serde_json::Value, args: &serde_json::Value) -> Option<String> {
+    if matches!(name, "PublishNotification" | "ClearNotifications") {
+        return None;
+    }
+    Some(format!("[fbro] intent: {name} scope={scope} args={args}"))
+}
+
+pub(crate) async fn notification_updates_before_snapshot(
+    service: &crate::notifications::NotificationService,
+    snapshot: &mut crate::notifications::NotificationSnapshot,
+    receiver: &mut mpsc::UnboundedReceiver<crate::notifications::NotificationUpdate>,
+    delivered_version: &mut u64,
+) -> Vec<crate::notifications::NotificationUpdate> {
+    // A resnapshot may have waited in the normal job channel while live
+    // notifications advanced. Capture a fresh boundary, then deliver every
+    // subscribed update it covers before the frontend installs that version.
+    // Initial connection snapshots bypass this path and never replay toasts.
+    *snapshot = service.snapshot();
+    let mut updates = Vec::new();
+    while *delivered_version < snapshot.version {
+        let Some(update) = receiver.recv().await else {
+            break;
+        };
+        *delivered_version = update.version;
+        updates.push(update);
+    }
+    updates
+}
+
+#[cfg(test)]
+mod notification_trace_tests {
+    use super::intent_trace;
+
+    #[test]
+    fn notifications_housekeeping_payloads_do_not_bypass_log_channel_routing() {
+        let scope = serde_json::json!({});
+        for channels in [serde_json::json!([]), serde_json::json!(["toast"])] {
+            let args = serde_json::json!({"message": "private feedback", "channels": channels});
+            assert!(intent_trace("PublishNotification", &scope, &args).is_none());
+        }
+        assert!(intent_trace("ClearNotifications", &scope, &scope).is_none());
+        assert!(intent_trace("RenameFile", &scope, &scope).is_some());
+    }
+}
+
 pub(crate) async fn apply_job_event_to_state(state: &SharedState, msg: &mut ServerMessage) -> bool {
     let generation_job_id = match msg {
         ServerMessage::HashGenerateBroResult { job_id, .. }
@@ -756,6 +872,9 @@ pub(crate) async fn apply_job_event_to_state(state: &SharedState, msg: &mut Serv
         .map(|job| matches!(job.kind, crate::jobs::JobKind::FpBro(_)))
         .unwrap_or(false);
 
+    let notifications = state_guard.notifications.clone();
+    let mut terminal_feedback = None;
+
     let is_search_job = state_guard
         .job_store
         .jobs
@@ -764,14 +883,11 @@ pub(crate) async fn apply_job_event_to_state(state: &SharedState, msg: &mut Serv
         .unwrap_or(false);
 
     if let Some(job) = state_guard.job_store.jobs.get_mut(job_id) {
-        if job.state == JobState::Cancelled && event != "Cancelled" {
-            if matches!(event.as_str(), "Completed" | "Failed") {
-                // The worker has drained. Acknowledge cancellation so its queue
-                // can advance, without letting a late terminal event revive it.
-                *event = "Cancelled".to_string();
-            } else {
-                return false;
-            }
+        if !reconcile_cancelled_job_event(&job.state, event) {
+            return false;
+        }
+        if let crate::jobs::JobKind::HashGenerateBro(meta) = &mut job.kind {
+            terminal_feedback = crate::notifications::hash_generation_feedback(meta, event);
         }
         if let Some(files) = files {
             match &mut job.kind {
@@ -873,6 +989,14 @@ pub(crate) async fn apply_job_event_to_state(state: &SharedState, msg: &mut Serv
             state_guard.job_store.fp_running = None;
         }
         state_guard.job_store.remove_from_fp_queue(job_id);
+    }
+
+    if let Some(input) = terminal_feedback {
+        // Claiming the summary happened under SharedState; routing and sink
+        // I/O happen after releasing it.
+        drop(state_guard);
+        notifications.publish(input);
+        return true;
     }
 
     // For search jobs: mark the store as done on terminal events

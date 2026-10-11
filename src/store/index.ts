@@ -1,6 +1,8 @@
 import { createContext, useContext, useReducer, type Dispatch } from "react";
 import { isSearchSourceId } from "../utils/sourceId";
 import { disposeCachedTerminal } from "../components/PanelTerminal";
+import { applyNotificationPatch, applyNotificationSnapshot, createNotificationState, expireNotificationToast, type NotificationState } from "../notifications/state";
+import type { NotificationRequest, NotificationRequestAction } from "../notifications/service";
 import type {
   PanelState,
   PanelSlot,
@@ -37,9 +39,6 @@ import type {
   GitCommitShowReadyMessage,
   GitActionFinishedMessage,
   ExternalClipboardReadyMessage,
-  ExternalClipboardWrittenMessage,
-  FileClipboardWrittenMessage,
-  TextClipboardWrittenMessage,
   CacheStatusReadyMessage,
   ThumbnailQueueReadyMessage,
   PrefetchCacheStatus,
@@ -53,6 +52,8 @@ import type {
   PendingPairing,
   RemoteSourceStatus,
   GlobalSelectionSummary,
+  NotificationsPatch,
+  NotificationInput,
 } from "../ws/types";
 
 // ─── State ───────────────────────────────────────────────────────────────────
@@ -329,7 +330,10 @@ export interface AppState {
    *  `RemoteSourceStatus` events from the BE's SFTP supervisor.
    *  Missing keys are implicitly "connected" / unknown. */
   remoteSourceStatus: Record<string, RemoteSourceStatus>;
-  transientHint: { message: string; token: number } | null;
+  notifications: NotificationState;
+  notificationRequests: NotificationRequest[];
+  notificationConnectionReady: boolean;
+  notificationPublishError: string | null;
   embeddedViewer: { sourceSlotId: string } | null;
   cacheStatus: { prefetchCache: PrefetchCacheStatus } | null;
   thumbnailQueue: ThumbnailQueueReadyMessage | null;
@@ -411,7 +415,10 @@ const initialState: AppState = {
   pendingPairing: null,
   remoteSourceStatus: {},
 
-  transientHint: null,
+  notifications: createNotificationState(),
+  notificationRequests: [],
+  notificationConnectionReady: false,
+  notificationPublishError: null,
   embeddedViewer: null,
   cacheStatus: null,
   thumbnailQueue: null,
@@ -432,7 +439,7 @@ const initialState: AppState = {
 export type AppAction =
   | { type: "CONNECTED" }
   | { type: "DISCONNECTED" }
-  | { type: "BE_MESSAGE"; msg: BEMessage }
+  | { type: "BE_MESSAGE"; msg: BEMessage; notificationRequestId: string }
   | { type: "OPEN_OPERATION"; op: PendingOp }
   | { type: "CLOSE_OPERATION" }
   | { type: "SET_ACTIVE_JOB"; jobId: string }
@@ -485,8 +492,8 @@ export type AppAction =
   | { type: "CLOSE_ABOUT" }
   | { type: "OPEN_SORT_SELECTOR"; panelId: string }
   | { type: "CLOSE_SORT_SELECTOR" }
-  | { type: "CLOSE_TRANSIENT_HINT" }
-  | { type: "SHOW_TRANSIENT_HINT"; message: string }
+  | NotificationRequestAction
+  | { type: "EXPIRE_NOTIFICATION_TOAST"; id: string }
   | { type: "CLOSE_INPUT" }
   | { type: "TOGGLE_EMBEDDED_VIEWER" }
   | { type: "NAV_HISTORY_BACK";    panelId: string }
@@ -582,6 +589,9 @@ function applySnapshot(state: AppState, msg: StateSnapshotMessage): AppState {
   if (domains.globalSelections !== undefined) {
     next.globalSelections = domains.globalSelections;
   }
+  if (domains.notifications !== undefined) {
+    next.notifications = applyNotificationSnapshot(state.notifications, domains.notifications);
+  }
   if (next.maximizedTerminalPanelId
       && next.panels[next.maximizedTerminalPanelId]?.terminalSessionId === undefined) {
     storeMaximizedTerminalPanelId(null);
@@ -591,6 +601,9 @@ function applySnapshot(state: AppState, msg: StateSnapshotMessage): AppState {
 }
 
 function applyPatch(state: AppState, msg: StatePatchMessage): AppState {
+  if (msg.domain === "notifications") {
+    return { ...state, notifications: applyNotificationPatch(state.notifications, msg.version, msg.patch as NotificationsPatch) };
+  }
   if (msg.domain === "panels" && msg.entityId) {
     const panelId = msg.entityId;
     let panel = state.panels[panelId];
@@ -1195,28 +1208,6 @@ function applyJobEvent(state: AppState, msg: JobEventMessage): AppState {
   }
 
   let next = { ...state, jobs: { ...state.jobs, [msg.jobId]: updated } };
-  if (msg.event === "FileSkipped") {
-    const fileName = msg.error ?? job.progress?.currentFile ?? "file";
-    next = {
-      ...next,
-      transientHint: {
-        message: `Skipped copying file ${fileName}`,
-        token: msg.timestamp,
-      },
-    };
-  }
-
-  if (job.kind === "hash-generate-bro" && ["Completed", "Cancelled", "Failed"].includes(msg.event)
-      && !["Completed", "Cancelled", "Failed"].includes(job.state)) {
-    const saved = job.hashGenerateResult?.items.filter((item) => item.status === "created" || item.status === "replaced").length ?? 0;
-    if (saved > 0) {
-      next = { ...next, transientHint: {
-        message: `${msg.event === "Cancelled" ? "Cancelled — saved" : msg.event === "Failed" ? "Failed — saved" : "Saved"} ${saved} hash ${saved === 1 ? "file" : "files"}`,
-        token: msg.timestamp,
-      } };
-    }
-  }
-
   // Reuse the cached job snapshot when this search is open, including the
   // final estimate and counters on terminal events.
   if (job.kind === "search" && state.pendingSearch?.jobId === msg.jobId) {
@@ -1243,13 +1234,17 @@ function applyJobEvent(state: AppState, msg: JobEventMessage): AppState {
   return next;
 }
 
+function requestNotification(state: AppState, requestId: string, input: NotificationInput): AppState {
+  return { ...state, notificationRequests: [...state.notificationRequests, { requestId, input }] };
+}
+
 function reducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
     case "CONNECTED":
-      return { ...state, connected: true };
+      return { ...state, connected: true, notificationConnectionReady: false };
     case "DISCONNECTED":
       return {
-        ...state, connected: false, sessionId: null,
+        ...state, connected: false, sessionId: null, notificationConnectionReady: false,
         sharedFolderInput: state.sharedFolderInput.requestId
           ? { ...state.sharedFolderInput, requestId: null, error: "Connection lost. Check shared folders after reconnecting, then retry if needed." }
           : state.sharedFolderInput,
@@ -1261,7 +1256,17 @@ function reducer(state: AppState, action: AppAction): AppState {
           // Request-local reply; the preview session owns this ephemeral target.
           return state;
         case "Welcome":
-          return { ...state, sessionId: msg.sessionId, fileServerPort: msg.fileServerPort };
+          return { ...state, sessionId: msg.sessionId, fileServerPort: msg.fileServerPort,
+            notificationConnectionReady: true, notifications: { ...state.notifications, version: -1 } };
+        case "PublishNotificationOk":
+        case "PublishNotificationFailed":
+          return { ...state,
+            notificationRequests: state.notificationRequests.filter((request) => request.requestId !== msg.requestId),
+            notificationPublishError: msg.type === "PublishNotificationFailed" ? msg.message : state.notificationPublishError,
+          };
+        case "ClearNotificationsOk":
+        case "ClearNotificationsFailed":
+          return state;
         case "StateSnapshot":
           return applySnapshot(state, msg);
         case "StatePatch":
@@ -1306,7 +1311,6 @@ function reducer(state: AppState, action: AppAction): AppState {
           return {
             ...state,
             jobs: { ...state.jobs, [msg.jobId]: { ...job, reportSavedPath: msg.path, hashCheckReportError: undefined } },
-            transientHint: { message: `Saved hash check report to ${msg.path}`, token: msg.timestamp },
           };
         }
         case "HashCheckReportFailed": {
@@ -1315,7 +1319,6 @@ function reducer(state: AppState, action: AppAction): AppState {
           return {
             ...state,
             jobs: { ...state.jobs, [msg.jobId]: { ...job, hashCheckReportError: msg.message } },
-            transientHint: { message: msg.message, token: msg.timestamp },
           };
         }
         case "FedupBroResult":
@@ -1333,7 +1336,6 @@ function reducer(state: AppState, action: AppAction): AppState {
           return {
             ...state,
             jobs: { ...state.jobs, [msg.jobId]: { ...job, reportSavedPath: msg.path } },
-            transientHint: { message: `Saved Fedup report to ${msg.path}`, token: msg.timestamp },
           };
         }
         case "SyncReportSaved": {
@@ -1342,7 +1344,6 @@ function reducer(state: AppState, action: AppAction): AppState {
           return {
             ...state,
             jobs: { ...state.jobs, [msg.jobId]: { ...job, reportSavedPath: msg.path } },
-            transientHint: { message: `Saved sync report to ${msg.path}`, token: msg.timestamp },
           };
         }
         case "Error":
@@ -1394,7 +1395,7 @@ function reducer(state: AppState, action: AppAction): AppState {
             return { ...state, pendingAttributes: { ...state.pendingAttributes, error: msg.message } };
           }
           if (msg.code === "TOUCH_NOT_SUPPORTED") {
-            return { ...state, pendingTouch: null, transientHint: { message: msg.message, token: msg.timestamp } };
+            return { ...state, pendingTouch: null };
           }
           if (msg.code === "NO_EDITOR" && msg.extra?.path) {
             const path = msg.extra.path as string;
@@ -1403,7 +1404,7 @@ function reducer(state: AppState, action: AppAction): AppState {
           }
           if (msg.code === "NAVIGATE_FAILED") {
             const panelId = msg.extra?.panelId as string | undefined;
-            if (!panelId) return { ...state, transientHint: { message: msg.message, token: msg.timestamp } };
+            if (!panelId) return requestNotification(state, action.notificationRequestId, { message: msg.message, level: "error" });
             let next = state;
             const pendingGoToPath = state.pendingGoToPath;
             if (pendingGoToPath?.panelId === panelId) {
@@ -1426,96 +1427,30 @@ function reducer(state: AppState, action: AppAction): AppState {
               };
             }
             return next === state
-              ? { ...state, transientHint: { message: msg.message, token: msg.timestamp } }
+              ? requestNotification(state, action.notificationRequestId, { message: msg.message, level: "error" })
               : next;
           }
-          if (msg.code === "NOT_A_FILE") {
-            return { ...state, transientHint: { message: msg.message, token: msg.timestamp } };
-          }
-          if (msg.code.startsWith("PASTE_EXTERNAL_")) {
-            return {
-              ...state,
-              transientHint: {
-                message: msg.message,
-                token: msg.timestamp,
-              },
-            };
-          }
-          if (msg.code.startsWith("WRITE_EXTERNAL_")) {
-            return {
-              ...state,
-              transientHint: {
-                message: msg.message,
-                token: msg.timestamp,
-              },
-            };
-          }
           if (msg.code === "START_FILE_OP_FAILED") {
-            return {
-              ...state,
-              pendingOp: null,
-              transientHint: {
-                message: msg.message,
-                token: msg.timestamp,
-              },
-            };
+            return { ...state, pendingOp: null };
           }
-          if (msg.code === "PANEL_RECOVERED_HOME") {
-            return {
-              ...state,
-              transientHint: {
-                message: msg.message,
-                token: msg.timestamp,
-              },
-            };
-          }
-          if (msg.code === "BRO_LAUNCH_FAILED") {
-            return {
-              ...state,
-              transientHint: {
-                message: msg.message,
-                token: msg.timestamp,
-              },
-            };
-          }
-          if (msg.code.startsWith("GIT_REVIEW_")) {
-            return {
-              ...state,
-              transientHint: {
-                message: msg.message,
-                token: msg.timestamp,
-              },
-            };
-          }
-          // Surface remote / sharing errors as toasts. Without this they
-          // disappear silently and the user can't tell why Connect or
-          // Pair didn't do anything.
-          if (msg.code.startsWith("remote.") || msg.code.startsWith("sharing.")) {
-            return {
-              ...state,
-              transientHint: {
-                message: msg.message,
-                token: msg.timestamp,
-              },
-            };
-          }
-          console.error("BE error:", msg.code, msg.message);
+          // Notifications for unconditional backend feedback arrive separately
+          // through the authoritative notifications domain.
           return state;
         case "AddSharedFolderOk":
           return {
             ...state,
             sharedFolderInput: state.sharedFolderInput.requestId === msg.requestId
               ? { path: "", requestId: null } : state.sharedFolderInput,
-            transientHint: { message: "Shared folder", token: msg.timestamp },
           };
-        case "AddSharedFolderFailed":
+        case "AddSharedFolderFailed": {
           if (state.sharedFolderInput.requestId !== msg.requestId) return state;
-          return {
+          const next = {
             ...state,
             sharedFolderInput: { ...state.sharedFolderInput, requestId: null, error: msg.message },
-            transientHint: state.pendingSettings?.activeTab !== "sharing"
-              ? { message: msg.message, token: msg.timestamp } : state.transientHint,
           };
+          return state.pendingSettings?.activeTab === "sharing" ? next
+            : requestNotification(next, action.notificationRequestId, { message: msg.message, level: "error" });
+        }
         case "RenameOk":
           return { ...state, pendingRename: null };
         case "MkdirOk":
@@ -1525,13 +1460,12 @@ function reducer(state: AppState, action: AppAction): AppState {
             ...state,
             pendingGitInit: state.pendingGitInit?.requestId === msg.requestId
               ? null : state.pendingGitInit,
-            transientHint: { message: "Initialized Git repository", token: msg.timestamp },
           };
         case "InitGitRepositoryFailed":
           if (state.pendingGitInit?.requestId === msg.requestId) {
             return { ...state, pendingGitInit: { ...state.pendingGitInit, submitting: false, error: msg.message } };
           }
-          return { ...state, transientHint: { message: msg.message, token: msg.timestamp } };
+          return requestNotification(state, action.notificationRequestId, { message: msg.message, level: "error" });
         case "TouchFileOk":
           return { ...state, pendingTouch: null };
         case "SetPermissionsOk":
@@ -1546,14 +1480,10 @@ function reducer(state: AppState, action: AppAction): AppState {
           return {
             ...state,
             pendingEject: state.pendingEject?.requestId === msg.requestId ? null : state.pendingEject,
-            transientHint: {
-              message: msg.action === "eject-drive" ? "Drive ready to remove" : "Volume unmounted",
-              token: msg.timestamp,
-            },
           };
         case "EjectSourceFailed":
           if (state.pendingEject?.requestId !== msg.requestId) {
-            return { ...state, transientHint: { message: msg.message, token: msg.timestamp } };
+            return requestNotification(state, action.notificationRequestId, { message: msg.message, level: "error" });
           }
           return {
             ...state,
@@ -1573,39 +1503,12 @@ function reducer(state: AppState, action: AppAction): AppState {
               ...(m.sourceId ? { sourceId: m.sourceId } : {}),
             },
             pendingContextMenu: null,
-            transientHint: null,
           };
         }
-        case "ExternalClipboardWritten": {
-          const m = msg as ExternalClipboardWrittenMessage;
-          const verb = m.opType === "move" ? "Cut" : "Copied";
-          const noun = m.itemCount === 1 ? "item" : "items";
-          return {
-            ...state,
-            transientHint: {
-              message: `${verb} ${m.itemCount} ${noun} to the system clipboard.`,
-              token: m.timestamp,
-            },
-          };
-        }
-        case "FileClipboardWritten": {
-          const m = msg as FileClipboardWrittenMessage;
-          const at = m.label ? ` @ ${m.label}` : "";
-          return {
-            ...state,
-            transientHint: {
-              message: `Copied raw file “${m.name}”${at}`,
-              token: m.timestamp,
-            },
-          };
-        }
-        case "TextClipboardWritten": {
-          const m = msg as TextClipboardWrittenMessage;
-          return {
-            ...state,
-            transientHint: { message: `Copied ${m.what}`, token: m.timestamp },
-          };
-        }
+        case "ExternalClipboardWritten":
+        case "FileClipboardWritten":
+        case "TextClipboardWritten":
+          return state;
         case "DryRunReady": {
           const m = msg as DryRunReadyMessage;
           const scriptName = m.scriptPath.replace(/\\/g, "/").split("/").filter(Boolean).pop() ?? m.scriptPath;
@@ -1618,7 +1521,6 @@ function reducer(state: AppState, action: AppAction): AppState {
               scriptName,
               sourcePanel: state.pendingOp?.sourcePanel ?? "",
             },
-            transientHint: { message: `Saved dry-run script to ${m.scriptPath}`, token: m.timestamp },
           };
         }
         case "FedupDeleteDryRunReady": {
@@ -1635,10 +1537,6 @@ function reducer(state: AppState, action: AppAction): AppState {
               manifestPath: m.manifestPath,
               manifestName,
               sourcePanel: job?.sourcePanel ?? "",
-            },
-            transientHint: {
-              message: `Saved Fedup delete dry-run script to ${m.scriptPath}`,
-              token: m.timestamp,
             },
           };
         }
@@ -2075,16 +1973,10 @@ function reducer(state: AppState, action: AppAction): AppState {
       return { ...state, activeSortSelectorPanelId: action.panelId };
     case "CLOSE_SORT_SELECTOR":
       return { ...state, activeSortSelectorPanelId: null };
-    case "CLOSE_TRANSIENT_HINT":
-      return { ...state, transientHint: null };
-    case "SHOW_TRANSIENT_HINT":
-      return {
-        ...state,
-        transientHint: {
-          message: action.message,
-          token: Date.now(),
-        },
-      };
+    case "REQUEST_NOTIFICATION":
+      return { ...state, notificationRequests: [...state.notificationRequests, action.request], notificationPublishError: null };
+    case "EXPIRE_NOTIFICATION_TOAST":
+      return { ...state, notifications: expireNotificationToast(state.notifications, action.id) };
     case "CLOSE_INPUT":
       return { ...state, pendingInput: null };
     case "TOGGLE_EMBEDDED_VIEWER": {

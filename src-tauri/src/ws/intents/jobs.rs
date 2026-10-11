@@ -493,6 +493,7 @@ async fn write_external_clipboard(args: &Value, ctx: &mut IntentContext<'_>) {
         match source_paths_for_external_clipboard(&state_guard, &parsed.panel_id) {
             Ok(value) => value,
             Err((code, message)) => {
+                drop(state_guard);
                 let _ = send_error(ctx, &code, message).await;
                 return;
             }
@@ -511,9 +512,7 @@ async fn write_external_clipboard(args: &Value, ctx: &mut IntentContext<'_>) {
                 ExternalClipboardOp::Move => "move",
                 ExternalClipboardOp::Copy => "copy",
             };
-            let _ = ctx
-                .tx
-                .send(ServerMessage::ExternalClipboardWritten {
+            let _ = ctx.send_feedback(ServerMessage::ExternalClipboardWritten {
                     timestamp: now(),
                     op_type: op_type.to_string(),
                     item_count,
@@ -569,6 +568,7 @@ async fn paste_external_clipboard(args: &Value, ctx: &mut IntentContext<'_>) {
         let state_guard = ctx.state.lock().await;
         if let Some(clipboard) = state_guard.file_clipboard.clone() {
             let Some(panel) = state_guard.panels.get(&parsed.panel_id) else {
+                drop(state_guard);
                 let _ = send_error(
                     ctx,
                     "PASTE_EXTERNAL_NO_PANEL",
@@ -578,6 +578,7 @@ async fn paste_external_clipboard(args: &Value, ctx: &mut IntentContext<'_>) {
                 return;
             };
             if !state_guard.drivers.contains_key(&panel.source_id) {
+                drop(state_guard);
                 let _ = send_error(
                     ctx,
                     "PASTE_EXTERNAL_UNSUPPORTED_DESTINATION",
@@ -611,6 +612,7 @@ async fn paste_external_clipboard(args: &Value, ctx: &mut IntentContext<'_>) {
     let (panel_path, panel_id, platform) = {
         let state_guard = ctx.state.lock().await;
         let Some(panel) = state_guard.panels.get(&parsed.panel_id) else {
+            drop(state_guard);
             let _ = send_error(
                 ctx,
                 "PASTE_EXTERNAL_NO_PANEL",
@@ -621,6 +623,7 @@ async fn paste_external_clipboard(args: &Value, ctx: &mut IntentContext<'_>) {
         };
 
         if !state_guard.drivers.contains_key(&panel.source_id) {
+            drop(state_guard);
             let _ = send_error(
                 ctx,
                 "PASTE_EXTERNAL_UNSUPPORTED_DESTINATION",
@@ -678,9 +681,11 @@ async fn paste_external_clipboard(args: &Value, ctx: &mut IntentContext<'_>) {
     let files = {
         let state_guard = ctx.state.lock().await;
         if let Err(error) = resolve_common_driver_for_paths(&state_guard, &payload.source_paths) {
+            drop(state_guard);
             let _ = send_error(ctx, "PASTE_EXTERNAL_MULTI_SOURCE", error).await;
             return;
         }
+        drop(state_guard);
 
         let mut files = Vec::with_capacity(payload.source_paths.len());
         for source_path in &payload.source_paths {
@@ -1067,9 +1072,7 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
         .await;
         match result {
             Ok(Ok(())) => {
-                let _ = ctx
-                    .tx
-                    .send(ServerMessage::DryRunReady {
+                let _ = ctx.send_feedback(ServerMessage::DryRunReady {
                         timestamp: now(),
                         script_path,
                         script_dir: home,
@@ -1364,111 +1367,112 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
     let skip_current_file_spawn = Arc::clone(&skip_current_file);
     let keep_partial_files_on_cancel_spawn = Arc::clone(&keep_partial_files_on_cancel);
 
-    let handle = if let Some((targets, total)) = archive_extract {
-        let src_driver_extract = Arc::clone(&src_driver);
-        let tx_extract = tx_for_patch.clone();
-        let job_id_extract = job_id_spawn;
-        let extract_options = crate::jobs::extract_archive::ExtractOptions {
-            sevenzip_binary: crate::jobs::extract_archive::resolve_sevenzip_binary(
-                sevenzip_mode,
-                &sevenzip_custom,
-            ),
-        };
-        tokio::spawn(async move {
-            crate::jobs::extract_archive::run_extract_archive(
-                job_id_extract,
-                src_driver_extract,
-                targets,
-                total,
-                extract_options,
-                tx_extract,
-                cancel_rx,
-            )
-            .await;
-
-            let sources_json = {
-                let state = state_for_patch.lock().await;
-                build_sources_json(&state)
-            };
-            let _ = tx_for_patch
-                .send(ServerMessage::StatePatch {
-                    timestamp: now(),
-                    domain: "sources".to_string(),
-                    entity_id: None,
-                    version: 0,
-                    patch: serde_json::json!({ "sources": sources_json }),
-                })
-                .await;
-        })
-    } else {
-        tokio::spawn(async move {
-            run_file_op(
-                job_id_spawn,
-                op_type_spawn,
-                files_spawn,
-                dest_path_spawn,
-                conflict_policy_spawn,
-                tx_for_patch.clone(),
-                cancel_rx,
-                pause_rx,
-                decision_rx,
-                src_driver,
-                dst_driver,
-                preserve_attributes,
-                verification_policy_spawn,
-                save_digest_file_spawn,
-                auto_resume_copies,
-                skip_current_file_spawn,
-                keep_partial_files_on_cancel_spawn,
-            )
-            .await;
-
-            let sources_json = {
-                let state = state_for_patch.lock().await;
-                build_sources_json(&state)
-            };
-            let _ = tx_for_patch
-                .send(ServerMessage::StatePatch {
-                    timestamp: now(),
-                    domain: "sources".to_string(),
-                    entity_id: None,
-                    version: 0,
-                    patch: serde_json::json!({ "sources": sources_json }),
-                })
-                .await;
-        })
+    // Register authoritative metadata before any producer can emit events.
+    let job = AppJob {
+        job_id: job_id.clone(),
+        kind: JobKind::FileOp(FileOpJobMeta {
+            op_type,
+            files,
+            conflict_policy,
+            apply_to_all_decision: None,
+        }),
+        source_panel: parsed.source_panel,
+        dest_panel: parsed.dest_panel,
+        source_path,
+        dest_path,
+        state: JobState::Running,
+        progress: Default::default(),
+        decision: None,
+        error: None,
+        background: parsed.background,
+        paused: parsed.start_paused,
+        handle: None,
+        cancel_tx,
+        pause_tx,
+        skip_current_file,
+        keep_partial_files_on_cancel,
     };
 
-    {
-        let mut state_guard = ctx.state.lock().await;
-        state_guard.job_store.jobs.insert(
-            job_id.clone(),
-            AppJob {
-                job_id: job_id.clone(),
-                kind: JobKind::FileOp(FileOpJobMeta {
-                    op_type,
-                    files,
-                    conflict_policy,
-                    apply_to_all_decision: None,
-                }),
-                source_panel: parsed.source_panel,
-                dest_panel: parsed.dest_panel,
-                source_path,
-                dest_path,
-                state: JobState::Running,
-                progress: Default::default(),
-                decision: None,
-                error: None,
-                background: parsed.background,
-                paused: parsed.start_paused,
-                handle: Some(handle),
-                cancel_tx,
-                pause_tx,
-                skip_current_file,
-                keep_partial_files_on_cancel,
-            },
-        );
-    }
+    register_file_op_and_spawn(ctx.state, job, || {
+        if let Some((targets, total)) = archive_extract {
+            let src_driver_extract = Arc::clone(&src_driver);
+            let tx_extract = tx_for_patch.clone();
+            let job_id_extract = job_id_spawn;
+            let extract_options = crate::jobs::extract_archive::ExtractOptions {
+                sevenzip_binary: crate::jobs::extract_archive::resolve_sevenzip_binary(
+                    sevenzip_mode,
+                    &sevenzip_custom,
+                ),
+            };
+            tokio::spawn(async move {
+                crate::jobs::extract_archive::run_extract_archive(
+                    job_id_extract,
+                    src_driver_extract,
+                    targets,
+                    total,
+                    extract_options,
+                    tx_extract,
+                    cancel_rx,
+                )
+                .await;
+
+                let sources_json = {
+                    let state = state_for_patch.lock().await;
+                    build_sources_json(&state)
+                };
+                let _ = tx_for_patch
+                    .send(ServerMessage::StatePatch {
+                        timestamp: now(),
+                        domain: "sources".to_string(),
+                        entity_id: None,
+                        version: 0,
+                        patch: serde_json::json!({ "sources": sources_json }),
+                    })
+                    .await;
+            })
+        } else {
+            tokio::spawn(async move {
+                run_file_op(
+                    job_id_spawn,
+                    op_type_spawn,
+                    files_spawn,
+                    dest_path_spawn,
+                    conflict_policy_spawn,
+                    crate::notifications::worker_feedback_sender(
+                        state_for_patch.clone(),
+                        tx_for_patch.clone(),
+                    ),
+                    cancel_rx,
+                    pause_rx,
+                    decision_rx,
+                    src_driver,
+                    dst_driver,
+                    preserve_attributes,
+                    verification_policy_spawn,
+                    save_digest_file_spawn,
+                    auto_resume_copies,
+                    skip_current_file_spawn,
+                    keep_partial_files_on_cancel_spawn,
+                )
+                .await;
+
+                let sources_json = {
+                    let state = state_for_patch.lock().await;
+                    build_sources_json(&state)
+                };
+                let _ = tx_for_patch
+                    .send(ServerMessage::StatePatch {
+                        timestamp: now(),
+                        domain: "sources".to_string(),
+                        entity_id: None,
+                        version: 0,
+                        patch: serde_json::json!({ "sources": sources_json }),
+                    })
+                    .await;
+            })
+        }
+    })
+    .await;
 
     if parsed.start_paused {
         let _ = ctx
@@ -1783,6 +1787,30 @@ fn job_progress_schema(job: &AppJob) -> FileOpProgressSchema {
     }
 }
 
+pub(crate) async fn register_file_op_and_spawn(
+    state: &crate::state::SharedState,
+    job: AppJob,
+    spawn_worker: impl FnOnce() -> tokio::task::JoinHandle<()>,
+) {
+    let job_id = job.job_id.clone();
+    state
+        .lock()
+        .await
+        .job_store
+        .jobs
+        .insert(job_id.clone(), job);
+    let handle = spawn_worker();
+    let mut state_guard = state.lock().await;
+    if let Some(job) = state_guard.job_store.jobs.get_mut(&job_id) {
+        if !matches!(
+            job.state,
+            JobState::Completed | JobState::Failed | JobState::Cancelled
+        ) {
+            job.handle = Some(handle);
+        }
+    }
+}
+
 async fn start_queued_file_op(
     job_id: String,
     state: &crate::state::SharedState,
@@ -1816,7 +1844,7 @@ async fn start_queued_file_op(
             launch.files,
             launch.dest_path,
             launch.conflict_policy,
-            tx_for_patch.clone(),
+            crate::notifications::worker_feedback_sender(state_for_patch.clone(), tx_for_patch.clone()),
             launch.cancel_rx,
             launch.pause_rx,
             launch.decision_rx,
@@ -2314,9 +2342,7 @@ async fn rename_file(args: &Value, ctx: &mut IntentContext<'_>) {
     }
 
     if parsed.dest_name.contains('/') || parsed.dest_name.contains('\\') {
-        let _ = ctx
-            .tx
-            .send(ServerMessage::Error {
+        let _ = ctx.send_feedback(ServerMessage::Error {
                 timestamp: now(),
                 code: "RENAME_FAILED".to_string(),
                 message: "Rename cannot change directories — use Move for that.".to_string(),
@@ -2375,9 +2401,7 @@ async fn rename_file(args: &Value, ctx: &mut IntentContext<'_>) {
                 .await;
             }
             Ok(Ok(false)) => {
-                let _ = ctx
-                    .tx
-                    .send(ServerMessage::Error {
+                let _ = ctx.send_feedback(ServerMessage::Error {
                         timestamp: now(),
                         code: "RENAME_FAILED".to_string(),
                         message: "Cannot rename across filesystems — use Move instead.".to_string(),
@@ -3241,8 +3265,7 @@ async fn send_error(
     code: &str,
     message: String,
 ) -> Result<(), mpsc::error::SendError<ServerMessage>> {
-    ctx.tx
-        .send(ServerMessage::Error {
+    ctx.send_feedback(ServerMessage::Error {
             timestamp: now(),
             code: code.to_string(),
             message,

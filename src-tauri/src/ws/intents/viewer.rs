@@ -230,9 +230,7 @@ fn search_viewer_target(
 }
 
 async fn send_search_viewer_error(ctx: &IntentContext<'_>) {
-    let _ = ctx
-        .tx
-        .send(ServerMessage::Error {
+    let _ = ctx.send_feedback(ServerMessage::Error {
             timestamp: now(),
             code: "NOT_A_FILE".into(),
             message: "Search result is no longer available".into(),
@@ -430,9 +428,7 @@ async fn view_file(args: &Value, ctx: &mut IntentContext<'_>) {
     let file = match resolve_viewer_file(&parsed, ctx).await {
         Ok(file) => file,
         Err(message) => {
-            let _ = ctx
-                .tx
-                .send(ServerMessage::Error {
+            let _ = ctx.send_feedback(ServerMessage::Error {
                     timestamp: now(),
                     code: "NOT_A_FILE".into(),
                     message,
@@ -696,9 +692,7 @@ async fn viewer_navigate(args: &Value, ctx: &mut IntentContext<'_>) {
         .is_none()
     {
         ctx.viewer_prefetch.cancel_panel(&parsed.panel_id);
-        let _ = ctx
-            .tx
-            .send(ServerMessage::Error {
+        let _ = ctx.send_feedback(ServerMessage::Error {
                 timestamp: now(),
                 code: "NOT_A_FILE".into(),
                 message: "No file available in the source panel".into(),
@@ -777,7 +771,7 @@ async fn viewer_navigate(args: &Value, ctx: &mut IntentContext<'_>) {
                                 Err(error) => format!("Cannot follow symbolic link: {error}"),
                                 Ok(Ok(_)) => unreachable!(),
                             };
-                            let _ = ctx.tx.send(ServerMessage::Error {
+                            let _ = ctx.send_feedback(ServerMessage::Error {
                                 timestamp: now(), code: "NOT_A_FILE".into(), message,
                                 recoverable: true, extra: None,
                             }).await;
@@ -876,9 +870,7 @@ async fn viewer_navigate(args: &Value, ctx: &mut IntentContext<'_>) {
                 }
             } else {
                 ctx.viewer_prefetch.cancel_panel(&parsed.panel_id);
-                let _ = ctx
-                    .tx
-                    .send(ServerMessage::Error {
+                let _ = ctx.send_feedback(ServerMessage::Error {
                         timestamp: now(),
                         code: "NOT_A_FILE".to_string(),
                         message: format!("{name} is a {kind}, not a file"),

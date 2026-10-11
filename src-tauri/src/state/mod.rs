@@ -494,6 +494,8 @@ pub struct FileClipboard {
 // ─── AppState ────────────────────────────────────────────────────────────────
 
 pub struct AppState {
+    /// Application-lifetime history is independent of GUI connections.
+    pub notifications: Arc<crate::notifications::NotificationService>,
     pub panels: HashMap<String, Panel>,
     /// Slots in the panel layout. Each slot owns 1+ panels (tabs).
     pub slots: HashMap<String, PanelSlot>,
@@ -1005,6 +1007,7 @@ impl AppState {
         crate::remote::shared_folder::sync_drivers(&mut drivers, &share_config.shared_roots);
 
         AppState {
+            notifications: Arc::new(crate::notifications::NotificationService::default()),
             panels,
             slots,
             layout_slots,
@@ -1491,6 +1494,275 @@ mod tests {
                 eject: None,
             }]
         }
+    }
+
+    fn notifications_hash_job_state() -> super::SharedState {
+        use crate::jobs::{AppJob, FileOpProgress, HashGenerateBroJobMeta, JobKind, JobState};
+        use std::sync::atomic::AtomicBool;
+        use tokio::sync::{watch, Mutex};
+        let platform: Arc<dyn Platform> = Arc::new(TestPlatform { home: "/".into() });
+        let mut app = AppState::new_default(
+            platform.clone(),
+            Default::default(),
+            0,
+            crate::thumb_pool::ThumbPool::start(platform, 1),
+            Arc::new(crate::fileserver::ThumbCache::new(1)),
+        );
+        let (cancel_tx, _) = watch::channel(false);
+        let (pause_tx, _) = watch::channel(false);
+        app.job_store.jobs.insert(
+            "hash-job".into(),
+            AppJob {
+                job_id: "hash-job".into(),
+                kind: JobKind::HashGenerateBro(HashGenerateBroJobMeta {
+                    result: None,
+                    terminal_feedback_published: false,
+                }),
+                source_panel: "left".into(),
+                dest_panel: None,
+                source_path: "/".into(),
+                dest_path: None,
+                state: JobState::Running,
+                progress: FileOpProgress::default(),
+                decision: None,
+                error: None,
+                background: false,
+                paused: false,
+                handle: None,
+                cancel_tx,
+                pause_tx,
+                skip_current_file: Arc::new(AtomicBool::new(false)),
+                keep_partial_files_on_cancel: Arc::new(AtomicBool::new(false)),
+            },
+        );
+        Arc::new(Mutex::new(app))
+    }
+
+    #[tokio::test]
+    async fn notifications_worker_delivery_never_rewinds_committed_hash_rows_or_loses_summary() {
+        use crate::jobs::{JobKind, JobState};
+        use crate::notifications::worker_feedback_sender;
+        use crate::ws::protocol::{
+            HashGenerateBroFileSchema, HashGenerateBroResultSchema, HashGenerateStatus,
+            ServerMessage,
+        };
+        use crate::ws::server::prepare_connection_job_message;
+        use tokio::sync::mpsc;
+
+        let state = notifications_hash_job_state();
+        let notifications = state.lock().await.notifications.clone();
+        let (gui_tx, mut gui_rx) = mpsc::channel(8);
+        let worker_tx = worker_feedback_sender(state.clone(), gui_tx);
+        let row = |name: &str, status| HashGenerateBroFileSchema {
+            source_path: name.into(),
+            hash_path: format!("{name}.b3"),
+            status,
+            hash: None,
+            error: None,
+        };
+        let result_message = |items| ServerMessage::HashGenerateBroResult {
+            timestamp: 1,
+            job_id: "hash-job".into(),
+            result: HashGenerateBroResultSchema {
+                ignored_count: 0,
+                items,
+            },
+        };
+        worker_tx
+            .send(result_message(vec![
+                row("first", HashGenerateStatus::Pending),
+                row("second", HashGenerateStatus::Pending),
+            ]))
+            .await
+            .unwrap();
+        worker_tx
+            .send(ServerMessage::HashGenerateBroFileResult {
+                timestamp: 2,
+                job_id: "hash-job".into(),
+                item: row("first", HashGenerateStatus::Created),
+            })
+            .await
+            .unwrap();
+        worker_tx
+            .send(result_message(vec![
+                row("first", HashGenerateStatus::Created),
+                row("second", HashGenerateStatus::Replaced),
+            ]))
+            .await
+            .unwrap();
+
+        // Receipt of the final producer message is a deterministic barrier:
+        // authoritative metadata is committed before GUI delivery begins.
+        let initial = gui_rx.recv().await.unwrap();
+        let intermediate = gui_rx.recv().await.unwrap();
+        let final_result = gui_rx.recv().await.unwrap();
+        let initial = prepare_connection_job_message(&state, initial)
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(initial).unwrap()["type"],
+            "HashGenerateBroResult"
+        );
+        {
+            let guard = state.lock().await;
+            let JobKind::HashGenerateBro(meta) = &guard.job_store.jobs["hash-job"].kind else {
+                unreachable!()
+            };
+            assert_eq!(
+                meta.result.as_ref().unwrap().items[0].status,
+                HashGenerateStatus::Created,
+                "late GUI delivery must not restore pending rows"
+            );
+            assert_eq!(
+                meta.result.as_ref().unwrap().items[1].status,
+                HashGenerateStatus::Replaced
+            );
+        }
+        worker_tx
+            .send(ServerMessage::JobEvent {
+                timestamp: 3,
+                job_id: "hash-job".into(),
+                event: "Completed".into(),
+                files: None,
+                progress: None,
+                search_progress: None,
+                decision: None,
+                error: None,
+                result_path: None,
+                result_panel_id: None,
+            })
+            .await
+            .unwrap();
+        let terminal = gui_rx.recv().await.unwrap();
+        for message in [intermediate, final_result, terminal] {
+            prepare_connection_job_message(&state, message)
+                .await
+                .unwrap();
+        }
+        let history = notifications.snapshot();
+        assert_eq!(
+            history.entries.len(),
+            1,
+            "terminal producer owns one accurate summary"
+        );
+        assert_eq!(history.entries[0].message, "Saved 2 hash files");
+        assert_eq!(
+            state.lock().await.job_store.jobs["hash-job"].state,
+            JobState::Completed
+        );
+    }
+
+    #[tokio::test]
+    async fn notifications_applied_worker_delivery_preserves_later_cancellation() {
+        use crate::jobs::JobState;
+        use crate::ws::protocol::ServerMessage;
+        use crate::ws::server::prepare_connection_job_message;
+        use tokio::sync::mpsc;
+        let state = notifications_hash_job_state();
+        let (gui_tx, mut gui_rx) = mpsc::channel(2);
+        let worker_tx = crate::notifications::worker_feedback_sender(state.clone(), gui_tx);
+        let event = |event: &str| ServerMessage::JobEvent {
+            timestamp: 1,
+            job_id: "hash-job".into(),
+            event: event.into(),
+            files: None,
+            progress: None,
+            search_progress: None,
+            decision: None,
+            error: None,
+            result_path: None,
+            result_panel_id: None,
+        };
+        worker_tx.send(event("Progress")).await.unwrap();
+        let delayed_progress = gui_rx.recv().await.unwrap();
+        // Cancellation is authoritative after producer application but before
+        // its delayed message reaches the GUI delivery boundary.
+        state
+            .lock()
+            .await
+            .job_store
+            .jobs
+            .get_mut("hash-job")
+            .unwrap()
+            .state = JobState::Cancelled;
+        assert!(
+            prepare_connection_job_message(&state, delayed_progress)
+                .await
+                .is_none(),
+            "stale progress cannot revive a cancelled GUI job"
+        );
+        let delayed_terminal = ServerMessage::AppliedWorkerMessage {
+            message: Box::new(event("Completed")),
+        };
+        let terminal = prepare_connection_job_message(&state, delayed_terminal)
+            .await
+            .unwrap();
+        assert!(matches!(terminal, ServerMessage::JobEvent { event, .. } if event == "Cancelled"));
+        assert_eq!(
+            state.lock().await.job_store.jobs["hash-job"].state,
+            JobState::Cancelled
+        );
+    }
+
+    #[tokio::test]
+    async fn notifications_file_worker_spawn_observes_registered_job_before_emitting() {
+        use crate::jobs::{FileOpJobMeta, FileOpType, JobKind, JobState};
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let state = notifications_hash_job_state();
+        let mut job = state
+            .lock()
+            .await
+            .job_store
+            .jobs
+            .remove("hash-job")
+            .unwrap();
+        job.kind = JobKind::FileOp(FileOpJobMeta {
+            op_type: FileOpType::Copy,
+            files: vec![],
+            conflict_policy: crate::jobs::ConflictPolicy::Ask,
+            apply_to_all_decision: None,
+        });
+        let observed_registration = Arc::new(AtomicBool::new(false));
+        let observed = observed_registration.clone();
+        let producer_state = state.clone();
+        let (finished_tx, finished_rx) = tokio::sync::oneshot::channel();
+        crate::ws::intents::jobs::register_file_op_and_spawn(&state, job, move || {
+            observed.store(
+                producer_state
+                    .try_lock()
+                    .unwrap()
+                    .job_store
+                    .jobs
+                    .contains_key("hash-job"),
+                Ordering::SeqCst,
+            );
+            tokio::spawn(async move {
+                let mut message = crate::ws::protocol::ServerMessage::JobEvent {
+                    timestamp: 1,
+                    job_id: "hash-job".into(),
+                    event: "Completed".into(),
+                    files: None,
+                    progress: None,
+                    search_progress: None,
+                    decision: None,
+                    error: None,
+                    result_path: None,
+                    result_panel_id: None,
+                };
+                crate::ws::server::apply_job_event_to_state(&producer_state, &mut message).await;
+                let _ = finished_tx.send(());
+            })
+        })
+        .await;
+        assert!(
+            observed_registration.load(Ordering::SeqCst),
+            "producer invocation must observe authoritative job metadata"
+        );
+        finished_rx.await.unwrap();
+        assert_eq!(
+            state.lock().await.job_store.jobs["hash-job"].state,
+            JobState::Completed
+        );
     }
 
     #[test]

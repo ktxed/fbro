@@ -217,6 +217,8 @@ pub struct FedupBroJobMeta {
 
 pub struct HashGenerateBroJobMeta {
     pub result: Option<crate::ws::protocol::HashGenerateBroResultSchema>,
+    /// Claimed at the shared terminal-state boundary, before GUI delivery.
+    pub terminal_feedback_published: bool,
 }
 
 pub struct HashCheckBroJobMeta {

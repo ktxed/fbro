@@ -42,6 +42,7 @@ async fn start_pairing(args: &Value, ctx: &mut IntentContext<'_>) {
     {
         let state = ctx.state.lock().await;
         if !state.active_handshakes.is_empty() {
+            drop(state);
             send_error(
                 ctx,
                 "sharing.pair.in-progress",
@@ -94,6 +95,7 @@ async fn start_pairing(args: &Value, ctx: &mut IntentContext<'_>) {
             };
             let state = ctx.state.lock().await;
             let Some(dp) = state.discovered_peers.get(peer_id) else {
+                drop(state);
                 send_error(
                     ctx,
                     "sharing.pair.unknown-peer",
@@ -132,8 +134,7 @@ async fn start_pairing(args: &Value, ctx: &mut IntentContext<'_>) {
         .await
         {
             eprintln!("[sharing] initiate failed: {e}");
-            let _ = tx
-                .send(ServerMessage::Error {
+            let _ = crate::notifications::send_feedback(&state, &tx, ServerMessage::Error {
                     timestamp: now(),
                     code: "sharing.pair.connect".to_string(),
                     message: format!("Pairing connection failed: {e}"),
@@ -487,7 +488,7 @@ async fn add_shared_folder(args: &Value, ctx: &mut IntentContext<'_>) {
     };
     persist_share_state(ctx).await;
     broadcast_share_status(ctx).await;
-    let _ = ctx.tx.send(ServerMessage::AddSharedFolderOk {
+    let _ = ctx.send_feedback(ServerMessage::AddSharedFolderOk {
         timestamp: now(), request_id, target_id: root.id, path: root.path,
     }).await;
 }
@@ -793,9 +794,7 @@ async fn broadcast_share_status(ctx: &mut IntentContext<'_>) {
 }
 
 async fn send_error(ctx: &mut IntentContext<'_>, code: &str, message: &str) {
-    let _ = ctx
-        .tx
-        .send(ServerMessage::Error {
+    let _ = ctx.send_feedback(ServerMessage::Error {
             timestamp: now(),
             code: code.to_string(),
             message: message.to_string(),

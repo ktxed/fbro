@@ -1,3 +1,4 @@
+import { publishNotification } from "../notifications/service";
 import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Tooltip, type TooltipRefProps } from "react-tooltip";
@@ -1627,7 +1628,7 @@ export function Panel({
       e.preventDefault();
       e.stopPropagation();
       if (panel.git) openGitRepository();
-      else dispatch({ type: "SHOW_TRANSIENT_HINT", message: "Git repository actions are available inside a local Git repository" });
+      else publishNotification(dispatch, { message: "Git repository actions are available inside a local Git repository", level: "warning" });
       return;
     }
     if (panel.filterModeActive && e.key === "Escape") {

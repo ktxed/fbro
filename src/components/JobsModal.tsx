@@ -7,9 +7,10 @@ import { cancelJobWithPartialPrompt } from "../utils/jobCancel";
 import { ResizableModal } from "./ResizableModal";
 import { ModalLayer } from "./ModalStack";
 import { isLetterKey, rovingIndexForKey } from "./modalKeyboard";
+import { NotificationsTab } from "./NotificationsTab";
 
 const FILE_LIST_PAGE_SIZE = 25;
-const JOB_TABS = ["jobs", "thumbnails", "procs", "cache"] as const;
+const JOB_TABS = ["jobs", "thumbnails", "procs", "cache", "notifications"] as const;
 
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -751,12 +752,13 @@ export function JobsModal({ onClose, client }: { onClose: () => void; client: Ws
         <div className="jobs-modal__tabs" role="tablist" aria-label="Job views">
           {tabs.map((tab, index) => {
             const selected = activeTab === tab;
-            const label = tab === "jobs" ? "Jobs" : tab === "thumbnails" ? "Thumbnails" : tab === "procs" ? `Processes${childProcs.length > 0 ? ` (${childProcs.length})` : ""}` : "Cache";
+            const label = tab === "jobs" ? "Jobs" : tab === "thumbnails" ? "Thumbnails" : tab === "procs" ? `Processes${childProcs.length > 0 ? ` (${childProcs.length})` : ""}` : tab === "notifications" ? "Notifications" : "Cache";
             return (
               <button
                 key={tab}
                 ref={(node) => { tabRefs.current[index] = node; }}
                 id={`jobs-tab-${tab}`}
+                data-testid={`jobs-tab-${tab}`}
                 role="tab"
                 aria-selected={selected}
                 aria-controls={`jobs-panel-${tab}`}
@@ -852,6 +854,7 @@ export function JobsModal({ onClose, client }: { onClose: () => void; client: Ws
           )}
 
           {activeTab === "thumbnails" && <ThumbnailQueueView queue={state.thumbnailQueue?.queue ?? null} />}
+          {activeTab === "notifications" && <NotificationsTab client={client} />}
 
           {activeTab === "procs" && (
             <>

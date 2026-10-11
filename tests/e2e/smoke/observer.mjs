@@ -19,6 +19,7 @@ export class FbroObserver {
       settings: { general: { colorScheme: "fbro-dark" } },
       bookmarks: [],
       globalSelections: [],
+      notifications: { version: -1, entries: [] },
       focus: "",
       fileServerPort: 0,
     };
@@ -389,10 +390,17 @@ export class FbroObserver {
     if (domains.settings) this.state.settings = domains.settings;
     if (domains.bookmarks) this.state.bookmarks = domains.bookmarks;
     if (domains.globalSelections) this.state.globalSelections = domains.globalSelections;
+    if (domains.notifications && domains.notifications.version >= this.state.notifications.version) this.state.notifications = domains.notifications;
   }
 
   #applyPatch(msg) {
     const patch = msg.patch ?? {};
+    if (msg.domain === "notifications" && msg.version > this.state.notifications.version) {
+      this.state.notifications = {
+        version: msg.version,
+        entries: patch.clear ? [] : [patch.added, ...this.state.notifications.entries.filter((entry) => !patch.removedIds.includes(entry.id))],
+      };
+    }
     if (msg.domain === "panels" && msg.entityId) {
       const current = this.state.panels[msg.entityId] ?? {};
       const next = { ...current, ...patch };

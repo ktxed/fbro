@@ -787,3 +787,39 @@ Result messages update backend job metadata before forwarding. Normal
 precede the terminal event, allowing the frontend to confirm the saved count
 without optimistic file state. Only created/replaced rows count as saved; a
 late cancellation never changes an already committed row into cancelled.
+
+---
+
+## Notification service
+
+`PublishNotification` accepts `{ requestId, message, level?, channels? }`.
+Levels are `info`, `warning`, and `error`; channels are `toast` and `log`.
+Defaults are `info` and both channels. An explicit `channels: []` records history
+without delivery. Backend-generated records are
+`{ id, timestamp, message, level, channels }`, with UTC millisecond timestamps.
+
+The reply is `PublishNotificationOk { timestamp, requestId, notificationId }`
+or `PublishNotificationFailed { timestamp, requestId, code, message }`.
+Repeated requests with the same request ID return the retained original record
+without publishing again. Invalid input uses `INVALID_NOTIFICATION`.
+
+`ClearNotifications { requestId }` replies with
+`ClearNotificationsOk { timestamp, requestId }` or
+`ClearNotificationsFailed { timestamp, requestId, code, message }`.
+An invalid request uses `INVALID_NOTIFICATION_REQUEST`. Clear emits no notification.
+
+`StateSnapshot.domains.notifications` is `{ version, entries }`, newest first by
+publication order. `StatePatch` uses domain `notifications`, no entity ID, and a
+monotonically increasing version. The patch is either
+`{ added: Notification, removedIds: string[] }` (publication and oldest-entry
+eviction together) or `{ clear: true }`. Retention is the latest 1,000 entries in
+backend process memory. State clients subscribe atomically with initial history
+capture; viewer clients do not receive this domain.
+Later requested snapshots deliver pending live notification patches through the
+captured notification version before installing the snapshot, preserving toast delivery.
+
+Frontend history mirrors snapshots and ordered patches. Only live added records
+requesting toast delivery join the FIFO toast queue. Snapshots do not replay
+toasts. Operation acknowledgements, including `*ClipboardWritten`, retain their
+wire formats; notification feedback is separately published once at its owner.
+See [notifications.md](./notifications.md).

@@ -8,6 +8,12 @@ use std::collections::HashMap;
 #[derive(Serialize, Clone, Debug)]
 #[serde(tag = "type")]
 pub enum ServerMessage {
+    /// Internal delivery envelope. The originating worker has already applied
+    /// this message to authoritative state; it must be unwrapped before WS I/O.
+    #[serde(skip)]
+    AppliedWorkerMessage {
+        message: Box<ServerMessage>,
+    },
     Welcome {
         timestamp: u64,
         #[serde(rename = "protocolVersion")]
@@ -28,6 +34,32 @@ pub enum ServerMessage {
         entity_id: Option<String>,
         version: u64,
         patch: serde_json::Value,
+    },
+    PublishNotificationOk {
+        timestamp: u64,
+        #[serde(rename = "requestId")]
+        request_id: String,
+        #[serde(rename = "notificationId")]
+        notification_id: String,
+    },
+    PublishNotificationFailed {
+        timestamp: u64,
+        #[serde(rename = "requestId")]
+        request_id: String,
+        code: String,
+        message: String,
+    },
+    ClearNotificationsOk {
+        timestamp: u64,
+        #[serde(rename = "requestId")]
+        request_id: String,
+    },
+    ClearNotificationsFailed {
+        timestamp: u64,
+        #[serde(rename = "requestId")]
+        request_id: String,
+        code: String,
+        message: String,
     },
     JobEvent {
         timestamp: u64,
@@ -587,6 +619,7 @@ pub struct PrefetchCacheSchema {
 
 #[derive(Serialize, Clone, Debug)]
 pub struct StateDomains {
+    pub notifications: crate::notifications::NotificationSnapshot,
     pub layout: LayoutDomain,
     pub panels: HashMap<String, PanelSnapshot>,
     /// Slots keyed by slotId. Each slot owns one or more panel ids (tabs).

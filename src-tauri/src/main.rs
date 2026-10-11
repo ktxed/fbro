@@ -12,6 +12,7 @@ mod git;
 mod input_history;
 mod journal;
 mod jobs;
+mod notifications;
 mod persistence;
 mod platform;
 mod remote;

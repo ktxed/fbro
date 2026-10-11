@@ -35,6 +35,7 @@ spec before changing an area.
 | `thumbnails.md` | Grid-view thumbnail pipeline |
 | `virtual-panel.md` | Rendering huge directories |
 | `inline-operations.md` | Inline choices toolbar |
+| `notifications.md` | Notification publication, channels, in-memory history, and toast queue |
 
 `spex/plans/` holds plans and backlog, not specs. A change to protocol, source,
 keyboard, or modal behaviour **updates the matching spec in the same commit**.
@@ -57,8 +58,11 @@ keyboard, or modal behaviour **updates the matching spec in the same commit**.
   "Copied <what>" — `what` is a lowercase noun: "full path", "commit hash", "3 names".
   Never call `navigator.clipboard` directly.
 - Backend-side copies (files, raw git blobs) reply with a `*ClipboardWritten`
-  message; the reducer turns it into a toast. Add one for any new backend copy.
-- Other one-shot confirmations: `dispatch({ type: "SHOW_TRANSIENT_HINT", message })`.
+  message and publish feedback through the notification service. Keep the reply
+  for operation consumers; never generate a second notification in the reducer.
+- Other one-shot confirmations: `useNotifications()` in components/hooks or
+  `publishNotification(dispatch, { message, level?, channels? })` in command code.
+  Backend publishers use `NotificationService`. Never write toast state directly.
   The separate viewer/diff windows have no store, so no toasts there.
 
 **Modals** — `spex/modal-stack.md` §5
@@ -127,6 +131,8 @@ keyboard, or modal behaviour **updates the matching spec in the same commit**.
 **Protocol** — `spex/proto.md`
 - New intent: arm in `ws/intents/mod.rs::dispatch` → domain `handle()` → parse
   with `arg_str`/`arg_bool`/`arg_u64`/…; add mutating ones to `should_record_command`.
+  Notification publication and history housekeeping are volatile delivery
+  requests and are excluded from the persistent command journal.
 - New `ServerMessage` variant: there is no codegen. Mirror it by hand in
   `src/ws/types.ts`, add it to the `BEMessage` union, and handle it in
   `src/store/index.ts`. Serde renames must match TS field names exactly.

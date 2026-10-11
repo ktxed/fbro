@@ -304,7 +304,7 @@ async fn init_repository(args: &Value, ctx: &mut IntentContext<'_>) {
                 rescan_panel(&id, ctx.state, ctx.tx, ctx.scan_handles, cursor, selection,
                     ctx.dir_size_queue, ctx.watcher_cmd_tx).await;
             }
-            let _ = ctx.tx.send(ServerMessage::InitGitRepositoryOk {
+            let _ = ctx.send_feedback(ServerMessage::InitGitRepositoryOk {
                 timestamp: now(), panel_id, request_id, path, branch,
             }).await;
         }
@@ -530,9 +530,7 @@ async fn git_copy_raw_file(
         });
     }
 
-    let _ = ctx
-        .tx
-        .send(ServerMessage::FileClipboardWritten {
+    let _ = ctx.send_feedback(ServerMessage::FileClipboardWritten {
             timestamp: now(),
             item_count: 1,
             name,
@@ -572,5 +570,5 @@ async fn panel_repo(panel_id: &str, ctx: &IntentContext<'_>) -> (Option<String>,
 }
 
 async fn send_error(ctx: &IntentContext<'_>, code: &str, message: &str) {
-    let _ = ctx.tx.send(ServerMessage::Error { timestamp: now(), code: code.into(), message: message.into(), recoverable: true, extra: None }).await;
+    let _ = ctx.send_feedback(ServerMessage::Error { timestamp: now(), code: code.into(), message: message.into(), recoverable: true, extra: None }).await;
 }

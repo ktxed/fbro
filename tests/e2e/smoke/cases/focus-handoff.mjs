@@ -4,6 +4,7 @@ import { backendPath, hostPath } from "../config.mjs";
 import { clickEntry, goToPanelPath } from "../browser.mjs";
 import { waitFor } from "../wait.mjs";
 import { expectModalFocus } from "./modal-focus.mjs";
+import { waitForToast } from "./notifications.mjs";
 
 const panelSelector = '[data-testid="panel-left"]';
 
@@ -77,7 +78,7 @@ export async function runFocusHandoffFlow(browser, observer) {
     await browser.keys("F5");
     await expectModalFocus(browser, '[data-command-id="file.copy.confirm"]', "self-copy confirmation");
     await browser.keys("Enter");
-    await hint.waitForDisplayed({ timeout: 10_000 });
+    await waitForToast(browser, "onto itself");
     if (!(await hint.getText()).includes("onto itself")) throw new Error("missing self-copy warning");
     await expectFocus(browser, panelSelector, "backend rejection returns panel focus");
     await hint.click();
@@ -91,7 +92,7 @@ export async function runFocusHandoffFlow(browser, observer) {
 
     await clickEntry(browser, "left", "a.txt");
     await chord(browser, "\uE008", "g");
-    await hint.waitForDisplayed({ timeout: 5_000 });
+    await waitForToast(browser, "Git repository actions");
     if (!(await hint.getText()).includes("Git repository actions")) throw new Error("missing non-repository hint");
     // The empty bookmark list also owns focus and must return it on Escape.
     await chord(browser, "\uE009", "d");

@@ -7,6 +7,12 @@ import { Toolbar } from "./components/Toolbar";
 import { applyZoom } from "./utils/zoom";
 import { resolveColorScheme } from "./theme/colorSchemes";
 import { ModalStackProvider } from "./components/ModalStack";
+import { useNotificationBridge } from "./notifications/service";
+
+function NotificationBridge({ client }: { client: WsClient | null }) {
+  useNotificationBridge(client);
+  return null;
+}
 
 export function App() {
   const [state, dispatch] = useAppReducer();
@@ -35,7 +41,7 @@ export function App() {
       client.onConnected = () => dispatch({ type: "CONNECTED" });
       client.onDisconnected = () => dispatch({ type: "DISCONNECTED" });
       client.onMessage = (msg) => {
-        dispatch({ type: "BE_MESSAGE", msg });
+        dispatch({ type: "BE_MESSAGE", msg, notificationRequestId: crypto.randomUUID() });
         // Side-effect: once a pairing handshake completes successfully,
         // auto-mount the remote sources. The BE emits a `discoveredPeers`
         // patch immediately before `PairingResolved`, so by this point our
@@ -71,6 +77,7 @@ export function App() {
 
   return (
     <AppContext.Provider value={{ state, dispatch }}>
+      <NotificationBridge client={client} />
       <ModalStackProvider>
         {!state.connected && (
           <div className="banner banner--disconnected">

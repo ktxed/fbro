@@ -9,6 +9,7 @@ pub(crate) mod global_selection;
 mod history;
 pub(crate) mod jobs;
 mod navigation;
+mod notifications;
 mod panel;
 mod procs;
 mod remote;
@@ -36,6 +37,7 @@ pub async fn dispatch(name: &str, scope: &Value, args: &Value, ctx: &mut IntentC
         );
     }
     match name {
+        "PublishNotification" | "ClearNotifications" => notifications::handle(name, args, ctx).await,
         "EjectSource" => eject::handle(args, ctx).await,
         "RefreshPanels"
         | "Refresh"
@@ -162,6 +164,8 @@ pub async fn dispatch(name: &str, scope: &Value, args: &Value, ctx: &mut IntentC
 }
 
 fn should_record_command(name: &str) -> bool {
+    // Notification delivery/history housekeeping is ephemeral UI chatter.
+    // Journaling it would persist message payloads and ignore their channels.
     matches!(
         name,
         "GitCreateBranch"
@@ -181,6 +185,18 @@ fn should_record_command(name: &str) -> bool {
             | "OpenTerminal"
             | "EjectSource"
     )
+}
+
+#[cfg(test)]
+mod notification_journal_tests {
+    use super::should_record_command;
+
+    #[test]
+    fn notifications_housekeeping_does_not_persist_notification_payloads_in_the_journal() {
+        assert!(!should_record_command("PublishNotification"));
+        assert!(!should_record_command("ClearNotifications"));
+        assert!(should_record_command("WriteExternalClipboard"));
+    }
 }
 
 pub(crate) fn is_archive_source(source_id: &str) -> bool {

@@ -1,3 +1,4 @@
+import { publishNotification } from "../notifications/service";
 import type { Dispatch } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
@@ -413,7 +414,7 @@ function openGitInit(state: AppState, dispatch: Dispatch<AppAction>, panelId: st
   const source = panel ? state.sources[panel.sourceId] : undefined;
   if (!panel || !source || source.kind !== "filesystem" || !source.mounted
     || source.shadow || source.capabilities.readOnly || panel.shadowSource || panel.tabKind !== "listing") {
-    dispatch({ type: "SHOW_TRANSIENT_HINT", message: "Git initialization is available only on writable local filesystem folders." });
+    publishNotification(dispatch, { message: "Git initialization is available only on writable local filesystem folders.", level: "warning" });
     return false;
   }
   dispatch({
@@ -602,16 +603,10 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
     case "app.install_fbro_command":
       void invoke<{ path: string; command: string }>("install_fbro_command")
         .then((result) => {
-          dispatch({
-            type: "SHOW_TRANSIENT_HINT",
-            message: `Installed ${result.command} at ${result.path}`,
-          });
+          publishNotification(dispatch, { message: `Installed ${result.command} at ${result.path}`, level: "info" });
         })
         .catch((error) => {
-          dispatch({
-            type: "SHOW_TRANSIENT_HINT",
-            message: error instanceof Error ? error.message : String(error),
-          });
+          publishNotification(dispatch, { message: error instanceof Error ? error.message : String(error), level: "error" });
         });
       return true;
     case "panel.viewer.embed":
@@ -969,10 +964,7 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
       if (!focusedPanel) return false;
       const next = focusedPanel.viewMode === "grid" ? "list" : "grid";
       if (next === "grid" && !focusedPanel.supportsThumbnails) {
-        dispatch({
-          type: "SHOW_TRANSIENT_HINT",
-          message: "Grid view is not available for this source",
-        });
+        publishNotification(dispatch, { message: "Grid view is not available for this source", level: "warning" });
         return true;
       }
       client.sendIntent("SetPanelViewMode", focused.panelId, { mode: next });

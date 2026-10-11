@@ -140,9 +140,7 @@ async fn generate_fedup_delete_dry_run(args: &Value, ctx: &mut IntentContext<'_>
 
     match write_result {
         Ok(Ok(())) => {
-            let _ = ctx
-                .tx
-                .send(ServerMessage::FedupDeleteDryRunReady {
+            let _ = ctx.send_feedback(ServerMessage::FedupDeleteDryRunReady {
                     timestamp: now(),
                     job_id,
                     script_path: script_path.to_string_lossy().to_string(),
@@ -163,9 +161,7 @@ async fn send_generate_fedup_delete_dry_run_error(
     job_id: &str,
     message: String,
 ) {
-    let _ = ctx
-        .tx
-        .send(ServerMessage::Error {
+    let _ = ctx.send_feedback(ServerMessage::Error {
             timestamp: now(),
             code: "GENERATE_FEDUP_DELETE_DRY_RUN_FAILED".to_string(),
             message: format!("Could not generate Fedup delete dry-run: {message}"),
@@ -195,9 +191,7 @@ async fn save_fedup_report(args: &Value, ctx: &mut IntentContext<'_>) {
 
     match write_result {
         Ok(Ok(())) => {
-            let _ = ctx
-                .tx
-                .send(ServerMessage::FedupReportSaved {
+            let _ = ctx.send_feedback(ServerMessage::FedupReportSaved {
                     timestamp: now(),
                     job_id,
                     path: report_path,
@@ -210,9 +204,7 @@ async fn save_fedup_report(args: &Value, ctx: &mut IntentContext<'_>) {
 }
 
 async fn send_save_fedup_report_error(ctx: &IntentContext<'_>, job_id: &str, message: String) {
-    let _ = ctx
-        .tx
-        .send(ServerMessage::Error {
+    let _ = ctx.send_feedback(ServerMessage::Error {
             timestamp: now(),
             code: "SAVE_FEDUP_REPORT_FAILED".to_string(),
             message: format!("Could not save Fedup report: {message}"),
@@ -263,9 +255,7 @@ async fn get_fedup_result_page(args: &Value, ctx: &mut IntentContext<'_>) {
 }
 
 async fn send_get_fedup_result_page_error(ctx: &IntentContext<'_>, job_id: &str, message: String) {
-    let _ = ctx
-        .tx
-        .send(ServerMessage::Error {
+    let _ = ctx.send_feedback(ServerMessage::Error {
             timestamp: now(),
             code: "GET_FEDUP_RESULT_PAGE_FAILED".to_string(),
             message: format!("Could not load Fedup result page: {message}"),
@@ -352,9 +342,7 @@ async fn save_sync_report(args: &Value, ctx: &mut IntentContext<'_>) {
 
     match write_result {
         Ok(Ok(())) => {
-            let _ = ctx
-                .tx
-                .send(ServerMessage::SyncReportSaved {
+            let _ = ctx.send_feedback(ServerMessage::SyncReportSaved {
                     timestamp: now(),
                     job_id,
                     path: report_path,
@@ -367,9 +355,7 @@ async fn save_sync_report(args: &Value, ctx: &mut IntentContext<'_>) {
 }
 
 async fn send_save_report_error(ctx: &IntentContext<'_>, job_id: &str, message: String) {
-    let _ = ctx
-        .tx
-        .send(ServerMessage::Error {
+    let _ = ctx.send_feedback(ServerMessage::Error {
             timestamp: now(),
             code: "SAVE_SYNC_REPORT_FAILED".to_string(),
             message: format!("Could not save sync report: {message}"),
@@ -789,9 +775,7 @@ async fn launch_selected_bro(args: &Value, ctx: &mut IntentContext<'_>) {
         LaunchRecipe::BuiltInCheckHashes | LaunchRecipe::BuiltInGenerateHashes
     ) {
         if let Err(message) = launch_hash_bro(request, &bro, &parsed, ctx).await {
-            let _ = ctx
-                .tx
-                .send(ServerMessage::Error {
+            let _ = ctx.send_feedback(ServerMessage::Error {
                     timestamp: now(),
                     code: "BRO_LAUNCH_FAILED".into(),
                     message,
@@ -812,9 +796,7 @@ async fn launch_selected_bro(args: &Value, ctx: &mut IntentContext<'_>) {
             request.resolved_inputs.as_deref().unwrap_or(&[]),
         );
         if let Err(message) = launch_sync_bro(request, ctx).await {
-            let _ = ctx
-                .tx
-                .send(ServerMessage::Error {
+            let _ = ctx.send_feedback(ServerMessage::Error {
                     timestamp: now(),
                     code: "BRO_LAUNCH_FAILED".to_string(),
                     message,
@@ -835,9 +817,7 @@ async fn launch_selected_bro(args: &Value, ctx: &mut IntentContext<'_>) {
             request.resolved_inputs.as_deref().unwrap_or(&[]),
         );
         if let Err(message) = launch_fedup_bro(request, parsed.params.clone(), ctx).await {
-            let _ = ctx
-                .tx
-                .send(ServerMessage::Error {
+            let _ = ctx.send_feedback(ServerMessage::Error {
                     timestamp: now(),
                     code: "BRO_LAUNCH_FAILED".to_string(),
                     message,
@@ -859,9 +839,7 @@ async fn launch_selected_bro(args: &Value, ctx: &mut IntentContext<'_>) {
         )
         .await
         {
-            let _ = ctx
-                .tx
-                .send(ServerMessage::Error {
+            let _ = ctx.send_feedback(ServerMessage::Error {
                     timestamp: now(),
                     code: "BRO_LAUNCH_FAILED".to_string(),
                     message,
@@ -883,9 +861,7 @@ async fn launch_selected_bro(args: &Value, ctx: &mut IntentContext<'_>) {
     let inputs = if let Some(inputs) = request.resolved_inputs.clone() {
         if inputs.is_empty() {
             eprintln!("[bro] no valid entries in global selection");
-            let _ = ctx
-                .tx
-                .send(ServerMessage::Error {
+            let _ = ctx.send_feedback(ServerMessage::Error {
                     timestamp: now(),
                     code: "BRO_LAUNCH_FAILED".to_string(),
                     message: "No valid input entries are selected.".to_string(),
@@ -953,9 +929,7 @@ async fn launch_selected_bro(args: &Value, ctx: &mut IntentContext<'_>) {
         match raw_inputs {
             Err(message) => {
                 eprintln!("[bro] input resolution failed: {message}");
-                let _ = ctx
-                    .tx
-                    .send(ServerMessage::Error {
+                let _ = ctx.send_feedback(ServerMessage::Error {
                         timestamp: now(),
                         code: "BRO_LAUNCH_FAILED".to_string(),
                         message,
@@ -971,9 +945,7 @@ async fn launch_selected_bro(args: &Value, ctx: &mut IntentContext<'_>) {
             Ok((driver, panel_path, raw)) => {
                 if raw.is_empty() {
                     eprintln!("[bro] no valid entries in selection");
-                    let _ = ctx
-                        .tx
-                        .send(ServerMessage::Error {
+                    let _ = ctx.send_feedback(ServerMessage::Error {
                             timestamp: now(),
                             code: "BRO_LAUNCH_FAILED".to_string(),
                             message: "No valid input entries are selected.".to_string(),
@@ -1037,7 +1009,7 @@ async fn launch_selected_bro(args: &Value, ctx: &mut IntentContext<'_>) {
                         })),
                     },
                 };
-                let _ = ctx.tx.send(message).await;
+                let _ = ctx.send_feedback(message).await;
                 return;
             }
             if matches!(bro.launch, LaunchRecipe::BuiltInKillProc) {
@@ -1068,9 +1040,7 @@ async fn launch_selected_bro(args: &Value, ctx: &mut IntentContext<'_>) {
                 })
                 .await;
                 if result.is_err() {
-                    let _ = ctx
-                        .tx
-                        .send(ServerMessage::Error {
+                    let _ = ctx.send_feedback(ServerMessage::Error {
                             timestamp: now(),
                             code: "BRO_LAUNCH_FAILED".to_string(),
                             message: "Kill task panicked".to_string(),
@@ -1098,9 +1068,7 @@ async fn launch_selected_bro(args: &Value, ctx: &mut IntentContext<'_>) {
             match launch_result {
                 Err(message) => {
                     eprintln!("[bro] launch failed: {message}");
-                    let _ = ctx
-                        .tx
-                        .send(ServerMessage::Error {
+                    let _ = ctx.send_feedback(ServerMessage::Error {
                             timestamp: now(),
                             code: "BRO_LAUNCH_FAILED".to_string(),
                             message,
@@ -1161,9 +1129,7 @@ async fn launch_selected_bro(args: &Value, ctx: &mut IntentContext<'_>) {
             if let Err(message) =
                 launch_fp_bro(request, inputs, bro, parsed.output, parsed.params, ctx).await
             {
-                let _ = ctx
-                    .tx
-                    .send(ServerMessage::Error {
+                let _ = ctx.send_feedback(ServerMessage::Error {
                         timestamp: now(),
                         code: "BRO_LAUNCH_FAILED".to_string(),
                         message,
@@ -1545,7 +1511,7 @@ async fn launch_hash_bro(
             AppJob {
                 job_id: job_id.clone(),
                 kind: if generate {
-                    JobKind::HashGenerateBro(HashGenerateBroJobMeta { result: None })
+                    JobKind::HashGenerateBro(HashGenerateBroJobMeta { result: None, terminal_feedback_published: false })
                 } else {
                     JobKind::HashCheckBro(HashCheckBroJobMeta {
                         result: None,
@@ -1615,7 +1581,7 @@ async fn launch_hash_bro(
                     .get("overwriteExisting")
                     .is_some_and(|value| value.trim() == "true"),
             },
-            ctx.tx.clone(),
+            crate::notifications::worker_feedback_sender(ctx.state.clone(), ctx.tx.clone()),
             cancel_rx,
         ))
     } else {
@@ -1630,7 +1596,7 @@ async fn launch_hash_bro(
                     .get("saveResult")
                     .is_some_and(|value| value.trim() == "true"),
             },
-            ctx.tx.clone(),
+            crate::notifications::worker_feedback_sender(ctx.state.clone(), ctx.tx.clone()),
             cancel_rx,
         ))
     };

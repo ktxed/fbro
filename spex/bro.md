@@ -495,7 +495,7 @@ Current launch forms:
 * native `tar`: `tar -cf <outputPath> <entry names...>` with working directory set to the parent directory of the selected inputs
 * native `7z`: `7z a -mx<level> [-p<password>] <outputPath> -- <entry names...>` with working directory set to the parent directory of the selected inputs
 * built-in `Fedup Bro`: backend job that scans a global selection for exact duplicate files and returns a structured report
-* built-in `Copy Paths`: BE writes the resolved input paths, one per line, to the system clipboard and replies `TextClipboardWritten { what }` ("full path" / "N full paths"), which FE shows as a "Copied <what>" toast; a clipboard failure replies `Error` with `BRO_LAUNCH_FAILED`
+* built-in `Copy Paths`: BE writes the resolved input paths, one per line, to the system clipboard, publishes a "Copied <what>" notification, and replies `TextClipboardWritten { what }` ("full path" / "N full paths"); the reply does not produce another toast. A clipboard failure replies `Error` with `BRO_LAUNCH_FAILED` and publishes error feedback through the [notification service](notifications.md).
 
 ### 6.3 `fnf` contract
 
@@ -861,8 +861,8 @@ report as cancelled. Reports use
 `fbro-hash-check-<UTC Unix milliseconds>.txt`, adding a numeric suffix on
 collision. VFS exclusive creation prevents overwriting files or symlinks.
 Reports contain the time, summary counts, paths, digests, and error details.
-`HashCheckReportSaved` triggers a “Saved hash check report to <path>” toast only
-after successful flush. A save failure preserves the check results and displays
+The backend publishes a “Saved hash check report to <path>” notification and
+replies `HashCheckReportSaved` only after successful flush. A save failure preserves the check results and displays
 an error without a success toast.
 
 ---
@@ -942,7 +942,7 @@ Reliable result messages expose `pending`, `hashing`, `created`, `replaced`,
 files. The resizable results modal shows current-file and overall byte progress,
 per-file outcomes, and counts. **Close** is its only action; Close/Enter/Escape
 background a running job without cancelling. Jobs supports reopening and
-cancellation, and completion preserves focus. A single terminal toast confirms
+cancellation, and completion preserves focus. A single backend terminal notification confirms
 the number of successfully saved sidecars, including partial success on
 cancellation/failure; zero saved files produce no success toast. Terminal job
 handling refreshes the source panel through the existing backend scan path.

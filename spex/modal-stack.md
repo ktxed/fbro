@@ -172,11 +172,15 @@ Resizable dialogs retain their last pointer-selected size. Edge and corner
 handles, including the visible south-east affordance, are a pointer
 enhancement; keyboard access to dialog content does not depend on resizing.
 
-The Jobs dialog has Jobs, Processes, and Cache views, plus Thumbnails when the
+The Jobs dialog has Jobs, Processes, Cache, and Notifications views, plus Thumbnails when the
 backend reports `supportsManagedThumbnails`, in one roving tablist.
 Left/Right and Home/End select and focus a visible view; Tab skips inactive
 tabs. Thumbnail queue refreshes preserve focus, and Escape closes the dialog
 without cancelling thumbnail generation.
+The Notifications view has one focusable history list; Up/Down and Home/End
+move its active entry without passing keys to covered panels. New entries keep
+the browsed entry active. Clear history updates the backend and leaves queued
+toast delivery intact. Toast arrival and expiry preserve modal focus.
 
 The implementation lives in `src/components/ModalStack.tsx`; shared visual
 rules live in `src/styles.css`.

@@ -9,6 +9,8 @@ This document summarizes the agreed architecture and interaction model for a per
 
 The context-sensitive operation buttons shown beside the cursor entry are
 specified in [inline-operations.md](./inline-operations.md).
+Notification publication, channel delivery, and in-memory history are specified
+in [notifications.md](./notifications.md).
 
 ---
 

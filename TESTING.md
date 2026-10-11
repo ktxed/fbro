@@ -106,6 +106,7 @@ FBRO_E2E_REMOTE_ONLY=1 GDK_BACKEND=wayland npm run e2e:smoke:local_debug
 | Flag | Runs |
 | --- | --- |
 | `FBRO_E2E_FOCUS_ONLY=1` | Focus handoffs and modal ownership |
+| `FBRO_E2E_NOTIFICATIONS_ONLY=1` | Notification publication, FIFO toasts, history, clear, keyboard focus, and reload |
 | `FBRO_E2E_THUMBNAILS_ONLY=1` | Thumbnail settings, Jobs queue, and viewport behavior |
 | `FBRO_E2E_VIEWER_ONLY=1` | Viewer and preview regressions |
 | `FBRO_E2E_GIT_ONLY=1` | Repository initialization and Git operations |
@@ -135,6 +136,7 @@ coverage reference.
 | --- | --- | --- |
 | Local files and UI | `local.mjs` | Create, copy, overwrite, rename, delete, sort, filtering, empty-folder suggestions, settings, bookmarks, Bros, clipboard feedback, grid navigation, and symlink routes |
 | Focus and modals | `focus-handoff.mjs`, `modal-focus.mjs`, and checks throughout the suite | Initial focus, exact opener restoration, covered layers ignoring keys, one submission per activation, nested Escape, backend rejection/removal, outside clicks, and preserving focus during toasts or toolbar actions |
+| Notifications | `notifications.mjs` | Frontend clipboard publication without duplicates, timestamps/severity, FIFO burst delivery, keyboard history navigation, Clear focus handoff, clearing without cancelling delivery, overflow arrivals preserving the browsed row, both schemes, and reload without replay |
 | Thumbnails | `thumbnails.mjs` (also called by the local flow) | Platform capability controls, Jobs tab navigation, queue refresh preserving focus, visible-card loading, off-screen cooldown, viewport promotion, selection fill, and abandoning old requests |
 | Viewers | `viewer.mjs` | Large and delayed images, J-next/K-previous rapid/reverse navigation, invalid-image recovery, text and binary content, PDF, Markdown/HTML images, Mermaid, zoom, audio/video controls, preview keyboard ownership, and opener restoration |
 | HEIC conversion | `heic.mjs` | Backend-confirmed opt-in settings, startup settings delivery, errors, optional real-file decoding, and live disabling |
@@ -155,6 +157,10 @@ Hash progress/cancellation tests use sparse 8 GiB files, so their apparent size
 does not require 8 GiB of allocated disk space.
 
 ## Focused Rust tests
+
+Notification state projection and toast queue tests: `npm run test:notifications`
+(Node.js 22.19 or newer). Backend service, channel routing, retention, intent
+validation, and producer ownership: `cargo test --manifest-path src-tauri/Cargo.toml notifications`.
 
 Append a filter to the Rust test command:
 

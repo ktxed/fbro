@@ -789,6 +789,38 @@ export interface ChildProcess {
   started_at: number;
 }
 
+export type NotificationLevel = "info" | "warning" | "error";
+export type NotificationChannel = "toast" | "log";
+
+export interface NotificationInput {
+  message: string;
+  level?: NotificationLevel;
+  channels?: NotificationChannel[];
+}
+
+export interface Notification {
+  id: string;
+  timestamp: number;
+  message: string;
+  level: NotificationLevel;
+  channels: NotificationChannel[];
+}
+
+export interface NotificationsSnapshot {
+  version: number;
+  entries: Notification[];
+}
+
+export type NotificationsPatch =
+  | { added: Notification; removedIds: string[] }
+  | { clear: true };
+
+export type NotificationReply =
+  | { type: "PublishNotificationOk"; timestamp: number; requestId: string; notificationId: string }
+  | { type: "PublishNotificationFailed"; timestamp: number; requestId: string; code: string; message: string }
+  | { type: "ClearNotificationsOk"; timestamp: number; requestId: string }
+  | { type: "ClearNotificationsFailed"; timestamp: number; requestId: string; code: string; message: string };
+
 export interface StateSnapshotMessage {
   type: "StateSnapshot";
   timestamp: number;
@@ -808,13 +840,14 @@ export interface StateSnapshotMessage {
     discoveredPeers?: DiscoveredPeer[];
     shareConfig?: ShareConfig;
     globalSelections?: GlobalSelectionSummary[];
+    notifications?: NotificationsSnapshot;
   };
 }
 
 export interface StatePatchMessage {
   type: "StatePatch";
   timestamp: number;
-  domain: "panels" | "layout" | "slots" | "focus" | "selections" | "jobs" | "jobQueue" | "sources" | "dirSizeQueue" | "bookmarks" | "procs" | "settings" | "discoveredPeers" | "shareConfig" | "globalSelections";
+  domain: "panels" | "layout" | "slots" | "focus" | "selections" | "jobs" | "jobQueue" | "sources" | "dirSizeQueue" | "bookmarks" | "procs" | "settings" | "discoveredPeers" | "shareConfig" | "globalSelections" | "notifications";
   entityId?: string;
   version: number;
   patch: {
@@ -1241,6 +1274,7 @@ export interface AddSharedFolderFailedMessage {
 }
 
 export type BEMessage =
+  | NotificationReply
   | AddSharedFolderOkMessage
   | AddSharedFolderFailedMessage
   | WelcomeMessage

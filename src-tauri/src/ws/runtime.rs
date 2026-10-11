@@ -32,6 +32,13 @@ pub(crate) struct IntentContext<'a> {
     pub volume_watcher: &'a Arc<dyn crate::platform::VolumeWatcher>,
 }
 
+impl IntentContext<'_> {
+    /// Publish global feedback once where the semantic reply originates.
+    pub async fn send_feedback(&self, message: ServerMessage) -> Result<(), mpsc::error::SendError<ServerMessage>> {
+        crate::notifications::send_feedback(self.state, self.tx, message).await
+    }
+}
+
 #[cfg(target_os = "linux")]
 fn thumbnail_cache_dir_string() -> String {
     crate::platform::linux::thumbnail::cache_dir()
@@ -98,6 +105,7 @@ pub(crate) fn build_state_snapshot(
     ServerMessage::StateSnapshot {
         timestamp: now(),
         domains: StateDomains {
+            notifications: state.notifications.snapshot(),
             layout: LayoutDomain {
                 panels: active_panel_ids,
                 slots: state.layout_slots.clone(),

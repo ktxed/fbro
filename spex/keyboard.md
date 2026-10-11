@@ -207,6 +207,13 @@ must not lose focus to suggestions.
    window return remain explicit focus transitions; clearing an overlay guard
    alone does not refocus the panel, and there is no hover or polling recovery.
 
+The `j` Jobs modal includes a Notifications tab. Its tablist uses Left/Right
+and Home/End with one Tab stop. The history list also exposes one Tab stop;
+Up/Down and Home/End move the active entry and keep it visible. Incoming
+notifications preserve the entry being browsed. Clear history is a native
+button, and Escape or `j` closes the modal through normal opener restoration.
+Queued toasts never take focus; each expiry removes only its own active ID.
+
 ## Git repository initialization
 
 `git.init` (Initialize Git repository…) has no default binding and is available

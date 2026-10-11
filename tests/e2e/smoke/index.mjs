@@ -30,6 +30,7 @@ import { runGitFlow } from "./cases/git.mjs";
 import { runGitInitFlow } from "./cases/git-init.mjs";
 import { runLocalFlow } from "./cases/local.mjs";
 import { runFocusHandoffFlow } from "./cases/focus-handoff.mjs";
+import { runNotificationsFlow } from "./cases/notifications.mjs";
 import { runViewerFlow } from "./cases/viewer.mjs";
 import { runHeicFlow } from "./cases/heic.mjs";
 import { runQuickEditFlow } from "./cases/quick-edit.mjs";
@@ -65,6 +66,11 @@ async function main() {
     browserA = await startBrowser("fbro-a", webdriverHosts.a, webdriverPorts.a, appA);
     observerA = new FbroObserver("fbro-a", wsUrls.a);
     await observerA.connect();
+
+    if (process.env.FBRO_E2E_NOTIFICATIONS_ONLY === "1") {
+      await runNotificationsFlow(browserA, observerA);
+      return;
+    }
 
     if (process.env.FBRO_E2E_THUMBNAILS_ONLY === "1") {
       await verifyThumbnailQueue(browserA, observerA);
@@ -108,6 +114,7 @@ async function main() {
       await runViewerFlow(browserA, observerA);
       return;
     }
+    await runNotificationsFlow(browserA, observerA);
     await runFocusHandoffFlow(browserA, observerA);
     if (process.env.FBRO_E2E_FOCUS_ONLY === "1") return;
     await runLocalFlow(browserA, observerA);

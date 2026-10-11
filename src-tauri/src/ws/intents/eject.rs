@@ -118,7 +118,7 @@ pub(super) async fn handle(args: &Value, ctx: &mut IntentContext<'_>) {
     }
     match result {
         Ok(()) => {
-            let _ = ctx.tx.send(ServerMessage::EjectSourceOk {
+            let _ = ctx.send_feedback(ServerMessage::EjectSourceOk {
                 timestamp: now(),
                 request_id: request_id.into(),
                 source_id: source_id.into(),

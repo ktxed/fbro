@@ -86,6 +86,7 @@ async fn connect(args: &Value, ctx: &mut IntentContext<'_>) {
     let (host, port, paired) = {
         let state = ctx.state.lock().await;
         let Some(dp) = state.discovered_peers.get(peer_id) else {
+            drop(state);
             send_error(
                 ctx,
                 "remote.connect.unknown-peer",
@@ -95,6 +96,7 @@ async fn connect(args: &Value, ctx: &mut IntentContext<'_>) {
             return;
         };
         let Some(fp) = dp.pubkey_fp.clone() else {
+            drop(state);
             send_error(
                 ctx,
                 "remote.connect.no-fingerprint",
@@ -104,6 +106,7 @@ async fn connect(args: &Value, ctx: &mut IntentContext<'_>) {
             return;
         };
         let Some(paired) = state.share_config.paired_peers.get(&fp).cloned() else {
+            drop(state);
             send_error(
                 ctx,
                 "remote.connect.not-paired",
@@ -138,6 +141,7 @@ async fn retry_last_peer(args: &Value, ctx: &mut IntentContext<'_>) {
     let (host, port, paired) = {
         let state = ctx.state.lock().await;
         let Some(paired) = state.share_config.paired_peers.get(fingerprint).cloned() else {
+            drop(state);
             send_error(
                 ctx,
                 "remote.retry.unknown-peer",
@@ -147,6 +151,7 @@ async fn retry_last_peer(args: &Value, ctx: &mut IntentContext<'_>) {
             return;
         };
         let Some(host) = paired.last_host.clone() else {
+            drop(state);
             send_error(
                 ctx,
                 "remote.retry.no-endpoint",
@@ -156,6 +161,7 @@ async fn retry_last_peer(args: &Value, ctx: &mut IntentContext<'_>) {
             return;
         };
         let Some(port) = paired.last_sftp_port else {
+            drop(state);
             send_error(
                 ctx,
                 "remote.retry.no-endpoint",
@@ -423,9 +429,7 @@ async fn push_share_config_patch(ctx: &mut IntentContext<'_>) {
 }
 
 async fn send_error(ctx: &mut IntentContext<'_>, code: &str, message: &str) {
-    let _ = ctx
-        .tx
-        .send(ServerMessage::Error {
+    let _ = ctx.send_feedback(ServerMessage::Error {
             timestamp: now(),
             code: code.to_string(),
             message: message.to_string(),
