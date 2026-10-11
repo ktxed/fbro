@@ -293,7 +293,7 @@ async function verifyDuplicateResultViewer(browser, observer) {
   try {
     await browser.url(`${mainUrl.split("?")[0]}?${params}`);
     await expectContent(hits[1]);
-    for (const [key, hit] of [["k", hits[2]], ["j", hits[1]], ["j", hits[0]], ["k", hits[1]]]) {
+    for (const [key, hit] of [["j", hits[2]], ["k", hits[1]], ["k", hits[0]], ["j", hits[1]]]) {
       await browser.keys(key);
       await expectContent(hit);
     }

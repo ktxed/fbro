@@ -128,7 +128,7 @@ text transformations:
 | `W` | Toggle word wrapping in raw text mode |
 | `F` | Open find; Markdown preview first returns to raw text |
 | `E` / `F4` | Edit a real local file |
-| `J` / `K` | Previous/next file |
+| `J` / `K` | Next/previous file (down/up in listing order) |
 | `Space` | Play/pause directly rendered local video or MP3 audio |
 | `Left` / `Right` | Seek directly rendered media backward/forward five seconds |
 | `Esc` | Close the viewer, or leave native fullscreen first on macOS |
@@ -152,6 +152,11 @@ While it is open it owns the keyboard, and other viewer shortcuts are held back:
 | `Esc` | Return to the document (the viewer stays open) |
 
 `Ctrl`/`Cmd`+`=`/`-`/`0` keep adjusting the global font size.
+
+The Git changes/log lists use `J` to move down and `K` to move up.
+The diff viewer uses the same file order as the separate viewer: `J` opens
+the next changed file, and `K` opens the previous changed file.
+Shift+J/Shift+K select the next/previous panel tab.
 
 ---
 

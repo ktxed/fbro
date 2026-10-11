@@ -260,7 +260,7 @@ export function DiffViewerApp({ requestId, windowLabel, initialColorScheme }: Di
           setNavigationError(null);
           clientRef.current?.sendIntent("NavigateCompareDiff", undefined, {
             requestId,
-            direction: key === "k" ? "next" : "prev",
+            direction: key === "j" ? "next" : "prev",
           });
           return;
         }
@@ -538,7 +538,7 @@ export function DiffViewerApp({ requestId, windowLabel, initialColorScheme }: Di
             <span>{result.identical ? "No differences" : `${changedCount} changed rows`}</span>
             <span>{rowCount} total rows</span>
             {result.navigation && (
-              <span>{result.navigation.currentIndex + 1}/{result.navigation.total} changed files · J/K prev/next file</span>
+              <span>{result.navigation.currentIndex + 1}/{result.navigation.total} changed files · J/K next/prev file</span>
             )}
             {navigationError && <span className="diff-viewer__meta-error">{navigationError}</span>}
           </div>

@@ -616,14 +616,14 @@ pub(crate) fn build_interactive_commands() -> Vec<InteractiveCommandSchema> {
             "panel.tab.next",
             "Panel",
             "Next Tab",
-            vec![keybinding_with_modifiers("k", true, false, false, false)],
+            vec![keybinding_with_modifiers("j", true, false, false, false)],
             None,
         ),
         command(
             "panel.tab.prev",
             "Panel",
             "Previous Tab",
-            vec![keybinding_with_modifiers("j", true, false, false, false)],
+            vec![keybinding_with_modifiers("k", true, false, false, false)],
             None,
         ),
     ];

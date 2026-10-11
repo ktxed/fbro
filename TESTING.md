@@ -136,11 +136,11 @@ coverage reference.
 | Local files and UI | `local.mjs` | Create, copy, overwrite, rename, delete, sort, filtering, empty-folder suggestions, settings, bookmarks, Bros, clipboard feedback, grid navigation, and symlink routes |
 | Focus and modals | `focus-handoff.mjs`, `modal-focus.mjs`, and checks throughout the suite | Initial focus, exact opener restoration, covered layers ignoring keys, one submission per activation, nested Escape, backend rejection/removal, outside clicks, and preserving focus during toasts or toolbar actions |
 | Thumbnails | `thumbnails.mjs` (also called by the local flow) | Platform capability controls, Jobs tab navigation, queue refresh preserving focus, visible-card loading, off-screen cooldown, viewport promotion, selection fill, and abandoning old requests |
-| Viewers | `viewer.mjs` | Large and delayed images, rapid/reverse navigation, invalid-image recovery, text and binary content, PDF, Markdown/HTML images, Mermaid, zoom, audio/video controls, preview keyboard ownership, and opener restoration |
+| Viewers | `viewer.mjs` | Large and delayed images, J-next/K-previous rapid/reverse navigation, invalid-image recovery, text and binary content, PDF, Markdown/HTML images, Mermaid, zoom, audio/video controls, preview keyboard ownership, and opener restoration |
 | HEIC conversion | `heic.mjs` | Backend-confirmed opt-in settings, startup settings delivery, errors, optional real-file decoding, and live disabling |
 | Quick Edit | `quick-edit.mjs` | Edit/save in the embedded terminal, terminal closure, journal entries, and editing a newly created empty file |
 | Global selections | `global-selection.mjs` | Creation, reload persistence, adding through menus and long right-clicks, keyboard selection, focus, and removing references without deleting files |
-| Git | `git-init.mjs`, `git.mjs` | Initialization, branch creation/filtering/checkout, validation and busy states, stage/unstage/rollback, changes/log navigation, journal entries, modal guards, and focus |
+| Git | `git-init.mjs`, `git.mjs` | Initialization, branch creation/filtering/checkout, validation and busy states, stage/unstage/rollback, changes/log navigation (J down, K up), journal entries, modal guards, and focus |
 | Fedup | `fedup.mjs` | Global-selection input, default ignores, case-insensitive includes, and custom excludes |
 | Hashes | `hash-check.mjs`, `hash-generate.mjs` | Discovery, stale targets, options, matching/malformed sidecars, skip/overwrite, reports/toasts, progress, background/reopen, cancellation, and preserving existing sidecars |
 | Archives | `archive.mjs` | Enter a ZIP, copy a file out, and verify its content |

@@ -204,8 +204,8 @@ These bindings are **panel-scoped**: they fire only when a panel listing has foc
 |---|---|---|
 | `panel.tab.new` | Ctrl/Cmd+T | New tab (clone active local listing; otherwise open Home) |
 | `panel.tab.close` | Ctrl/Cmd+W | Close active tab; no-op on last tab |
-| `panel.tab.next` | Shift+K | Activate next tab (wraps) |
-| `panel.tab.prev` | Shift+J | Activate previous tab (wraps) |
+| `panel.tab.next` | Shift+J | Activate next tab (wraps) |
+| `panel.tab.prev` | Shift+K | Activate previous tab (wraps) |
 
 Middle-click on a tab chip also closes it. Double-clicking on **empty space** in the tab bar uses the same New Tab behavior as Ctrl/Cmd+T: clone the active local filesystem listing, or open Home when the active tab is virtual, remote, or terminal.
 

@@ -189,31 +189,31 @@ stateDiagram-v2
     sampleMemory("initial");
 
     hold = true;
-    await browser.keys("k");
+    await browser.keys("j");
     await browser.$('.viewer__loading-overlay[role="status"]').waitForDisplayed({ timeout: 10_000 });
     release();
     await waitReady("delayed next image ready");
 
     for (let i = 2; i < names.length; i++) {
-      measurements.forwardMs.push(await navigate("k", names[i]));
+      measurements.forwardMs.push(await navigate("j", names[i]));
       if (i % 8 === 7) sampleMemory(`forward-${i}`);
     }
     for (let i = names.length - 2; i >= 0; i--) {
-      measurements.reverseMs.push(await navigate("j", names[i]));
+      measurements.reverseMs.push(await navigate("k", names[i]));
       if (i % 8 === 0) sampleMemory(`reverse-${i}`);
     }
     await browser.execute(() => {
-      for (let i = 0; i < 12; i++) document.querySelector("[data-viewer-content]").dispatchEvent(new KeyboardEvent("keydown", { key: "k", bubbles: true, cancelable: true }));
+      for (let i = 0; i < 12; i++) document.querySelector("[data-viewer-content]").dispatchEvent(new KeyboardEvent("keydown", { key: "j", bubbles: true, cancelable: true }));
     });
     await waitFor(() => browser.execute(() => document.querySelector(".viewer__filename")?.textContent === "12.jpg"),
       { timeout: 15_000, label: "rapid navigation settles on final file" });
     await waitReady("rapid navigation image ready");
-    await navigate("j", "11.jpg");
-    for (let i = 12; i < names.length; i++) await navigate("k", names[i]);
-    await browser.keys("k");
+    await navigate("k", "11.jpg");
+    for (let i = 12; i < names.length; i++) await navigate("j", names[i]);
+    await browser.keys("j");
     await browser.$('.viewer__image-notice[role="alert"]').waitForDisplayed({ timeout: 10_000 });
     if (await browser.$(".viewer__loading-overlay").isExisting()) throw new Error("image failure left loading indicator visible");
-    await navigate("j", "31.jpg");
+    await navigate("k", "31.jpg");
     sampleMemory("final");
 
     const isMac = await browser.execute(() =>
@@ -266,7 +266,7 @@ stateDiagram-v2
     await browser.url(`${mainUrl.split("?")[0]}?${pdfParams}`);
     await browser.$('.viewer__pdf-page:first-child[data-rendered="true"] canvas').waitForDisplayed({ timeout: 15_000 });
     if (await browser.$(".viewer__pdf-error").isExisting()) throw new Error("PDF viewer reported an error");
-    await browser.keys("k");
+    await browser.keys("j");
     await waitFor(() => browser.execute(expected =>
       document.querySelector(".viewer__filename")?.textContent === expected, afterPdfName), {
       timeout: 10_000,

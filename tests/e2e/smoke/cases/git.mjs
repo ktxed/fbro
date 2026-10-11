@@ -244,18 +244,18 @@ export async function runGitFlow(browser, observer) {
     label: "Staged Git deletion",
   });
   const panelCursor = observer.state.panels.left?.cursor;
-  await browser.keys("ArrowDown");
+  await browser.keys("j");
   await waitFor(async () => (await browser.$('[data-testid="git-change-row"][data-change-index="1"]')).isFocused(), {
     timeout: 10_000,
-    label: "Git change row down navigation",
+    label: "Git change row J moves down",
   });
   if (observer.state.panels.left?.cursor !== panelCursor) {
-    throw new Error("Git modal arrow navigation changed the panel cursor");
+    throw new Error("Git modal J navigation changed the panel cursor");
   }
   await browser.keys("k");
   await waitFor(async () => (await browser.$('[data-testid="git-change-row"][data-change-index="0"]')).isFocused(), {
     timeout: 10_000,
-    label: "Git change row K navigation",
+    label: "Git change row K moves up",
   });
 
   await browser.keys(" ");

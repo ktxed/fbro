@@ -1059,14 +1059,14 @@ export function FileViewer({ ref, path: initPath, sourceId: initSourceId, filena
         }
         return;
       }
-      if (!quick && !ctrl && !e.altKey && isLetterKey(e, "k") && !e.shiftKey) {
+      if (!quick && !ctrl && !e.altKey && isLetterKey(e, "j") && !e.shiftKey) {
         e.preventDefault();
         setNavError(null);
         if (clientRef.current) setPendingNavigation(n => n + 1);
         clientRef.current?.sendIntent("ViewerNavigate", undefined, { panelId, direction: "next" });
         return;
       }
-      if (!quick && !ctrl && !e.altKey && isLetterKey(e, "j") && !e.shiftKey) {
+      if (!quick && !ctrl && !e.altKey && isLetterKey(e, "k") && !e.shiftKey) {
         e.preventDefault();
         setNavError(null);
         if (clientRef.current) setPendingNavigation(n => n + 1);
@@ -1520,7 +1520,7 @@ export function FileViewer({ ref, path: initPath, sourceId: initSourceId, filena
           )}
         </div>
         {!quick && <div className="viewer__status">
-          <span className="viewer__status-nav">j/k prev/next file · M maximize · Esc close</span>
+          <span className="viewer__status-nav">j/k next/prev file · M maximize · Esc close</span>
         </div>}
       </div>
     );
@@ -1742,9 +1742,9 @@ export function FileViewer({ ref, path: initPath, sourceId: initSourceId, filena
             const editHint = canEdit ? " · e/F4 edit" : "";
             const markdownHint = isMdExt(curFilename) ? " · 4 md" : "";
             if (expandedMermaid) return "wheel/+/- zoom · drag/arrows pan · 0 fit · M maximize · Esc back";
-            if (isImageMode) return `z zoom · j/k prev/next file · 1 text · 2 image · 3 hex${markdownHint} · M maximize${editHint}`;
-            if (effectiveMode === "text") return `↑↓ PgDn/PgUp scroll · j/k prev/next · 1 text · 2 image · 3 hex${markdownHint} · M maximize · s dos · w wrap · f find${editHint}`;
-            return `↑↓ PgDn/PgUp scroll · j/k prev/next file · 1 text · 2 image · 3 hex${markdownHint} · M maximize${editHint}`;
+            if (isImageMode) return `z zoom · j/k next/prev file · 1 text · 2 image · 3 hex${markdownHint} · M maximize${editHint}`;
+            if (effectiveMode === "text") return `↑↓ PgDn/PgUp scroll · j/k next/prev · 1 text · 2 image · 3 hex${markdownHint} · M maximize · s dos · w wrap · f find${editHint}`;
+            return `↑↓ PgDn/PgUp scroll · j/k next/prev file · 1 text · 2 image · 3 hex${markdownHint} · M maximize${editHint}`;
           })()}
         </span>
       </div>}
