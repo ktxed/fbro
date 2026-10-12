@@ -484,7 +484,7 @@ async fn handle_event(
                 if let Some(v6) = info
                     .get_addresses()
                     .iter()
-                    .find(|ip| matches!(ip, std::net::IpAddr::V6(_)))
+                    .find(|ip| ip.is_ipv6())
                 {
                     // IPv6 string with brackets when used in URLs/hostname
                     // forms, but `russh::client::connect` takes a
@@ -579,6 +579,8 @@ async fn handle_event(
             eprintln!("[discovery] search stopped for {ty}");
             false
         }
+        // mdns-sd's event enum is non-exhaustive.
+        _ => false,
     }
 }
 

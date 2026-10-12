@@ -34,7 +34,7 @@ ed25519-dalek = { version = "2", features = ["rand_core"] }
 sha2 = "0.10"
 hkdf = "0.12"
 base64 = "0.22"
-mdns-sd = "0.11"
+mdns-sd = "0.21.5"
 russh = { version = "0.64.1", default-features = false, features = ["ring", "flate2"] }
 russh-sftp = "2.1"
 bytes = "1"

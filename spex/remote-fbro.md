@@ -27,6 +27,10 @@ no system `sshd` and no external `ssh`/`sftp` binary.
   ends handshake; authentication is **Ed25519 public key** (no passwords).
   The client accepts only the paired raw Ed25519 host key and rejects SSH
   certificates. RSA support is disabled in the embedded SSH library.
+  Discovery uses `mdns-sd` 0.21.5 or newer in the 0.21 series, including its
+  macOS interface fixes: Apple P2P interfaces (`awdl`/`llw`) are excluded by
+  default, as are point-to-point interfaces such as VPN tunnels. This avoids
+  false hostname conflicts with Bonjour when advertising the host's name.
 - **Read-only by default:** a mounted remote source advertises `readOnly` and
   does not expose write capabilities (`DeleteSelection`, `NewFolder`, …).
 

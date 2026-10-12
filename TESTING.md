@@ -235,6 +235,11 @@ The automated smoke environment exercises Linux. Linux fixtures, including
 Windows storage-descriptor fixtures, do not validate native macOS or Windows
 APIs. Check the affected platforms when changing these areas:
 
+- **Remote discovery:** On macOS, enable remote access alongside Bonjour and
+  confirm the local hostname does not acquire numeric suffixes. Verify LAN
+  discovery and pairing with a Linux peer, including with VPN and Apple P2P
+  interfaces present. Linux backend tests do not verify this native interaction
+  or recovery from the reported network outage.
 - **Keyboard, focus, and styling:** Cmd/Ctrl shortcuts, modal stacking, exact
   opener restoration, both themes, and WebView controls. The smoke harness checks
   viewer-launch intents but cannot verify the backend's separate native viewer
