@@ -11,6 +11,7 @@ pub(crate) async fn handle(name: &str, args: &Value, ctx: &mut IntentContext<'_>
     match name {
         "SetGeneralOption" => set_general_option(args, ctx).await,
         "SetModalSizePreference" => set_modal_size_preference(args, ctx).await,
+        "ClearIconCache" => clear_icon_cache(args, ctx).await,
         "ClearThumbnailCache" => clear_thumbnail_cache(ctx).await,
         "ResetLocationSortSettings" => reset_location_sort_settings(ctx).await,
         _ => {}
@@ -726,4 +727,34 @@ async fn clear_thumbnail_cache(ctx: &mut IntentContext<'_>) {
         let _ = sender.send(patch.clone()).await;
     }
     let _ = ctx.tx.send(patch).await;
+}
+
+async fn clear_icon_cache(args: &Value, ctx: &mut IntentContext<'_>) {
+    let request_id = super::arg_str(args, "requestId").unwrap_or_default().to_string();
+    let (platform, senders, notifications) = {
+        let state = ctx.state.lock().await;
+        (state.platform.clone(), state.gui_senders.clone(), state.notifications.clone())
+    };
+    let result = if request_id.is_empty() {
+        Err("A requestId is required".to_string())
+    } else {
+        tokio::task::spawn_blocking(move || platform.clear_icon_cache()).await
+            .map_err(|error| format!("Clear file icon cache worker: {error}"))
+            .and_then(|result| result)
+    };
+    let reply = match result {
+        Ok(revision) => {
+            let patch = ServerMessage::StatePatch {
+                timestamp: now(), domain: "settings".into(), entity_id: None, version: 0,
+                patch: serde_json::json!({"general": {"iconCacheRevision": revision}}),
+            };
+            for sender in senders { let _ = sender.send(patch.clone()).await; }
+            notifications.publish(crate::notifications::NotificationInput::new("Cleared file icon cache"));
+            ServerMessage::ClearIconCacheOk { timestamp: now(), request_id }
+        }
+        Err(message) => ServerMessage::ClearIconCacheFailed {
+            timestamp: now(), request_id, code: "CLEAR_ICON_CACHE_FAILED".into(), message,
+        },
+    };
+    let _ = ctx.tx.send(reply).await;
 }

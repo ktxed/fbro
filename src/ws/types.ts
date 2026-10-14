@@ -742,6 +742,8 @@ export interface GeneralSettings {
   rememberSortPerLocation: boolean;
   locationSettingsCount: number;
   /** Backend capability: fbro manages generation settings and the disk cache. */
+  iconCacheDir: string;
+  iconCacheRevision: number;
   supportsManagedThumbnails: boolean;
   enableVideoThumbnails: boolean;
   thumbnailMaxImageSizeMb: number;
@@ -1109,6 +1111,19 @@ export interface PrefetchCacheStatus {
   maxEntries: number;
 }
 
+export interface ClearIconCacheOkMessage {
+  type: "ClearIconCacheOk";
+  timestamp: number;
+  requestId: string;
+}
+export interface ClearIconCacheFailedMessage {
+  type: "ClearIconCacheFailed";
+  timestamp: number;
+  requestId: string;
+  code: string;
+  message: string;
+}
+
 export interface CacheStatusReadyMessage {
   type: "CacheStatusReady";
   timestamp: number;
@@ -1325,6 +1340,8 @@ export type BEMessage =
   | InitGitRepositoryOkMessage
   | InitGitRepositoryFailedMessage
   | InputRequiredMessage
+  | ClearIconCacheOkMessage
+  | ClearIconCacheFailedMessage
   | CacheStatusReadyMessage
   | ThumbnailQueueReadyMessage
   | TerminalSessionOpenedMessage

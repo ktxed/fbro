@@ -6310,6 +6310,8 @@ body {
 
 .sharing-button,
 .settings-button {
+  appearance: none;
+  font: inherit;
   background: var(--bg-input);
   color: var(--text-dim);
   border: 1px solid var(--border);
@@ -6329,7 +6331,8 @@ body {
 }
 
 .sharing-button:disabled,
-.settings-button:disabled {
+.settings-button:disabled,
+.settings-button[aria-disabled="true"] {
   cursor: not-allowed;
   opacity: 0.45;
 }

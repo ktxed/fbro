@@ -7,6 +7,17 @@
 
 ## 1. Overview
 
+`ClearIconCache { requestId }` clears the macOS native file icon disk and memory
+cache on a blocking worker. It returns `ClearIconCacheOk { timestamp, requestId }`
+or `ClearIconCacheFailed { timestamp, requestId, code, message }` with
+`CLEAR_ICON_CACHE_FAILED` (including unsupported platforms). Success broadcasts
+a settings patch updating read-only `general.iconCacheRevision` before replying.
+Settings snapshots also provide read-only `general.iconCacheDir`, empty on other
+platforms. The intent is recorded in the command journal. Frontend consumers use
+correlated replies for operation status; backend notifications provide success
+feedback without reducer duplication.
+
+
 ### Adding a shared folder
 
 `AddSharedFolder { requestId, path, panelId? }` adds an accessible local folder to

@@ -11,6 +11,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::collections::HashMap;
 
+mod icon_cache;
+
 pub struct MacOSPlatform;
 
 type CFAllocatorRef = *const c_void;
@@ -263,8 +265,28 @@ impl Platform for MacOSPlatform {
         }
     }
 
-    // find_icon: uses default (None) — falls back to embedded generic icons.
-    // TODO: use NSWorkspace iconForFileType: for extension-based system icons.
+    fn icon_cache_dir(&self) -> Option<PathBuf> { icon_cache::directory() }
+
+    fn icon_cache_revision(&self) -> u64 {
+        icon_cache::cache().lock().map(|cache| cache.revision).unwrap_or(0)
+    }
+
+    fn clear_icon_cache(&self) -> Result<u64, String> {
+        let directory = icon_cache::directory().ok_or("File icon cache directory is unavailable")?;
+        icon_cache::cache().lock().map_err(|_| "File icon cache lock poisoned".to_string())?.clear(&directory)
+    }
+
+    fn find_file_type_icon(&self, extension: &str) -> Option<(Vec<u8>, &'static str)> {
+        macos_type_icon(extension, false).map(|bytes| (bytes, "image/png"))
+    }
+
+    fn find_icon(&self, name: &str) -> Option<(Vec<u8>, &'static str)> {
+        if name == "folder" {
+            macos_type_icon("public.folder", true).map(|bytes| (bytes, "image/png"))
+        } else {
+            None
+        }
+    }
 
     fn list_volumes(&self) -> Vec<VolumeInfo> {
         let mut volumes = vec![VolumeInfo {
@@ -852,6 +874,40 @@ extern "C" {
 }
 
 const K_CF_STRING_ENCODING_UTF8: u32 = 0x08000100;
+
+// Native content-type icons use the macOS 11+ UniformTypeIdentifiers framework.
+#[link(name = "UniformTypeIdentifiers", kind = "framework")]
+extern "C" {}
+
+fn macos_type_icon(value: &str, identifier: bool) -> Option<Vec<u8>> {
+    let directory = icon_cache::directory();
+    icon_cache::cache().lock().ok()?.get_or_generate(directory.as_deref(), value, identifier, || macos_generate_type_icon(value, identifier))
+}
+
+pub(super) fn macos_generate_type_icon(value: &str, identifier: bool) -> Option<Vec<u8>> {
+    let pool = unsafe { objc_autoreleasePoolPush() };
+    let result = (|| unsafe {
+        let class = get_objc_class("UTType").ok()?;
+        let value = make_nsstring(value).ok()?;
+        let content_type: ObjcId = msg_send1(class,
+            if identifier { "typeWithIdentifier:" } else { "typeWithFilenameExtension:" }, value);
+        if content_type.is_null() { return None; }
+        let workspace: ObjcId = msg_send0(get_objc_class("NSWorkspace").ok()?, "sharedWorkspace");
+        let image: ObjcId = msg_send1(workspace, "iconForContentType:", content_type);
+        if image.is_null() { return None; }
+        // NSBitmapImageRep decodes the native image representation without drawing
+        // through a main-thread graphics context. All objects live in this worker's pool.
+        let tiff: ObjcId = msg_send0(image, "TIFFRepresentation");
+        if tiff.is_null() { return None; }
+        let bitmap: ObjcId = msg_send1(get_objc_class("NSBitmapImageRep").ok()?, "imageRepWithData:", tiff);
+        if bitmap.is_null() { return None; }
+        let cg_image: CGImageRef = msg_send0(bitmap, "CGImage");
+        if cg_image.is_null() { return None; }
+        cg_image_to_png(cg_image)
+    })();
+    unsafe { objc_autoreleasePoolPop(pool) };
+    result
+}
 
 fn macos_get_thumbnail(path: &str, size: u32) -> Option<Vec<u8>> {
     let pool = unsafe { objc_autoreleasePoolPush() };

@@ -331,9 +331,20 @@ pub fn browsable_archive_kind(name: &str) -> Option<BrowsableArchiveKind> {
     .then_some(BrowsableArchiveKind::Zip)
 }
 
+/// URL-safe icon key retaining the extension for native platform lookup.
+pub fn icon_name_for_entry(name: &str, kind: &VfsKind) -> Option<String> {
+    if matches!(kind, VfsKind::File) {
+        if let Some(ext) = Path::new(name).extension().and_then(|ext| ext.to_str()).filter(|ext| !ext.is_empty()) {
+            let encoded: String = ext.to_lowercase().as_bytes().iter().map(|byte| format!("{byte:02x}")).collect();
+            return Some(format!("file-type-{encoded}"));
+        }
+    }
+    legacy_icon_name_for_entry(name, kind)
+}
+
 /// Derive a freedesktop icon name from the entry kind and file extension.
 /// No content/MIME scanning — purely extension-based.
-pub fn icon_name_for_entry(name: &str, kind: &VfsKind) -> Option<String> {
+pub fn legacy_icon_name_for_entry(name: &str, kind: &VfsKind) -> Option<String> {
     match kind {
         VfsKind::Directory => return Some("folder".to_string()),
         VfsKind::Symlink => return Some("emblem-symbolic-link".to_string()),

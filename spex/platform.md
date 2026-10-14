@@ -48,6 +48,8 @@ Sync trait, `Send + Sync`. Grouped by purpose:
 
 | Method | Purpose |
 |---|---|
+| `icon_cache_dir() -> Option<PathBuf>` / `icon_cache_revision() -> u64` / `clear_icon_cache() -> Result<u64, String>` | macOS persistent native-icon cache location and invalidation revision. Other platforms return no directory and reject clearing. Clear runs on a blocking worker. |
+| `find_file_type_icon(extension) -> Option<(bytes, content_type)>` | Native document icon by extension, without the dot. Default `None`; macOS uses `UTType` and `NSWorkspace.iconForContentType:`. |
 | `find_icon(name) -> Option<(bytes, content_type)>` | Look up a freedesktop-style icon name. Default `None`. The free function `resolve_icon` falls back to embedded SVGs. |
 | `supports_managed_thumbnails() -> bool` | Default `false`; Linux returns `true`. Exposed as a read-only settings capability to show fbro's generation/cache controls and Jobs thumbnail view only where applicable. |
 | `get_thumbnail(path, size) -> Option<(bytes, content_type)>` | Native thumbnailer (Windows `IShellItemImageFactory`, macOS `QLThumbnailGenerator`). MUST be safe to call from any worker thread — `ThumbPool` calls it from a thread pool. |
@@ -110,6 +112,22 @@ forget launches, `xclip`/`wl-copy` (selected at runtime) for the clipboard,
 Home from `$HOME` (which the OS always sets). Native APIs: `NSWorkspace` for
 default-app launch, `QLThumbnailGenerator` for thumbnails, `LSCopyApplications`
 for "open with", `NSPasteboard` for the clipboard, `open -R` for reveal.
+
+Panel file icon keys retain lowercase extensions as URL-safe UTF-8 hex
+(`file-type-<hex>`). `resolve_icon` first tries native extension lookup, then
+uses the existing freedesktop mapping and embedded fallback (including the HTML
+icon). macOS provides native document and folder icons as PNG, using
+`NSBitmapImageRep` and ImageIO on the file-server worker. A bounded, process-local
+cache holds up to 256 lookup results, including misses. Successful icons are also
+stored atomically as hashed PNG filenames under `$HOME/Library/Caches/fbro/icons/v1`.
+Disk hits are reused across launches; unavailable/truncated entries regenerate.
+Cache write failures log and still return the native image. Misses remain memory-only.
+Lookup and clear share a lock, preventing pre-clear lookups from restoring stale
+entries. Clearing removes disk and memory entries and increments the backend
+revision used in panel HTTP URLs to bypass WebView caching. Display settings
+expose the clear action only when the backend reports a cache directory. The panel displays a generic folder/file icon until the requested
+image loads, and retains that fallback if loading fails. Extension lookup also works for remote and archive entries; it
+does not inspect content, custom per-file icons, or application bundles.
 
 The image viewer recognizes `.heic` and `.heif` on macOS and delegates decoding
 to WKWebView (Safari 17 or newer), for both HTTP images and buffered Blob images.

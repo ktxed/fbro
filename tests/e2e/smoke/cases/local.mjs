@@ -23,7 +23,10 @@ import { expectModalFocus, expectCoveredModal } from "./modal-focus.mjs";
 import { verifyThumbnailQueue } from "./thumbnails.mjs";
 import { runPanelSelectionFlow } from "./panel-selection.mjs";
 
+import { verifyFileIcons } from "./file-icons.mjs";
+
 export async function runLocalFlow(browser, observer) {
+  await verifyFileIcons(browser, observer);
   await verifyColorSchemeSwitch(browser, observer);
   await verifyAboutModal(browser);
   await verifyEjectPicker(browser);

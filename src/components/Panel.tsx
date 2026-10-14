@@ -666,9 +666,9 @@ function PathBreadcrumbs({ panelId, path, client, shadowSource }: {
 
 function fallbackIcon(entry: VFSEntry): React.ReactNode {
   switch (entry.kind) {
-    case "directory": return <IconChevronRight size={14} />;
+    case "directory": return <IconFolder size={14} aria-hidden />;
     case "symlink":   return <IconArrowUpRight size={14} />;
-    case "file":      return null;
+    case "file":      return <IconFile size={14} aria-hidden />;
     default:          return <span>?</span>;
   }
 }
@@ -685,20 +685,26 @@ function LinkTargetHint({ entry }: { entry: VFSEntry }) {
 }
 
 function EntryIcon({ entry }: { entry: VFSEntry }) {
-  const [failed, setFailed] = useState(false);
-  const { fileServerPort } = useAppState();
-  const iconName = entry.iconName;
+  const [loadedUrl, setLoadedUrl] = useState<string>();
+  const [failedUrl, setFailedUrl] = useState<string>();
+  const { fileServerPort, settings } = useAppState();
+  const iconUrl = entry.iconName && fileServerPort > 0
+    ? `http://127.0.0.1:${fileServerPort}/__icon__/${entry.iconName}?v=${settings.general.iconCacheRevision}`
+    : undefined;
+  const loaded = iconUrl !== undefined && loadedUrl === iconUrl && failedUrl !== iconUrl;
   return (
     <span className="panel__col-icon">
-      {iconName && !failed && fileServerPort > 0 ? (
+      {!loaded && fallbackIcon(entry)}
+      {iconUrl && failedUrl !== iconUrl && (
         <img
-          src={`http://127.0.0.1:${fileServerPort}/__icon__/${iconName}`}
+          key={iconUrl}
+          src={iconUrl}
           alt=""
           draggable={false}
-          onError={() => setFailed(true)}
+          style={{ display: loaded ? undefined : "none" }}
+          onLoad={() => setLoadedUrl(iconUrl)}
+          onError={() => setFailedUrl(iconUrl)}
         />
-      ) : (
-        fallbackIcon(entry)
       )}
     </span>
   );

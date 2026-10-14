@@ -43,6 +43,12 @@ It only:
 
 Below is a **minimal but sufficient** interface.
 
+Entry `icon_name` values are backend-owned opaque lookup keys. Regular files
+with an extension use `file-type-<hex>` (lowercase extension encoded as UTF-8
+hex); directories and other kinds retain symbolic names. Platform resolution
+can use the exact extension, with the freedesktop mapping as fallback. Drivers
+perform no native icon or content lookup during listing.
+
 ### 2.1 Driver identity & capabilities
 
 ```ts

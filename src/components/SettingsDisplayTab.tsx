@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { GeneralSettings } from "../ws/types";
 import type { WsClient } from "../ws/client";
 import { stepNumberInputOnWheel } from "../utils/numberInputWheel";
+import { useAppState } from "../store";
 import { COLOR_SCHEMES, resolveColorScheme } from "../theme/colorSchemes";
 
 function formatBytes(bytes: number): string {
@@ -16,6 +17,46 @@ interface SettingsDisplayTabProps {
 }
 
 export function SettingsDisplayTab({ general, client }: SettingsDisplayTabProps) {
+  const { connected } = useAppState();
+  const pendingIconClear = useRef<string | null>(null);
+  const [clearingIcons, setClearingIcons] = useState(false);
+  const [iconCacheError, setIconCacheError] = useState<string>();
+  useEffect(() => client.subscribeMessages((message) => {
+    if ((message.type !== "ClearIconCacheOk" && message.type !== "ClearIconCacheFailed")
+      || message.requestId !== pendingIconClear.current) return;
+    pendingIconClear.current = null;
+    setClearingIcons(false);
+    setIconCacheError(message.type === "ClearIconCacheFailed" ? message.message : undefined);
+  }), [client]);
+  useEffect(() => {
+    if (!connected && pendingIconClear.current) {
+      pendingIconClear.current = null;
+      setClearingIcons(false);
+      setIconCacheError("Connection lost. Reconnect to try again.");
+    }
+  }, [connected]);
+  const clearIconCache = () => {
+    if (!connected || pendingIconClear.current) return;
+    const requestId = crypto.randomUUID();
+    pendingIconClear.current = requestId;
+    setClearingIcons(true);
+    setIconCacheError(undefined);
+    client.sendIntent("ClearIconCache", undefined, { requestId });
+  };
+  const iconCacheSection = general.iconCacheDir ? (
+    <div className="settings-tab__section" data-testid="file-icon-cache-settings">
+      <h3 className="settings-tab__section-title">File icons</h3>
+      <p className="settings-tab__hint">macOS file type icons are cached on disk for future launches.</p>
+      <p className="settings-tab__hint">{general.iconCacheDir}</p>
+      <button type="button" className="settings-button"
+        data-testid="clear-file-icon-cache" onClick={clearIconCache}
+        disabled={!connected} aria-disabled={clearingIcons || !connected}>
+        {clearingIcons ? "Clearing…" : "Clear file icon cache"}
+      </button>
+      {iconCacheError && <p role="alert">{iconCacheError}</p>}
+    </div>
+  ) : null;
+
   const send = (key: string, value: boolean | number | string) => {
     client.sendIntent("SetGeneralOption", undefined, { key, value });
   };
@@ -146,6 +187,7 @@ export function SettingsDisplayTab({ general, client }: SettingsDisplayTabProps)
     return (
       <div className="settings-tab">
         {colorSchemeSection}
+        {iconCacheSection}
         {compareSection}
         <h3>Thumbnails</h3>
         <p className="settings-tab__hint">
@@ -168,6 +210,7 @@ export function SettingsDisplayTab({ general, client }: SettingsDisplayTabProps)
   return (
     <div className="settings-tab">
       {colorSchemeSection}
+        {iconCacheSection}
       {compareSection}
       <div className="settings-tab__section" data-testid="managed-thumbnail-settings">
         <h3 className="settings-tab__section-title">Thumbnails</h3>

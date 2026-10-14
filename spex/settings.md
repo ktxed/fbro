@@ -62,6 +62,18 @@ on all platforms. Settings patches merge with the snapshot and preserve this fla
 }
 ```
 
+## macOS file icon cache
+
+Settings → Display shows a File icons section only when the read-only backend
+`general.iconCacheDir` is nonempty (macOS). PNGs persist under
+`$HOME/Library/Caches/fbro/icons/v1`. The keyboard-accessible Clear file icon
+cache button sends `ClearIconCache { requestId }`, disables itself with
+“Clearing…” until the correlated reply, and shows errors inline. Disconnection
+releases the pending state. Backend success publishes “Cleared file icon cache”.
+The authoritative `general.iconCacheRevision` patch refreshes panel icon URLs;
+visible icons may immediately repopulate the cache. Neither field is persisted
+in settings.json or writable with `SetGeneralOption`.
+
 ## Intent: `SetGeneralOption`
 
 **Direction:** FE → BE

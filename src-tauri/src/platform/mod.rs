@@ -143,6 +143,18 @@ pub trait Platform: Send + Sync {
         None
     }
 
+    /// Look up a native document icon by filename extension (without the dot).
+    fn find_file_type_icon(&self, _extension: &str) -> Option<(Vec<u8>, &'static str)> {
+        None
+    }
+
+    /// Persistent native icon cache capability; None on unsupported platforms.
+    fn icon_cache_dir(&self) -> Option<std::path::PathBuf> { None }
+    fn icon_cache_revision(&self) -> u64 { 0 }
+    fn clear_icon_cache(&self) -> Result<u64, String> {
+        Err("File icon cache is not supported on this platform".to_string())
+    }
+
     /// Whether fbro manages thumbnail generation settings and its disk cache.
     /// Native OS providers do not expose these controls.
     fn supports_managed_thumbnails(&self) -> bool {
@@ -304,6 +316,17 @@ const IE_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 
 
 /// Resolve an icon name using the platform, falling back to generic embedded SVGs.
 pub fn resolve_icon(platform: &dyn Platform, icon_name: &str) -> (Vec<u8>, &'static str) {
+    if let Some(encoded) = icon_name.strip_prefix("file-type-") {
+        if let Some(extension) = decode_icon_extension(encoded) {
+            if let Some(icon) = platform.find_file_type_icon(&extension) {
+                return icon;
+            }
+            let legacy = crate::vfs::legacy_icon_name_for_entry(
+                &format!("file.{extension}"), &crate::vfs::VfsKind::File,
+            ).unwrap_or_else(|| "text-x-generic".to_string());
+            return resolve_icon(platform, &legacy);
+        }
+    }
     if icon_name == "fbro-ie-html" {
         return (IE_SVG.to_vec(), "image/svg+xml");
     }
@@ -316,6 +339,16 @@ pub fn resolve_icon(platform: &dyn Platform, icon_name: &str) -> (Vec<u8>, &'sta
     } else {
         (FALLBACK_FILE_SVG.to_vec(), "image/svg+xml")
     }
+}
+
+fn decode_icon_extension(encoded: &str) -> Option<String> {
+    if encoded.is_empty() || encoded.len() % 2 != 0 || !encoded.is_ascii() {
+        return None;
+    }
+    let bytes = (0..encoded.len()).step_by(2)
+        .map(|offset| u8::from_str_radix(&encoded[offset..offset + 2], 16).ok())
+        .collect::<Option<Vec<_>>>()?;
+    String::from_utf8(bytes).ok()
 }
 
 /// Create the platform implementation for the current OS.
@@ -440,6 +473,49 @@ pub async fn create_volume_watcher(platform: Arc<dyn Platform>) -> Arc<dyn Volum
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn extension_icon_keys_preserve_types_and_reject_invalid_encoding() {
+        use crate::vfs::{icon_name_for_entry, VfsKind};
+        for (name, ext) in [("photo.JPG", "jpg"), ("data.json", "json"), ("config.toml", "toml"), ("file.例", "例")] {
+            let key = icon_name_for_entry(name, &VfsKind::File).unwrap();
+            assert_eq!(super::decode_icon_extension(key.strip_prefix("file-type-").unwrap()).as_deref(), Some(ext));
+        }
+        assert_eq!(icon_name_for_entry("folder.txt", &VfsKind::Directory).as_deref(), Some("folder"));
+        assert_eq!(icon_name_for_entry(".gitignore", &VfsKind::File).as_deref(), Some("text-x-generic"));
+        for invalid in ["", "1", "zz", "é", "ff"] {
+            assert!(super::decode_icon_extension(invalid).is_none());
+        }
+    }
+
+    #[test]
+    fn extension_icons_keep_legacy_fallback() {
+        struct Fallback;
+        impl super::Platform for Fallback {
+            fn home_dir(&self) -> String { String::new() }
+            fn open_in_editor(&self, _: &str) -> Result<String, String> { Err(String::new()) }
+        }
+        let key = crate::vfs::icon_name_for_entry("page.HTML", &crate::vfs::VfsKind::File).unwrap();
+        assert_eq!(super::resolve_icon(&Fallback, &key), super::resolve_icon(&Fallback, "fbro-ie-html"));
+        assert_eq!(super::resolve_icon(&Fallback, "file-type-zz").0, super::FALLBACK_FILE_SVG);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn native_extension_icons_are_png() {
+        for ext in ["html", "pdf", "png", "txt"] {
+            let bytes = super::macos::macos_generate_type_icon(ext, false).expect("native document icon");
+            assert!(bytes.starts_with(b"\x89PNG\r\n\x1a\n"));
+        }
+        assert!(super::macos::macos_generate_type_icon("public.folder", true).unwrap().starts_with(b"\x89PNG"));
+    }
+
+    #[test]
+    fn persistent_icon_cache_is_macos_only() {
+        let platform = super::create_platform();
+        assert_eq!(platform.icon_cache_dir().is_some(), cfg!(target_os = "macos"));
+        if !cfg!(target_os = "macos") { assert!(platform.clear_icon_cache().is_err()); }
+    }
+
     #[test]
     fn managed_thumbnails_are_linux_only() {
         assert_eq!(

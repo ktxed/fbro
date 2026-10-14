@@ -155,6 +155,8 @@ pub(crate) fn build_state_snapshot(
                         .general
                         .remember_sort_per_location,
                     location_settings_count: state.location_settings.len(),
+                    icon_cache_dir: state.platform.icon_cache_dir().map(|path| path.to_string_lossy().into_owned()).unwrap_or_default(),
+                    icon_cache_revision: state.platform.icon_cache_revision(),
                     supports_managed_thumbnails: state.platform.supports_managed_thumbnails(),
                     enable_video_thumbnails: state.settings.general.enable_video_thumbnails,
                     thumbnail_max_image_size_mb: state.settings.general.thumbnail_max_image_size_mb,

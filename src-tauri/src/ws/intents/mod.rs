@@ -135,6 +135,7 @@ pub async fn dispatch(name: &str, scope: &Value, args: &Value, ctx: &mut IntentC
         "Quit" | "ConfirmQuit" | "SetFontSize" => app::handle(name, args, ctx).await,
         "SetGeneralOption"
         | "SetModalSizePreference"
+        | "ClearIconCache"
         | "ClearThumbnailCache"
         | "ResetLocationSortSettings" => {
             settings::handle(name, args, ctx).await
@@ -169,7 +170,8 @@ fn should_record_command(name: &str) -> bool {
     // Journaling it would persist message payloads and ignore their channels.
     matches!(
         name,
-        "GitCreateBranch"
+        "ClearIconCache"
+            | "GitCreateBranch"
             | "AddSharedFolder"
             | "InitGitRepository"
             | "StartFileOp"
@@ -197,6 +199,7 @@ mod notification_journal_tests {
         assert!(!should_record_command("PublishNotification"));
         assert!(!should_record_command("ClearNotifications"));
         assert!(should_record_command("WriteExternalClipboard"));
+        assert!(should_record_command("ClearIconCache"));
     }
 }
 

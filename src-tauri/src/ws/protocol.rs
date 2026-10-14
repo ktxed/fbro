@@ -436,6 +436,18 @@ pub enum ServerMessage {
         request_id: String,
         queue: crate::thumb_pool::ThumbQueueSnapshot,
     },
+    ClearIconCacheOk {
+        timestamp: u64,
+        #[serde(rename = "requestId")]
+        request_id: String,
+    },
+    ClearIconCacheFailed {
+        timestamp: u64,
+        #[serde(rename = "requestId")]
+        request_id: String,
+        code: String,
+        message: String,
+    },
     CacheStatusReady {
         timestamp: u64,
         #[serde(rename = "prefetchCache")]
@@ -679,6 +691,8 @@ pub struct GeneralSettingsSchema {
     pub save_panel_view_mode: bool,
     pub remember_sort_per_location: bool,
     pub location_settings_count: usize,
+    pub icon_cache_dir: String,
+    pub icon_cache_revision: u64,
     pub supports_managed_thumbnails: bool,
     pub enable_video_thumbnails: bool,
     pub thumbnail_max_image_size_mb: u64,
