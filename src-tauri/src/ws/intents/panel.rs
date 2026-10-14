@@ -22,7 +22,7 @@ pub(crate) async fn handle(name: &str, scope: &Value, args: &Value, ctx: &mut In
         "SelectAtIndex" => select_at_index(scope, args, ctx).await,
         "DeselectAtIndex" => deselect_at_index(scope, args, ctx).await,
         "ToggleSelectionAtIndex" => toggle_selection_at_index(scope, args, ctx).await,
-        "ToggleSelection" => toggle_selection(scope, ctx).await,
+        "ToggleSelection" => toggle_selection(scope, args, ctx).await,
         "SelectAll" => select_all(scope, ctx).await,
         "ClearSelection" => clear_selection(scope, ctx).await,
         "InvertSelection" => invert_selection(scope, ctx).await,
@@ -32,6 +32,7 @@ pub(crate) async fn handle(name: &str, scope: &Value, args: &Value, ctx: &mut In
         "MoveCursorToEdge" => move_cursor_to_edge(scope, args, ctx).await,
         "SetCursor" => set_cursor(scope, args, ctx).await,
         "CalculateSize" => calculate_size(scope, args, ctx).await,
+        "ToggleDirectorySizes" => toggle_directory_sizes(scope, ctx).await,
         "CancelSizeCalculation" => cancel_size_calculation(scope, args, ctx).await,
         "RequestWindow" => request_window(scope, args, ctx).await,
         "SwitchFocus" => switch_focus(args, ctx).await,
@@ -663,22 +664,69 @@ async fn toggle_selection_at_index(scope: &Value, args: &Value, ctx: &mut Intent
     .await;
 }
 
-async fn toggle_selection(scope: &Value, ctx: &mut IntentContext<'_>) {
+/// Return a size request only when Space newly selects an unknown, idle folder.
+fn toggle_entry_selection(
+    entries: &[crate::ws::protocol::EntrySchema],
+    cursor: usize,
+    selection: &mut Vec<usize>,
+    calculating: &HashSet<String>,
+    calculate_size: bool,
+) -> Option<String> {
+    let entry = entries.get(cursor)?;
+    if let Some(position) = selection.iter().position(|&index| index == cursor) {
+        selection.remove(position);
+        return None;
+    }
+    selection.push(cursor);
+    (calculate_size
+        && entry.kind == "directory"
+        && entry.size.is_none()
+        && !calculating.contains(&entry.name))
+    .then(|| entry.name.clone())
+}
+
+fn directory_size_actions(
+    entries: &[crate::ws::protocol::EntrySchema],
+    selection: &[usize],
+    calculating: &HashSet<String>,
+) -> Vec<(String, bool)> {
+    let indices: Vec<usize> = if selection.is_empty() {
+        (0..entries.len()).collect()
+    } else {
+        selection.to_vec()
+    };
+    indices
+        .into_iter()
+        .filter_map(|index| {
+            let entry = entries.get(index)?;
+            (entry.kind == "directory")
+                .then(|| (entry.name.clone(), calculating.contains(&entry.name)))
+        })
+        .collect()
+}
+
+async fn toggle_selection(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
     let panel_id = resolve_panel_id(scope, ctx.state).await;
-    let (new_selection, version, selected_entries) = {
+    let (new_selection, version, selected_entries, size_target, panel_epoch) = {
         let mut state_guard = ctx.state.lock().await;
         if let Some(panel) = state_guard.panels.get_mut(&panel_id) {
-            let cursor = panel.cursor;
-            if let Some(position) = panel.selection.iter().position(|&index| index == cursor) {
-                panel.selection.remove(position);
-            } else {
-                panel.selection.push(cursor);
+            if panel.entries.get(panel.cursor).is_none() {
+                return;
             }
+            let size_target = toggle_entry_selection(
+                &panel.entries,
+                panel.cursor,
+                &mut panel.selection,
+                &panel.calculating_size,
+                arg_bool(args, "calculateSize", false),
+            );
             panel.version += 1;
             (
                 panel.selection.clone(),
                 panel.version,
                 selected_entries_for_panel(panel),
+                size_target,
+                panel.panel_epoch,
             )
         } else {
             return;
@@ -686,11 +734,14 @@ async fn toggle_selection(scope: &Value, ctx: &mut IntentContext<'_>) {
     };
     send_panel_patch(
         ctx,
-        panel_id,
+        panel_id.clone(),
         version,
-        serde_json::json!({ "selection": new_selection, "selectedEntries": selected_entries }),
+        serde_json::json!({ "panelEpoch": panel_epoch, "selection": new_selection, "selectedEntries": selected_entries }),
     )
     .await;
+    if let Some(name) = size_target {
+        calculate_entry_size(&panel_id, &name, Some(panel_epoch), ctx).await;
+    }
 }
 
 async fn select_all(scope: &Value, ctx: &mut IntentContext<'_>) {
@@ -1034,90 +1085,165 @@ async fn set_cursor(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
     .await;
 }
 
-async fn calculate_size(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
+async fn toggle_directory_sizes(scope: &Value, ctx: &mut IntentContext<'_>) {
     let panel_id = resolve_panel_id(scope, ctx.state).await;
-    let parsed = NameArgs::from_args(args);
-
-    let (panel_path, full_path, is_shadow, source_id, panel_epoch) = {
-        let state_guard = ctx.state.lock().await;
-        match state_guard.panels.get(&panel_id).and_then(|panel| {
-            panel
-                .entries
-                .iter()
-                .find(|entry| entry.name == parsed.name && entry.kind == "directory")
-                .map(|_| {
-                    let dir_path = if panel.path.is_empty() {
-                        parsed.name.clone()
-                    } else {
-                        format!("{}/{}", panel.path.trim_end_matches('/'), parsed.name)
-                    };
-                    (
-                        panel.path.clone(),
-                        dir_path,
-                        panel.shadow_source.is_some(),
-                        panel.source_id.clone(),
-                        panel.panel_epoch,
-                    )
-                })
-        }) {
-            Some(v) => v,
-            None => return,
-        }
-    };
-
-    // Fast path for archive sources: compute size from the in-memory directory tree.
-    if is_shadow {
-        let size = {
-            let state_guard = ctx.state.lock().await;
-            state_guard.drivers.get(&source_id).and_then(|driver| {
-                driver
-                    .as_any()
-                    .downcast_ref::<crate::vfs::zip::ZipFsDriver>()
-                    .map(|d| d.dir_size(&full_path))
-                    .or_else(|| {
-                        driver
-                            .as_any()
-                            .downcast_ref::<crate::vfs::seven_zip::SevenZipFsDriver>()
-                            .map(|d| d.dir_size(&full_path))
-                    })
-            })
+    let (actions, panel_epoch) = {
+        let state = ctx.state.lock().await;
+        let Some(panel) = state.panels.get(&panel_id) else {
+            return;
         };
-        if let Some(size) = size {
-            // Update the entry size directly.
-            let (version, panel_epoch) = {
-                let mut state_guard = ctx.state.lock().await;
-                if let Some(panel) = state_guard.panels.get_mut(&panel_id) {
-                    if let Some(entry) = panel.entries.iter_mut().find(|e| e.name == parsed.name) {
-                        entry.size = Some(size);
-                    }
-                    panel.version += 1;
-                    (panel.version, panel.panel_epoch)
-                } else {
-                    return;
-                }
-            };
-            send_panel_patch(
+        (
+            directory_size_actions(&panel.entries, &panel.selection, &panel.calculating_size),
+            panel.panel_epoch,
+        )
+    };
+    for (name, cancel) in actions {
+        if !ctx
+            .state
+            .lock()
+            .await
+            .panels
+            .get(&panel_id)
+            .is_some_and(|panel| panel.panel_epoch == panel_epoch)
+        {
+            return;
+        }
+        if cancel {
+            cancel_size_calculation(
+                &serde_json::json!(panel_id),
+                &serde_json::json!({ "name": name }),
                 ctx,
-                panel_id.clone(),
-                version,
-                serde_json::json!({
-                    "panelEpoch": panel_epoch,
-                    "updateEntrySize": { "name": parsed.name, "size": size }
-                }),
             )
             .await;
+        } else {
+            calculate_entry_size(&panel_id, &name, Some(panel_epoch), ctx).await;
         }
+    }
+}
+
+fn supports_directory_sizes(driver: &dyn crate::vfs::VfsDriver) -> bool {
+    driver.is_local()
+        || driver.as_any().is::<crate::vfs::zip::ZipFsDriver>()
+        || driver
+            .as_any()
+            .is::<crate::vfs::seven_zip::SevenZipFsDriver>()
+}
+
+fn apply_archive_size(
+    panel: &mut crate::state::Panel,
+    path: &str,
+    source_id: &str,
+    panel_epoch: u64,
+    name: &str,
+    size: u64,
+) -> Option<u64> {
+    if panel.panel_epoch != panel_epoch || panel.source_id != source_id || panel.path != path {
+        return None;
+    }
+    let entry = panel
+        .entries
+        .iter_mut()
+        .find(|entry| entry.name == name && entry.kind == "directory")?;
+    entry.size = Some(size);
+    panel.version += 1;
+    Some(panel.version)
+}
+
+async fn calculate_size(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
+    let panel_id = resolve_panel_id(scope, ctx.state).await;
+    calculate_entry_size(&panel_id, &NameArgs::from_args(args).name, None, ctx).await;
+}
+
+async fn calculate_entry_size(
+    panel_id: &str,
+    name: &str,
+    expected_epoch: Option<u64>,
+    ctx: &mut IntentContext<'_>,
+) {
+    let (panel_path, full_path, source_id, panel_epoch, driver) = {
+        let state = ctx.state.lock().await;
+        let Some(panel) = state.panels.get(panel_id) else {
+            return;
+        };
+        if expected_epoch.is_some_and(|epoch| epoch != panel.panel_epoch)
+            || !panel
+                .entries
+                .iter()
+                .any(|entry| entry.name == name && entry.kind == "directory")
+        {
+            return;
+        }
+        let Some(driver) = state.drivers.get(&panel.source_id) else {
+            return;
+        };
+        // Remote and virtual paths must never reach the local filesystem walker.
+        if !supports_directory_sizes(driver.as_ref()) {
+            return;
+        }
+        let full_path = if panel.path.is_empty() {
+            name.to_string()
+        } else {
+            format!("{}/{}", panel.path.trim_end_matches('/'), name)
+        };
+        (
+            panel.path.clone(),
+            full_path,
+            panel.source_id.clone(),
+            panel.panel_epoch,
+            std::sync::Arc::clone(driver),
+        )
+    };
+
+    if !driver.is_local() {
+        // Archives calculate from their in-memory tree, outside the state lock.
+        let archive_path = full_path.clone();
+        let size = tokio::task::spawn_blocking(move || {
+            driver
+                .as_any()
+                .downcast_ref::<crate::vfs::zip::ZipFsDriver>()
+                .map(|driver| driver.dir_size(&archive_path))
+                .or_else(|| {
+                    driver
+                        .as_any()
+                        .downcast_ref::<crate::vfs::seven_zip::SevenZipFsDriver>()
+                        .map(|driver| driver.dir_size(&archive_path))
+                })
+        })
+        .await;
+        let Ok(Some(size)) = size else { return };
+        let version = {
+            let mut state = ctx.state.lock().await;
+            let Some(panel) = state.panels.get_mut(panel_id) else {
+                return;
+            };
+            let Some(version) =
+                apply_archive_size(panel, &panel_path, &source_id, panel_epoch, name, size)
+            else {
+                return;
+            };
+            version
+        };
+        send_panel_patch(
+            ctx,
+            panel_id.to_string(),
+            version,
+            serde_json::json!({
+                "panelEpoch": panel_epoch,
+                "updateEntrySize": { "name": name, "size": size }
+            }),
+        )
+        .await;
         return;
     }
 
     ctx.dir_size_queue.invalidate_cache(&full_path).await;
     ctx.dir_size_queue
         .enqueue(
-            panel_id,
+            panel_id.to_string(),
             panel_path,
             source_id,
             panel_epoch,
-            parsed.name,
+            name.to_string(),
             full_path,
             std::sync::Arc::clone(ctx.state),
             ctx.tx.clone(),
@@ -1321,7 +1447,215 @@ async fn send_panel_patch(
 
 #[cfg(test)]
 mod tests {
-    use super::extend_selection_range;
+    use super::{directory_size_actions, extend_selection_range, toggle_entry_selection};
+    use crate::ws::protocol::EntrySchema;
+    use std::collections::HashSet;
+
+    fn entry(name: &str, kind: &str, size: Option<u64>) -> EntrySchema {
+        EntrySchema {
+            name: name.into(),
+            kind: kind.into(),
+            size,
+            target_kind: None,
+            browsable_archive: false,
+            mtime: None,
+            btime: None,
+            permissions: None,
+            icon_name: None,
+            cc: None,
+            source_path: None,
+            path_hint: None,
+            git_status: None,
+            git_details: None,
+        }
+    }
+
+    #[test]
+    fn space_selects_first_folder_and_requests_its_unknown_size() {
+        let entries = vec![
+            entry("folder", "directory", None),
+            entry("file", "file", Some(7)),
+        ];
+        let mut selection = vec![];
+        let calculating = HashSet::new();
+        assert_eq!(
+            toggle_entry_selection(&entries, 0, &mut selection, &calculating, true),
+            Some("folder".into())
+        );
+        assert_eq!(selection, vec![0]);
+        assert_eq!(
+            toggle_entry_selection(&entries, 1, &mut selection, &calculating, true),
+            None
+        );
+        assert_eq!(selection, vec![0, 1]);
+    }
+
+    #[test]
+    fn space_deselects_without_cancelling_or_restarting_size_work() {
+        let entries = vec![entry("folder", "directory", None)];
+        let calculating = HashSet::from(["folder".into()]);
+        let mut selection = vec![0];
+        assert_eq!(
+            toggle_entry_selection(&entries, 0, &mut selection, &calculating, true),
+            None
+        );
+        assert!(selection.is_empty());
+        assert!(calculating.contains("folder"));
+        assert_eq!(
+            toggle_entry_selection(&entries, 0, &mut selection, &calculating, true),
+            None
+        );
+        assert_eq!(selection, vec![0]);
+    }
+
+    #[test]
+    fn space_reuses_known_sizes_including_zero_and_does_not_follow_symlinks() {
+        let entries = vec![
+            entry("known", "directory", Some(42)),
+            entry("empty", "directory", Some(0)),
+            entry("link", "symlink", None),
+        ];
+        let mut selection = vec![];
+        for index in 0..entries.len() {
+            assert_eq!(
+                toggle_entry_selection(&entries, index, &mut selection, &HashSet::new(), true),
+                None
+            );
+        }
+        assert_eq!(selection, vec![0, 1, 2]);
+    }
+
+    #[test]
+    fn plain_toggle_and_invalid_cursors_never_request_size() {
+        let entries = vec![entry("folder", "directory", None)];
+        let mut selection = vec![];
+        assert_eq!(
+            toggle_entry_selection(&entries, 0, &mut selection, &HashSet::new(), false),
+            None
+        );
+        assert_eq!(selection, vec![0]);
+        assert_eq!(
+            toggle_entry_selection(&entries, 5, &mut selection, &HashSet::new(), true),
+            None
+        );
+        assert_eq!(selection, vec![0]);
+        assert_eq!(
+            toggle_entry_selection(&[], 0, &mut selection, &HashSet::new(), true),
+            None
+        );
+        assert_eq!(selection, vec![0]);
+    }
+
+    #[test]
+    fn bulk_sizes_resolve_all_backend_selection_indices_and_toggle_individually() {
+        let entries = vec![
+            entry("running", "directory", None),
+            entry("file", "file", Some(7)),
+            entry("idle", "directory", Some(42)),
+        ];
+        let calculating = HashSet::from(["running".into()]);
+        // Render windows must not restrict absolute backend selection indices.
+        assert_eq!(
+            directory_size_actions(&entries, &[0, 2, 99], &calculating),
+            vec![("running".into(), true), ("idle".into(), false)]
+        );
+        assert_eq!(
+            directory_size_actions(&entries, &[], &calculating),
+            vec![("running".into(), true), ("idle".into(), false)]
+        );
+        assert!(directory_size_actions(&entries, &[1], &calculating).is_empty());
+        assert!(directory_size_actions(&[], &[], &calculating).is_empty());
+    }
+
+    #[test]
+    fn bulk_sizes_include_entries_beyond_a_render_window() {
+        let entries: Vec<_> = (0..3200)
+            .map(|index| entry(&format!("folder-{index}"), "directory", None))
+            .collect();
+        assert_eq!(
+            directory_size_actions(&entries, &[0, 3199], &HashSet::new()),
+            vec![("folder-0".into(), false), ("folder-3199".into(), false)]
+        );
+        assert_eq!(
+            directory_size_actions(&entries, &[], &HashSet::new()).len(),
+            3200
+        );
+    }
+
+    #[test]
+    fn local_sizing_never_walks_virtual_paths() {
+        assert!(super::supports_directory_sizes(
+            &crate::vfs::local::LocalFsDriver
+        ));
+        assert!(!super::supports_directory_sizes(
+            &crate::vfs::history::HistoryDriver::new(vec![])
+        ));
+        assert!(!super::supports_directory_sizes(
+            &crate::vfs::bookmarks::BookmarksDriver::new(vec![])
+        ));
+    }
+
+    fn archive_panel() -> crate::state::Panel {
+        crate::state::Panel {
+            panel_id: "left".into(),
+            slot_id: "left".into(),
+            tab_kind: crate::state::TabKind::Listing,
+            tab_title_override: None,
+            source_id: "zip:fixture".into(),
+            path: "/inside".into(),
+            status: crate::state::PanelStatus::Ready,
+            sort: crate::ws::protocol::SortSpec {
+                by: "name".into(),
+                order: "asc".into(),
+            },
+            filter: None,
+            filter_mode_active: false,
+            show_hidden: false,
+            view_mode: crate::state::PanelViewMode::List,
+            cursor: 0,
+            selection: vec![0],
+            entries: vec![entry("folder", "directory", None)],
+            version: 5,
+            panel_epoch: 3,
+            calculating_size: HashSet::new(),
+            windowed: false,
+            window_start: 0,
+            window_count: 0,
+            thumbnail_viewport: None,
+            window_version: 0,
+            source_paths: Default::default(),
+            navigation_context: Default::default(),
+            shadow_source: None,
+            terminal_session: None,
+            git: None,
+        }
+    }
+
+    #[test]
+    fn stale_archive_completion_never_changes_replacement_listing_or_selection() {
+        for (path, source, epoch) in [
+            ("/old", "zip:fixture", 3),
+            ("/inside", "zip:other", 3),
+            ("/inside", "zip:fixture", 2),
+        ] {
+            let mut panel = archive_panel();
+            assert_eq!(
+                super::apply_archive_size(&mut panel, path, source, epoch, "folder", 42),
+                None
+            );
+            assert_eq!(panel.entries[0].size, None);
+            assert_eq!(panel.version, 5);
+            assert_eq!(panel.selection, vec![0]);
+        }
+        let mut panel = archive_panel();
+        assert_eq!(
+            super::apply_archive_size(&mut panel, "/inside", "zip:fixture", 3, "folder", 42),
+            Some(6)
+        );
+        assert_eq!(panel.entries[0].size, Some(42));
+        assert_eq!(panel.selection, vec![0]);
+        assert_eq!(panel.cursor, 0);
+    }
 
     #[test]
     fn extend_down_from_empty_selection() {

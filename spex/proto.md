@@ -427,10 +427,32 @@ Intents represent **user intent**, not UI actions.
 ```json
 {
   "type": "Intent",
-  "name": "ToggleSelectionAtCursor",
-  "scope": "focused-panel"
+  "name": "ToggleSelection",
+  "scope": "left",
+  "args": { "calculateSize": true }
 }
 ```
+
+`ToggleSelection` resolves the cursor against the backend's complete panel listing
+and toggles that entry's selection. An empty listing or invalid cursor is a no-op.
+The optional boolean `calculateSize` defaults to `false`. When true, newly selecting
+a real directory with an unknown size starts a calculation unless already queued
+or running. Deselecting never cancels size work; known sizes, including zero, are
+reused. Selection is patched promptly with `selection` and `selectedEntries`,
+before size work. The frontend supplies the resolved panel ID for Space commands.
+
+`ToggleDirectorySizes` takes a panel scope and no arguments. It resolves selected
+directories from the backend's full listing, or all listed directories if selection
+is empty, independently of the frontend's render window. Each running/queued
+target is cancelled; each idle target is freshly calculated. Selection is unchanged.
+`CalculateSize` and `CancelSizeCalculation` remain available with `{ "name": string }`
+for explicit per-folder actions, including Jobs cancellation.
+
+Sizing supports local filesystem drivers and ZIP/7z archive trees. Other drivers
+and symlinks are skipped; virtual and remote paths are never passed to the local
+filesystem walker. Results use the existing `calculatingSize` / `updateEntrySize`
+panel patches, guarded by the source, path, and `panelEpoch`. These read-only size
+and selection intents are excluded from the persistent command journal.
 
 ---
 

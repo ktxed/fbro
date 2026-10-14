@@ -21,6 +21,7 @@ import {
 import { waitFor } from "../wait.mjs";
 import { expectModalFocus, expectCoveredModal } from "./modal-focus.mjs";
 import { verifyThumbnailQueue } from "./thumbnails.mjs";
+import { runPanelSelectionFlow } from "./panel-selection.mjs";
 
 export async function runLocalFlow(browser, observer) {
   await verifyColorSchemeSwitch(browser, observer);
@@ -350,6 +351,7 @@ export async function runLocalFlow(browser, observer) {
 
   await verifyWindowFocusRestoration(browser, observer);
   await verifyGridLeftAtFirstItemNavigatesUp(browser, observer, aSrc);
+  await runPanelSelectionFlow(browser, observer);
 }
 
 async function verifyEmptyFolder(browser, observer) {

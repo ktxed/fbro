@@ -106,6 +106,7 @@ FBRO_E2E_REMOTE_ONLY=1 GDK_BACKEND=wayland npm run e2e:smoke:local_debug
 | Flag | Runs |
 | --- | --- |
 | `FBRO_E2E_FOCUS_ONLY=1` | Focus handoffs and modal ownership |
+| `FBRO_E2E_PANEL_SELECTION_ONLY=1` | Space selection, folder sizes, Shift+Space targeting, and keyboard ownership in list/grid views |
 | `FBRO_E2E_NOTIFICATIONS_ONLY=1` | Notification publication, FIFO toasts, history, clear, keyboard focus, and reload |
 | `FBRO_E2E_THUMBNAILS_ONLY=1` | Thumbnail settings, Jobs queue, and viewport behavior |
 | `FBRO_E2E_VIEWER_ONLY=1` | Viewer and preview regressions |
@@ -135,6 +136,7 @@ coverage reference.
 | Area | Case files | Main checks |
 | --- | --- | --- |
 | Local files and UI | `local.mjs` | Create, copy, overwrite, rename, delete, sort, filtering, empty-folder suggestions, settings, bookmarks, Bros, clipboard feedback, grid navigation, and symlink routes |
+| Panel selection and sizes | `panel-selection.mjs` (called by the local flow) | Space selects folders/files in list and grid views, calculates unknown sizes, reuses known/zero sizes, preserves cursor/focus, ignores held-key repeats, and respects modal/input/native controls; Shift+Space sizes selected/all folders without changing selection; Copy targets a selected folder despite a file cursor |
 | Focus and modals | `focus-handoff.mjs`, `modal-focus.mjs`, and checks throughout the suite | Initial focus, exact opener restoration, covered layers ignoring keys, one submission per activation, nested Escape, backend rejection/removal, outside clicks, and preserving focus during toasts or toolbar actions |
 | Notifications | `notifications.mjs` | Frontend clipboard publication without duplicates, timestamps/severity, FIFO burst delivery, keyboard history navigation, Clear focus handoff, clearing without cancelling delivery, overflow arrivals preserving the browsed row, both schemes, and reload without replay |
 | Thumbnails | `thumbnails.mjs` (also called by the local flow) | Platform capability controls, Jobs tab navigation, queue refresh preserving focus, visible-card loading, off-screen cooldown, viewport promotion, selection fill, and abandoning old requests |
@@ -171,6 +173,7 @@ cargo test --manifest-path src-tauri/Cargo.toml --locked patch_tests
 | Filter | Coverage |
 | --- | --- |
 | `patch_tests` | Delayed scan patches preserving newer cursor/selection/version, queued entries/completion/errors, and independent window updates |
+| `ws::intents::panel::tests` | Cursor/range selection, Space folder selection and size reuse, running-size preservation, full-list size targets beyond render windows, supported drivers, and stale archive completion guards |
 | `remote::` | Share validation/persistence, SFTP root resolution, transfer isolation, cancellation, and late lifecycle events |
 | `vfs::sftp::tests` | SFTP reads/cancellation and paired Ed25519 host-key pinning, including rejection of mismatched keys and certificates |
 | `jobs::file_ops::tests` | File-operation and remote-transfer cleanup/cancellation |

@@ -60,6 +60,7 @@ pub async fn dispatch(name: &str, scope: &Value, args: &Value, ctx: &mut IntentC
         | "MoveCursorToEdge"
         | "SetCursor"
         | "CalculateSize"
+        | "ToggleDirectorySizes"
         | "CancelSizeCalculation"
         | "RequestWindow"
         | "SwitchFocus"

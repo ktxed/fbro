@@ -76,6 +76,28 @@ and sharing patches do not move focus. Covered Settings controls remain inert.
 
 ---
 
+## Panel selection and folder sizes
+
+In both list and grid listings, `Space` toggles the cursor entry's selection
+without moving the cursor. When it selects a real folder with no displayed size,
+it also starts a size calculation unless one is already queued or running.
+Known sizes, including zero, are reused. Deselecting a folder leaves its size
+calculation running. Mouse selection, range selection, and Select All do not
+automatically calculate sizes.
+
+`Shift+Space` leaves selection unchanged and toggles size calculations for the
+selected folders, or all folders in the current listing when nothing is selected.
+Running or queued calculations are cancelled; idle folders are freshly calculated
+even if their size is already displayed. Targets come from the complete backend
+listing, including entries outside the frontend render window. Jobs also provides
+per-folder cancellation. Holding either shortcut does not repeat its action.
+
+Size calculation supports local filesystem folders and ZIP/7z directories.
+Other sources and directory symlinks remain selectable without an automatic scan.
+Calculation completion, failure, cancellation, or timeout never changes selection.
+The existing input-ownership rules apply; quick-preview video Space retains its
+play/pause action instead of selecting the video.
+
 ## 3. Quick preview and separate viewer
 
 `Ctrl+F3` (macOS: the registry's `Cmd+3`) toggles quick preview in the other
@@ -93,8 +115,8 @@ PDF and diagram controls, and native audio/video controls remain available.
 Media Space toggles playback; Left/Right seek five seconds, bounded by the clip.
 When quick preview displays a video, unmodified Space in its source listing
 also plays/pauses that video, preserving listing focus and selection. Holding
-Space does not repeatedly toggle playback. Other files keep the usual selection
-or directory-size action; inputs, native controls and covered panels keep their
+Space does not repeatedly toggle playback. Other entries keep the usual selection
+and optional folder-size action; inputs, native controls and covered panels keep their
 own keyboard ownership.
 PDF uses the same arrows, PageUp/PageDown and Home/End scrolling as text.
 A native button keeps its Space/Enter activation without a second viewer action.

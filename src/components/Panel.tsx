@@ -1658,6 +1658,8 @@ export function Panel({
     if (command) {
       e.preventDefault();
       e.stopPropagation();
+      if (e.repeat && (command.id === "panel.selection.toggle_or_size"
+        || command.id === "panel.selection.calculate_sizes")) return;
       if (command.id === "panel.cursor.up" || command.id === "panel.cursor.down") {
         armPreviewContinuation(command.id === "panel.cursor.up" ? "up" : "down");
       } else if (previewContinuationRef.current) {

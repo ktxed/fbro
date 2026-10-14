@@ -124,11 +124,16 @@ Intents describe **what the user wants**, never *how* it was triggered.
 
 ```json
 {
-  "type": "intent",
-  "name": "ToggleSelectionAtCursor",
-  "scope": "focused-panel"
+  "type": "Intent",
+  "name": "ToggleSelection",
+  "scope": "left",
+  "args": { "calculateSize": true }
 }
 ```
+
+Space selects files and folders alike; newly selected folders with unknown sizes
+also start sizing. Deselecting keeps size work running. See [Keyboard](keyboard.md)
+for Shift+Space and input ownership, and [Protocol](proto.md) for intent details.
 
 ---
 

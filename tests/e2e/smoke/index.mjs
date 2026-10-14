@@ -29,6 +29,7 @@ import { runGlobalSelectionFlow } from "./cases/global-selection.mjs";
 import { runGitFlow } from "./cases/git.mjs";
 import { runGitInitFlow } from "./cases/git-init.mjs";
 import { runLocalFlow } from "./cases/local.mjs";
+import { runPanelSelectionFlow } from "./cases/panel-selection.mjs";
 import { runFocusHandoffFlow } from "./cases/focus-handoff.mjs";
 import { runNotificationsFlow } from "./cases/notifications.mjs";
 import { runViewerFlow } from "./cases/viewer.mjs";
@@ -66,6 +67,11 @@ async function main() {
     browserA = await startBrowser("fbro-a", webdriverHosts.a, webdriverPorts.a, appA);
     observerA = new FbroObserver("fbro-a", wsUrls.a);
     await observerA.connect();
+
+    if (process.env.FBRO_E2E_PANEL_SELECTION_ONLY === "1") {
+      await runPanelSelectionFlow(browserA, observerA);
+      return;
+    }
 
     if (process.env.FBRO_E2E_NOTIFICATIONS_ONLY === "1") {
       await runNotificationsFlow(browserA, observerA);

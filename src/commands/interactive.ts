@@ -444,47 +444,6 @@ function openViewerIntent(client: WsClient, panel: PanelState, intentName: "View
   return true;
 }
 
-function toggleSelectionOrSize(client: WsClient, panel: PanelState) {
-  const cursorEntry = currentEntry(panel);
-  const calcSet = new Set(panel.calculatingSize ?? []);
-
-  if (cursorEntry?.kind === "directory" && panel.selection.length === 0) {
-    if (calcSet.has(cursorEntry.name)) {
-      client.sendIntent("CancelSizeCalculation", "focused-panel", { name: cursorEntry.name });
-    } else {
-      client.sendIntent("CalculateSize", "focused-panel", { name: cursorEntry.name });
-    }
-  } else {
-    client.sendIntent("ToggleSelection", "focused-panel");
-  }
-  return true;
-}
-
-function toggleSelectedDirectorySizes(client: WsClient, panel: PanelState) {
-  const calcSet = new Set(panel.calculatingSize ?? []);
-  const isWindowed = panel.totalCount !== undefined && panel.totalCount > panel.entries.length;
-  const windowStart = panel.windowStart ?? 0;
-  const entriesToCalc = panel.selection.length > 0
-    ? panel.selection.map((index) => (
-        isWindowed
-          ? (index >= windowStart && index < windowStart + panel.entries.length
-              ? panel.entries[index - windowStart]
-              : undefined)
-          : panel.entries[index]
-      ))
-    : panel.entries;
-
-  for (const entry of entriesToCalc) {
-    if (!entry || entry.kind !== "directory") continue;
-    if (calcSet.has(entry.name)) {
-      client.sendIntent("CancelSizeCalculation", "focused-panel", { name: entry.name });
-    } else {
-      client.sendIntent("CalculateSize", "focused-panel", { name: entry.name });
-    }
-  }
-  return true;
-}
-
 function openFocusedEntry(client: WsClient, panel: PanelState, sources: Record<string, Source>) {
   const entry = currentEntry(panel);
   if (entry && entry.kind !== "directory" && !(entry.kind === "symlink" && entry.targetKind === "directory")) {
@@ -797,9 +756,13 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
       client.sendIntent("MoveCursorWithSelect", "focused-panel", { delta: 1 });
       return true;
     case "panel.selection.toggle_or_size":
-      return focused ? toggleSelectionOrSize(client, focused.panel) : false;
+      if (!focused) return false;
+      client.sendIntent("ToggleSelection", focused.panelId, { calculateSize: true });
+      return true;
     case "panel.selection.calculate_sizes":
-      return focused ? toggleSelectedDirectorySizes(client, focused.panel) : false;
+      if (!focused) return false;
+      client.sendIntent("ToggleDirectorySizes", focused.panelId);
+      return true;
     case "panel.selection.select_all":
       client.sendIntent("SelectAll", "focused-panel");
       return true;

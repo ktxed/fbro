@@ -342,7 +342,7 @@ pub(crate) fn build_interactive_commands() -> Vec<InteractiveCommandSchema> {
         command(
             "panel.selection.toggle_or_size",
             "Selection",
-            "Toggle Selection Or Directory Size",
+            "Toggle Selection and Calculate Folder Size",
             vec![keybinding(" ")],
             None,
         ),
