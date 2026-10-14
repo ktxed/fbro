@@ -13,6 +13,8 @@ import { ResizableModal } from "./ResizableModal";
 import { ModalLayer } from "./ModalStack";
 import { isNativeActivationTarget } from "./modalKeyboard";
 
+const fbroIcon = new URL("../../logo256.png", import.meta.url).href;
+
 interface CommandPaletteModalProps {
   client: WsClient;
   onOpenJobsView: () => void;
@@ -160,6 +162,9 @@ export function CommandPaletteModal({ client, onOpenJobsView }: CommandPaletteMo
                   </span>
                   {binding && (
                     <span className="command-palette__item-binding">{binding}</span>
+                  )}
+                  {command.id === "app.about" && (
+                    <img className="command-palette__item-icon" src={fbroIcon} alt="" aria-hidden="true" />
                   )}
                 </button>
               );

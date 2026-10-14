@@ -3139,6 +3139,13 @@ body {
   font-size: calc(var(--font-size) - 1px);
 }
 
+.command-palette__item-icon {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  object-fit: contain;
+}
+
 .command-palette__empty {
   color: var(--text-dim);
   padding: 18px 12px;
