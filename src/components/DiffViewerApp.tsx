@@ -16,7 +16,8 @@ import { DEFAULT_COLOR_SCHEME_ID, resolveColorScheme, type ColorSchemeId } from 
 
 type DiffViewMode = "split" | "unified";
 
-const DIFF_ROW_HEIGHT = 13 * 1.45;
+// Match the integral line height in .diff-table to avoid WebKit paint seams.
+const DIFF_ROW_HEIGHT = 20;
 const DIFF_WHEEL_ROWS = 3;
 const DIFF_HORIZONTAL_SCROLL_STEP = 80;
 

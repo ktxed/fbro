@@ -6734,10 +6734,13 @@ body {
 
 .diff-table {
   width: 100%;
-  border-collapse: collapse;
+  /* Collapsed cells with fractional row heights leave one-pixel paint gaps
+   * in WebKit. Keep adjacent backgrounds contiguous, including sticky gutters. */
+  border-collapse: separate;
+  border-spacing: 0;
   table-layout: fixed;
   font-size: 13px;
-  line-height: 1.45;
+  line-height: 20px;
 }
 
 .diff-table--split {
