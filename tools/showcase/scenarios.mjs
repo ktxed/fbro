@@ -5,16 +5,16 @@ import { commitMessage, git, guardedChild, hashFile, repoRoot, showcaseZoomSteps
 import { assertDemoClone, assertPendingReadme, verifyDemoCommit } from "./fixtures.mjs";
 
 export const chapters = [
-  ["01-browse-filter", "Customize, browse, and filter", "Show the command palette, About, zoom, and themes; run ls -al and mc in the embedded terminal, maximize and promote it to a tab, return to files, then demonstrate grid/list views and filtering."],
+  ["01-browse-filter", "Customize, browse, and filter", "Start with the demo photo grid, show quick preview on the right while selecting several photos, then open About through the command palette and continue with zoom, themes, list view, and filtering."],
   ["02-collect-shortlist", "Collect a photo shortlist", "Create a destination folder, select six photos, copy, navigate into the result, and switch between grid and list."],
   ["03-remove-rejects", "Remove rejected photos", "Delete one copied photo in grid mode, return to list to delete two together, and preview the remaining thumbnails."],
   ["04-rename-keeper", "Rename the keepers", "Rename a photo in grid mode, return to list to rename its folder, then preview the renamed collection."],
   ["05-markdown-mermaid", "Read Markdown and Mermaid", "Maximize the Markdown viewer, search and navigate occurrences, scroll with the keyboard in four directions, then render Markdown and expand a Mermaid diagram."],
   ["06-media-viewers", "Preview photos and media", "JPEG zoom and next-file navigation, animated GIF, and MOV playback."],
   ["07-compare-notes", "Compare shortlist notes", "Select two text versions and review the internal side-by-side comparison."],
-  ["08-explore-git", "Explore fbro’s Git history", "Inspect status, history, and a historical diff; maximize, navigate down and up, and switch between unified and side-by-side modes."],
-  ["09-edit-review", "Edit and review documentation", "Edit README in the isolated clone with embedded Nano, then maximize and navigate the Git diff in side-by-side and unified modes."],
-  ["10-stage-commit", "Stage and commit", "Stage only README, commit, and inspect its history and maximized diff with navigation and unified mode."],
+  ["08-explore-git", "Explore fbro’s Git history", "Inspect status, history, and a historical diff. Maximize briefly for a single change; navigate and switch views only for multiple change blocks."],
+  ["09-edit-review", "Edit and review documentation", "Edit README and review its diff, then run ls -al and mc in the embedded terminal, maximize and promote it to a tab, and return to files."],
+  ["10-stage-commit", "Stage and commit", "Stage only README, commit, and inspect the new commit with a brief maximized diff."],
 ].map(([id, title, description]) => ({ id, title, description }));
 
 export function selectChapters(value = "all") {
@@ -188,7 +188,17 @@ export class Scene {
   }
 
   async exploreDiff() {
-    await this.step("Maximize the Git diff", () => this.maximizeViewer(), 1200);
+    let count;
+    await until("comparison change-block count", async () => {
+      const state = await this.input.inspect();
+      const counter = state.nodes.find(node => node.window === state.focusedWindow && node.role === "AXStaticText" && /^\d+\/\d+$/.test(node.value));
+      if (!counter) return false;
+      count = Number(counter.value.split("/")[1]);
+      return true;
+    }, this.config.timeoutMs);
+    this.clip.diffChangeBlocks = count;
+    await this.step("Maximize the comparison", () => this.maximizeViewer(), count <= 1 ? 1800 : 1000);
+    if (count <= 1) return;
     await this.step("Navigate down through the diff", () => this.keys(["ArrowDown", "PageDown"]), 1200);
     await this.step("Navigate back up through the diff", () => this.keys(["PageUp", "ArrowUp"]), 1200);
     await this.step("Switch to unified diff mode", () => this.input.button("Unified view"), 1600);
@@ -197,11 +207,11 @@ export class Scene {
     await this.step("Restore the comparison window", () => this.restoreViewer());
   }
 
-  async terminalTour() {
+  async terminalTour(directory) {
     const { input: i, observer: o } = this;
     let sessionId, terminalPanelId;
-    await this.step("Open the embedded terminal in the photos folder", async () => {
-      await o.path("left", this.config.pics);
+    await this.step("Open the embedded terminal in the edited repository", async () => {
+      await o.path("left", directory);
       await i.focusPanel("left");
       await i.command("panel.toggle_embedded_terminal");
       await o.wait("embedded shell session", () => o.panel("left").terminalSessionId != null);
@@ -230,10 +240,10 @@ export class Scene {
     await this.step("Return to the previous files tab and keep the terminal running", async () => {
       // Both tabs keep the folder name. The original files caption comes first
       // and has no terminal icon; clicking its text avoids the tab-close button.
-      await i.click({ label: path.basename(this.config.pics), role: "AXStaticText" }, { panel: "left" });
+      await i.click({ label: path.basename(directory), role: "AXStaticText" }, { panel: "left" });
       await o.wait("original files tab restored", state => state.slots.left.activePanelId === "left" && state.focus === "left"
         && state.panels[terminalPanelId]?.terminalSessionId === sessionId);
-      await o.path("left", this.config.pics);
+      await o.path("left", directory);
       assert.equal(o.panel("left").tabKind, "listing");
     }, 1200);
   }
@@ -242,6 +252,29 @@ export class Scene {
 const flows = {
   async "01-browse-filter"(s) {
     const { input: i, observer: o } = s;
+    const photos = s.fixture.previewPhotos;
+    const filter = s.fixture.filter;
+    await s.step("Start with the entire photos folder in grid view", async () => {
+      await o.path("left", s.config.pics);
+      await o.wait("opening photo grid", () => o.panel("left").viewMode === "grid");
+      const target = await i.find({ label: photos[0], role: "AXStaticText" }, { panel: "left" });
+      await i.move(target.frame.x + target.frame.width / 2, target.frame.y + target.frame.height / 2);
+    }, 1000);
+    await s.step("Open the larger right-hand quick preview with Cmd+3", async () => {
+      await i.command("panel.viewer.embed");
+      await i.find({ label: photos[0], role: "AXImage" }, { panel: "right" });
+    }, 1500);
+    for (const name of photos.slice(1)) {
+      await s.step(`Move the file cursor to ${name} and update the right preview`, async () => {
+        await i.click({ label: name, role: "AXStaticText" }, { panel: "left" });
+        await o.wait(`grid cursor ${name}`, () => { const panel = o.panel("left"); return panel.entries[panel.cursor]?.name === name; });
+        await i.find({ label: name, role: "AXImage" }, { panel: "right" });
+      }, 1500);
+    }
+    await s.step("Close quick preview and return to both file panels", async () => {
+      await i.command("panel.viewer.embed");
+      await until("right preview closed", async () => !(await i.find({ label: photos.at(-1), role: "AXImage" }, { optional: true, panel: "right" })), s.config.timeoutMs);
+    }, 600);
     await s.step("Show the command palette", async () => {
       await i.command("app.command_palette");
       await i.find({ role: "AXTextField|AXComboBox", focused: true });
@@ -276,27 +309,18 @@ const flows = {
       await o.wait("dark theme", (state) => state.settings.general.colorScheme === "fbro-dark");
     }, 1800);
     await s.step("Close Settings", () => i.button("Close"));
-    await s.terminalTour();
-    await s.step("Switch to the thumbnail grid", async () => {
-      await i.command("panel.toggle_view_mode");
-      await o.wait("grid mode", () => o.panel().viewMode === "grid");
-      // Thumbnail images have empty alt text and are intentionally omitted
-      // from Accessibility. Wait for the grid cards, then let them settle.
-      await i.find({ role: "AXRow" }, { panel: "left" });
-    }, 2200);
-    await s.step("Point out the photo thumbnails", () => i.move(i.stage.x + i.stage.width * 0.3, i.stage.y + i.stage.height * 0.4), 1800);
-    await s.step("Return to list mode", async () => { await i.command("panel.toggle_view_mode"); await o.wait("list mode", () => o.panel().viewMode === "list"); });
+    await s.step("Return to list mode", () => s.view("list"));
     await s.step("Filter the photo filenames", async () => {
       await i.command("panel.filter.open"); await i.find({ role: "AXTextField", focused: true });
       // Let each live backend echo settle before the next character. A burst
       // of native Unicode events can otherwise race the controlled input.
       let draft = "";
-      for (const character of s.config.filter) {
+      for (const character of filter) {
         await i.type(character); draft += character;
         await o.wait(`filter text ${draft}`, () => o.panel().filter?.value === draft);
         await sleep(100);
       }
-      await o.wait("filtered listing", () => o.panel().filter?.value === s.config.filter && o.panel().status === "ready");
+      await o.wait("filtered listing", () => o.panel().filter?.value === filter && o.panel().status === "ready");
     }, 2200);
     await s.step("Clear the filter", async () => { await i.type("", true); await i.key("Escape"); await o.wait("unfiltered listing", () => !o.panel().filter?.value && o.panel().status === "ready"); });
   },
@@ -422,14 +446,15 @@ const flows = {
       await until("comparison window", async () => (await s.input.inspect()).windows.length > 1, s.config.timeoutMs);
       await s.input.contain();
       await s.input.find({ label: "Ready for the presentation.", prefix: true });
-    }, 3500);
+    }, 600);
+    await s.exploreDiff();
     await s.closeViewer();
   },
   async "08-explore-git"(s) {
     const i = s.input;
     await s.step("Open the real fbro repository’s Git modal", () => s.gitModal(), 1800);
     await s.step("Browse the commit history", () => i.button("Log", { prefix: true }), 1500);
-    await s.step("Expand the latest commit and inspect its first file diff", () => s.historicalDiff(), 3000);
+    await s.step("Expand the latest commit and inspect its first file diff", () => s.historicalDiff(), 600);
     await s.exploreDiff();
     await s.closeViewer(); await i.key("Escape");
   },
@@ -444,14 +469,15 @@ const flows = {
       await o.wait("embedded Nano terminal", () => o.panel().terminalSessionId != null);
       await i.find({ role: "AXTextArea|AXTextField", focused: true });
     }, 1000);
-    await s.step("Append the showcase sentence", async () => {
+    await s.step("Find the Design docs section in the middle of README", async () => {
       await o.path("left", f.clone);
-      // Page down to EOF using Nano's portable Ctrl+V binding. This also
-      // works with the older Nano supplied by macOS without Option-layout issues.
-      for (let page = 0; page < Math.ceil(f.originalReadme.split("\n").length / 10) + 1; page++) await i.key("v", ["ctrl"]);
-      await i.key("e", ["ctrl"]);
-      // Pico/Nano preserves a final newline when writing the last line.
-      await i.type(f.expectedReadme.slice(f.originalReadme.length).replace(/\n$/, ""));
+      // Ctrl+W search works in both GNU Nano and macOS Pico. Insert above
+      // the heading, leaving existing text and the file's final newline intact.
+      await i.key("w", ["ctrl"]); await i.type("## Design docs"); await i.key("Enter");
+      await i.key("a", ["ctrl"]);
+    }, 800);
+    await s.step("Insert the showcase paragraph above Design docs", async () => {
+      await i.type(f.readmeInsertText);
     }, 1000);
     await s.step("Save and close the editor", async () => {
       await i.key("o", ["ctrl"]); await sleep(250); await i.key("Enter"); await sleep(250); await i.key("x", ["ctrl"]);
@@ -460,9 +486,11 @@ const flows = {
     });
     await s.step("Review the README change in Git", async () => {
       await s.gitModal(); await i.find({ label: "Select README.md", role: "AXCheckBox" }); await s.diff();
-    }, 3000);
+    }, 600);
     await s.exploreDiff();
     await s.closeViewer(); await i.key("Escape");
+    await s.terminalTour(f.clone);
+    await assertPendingReadme(f);
   },
   async "10-stage-commit"(s) {
     const { input: i, observer: o, fixture: f } = s;
@@ -488,7 +516,7 @@ const flows = {
       await i.button("Log", { prefix: true });
       await i.find({ label: commitMessage, prefix: true });
       await s.historicalDiff();
-    }, 3000);
+    }, 600);
     await s.exploreDiff();
     await s.closeViewer(); await i.key("Escape");
   },

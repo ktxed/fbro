@@ -7,8 +7,12 @@ captions or click highlights. Most chapters take 15–40 seconds; the extended
 Markdown and Git chapters take longer. Loading and action times determine the
 actual length.
 
-The opening chapter starts with the command palette, opens About fbro from it,
-then visibly zooms from the default 13px through three Cmd+Plus presses to 16px
+The opening chapter starts already in grid view with the entire configured
+photos folder, without filtering or reducing it to six copied images.
+Cmd+3 opens quick preview on the right; clicking through three thumbnails shows
+each photo larger without leaving the grid. The first three JPEG/PNG entries
+in the listing are used for preview. It then closes preview, opens the
+command palette and About fbro, and zooms from the default 13px through three Cmd+Plus presses to 16px
 while About is visible. Every later chapter starts at 16px, including its viewer, comparison,
 and embedded editor, so cuts keep a consistent zoom level. Each isolated app
 session is seeded with this setting before recording starts.
@@ -95,24 +99,31 @@ directory and a separate loopback WebSocket port.
 
 | ID | Feature and scene |
 | --- | --- |
-| `01-browse-filter` | Command palette → About → three zoom steps → Settings → light → dark → terminal → ls -al → mc → maximize → promote to tab → return to files → grid → list → filter → clear |
+| `01-browse-filter` | Entire photos folder in grid immediately → Cmd+3 quick preview on the right → select three photos → close preview → command palette → About → zoom → themes → list → filter → clear |
 | `02-collect-shortlist` | Create Shortlist → select six originals → grid → copy → navigate into copied thumbnails → list |
 | `03-remove-rejects` | Delete one copied photo in grid → list → select/delete two together → remaining thumbnails |
 | `04-rename-keeper` | Choose cover photo → grid → rename to cover.jpg → list → rename Shortlist to Presentation → preview its grid |
 | `05-markdown-mermaid` | Open sources.md → maximize → search raw Markdown → next/previous occurrences → keyboard scroll down/up/right/left → Markdown preview → expanded Mermaid diagram and zoom → restore |
 | `06-media-viewers` | JPEG zoom → next image → animated GIF → play/pause MOV |
-| `07-compare-notes` | Select two versions of shortlist notes and compare them side by side |
-| `08-explore-git` | Real checkout: Git status → log → expand commit → historical diff → maximize → down/up → unified → side by side → restore |
-| `09-edit-review` | Independent clone: Quick Edit README → append sentence → save → Git diff → maximize → down/up → unified → side by side → restore |
-| `10-stage-commit` | Independent clone: stage README → message → commit → new history entry and diff → maximize → down/up → unified → side by side → restore |
+| `07-compare-notes` | Select two note versions → compare → maximize briefly → close |
+| `08-explore-git` | Real checkout: Git status → log → expand commit → historical diff → maximize; navigate/switch views only for multiple changes |
+| `09-edit-review` | Independent clone: edit README → review diff → terminal → ls -al → mc → maximize → promote to tab → return to files |
+| `10-stage-commit` | Independent clone: stage README → message → commit → new history entry → maximize diff briefly |
 
 Chapter 08 inspects the checkout's current branch, history, and pending tooling
 changes. It performs no staging, branch switching, fetching, or committing.
 The Git modal's remote-operation controls are not part of these scenes.
 
-Chapter 01 runs `ls -al` and `mc` in a real shell rooted in the configured photos
-folder. It maximizes the embedded terminal, promotes the same live PTY session
-to a sibling tab, and clicks back to the original files tab before continuing.
+Comparison scenes read the visible change-block counter. With zero or one
+block they only maximize, pause briefly, and close. With multiple blocks they
+also navigate down/up, show unified mode, and return to side-by-side mode.
+The demo README paragraph is inserted before `## Design docs`, around the
+middle of the document, leaving surrounding content visible on both sides.
+
+After editing and reviewing README, chapter 09 runs `ls -al` and `mc` in a real
+shell rooted in the independent demo repository. It maximizes the embedded
+terminal, promotes the same live PTY session to a sibling tab, and clicks back
+to the original files tab before continuing.
 The terminal remains open in its tab until the chapter's dedicated app exits.
 Preflight checks that Midnight Commander (`mc`) is installed.
 

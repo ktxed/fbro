@@ -32,7 +32,10 @@ export async function assertDemoClone(destination, revision) {
 export function readmeEdit(filename) {
   const original = fs.readFileSync(filename, "utf8");
   if (original.includes(sentence)) throw new Error("Demo README already contains the showcase edit");
-  return `${original}${original.endsWith("\n") ? "" : "\n"}\n${sentence}\n`;
+  const anchor = "## Design docs\n";
+  if (original.split(anchor).length !== 2) throw new Error("Demo README must contain one Design docs heading");
+  const offset = original.indexOf(anchor);
+  return `${original.slice(0, offset)}${sentence}\n\n${original.slice(offset)}`;
 }
 
 export async function assertPendingReadme(fixture, { staged = false } = {}) {
@@ -80,6 +83,7 @@ export async function prepareFixture(id, context) {
     await makeDemoClone(fixture.clone, revision);
     fixture.originalReadme = fs.readFileSync(path.join(fixture.clone, "README.md"), "utf8");
     fixture.expectedReadme = readmeEdit(path.join(fixture.clone, "README.md"));
+    fixture.readmeInsertText = `${sentence}\n\n`;
     if (id === "10-stage-commit") fs.writeFileSync(path.join(fixture.clone, "README.md"), fixture.expectedReadme);
   }
   return fixture;

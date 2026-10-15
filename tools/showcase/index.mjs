@@ -162,6 +162,18 @@ async function execute(config, selected, mode, binary) {
         const initialFontSize = chapter.id === "01-browse-filter" ? 13 : showcaseFontSize;
         active = await launch(path.join(directory, `${chapter.id}-logs`), paths, { ...config, captureWorkingArea, initialFontSize }, binary);
         if (interrupted) throw new Error("Run interrupted by user");
+        if (chapter.id === "01-browse-filter") {
+          fixture.previewPhotos = active.observer.panel("left").entries
+            .filter(entry => entry.kind === "file" && /\.(jpe?g|png)$/i.test(entry.name))
+            .slice(0, 3).map(entry => entry.name);
+          if (fixture.previewPhotos.length < 3) throw new Error("The opening photos folder needs at least three JPEG or PNG files");
+          fixture.filter = path.parse(fixture.previewPhotos[0]).name;
+          await active.input.entry("left", fixture.previewPhotos[0]);
+          await active.input.command("panel.toggle_view_mode");
+          await active.observer.wait("opening grid ready", () => active.observer.panel("left").viewMode === "grid");
+          await active.input.find({ label: fixture.previewPhotos[0], role: "AXStaticText" }, { panel: "left" });
+          await sleep(1000);
+        }
         clip.stage = active.input.stage; clip.crop = active.input.geometry; clip.paths = paths;
         clip.initialFontSize = initialFontSize;
         if (fixture.clone) clip.demoClone = fixture.clone;
