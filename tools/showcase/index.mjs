@@ -12,6 +12,7 @@ import { mediaBaseline, prepareFixture } from "./fixtures.mjs";
 import { buildNative, MacInput, nativeCall, prerequisites, Recorder } from "./macos.mjs";
 import { Observer } from "./observer.mjs";
 import { chapters, playScene, Scene, selectChapters, startingPaths } from "./scenarios.mjs";
+import { montage } from "./montage.mjs";
 
 const help = `fbro macOS showcase
 
@@ -21,6 +22,7 @@ const help = `fbro macOS showcase
   npm run showcase -- rehearse --clip 01
   npm run showcase -- record --clip all
   npm run showcase -- record --clip 09,10
+  npm run showcase -- montage [--speed 5] [--input RUN_FOLDER] [--output FILE.mp4]
   npm run showcase -- inspect --pid PID
   npm run showcase -- calibrate --pid PID --name ANCHOR
 
@@ -216,10 +218,12 @@ export async function main(args = process.argv.slice(2)) {
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: {
     config: { type: "string" }, app: { type: "string" }, pace: { type: "string" }, clip: { type: "string", default: "all" },
     pid: { type: "string" }, name: { type: "string" }, capture: { type: "boolean" }, help: { type: "boolean", short: "h" },
+    input: { type: "string" }, output: { type: "string" }, speed: { type: "string" },
   } });
   if (values.help || !positionals.length) { process.stdout.write(help); return; }
   if (positionals.length !== 1) throw new Error("Expected one command; use --help");
   const command = positionals[0];
+  if (command === "montage") return montage({ input: values.input, output: values.output, speed: values.speed === undefined ? 5 : Number(values.speed) });
   if (command === "list" || command === "storyboard") {
     for (const chapter of chapters) process.stdout.write(`${chapter.id}  ${chapter.title}\n${command === "storyboard" ? `  ${chapter.description}\n` : ""}`);
     return;

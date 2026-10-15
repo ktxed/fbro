@@ -162,6 +162,32 @@ edits outside the recording session so this check can detect unexpected changes.
 Demo folders and clones are retained; remove unwanted runs manually after
 editing. A retake never resets or deletes an existing demo repository.
 
+## Join and speed up recorded clips
+
+```sh
+npm run showcase -- montage
+npm run showcase -- montage --speed 3
+npm run showcase -- montage --input artifacts/showcase/final-happy-puffin --speed 5 --output artifacts/showcase/highlights.mp4
+```
+
+The script also runs directly:
+
+```sh
+node tools/showcase/montage.mjs --speed 5 --output artifacts/showcase/highlights.mp4
+```
+
+`montage` joins the clips in manifest order and defaults to 5× speed. Without
+`--input`, it uses the folder named in `artifacts/showcase/latest-complete.txt`.
+An input must contain only passed recorded clips. The result defaults to
+`showcase-5x.mp4` inside that folder, with a JSON report and Markdown editing
+index beside it. Chapter markers and action timings use the accelerated
+timeline. Existing outputs are never overwritten; choose another output name
+for a retake. Originals are preserved.
+
+The output is silent H.264 MP4 at 30 fps, preserving the recording dimensions.
+This command only needs Node, FFmpeg, and FFprobe; it does not open fbro or
+require macOS capture permissions.
+
 ## Accessibility diagnostics and calibration
 
 UI targets normally use Accessibility labels and bounds. Commands use the
