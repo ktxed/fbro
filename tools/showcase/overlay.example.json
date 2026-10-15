@@ -1,0 +1,64 @@
+{
+  "format": "fbro.showcase.overlays",
+  "version": 1,
+  "video": {
+    "file": "example-5x.mp4",
+    "width": 1920,
+    "height": 1080,
+    "fps": 30,
+    "frameCount": 360,
+    "speed": 5
+  },
+  "clips": [
+    {
+      "id": "01-browse-filter",
+      "file": "01-browse-filter.mp4",
+      "sourceDurationSeconds": 60,
+      "startFrame": 0,
+      "endFrame": 360
+    }
+  ],
+  "tracks": {
+    "scenes": [
+      {
+        "id": "opening-about",
+        "clipId": "01-browse-filter",
+        "startFrame": 0,
+        "endFrame": 360,
+        "title": "About fbro",
+        "screen": "app.about",
+        "source": { "startSeconds": 0, "endSeconds": 60, "timing": "authored" }
+      }
+    ],
+    "operations": [
+      {
+        "id": "opening-zoom",
+        "clipId": "01-browse-filter",
+        "sceneId": "opening-about",
+        "startFrame": 60,
+        "endFrame": 180,
+        "text": "Zoom in three levels",
+        "source": { "startSeconds": 10, "endSeconds": 30, "timing": "authored" }
+      }
+    ],
+    "keyboard": [
+      {
+        "id": "opening-zoom-keys",
+        "clipId": "01-browse-filter",
+        "operationId": "opening-zoom",
+        "startFrame": 75,
+        "endFrame": 105,
+        "key": "=",
+        "modifiers": ["cmd", "shift"],
+        "label": "⌘+Plus ×3",
+        "repeat": 3,
+        "presses": [
+          { "frame": 75, "sourceSeconds": 12.5 },
+          { "frame": 81, "sourceSeconds": 13.5 },
+          { "frame": 87, "sourceSeconds": 14.5 }
+        ],
+        "source": { "startSeconds": 12.5, "endSeconds": 14.5, "timing": "authored" }
+      }
+    ]
+  }
+}

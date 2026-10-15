@@ -188,6 +188,18 @@ The output is silent H.264 MP4 at 30 fps, preserving the recording dimensions.
 This command only needs Node, FFmpeg, and FFprobe; it does not open fbro or
 require macOS capture permissions.
 
+## Overlay data for animation
+
+[OVERLAY_FORMAT.md](OVERLAY_FORMAT.md) documents the current montage report
+and the version-1 overlay timeline contract: scene descriptions, operation
+captions, and keyboard badges synchronized to output frames. It includes
+timing conversion, repeated-key grouping, provenance, and a complete
+[example JSON file](overlay.example.json).
+
+The overlay timeline is specified but not yet exported. The existing montage
+JSON already contains accelerated chapter/action start times; raw keyboard
+logs still need an explicit recording-relative clock for precise export.
+
 ## Accessibility diagnostics and calibration
 
 UI targets normally use Accessibility labels and bounds. Commands use the
