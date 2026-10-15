@@ -1,0 +1,14 @@
+{
+  "app": "/Applications/fbro.app/Contents/MacOS/fbro",
+  "pics": "/Users/ktx/Documents/pics",
+  "photos": ["IMG_0595.JPG", "IMG_0596.JPG", "IMG_0597.JPG", "IMG_0598.JPG", "IMG_0601.JPG", "IMG_0604.JPG"],
+  "gif": "20211031_001313.gif",
+  "video": "IMG_1043.MOV",
+  "markdown": "spex/sources.md",
+  "filter": "IMG_0",
+  "screenIndex": 0,
+  "windowWidth": 1440,
+  "pace": 1,
+  "timeoutMs": 20000,
+  "anchors": {}
+}
