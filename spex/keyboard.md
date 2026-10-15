@@ -152,12 +152,14 @@ text transformations:
 | `E` / `F4` | Edit a real local file |
 | `J` / `K` | Next/previous file (down/up in listing order) |
 | `Space` | Play/pause directly rendered local video or MP3 audio |
-| `Left` / `Right` | Seek directly rendered media backward/forward five seconds |
+| `Left` / `Right` | Scroll text, Hex, Markdown or PDF horizontally by 80 pixels; seek directly rendered media backward/forward five seconds |
 | `Esc` | Close the viewer, or leave native fullscreen first on macOS |
 
 Markdown is a distinct presentation of text rather than a second simultaneous
 toggle: only `1 Text` or `4 MD` is shown as active. When focus is in the find
 input, printable viewer shortcuts are not intercepted.
+Left/Right keep native cursor movement in the find input. Horizontal scrolling
+also works for large files with virtual vertical scrolling and in quick preview.
 
 Mermaid diagrams in the Markdown preview have a hover toolbar (zoom out, zoom
 in, fit, expand); `Ctrl`/`Cmd`+wheel over a diagram zooms it in place, while a

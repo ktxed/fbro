@@ -69,12 +69,13 @@ export async function runViewerFlow(browser, observer) {
   fs.writeFileSync(hostPath(`${directory}/${audioName}`), "ID3");
   fs.writeFileSync(hostPath(`${directory}/${pdfName}`), minimalPdf());
   const afterPdfName = "ZZ after PDF.txt";
-  fs.writeFileSync(hostPath(`${directory}/${afterPdfName}`), "Viewer title follows navigation.\n");
+  fs.writeFileSync(hostPath(`${directory}/${afterPdfName}`), "Viewer title follows navigation. " + "wide text ".repeat(50) + "\n");
   const videoName = "ZZZZ Video seek.mp4";
   const video = fs.readFileSync(new URL("../fixtures/viewer.mp4", import.meta.url));
   fs.writeFileSync(hostPath(`${directory}/${videoName}`), video);
   const largeName = "ZZZZZ Large.txt";
-  fs.writeFileSync(hostPath(`${directory}/${largeName}`), "large file line\n".repeat(90_000) + "END OF LARGE PREVIEW\n");
+  fs.writeFileSync(hostPath(`${directory}/${largeName}`), "large file line " + "wide text ".repeat(50) + "\n"
+    + "large file line\n".repeat(90_000) + "END OF LARGE PREVIEW\n");
   const binaryName = "ZZZZZZ Binary.bin";
   fs.writeFileSync(hostPath(`${directory}/${binaryName}`), Buffer.alloc(2048, 0));
   const linkName = "ZZZZZZZ video-link";
@@ -276,6 +277,26 @@ stateDiagram-v2
       timeout: 10_000,
       label: "viewer window title after PDF navigation",
     });
+    await checkHorizontalScrolling(browser, "small text");
+    await browser.keys("f");
+    await browser.$(".viewer__find-bar input").setValue("wide");
+    await browser.keys("ArrowLeft");
+    const findState = await browser.execute(() => ({
+      cursor: document.querySelector(".viewer__find-bar input").selectionStart,
+      scroll: document.querySelector(".viewer__text").scrollLeft,
+    }));
+    if (findState.cursor !== 3 || findState.scroll !== 0) {
+      throw new Error(`Find input lost arrow-key ownership: ${JSON.stringify(findState)}`);
+    }
+    await browser.keys("Escape");
+
+    const largeParams = new URLSearchParams({ viewer: "1", path: `${directory}/${largeName}`,
+      source: observer.state.panels.left.sourceId, name: largeName, label: "main", panel: "left",
+      local: "1", size: String(fs.statSync(hostPath(`${directory}/${largeName}`)).size),
+      fsport: String(observer.state.fileServerPort) });
+    await browser.url(`${mainUrl.split("?")[0]}?${largeParams}`);
+    await browser.$(".viewer__text--virtual").waitForDisplayed({ timeout: 10_000 });
+    await checkHorizontalScrolling(browser, "large text");
 
     const audioParams = new URLSearchParams({ viewer: "1", path: `${directory}/${audioName}`,
       source: observer.state.panels.left.sourceId, name: audioName, label: "main", panel: "left",
@@ -392,6 +413,24 @@ stateDiagram-v2
     observer.navigatePanelToPath("left", originalPath);
     await observer.waitForPanelPath("left", originalPath);
   }
+}
+
+async function checkHorizontalScrolling(browser, label) {
+  const overflows = await browser.execute(() => {
+    const surface = document.querySelector(".viewer__text");
+    document.querySelector("[data-viewer-content]").focus();
+    surface.scrollLeft = 0;
+    return surface.scrollWidth > surface.clientWidth + 160;
+  });
+  if (!overflows) throw new Error(`${label} fixture does not overflow horizontally`);
+  await browser.keys("ArrowRight");
+  await browser.keys("ArrowRight");
+  await waitFor(() => browser.execute(() => document.querySelector(".viewer__text").scrollLeft >= 160),
+    { timeout: 3000, label: `${label} scrolls right from viewer root` });
+  await browser.keys("ArrowLeft");
+  await browser.keys("ArrowLeft");
+  await waitFor(() => browser.execute(() => document.querySelector(".viewer__text").scrollLeft === 0),
+    { timeout: 3000, label: `${label} scrolls left from viewer root` });
 }
 
 async function checkRealVideoSeeking(browser, label) {

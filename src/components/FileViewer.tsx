@@ -45,6 +45,7 @@ function getMermaid(theme: "dark" | "default") {
 const SMALL_LIMIT = 1 * 1024 * 1024;  // 1 MiB — files at or below this are loaded fully
 const CHUNK_SIZE  = 65536;  // 64 KiB — buffer window for large files
 const LINE_H      = 20;     // px — 13px font × 1.5 line-height (19.5, rounded up)
+const HORIZONTAL_SCROLL_STEP = 80; // px — matches the diff viewer
 const MAX_COL     = 512;    // chars — wrap long lines into multiple display rows
 
 export interface FileViewerHandle {
@@ -1090,6 +1091,12 @@ export function FileViewer({ ref, path: initPath, sourceId: initSourceId, filena
 
       // Text/Markdown and PDF share keyboard scrolling of their DOM surface.
       const pdfSurface = rootRef.current?.querySelector<HTMLElement>(".viewer__pdf");
+      const surface = contentRef.current ?? pdfSurface;
+      if (surface && !ctrl && !e.altKey && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
+        e.preventDefault();
+        surface.scrollLeft += e.key === "ArrowRight" ? HORIZONTAL_SCROLL_STEP : -HORIZONTAL_SCROLL_STEP;
+        return;
+      }
       if (isSmall === true || pdfSurface) {
         const el = contentRef.current ?? pdfSurface;
         if (!el) return;
@@ -1743,8 +1750,8 @@ export function FileViewer({ ref, path: initPath, sourceId: initSourceId, filena
             const markdownHint = isMdExt(curFilename) ? " · 4 md" : "";
             if (expandedMermaid) return "wheel/+/- zoom · drag/arrows pan · 0 fit · M maximize · Esc back";
             if (isImageMode) return `z zoom · j/k next/prev file · 1 text · 2 image · 3 hex${markdownHint} · M maximize${editHint}`;
-            if (effectiveMode === "text") return `↑↓ PgDn/PgUp scroll · j/k next/prev · 1 text · 2 image · 3 hex${markdownHint} · M maximize · s dos · w wrap · f find${editHint}`;
-            return `↑↓ PgDn/PgUp scroll · j/k next/prev file · 1 text · 2 image · 3 hex${markdownHint} · M maximize${editHint}`;
+            if (effectiveMode === "text") return `↑↓ ←→ PgDn/PgUp scroll · j/k next/prev · 1 text · 2 image · 3 hex${markdownHint} · M maximize · s dos · w wrap · f find${editHint}`;
+            return `↑↓ ←→ PgDn/PgUp scroll · j/k next/prev file · 1 text · 2 image · 3 hex${markdownHint} · M maximize${editHint}`;
           })()}
         </span>
       </div>}
