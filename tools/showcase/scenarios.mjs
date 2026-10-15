@@ -5,7 +5,7 @@ import { commitMessage, git, guardedChild, hashFile, repoRoot, showcaseZoomSteps
 import { assertDemoClone, assertPendingReadme, verifyDemoCommit } from "./fixtures.mjs";
 
 export const chapters = [
-  ["01-browse-filter", "Customize, browse, and filter", "Open the command palette and About fbro, zoom in three levels while About is visible, then show themes, grid/list views, and filename filtering."],
+  ["01-browse-filter", "Customize, browse, and filter", "Show the command palette, About, zoom, and themes; run ls -al and mc in the embedded terminal, maximize and promote it to a tab, return to files, then demonstrate grid/list views and filtering."],
   ["02-collect-shortlist", "Collect a photo shortlist", "Create a destination folder, select six photos, copy, navigate into the result, and switch between grid and list."],
   ["03-remove-rejects", "Remove rejected photos", "Delete one copied photo in grid mode, return to list to delete two together, and preview the remaining thumbnails."],
   ["04-rename-keeper", "Rename the keepers", "Rename a photo in grid mode, return to list to rename its folder, then preview the renamed collection."],
@@ -196,6 +196,47 @@ export class Scene {
     await this.step("Return to side-by-side mode", () => this.input.button("Side by side view"), 1200);
     await this.step("Restore the comparison window", () => this.restoreViewer());
   }
+
+  async terminalTour() {
+    const { input: i, observer: o } = this;
+    let sessionId, terminalPanelId;
+    await this.step("Open the embedded terminal in the photos folder", async () => {
+      await o.path("left", this.config.pics);
+      await i.focusPanel("left");
+      await i.command("panel.toggle_embedded_terminal");
+      await o.wait("embedded shell session", () => o.panel("left").terminalSessionId != null);
+      sessionId = o.panel("left").terminalSessionId;
+      await i.find({ role: "AXTextArea|AXTextField", focused: true });
+    }, 1200);
+    await this.step("List the real folder contents with ls -al", async () => {
+      await i.type("ls -al"); await i.key("Enter");
+    }, 2000);
+    await this.step("Launch Midnight Commander with mc", async () => {
+      await i.type("mc"); await i.key("Enter");
+    }, 2500);
+    await this.step("Expand the terminal to fill the app", async () => {
+      await i.button("Maximize terminal");
+      await i.find({ label: "Restore terminal", role: "AXButton" });
+    }, 2000);
+    await this.step("Promote the live terminal to its own tab", async () => {
+      await i.button("Promote terminal to its own tab");
+      await o.wait("terminal promoted with the same live session", state => {
+        terminalPanelId = state.slots.left.activePanelId;
+        const terminal = state.panels[terminalPanelId];
+        return terminalPanelId !== "left" && terminal?.tabKind === "terminal"
+          && terminal.terminalSessionId === sessionId && o.panel("left").terminalSessionId == null;
+      });
+    }, 1800);
+    await this.step("Return to the previous files tab and keep the terminal running", async () => {
+      // Both tabs keep the folder name. The original files caption comes first
+      // and has no terminal icon; clicking its text avoids the tab-close button.
+      await i.click({ label: path.basename(this.config.pics), role: "AXStaticText" }, { panel: "left" });
+      await o.wait("original files tab restored", state => state.slots.left.activePanelId === "left" && state.focus === "left"
+        && state.panels[terminalPanelId]?.terminalSessionId === sessionId);
+      await o.path("left", this.config.pics);
+      assert.equal(o.panel("left").tabKind, "listing");
+    }, 1200);
+  }
 }
 
 const flows = {
@@ -235,6 +276,7 @@ const flows = {
       await o.wait("dark theme", (state) => state.settings.general.colorScheme === "fbro-dark");
     }, 1800);
     await s.step("Close Settings", () => i.button("Close"));
+    await s.terminalTour();
     await s.step("Switch to the thumbnail grid", async () => {
       await i.command("panel.toggle_view_mode");
       await o.wait("grid mode", () => o.panel().viewMode === "grid");

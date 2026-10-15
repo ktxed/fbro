@@ -18,7 +18,7 @@ session is seeded with this setting before recording starts.
 Run from the repository root, on a logged-in macOS desktop:
 
 ```sh
-brew install cliclick ffmpeg
+brew install cliclick ffmpeg midnight-commander
 npm ci
 npm run showcase -- preflight
 ```
@@ -95,7 +95,7 @@ directory and a separate loopback WebSocket port.
 
 | ID | Feature and scene |
 | --- | --- |
-| `01-browse-filter` | Command palette → About fbro → three zoom steps to 16px → close About → Settings → light → dark → grid → list → filter → clear |
+| `01-browse-filter` | Command palette → About → three zoom steps → Settings → light → dark → terminal → ls -al → mc → maximize → promote to tab → return to files → grid → list → filter → clear |
 | `02-collect-shortlist` | Create Shortlist → select six originals → grid → copy → navigate into copied thumbnails → list |
 | `03-remove-rejects` | Delete one copied photo in grid → list → select/delete two together → remaining thumbnails |
 | `04-rename-keeper` | Choose cover photo → grid → rename to cover.jpg → list → rename Shortlist to Presentation → preview its grid |
@@ -109,6 +109,12 @@ directory and a separate loopback WebSocket port.
 Chapter 08 inspects the checkout's current branch, history, and pending tooling
 changes. It performs no staging, branch switching, fetching, or committing.
 The Git modal's remote-operation controls are not part of these scenes.
+
+Chapter 01 runs `ls -al` and `mc` in a real shell rooted in the configured photos
+folder. It maximizes the embedded terminal, promotes the same live PTY session
+to a sibling tab, and clicks back to the original files tab before continuing.
+The terminal remains open in its tab until the chapter's dedicated app exits.
+Preflight checks that Midnight Commander (`mc`) is installed.
 
 ## Demo data and editing files
 

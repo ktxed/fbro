@@ -23,7 +23,7 @@ export async function prerequisites(config) {
   const native = await buildNative();
   const status = await nativeCall(native, "status");
   const checks = [];
-  for (const [command, args] of [["cliclick", ["-V"]], ["ffmpeg", ["-version"]], ["ffprobe", ["-version"]], ["git", ["--version"]], ["nano", null]]) {
+  for (const [command, args] of [["cliclick", ["-V"]], ["ffmpeg", ["-version"]], ["ffprobe", ["-version"]], ["git", ["--version"]], ["nano", null], ["mc", ["--version"]]]) {
     try { const { stdout } = await run(args ? command : "/usr/bin/which", args ?? [command], { timeout: 5000 }); checks.push({ tool: command, available: true, version: stdout.split("\n")[0] }); }
     catch (error) { checks.push({ tool: command, available: false, error: error.code ?? error.message }); }
   }
