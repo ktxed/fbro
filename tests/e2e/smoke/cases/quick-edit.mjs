@@ -10,12 +10,18 @@ export async function runQuickEditFlow(browser, observer) {
   const directory = backendPath("a", "src");
   const target = path.posix.join(directory, "quick-edit-smoke.txt");
   const hostTarget = hostPath(target);
+  const cursorName = "quick-edit-cursor.txt";
+  const cursorTarget = hostPath(path.posix.join(directory, cursorName));
+  const cursorContents = "leave the cursor file unchanged\n";
   fs.writeFileSync(hostTarget, "before\n");
+  fs.writeFileSync(cursorTarget, cursorContents);
 
   await goToPanelPath(browser, observer, "left", directory);
   await observer.waitForEntry("left", "quick-edit-smoke.txt", "file");
-  await clickEntry(browser, "left", "quick-edit-smoke.txt");
-  observer.sendIntent("QuickEditFile", "left");
+  await observer.waitForEntry("left", cursorName, "file");
+  await clickEntry(browser, "left", cursorName);
+  // Explicit arguments win even when the backend cursor points to another file.
+  observer.sendIntent("QuickEditFile", "left", { path: directory, filename: "quick-edit-smoke.txt" });
 
   let terminalOpened = false;
   await waitFor(() => {
@@ -23,6 +29,10 @@ export async function runQuickEditFlow(browser, observer) {
     const saved = fs.readFileSync(hostTarget, "utf8").includes("quick edit saved");
     return terminalOpened && saved && observer.state.panels.left?.terminalSessionId == null;
   }, { timeout: 10_000, label: "Quick Edit terminal completion" });
+  if (fs.readFileSync(cursorTarget, "utf8") !== cursorContents) {
+    throw new Error("Quick Edit modified the cursor file instead of only its explicit target");
+  }
+  await expectListingFocus(browser, cursorName);
 
   // Create a genuinely zero-byte file through the empty-folder suggestion,
   // then invoke the same Quick Edit path without an intervening row click.
@@ -44,24 +54,51 @@ export async function runQuickEditFlow(browser, observer) {
   { timeout: 10_000, label: "newly created file listing and focus" });
   const emptyTarget = hostPath(path.posix.join(emptyDirectory, "new.txt"));
   if (fs.statSync(emptyTarget).size !== 0) throw new Error("New file was not zero bytes");
-  // Ctrl+F4 is the Linux smoke fixture's Quick Edit binding.
-  await browser.performActions([{
-    type: "key", id: "quick-edit-keyboard", actions: [
-      { type: "keyDown", value: "\uE009" },
-      { type: "keyDown", value: "\uE034" },
-      { type: "keyUp", value: "\uE034" },
-      { type: "keyUp", value: "\uE009" },
-    ],
-  }]);
-  await browser.releaseActions();
-  terminalOpened = false;
+  await browser.execute(() => {
+    window.__quickEditIntents = [];
+    window.__quickEditOriginalSend = WebSocket.prototype.send;
+    WebSocket.prototype.send = function(data) {
+      if (typeof data === "string") {
+        const message = JSON.parse(data);
+        if (message.type === "Intent" && message.name === "QuickEditFile") {
+          window.__quickEditIntents.push(message);
+        }
+      }
+      return window.__quickEditOriginalSend.call(this, data);
+    };
+  });
+  try {
+    // Ctrl+F4 is the Linux smoke fixture's Quick Edit binding.
+    await browser.performActions([{
+      type: "key", id: "quick-edit-keyboard", actions: [
+        { type: "keyDown", value: "\uE009" },
+        { type: "keyDown", value: "\uE034" },
+        { type: "keyUp", value: "\uE034" },
+        { type: "keyUp", value: "\uE009" },
+      ],
+    }]);
+    await browser.releaseActions();
+    const intents = await browser.execute(() => window.__quickEditIntents);
+    if (intents.length !== 1 || intents[0].scope !== "left"
+      || intents[0].args?.path !== emptyDirectory || intents[0].args?.filename !== "new.txt") {
+      throw new Error(`Quick Edit did not send its displayed target: ${JSON.stringify(intents)}`);
+    }
+  } finally {
+    await browser.execute(() => {
+      WebSocket.prototype.send = window.__quickEditOriginalSend;
+      delete window.__quickEditOriginalSend;
+      delete window.__quickEditIntents;
+    });
+  }
   await waitFor(() => {
-    if (observer.state.panels.left?.terminalSessionId != null) terminalOpened = true;
-    return terminalOpened && fs.readFileSync(emptyTarget, "utf8").includes("quick edit saved")
+    observer.sendIntent("RequestStateSnapshot");
+    // Saving proves the editor ran; don't require polling to catch its short-lived session.
+    return fs.readFileSync(emptyTarget, "utf8").includes("quick edit saved")
       && observer.state.panels.left?.terminalSessionId == null;
   }, { timeout: 10_000, label: "Quick Edit newly created zero-byte file completion" });
+  await expectListingFocus(browser, "new.txt");
 
-  observer.sendIntent("QuickEditFile", "missing-panel");
+  observer.sendIntent("QuickEditFile", "missing-panel", { path: emptyDirectory, filename: "new.txt" });
   observer.sendIntent("NavigateToSource", "left", { sourceId: "journal" });
   await waitFor(() => {
     const panel = observer.state.panels.left;
@@ -81,4 +118,12 @@ export async function runQuickEditFlow(browser, observer) {
   observer.sendIntent("NavigatePanelTo", undefined, { panelId: "left", path: directory });
   await observer.waitForPanelPath("left", directory);
   await observer.waitForPanelReady("left");
+}
+
+async function expectListingFocus(browser, filename) {
+  await waitFor(() => browser.execute((filename) => {
+    const panel = document.querySelector('[data-testid="panel-left"]');
+    const cursor = panel?.querySelector(".panel__row--cursor, .panel__card--cursor");
+    return document.activeElement === panel && cursor?.getAttribute("data-entry-name") === filename;
+  }, filename), { timeout: 10_000, label: `Quick Edit restores listing focus on ${filename}` });
 }

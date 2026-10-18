@@ -143,7 +143,7 @@ coverage reference.
 | Thumbnails | `thumbnails.mjs` (also called by the local flow) | Platform capability controls, Jobs tab navigation, queue refresh preserving focus, visible-card loading, off-screen cooldown, viewport promotion, selection fill, and abandoning old requests |
 | Viewers | `viewer.mjs` | Large and delayed images, J-next/K-previous rapid/reverse navigation, invalid-image recovery, text and binary content, horizontal arrow scrolling in small/large text with find-input cursor ownership, PDF, Markdown/HTML images, Mermaid, zoom, audio/video controls, preview keyboard ownership, and opener restoration |
 | HEIC conversion | `heic.mjs` | Backend-confirmed opt-in settings, startup settings delivery, errors, optional real-file decoding, and live disabling |
-| Quick Edit | `quick-edit.mjs` | Edit/save in the embedded terminal, terminal closure, journal entries, and editing a newly created empty file |
+| Quick Edit | `quick-edit.mjs` | Explicit target wins over a different cursor file without modifying it; keyboard invocation sends the displayed directory/filename; edit/save, terminal closure, listing focus restoration, journal entries, and editing a newly created empty file |
 | Global selections | `global-selection.mjs` | Creation, reload persistence, adding through menus and long right-clicks, keyboard selection, focus, and removing references without deleting files |
 | Git | `git-init.mjs`, `git.mjs` | Initialization, branch creation/filtering/checkout, validation and busy states, stage/unstage/rollback, changes/log navigation (J down, K up), journal entries, modal guards, and focus |
 | Fedup | `fedup.mjs` | Global-selection input, default ignores, case-insensitive includes, and custom excludes |
@@ -187,6 +187,7 @@ cargo test --manifest-path src-tauri/Cargo.toml --locked patch_tests
 | `jobs::check_hashes` | Parsing, streaming, I/O errors, report collisions, symlinks, and cancellation at report commit |
 | `jobs::generate_hashes` | Selection, filename handling, checker compatibility, destination races, I/O failures, cleanup, and per-file commit cancellation |
 | `terminal::tests` | Nonblocking resize/close, pending resize coalescing, and session registry release |
+| `ws::intents::terminal::tests` | Explicit Quick Edit targets independent of cursor/selection/render window, required arguments, changed locations, regular-file restrictions, and spaces/Unicode in paths |
 | `storage` | Device classification and prefetch eligibility |
 | `viewer_prefetch` | Scheduling, cache limits, storage policy, and cancellation |
 | `thumb_pool` | Deduplication, visibility priority, cooldown/wakeup, concurrency, stale epochs, and navigation cleanup |

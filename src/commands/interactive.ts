@@ -621,7 +621,10 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
       if (!focused || !sourceCapability("Edit") || !sourceCapability("OpenShell")) return false;
       const entry = currentEntry(focused.panel);
       if (!entry || entry.kind !== "file" || focused.panel.terminalSessionId !== undefined || focused.panel.shadowSource) return false;
-      client.sendIntent("QuickEditFile", focused.panelId);
+      client.sendIntent("QuickEditFile", focused.panelId, {
+        path: focused.panel.path,
+        filename: entry.name,
+      });
       return true;
     }
     case "file.copy":

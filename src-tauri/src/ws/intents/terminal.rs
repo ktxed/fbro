@@ -2,10 +2,12 @@ use std::path::Path;
 
 use serde_json::Value;
 
-use crate::state::TabKind;
+use crate::state::{Panel, TabKind};
 use crate::terminal::{file_fingerprint, fingerprint_changed, QuickEditCompletion};
 use crate::ws::protocol::{now, ServerMessage};
 use crate::ws::runtime::IntentContext;
+
+use super::arg_str;
 
 pub(crate) async fn handle(name: &str, scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
     let Some(panel_id) = scope.as_str() else {
@@ -15,14 +17,37 @@ pub(crate) async fn handle(name: &str, scope: &Value, args: &Value, ctx: &mut In
 
     match name {
         "OpenPanelTerminal" => open(panel_id, args, ctx).await,
-        "QuickEditFile" => quick_edit(panel_id, ctx).await,
+        "QuickEditFile" => quick_edit(panel_id, args, ctx).await,
         "ResizeTerminal" => resize(panel_id, args, ctx).await,
         "ClosePanelTerminal" => close(panel_id, ctx).await,
         _ => {}
     }
 }
 
-async fn quick_edit(panel_id: &str, ctx: &mut IntentContext<'_>) {
+fn quick_edit_target(panel: &Panel, args: &Value) -> Result<(String, String), String> {
+    let path = arg_str(args, "path")
+        .filter(|path| !path.is_empty())
+        .ok_or_else(|| "Quick edit requires a directory path.".to_string())?;
+    let filename = arg_str(args, "filename")
+        .filter(|name| !name.is_empty())
+        .ok_or_else(|| "Quick edit requires a filename.".to_string())?;
+    if Path::new(path) != Path::new(&panel.path) {
+        return Err("Quick edit panel location has changed.".into());
+    }
+    // The request identifies a file, independently of cursor or render-window changes.
+    let entry = panel.entries.iter()
+        .find(|entry| entry.name == filename)
+        .ok_or_else(|| "Quick edit target is no longer in the listing.".to_string())?;
+    if entry.kind != "file" || entry.name == ".." {
+        return Err("Quick edit is available only for regular files.".into());
+    }
+    Ok((
+        path.to_string(),
+        Path::new(path).join(filename).to_string_lossy().to_string(),
+    ))
+}
+
+async fn quick_edit(panel_id: &str, args: &Value, ctx: &mut IntentContext<'_>) {
     let (cwd, file_path, source_id, version, gui_senders, pty_manager, editor) = {
         let state_guard = ctx.state.lock().await;
         let Some(panel) = state_guard.panels.get(panel_id) else {
@@ -51,28 +76,19 @@ async fn quick_edit(panel_id: &str, ctx: &mut IntentContext<'_>) {
             send_quick_edit_error(ctx, message).await;
             return;
         }
-        let local_index = panel.cursor.saturating_sub(panel.window_start);
-        let Some(entry) = panel.entries.get(local_index) else {
-            let source_id = panel.source_id.clone();
-            let requested_editor = state_guard.settings.general.quick_terminal_editor.program();
-            drop(state_guard);
-            let message = "Quick edit requires a file under the cursor.";
-            record_quick_edit_failure(panel_id, Some(&source_id), None, Some(requested_editor), &[], message, None);
-            send_quick_edit_error(ctx, message).await;
-            return;
+        let (cwd, file_path) = match quick_edit_target(panel, args) {
+            Ok(target) => target,
+            Err(message) => {
+                let source_id = panel.source_id.clone();
+                let requested_editor = state_guard.settings.general.quick_terminal_editor.program();
+                drop(state_guard);
+                record_quick_edit_failure(panel_id, Some(&source_id), None, Some(requested_editor), &[], &message, None);
+                send_quick_edit_error(ctx, &message).await;
+                return;
+            }
         };
-        if entry.kind != "file" || entry.name == ".." {
-            let source_id = panel.source_id.clone();
-            let requested_editor = state_guard.settings.general.quick_terminal_editor.program();
-            drop(state_guard);
-            let message = "Quick edit is available only for regular files.";
-            record_quick_edit_failure(panel_id, Some(&source_id), None, Some(requested_editor), &[], message, None);
-            send_quick_edit_error(ctx, message).await;
-            return;
-        }
-        let file_path = Path::new(&panel.path).join(&entry.name).to_string_lossy().to_string();
         (
-            panel.path.clone(),
+            cwd,
             file_path,
             panel.source_id.clone(),
             panel.version,
@@ -321,5 +337,93 @@ async fn close(panel_id: &str, ctx: &mut IntentContext<'_>) {
     let _ = ctx.tx.send(closed.clone()).await;
     for sender in &gui_senders {
         let _ = sender.send(closed.clone()).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::quick_edit_target;
+    use crate::state::{Panel, PanelStatus, PanelViewMode, TabKind};
+    use crate::ws::protocol::{EntrySchema, SortSpec};
+    use serde_json::json;
+    use std::path::Path;
+
+    fn entry(name: &str, kind: &str) -> EntrySchema {
+        EntrySchema {
+            name: name.into(), kind: kind.into(), target_kind: None,
+            browsable_archive: false, size: None, mtime: None, btime: None,
+            permissions: None, icon_name: None, cc: None, source_path: None,
+            path_hint: None, git_status: None, git_details: None,
+        }
+    }
+
+    fn panel() -> Panel {
+        Panel {
+            panel_id: "left".into(), slot_id: "left".into(), tab_kind: TabKind::Listing,
+            tab_title_override: None, source_id: "local".into(), path: "/photos".into(),
+            status: PanelStatus::Ready,
+            sort: SortSpec { by: "name".into(), order: "asc".into() },
+            filter: None, filter_mode_active: false, show_hidden: false,
+            view_mode: PanelViewMode::List, cursor: 0, selection: vec![0],
+            entries: vec![entry("a.jpg", "file"), entry("relinker.py", "file"),
+                entry("folder", "directory"), entry("link.py", "symlink"), entry("..", "directory")],
+            version: 1, panel_epoch: 1, calculating_size: Default::default(),
+            windowed: false, window_start: 0, window_count: 0,
+            thumbnail_viewport: None, window_version: 0, source_paths: Default::default(),
+            navigation_context: Default::default(), shadow_source: None,
+            terminal_session: None, git: None,
+        }
+    }
+
+    #[test]
+    fn explicit_quick_edit_target_ignores_cursor_selection_and_render_window() {
+        let mut panel = panel();
+        let args = json!({ "path": panel.path, "filename": "relinker.py" });
+        for (cursor, windowed, window_start) in [(0, false, 0), (0, true, 1), (2, true, 100), (usize::MAX, true, 100)] {
+            panel.cursor = cursor;
+            panel.windowed = windowed;
+            panel.window_start = window_start;
+            panel.window_count = 1;
+            let (cwd, target) = quick_edit_target(&panel, &args).unwrap();
+            assert_eq!(cwd, panel.path);
+            assert_eq!(Path::new(&target), Path::new(&panel.path).join("relinker.py"));
+        }
+    }
+
+    #[test]
+    fn quick_edit_requires_explicit_string_arguments_without_cursor_fallback() {
+        let panel = panel();
+        for args in [json!({}), json!({ "filename": "a.jpg" }),
+            json!({ "path": "", "filename": "a.jpg" }),
+            json!({ "path": 7, "filename": "a.jpg" }),
+            json!({ "path": panel.path }), json!({ "path": panel.path, "filename": "" }),
+            json!({ "path": panel.path, "filename": 7 })] {
+            assert!(quick_edit_target(&panel, &args).is_err(), "accepted {args}");
+        }
+    }
+
+    #[test]
+    fn quick_edit_rejects_changed_locations_and_non_file_targets() {
+        let panel = panel();
+        assert_eq!(quick_edit_target(&panel, &json!({ "path": "/old-photos", "filename": "a.jpg" })),
+            Err("Quick edit panel location has changed.".into()));
+        for filename in ["missing.py", "folder", "link.py", "..", "../a.jpg", "/a.jpg"] {
+            assert!(quick_edit_target(&panel, &json!({ "path": panel.path, "filename": filename })).is_err(),
+                "accepted {filename}");
+        }
+        let mut empty = panel.clone();
+        empty.entries.clear();
+        assert!(quick_edit_target(&empty, &json!({ "path": panel.path, "filename": "a.jpg" })).is_err());
+    }
+
+    #[test]
+    fn quick_edit_preserves_spaces_and_unicode_in_explicit_targets() {
+        let mut panel = panel();
+        panel.path = "/my photos/été".into();
+        panel.entries.push(entry(" script é.py", "file"));
+        let (cwd, target) = quick_edit_target(&panel,
+            &json!({ "path": panel.path, "filename": " script é.py" })).unwrap();
+        assert_eq!(cwd, panel.path);
+        assert_eq!(Path::new(&target), Path::new(&panel.path).join(" script é.py"));
     }
 }

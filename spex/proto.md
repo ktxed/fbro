@@ -363,7 +363,7 @@ Slot patches use `domain: "slots"`. Patch payloads:
 | `panel.tab.switch` | `{ slotId, panelId }` | Activates `panelId` within `slotId`. |
 | `panel.tab.rename` | `{ panelId, title }` | Sets `tabTitle` override (FUTURE — protocol only). |
 | `panel.terminal.promote` | `{ panelId }` | Detaches the panel's embedded PTY and inserts it as a sibling terminal tab; source panel returns to listing. |
-| `QuickEditFile` | panel id scope | Opens the cursor file in the configured Nano/Vim embedded terminal editor. On Windows, also probes Git for Windows `usr\\bin`, Scoop, Chocolatey, and WinGet for nano/vim/micro/edit. The temporary terminal closes when the editor exits. |
+| `QuickEditFile` | panel id scope; `{ path, filename }` | Opens the explicitly named local file in the configured Nano/Vim embedded terminal editor. Both arguments are required; `path` must match the panel's current directory and `filename` must name a regular file in its complete backend listing. Cursor position, selection, and render-window offsets do not affect the target. Missing/invalid arguments or a changed directory produce the existing Quick Edit error and failed journal result, with no cursor fallback. `path` is the editor's working directory and the scoped panel hosts the terminal. On Windows, also probes Git for Windows `usr\\bin`, Scoop, Chocolatey, and WinGet for nano/vim/micro/edit. The temporary terminal closes when the editor exits. |
 
 ---
 
