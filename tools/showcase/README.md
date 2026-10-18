@@ -105,7 +105,7 @@ directory and a separate loopback WebSocket port.
 | `04-rename-keeper` | Choose cover photo → grid → rename to cover.jpg → list → rename Shortlist to Presentation → preview its grid |
 | `05-markdown-mermaid` | Open sources.md → maximize → search raw Markdown → next/previous occurrences → keyboard scroll down/up/right/left → Markdown preview → expanded Mermaid diagram and zoom → restore |
 | `06-media-viewers` | JPEG zoom → next image → animated GIF → play/pause MOV |
-| `07-compare-notes` | Select two note versions → compare → maximize briefly → close |
+| `07-compare-notes` | Select two note versions → compare → maximize briefly → close → search for notes → To Results → select a result → Info (`i`) → close |
 | `08-explore-git` | Real checkout: Git status → log → expand commit → historical diff → maximize; navigate/switch views only for multiple changes |
 | `09-edit-review` | Independent clone: edit README → review diff → terminal → ls -al → mc → maximize → promote to tab → return to files |
 | `10-stage-commit` | Independent clone: stage README → message → commit → new history entry → maximize diff briefly |
@@ -117,6 +117,11 @@ The Git modal's remote-operation controls are not part of these scenes.
 Comparison scenes read the visible change-block counter. With zero or one
 block they only maximize, pause briefly, and close. With multiple blocks they
 also navigate down/up, show unified mode, and return to side-by-side mode.
+Chapter 07 then searches its demo folder for `shortlist-notes-*.txt`, mounts
+the results in the file panel, and opens Info with the registered `i` shortcut
+on `shortlist-notes-v2.txt`. The modal shows the real file’s path and metadata;
+closing it returns to that search result. These actions are included in the
+clip’s scene and keyboard metadata for overlays.
 The demo README paragraph is inserted before `## Design docs`, around the
 middle of the document, leaving surrounding content visible on both sides.
 

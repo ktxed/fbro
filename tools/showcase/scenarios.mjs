@@ -11,7 +11,7 @@ export const chapters = [
   ["04-rename-keeper", "Rename the keepers", "Rename a photo in grid mode, return to list to rename its folder, then preview the renamed collection."],
   ["05-markdown-mermaid", "Read Markdown and Mermaid", "Maximize the Markdown viewer, search and navigate occurrences, scroll with the keyboard in four directions, then render Markdown and expand a Mermaid diagram."],
   ["06-media-viewers", "Preview photos and media", "JPEG zoom and next-file navigation, animated GIF, and MOV playback."],
-  ["07-compare-notes", "Compare shortlist notes", "Select two text versions and review the internal side-by-side comparison."],
+  ["07-compare-notes", "Compare and inspect shortlist notes", "Compare two text versions, then search for the notes and press i on a result to inspect its real file information."],
   ["08-explore-git", "Explore fbro’s Git history", "Inspect status, history, and a historical diff. Maximize briefly for a single change; navigate and switch views only for multiple change blocks."],
   ["09-edit-review", "Edit and review documentation", "Edit README and review its diff, then run ls -al and mc in the embedded terminal, maximize and promote it to a tab, and return to files."],
   ["10-stage-commit", "Stage and commit", "Stage only README, commit, and inspect the new commit with a brief maximized diff."],
@@ -440,6 +440,7 @@ const flows = {
     await s.closeViewer();
   },
   async "07-compare-notes"(s) {
+    const { input: i, observer: o, fixture: f } = s;
     await s.step("Select both versions of the shortlist notes", () => s.select(["shortlist-notes-v1.txt", "shortlist-notes-v2.txt"]));
     await s.step("Compare the two versions", async () => {
       await s.input.command("file.compare");
@@ -449,6 +450,37 @@ const flows = {
     }, 600);
     await s.exploreDiff();
     await s.closeViewer();
+    await s.step("Search the demo folder for shortlist notes", async () => {
+      await i.focusPanel("left");
+      await i.command("panel.selection.clear");
+      await o.selection("left", []);
+      await i.command("app.search");
+      await i.click({ label: "File name", role: "AXTextField" });
+      await i.type("shortlist-notes-*.txt", true);
+      await i.button("Search");
+      await i.find({ label: "To Results", role: "AXButton" });
+    }, 1200);
+    await s.step("Show the matching files in the search results listing", async () => {
+      await i.button("To Results");
+      await o.wait("shortlist notes search results mounted", () => {
+        const panel = o.panel("left");
+        return panel.status === "ready" && panel.sourceId?.startsWith("search:")
+          && ["shortlist-notes-v1.txt", "shortlist-notes-v2.txt"].every(name => panel.entries.some(entry => entry.name === name));
+      });
+      await i.entry("left", "shortlist-notes-v2.txt");
+      const panel = o.panel("left");
+      assert.equal(panel.entries[panel.cursor].sourcePath, path.join(f.workspace, "shortlist-notes-v2.txt"));
+    }, 1000);
+    await s.step("Press i to inspect a search result’s real file information", async () => {
+      await i.command("file.info");
+      await i.find({ label: "Info" });
+      await i.find({ label: path.join(f.workspace, "shortlist-notes-v2.txt") });
+      await i.find({ label: "Modified" });
+    }, 2500);
+    await s.step("Close Info and return to the search result", async () => {
+      await i.key("Escape");
+      await i.entry("left", "shortlist-notes-v2.txt");
+    });
   },
   async "08-explore-git"(s) {
     const i = s.input;
