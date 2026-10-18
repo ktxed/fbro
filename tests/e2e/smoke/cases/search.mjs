@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { artifactsDir, backendPath, hostPath } from "../config.mjs";
-import { clickCommand, closeTerminalJobDialog, confirmOperation, openPanelContextMenu, reloadBrowserApp } from "../browser.mjs";
+import { clickCommand, closeTerminalJobDialog, confirmOperation, goToPanelPath, openPanelContextMenu, reloadBrowserApp } from "../browser.mjs";
 import { expectModalFocus } from "./modal-focus.mjs";
 import { waitFor } from "../wait.mjs";
 
@@ -394,6 +394,33 @@ export async function runSearchActionsFlow(browser, observer) {
       await waitForState(() => observer.state.panels.left.cursor === index, `cursor snapshot for ${fullPath}`);
       return index;
     };
+    const checkReconnectRescan = async (cursor, selectedPaths) => {
+      const version = observer.state.panels.left.version;
+      // Reconnection forces a quiet replacement scan, including when no
+      // filesystem event happens to race the click in this particular run.
+      await reloadBrowserApp(browser, "fbro-a");
+      await waitForState(() => {
+        const panel = observer.state.panels.left;
+        return panel.version > version && panel.status === "ready"
+          && panel.cursor === cursor
+          && JSON.stringify(panel.selectedEntries.map(entry => entry.sourcePath)) === JSON.stringify(selectedPaths);
+      }, "search rescan preserves exact cursor and selected paths");
+      await browser.waitUntil(() => browser.execute(({ panelSelector, cursor }) =>
+        document.querySelector(`${panelSelector} .panel__row--cursor`)?.getAttribute("data-abs-index") === String(cursor),
+      { panelSelector, cursor }), { timeout: 10_000, timeoutMsg: "Search rescan did not render the preserved cursor" });
+    };
+    const selectDuplicates = async () => {
+      const clear = await browser.$(`${panelSelector} .panel__selection-clear`);
+      if (await clear.isExisting()) {
+        await clear.click();
+        await waitForState(() => observer.state.panels.left.selectedEntries.length === 0, "reset duplicate selection");
+      }
+      for (const [index, fullPath] of [firstPath, secondPath].entries()) {
+        await choose(fullPath);
+        await browser.keys(" ");
+        await waitForState(() => observer.state.panels.left.selectedEntries.length === index + 1, "select duplicate fixture");
+      }
+    };
     const openWith = async (fullPath, keyboard = true) => {
       await choose(fullPath);
       await openPanelContextMenu(browser, "left");
@@ -419,9 +446,7 @@ export async function runSearchActionsFlow(browser, observer) {
     // Copy the second same-name result through the bottom bar, with no selection.
     const copyDestination = path.posix.join(root, "copy-destination");
     fs.mkdirSync(hostPath(copyDestination), { recursive: true });
-    observer.navigatePanelToPath("right", copyDestination);
-    await observer.waitForPanelPath("right", copyDestination);
-    await observer.waitForPanelReady("right");
+    await goToPanelPath(browser, observer, "right", copyDestination);
     try {
       await choose(secondPath);
       const copy = await browser.$('.toolbar [data-command-id="file.copy"]');
@@ -485,11 +510,11 @@ export async function runSearchActionsFlow(browser, observer) {
       await waitForState(() => observer.state.settings.general.colorScheme === scheme, `duplicate Copy ${scheme}`);
       const destination = path.posix.join(root, `copy-${scheme}-${policy}`);
       fs.mkdirSync(hostPath(destination), { recursive: true });
-      observer.navigatePanelToPath("right", destination);
-      await observer.waitForPanelPath("right", destination);
-      await observer.waitForPanelReady("right");
+      await goToPanelPath(browser, observer, "right", destination);
       try {
-        await choose(secondPath);
+        // Completed file operations clear selection. Each policy scenario
+        // establishes its own two-file input before opening a confirmation.
+        await selectDuplicates();
         const firstSource = observer.state.panels.left.selectedEntries[0]?.sourcePath;
         if (!firstSource) throw new Error("Selected search result lost its source path");
         if (inline) await browser.$(`${panelSelector} [data-inline-operation="file.copy"]`).click();
@@ -546,6 +571,7 @@ export async function runSearchActionsFlow(browser, observer) {
         await observer.waitForPanelPath("right", otherPath);
       }
     }
+    await selectDuplicates();
     if (await browser.$(jumpSelector).isExisting()) throw new Error("Multi-selection exposed Jump to location");
     await openPanelContextMenu(browser, "left");
     if (await browser.$('[data-contextual-operation="platform.open-with"]').isExisting()) {
@@ -632,6 +658,17 @@ export async function runSearchActionsFlow(browser, observer) {
     if (observer.state.panels.left.sourceId !== sourceId) throw new Error("Rejected jump discarded search results");
     await browser.waitUntil(panelHasFocus, { timeout: 10_000, timeoutMsg: "Rejected jump lost listing focus" });
     if (launches().length !== beforeLaunch + 1) throw new Error("Open With launched more than once");
+
+    // Run reload checks after all job-chip remounts: initial snapshots do not
+    // replay the completed jobs used by those earlier steps.
+    const secondIndex = await choose(secondPath);
+    await checkReconnectRescan(secondIndex, []);
+    const firstIndex = await choose(firstPath);
+    await browser.keys(" ");
+    await waitForState(() => observer.state.panels.left.selectedEntries.length === 1, "selection before rescan");
+    await checkReconnectRescan(firstIndex, [firstPath]);
+    await browser.$(`${panelSelector} .panel__selection-clear`).click();
+    await waitForState(() => observer.state.panels.left.selectedEntries.length === 0, "clear rescan selection");
 
     await choose(hiddenPath);
     await browser.$(jumpSelector).click();

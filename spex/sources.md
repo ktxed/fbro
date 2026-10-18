@@ -94,6 +94,13 @@ source simultaneously.
 
 ### 1.4 Panel and tab: a view into a source
 
+Local directory-deletion events retain their watched path. Recovery applies only
+while the panel still browses that local path and it remains missing. Delayed
+events from a previous location, or a folder recreated before delivery, cannot
+navigate the panel upward. Filesystem recovery checks run off the async executor;
+the panel's source, path, and navigation epoch are rechecked atomically with the
+recovery's navigation update afterward.
+
 A listing tab is a `Panel` record. It owns `source_id`, the current driver path,
 sort/filter/view state, cursor, selection, history, and optional shadow return
 context. Thumbnail work belongs to the active panel's source/location lifetime:

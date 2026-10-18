@@ -135,6 +135,10 @@ struct LiveListingState {
     anchor_delta: Option<i64>,
 }
 
+fn entry_identity(entry: &EntrySchema) -> &str {
+    entry.source_path.as_deref().unwrap_or(&entry.name)
+}
+
 /// Reconcile interaction state against a replacement listing at commit time.
 /// Using the panel's current entries ensures interactions made while the scan
 /// was running are not overwritten by scan-start state.
@@ -145,20 +149,23 @@ fn reconcile_live_listing(
     new_entries: &[EntrySchema],
 ) -> LiveListingState {
     let old_cursor = old_cursor.min(old_entries.len().saturating_sub(1));
-    let cursor_name = old_entries.get(old_cursor).map(|entry| entry.name.as_str());
-    let anchored_index =
-        cursor_name.and_then(|name| new_entries.iter().position(|entry| entry.name == name));
+    let cursor_identity = old_entries.get(old_cursor).map(entry_identity);
+    let anchored_index = cursor_identity.and_then(|identity| {
+        new_entries
+            .iter()
+            .position(|entry| entry_identity(entry) == identity)
+    });
     let cursor =
         anchored_index.unwrap_or_else(|| old_cursor.min(new_entries.len().saturating_sub(1)));
 
-    let selected_names: std::collections::HashSet<&str> = old_selection
+    let selected_identities: std::collections::HashSet<&str> = old_selection
         .iter()
-        .filter_map(|&index| old_entries.get(index).map(|entry| entry.name.as_str()))
+        .filter_map(|&index| old_entries.get(index).map(entry_identity))
         .collect();
     let selection = new_entries
         .iter()
         .enumerate()
-        .filter(|(_, entry)| selected_names.contains(entry.name.as_str()))
+        .filter(|(_, entry)| selected_identities.contains(entry_identity(entry)))
         .map(|(index, _)| index)
         .collect();
 
@@ -991,6 +998,47 @@ mod tests {
                 selection: vec![2, 3],
                 anchor_delta: Some(2),
             }
+        );
+    }
+
+    #[test]
+    fn live_listing_preserves_exact_duplicate_cursor_and_selection() {
+        let old = vec![
+            entry_at("result.txt", "/one/result.txt"),
+            entry_at("result.txt", "/two/result.txt"),
+        ];
+        let new = vec![
+            entry("earlier.txt"),
+            entry_at("result.txt", "/one/result.txt"),
+            entry_at("result.txt", "/two/result.txt"),
+        ];
+        assert_eq!(
+            reconcile_live_listing(&old, 1, &[1], &new),
+            LiveListingState {
+                cursor: 2,
+                selection: vec![2],
+                anchor_delta: Some(1)
+            },
+        );
+    }
+
+    #[test]
+    fn live_listing_does_not_retarget_a_removed_duplicate() {
+        let old = vec![
+            entry_at("result.txt", "/one/result.txt"),
+            entry_at("result.txt", "/two/result.txt"),
+        ];
+        let new = vec![
+            entry_at("result.txt", "/one/result.txt"),
+            entry("other.txt"),
+        ];
+        assert_eq!(
+            reconcile_live_listing(&old, 1, &[1], &new),
+            LiveListingState {
+                cursor: 1,
+                selection: vec![],
+                anchor_delta: None
+            },
         );
     }
 

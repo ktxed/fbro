@@ -523,10 +523,33 @@ pub(crate) async fn navigate_to(
     dir_size_queue: &Arc<DirSizeQueue>,
     watcher_cmd_tx: &mpsc::Sender<WatcherCommand>,
 ) {
-    if let Some(handle) = scan_handles.remove(panel_id) {
-        handle.abort();
-    }
+    navigate_to_if_current(
+        panel_id,
+        new_path,
+        cursor_hint,
+        cursor_index,
+        state,
+        tx,
+        scan_handles,
+        dir_size_queue,
+        watcher_cmd_tx,
+        None,
+    )
+    .await;
+}
 
+async fn navigate_to_if_current(
+    panel_id: &str,
+    new_path: &str,
+    cursor_hint: Option<String>,
+    cursor_index: Option<usize>,
+    state: &SharedState,
+    tx: &mpsc::Sender<ServerMessage>,
+    scan_handles: &mut HashMap<String, ScanHandle>,
+    dir_size_queue: &Arc<DirSizeQueue>,
+    watcher_cmd_tx: &mpsc::Sender<WatcherCommand>,
+    expected_location: Option<(&str, u64, &std::path::Path)>,
+) {
     let (
         sort,
         filter,
@@ -540,6 +563,20 @@ pub(crate) async fn navigate_to(
         view_mode,
     ) = {
         let mut state_guard = state.lock().await;
+        // Recovery must validate and mutate atomically: another connection can
+        // navigate while the filesystem check is running or this lock is queued.
+        if let Some((source_id, epoch, path)) = expected_location {
+            if !state_guard.panels.get(panel_id).is_some_and(|panel| {
+                panel.source_id == source_id
+                    && panel.panel_epoch == epoch
+                    && std::path::Path::new(&panel.path) == path
+            }) {
+                return;
+            }
+        }
+        if let Some(handle) = scan_handles.remove(panel_id) {
+            handle.abort();
+        }
         let (source_id, current_sort, filter, show_hidden, version, panel_epoch, shadow_schema) =
             if let Some(panel) = state_guard.panels.get_mut(panel_id) {
                 let source_id = panel.source_id.clone();
@@ -989,61 +1026,73 @@ pub(crate) async fn quiet_rescan_panel(
 
 pub(crate) async fn navigate_up_safe(
     panel_id: &str,
+    deleted_path: &std::path::Path,
     state: &SharedState,
     tx: &mpsc::Sender<ServerMessage>,
     scan_handles: &mut HashMap<String, ScanHandle>,
     watcher_cmd_tx: &mpsc::Sender<WatcherCommand>,
     dir_size_queue: &Arc<DirSizeQueue>,
 ) {
-    let (current_path, home) = {
+    let (source_id, panel_epoch, home) = {
         let state_guard = state.lock().await;
-        let current_path = state_guard
-            .panels
-            .get(panel_id)
-            .map(|panel| panel.path.clone())
-            .unwrap_or_default();
-        (current_path, state_guard.platform.home_dir())
+        let Some(panel) = state_guard.panels.get(panel_id) else {
+            return;
+        };
+        // A debounced deletion may belong to the folder the panel just left.
+        if std::path::Path::new(&panel.path) != deleted_path
+            || !state_guard
+                .drivers
+                .get(&panel.source_id)
+                .is_some_and(|driver| driver.is_local())
+        {
+            return;
+        }
+        (
+            panel.source_id.clone(),
+            panel.panel_epoch,
+            state_guard.platform.home_dir(),
+        )
     };
 
-    let mut target = PathBuf::from(&current_path);
-    loop {
-        match target.parent() {
-            Some(parent) if parent != target => {
-                if parent.is_dir() {
-                    let dir_name = target
-                        .file_name()
-                        .and_then(|name| name.to_str())
-                        .map(String::from);
-                    navigate_to(
-                        panel_id,
-                        &parent.to_string_lossy(),
-                        dir_name,
-                        None,
-                        state,
-                        tx,
-                        scan_handles,
-                        dir_size_queue,
-                        watcher_cmd_tx,
-                    )
-                    .await;
-                    return;
-                }
-                target = parent.to_path_buf();
-            }
-            _ => break,
+    let deleted_path = deleted_path.to_path_buf();
+    let path_to_check = deleted_path.clone();
+    let recovery = tokio::task::spawn_blocking(move || {
+        // The same directory may have been recreated before delivery.
+        if path_to_check.is_dir() {
+            return None;
         }
-    }
-
-    navigate_to(
+        let mut target = path_to_check;
+        loop {
+            match target.parent() {
+                Some(parent) if parent != target => {
+                    if parent.is_dir() {
+                        let dir_name = target
+                            .file_name()
+                            .and_then(|name| name.to_str())
+                            .map(String::from);
+                        return Some((parent.to_string_lossy().into_owned(), dir_name));
+                    }
+                    target = parent.to_path_buf();
+                }
+                _ => return Some((home, None)),
+            }
+        }
+    })
+    .await;
+    let Ok(Some((target, cursor_hint))) = recovery else {
+        return;
+    };
+    navigate_to_if_current(
         panel_id,
-        &home,
-        None,
+        &target,
+        cursor_hint,
         None,
         state,
         tx,
         scan_handles,
         dir_size_queue,
         watcher_cmd_tx,
+        Some((&source_id, panel_epoch, &deleted_path)),
     )
     .await;
 }
@@ -1506,6 +1555,132 @@ mod patch_tests {
             crate::thumb_pool::ThumbPool::start(platform, 1),
             Arc::new(crate::fileserver::ThumbCache::new(1)),
         )))
+    }
+
+    #[tokio::test]
+    async fn directory_deletion_recovery_ignores_stale_events() {
+        struct TempDir(PathBuf);
+        impl Drop for TempDir {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        // Both the old and new location can be gone; path identity must still
+        // reject the old event instead of recovering the new location early.
+        for (label, watched_name, current_exists, expected_name) in [
+            ("previous folder deleted", "old", false, "current"),
+            ("current folder recreated", "current", true, "current"),
+            ("current folder deleted", "current", false, ""),
+        ] {
+            let dir =
+                TempDir(std::env::temp_dir().join(format!("fbro-watch-{}", uuid::Uuid::new_v4())));
+            std::fs::create_dir_all(&dir.0).unwrap();
+            let current = dir.0.join("current");
+            if current_exists {
+                std::fs::create_dir(&current).unwrap();
+            }
+            let state = test_state();
+            {
+                let mut guard = state.lock().await;
+                guard.drivers.insert(
+                    "local-test".into(),
+                    Arc::new(crate::vfs::local::LocalFsDriver),
+                );
+                let panel = guard.panels.get_mut("left").unwrap();
+                panel.source_id = "local-test".into();
+                panel.path = current.to_string_lossy().into_owned();
+            }
+            let (tx, mut rx) = mpsc::channel(64);
+            let (watch_tx, _watch_rx) = mpsc::channel(64);
+            let mut handles = HashMap::new();
+            navigate_up_safe(
+                "left",
+                &dir.0.join(watched_name),
+                &state,
+                &tx,
+                &mut handles,
+                &watch_tx,
+                &Arc::new(DirSizeQueue::new()),
+            )
+            .await;
+            for handle in handles.values() {
+                handle.abort();
+            }
+            let expected = if expected_name.is_empty() {
+                dir.0.clone()
+            } else {
+                dir.0.join(expected_name)
+            };
+            assert_eq!(
+                state.lock().await.panels["left"].path,
+                expected.to_string_lossy(),
+                "{label}"
+            );
+            if expected_name == "current" {
+                assert!(
+                    rx.try_recv().is_err(),
+                    "{label}: stale deletion must not publish navigation"
+                );
+                assert!(
+                    handles.is_empty(),
+                    "{label}: stale deletion must not start a scan"
+                );
+            } else {
+                let ServerMessage::StatePatch { patch, .. } = rx.try_recv().unwrap() else {
+                    panic!("{label}: recovery must publish navigation");
+                };
+                assert_eq!(patch["path"], expected.to_string_lossy().as_ref());
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn deletion_recovery_cannot_overwrite_a_newer_navigation() {
+        for (source, epoch, path) in [
+            ("local-test", 1, "/new-location"),
+            ("local-test", 2, "/old-location"),
+            ("replacement-source", 1, "/old-location"),
+        ] {
+            let state = test_state();
+            {
+                let mut guard = state.lock().await;
+                guard
+                    .drivers
+                    .insert(source.into(), Arc::new(crate::vfs::local::LocalFsDriver));
+                let panel = guard.panels.get_mut("left").unwrap();
+                panel.source_id = source.into();
+                panel.panel_epoch = epoch;
+                panel.path = path.into();
+            }
+            let (tx, mut rx) = mpsc::channel(64);
+            let (watch_tx, _watch_rx) = mpsc::channel(64);
+            let mut handles = HashMap::new();
+            // The filesystem check began at this location, but another
+            // connection changed it before recovery acquired the mutation lock.
+            navigate_to_if_current(
+                "left",
+                "/",
+                None,
+                None,
+                &state,
+                &tx,
+                &mut handles,
+                &Arc::new(DirSizeQueue::new()),
+                &watch_tx,
+                Some(("local-test", 1, std::path::Path::new("/old-location"))),
+            )
+            .await;
+            for handle in handles.values() {
+                handle.abort();
+            }
+            let guard = state.lock().await;
+            let panel = &guard.panels["left"];
+            assert_eq!(panel.path, path);
+            assert_eq!(panel.source_id, source);
+            assert_eq!(panel.panel_epoch, epoch);
+            assert!(rx.try_recv().is_err());
+            assert!(handles.is_empty());
+        }
     }
 
     #[tokio::test]

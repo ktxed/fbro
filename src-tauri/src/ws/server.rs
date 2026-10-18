@@ -471,9 +471,10 @@ async fn handle_connection(
                             &watcher_cmd_tx,
                         ).await;
                     }
-                    WatcherAction::DirDeleted { panel_id } => {
+                    WatcherAction::DirDeleted { panel_id, path } => {
                         navigate_up_safe(
                             &panel_id,
+                            &path,
                             &state,
                             &tx,
                             &mut scan_handles,

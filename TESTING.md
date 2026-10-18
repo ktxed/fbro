@@ -114,7 +114,7 @@ FBRO_E2E_REMOTE_ONLY=1 GDK_BACKEND=wayland npm run e2e:smoke:local_debug
 | `FBRO_E2E_HASH_CHECK_ONLY=1` | Check hashes |
 | `FBRO_E2E_HASH_GENERATE_ONLY=1` | Generate hashes, followed by Check hashes |
 | `FBRO_E2E_SEARCH_ACTIVITY_ONLY=1` | Search progress, background jobs, and cancellation |
-| `FBRO_E2E_SEARCH_ACTIONS_ONLY=1` | Search-result actions and focus |
+| `FBRO_E2E_SEARCH_ACTIONS_ONLY=1` | Search-result actions, duplicate cursor/selection preservation on reconnect, and focus |
 | `FBRO_E2E_REMOTE_ONLY=1` | Sharing, pairing, browsing, transfers, and cancellation |
 
 The viewer flow also accepts `--viewer-only`:
@@ -149,7 +149,7 @@ coverage reference.
 | Fedup | `fedup.mjs` | Global-selection input, default ignores, case-insensitive includes, and custom excludes |
 | Hashes | `hash-check.mjs`, `hash-generate.mjs` | Discovery, stale targets, options, matching/malformed sidecars, skip/overwrite, reports/toasts, progress, background/reopen, cancellation, and preserving existing sidecars |
 | Archives | `archive.mjs` | Enter a ZIP, copy a file out, and verify its content |
-| Search | `search.mjs` | Activity without hits, inspected counts, cancellation, duplicate-name hints and viewer paths, toolbar/shortcut Copy with cursor and selection targets, repeated-filename exclusion/suffixes via inline and bottom actions, background copies, per-dialog defaults, both themes, Jump to location, Open With, stale/deleted targets, modal keys, and date/size filters |
+| Search | `search.mjs` | Activity without hits, inspected counts, cancellation, duplicate-name hints and viewer paths, toolbar/shortcut Copy with cursor and selection targets, repeated-filename exclusion/suffixes via inline and bottom actions, background copies, per-dialog defaults, both themes, Jump to location, Open With, duplicate cursor/selection preservation on reconnect, stale/deleted targets, modal keys, and date/size filters |
 | Remote | `remote.mjs` | Folder suggestions and typed shares, validation/history, unsharing, pairing, read-only browsing, copying, thumbnails, integrity, cancellation on both peers, and a fresh transfer after cancellation |
 
 Several UI flows check both `fbro-dark` and `daylight`. Modal tests sample common
@@ -174,6 +174,8 @@ cargo test --manifest-path src-tauri/Cargo.toml --locked patch_tests
 | Filter | Coverage |
 | --- | --- |
 | `patch_tests` | Delayed scan patches preserving newer cursor/selection/version, queued entries/completion/errors, and independent window updates |
+| `live_listing_` | Live cursor/selection and scroll-anchor reconciliation, including exact duplicate search paths and removed results |
+| `deletion_recovery` | Delayed deletion events from previous locations, recreated directories, recovery from a genuinely deleted current folder, and newer navigation winning before recovery mutates state |
 | `ws::intents::panel::tests` | Cursor/range selection, Space folder selection and size reuse, running-size preservation, full-list size targets beyond render windows, supported drivers, and stale archive completion guards |
 | `remote::` | Share validation/persistence, SFTP root resolution, transfer isolation, cancellation, and late lifecycle events |
 | `vfs::sftp::tests` | SFTP reads/cancellation and paired Ed25519 host-key pinning, including rejection of mismatched keys and certificates |

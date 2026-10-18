@@ -25,7 +25,7 @@ pub enum WatcherAction {
     /// Directory contents changed — rescan the panel.
     DirChanged { panel_id: String },
     /// The watched directory was deleted — navigate panel to safe location.
-    DirDeleted { panel_id: String },
+    DirDeleted { panel_id: String, path: PathBuf },
     /// Volume list changed.
     VolumesChanged { volumes: Vec<VolumeInfo> },
 }
@@ -184,7 +184,7 @@ async fn watcher_task(
                     .collect();
 
                 let mut changed_panels = HashSet::new();
-                let mut deleted_panels = HashSet::new();
+                let mut deleted_panels = HashMap::new();
                 for path in ready {
                     pending.remove(&path);
                     if let Some(panels) = path_panels.get(&path) {
@@ -193,15 +193,15 @@ async fn watcher_task(
                             if dir_exists {
                                 changed_panels.insert(pid.clone());
                             } else {
-                                deleted_panels.insert(pid.clone());
+                                deleted_panels.insert(pid.clone(), path.clone());
                             }
                         }
                     }
                 }
-                for panel_id in &deleted_panels {
-                    let _ = action_tx.send(WatcherAction::DirDeleted { panel_id: panel_id.clone() }).await;
+                for (panel_id, path) in &deleted_panels {
+                    let _ = action_tx.send(WatcherAction::DirDeleted { panel_id: panel_id.clone(), path: path.clone() }).await;
                 }
-                for panel_id in changed_panels.difference(&deleted_panels) {
+                for panel_id in changed_panels.iter().filter(|id| !deleted_panels.contains_key(*id)) {
                     let _ = action_tx.send(WatcherAction::DirChanged { panel_id: panel_id.clone() }).await;
                 }
             }

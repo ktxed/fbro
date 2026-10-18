@@ -363,6 +363,12 @@ as React keys. Backend selections retain exact paths across rescans and render
 window changes. Renamed job entries expose their resolved destination names in
 the operation and Jobs dialogs. The policy is per confirmation, not a setting.
 
+Quiet replacement scans reconcile the live cursor, selection, and scroll anchor
+by `sourcePath` for result entries, falling back to the filename for entries
+without one. Same-name results never gain selection together or replace each
+other as the cursor anchor. If the exact cursor entry disappears, the cursor
+uses the existing index fallback and its selection is dropped.
+
 The cursor row of a single file exposes **Jump to location** in the existing
 inline toolbar, after Browse archive when available. It sends
 `NavigateToSearchResult { panelId, fullPath, kind }` using the row's
