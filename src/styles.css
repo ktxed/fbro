@@ -2667,6 +2667,22 @@ body {
   margin: 1px 0;
 }
 
+.modal__file-source {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.modal__duplicate-help {
+  margin: 0 0 8px;
+  color: var(--text-dim);
+  font-size: var(--font-size);
+}
+
+.modal__option .modal__duplicate-policy {
+  appearance: none;
+  font: inherit;
+}
+
 /* ─── Attributes modal (chmod) ───────────────────────────────────── */
 
 .attrs-grid {

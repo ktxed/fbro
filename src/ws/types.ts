@@ -417,7 +417,11 @@ export interface FileOpFile {
   size?: number;
   kind: string;
   sourcePath?: string;
+  /** Backend-resolved destination name in job metadata. */
+  destName?: string;
 }
+
+export type DuplicateNamePolicy = "exclude" | "suffix";
 
 export interface KeyBinding {
   key: string;

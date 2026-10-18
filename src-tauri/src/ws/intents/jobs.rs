@@ -5,6 +5,7 @@ use serde_json::Value;
 use tokio::sync::{mpsc, watch, Mutex};
 
 use crate::jobs::file_ops::{generate_dry_run_script, run_file_op, same_resolved_path};
+use crate::jobs::copy_duplicates::{prepare_search_copy, DuplicateNamePolicy};
 use crate::jobs::search::{
     run_search, MaskMode, SearchDepth, SearchParams, SearchResultStore, SizeOp, TimeOp,
 };
@@ -69,6 +70,7 @@ struct StartFileOpArgs {
     dest_panel: Option<String>,
     dest_path: Option<String>,
     dest_name: Option<String>,
+    duplicate_name_policy: String,
     op_type: String,
     conflict_policy: String,
     verification_policy: String,
@@ -100,6 +102,7 @@ impl StartFileOpArgs {
             dest_panel: arg_str(args, "destPanel").map(String::from),
             dest_path: arg_str(args, "destPath").map(String::from),
             dest_name: arg_str(args, "destName").map(String::from),
+            duplicate_name_policy: arg_str(args, "duplicateNamePolicy").unwrap_or("exclude").to_string(),
             op_type: arg_str(args, "opType").unwrap_or("copy").to_string(),
             conflict_policy: arg_str(args, "conflictPolicy").unwrap_or("ask").to_string(),
             verification_policy: arg_str(args, "verificationPolicy")
@@ -363,6 +366,7 @@ fn schema_from_source_path(source_path: &str) -> Result<FileOpFileSchema, String
         },
         kind: kind.to_string(),
         source_path: Some(source_path.replace('\\', "/")),
+        dest_name: None,
     })
 }
 
@@ -966,11 +970,14 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
         } else {
             (None, None)
         };
-        Ok((files, source_path, dest_path, src_driver, dst_driver))
+        let search_copy = op_type == FileOpType::Copy
+            && is_search_source(&source_panel.source_id)
+            && !has_virtual_source;
+        Ok((files, source_path, dest_path, src_driver, dst_driver, search_copy))
     }
     .await;
 
-    let (mut files, source_path, dest_path, src_driver, dst_driver) = match prepared {
+    let (mut files, source_path, dest_path, src_driver, dst_driver, search_copy) = match prepared {
         Ok(prepared) => prepared,
         Err(error) => {
             let _ = send_error(ctx, "START_FILE_OP_FAILED", error).await;
@@ -1003,6 +1010,32 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
                 return;
             }
         }
+    }
+
+    if search_copy {
+        let policy = match DuplicateNamePolicy::parse(&parsed.duplicate_name_policy) {
+            Ok(policy) => policy,
+            Err(error) => {
+                let _ = send_error(ctx, "START_FILE_OP_FAILED", error).await;
+                return;
+            }
+        };
+        let (Some(destination), Some(driver)) = (dest_path.clone(), dst_driver.clone()) else {
+            let _ = send_error(ctx, "START_FILE_OP_FAILED", "No destination for search-result copy.".into()).await;
+            return;
+        };
+        let prepared = tokio::task::spawn_blocking(move || {
+            prepare_search_copy(files, policy, &destination, driver.as_ref())
+        }).await
+            .map_err(|error| format!("Could not prepare repeated filenames: {error}"))
+            .and_then(|result| result);
+        files = match prepared {
+            Ok(files) => files,
+            Err(error) => {
+                let _ = send_error(ctx, "START_FILE_OP_FAILED", error).await;
+                return;
+            }
+        };
     }
 
     if op_type == FileOpType::Copy {
@@ -1112,6 +1145,7 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
             size: file.size,
             kind: file.kind.clone(),
             source_path: Some(file.source_path.clone()),
+            dest_name: file.dest_name.clone(),
         })
         .collect();
 
@@ -3273,6 +3307,33 @@ async fn send_error(
             extra: None,
         })
         .await
+}
+
+#[cfg(test)]
+mod copy_duplicate_args_tests {
+    use super::StartFileOpArgs;
+
+    #[test]
+    fn omitted_duplicate_policy_defaults_to_exclude() {
+        let args = StartFileOpArgs::from_args(&serde_json::json!({"opType": "copy"}));
+        assert_eq!(args.duplicate_name_policy, "exclude");
+        let args = StartFileOpArgs::from_args(&serde_json::json!({"duplicateNamePolicy": "suffix"}));
+        assert_eq!(args.duplicate_name_policy, "suffix");
+    }
+
+    #[test]
+    fn job_destination_name_is_optional_and_serializes_in_camel_case() {
+        use crate::ws::protocol::FileOpFileSchema;
+        let mut file: FileOpFileSchema = serde_json::from_value(serde_json::json!({
+            "name": "README.md", "kind": "file", "sourcePath": "/two/README.md"
+        })).unwrap();
+        assert!(file.dest_name.is_none());
+        assert!(serde_json::to_value(&file).unwrap().get("destName").is_none());
+        file.dest_name = Some("README-049f.md".into());
+        let json = serde_json::to_value(&file).unwrap();
+        assert_eq!(json["destName"], "README-049f.md");
+        assert_eq!(json["sourcePath"], "/two/README.md");
+    }
 }
 
 #[cfg(test)]

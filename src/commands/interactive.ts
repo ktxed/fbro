@@ -300,7 +300,7 @@ function openFileOp(state: AppState, dispatch: Dispatch<AppAction>, panel: Panel
     ? panel.selectedEntries
     : (() => {
         const entry = currentEntry(panel);
-        return entry ? [{ name: entry.name, size: entry.size, kind: entry.kind }] : [];
+        return entry ? [{ name: entry.name, size: entry.size, kind: entry.kind, sourcePath: entry.sourcePath }] : [];
       })();
 
   return openFileOpForEntries(state, dispatch, panel.panelId, files, opType);
@@ -625,7 +625,7 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
       return true;
     }
     case "file.copy":
-      if (!focused || !sourceCapability("CopySelection")) return false;
+      if (!focused || (!focused.panel.shadowSource && !sourceCapability("CopySelection"))) return false;
       return openFileOp(state, dispatch, focused.panel, "copy");
     case "file.copy_external":
       if (!focused || focused.panel.shadowSource) return false;

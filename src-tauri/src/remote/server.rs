@@ -555,6 +555,7 @@ impl SftpHandler {
                 size,
                 kind: "file".to_string(),
                 source_path: Some(path.to_string()),
+                dest_name: None,
             };
             transfer
                 .file_indexes

@@ -11,6 +11,12 @@ semantics, or the WebSocket protocol.
 
 ## 1. Invariants
 
+The Copy confirmation for multiple regular search-result files includes a native
+Repeated filenames selector. `U` focuses it; its native keys select Exclude
+duplicates or Add random suffix. The default resets to Exclude duplicates for
+each confirmation. Choosing a policy leaves focus in the selector and does not
+submit. Existing initial focus, Enter ownership, and opener restoration apply.
+
 1. Every full-screen dialog is rendered through `ModalLayer`.
 2. The most recently registered layer is the top layer.
 3. Only the top layer is interactive and visible to assistive technology.

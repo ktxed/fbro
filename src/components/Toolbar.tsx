@@ -136,7 +136,8 @@ export function Toolbar({ client, onOpenJobsView }: { client: WsClient; onOpenJo
         const globalBlocked =
           (globalSelectionAny && (commandId === "file.view" || commandId === "file.edit" || commandId === "file.copy" || commandId === "file.move" || commandId === "file.mkdir" || commandId === "app.open_terminal"))
           || (globalSelectionAny && !globalSelectionRoot && commandId === "file.rename");
-        const isDisabled = globalBlocked || (cap !== undefined && !sourceSupports.includes(cap));
+        const canCopyShadow = commandId === "file.copy" && !!focusedPanel?.shadowSource;
+        const isDisabled = globalBlocked || (cap !== undefined && !sourceSupports.includes(cap) && !canCopyShadow);
         const label = isArchive && commandId === "file.copy" ? "Extract" : TOOLBAR_LABELS[commandId];
         const detail = command?.title ?? label;
         const icon = TOOLBAR_ICONS[commandId];

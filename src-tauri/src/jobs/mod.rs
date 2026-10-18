@@ -1,4 +1,5 @@
 pub mod check_hashes;
+pub(crate) mod copy_duplicates;
 pub mod dirsize;
 pub mod extract_archive;
 pub mod fedup;

@@ -525,6 +525,7 @@ async fn git_copy_raw_file(
                 size: Some(size),
                 kind: "file".into(),
                 source_path: Some(name.clone()),
+                dest_name: None,
             }],
             label: Some(short.clone()),
         });

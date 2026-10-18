@@ -177,7 +177,8 @@ fn build_selected_entries(entries: &[EntrySchema], selection: &[usize]) -> Vec<F
                 name: entry.name.clone(),
                 size: entry.size,
                 kind: entry.kind.clone(),
-                source_path: None,
+                source_path: entry.source_path.clone(),
+                dest_name: None,
             })
         })
         .collect()
@@ -869,6 +870,17 @@ mod tests {
             source_path: Some(source_path.to_string()),
             ..entry(name)
         }
+    }
+
+    #[test]
+    fn selected_search_entries_preserve_paths_and_backend_order_outside_render_window() {
+        let mut entries = entries(&vec!["other.txt"; 1500]);
+        entries[1499] = entry_at("README.md", "/last/README.md");
+        entries[0] = entry_at("README.md", "/first/README.md");
+        let selected = build_selected_entries(&entries, &[1499, 0]);
+        assert_eq!(selected[0].source_path.as_deref(), Some("/last/README.md"));
+        assert_eq!(selected[1].source_path.as_deref(), Some("/first/README.md"));
+        assert!(selected.iter().all(|file| file.dest_name.is_none()));
     }
 
     #[test]

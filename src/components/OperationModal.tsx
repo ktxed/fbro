@@ -1,9 +1,9 @@
 import { useState, useRef, useEffect } from "react";
 import type { WsClient } from "../ws/client";
-import type { PendingOp, Job, ConflictPolicy, VerificationPolicy, FileOpFile, SyncBroResult, FedupBroResult } from "../ws/types";
+import type { PendingOp, Job, ConflictPolicy, VerificationPolicy, DuplicateNamePolicy, FileOpFile, SyncBroResult, FedupBroResult } from "../ws/types";
 import { useAppDispatch, useAppState } from "../store";
 import type { AppState, PendingDryRun } from "../store";
-import { isArchiveSourceId, isGlobalSelectionSourceId } from "../utils/sourceId";
+import { isArchiveSourceId, isGlobalSelectionSourceId, isSearchSourceId } from "../utils/sourceId";
 import { IconAlertTriangle } from "@tabler/icons-react";
 import { ResizableModal } from "./ResizableModal";
 import { ModalLayer } from "./ModalStack";
@@ -485,10 +485,12 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
   const [dryMode, setDryMode] = useState(false);
   const [startPaused, setStartPaused] = useState(true);
   const [destName, setDestName] = useState("");
+  const [duplicateNamePolicy, setDuplicateNamePolicy] = useState<DuplicateNamePolicy>("exclude");
   const [applyToAll, setApplyToAll] = useState(false);
   const [confirmingCancel, setConfirmingCancel] = useState(false);
   const modalRef = useRef<HTMLDivElement>(null);
   const destNameInputRef = useRef<HTMLInputElement>(null);
+  const duplicateNamePolicyRef = useRef<HTMLSelectElement>(null);
   const selectedDestNameConflictRef = useRef<string | null>(null);
   // The modal stays mounted between operations, so a repeated identical copy
   // must not inherit the previous operation's "Starting…" state.
@@ -542,6 +544,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
     setDryMode(false);
     setConflictPolicy(shouldDefaultResumeForPending(state, pending) ? "resume" : pending.conflictPolicy);
     setDestName(supportsCopyDestName(pending) ? pending.files[0].name : "");
+    setDuplicateNamePolicy("exclude");
   }, [pending]);
 
   useEffect(() => {
@@ -654,6 +657,9 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
       : ["ask", "overwrite", "skip"];
     const selectedConflictPolicy = conflictPolicies.includes(conflictPolicy) ? conflictPolicy : "ask";
     const showDestNameInput = supportsCopyDestName(pending);
+    const showDuplicateNamePolicy = pending.opType === "copy"
+      && !!sourcePanelState && isSearchSourceId(sourcePanelState.sourceId)
+      && !pending.sourceId && pending.files.filter(file => file.kind === "file").length > 1;
     const destNameWarning = showDestNameInput ? pendingDestNameIssue?.message ?? null : null;
     const isSubmitted = submitted && submittedPendingRef.current === pending;
     const canSubmitPending = !isSubmitted && !destNameWarning;
@@ -685,6 +691,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
         destPath: pending.destPath,
         ...(pending.sourceId ? { sourceId: pending.sourceId } : {}),
         ...(showDestNameInput && destName !== pending.files[0].name ? { destName } : {}),
+        ...(showDuplicateNamePolicy ? { duplicateNamePolicy } : {}),
         conflictPolicy: selectedConflictPolicy,
         verificationPolicy,
         saveDigestFile,
@@ -713,6 +720,8 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
         close();
         return;
       }
+      // Let the repeated-name selector own typeahead and native activation.
+      if (e.target === duplicateNamePolicyRef.current) return;
       if (e.key === "Enter" && isNativeActivationTarget(e.target) && !isEditableTarget(e.target)) return;
       if (isEditableTarget(e.target) && e.key !== "Enter") return;
       if (e.key === "Enter") {
@@ -724,6 +733,11 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
         e.preventDefault();
         destNameInputRef.current?.focus();
         destNameInputRef.current?.select();
+        return;
+      }
+      if (isLetterKey(e, "u") && showDuplicateNamePolicy && !isSubmitted) {
+        e.preventDefault();
+        duplicateNamePolicyRef.current?.focus();
         return;
       }
       if (isLetterKey(e, "d") && !isSubmitted) {
@@ -773,8 +787,13 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
 
             {fileCount > 1 && (
               <ul className="modal__file-list">
-                {pending.files.slice(0, 10).map((f) => (
-                  <li key={f.name}>{f.name}</li>
+                {pending.files.slice(0, 10).map((f, index) => (
+                  <li key={`${f.sourcePath ?? f.name}:${index}`} title={f.sourcePath}>
+                    {f.name}
+                    {sourcePanelState && isSearchSourceId(sourcePanelState.sourceId) && f.sourcePath && (
+                      <span className="modal__file-source">{f.sourcePath}</span>
+                    )}
+                  </li>
                 ))}
                 {fileCount > 10 && <li>… and {fileCount - 10} more</li>}
               </ul>
@@ -782,6 +801,33 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
 
             {!isDelete && (
               <>
+                {showDuplicateNamePolicy && (
+                  <>
+                    <div className="modal__option">
+                      <label htmlFor="copy-duplicate-name-policy"><MnemonicLabel text="Repeated filenames:" mnemonic="u" /></label>
+                      <select
+                        id="copy-duplicate-name-policy"
+                        className="modal__duplicate-policy"
+                        ref={duplicateNamePolicyRef}
+                        data-testid="copy-duplicate-name-policy"
+                        aria-keyshortcuts="U"
+                        aria-describedby="copy-duplicate-name-help"
+                        value={duplicateNamePolicy}
+                        disabled={isSubmitted}
+                        onChange={e => setDuplicateNamePolicy(e.target.value as DuplicateNamePolicy)}
+                      >
+                        <option value="exclude">Exclude duplicates</option>
+                        <option value="suffix">Add random suffix</option>
+                      </select>
+                    </div>
+                    <p id="copy-duplicate-name-help" className="modal__duplicate-help">
+                      {duplicateNamePolicy === "exclude"
+                        ? "Only the first file with each name in this list will be copied."
+                        : "The first file keeps its name. Later files get a suffix, such as README-049f.md."}
+                      {" "}Folders keep their normal merge behavior.
+                    </p>
+                  </>
+                )}
                 <div className="modal__option">
                   <label htmlFor="file-conflict-policy"><MnemonicLabel text="Action if file exists:" mnemonic="a" /></label>
                   <select
@@ -857,6 +903,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
                 <label>
                   <input
                     type="checkbox"
+                    data-testid="file-operation-start-paused"
                     checked={startPaused}
                     onChange={(e) => setStartPaused(e.target.checked)}
                   />
@@ -1328,7 +1375,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
               </div>
             )}
 
-            {isOutgoing && activeJob.files.length > 0 && (
+            {(isOutgoing || activeJob.files.some(file => file.destName)) && activeJob.files.length > 0 && (
               <div className="modal__transfer-files">
                 {activeJob.files.map((file) => {
                   const path = file.sourcePath ?? file.name;
@@ -1339,7 +1386,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
                       className={`modal__transfer-file${isCurrent ? " modal__transfer-file--current" : ""}`}
                       title={path}
                     >
-                      <span>{file.name}</span>
+                      <span>{file.name}{file.destName && file.destName !== file.name ? ` → ${file.destName}` : ""}</span>
                       {file.size !== undefined && <span>{formatBytes(file.size)}</span>}
                     </div>
                   );

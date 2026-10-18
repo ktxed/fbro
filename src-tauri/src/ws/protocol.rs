@@ -1148,6 +1148,9 @@ pub struct FileOpFileSchema {
     pub kind: String,
     #[serde(rename = "sourcePath", skip_serializing_if = "Option::is_none")]
     pub source_path: Option<String>,
+    /// Backend-resolved destination name in job metadata; never an input override.
+    #[serde(default, rename = "destName", skip_serializing_if = "Option::is_none")]
+    pub dest_name: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

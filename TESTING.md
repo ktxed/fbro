@@ -149,7 +149,7 @@ coverage reference.
 | Fedup | `fedup.mjs` | Global-selection input, default ignores, case-insensitive includes, and custom excludes |
 | Hashes | `hash-check.mjs`, `hash-generate.mjs` | Discovery, stale targets, options, matching/malformed sidecars, skip/overwrite, reports/toasts, progress, background/reopen, cancellation, and preserving existing sidecars |
 | Archives | `archive.mjs` | Enter a ZIP, copy a file out, and verify its content |
-| Search | `search.mjs` | Activity without hits, inspected counts, cancellation, duplicate-name hints and viewer paths, Jump to location, Open With, stale/deleted targets, modal keys, and date/size filters |
+| Search | `search.mjs` | Activity without hits, inspected counts, cancellation, duplicate-name hints and viewer paths, toolbar/shortcut Copy with cursor and selection targets, repeated-filename exclusion/suffixes via inline and bottom actions, background copies, per-dialog defaults, both themes, Jump to location, Open With, stale/deleted targets, modal keys, and date/size filters |
 | Remote | `remote.mjs` | Folder suggestions and typed shares, validation/history, unsharing, pairing, read-only browsing, copying, thumbnails, integrity, cancellation on both peers, and a fresh transfer after cancellation |
 
 Several UI flows check both `fbro-dark` and `daylight`. Modal tests sample common
@@ -180,6 +180,7 @@ cargo test --manifest-path src-tauri/Cargo.toml --locked patch_tests
 | `jobs::file_ops::tests` | File-operation and remote-transfer cleanup/cancellation |
 | `jobs::search::tests` | Activity/counts, estimates, roots/depth, large directory backlogs, permission errors, FIFO avoidance, and cancellation |
 | `search_navigation_tests` | Exact source/path resolution, result ordering, and missing results |
+| `copy_duplicates`, `search_copy_duplicates`, `copy_duplicate_args_tests` | Repeated search filenames, exact source identity, exclusion/suffixes, collisions, folder passthrough, defaults, actual copy contents, and matching dry-run destinations |
 | `git::` | Repository operations, target/driver validation, native-path mapping, and replies |
 | `jobs::check_hashes` | Parsing, streaming, I/O errors, report collisions, symlinks, and cancellation at report commit |
 | `jobs::generate_hashes` | Selection, filename handling, checker compatibility, destination races, I/O failures, cleanup, and per-file commit cancellation |

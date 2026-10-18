@@ -486,6 +486,32 @@ and selection intents are excluded from the persistent command journal.
 
 ---
 
+#### StartFileOp repeated filenames
+
+`StartFileOp` accepts optional `args.duplicateNamePolicy: "exclude" | "suffix"`.
+It applies only to Copy from a search-results panel using its real result paths,
+not an explicit virtual clipboard source. Omitted values default to `"exclude"`;
+unknown values reject an applicable operation with `START_FILE_OP_FAILED`.
+
+The backend processes regular files in the supplied confirmation-list order.
+For each exact repeated filename, `"exclude"` drops later files; `"suffix"`
+keeps them with backend-generated destination names. The first file keeps its
+name. Folders, symlinks, case variants, and nested contents retain their existing
+behavior. This policy is separate from `conflictPolicy`, which still governs
+existing destination entries and conflicts arising after preparation.
+
+Generated names append `-` and four lowercase hexadecimal UUID characters before
+the final extension, or at the end for extensionless names and dotfiles. Original
+batch names, generated names, and existing destination entries are reserved;
+exhausting 128 attempts rejects the operation. Foreground, background, and dry
+mode use the same prepared entries and totals.
+
+`FileOpFileSchema` / TS `FileOpFile` have optional `destName` in job messages.
+It reports the backend-resolved name when present. Per-file `destName` supplied
+by clients is ignored; the existing top-level single-item `destName` argument
+remains the supported explicit rename input. `sourcePath` always identifies the
+original source and is preserved in backend selection patches and snapshots.
+
 ### 9.4 Global Selection Deletion
 
 Global selections are virtual state, not filesystem ownership. Deleting from the

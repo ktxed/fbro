@@ -412,7 +412,7 @@ function JobRow({
               const path = file.sourcePath ?? file.name;
               return (
                 <div key={`${path}:${fileStart + index}`} className="jobs-modal__file-row" title={path}>
-                  <span className="jobs-modal__file-name">{file.name}</span>
+                  <span className="jobs-modal__file-name">{file.name}{file.destName && file.destName !== file.name ? ` → ${file.destName}` : ""}</span>
                   <span className="jobs-modal__file-kind">{file.kind}</span>
                   <span className="jobs-modal__file-size">{fileSizeLabel(file.size)}</span>
                 </div>

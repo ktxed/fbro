@@ -337,6 +337,32 @@ file.
 
 ### Mounted result actions
 
+The bottom toolbar's **Copy** button and the registry's `file.copy` shortcut
+support mounted search results, like the inline Copy action. They copy the
+backend selection, or the cursor result when no items are selected. The
+cursor result retains its exact `sourcePath`, including for duplicate names.
+
+Copy confirmations containing at least two regular search-result files expose
+**Repeated filenames** (`U` focuses the selector). Each new confirmation defaults
+to **Exclude duplicates**: only the first regular file with each exact name in
+confirmation-list order is copied. **Add random suffix** keeps the first name
+unchanged and assigns later files four lowercase hexadecimal UUID characters
+before the final extension (`README-049f.md`). Extensionless names and dotfiles
+receive the suffix at the end. Case variants remain separate names.
+
+The backend resolves the policy before creating the job, its totals, or its
+dry-run script. It reserves all original target names and retries generated
+names that collide with batch targets or existing destination entries, failing
+after 128 attempts. Existing-destination conflicts and races retain the separate
+**Action if file exists** policy. Only top-level regular files are affected;
+folders retain normal merging and their contents are not renamed or deduplicated.
+This policy does not apply to normal filesystem copies, Move, or Delete.
+
+Confirmation rows show source paths and use full-path identity rather than names
+as React keys. Backend selections retain exact paths across rescans and render
+window changes. Renamed job entries expose their resolved destination names in
+the operation and Jobs dialogs. The policy is per confirmation, not a setting.
+
 The cursor row of a single file exposes **Jump to location** in the existing
 inline toolbar, after Browse archive when available. It sends
 `NavigateToSearchResult { panelId, fullPath, kind }` using the row's

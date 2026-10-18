@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { artifactsDir, backendPath, hostPath } from "../config.mjs";
-import { clickCommand, openPanelContextMenu, reloadBrowserApp } from "../browser.mjs";
+import { clickCommand, closeTerminalJobDialog, confirmOperation, openPanelContextMenu, reloadBrowserApp } from "../browser.mjs";
 import { expectModalFocus } from "./modal-focus.mjs";
 import { waitFor } from "../wait.mjs";
 
@@ -415,9 +415,53 @@ export async function runSearchActionsFlow(browser, observer) {
 
     const firstPath = path.posix.join(root, "one", "result.txt");
     const secondPath = path.posix.join(root, "two", "result.txt");
+
+    // Copy the second same-name result through the bottom bar, with no selection.
+    const copyDestination = path.posix.join(root, "copy-destination");
+    fs.mkdirSync(hostPath(copyDestination), { recursive: true });
+    observer.navigatePanelToPath("right", copyDestination);
+    await observer.waitForPanelPath("right", copyDestination);
+    await observer.waitForPanelReady("right");
+    try {
+      await choose(secondPath);
+      const copy = await browser.$('.toolbar [data-command-id="file.copy"]');
+      if (!await copy.isEnabled()) throw new Error("Toolbar Copy was disabled on search results");
+      await copy.click();
+      await expectModalFocus(browser, '[data-command-id="file.copy.confirm"]', "search toolbar Copy focus");
+      await browser.$('[data-testid="file-conflict-policy"]').selectByAttribute("value", "overwrite");
+      await confirmOperation(browser, "file.copy.confirm");
+      await observer.waitForJobIdle();
+      await browser.$('[data-command-id="job.close"]').waitForDisplayed({ timeout: 10_000 });
+      const copied = fs.readFileSync(hostPath(path.posix.join(copyDestination, "result.txt")), "utf8");
+      if (copied !== "two\n") throw new Error(`Toolbar Copy used the wrong duplicate: ${copied}`);
+      await closeTerminalJobDialog(browser);
+      await browser.waitUntil(panelHasFocus, { timeout: 10_000, timeoutMsg: "Search Copy did not restore listing focus" });
+    } finally {
+      observer.navigatePanelToPath("right", otherPath);
+      await observer.waitForPanelPath("right", otherPath);
+    }
+
+    const checkSelectedCopy = async (count, keyboard) => {
+      if (keyboard) await browser.keys("F5");
+      else await clickCommand(browser, "file.copy");
+      await expectModalFocus(browser, '[data-command-id="file.copy.confirm"]', "selected search Copy focus");
+      const summary = await browser.$('[data-testid="operation-dialog"] .modal__summary').getText();
+      if (!summary.includes(count === 1 ? "result.txt" : `${count} items`)) {
+        throw new Error(`Search Copy lost its selection: ${summary}`);
+      }
+      const cursor = observer.state.panels.left.cursor;
+      await browser.keys("ArrowDown");
+      await waitForState(() => observer.state.panels.left.cursor === cursor, "Copy covers search listing");
+      await browser.keys("Escape");
+      await browser.$('[data-testid="operation-dialog"]').waitForDisplayed({ timeout: 10_000, reverse: true });
+      await browser.waitUntil(panelHasFocus, { timeout: 10_000, timeoutMsg: "Cancelled search Copy did not restore focus" });
+    };
     await choose(firstPath);
     await browser.keys(" ");
     await waitForState(() => observer.state.panels.left.selectedEntries.length === 1, "first search selection");
+    await choose(secondPath);
+    await checkSelectedCopy(1, true);
+    await choose(firstPath);
     await browser.$(jumpSelector).waitForDisplayed({ timeout: 10_000 });
     await openPanelContextMenu(browser, "left");
     await browser.$('[data-contextual-operation="platform.open-with"]').waitForDisplayed({ timeout: 10_000 });
@@ -425,6 +469,83 @@ export async function runSearchActionsFlow(browser, observer) {
     await choose(secondPath);
     await browser.keys(" ");
     await waitForState(() => observer.state.panels.left.selectedEntries.length === 2, "two search selections");
+    await checkSelectedCopy(2, false);
+    await checkSelectedCopy(2, true);
+
+    // Both entry points use the same backend duplicate policy. Each operation
+    // starts with exclusion, even after a previous copy chose suffixes.
+    const duplicatePolicySelector = '[data-testid="copy-duplicate-name-policy"]';
+    for (const [scheme, policy, inline, background] of [
+      ["fbro-dark", "suffix", true, true],
+      ["fbro-dark", "exclude", false, false],
+      ["daylight", "suffix", false, false],
+      ["daylight", "exclude", true, false],
+    ]) {
+      observer.sendIntent("SetGeneralOption", undefined, { key: "colorScheme", value: scheme });
+      await waitForState(() => observer.state.settings.general.colorScheme === scheme, `duplicate Copy ${scheme}`);
+      const destination = path.posix.join(root, `copy-${scheme}-${policy}`);
+      fs.mkdirSync(hostPath(destination), { recursive: true });
+      observer.navigatePanelToPath("right", destination);
+      await observer.waitForPanelPath("right", destination);
+      await observer.waitForPanelReady("right");
+      try {
+        await choose(secondPath);
+        const firstSource = observer.state.panels.left.selectedEntries[0]?.sourcePath;
+        if (!firstSource) throw new Error("Selected search result lost its source path");
+        if (inline) await browser.$(`${panelSelector} [data-inline-operation="file.copy"]`).click();
+        else await clickCommand(browser, "file.copy");
+        await expectModalFocus(browser, '[data-command-id="file.copy.confirm"]', "duplicate Copy initial focus");
+        const policyControl = await browser.$(duplicatePolicySelector);
+        if (await policyControl.getValue() !== "exclude") throw new Error("Duplicate Copy did not default to exclusion");
+        const listedPaths = await browser.$('[data-testid="operation-dialog"] .modal__file-list').getText();
+        if (!listedPaths.includes(firstPath) || !listedPaths.includes(secondPath)) {
+          throw new Error(`Duplicate confirmation hid source paths: ${listedPaths}`);
+        }
+        await browser.keys("u");
+        await expectModalFocus(browser, duplicatePolicySelector, "duplicate policy mnemonic");
+        if (policy === "suffix") {
+          await browser.keys("ArrowDown");
+          await browser.waitUntil(async () => await policyControl.getValue() === "suffix", { timeout: 5_000 });
+        }
+        await browser.execute(() => document.querySelector('[data-command-id="file.copy.confirm"]')?.focus());
+        const cursor = observer.state.panels.left.cursor;
+        await browser.keys("ArrowDown");
+        await waitForState(() => observer.state.panels.left.cursor === cursor, "duplicate Copy covers listing");
+        if (background) {
+          const paused = await browser.$('[data-testid="file-operation-start-paused"]');
+          if (await paused.isSelected()) await paused.click();
+          await clickCommand(browser, "file.copy.background");
+        } else await confirmOperation(browser, "file.copy.confirm");
+        await waitFor(() => {
+          const names = fs.readdirSync(hostPath(destination));
+          return names.length === (policy === "suffix" ? 2 : 1)
+            && names.every(name => fs.readFileSync(hostPath(path.posix.join(destination, name)), "utf8").length === 4);
+        }, { timeout: 10_000, label: `${policy} search Copy contents` });
+        const names = fs.readdirSync(hostPath(destination));
+        const original = fs.readFileSync(hostPath(path.posix.join(destination, "result.txt")), "utf8");
+        if (original !== fs.readFileSync(hostPath(firstSource), "utf8")) throw new Error("Duplicate Copy did not retain the first source");
+        if (policy === "suffix") {
+          const renamed = names.find(name => /^result-[0-9a-f]{4}\.txt$/.test(name));
+          if (!renamed) throw new Error(`Invalid duplicate suffix: ${names}`);
+          if (fs.readFileSync(hostPath(path.posix.join(destination, renamed)), "utf8") === original) {
+            throw new Error("Suffix Copy copied the same source twice");
+          }
+        }
+        await observer.waitForJobIdle();
+        if (!background) {
+          await browser.$('[data-command-id="job.close"]').waitForDisplayed({ timeout: 10_000 });
+          await closeTerminalJobDialog(browser);
+        }
+        await browser.waitUntil(async () => browser.execute(selector => {
+          const active = document.activeElement;
+          return active === document.querySelector(selector)
+            || active?.matches('[data-inline-operation="file.copy"]');
+        }, panelSelector), { timeout: 10_000, timeoutMsg: "Duplicate Copy did not restore its opener" });
+      } finally {
+        observer.navigatePanelToPath("right", otherPath);
+        await observer.waitForPanelPath("right", otherPath);
+      }
+    }
     if (await browser.$(jumpSelector).isExisting()) throw new Error("Multi-selection exposed Jump to location");
     await openPanelContextMenu(browser, "left");
     if (await browser.$('[data-contextual-operation="platform.open-with"]').isExisting()) {

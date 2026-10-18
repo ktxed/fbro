@@ -43,6 +43,8 @@ and sharing patches do not move focus. Covered Settings controls remain inert.
 - Single-item Copy confirmation uses `N` to focus and select the destination
   name for editing. The label displays the mnemonic; it does not intercept
   typing in editable fields.
+- Multi-file search-result Copy uses `U` to focus Repeated filenames. The native
+  selector owns its selection keys; changing the policy does not submit.
 - The bookmark popover moves focus into its composite list. Up/Down and
   Home/End move the active bookmark, Enter opens it, and Escape closes the
   popover; while it is open the underlying panel and global commands are held

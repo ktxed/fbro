@@ -1668,6 +1668,61 @@ mod tests {
         ).unwrap();
     }
 
+    #[test]
+    fn search_copy_duplicates_use_same_plan_for_copy_and_dry_run() {
+        use crate::jobs::copy_duplicates::{prepare_search_copy, DuplicateNamePolicy};
+        let fixture = TestDir::new("search-copy-duplicates");
+        let driver = crate::vfs::local::LocalFsDriver;
+        let mut sources = Vec::new();
+        for folder in ["one", "two"] {
+            let directory = fixture.path.join(folder);
+            fs::create_dir_all(&directory).unwrap();
+            let path = directory.join("README.md");
+            fs::write(&path, folder).unwrap();
+            sources.push(FileOpEntry {
+                name: "README.md".into(), dest_name: None,
+                source_path: path.to_string_lossy().into_owned(), size: Some(3),
+                kind: "file".into(), mtime: None, permissions: None,
+            });
+        }
+        for (label, policy, expected_count) in [
+            ("exclude", DuplicateNamePolicy::Exclude, 1),
+            ("suffix", DuplicateNamePolicy::Suffix, 2),
+        ] {
+            let destination = fixture.path.join(label);
+            fs::create_dir_all(&destination).unwrap();
+            let dest = destination.to_string_lossy().into_owned();
+            let files = prepare_search_copy(sources.clone(), policy, &dest, &driver).unwrap();
+            assert_eq!(files.len(), expected_count);
+            let script = fixture.path.join(format!("{label}.sh"));
+            generate_dry_run_script(&FileOpType::Copy, &files, &script.to_string_lossy(), &driver, Some(&dest), Some(&driver)).unwrap();
+            let script_text = fs::read_to_string(script).unwrap();
+            assert_eq!(script_text.lines().filter(|line| line.starts_with("cp ")).count(), expected_count);
+            for file in &files {
+                assert!(script_text.contains(&shell_quote(&driver.resolve_child(&dest, destination_name(file)))));
+            }
+
+            let (tx, _rx) = mpsc::channel(128);
+            let (_cancel_tx, cancel_rx) = watch::channel(false);
+            let (_pause_tx, pause_rx) = watch::channel(false);
+            let (_decision_tx, mut decision_rx) = mpsc::channel(1);
+            run_file_op_blocking(
+                "search-copy-test", &FileOpType::Copy, &files, Some(&dest),
+                &ConflictPolicy::Overwrite, &tx, &cancel_rx, &pause_rx, &mut decision_rx,
+                &driver, Some(&driver), false, &VerificationPolicy::Fail, false, false,
+                Arc::new(AtomicBool::new(false)), Arc::new(AtomicBool::new(false)),
+            ).unwrap();
+            assert_eq!(fs::read_dir(&destination).unwrap().count(), expected_count);
+            assert_eq!(fs::read_to_string(destination.join("README.md")).unwrap(), "one");
+            if policy == DuplicateNamePolicy::Suffix {
+                let renamed = files[1].dest_name.as_ref().unwrap();
+                assert!(renamed.starts_with("README-") && renamed.ends_with(".md"));
+                assert_eq!(fs::read_to_string(destination.join(renamed)).unwrap(), "two");
+            }
+            assert!(sources.iter().all(|file| Path::new(&file.source_path).exists()));
+        }
+    }
+
     #[cfg(unix)]
     #[test]
     fn local_link_copy_move_rename_and_delete_preserve_target() {
