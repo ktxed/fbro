@@ -431,7 +431,7 @@ macOS:
 
 Windows:
 
-* native `mpv` / `vlc` from `PATH` and common install directories
+* native `mpv` / `vlc` from `PATH` and common install directories. mpv also checks shinchiro's `MPV Player` directory (`Program Files` and `%LOCALAPPDATA%\Programs`) and the `Applications\mpv.exe` open command written by that installer and by `mpv-install.bat`
 * built-in `Fedup Bro`
 * native `7z` (`7z.exe` on `PATH` or `Program Files\7-Zip`)
 * native `tar` (`tar.exe` from Windows 10+)
