@@ -121,6 +121,21 @@ export function SettingsDisplayTab({ general, client }: SettingsDisplayTabProps)
   };
 
   const activeScheme = resolveColorScheme(general.colorScheme);
+  const buttonBarSection = (
+    <div className="settings-tab__section">
+      <h3 className="settings-tab__section-title">Button bar</h3>
+      <label className="settings-tab__option">
+        <input
+          type="checkbox"
+          data-testid="show-button-bar"
+          checked={general.showButtonBar}
+          onChange={(e) => send("showButtonBar", e.target.checked)}
+        />
+        <span>Show bottom button bar</span>
+      </label>
+      <p className="settings-tab__hint">Keyboard shortcuts remain available when the bar is hidden.</p>
+    </div>
+  );
   const compareSection = (
     <div className="settings-tab__section">
       <h3 className="settings-tab__section-title">Compare</h3>
@@ -186,6 +201,7 @@ export function SettingsDisplayTab({ general, client }: SettingsDisplayTabProps)
   if (!general.supportsManagedThumbnails) {
     return (
       <div className="settings-tab">
+        {buttonBarSection}
         {colorSchemeSection}
         {iconCacheSection}
         {compareSection}
@@ -209,6 +225,7 @@ export function SettingsDisplayTab({ general, client }: SettingsDisplayTabProps)
 
   return (
     <div className="settings-tab">
+      {buttonBarSection}
       {colorSchemeSection}
         {iconCacheSection}
       {compareSection}

@@ -7,6 +7,15 @@
 
 ## 1. Overview
 
+Settings snapshots and settings-domain patches expose `general.showButtonBar`
+as a boolean. `SetGeneralOption { key: "showButtonBar", value: true | false }`
+updates and persists the application-wide bottom button bar visibility, then
+broadcasts the authoritative setting to connected clients. Other value types
+return `BAD_SETTING` without changing visibility. The on-disk field is
+`general.show_button_bar`, defaulting to true when absent in older settings.
+The command registry includes `app.toggle_button_bar` (**Toggle Button Bar**)
+with no default binding; the frontend uses the same settings intent.
+
 `ClearIconCache { requestId }` clears the macOS native file icon disk and memory
 cache on a blocking worker. It returns `ClearIconCacheOk { timestamp, requestId }`
 or `ClearIconCacheFailed { timestamp, requestId, code, message }` with

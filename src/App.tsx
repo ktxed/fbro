@@ -86,6 +86,7 @@ export function App() {
         )}
         <div
           className="app"
+          data-ready={state.connected && Object.keys(state.commands).length > 0}
           data-color-scheme={colorScheme.id}
           style={{ colorScheme: colorScheme.mode }}
         >

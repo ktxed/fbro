@@ -736,6 +736,7 @@ export interface BookmarkEntry {
 
 export interface GeneralSettings {
   showHiddenDefault: boolean;
+  showButtonBar: boolean;
   rememberWindowState: boolean;
   preserveAttributes: boolean;
   autoResumeCopies: boolean;

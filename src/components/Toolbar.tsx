@@ -110,6 +110,9 @@ export function Toolbar({ client, onOpenJobsView }: { client: WsClient; onOpenJo
     return () => window.removeEventListener("keydown", handler);
   }, [client, dispatch, hasActiveModal, onOpenJobsView, state]);
 
+  // Keep global keyboard handling mounted even when the button bar is hidden.
+  if (!state.settings.general.showButtonBar) return null;
+
   const focusedPanel = state.panels[state.focus];
   const isArchive = !!focusedPanel?.shadowSource && isArchiveSourceId(focusedPanel.sourceId);
   const sourceSupports = focusedPanel

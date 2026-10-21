@@ -122,6 +122,14 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
         let mut state_guard = ctx.state.lock().await;
 
         match key {
+            "showButtonBar" => {
+                let Some(v) = value.as_bool() else {
+                    drop(state_guard);
+                    bad_setting(ctx.tx, "showButtonBar must be a boolean").await;
+                    return;
+                };
+                state_guard.settings.general.show_button_bar = v;
+            }
             "rememberWindowState" => {
                 let Some(v) = value.as_bool() else {
                     drop(state_guard);
@@ -531,6 +539,7 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
         patch: serde_json::json!({
             "general": {
                 "showHiddenDefault": general.show_hidden_default,
+                "showButtonBar": general.show_button_bar,
                 "rememberWindowState": general.remember_window_state,
                 "preserveAttributes": general.preserve_attributes,
                 "autoResumeCopies": general.auto_resume_copies,

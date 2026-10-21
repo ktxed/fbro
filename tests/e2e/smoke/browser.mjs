@@ -38,8 +38,7 @@ export async function startBrowser(name, host, port, application) {
 export async function waitForMainWindow(browser, name) {
   await waitFor(() => browser.execute(() =>
     document.querySelector('[data-testid="panel-left"]')
-      && Array.from(document.querySelectorAll(".toolbar__key"))
-        .some((key) => key.textContent.trim() !== "")), {
+      && document.querySelector('.app[data-ready="true"]')), {
     timeout: 30_000,
     label: `${name} main window`,
   });

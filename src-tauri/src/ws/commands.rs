@@ -85,6 +85,7 @@ pub(crate) fn build_interactive_commands() -> Vec<InteractiveCommandSchema> {
             None,
         ),
         command("app.about", "App", "About fbro", vec![], None),
+        command("app.toggle_button_bar", "App", "Toggle Button Bar", vec![], None),
         command(
             "app.search",
             "App",

@@ -39,6 +39,12 @@ and sharing patches do not move focus. Covered Settings controls remain inert.
   modal guard. A guarded panel suppresses keyboard actions and focus intents.
 - `Toolbar` uses the same conditions to suppress modal-opening and file-command
   shortcuts. Zoom shortcuts remain global.
+- Settings → Display's **Show bottom button bar** checkbox and the command
+  palette's **Toggle Button Bar** command control persistent visibility. There
+  is no default binding for the toggle. `Toolbar` stays mounted when hidden,
+  retaining global shortcut handling and all existing input guards; only its
+  visible buttons are omitted. Closing Settings or the palette restores its
+  opener through the modal stack as usual.
 - Each modal owns its feature-specific keys on its layer or descendants.
 - Single-item Copy confirmation uses `N` to focus and select the destination
   name for editing. The label displays the mnemonic; it does not intercept

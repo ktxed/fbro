@@ -37,6 +37,7 @@ export const GLOBAL_SHORTCUT_COMMAND_IDS = [
   "app.open_jobs",
   "app.search",
   "app.settings",
+  "app.toggle_button_bar",
   "app.about",
   "app.install_fbro_command",
   "app.eject_source",
@@ -555,6 +556,12 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
       return true;
     case "app.settings":
       dispatch({ type: "OPEN_SETTINGS", tab: "general" });
+      return true;
+    case "app.toggle_button_bar":
+      client.sendIntent("SetGeneralOption", undefined, {
+        key: "showButtonBar",
+        value: !state.settings.general.showButtonBar,
+      });
       return true;
     case "app.about":
       dispatch({ type: "OPEN_ABOUT" });

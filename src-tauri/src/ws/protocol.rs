@@ -682,6 +682,7 @@ pub struct ModalSizePreferenceSchema {
 #[serde(rename_all = "camelCase")]
 pub struct GeneralSettingsSchema {
     pub show_hidden_default: bool,
+    pub show_button_bar: bool,
     pub remember_window_state: bool,
     pub preserve_attributes: bool,
     pub auto_resume_copies: bool,

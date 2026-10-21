@@ -27,6 +27,9 @@ pub struct ModalSizePreference {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct GeneralSettings {
     pub show_hidden_default: bool,
+    /// Show the classic bottom command buttons without affecting shortcuts.
+    #[serde(default = "default_true")]
+    pub show_button_bar: bool,
     pub remember_window_state: bool,
     #[serde(default = "default_true")]
     pub preserve_attributes: bool,
@@ -273,6 +276,7 @@ impl Default for GeneralSettings {
     fn default() -> Self {
         Self {
             show_hidden_default: false,
+            show_button_bar: true,
             remember_window_state: true,
             preserve_attributes: true,
             auto_resume_copies: true,
@@ -330,6 +334,37 @@ pub fn save(settings: &Settings) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn button_bar_is_visible_for_existing_settings_files() {
+        let mut encoded = serde_json::to_value(Settings::default()).unwrap();
+        encoded["general"]
+            .as_object_mut()
+            .unwrap()
+            .remove("show_button_bar");
+        let decoded: Settings = serde_json::from_value(encoded).unwrap();
+
+        assert_eq!(
+            serde_json::to_value(decoded).unwrap()["general"]["show_button_bar"],
+            true
+        );
+    }
+
+    #[test]
+    fn button_bar_visibility_survives_settings_roundtrip() {
+        for visible in [false, true] {
+            let mut encoded = serde_json::to_value(Settings::default()).unwrap();
+            encoded["general"]["show_button_bar"] = serde_json::json!(visible);
+            let decoded: Settings = serde_json::from_value(encoded).unwrap();
+            let saved = serde_json::to_string(&decoded).unwrap();
+            let reloaded: Settings = serde_json::from_str(&saved).unwrap();
+
+            assert_eq!(
+                serde_json::to_value(reloaded).unwrap()["general"]["show_button_bar"],
+                visible
+            );
+        }
+    }
 
     #[test]
     fn modal_sizes_default_when_missing_from_settings_file() {

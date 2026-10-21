@@ -143,6 +143,7 @@ pub(crate) fn build_state_snapshot(
             settings: SettingsSnapshot {
                 general: GeneralSettingsSchema {
                     show_hidden_default: state.settings.general.show_hidden_default,
+                    show_button_bar: state.settings.general.show_button_bar,
                     remember_window_state: state.settings.general.remember_window_state,
                     preserve_attributes: state.settings.general.preserve_attributes,
                     auto_resume_copies: state.settings.general.auto_resume_copies,
