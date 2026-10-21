@@ -198,6 +198,20 @@ rules live in `src/styles.css`.
 
 ## 6. Default Focus and Actions
 
+Select Files and Deselect Files share the `selection-mask` layer and a compact
+`ModalDialog`. They capture their originating panel, use shared mask input
+history, and preselect the filename-extension default for overtyping. If the
+cursor entry is outside the frontend's window, `RequestWindow` supplies the
+prefill; its arrival never overwrites user edits or takes focus from another
+control. Confirm is disabled until the listing and lookup are ready and the
+mask is nonempty. Confirmation sends one selection intent and removes the layer;
+selection changes only through backend patches. Escape closes history before
+the dialog; focused Cancel retains native Enter activation. Panel removal or a
+change of source/location removes the dialog through the same shared focus
+restoration path. Covered layers remain inert; an open mask history dropdown is
+suspended while covered, so it cannot intercept the top layer's Escape. It
+returns with its owning layer and then closes before the mask dialog does.
+
 Initial focus identifies the next useful keyboard action. It is independent
 of button styling: a primary button does not automatically become the default.
 Each dialog declares its target explicitly. Disabled or hidden targets are
@@ -210,6 +224,7 @@ enter the sequential Tab cycle.
 | Rename, Create Directory, New File | Name input | Submit once |
 | Initialize Git repository | Initial branch input (defaults to main) | Submit once |
 | Go To Path | Path input | Navigate once |
+| Select Files / Deselect Files | Mask input; prefill selected | Submit once |
 | Generic Input / Password | Value input | Submit once |
 | Set Permissions | Apply | Apply permissions |
 | To Global Selection | Existing-selection select, or new-name input | Native select behavior; new-name input submits once |

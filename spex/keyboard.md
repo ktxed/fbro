@@ -86,6 +86,29 @@ and sharing patches do not move focus. Covered Settings controls remain inert.
 
 ## Panel selection and folder sizes
 
+In list and grid listings, `+` opens **Select Files** and `-` opens
+**Deselect Files**. The registry commands are `panel.selection.select_by_mask`
+and `panel.selection.deselect_by_mask`; symbol matching includes Shift-produced
+and numpad symbols, while Ctrl/Cmd zoom keeps its existing bindings. Held-key
+repeats do not open or reopen the prompt. Text inputs, embedded terminals,
+menus, and covered panels retain ownership of their keys.
+
+The mask input initially has focus and selected text. Its default is the cursor
+file's final extension (`*.txt`), or `*.*` for directories, extensionless names,
+and empty listings. An unloaded cursor entry is fetched with `RequestWindow`.
+Confirmation waits for the listing and initial lookup to be ready. Enter submits
+once; Enter on Cancel cancels. Escape dismisses input history first, then the
+dialog, returning focus through the shared modal stack. The command palette
+also exposes both actions.
+
+Patterns are whitespace-separated, case-insensitive whole-filename matches;
+`*` matches any text and `?` one character. `*.*` matches all files, including
+extensionless files. Select adds matches and Deselect removes matches from the
+complete backend listing, including outside render windows, without changing
+the cursor or unrelated selections. Directories and directory symlinks never
+match; regular files and known file symlinks do. Existing selected directories
+remain selected. Hidden and filtered-out entries are outside the operation.
+
 In both list and grid listings, `Space` toggles the cursor entry's selection
 without moving the cursor. When it selects a real folder with no displayed size,
 it also starts a size calculation unless one is already queued or running.

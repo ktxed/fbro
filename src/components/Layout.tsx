@@ -12,6 +12,7 @@ import { InfoModal } from "./InfoModal";
 import { MkDirModal } from "./MkDirModal";
 import { GitInitModal } from "./GitInitModal";
 import { TouchModal } from "./TouchModal";
+import { SelectionMaskModal } from "./SelectionMaskModal";
 import { NoEditorModal } from "./NoEditorModal";
 import { GoToPathModal } from "./GoToPathModal";
 import { GlobalSelectionModal } from "./GlobalSelectionModal";
@@ -573,6 +574,9 @@ export function Layout({ client, jobsViewOpen, onCloseJobsView, onOpenJobsView }
       )}
       {state.pendingTouch && (
         <TouchModal touch={state.pendingTouch} client={client} />
+      )}
+      {state.pendingSelectionMask && (
+        <SelectionMaskModal selectionMask={state.pendingSelectionMask} client={client} />
       )}
       {state.pendingNoEditor && (
         <NoEditorModal noEditor={state.pendingNoEditor} />

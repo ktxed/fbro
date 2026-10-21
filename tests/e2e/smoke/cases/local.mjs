@@ -22,6 +22,7 @@ import { waitFor } from "../wait.mjs";
 import { expectModalFocus, expectCoveredModal } from "./modal-focus.mjs";
 import { verifyThumbnailQueue } from "./thumbnails.mjs";
 import { runPanelSelectionFlow } from "./panel-selection.mjs";
+import { runSelectionMaskFlow } from "./selection-mask.mjs";
 
 import { verifyFileIcons } from "./file-icons.mjs";
 
@@ -355,6 +356,7 @@ export async function runLocalFlow(browser, observer) {
   await verifyWindowFocusRestoration(browser, observer);
   await verifyGridLeftAtFirstItemNavigatesUp(browser, observer, aSrc);
   await runPanelSelectionFlow(browser, observer);
+  await runSelectionMaskFlow(browser, observer);
 }
 
 async function verifyEmptyFolder(browser, observer) {

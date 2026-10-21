@@ -30,6 +30,7 @@ import { runGitFlow } from "./cases/git.mjs";
 import { runGitInitFlow } from "./cases/git-init.mjs";
 import { runLocalFlow } from "./cases/local.mjs";
 import { runPanelSelectionFlow } from "./cases/panel-selection.mjs";
+import { runSelectionMaskFlow } from "./cases/selection-mask.mjs";
 import { runFocusHandoffFlow } from "./cases/focus-handoff.mjs";
 import { runNotificationsFlow } from "./cases/notifications.mjs";
 import { runViewerFlow } from "./cases/viewer.mjs";
@@ -76,6 +77,12 @@ async function main() {
 
     if (process.env.FBRO_E2E_PANEL_SELECTION_ONLY === "1") {
       await runPanelSelectionFlow(browserA, observerA);
+      await runSelectionMaskFlow(browserA, observerA);
+      return;
+    }
+
+    if (process.env.FBRO_E2E_SELECTION_MASK_ONLY === "1") {
+      await runSelectionMaskFlow(browserA, observerA);
       return;
     }
 

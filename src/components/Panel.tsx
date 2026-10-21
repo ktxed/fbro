@@ -1665,7 +1665,9 @@ export function Panel({
       e.preventDefault();
       e.stopPropagation();
       if (e.repeat && (command.id === "panel.selection.toggle_or_size"
-        || command.id === "panel.selection.calculate_sizes")) return;
+        || command.id === "panel.selection.calculate_sizes"
+        || command.id === "panel.selection.select_by_mask"
+        || command.id === "panel.selection.deselect_by_mask")) return;
       if (command.id === "panel.cursor.up" || command.id === "panel.cursor.down") {
         armPreviewContinuation(command.id === "panel.cursor.up" ? "up" : "down");
       } else if (previewContinuationRef.current) {
@@ -1697,6 +1699,14 @@ export function Panel({
   }
 
   const handleFilterKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    // Printable selection-mask bindings belong to the text editor, including
+    // Shift-produced +. Other shifted registry commands retain their behavior.
+    const maskCommand = findMatchingCommand(appState.commands,
+      ["panel.selection.select_by_mask", "panel.selection.deselect_by_mask"], e.nativeEvent, panel.viewMode);
+    if (maskCommand) {
+      e.stopPropagation();
+      return;
+    }
     if (e.key === "Enter") {
       e.preventDefault();
       e.stopPropagation();

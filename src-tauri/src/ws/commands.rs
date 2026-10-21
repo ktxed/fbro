@@ -355,6 +355,20 @@ pub(crate) fn build_interactive_commands() -> Vec<InteractiveCommandSchema> {
             None,
         ),
         command(
+            "panel.selection.select_by_mask",
+            "Selection",
+            "Select Files",
+            vec![keybinding("+")],
+            None,
+        ),
+        command(
+            "panel.selection.deselect_by_mask",
+            "Selection",
+            "Deselect Files",
+            vec![keybinding("-")],
+            None,
+        ),
+        command(
             "panel.selection.select_all",
             "Selection",
             "Select All",

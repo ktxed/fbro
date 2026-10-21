@@ -3,6 +3,7 @@ import type { Dispatch } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
 import { isMac } from "../utils/platform";
+import { selectionMaskForEntry } from "../utils/selectionMask";
 import type { AppAction, AppState } from "../store";
 import { markHistoryNavPending } from "../store";
 import { isGlobalSelectionSourceId, isSearchSourceId } from "../utils/sourceId";
@@ -73,6 +74,8 @@ export const PANEL_SHORTCUT_COMMAND_IDS = [
   "panel.selection.select_all",
   "panel.selection.clear",
   "panel.selection.invert",
+  "panel.selection.select_by_mask",
+  "panel.selection.deselect_by_mask",
   "panel.cursor.page_up",
   "panel.cursor.page_down",
   "panel.open",
@@ -776,6 +779,21 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
     case "panel.selection.select_all":
       client.sendIntent("SelectAll", "focused-panel");
       return true;
+    case "panel.selection.select_by_mask":
+    case "panel.selection.deselect_by_mask": {
+      if (!focused || focused.panel.tabKind !== "listing") return false;
+      const entry = currentEntry(focused.panel);
+      const count = focused.panel.totalCount ?? focused.panel.entries.length;
+      dispatch({ type: "OPEN_SELECTION_MASK", selectionMask: {
+        panelId: focused.panelId,
+        sourceId: focused.panel.sourceId,
+        path: focused.panel.path,
+        mode: commandId === "panel.selection.select_by_mask" ? "select" : "deselect",
+        initialMask: focused.panel.status === "ready" && (entry || count === 0)
+          ? selectionMaskForEntry(entry) : null,
+      } });
+      return true;
+    }
     case "panel.selection.clear":
       client.sendIntent("ClearSelection", "focused-panel");
       return true;
