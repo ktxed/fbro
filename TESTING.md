@@ -17,6 +17,7 @@ The standard checks are:
 ```bash
 npm run build
 npm run test:build-info
+npm run test:selection-mask
 node --test tests/check-version.test.mjs
 cargo test --manifest-path src-tauri/Cargo.toml --locked
 cargo check --manifest-path tools/lfs-spy/Cargo.toml --locked
@@ -24,7 +25,8 @@ cargo check --manifest-path tools/lfs-spy/Cargo.toml --locked
 
 `npm run build` runs TypeScript checking and the production frontend build.
 There is no separate frontend lint command. The Node tests cover build metadata
-and release-version consistency. Rust tests cover backend behavior and adapters;
+and release-version consistency, plus selection-mask prompt defaults. Rust tests
+cover backend behavior and adapters;
 the last command checks the optional local-filesystem spy helper.
 
 For dependency changes, also run `npm audit`. With `cargo-audit` installed,
@@ -107,7 +109,8 @@ FBRO_E2E_REMOTE_ONLY=1 GDK_BACKEND=wayland npm run e2e:smoke:local_debug
 | --- | --- |
 | `FBRO_E2E_FOCUS_ONLY=1` | Focus handoffs and modal ownership |
 | `FBRO_E2E_BUTTON_BAR_ONLY=1` | Persistent button bar visibility, Settings and command palette, hidden-bar shortcuts, focus, both themes, and invalid values |
-| `FBRO_E2E_PANEL_SELECTION_ONLY=1` | Space selection, folder sizes, Shift+Space targeting, and keyboard ownership in list/grid views |
+| `FBRO_E2E_PANEL_SELECTION_ONLY=1` | Space selection, folder sizes, Shift+Space targeting, mask selection, and keyboard ownership in list/grid views |
+| `FBRO_E2E_SELECTION_MASK_ONLY=1` | Select/Deselect Files masks, defaults, keyboard/focus ownership, and full windowed-list matching |
 | `FBRO_E2E_NOTIFICATIONS_ONLY=1` | Notification publication, FIFO toasts, history, clear, keyboard focus, and reload |
 | `FBRO_E2E_THUMBNAILS_ONLY=1` | Thumbnail settings, Jobs queue, and viewport behavior |
 | `FBRO_E2E_VIEWER_ONLY=1` | Viewer and preview regressions |
@@ -147,6 +150,7 @@ coverage reference.
 | HEIC conversion | `heic.mjs` | Backend-confirmed opt-in settings, startup settings delivery, errors, optional real-file decoding, and live disabling |
 | Quick Edit | `quick-edit.mjs` | Explicit target wins over a different cursor file without modifying it; keyboard invocation sends the displayed directory/filename; edit/save, terminal closure, listing focus restoration, journal entries, and editing a newly created empty file |
 | Global selections | `global-selection.mjs` | Creation, reload persistence, adding through menus and long right-clicks, keyboard selection, focus, and removing references without deleting files |
+| Selection masks | `selection-mask.mjs` (also called by the local flow) | +/− dialogs in list/grid views and both themes, Shift/numpad symbols, prefill and overtyping, additive/subtractive file matching, unrelated directory selection, input history including covered-history ownership, single submit, Cancel/Escape, held keys, command-palette handoff, filter typing, font zoom, opener restoration, and full-list matching/prefill in Mode B |
 | Git | `git-init.mjs`, `git.mjs` | Initialization, branch creation/filtering/checkout, validation and busy states, stage/unstage/rollback, changes/log navigation (J down, K up), active-log-row and inline-action Tab/Shift+Tab order without scrolling through inactive rows, expanded messages/files, history pagination with Space, journal entries, modal guards, and focus |
 | Fedup | `fedup.mjs` | Global-selection input, default ignores, case-insensitive includes, and custom excludes |
 | Hashes | `hash-check.mjs`, `hash-generate.mjs` | Discovery, stale targets, options, matching/malformed sidecars, skip/overwrite, reports/toasts, progress, background/reopen, cancellation, and preserving existing sidecars |
@@ -179,6 +183,7 @@ cargo test --manifest-path src-tauri/Cargo.toml --locked patch_tests
 | `live_listing_` | Live cursor/selection and scroll-anchor reconciliation, including exact duplicate search paths and removed results |
 | `deletion_recovery` | Delayed deletion events from previous locations, recreated directories, recovery from a genuinely deleted current folder, and newer navigation winning before recovery mutates state |
 | `ws::intents::panel::tests` | Cursor/range selection, Space folder selection and size reuse, running-size preservation, full-list size targets beyond render windows, supported drivers, and stale archive completion guards |
+| `ws::intents::panel::tests::selection_masks*` | Whole-name wildcard alternatives, literal punctuation, Unicode/case/newlines, extensionless *.*, file and symlink eligibility, selection merge/subtraction, stale epochs, and matches beyond the render window |
 | `remote::` | Share validation/persistence, SFTP root resolution, transfer isolation, cancellation, and late lifecycle events |
 | `vfs::sftp::tests` | SFTP reads/cancellation and paired Ed25519 host-key pinning, including rejection of mismatched keys and certificates |
 | `jobs::file_ops::tests` | File-operation and remote-transfer cleanup/cancellation |

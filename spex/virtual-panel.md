@@ -18,7 +18,7 @@ Panels operate in one of two modes, chosen automatically per directory based on 
 
 ### Mode A — Full (default)
 
-Used when a directory has **<= 3000 entries** (constant `WINDOWED_THRESHOLD` in `scan.rs`).
+Used when a directory has **<= 1500 entries** (constant `WINDOWED_THRESHOLD` in `scan.rs`).
 
 Behaviour is unchanged from the original design:
 
@@ -28,7 +28,7 @@ Behaviour is unchanged from the original design:
 
 ### Mode B — Windowed / Virtual Scroll
 
-Used when a directory has **> 3000 entries**.
+Used when a directory has **> 1500 entries**.
 
 1. `run_scan` collects and sorts all entries, then stores the **full list** directly in the BE panel state (`panel.entries`).
 2. Instead of batched `appendEntries`, the BE sends a single `StatePatch`:
@@ -110,6 +110,11 @@ registry. Focus behavior is specified in [Keyboard](keyboard.md).
 
 - **Cursor** is always an absolute index into the full entry list, same as Mode A.
 - **Selection** is stored as an array of absolute indices on both BE and FE.
+- `SelectByMask` / `DeselectByMask`, like Select All and Invert Selection,
+  resolve matches from the complete backend listing. They never restrict
+  matching to the rendered window. Their `+` / `-` prompts request a window
+  around the cursor when its entry is unloaded, so the extension prefill still
+  reflects the cursor filename after scrolling elsewhere.
 - The FE uses a `Set` for O(1) selection lookup during rendering.
 - When the cursor moves outside the current window (via keyboard navigation), the BE automatically sends a new window patch centered on the cursor position.
 
@@ -132,7 +137,7 @@ This applies to all FE code that accesses entries by cursor or selection index (
 
 | Constant | Location | Value | Purpose |
 |----------|----------|-------|---------|
-| `WINDOWED_THRESHOLD` | `scan.rs` | 3000 | Entry count above which Mode B activates |
+| `WINDOWED_THRESHOLD` | `scan.rs` | 1500 | Entry count above which Mode B activates |
 | `INITIAL_WINDOW_SIZE` | `scan.rs` | 200 | Number of entries in the first window |
 | `ROW_HEIGHT` | `Panel.tsx` / CSS `--row-height` | 22px | Fixed row height used for virtual scroll math |
 
@@ -161,9 +166,9 @@ Directory opened
     v
 run_scan collects & sorts all entries
     |
-    +-- entries <= 3000 --> Mode A: batched appendEntries (current behaviour)
+    +-- entries <= 1500 --> Mode A: batched appendEntries (current behaviour)
     |
-    +-- entries > 3000  --> Mode B:
+    +-- entries > 1500  --> Mode B:
             |
             +-- Store full list in BE panel.entries
             +-- Send initial window (200 entries centered on cursor)

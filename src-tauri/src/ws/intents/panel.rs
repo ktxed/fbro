@@ -26,6 +26,8 @@ pub(crate) async fn handle(name: &str, scope: &Value, args: &Value, ctx: &mut In
         "SelectAll" => select_all(scope, ctx).await,
         "ClearSelection" => clear_selection(scope, ctx).await,
         "InvertSelection" => invert_selection(scope, ctx).await,
+        "SelectByMask" => select_by_mask(scope, args, true, ctx).await,
+        "DeselectByMask" => select_by_mask(scope, args, false, ctx).await,
         "ExtendSelectionTo" => extend_selection_to(scope, args, ctx).await,
         "MoveCursorWithSelect" => move_cursor_with_select(scope, args, ctx).await,
         "MoveCursorBy" => move_cursor_by(scope, args, ctx).await,
@@ -742,6 +744,118 @@ async fn toggle_selection(scope: &Value, args: &Value, ctx: &mut IntentContext<'
     if let Some(name) = size_target {
         calculate_entry_size(&panel_id, &name, Some(panel_epoch), ctx).await;
     }
+}
+
+fn compile_selection_mask(mask: &str) -> Option<regex::Regex> {
+    let patterns: Vec<_> = mask
+        .split_whitespace()
+        .map(|pattern| {
+            let pattern = if pattern == "*.*" { "*" } else { pattern };
+            regex::escape(pattern)
+                .replace("\\*", ".*")
+                .replace("\\?", ".")
+        })
+        .collect();
+    if patterns.is_empty() {
+        return None;
+    }
+    regex::RegexBuilder::new(&format!(r"\A(?:{})\z", patterns.join("|")))
+        .case_insensitive(true)
+        .dot_matches_new_line(true)
+        .build()
+        .ok()
+}
+
+fn selection_mask_matches(entries: &[crate::ws::protocol::EntrySchema], mask: &str) -> Vec<usize> {
+    let Some(matcher) = compile_selection_mask(mask) else {
+        return vec![];
+    };
+    entries
+        .iter()
+        .enumerate()
+        .filter_map(|(index, entry)| {
+            let is_file = entry.kind == "file"
+                || (entry.kind == "symlink" && entry.target_kind.as_deref() == Some("file"));
+            (is_file && entry.name != ".." && matcher.is_match(&entry.name)).then_some(index)
+        })
+        .collect()
+}
+
+fn merge_mask_selection(selection: &[usize], matches: &[usize], select: bool) -> Vec<usize> {
+    let mut selected: HashSet<_> = selection.iter().copied().collect();
+    for index in matches {
+        if select {
+            selected.insert(*index);
+        } else {
+            selected.remove(index);
+        }
+    }
+    let mut selection: Vec<_> = selected.into_iter().collect();
+    selection.sort_unstable();
+    selection
+}
+
+fn apply_mask_selection(
+    panel: &mut crate::state::Panel,
+    epoch: u64,
+    matches: &[usize],
+    select: bool,
+) -> bool {
+    if panel.panel_epoch != epoch || panel.status != crate::state::PanelStatus::Ready {
+        return false;
+    }
+    panel.selection = merge_mask_selection(&panel.selection, matches, select);
+    panel.version += 1;
+    true
+}
+
+async fn select_by_mask(scope: &Value, args: &Value, select: bool, ctx: &mut IntentContext<'_>) {
+    let Some(mask) = arg_str(args, "mask").filter(|mask| !mask.trim().is_empty()) else {
+        return;
+    };
+    let panel_id = resolve_panel_id(scope, ctx.state).await;
+    let (entries, epoch) = {
+        let state = ctx.state.lock().await;
+        let Some(panel) = state.panels.get(&panel_id) else {
+            return;
+        };
+        if panel.status != crate::state::PanelStatus::Ready {
+            return;
+        }
+        (panel.entries.clone(), panel.panel_epoch)
+    };
+    let mask = mask.to_owned();
+    let matches =
+        match tokio::task::spawn_blocking(move || selection_mask_matches(&entries, &mask)).await {
+            Ok(matches) => matches,
+            Err(error) => {
+                eprintln!("[selection] mask matching failed: {error}");
+                return;
+            }
+        };
+    let (selection, version, selected_entries) = {
+        let mut state = ctx.state.lock().await;
+        let Some(panel) = state.panels.get_mut(&panel_id) else {
+            return;
+        };
+        if !apply_mask_selection(panel, epoch, &matches, select) {
+            return;
+        }
+        (
+            panel.selection.clone(),
+            panel.version,
+            selected_entries_for_panel(panel),
+        )
+    };
+    send_panel_patch(
+        ctx,
+        panel_id,
+        version,
+        serde_json::json!({
+            "panelEpoch": epoch, "selection": selection, "selectedEntries": selected_entries,
+        }),
+    )
+    .await;
 }
 
 async fn select_all(scope: &Value, ctx: &mut IntentContext<'_>) {
@@ -1468,6 +1582,92 @@ mod tests {
             git_status: None,
             git_details: None,
         }
+    }
+
+    #[test]
+    fn selection_masks_match_whole_names_with_literal_punctuation() {
+        for (mask, name, expected) in [
+            ("*.txt", "Notes.TXT", true),
+            ("*.txt", "notes.txt.bak", false),
+            ("a?.txt", "ab.txt", true),
+            ("a?.txt", "abc.txt", false),
+            ("*.txt\t*.jpg\n*.png", "PHOTO.JPG", true),
+            ("[a]+.txt", "[a]+.txt", true),
+            ("[a]+.txt", "aaa.txt", false),
+            ("*.TXT", "line\nbreak.txt", true),
+            ("?.txt", "é.txt", true),
+            ("É*.txt", "été.TXT", true),
+            ("*.*", "README", true),
+            ("*.*", ".bashrc", true),
+            ("*", "README", true),
+        ] {
+            let matcher = super::compile_selection_mask(mask).unwrap();
+            assert_eq!(matcher.is_match(name), expected, "{mask:?}: {name:?}");
+        }
+        assert!(super::compile_selection_mask(" \t\n").is_none());
+    }
+
+    #[test]
+    fn selection_masks_only_match_files_and_known_file_symlinks() {
+        let mut file_link = entry("link.txt", "symlink", None);
+        file_link.target_kind = Some("file".into());
+        let mut directory_link = entry("folder.txt", "symlink", None);
+        directory_link.target_kind = Some("directory".into());
+        let entries = vec![
+            entry("..", "directory", None),
+            entry("folder.txt", "directory", None),
+            entry("file.txt", "file", None),
+            file_link,
+            directory_link,
+            entry("broken.txt", "symlink", None),
+            entry("device.txt", "other", None),
+        ];
+        assert_eq!(super::selection_mask_matches(&entries, "*.*"), vec![2, 3]);
+        assert!(super::selection_mask_matches(&entries, " ").is_empty());
+    }
+
+    #[test]
+    fn selection_masks_add_and_remove_matches_without_touching_other_selection() {
+        assert_eq!(
+            super::merge_mask_selection(&[0, 3], &[1, 3, 4], true),
+            vec![0, 1, 3, 4]
+        );
+        assert_eq!(
+            super::merge_mask_selection(&[0, 1, 3, 4], &[1, 3], false),
+            vec![0, 4]
+        );
+        assert_eq!(super::merge_mask_selection(&[0, 3], &[], true), vec![0, 3]);
+        assert_eq!(super::merge_mask_selection(&[0, 3], &[], false), vec![0, 3]);
+    }
+
+    #[test]
+    fn selection_masks_include_files_outside_the_render_window() {
+        let entries: Vec<_> = (0..3201)
+            .map(|index| entry(&format!("file-{index}.txt"), "file", None))
+            .collect();
+        let matches = super::selection_mask_matches(&entries, "file-3200.*");
+        assert_eq!(matches, vec![3200]);
+        assert_eq!(super::selection_mask_matches(&entries, "*.*").len(), 3201);
+        assert!(super::selection_mask_matches(&[], "*").is_empty());
+    }
+
+    #[test]
+    fn selection_masks_discard_stale_results_and_merge_the_current_selection() {
+        let mut panel = archive_panel();
+        panel.entries.push(entry("file.txt", "file", None));
+        assert!(!super::apply_mask_selection(&mut panel, 2, &[1], true));
+        assert_eq!(panel.selection, vec![0]);
+        assert_eq!(panel.version, 5);
+        panel.status = crate::state::PanelStatus::Loading;
+        assert!(!super::apply_mask_selection(&mut panel, 3, &[1], true));
+        panel.status = crate::state::PanelStatus::Ready;
+        assert!(super::apply_mask_selection(&mut panel, 3, &[1], true));
+        assert_eq!(panel.selection, vec![0, 1]);
+        assert_eq!(panel.version, 6);
+        assert_eq!(panel.cursor, 0);
+        assert!(super::apply_mask_selection(&mut panel, 3, &[1], false));
+        assert_eq!(panel.selection, vec![0]);
+        assert_eq!(panel.version, 7);
     }
 
     #[test]

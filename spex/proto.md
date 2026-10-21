@@ -474,6 +474,23 @@ filesystem walker. Results use the existing `calculatingSize` / `updateEntrySize
 panel patches, guarded by the source, path, and `panelEpoch`. These read-only size
 and selection intents are excluded from the persistent command journal.
 
+`SelectByMask` and `DeselectByMask` take a panel scope (the GUI sends the
+originating panel ID) and `{ "mask": string }`. They add or remove every matching
+file in the complete current backend listing, including entries outside a Mode B
+render window. Missing or whitespace-only masks and panels that are not ready
+are no-ops. No new reply type is used: the result is a versioned panel patch with
+`panelEpoch`, `selection`, and `selectedEntries`.
+
+Masks contain whitespace-separated alternatives, anchored to whole filenames
+and matched case-insensitively. Only `*` (any text, including newlines) and `?`
+(one character) are special; all other characters are literal. An exact `*.*`
+alternative is equivalent to `*`, including for extensionless files. Only regular
+files and symlinks with a known file target match; directories, directory
+symlinks, unknown symlinks, `..`, and other entry kinds do not. Existing unrelated
+selection is retained. Matching runs off the async executor; results from a
+replaced listing epoch are discarded. These intents are excluded from the
+persistent command journal, like other selection intents.
+
 ---
 
 ### 9.3 Example: Copy Selection (F5)

@@ -240,6 +240,14 @@ export interface PendingInput {
   prompt: string;
 }
 
+export interface PendingSelectionMask {
+  panelId: string;
+  sourceId: string;
+  path: string;
+  mode: "select" | "deselect";
+  initialMask: string | null;
+}
+
 export interface PendingSearch {
   sourcePanelPath: string;
   // Set once the search job starts
@@ -295,6 +303,7 @@ export interface AppState {
   pendingMkdir: PendingMkdir | null;
   pendingGitInit: PendingGitInit | null;
   pendingTouch: PendingTouch | null;
+  pendingSelectionMask: PendingSelectionMask | null;
   pendingNoEditor: PendingNoEditor | null;
   pendingGoToPath: PendingGoToPath | null;
   pendingPanelHistory: PendingPanelHistory | null;
@@ -389,6 +398,7 @@ const initialState: AppState = {
   pendingMkdir: null,
   pendingGitInit: null,
   pendingTouch: null,
+  pendingSelectionMask: null,
   pendingNoEditor: null,
   pendingGoToPath: null,
   pendingPanelHistory: null,
@@ -455,6 +465,8 @@ export type AppAction =
   | { type: "CLOSE_GIT_INIT" }
   | { type: "OPEN_TOUCH"; touch: PendingTouch }
   | { type: "CLOSE_TOUCH" }
+  | { type: "OPEN_SELECTION_MASK"; selectionMask: PendingSelectionMask }
+  | { type: "CLOSE_SELECTION_MASK" }
   | { type: "OPEN_NO_EDITOR"; noEditor: PendingNoEditor }
   | { type: "CLOSE_NO_EDITOR" }
   | { type: "OPEN_GO_TO_PATH"; goToPath: PendingGoToPath }
@@ -1825,6 +1837,10 @@ function reducer(state: AppState, action: AppAction): AppState {
       return { ...state, pendingTouch: action.touch };
     case "CLOSE_TOUCH":
       return { ...state, pendingTouch: null };
+    case "OPEN_SELECTION_MASK":
+      return { ...state, pendingSelectionMask: action.selectionMask };
+    case "CLOSE_SELECTION_MASK":
+      return { ...state, pendingSelectionMask: null };
     case "OPEN_NO_EDITOR":
       return { ...state, pendingNoEditor: action.noEditor };
     case "CLOSE_NO_EDITOR":
