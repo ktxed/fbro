@@ -928,7 +928,7 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
                       ref={(element) => { logRowRefs.current[index] = element; }}
                       className={`git-modal__log-row${commitActive ? " git-modal__log-row--active" : ""}`}
                       role="group"
-                      tabIndex={0}
+                      tabIndex={commitActive ? 0 : -1}
                       aria-expanded={isExpanded}
                       aria-label={`Commit ${index + 1} of ${logCommits.length}: ${commit.shortHash} ${commit.subject}`}
                       data-testid="git-log-row"
@@ -943,6 +943,7 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
                       <span className="git-modal__log-hash-cell">
                         <CopyButton
                           className="git-modal__log-copy"
+                          tabIndex={commitActive ? 0 : -1}
                           text={commit.hash}
                           what="commit hash"
                           title="Copy full hash (Y)"
@@ -956,6 +957,7 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
                         {commit.refs && commit.refs.length > 0 && (
                           <LogRefsStrip
                             refs={commit.refs}
+                            tabIndex={commitActive ? 0 : -1}
                             // Hand focus back to the row so arrow keys keep navigating the log.
                             onCopied={() => focusLogItem({ kind: "commit", index })}
                           />
@@ -983,7 +985,7 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
                                     ref={(element) => { logMessageLoadMoreRefs.current[commit.hash] = element; }}
                                     className={`git-modal__log-message-load-more${messageActive ? " git-modal__log-message-load-more--active" : ""}`}
                                     role="button"
-                                    tabIndex={0}
+                                    tabIndex={messageActive ? 0 : -1}
                                     aria-label="Load more message (Space or Enter)"
                                     title="Load more (Space or Enter)"
                                     onFocus={() => setLogFocus({ kind: "message", commitIndex: index })}
@@ -1025,7 +1027,7 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
                               }}
                               className={`git-modal__log-change${changeActive ? " git-modal__log-change--active" : ""}`}
                               role="group"
-                              tabIndex={0}
+                              tabIndex={changeActive ? 0 : -1}
                               aria-label={`Change ${changeIndex + 1} of ${show.changes.length}: ${pathLabel}`}
                               data-testid="git-log-change-row"
                               data-change-index={changeIndex}
@@ -1039,6 +1041,7 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
                                     type="button"
                                     className="git-modal__change-action git-modal__change-action--icon"
                                     data-testid="git-log-view-diff"
+                                    tabIndex={changeActive ? 0 : -1}
                                     title="View diff (V)"
                                     aria-label="View diff"
                                     aria-keyshortcuts="v"
@@ -1053,6 +1056,7 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
                                     type="button"
                                     className="git-modal__change-action git-modal__change-action--icon"
                                     data-testid="git-log-copy-raw"
+                                    tabIndex={changeActive ? 0 : -1}
                                     title="Copy raw file reference (C) — paste with Ctrl+V"
                                     aria-label="Copy raw file reference"
                                     aria-keyshortcuts="c"
@@ -1077,6 +1081,7 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
                     type="button"
                     className="git-modal__change-action"
                     data-testid="git-log-load-more"
+                    tabIndex={-1}
                     disabled={gitLog.status === "loading"}
                     onClick={() => requestLog({ skip: logCommits.length, append: true })}
                     title="Load more (Space)"
@@ -1181,7 +1186,7 @@ function formatLogDate(iso: string): string {
 }
 
 /** Horizontally pannable ref chips. overflow:hidden — no native scrollbar. */
-function LogRefsStrip({ refs, onCopied }: { refs: GitLogRef[]; onCopied: () => void }) {
+function LogRefsStrip({ refs, tabIndex, onCopied }: { refs: GitLogRef[]; tabIndex: 0 | -1; onCopied: () => void }) {
   const wrapRef = useRef<HTMLSpanElement>(null);
   const scrollerRef = useRef<HTMLSpanElement>(null);
   // Prefer trailing chips (right-aligned look). Stay pinned to the end until the user pans.
@@ -1274,6 +1279,7 @@ function LogRefsStrip({ refs, onCopied }: { refs: GitLogRef[]; onCopied: () => v
             <CopyButton
               className="git-modal__log-ref-copy"
               data-testid="git-log-copy-ref"
+              tabIndex={tabIndex}
               text={ref.name}
               what={ref.name}
               iconSize={12}

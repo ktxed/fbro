@@ -491,6 +491,101 @@ export async function runGitFlow(browser, observer) {
     timeout: 10_000,
     label: "Git refresh after navigating back to repository",
   });
+  await runGitLogTabFlow(browser, observer, repo, hostRepo);
+}
+
+async function runGitLogTabFlow(browser, observer, repo, hostRepo) {
+  // Overflow both the viewport and the first history page. The newest commit
+  // has message pagination and file actions as well as branch/tag copy buttons.
+  for (let index = 0; index < 105; index++) git(hostRepo, ["commit", "--allow-empty", "-qm", `history ${index}`]);
+  fs.writeFileSync(path.join(hostRepo, "log-tab.txt"), "keyboard navigation\n");
+  fs.writeFileSync(path.join(hostRepo, "log-tab-second.txt"), "sibling row\n");
+  git(hostRepo, ["add", "log-tab.txt", "log-tab-second.txt"]);
+  git(hostRepo, ["commit", "-qm", ["Tab navigation", "", ...Array.from({ length: 17 }, (_, index) => `Message line ${index}`)].join("\n")]);
+  git(hostRepo, ["tag", "tab-navigation"]);
+  await goToPanelPath(browser, observer, "left", path.dirname(repo));
+  await goToPanelPath(browser, observer, "left", repo);
+  await (await browser.$('[data-testid="panel-left"] .panel__git-btn')).click();
+  const panel = '[data-testid="git-log-panel"]';
+  const row = '[data-testid="git-log-row"]';
+  const firstRow = `${row}[data-log-index="0"]`;
+  await waitFor(() => browser.execute(() => document.querySelector('[data-testid="git-log-row"] .git-modal__log-subject')?.textContent === "Tab navigation"), { timeout: 10_000, label: "Git refreshed history" });
+  await waitFor(() => browser.$(firstRow).isFocused(), { timeout: 10_000, label: "Git log initial row focus" });
+
+  const expectFocus = async (selector, label) => waitFor(() => browser.$(selector).isFocused(), { timeout: 5_000, label });
+  const expectTabExit = async (selector) => {
+    await expectFocus(selector, "Git active item focus before Tab");
+    const before = await browser.execute((panel) => document.querySelector(panel).scrollTop, panel);
+    const buttons = await browser.execute((selector) => document.querySelector(selector).querySelectorAll("button:not([disabled])").length, selector);
+    for (let index = 0; index < buttons; index++) {
+      await browser.keys("Tab");
+      if (!await browser.execute((selector) => document.querySelector(selector).contains(document.activeElement), selector)) {
+        throw new Error("Tab skipped an active Git row button");
+      }
+    }
+    await browser.keys("Tab");
+    const state = await browser.execute((panel) => {
+      const list = document.querySelector(panel);
+      return { inside: list.contains(document.activeElement), scrollTop: list.scrollTop };
+    }, panel);
+    if (state.inside || Math.abs(state.scrollTop - before) > 1) {
+      throw new Error(`Git Tab did not leave the active row without scrolling: ${JSON.stringify({ before, ...state })}`);
+    }
+    // Reverse through the same buttons to reach the row itself again.
+    for (let index = 0; index <= buttons; index++) await browser.keys(["Shift", "Tab"]);
+    await expectFocus(selector, "Git Shift+Tab returns to active row");
+    await browser.keys(["Shift", "Tab"]);
+    if (await browser.execute((panel) => document.querySelector(panel).contains(document.activeElement), panel)) {
+      throw new Error("Git Shift+Tab entered an inactive row");
+    }
+    await browser.keys("Tab");
+    await expectFocus(selector, "Git Tab re-enters active row");
+  };
+
+  await expectTabExit(firstRow);
+  for (const [key, index] of [["ArrowDown", 1], ["j", 2], ["k", 1], ["ArrowUp", 0]]) {
+    await browser.keys(key);
+    await expectFocus(`${row}[data-log-index="${index}"]`, `Git log ${key} focus`);
+  }
+  await browser.keys("PageDown");
+  await waitFor(() => browser.execute(() => Number(document.activeElement?.getAttribute("data-log-index")) > 0), { timeout: 5_000, label: "Git PageDown moves row focus" });
+  const pageRow = await browser.execute(() => document.activeElement.getAttribute("data-log-index"));
+  await expectTabExit(`${row}[data-log-index="${pageRow}"]`);
+  await browser.keys("PageUp");
+  await expectFocus(firstRow, "Git PageUp returns to first row");
+
+  await browser.keys("ArrowRight");
+  const message = ".git-modal__log-message-load-more";
+  await expectFocus(message, "Git long commit message focus");
+  await expectTabExit(message);
+  await browser.keys("Space");
+  await expectFocus(message, "Git message has another page");
+  await browser.keys("Enter");
+  const change = '[data-testid="git-log-change-row"][data-change-index="0"]';
+  await expectFocus(change, "Git fully loaded message hands focus to file row");
+  await expectTabExit(change);
+  await browser.keys("ArrowDown");
+  await expectTabExit('[data-testid="git-log-change-row"][data-change-index="1"]');
+  await browser.keys("ArrowLeft");
+  await expectFocus(firstRow, "Git file row returns to commit");
+  await browser.keys("ArrowLeft");
+
+  // Clicking a previously inactive row must also update its Tab participation.
+  const clickedRow = `${row}[data-log-index="3"]`;
+  await browser.$(clickedRow).click();
+  await expectTabExit(clickedRow);
+  await browser.keys("End");
+  const lastIndex = await browser.execute((row) => document.querySelectorAll(row).length - 1, row);
+  await expectTabExit(`${row}[data-log-index="${lastIndex}"]`);
+  await browser.keys("Home");
+  await expectFocus(firstRow, "Git Home returns to first row");
+  const count = await browser.$$(row).then(rows => rows.length);
+  await browser.keys("Space");
+  await waitFor(async () => (await browser.$$(row)).length > count && !await browser.$('[data-testid="git-log-load-more"]').isExisting(), { timeout: 10_000, label: "Git Space loads remaining history" });
+  await expectFocus(firstRow, "Git pagination preserves active row");
+  await expectTabExit(firstRow);
+  await browser.keys("Escape");
+  await expectFocus('[data-testid="panel-left"] .panel__git-btn', "Git log close restores its opener");
 }
 
 async function runGitBranchPickerFlow(browser, observer) {

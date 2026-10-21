@@ -134,6 +134,11 @@ is mounted:
   inside `[data-modal-owns-tab]` receives `Tab` itself instead: the Pass to
   Bro list uses this so `Tab`/`Shift+Tab` move the selection like
   `ArrowDown`/`ArrowUp`. `Enter` and `Escape` remain the way out of such a list.
+  The Git log exposes its active row followed by that row's enabled inline
+  actions. Inactive commit/file rows, their buttons, and history Load more are
+  excluded from the cycle. Tab leaves after the active row's last action;
+  Shift+Tab reverses the order without entering another row. The existing
+  Space shortcut retains keyboard access to history pagination.
 - Focus attempting to leave the top layer is redirected into it.
 - A key event whose target is outside the top layer is stopped and redispatched
   from the top layer. This covers browser timing cases where a focused button

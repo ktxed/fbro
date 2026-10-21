@@ -180,6 +180,13 @@ While it is open it owns the keyboard, and other viewer shortcuts are held back:
 `Ctrl`/`Cmd`+`=`/`-`/`0` keep adjusting the global font size.
 
 The Git changes/log lists use `J` to move down and `K` to move up.
+In the Git log, Tab visits the active commit/file row itself and its enabled
+inline actions, then leaves the listing. Inactive rows and their actions are
+excluded from Tab order. Shift+Tab reverses that order; entering from before
+the listing reaches the active row. Arrows, J/K, Home/End, and PageUp/PageDown
+move the active item, including expanded file rows and message-load controls.
+History Load more is excluded from Tab order to avoid scrolling to it; Space
+from a commit row still loads the next page, and the button remains clickable.
 The diff viewer uses the same file order as the separate viewer: `J` opens
 the next changed file, and `K` opens the previous changed file.
 Shift+J/Shift+K select the next/previous panel tab.

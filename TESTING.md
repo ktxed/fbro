@@ -145,7 +145,7 @@ coverage reference.
 | HEIC conversion | `heic.mjs` | Backend-confirmed opt-in settings, startup settings delivery, errors, optional real-file decoding, and live disabling |
 | Quick Edit | `quick-edit.mjs` | Explicit target wins over a different cursor file without modifying it; keyboard invocation sends the displayed directory/filename; edit/save, terminal closure, listing focus restoration, journal entries, and editing a newly created empty file |
 | Global selections | `global-selection.mjs` | Creation, reload persistence, adding through menus and long right-clicks, keyboard selection, focus, and removing references without deleting files |
-| Git | `git-init.mjs`, `git.mjs` | Initialization, branch creation/filtering/checkout, validation and busy states, stage/unstage/rollback, changes/log navigation (J down, K up), journal entries, modal guards, and focus |
+| Git | `git-init.mjs`, `git.mjs` | Initialization, branch creation/filtering/checkout, validation and busy states, stage/unstage/rollback, changes/log navigation (J down, K up), active-log-row and inline-action Tab/Shift+Tab order without scrolling through inactive rows, expanded messages/files, history pagination with Space, journal entries, modal guards, and focus |
 | Fedup | `fedup.mjs` | Global-selection input, default ignores, case-insensitive includes, and custom excludes |
 | Hashes | `hash-check.mjs`, `hash-generate.mjs` | Discovery, stale targets, options, matching/malformed sidecars, skip/overwrite, reports/toasts, progress, background/reopen, cancellation, and preserving existing sidecars |
 | Archives | `archive.mjs` | Enter a ZIP, copy a file out, and verify its content |
