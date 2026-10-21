@@ -928,7 +928,7 @@ export function FileViewer({ ref, path: initPath, sourceId: initSourceId, filena
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.defaultPrevented || hostRef.current.blocked) return;
+      if (e.defaultPrevented || e.isComposing || hostRef.current.blocked) return;
       const target = e.target instanceof HTMLElement ? e.target : null;
       if (target?.matches("input, textarea, select, [contenteditable='true']") && target !== findHistory.inputRef.current) return;
       if (isNativeActivationTarget(e.target) && (e.key === "Enter" || e.key === " ")) return;
@@ -977,10 +977,13 @@ export function FileViewer({ ref, path: initPath, sourceId: initSourceId, filena
         return;
       }
 
-      // When typing in the find input, only intercept Escape and Enter
-      if (inFind) {
-        if (e.key === "Escape") { findHistory.addToHistory(findQuery); setFindOpen(false); }
-        else if (e.key === "Enter") { e.preventDefault(); findHistory.addToHistory(findQuery); e.shiftKey ? findPrev() : findNext(); }
+      // The input's React handler gives history first refusal. This native
+      // listener runs before React's delegated handler, so leave input keys to it.
+      if (inFind) return;
+
+      if (!quick && findOpenRef.current && e.key === "Enter" && !ctrl && !e.altKey) {
+        e.preventDefault();
+        e.shiftKey ? findPrev() : findNext();
         return;
       }
 
@@ -1713,10 +1716,26 @@ export function FileViewer({ ref, path: initPath, sourceId: initSourceId, filena
             ref={findHistory.inputRef as React.RefObject<HTMLInputElement>}
             type="text"
             className="viewer__find-input"
+            data-testid="viewer-find-input"
             placeholder="Find…"
             value={findQuery}
             onChange={e => { setFindQuery(e.target.value); setFindIdx(0); }}
-            onKeyDown={findHistory.onKeyDown}
+            onKeyDown={e => {
+              if (e.defaultPrevented || e.nativeEvent.isComposing || hostRef.current.blocked) return;
+              findHistory.onKeyDown(e);
+              if (e.defaultPrevented) return;
+              if (e.key === "Escape") {
+                e.preventDefault();
+                e.stopPropagation();
+                findHistory.addToHistory(findQuery);
+                setFindOpen(false);
+              } else if (e.key === "Enter" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+                e.preventDefault();
+                e.stopPropagation();
+                findHistory.addToHistory(findQuery);
+                e.shiftKey ? findPrev() : findNext();
+              }
+            }}
             spellCheck={false}
           />
           {findHistory.isOpen && (
@@ -1729,9 +1748,9 @@ export function FileViewer({ ref, path: initPath, sourceId: initSourceId, filena
             />
           )}
           <span className="viewer__find-count">{findLabel}</span>
-          <button className="viewer__find-nav" onClick={findPrev} title="Previous (Shift+Enter)">↑</button>
-          <button className="viewer__find-nav" onClick={findNext} title="Next (Enter)">↓</button>
-          <button className="viewer__find-close" onClick={() => setFindOpen(false)} title="Close (Esc)">×</button>
+          <button className="viewer__find-nav" data-testid="viewer-find-previous" onClick={findPrev} title="Previous (Shift+Enter)" aria-label="Previous occurrence" aria-keyshortcuts="Shift+Enter">↑</button>
+          <button className="viewer__find-nav" data-testid="viewer-find-next" onClick={findNext} title="Next (Enter)" aria-label="Next occurrence" aria-keyshortcuts="Enter">↓</button>
+          <button className="viewer__find-close" data-testid="viewer-find-close" onClick={() => setFindOpen(false)} title="Close (Esc)" aria-label="Close find">×</button>
           {isSmall === false && largeFindTruncated && (
             <span className="viewer__find-scope">first 10,000 matches</span>
           )}

@@ -288,7 +288,7 @@ stateDiagram-v2
     if (findState.cursor !== 3 || findState.scroll !== 0) {
       throw new Error(`Find input lost arrow-key ownership: ${JSON.stringify(findState)}`);
     }
-    await browser.keys("Escape");
+    await checkFindNavigation(browser, "small text");
 
     const largeParams = new URLSearchParams({ viewer: "1", path: `${directory}/${largeName}`,
       source: observer.state.panels.left.sourceId, name: largeName, label: "main", panel: "left",
@@ -297,6 +297,9 @@ stateDiagram-v2
     await browser.url(`${mainUrl.split("?")[0]}?${largeParams}`);
     await browser.$(".viewer__text--virtual").waitForDisplayed({ timeout: 10_000 });
     await checkHorizontalScrolling(browser, "large text");
+    await browser.keys("f");
+    await browser.$(".viewer__find-bar input").setValue("wide");
+    await checkFindNavigation(browser, "large text");
 
     const audioParams = new URLSearchParams({ viewer: "1", path: `${directory}/${audioName}`,
       source: observer.state.panels.left.sourceId, name: audioName, label: "main", panel: "left",
@@ -413,6 +416,68 @@ stateDiagram-v2
     observer.navigatePanelToPath("left", originalPath);
     await observer.waitForPanelPath("left", originalPath);
   }
+}
+
+// Catches swallowed Enter in inputs, missing content shortcuts, double native
+// button activation, and history selection accidentally advancing a match.
+async function checkFindNavigation(browser, label) {
+  const expectMatch = async (index, focusSelector) => {
+    await waitFor(() => browser.execute(({ index, focusSelector }) => {
+      const count = document.querySelector(".viewer__find-count")?.textContent ?? "";
+      return (count === `${index} / 50` || count === `${index} / 50 · line 1`)
+        && document.activeElement === document.querySelector(focusSelector)
+        && document.querySelectorAll(".viewer__find-match--active").length === 1;
+    }, { index, focusSelector }), { timeout: 5000, label: `${label} find match ${index}, focus ${focusSelector}` });
+  };
+  const input = '[data-testid="viewer-find-input"]';
+  const content = "[data-viewer-content]";
+  await expectMatch(1, input);
+  for (const focusSelector of [input, content]) {
+    await browser.execute(selector => document.querySelector(selector).focus(), focusSelector);
+    await browser.keys("Enter");
+    await expectMatch(2, focusSelector);
+    await browser.keys(["Shift", "Enter"]);
+    await expectMatch(1, focusSelector);
+    await browser.keys(["Shift", "Enter"]);
+    await expectMatch(50, focusSelector);
+    await browser.keys("Enter");
+    await expectMatch(1, focusSelector);
+  }
+
+  const nextButton = '[data-testid="viewer-find-next"]';
+  const previousButton = '[data-testid="viewer-find-previous"]';
+  await browser.execute(selector => document.querySelector(selector).focus(), nextButton);
+  await browser.keys("Enter");
+  await expectMatch(2, nextButton);
+  await browser.execute(selector => document.querySelector(selector).focus(), previousButton);
+  await browser.keys("Enter");
+  await expectMatch(1, previousButton);
+
+  await browser.$(input).setValue("text");
+  await browser.keys(["Alt", "ArrowDown", "Alt"]);
+  await browser.$(".input-history").waitForDisplayed();
+  await browser.keys("ArrowDown");
+  await browser.keys("Enter");
+  await browser.$(".input-history").waitForDisplayed({ reverse: true });
+  if (await browser.$(input).getValue() !== "wide") throw new Error(`${label}: find history lost the current query`);
+  await expectMatch(1, input);
+
+  // Escape dismisses history before find, then find restores its content opener.
+  await browser.keys(["Alt", "ArrowDown", "Alt"]);
+  await browser.$(".input-history").waitForDisplayed();
+  await browser.keys("Escape");
+  await browser.$(".input-history").waitForDisplayed({ reverse: true });
+  await expectMatch(1, input);
+  await browser.$(input).setValue("no-such-viewer-match");
+  await waitFor(async () => await browser.$(".viewer__find-count").getText() === "No matches",
+    { timeout: 5000, label: `${label} empty find results ready` });
+  await browser.keys("Enter");
+  await browser.keys(["Shift", "Enter"]);
+  if (await browser.$(".viewer__find-count").getText() !== "No matches") throw new Error(`${label}: empty find results changed`);
+  await browser.keys("Escape");
+  await browser.$(".viewer__find-bar").waitForDisplayed({ reverse: true });
+  await waitFor(() => browser.execute(() => document.activeElement === document.querySelector("[data-viewer-content]")),
+    { timeout: 3000, label: `${label} find restores content focus` });
 }
 
 async function checkHorizontalScrolling(browser, label) {

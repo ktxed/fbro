@@ -151,15 +151,22 @@ text transformations:
 | `S` | Toggle DOS/CP437 decoding in raw text mode |
 | `W` | Toggle word wrapping in raw text mode |
 | `F` | Open find; Markdown preview first returns to raw text |
+| `Enter` / `Shift+Enter` | Next/previous occurrence while find is open, from its input or file content |
 | `E` / `F4` | Edit a real local file |
 | `J` / `K` | Next/previous file (down/up in listing order) |
 | `Space` | Play/pause directly rendered local video or MP3 audio |
 | `Left` / `Right` | Scroll text, Hex, Markdown or PDF horizontally by 80 pixels; seek directly rendered media backward/forward five seconds |
-| `Esc` | Close the viewer, or leave native fullscreen first on macOS |
+| `Esc` | Dismiss find history, then find, then close the viewer; leave native fullscreen first on macOS |
 
 Markdown is a distinct presentation of text rather than a second simultaneous
 toggle: only `1 Text` or `4 MD` is shown as active. When focus is in the find
 input, printable viewer shortcuts are not intercepted.
+Find navigation wraps at either end and preserves the current focus, including
+when there are no matches. Enter on a focused button retains native activation
+and acts only once. In the find input, history selection consumes Enter before
+match navigation; Escape dismisses history before closing find. Closing find
+returns focus to its available opener without overriding an outside focus move.
+IME composition and Ctrl/Cmd/Alt+Enter do not navigate matches.
 Left/Right keep native cursor movement in the find input. Horizontal scrolling
 also works for large files with virtual vertical scrolling and in quick preview.
 
