@@ -137,9 +137,13 @@ pub(crate) async fn handle(name: &str, args: &Value, ctx: &mut IntentContext<'_>
                 .map(|_| None)
         },
         "GitSwitchBranch" => {
-            let branch = args.get("branch").and_then(Value::as_str).unwrap_or("").trim();
+            let branch = super::arg_str(args, "branch").unwrap_or("").trim().to_string();
+            let remote = super::arg_bool(args, "remote", false);
             if branch.is_empty() { Err("A branch is required.".to_string()) }
-            else { crate::git::run(&root, &["switch".into(), branch.into()]).map(|_| None) }
+            else {
+                let root = root.clone();
+                crate::jobs::git::switch_branch(root, branch, remote).await.map(|_| None)
+            }
         },
         "GitPull" => guarded(clean, || crate::git::run(&root, &["pull".into()])).map(|_| None),
         "GitPush" => match args.get("forceMode").and_then(Value::as_str).unwrap_or("") {

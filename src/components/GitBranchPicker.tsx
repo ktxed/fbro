@@ -6,16 +6,22 @@ import { resolveColorScheme } from "../theme/colorSchemes";
 import { mergeRefs } from "../utils/mergeRefs";
 import { rovingIndexForKey } from "./modalKeyboard";
 
+interface GitBranchChoice {
+  name: string;
+  kind: "local" | "remote";
+}
+
 interface GitBranchPickerProps {
   branches: string[];
+  remoteBranches: string[];
   value: string;
   disabled: boolean;
-  onSelect: (branch: string) => void;
+  onSelect: (choice: GitBranchChoice) => void;
   onInteract: () => void;
 }
 
 export const GitBranchPicker = forwardRef<HTMLButtonElement, GitBranchPickerProps>(function GitBranchPicker(
-  { branches, value, disabled, onSelect, onInteract }, forwardedRef,
+  { branches, remoteBranches, value, disabled, onSelect, onInteract }, forwardedRef,
 ) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -26,10 +32,12 @@ export const GitBranchPicker = forwardRef<HTMLButtonElement, GitBranchPickerProp
   const selectionPendingRef = useRef(false);
   const listId = useId();
   const colorScheme = resolveColorScheme(useAppState().settings.general.colorScheme);
-  const matches = useMemo(() => {
+  const { localMatches, remoteMatches, matches } = useMemo(() => {
     const pattern = query.trim().toLowerCase();
-    return branches.filter(branch => branch.toLowerCase().includes(pattern));
-  }, [branches, query]);
+    const localMatches = branches.filter(branch => branch.toLowerCase().includes(pattern)).map(name => ({ name, kind: "local" as const }));
+    const remoteMatches = remoteBranches.filter(branch => branch.toLowerCase().includes(pattern)).map(name => ({ name, kind: "remote" as const }));
+    return { localMatches, remoteMatches, matches: [...localMatches, ...remoteMatches] };
+  }, [branches, remoteBranches, query]);
   const visibleIndex = Math.min(activeIndex, Math.max(0, matches.length - 1));
   const isOpen = open && !disabled;
   const { refs, floatingStyles, context } = useFloating({
@@ -67,11 +75,36 @@ export const GitBranchPicker = forwardRef<HTMLButtonElement, GitBranchPickerProp
     setActiveIndex(Math.max(0, branches.indexOf(value)));
     setOpen(true);
   };
-  const selectBranch = (branch: string) => {
+  const selectBranch = (choice: GitBranchChoice) => {
     if (disabled || selectionPendingRef.current) return;
     selectionPendingRef.current = true;
     setOpen(false);
-    if (branch !== value) onSelect(branch);
+    if (choice.kind === "remote" || choice.name !== value) onSelect(choice);
+  };
+  const renderOption = (choice: GitBranchChoice, index: number) => {
+    const current = choice.kind === "local" && choice.name === value;
+    const title = current ? `${choice.name} (current branch)` : choice.kind === "remote" ? `Create a local branch tracking ${choice.name}` : choice.name;
+    return (
+      <button
+        ref={node => { optionRefs.current[index] = node; }}
+        key={`${choice.kind}:${choice.name}`}
+        id={`${listId}-${index}`}
+        type="button"
+        role="option"
+        aria-selected={current}
+        tabIndex={-1}
+        className="git-branch-picker__option"
+        data-testid="git-branch-option"
+        data-branch-kind={choice.kind}
+        data-active={index === visibleIndex}
+        title={title}
+        onMouseDown={event => event.preventDefault()}
+        onClick={() => selectBranch(choice)}
+      >
+        <span>{choice.name}</span>
+        {current && <IconCheck size={14} aria-hidden />}
+      </button>
+    );
   };
   const onSearchKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.defaultPrevented || event.nativeEvent.isComposing) return;
@@ -183,26 +216,18 @@ export const GitBranchPicker = forwardRef<HTMLButtonElement, GitBranchPickerProp
                 onChange={event => { setQuery(event.target.value); setActiveIndex(0); }}
               />
               <div id={listId} role="listbox" aria-label="Branches" className="git-branch-picker__list">
-                {matches.map((branch, index) => (
-                  <button
-                    ref={node => { optionRefs.current[index] = node; }}
-                    key={branch}
-                    id={`${listId}-${index}`}
-                    type="button"
-                    role="option"
-                    aria-selected={branch === value}
-                    tabIndex={-1}
-                    className="git-branch-picker__option"
-                    data-testid="git-branch-option"
-                    data-active={index === visibleIndex}
-                    title={branch === value ? `${branch} (current branch)` : branch}
-                    onMouseDown={event => event.preventDefault()}
-                    onClick={() => selectBranch(branch)}
-                  >
-                    <span>{branch}</span>
-                    {branch === value && <IconCheck size={14} aria-hidden />}
-                  </button>
-                ))}
+                {localMatches.length > 0 && (
+                  <div role="group" aria-label="Local branches" className="git-branch-picker__group">
+                    <div className="git-branch-picker__group-label" aria-hidden="true">Local</div>
+                    {localMatches.map((choice, index) => renderOption(choice, index))}
+                  </div>
+                )}
+                {remoteMatches.length > 0 && (
+                  <div role="group" aria-label="Remote branches" className="git-branch-picker__group">
+                    <div className="git-branch-picker__group-label" aria-hidden="true">Remote</div>
+                    {remoteMatches.map((choice, index) => renderOption(choice, index + localMatches.length))}
+                  </div>
+                )}
                 {matches.length === 0 && <div className="git-branch-picker__empty" role="status">No matching branches.</div>}
               </div>
             </div>

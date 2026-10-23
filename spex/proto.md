@@ -804,6 +804,31 @@ lifecycle: `GitActionFinished` correlates by `activityId`, with success/failure
 and an error message. Successful panel rescan precedes completion. Closing the
 modal backgrounds the activity without interrupting an atomic switch.
 
+## Git branch listing and checkout
+
+`GitRepoStatus.branches` contains local branches. The additive
+`remoteBranches` field contains cached remote-tracking branches from every
+remote, using short names such as `origin/feature`. Symbolic aliases such as
+`origin/HEAD` are not branch choices and are excluded. Inspection does not
+fetch; `GitFetch` and `GitRefresh` remain the explicit ways to update remote
+refs before a later status inspection publishes them.
+
+`GitSwitchBranch` accepts `{ panelId, branch, activityId, remote? }`. An omitted
+or false `remote` preserves ordinary local `git switch` behavior. When `remote`
+is true, `branch` must exactly match a published remote-tracking branch. The
+backend validates that ref and runs `git switch --track <branch>` on the
+blocking pool, creating a local branch whose name and upstream Git derives
+from that exact remote. It never uses default-remote guessing or detached
+HEAD for this action. An existing local branch with the derived name is not
+reset or re-pointed: Git rejects the action, and HEAD, refs, and upstream
+configuration remain unchanged. Branch creation and switching are
+transactional, including when local changes prevent checkout.
+
+Both local and remote switching retain the existing Git activity lifecycle,
+journal operation, and error delivery. A successful panel rescan precedes
+`GitActionFinished`; closing the modal backgrounds the activity without
+interrupting an atomic switch.
+
 ## Git repository initialization
 
 `InitGitRepository` accepts `{ panelId, sourceId, targetPath, branch, requestId }`.

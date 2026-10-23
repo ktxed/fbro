@@ -640,7 +640,7 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
         u: () => { if (canSetUpstream) runAction("GitSetUpstream", "Setting upstream…", { branch: git.branch }); },
         c: () => { if (activeTab === "changes" && canCommit) commitRef.current?.click(); },
       };
-      if (git.branches.length > 0) accelerators.b = () => branchRef.current?.focus();
+      if (git.branches.length + git.remoteBranches.length > 0) accelerators.b = () => branchRef.current?.focus();
       const action = !hasShortcutModifier && letter ? accelerators[letter] : undefined;
       if (action) {
         event.preventDefault();
@@ -691,15 +691,16 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
           </div>
         )}
         <div className="git-modal__toolbar">
-          {git.branches.length > 0 && (
+          {git.branches.length + git.remoteBranches.length > 0 && (
             <>
               <GitBranchPicker
                 ref={branchRef}
                 branches={git.branches}
+                remoteBranches={git.remoteBranches}
                 value={git.branch}
                 disabled={actionInFlight}
                 onInteract={() => { didAutoFocusLogRef.current = true; }}
-                onSelect={branch => runAction("GitSwitchBranch", "Switching branch…", { branch })}
+                onSelect={choice => runAction("GitSwitchBranch", choice.kind === "remote" ? "Creating tracking branch…" : "Switching branch…", { branch: choice.name, remote: choice.kind === "remote" })}
               />
               <kbd>B</kbd>
             </>

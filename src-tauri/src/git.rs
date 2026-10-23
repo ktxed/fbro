@@ -51,6 +51,7 @@ pub struct GitRepoStatus {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub behind_count: Option<usize>,
     pub branches: Vec<String>,
+    pub remote_branches: Vec<String>,
     pub changes: Vec<GitChange>,
 }
 
@@ -172,9 +173,19 @@ pub fn inspect(path: &str) -> Option<GitRepoStatus> {
     }).map(|(behind, ahead)| (Some(ahead), Some(behind))).unwrap_or((None, None));
     let branches = String::from_utf8(git(&root, &["for-each-ref", "--format=%(refname:short)", "refs/heads"]).unwrap_or_default())
         .unwrap_or_default().lines().map(str::to_string).collect();
+    let remote_branches = remote_branches(&root).unwrap_or_default();
     // fbro considers a work area dirty only when it contains staged changes.
     // Untracked and unstaged changes remain visible, but do not gate Git actions.
-    Some(GitRepoStatus { root, branch, detached, clean: has_no_staged_changes(staged_count), staged_count, modified_count, untracked_count, conflicted_count, upstream, ahead_count, behind_count, branches, changes })
+    Some(GitRepoStatus { root, branch, detached, clean: has_no_staged_changes(staged_count), staged_count, modified_count, untracked_count, conflicted_count, upstream, ahead_count, behind_count, branches, remote_branches, changes })
+}
+
+fn remote_branches(root: &str) -> Result<Vec<String>, String> {
+    let output = git(root, &["for-each-ref", "--format=%(refname:short)\t%(symref)", "refs/remotes"])?;
+    let output = String::from_utf8(output).map_err(|e| format!("Git remote branch names are not valid UTF-8: {e}"))?;
+    Ok(output.lines().filter_map(|line| {
+        let (name, symref) = line.split_once('\t')?;
+        (!name.is_empty() && symref.is_empty()).then(|| name.to_string())
+    }).collect())
 }
 
 fn has_no_staged_changes(staged_count: usize) -> bool {
@@ -228,6 +239,17 @@ fn status_label(change: &GitChange) -> String {
 pub fn create_branch(root: &str, branch: &str) -> Result<(), String> {
     let branch = validate_branch_name(root, branch)?;
     run(root, &["switch".into(), "--create".into(), branch.into()])
+}
+
+pub fn checkout_remote_branch(root: &str, branch: &str) -> Result<(), String> {
+    let branch = branch.trim();
+    if branch.is_empty() {
+        return Err("A remote branch is required.".into());
+    }
+    if !remote_branches(root)?.iter().any(|candidate| candidate == branch) {
+        return Err(format!("Unknown remote branch: {branch}."));
+    }
+    run(root, &["switch".into(), "--track".into(), branch.into()])
 }
 
 fn validate_branch_name<'a>(root: &str, branch: &'a str) -> Result<&'a str, String> {
@@ -1182,6 +1204,103 @@ mod tests {
             assert!(!repo.join("missing").exists());
             assert_eq!(fs::read_to_string(file).unwrap(), "data");
         });
+    }
+
+    #[test]
+    fn inspect_lists_remote_branches_and_excludes_symbolic_heads() {
+        with_remote_repo(|repo| {
+            let status = super::inspect(repo.to_str().unwrap()).unwrap();
+            assert_eq!(status.branches, vec!["main".to_string()]);
+            assert_eq!(status.remote_branches, vec![
+                "origin/feature".to_string(),
+                "origin/main".to_string(),
+                "upstream/feature".to_string(),
+                "upstream/main".to_string(),
+            ]);
+        });
+    }
+
+    #[test]
+    fn checkout_remote_branch_creates_tracking_branch_for_selected_remote() {
+        with_remote_repo(|repo| {
+            let root = repo.to_str().unwrap();
+            let expected_head = super::git(root, &["rev-parse", "refs/remotes/upstream/feature"]).unwrap();
+            super::checkout_remote_branch(root, "upstream/feature").unwrap();
+            let status = super::inspect(root).unwrap();
+            assert_eq!(status.branch, "feature");
+            assert!(!status.detached);
+            assert_eq!(status.upstream.as_deref(), Some("upstream/feature"));
+            assert_eq!(super::git(root, &["rev-parse", "HEAD"]).unwrap(), expected_head);
+        });
+    }
+
+    #[test]
+    fn checkout_remote_branch_rejects_unknown_and_existing_local_names() {
+        with_remote_repo(|repo| {
+            let root = repo.to_str().unwrap();
+            let head = super::git(root, &["rev-parse", "HEAD"]).unwrap();
+            let head_ref = super::git(root, &["symbolic-ref", "HEAD"]).unwrap();
+            let refs = super::git(root, &["show-ref"]).unwrap();
+            let upstream = super::inspect(root).unwrap().upstream;
+            for branch in ["origin/missing", "origin/main"] {
+                assert!(super::checkout_remote_branch(root, branch).is_err(), "accepted {branch}");
+                assert_eq!(super::git(root, &["rev-parse", "HEAD"]).unwrap(), head);
+                assert_eq!(super::git(root, &["symbolic-ref", "HEAD"]).unwrap(), head_ref);
+                assert_eq!(super::git(root, &["show-ref"]).unwrap(), refs);
+                assert_eq!(super::inspect(root).unwrap().upstream, upstream);
+            }
+        });
+    }
+
+    #[test]
+    fn failed_remote_checkout_is_transactional() {
+        with_remote_repo(|repo| {
+            let root = repo.to_str().unwrap();
+            let head = super::git(root, &["rev-parse", "HEAD"]).unwrap();
+            let head_ref = super::git(root, &["symbolic-ref", "HEAD"]).unwrap();
+            let refs = super::git(root, &["show-ref"]).unwrap();
+            fs::write(repo.join("tracked.txt"), "local\n").unwrap();
+            assert!(super::checkout_remote_branch(root, "origin/feature").is_err());
+            assert_eq!(super::git(root, &["rev-parse", "HEAD"]).unwrap(), head);
+            assert_eq!(super::git(root, &["symbolic-ref", "HEAD"]).unwrap(), head_ref);
+            assert_eq!(super::git(root, &["show-ref"]).unwrap(), refs);
+            assert!(super::git(root, &["show-ref", "--verify", "refs/heads/feature"]).is_err());
+            assert_eq!(fs::read_to_string(repo.join("tracked.txt")).unwrap(), "local\n");
+        });
+    }
+
+    fn with_remote_repo(test: impl FnOnce(&Path)) {
+        let root = temp_repo_path();
+        fs::create_dir_all(&root).unwrap();
+        struct Cleanup(PathBuf);
+        impl Drop for Cleanup {
+            fn drop(&mut self) { let _ = fs::remove_dir_all(&self.0); }
+        }
+        let _cleanup = Cleanup(root.clone());
+        git(&root, &["init", "-q", "--bare", "--initial-branch=main", "origin.git"]);
+        git(&root, &["clone", "-q", "origin.git", "repo"]);
+        let repo = root.join("repo");
+        git(&repo, &["config", "core.autocrlf", "false"]);
+        git(&repo, &["config", "user.email", "fbro-tests@example.invalid"]);
+        git(&repo, &["config", "user.name", "fbro tests"]);
+        git(&repo, &["symbolic-ref", "HEAD", "refs/heads/main"]);
+        fs::write(repo.join("tracked.txt"), "base\n").unwrap();
+        git(&repo, &["add", "tracked.txt"]);
+        git(&repo, &["commit", "-qm", "initial"]);
+        git(&repo, &["push", "-q", "--set-upstream", "origin", "main"]);
+        git(&repo, &["switch", "-q", "-c", "feature"]);
+        fs::write(repo.join("tracked.txt"), "feature\n").unwrap();
+        git(&repo, &["add", "tracked.txt"]);
+        git(&repo, &["commit", "-qm", "feature"]);
+        git(&repo, &["push", "-q", "origin", "feature"]);
+        git(&repo, &["fetch", "-q", "origin"]);
+        git(&repo, &["remote", "add", "upstream", "../origin.git"]);
+        git(&repo, &["fetch", "-q", "upstream"]);
+        git(&repo, &["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main"]);
+        git(&repo, &["symbolic-ref", "refs/remotes/upstream/HEAD", "refs/remotes/upstream/main"]);
+        git(&repo, &["switch", "-q", "main"]);
+        git(&repo, &["branch", "-D", "feature"]);
+        test(&repo);
     }
 
     fn with_empty_folder(test: impl FnOnce(&Path)) {

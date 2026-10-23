@@ -8,7 +8,9 @@ import { waitFor } from "../wait.mjs";
 export async function runGitFlow(browser, observer) {
   const repo = backendPath("a", "src", "git-diff-smoke");
   const hostRepo = hostPath(repo);
+  const hostRemote = `${hostRepo}-origin.git`;
   fs.rmSync(hostRepo, { recursive: true, force: true });
+  fs.rmSync(hostRemote, { recursive: true, force: true });
   fs.mkdirSync(hostRepo, { recursive: true });
   git(hostRepo, ["init", "-q"]);
   git(hostRepo, ["config", "user.email", "fbro-tests@example.invalid"]);
@@ -25,6 +27,13 @@ export async function runGitFlow(browser, observer) {
   git(hostRepo, ["branch", "feature/Fix-login"]);
   git(hostRepo, ["branch", "release/fix-logging"]);
   for (let index = 0; index < 24; index++) git(hostRepo, ["branch", `picker-scroll-${String(index).padStart(2, "0")}`]);
+  git(hostRepo, ["branch", "remote/Checkout-me"]);
+  git(hostRepo, ["init", "-q", "--bare", hostRemote]);
+  git(hostRepo, ["remote", "add", "origin", `../${path.basename(hostRemote)}`]);
+  git(hostRepo, ["push", "-q", "origin", initialBranch, "remote/Checkout-me"]);
+  git(hostRepo, ["fetch", "-q", "origin"]);
+  git(hostRepo, ["branch", "-d", "remote/Checkout-me"]);
+  git(hostRepo, ["symbolic-ref", "refs/remotes/origin/HEAD", `refs/remotes/origin/${initialBranch}`]);
   git(hostRepo, ["switch", "-qc", "feature/picker-rejected"]);
   fs.writeFileSync(path.join(hostRepo, "changed.txt"), "conflicting branch\n");
   git(hostRepo, ["commit", "-qam", "conflicting branch"]);
@@ -597,8 +606,11 @@ async function runGitBranchPickerFlow(browser, observer) {
   const originalScheme = observer.state.settings.general.colorScheme;
   const cursor = observer.state.panels.left.cursor;
   const optionNames = () => browser.execute(() => [...document.querySelectorAll('[data-testid="git-branch-option"]')].map(option => option.textContent.trim()));
+  const sectionNames = () => browser.execute(() => [...document.querySelectorAll('.git-branch-picker__group-label')].filter(section => section.getClientRects().length > 0).map(section => section.textContent.trim()));
   const activeName = () => browser.execute(() => document.querySelector('[data-testid="git-branch-option"][data-active="true"]')?.textContent.trim());
+  const activeKind = () => browser.execute(() => document.querySelector('[data-testid="git-branch-option"][data-active="true"]')?.getAttribute('data-branch-kind'));
   const sentCount = () => browser.execute(() => window.__pickerSwitches.length);
+  const remoteBranch = "origin/remote/Checkout-me";
   const expectClosed = () => waitFor(async () => !await browser.$(popupSelector).isExisting(), { timeout: 5_000, label: "branch dropdown dismissed" });
   const expectPickerFocus = () => waitFor(() => picker.isFocused(), { timeout: 5_000, label: "branch picker focus restored" });
   const open = async (key = "Enter") => {
@@ -625,6 +637,14 @@ async function runGitBranchPickerFlow(browser, observer) {
   });
   try {
     await open();
+    const initialGit = observer.state.panels.left.git;
+    if (!initialGit.remoteBranches?.includes(remoteBranch) || initialGit.remoteBranches.includes("origin/HEAD")) {
+      throw new Error(`Unexpected remote branch state: ${JSON.stringify(initialGit.remoteBranches)}`);
+    }
+    if ((await sectionNames()).join("|") !== "Local|Remote") throw new Error("Branch picker did not show Local and Remote sections");
+    if ((await browser.$$('[data-testid="git-branch-option"][data-branch-kind="remote"]')).length !== initialGit.remoteBranches.length) {
+      throw new Error("Remote branches were not rendered as remote options");
+    }
     for (const scheme of ["fbro-dark", "daylight"]) {
       observer.sendIntent("SetGeneralOption", undefined, { key: "colorScheme", value: scheme });
       await waitFor(() => browser.execute(scheme => document.querySelector('[data-testid="git-branch-dropdown"]')?.getAttribute("data-color-scheme") === scheme, scheme), { timeout: 5_000, label: `branch dropdown ${scheme} theme` });
@@ -643,20 +663,33 @@ async function runGitBranchPickerFlow(browser, observer) {
       return row.top >= list.top - 1 && row.bottom <= list.bottom + 1;
     });
     if (!activeVisible) throw new Error("Active branch was not scrolled into view");
+    if (await activeKind() !== "remote") throw new Error("End did not reach the remote section");
+    for (let index = 0; index < initialGit.remoteBranches.length; index++) await browser.keys("ArrowUp");
+    if (await activeKind() !== "local" || !await browser.$(searchSelector).isFocused()) throw new Error("ArrowUp did not cross from Remote to Local");
+    await browser.keys("ArrowDown");
+    if (await activeKind() !== "remote") throw new Error("ArrowDown did not cross from Local to Remote");
+    await browser.keys("Home");
+    if (await activeKind() !== "local") throw new Error("Home did not return to the first local branch");
     await setTextInputValue(browser, searchSelector, "FIX");
     const expected = ["feature/Fix-login", "release/fix-logging"];
     if ((await optionNames()).join("|") !== expected.join("|")) throw new Error("Branch search did not match case-insensitive substrings");
+    if ((await sectionNames()).join("|") !== "Local") throw new Error("Empty Remote section survived local-only search");
     for (const [key, name] of [["End", expected[1]], ["ArrowUp", expected[0]], ["ArrowDown", expected[1]], ["Home", expected[0]]]) {
       await browser.keys(key);
       if (await activeName() !== name || !await browser.$(searchSelector).isFocused()) throw new Error(`Branch navigation failed for ${key}`);
+    }
+    await setTextInputValue(browser, searchSelector, "CHECKOUT-ME");
+    if ((await optionNames()).join("|") !== remoteBranch || (await sectionNames()).join("|") !== "Remote" || await activeKind() !== "remote") {
+      throw new Error("Remote branch search did not filter groups and options");
     }
     if (observer.state.panels.left.cursor !== cursor || await sentCount() !== 0) throw new Error("Branch search/navigation changed backend selection");
     await setTextInputValue(browser, searchSelector, "no-such-branch");
     await browser.keys("ArrowDown");
     await browser.keys("Enter");
-    if ((await optionNames()).length !== 0 || !await browser.$(`${popupSelector} [role="status"]`).isDisplayed() || await sentCount() !== 0) throw new Error("Empty branch search submitted a switch");
+    if ((await optionNames()).length !== 0 || (await sectionNames()).length !== 0 || !await browser.$(`${popupSelector} [role="status"]`).isDisplayed() || await sentCount() !== 0) throw new Error("Empty branch search submitted a switch");
     await setTextInputValue(browser, searchSelector, "");
-    if ((await optionNames()).length !== observer.state.panels.left.git.branches.length) throw new Error("Clearing branch search did not restore the list");
+    const allBranchCount = observer.state.panels.left.git.branches.length + observer.state.panels.left.git.remoteBranches.length;
+    if ((await optionNames()).length !== allBranchCount) throw new Error("Clearing branch search did not restore local and remote lists");
     await browser.keys("Escape");
     await expectClosed();
     await expectPickerFocus();
@@ -732,6 +765,35 @@ async function runGitBranchPickerFlow(browser, observer) {
     await expectClosed();
     await expectPickerFocus();
     if (await sentCount() !== 3) throw new Error("Enter activated the highlight instead of the directly focused branch option");
+
+    const branchBeforeRemote = observer.state.panels.left.git.branch;
+    await open();
+    await setTextInputValue(browser, searchSelector, "checkout-me");
+    await browser.execute((selector) => {
+      window.__pickerHold = true;
+      document.querySelector(selector).dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    }, searchSelector);
+    await expectClosed();
+    await expectPickerFocus();
+    if (await sentCount() !== 4 || await picker.getAttribute("aria-disabled") !== "true") throw new Error("Remote checkout did not enter the busy state");
+    const remoteIntent = await browser.execute(() => {
+      const message = window.__pickerSwitches[window.__pickerSwitches.length - 1];
+      return { branch: message?.args?.branch, remote: message?.args?.remote };
+    });
+    if (remoteIntent.branch !== remoteBranch || remoteIntent.remote !== true) throw new Error(`Unexpected remote checkout intent: ${JSON.stringify(remoteIntent)}`);
+    if (observer.state.panels.left.git.branch !== branchBeforeRemote || await picker.getAttribute("data-branch") !== branchBeforeRemote) throw new Error("Remote checkout optimistically changed the branch");
+    await browser.execute(() => {
+      window.__pickerHold = false;
+      const held = window.__pickerHeldSend;
+      window.__pickerOriginalSend.call(held.socket, held.data);
+    });
+    await waitFor(async () => {
+      const git = observer.state.panels.left.git;
+      return git.branch === "remote/Checkout-me" && git.upstream === remoteBranch && !git.detached
+        && git.branches.includes("remote/Checkout-me") && await picker.getAttribute("data-branch") === "remote/Checkout-me"
+        && await picker.getAttribute("aria-disabled") === "false";
+    }, { timeout: 10_000, label: "backend-confirmed remote tracking checkout" });
+    await expectPickerFocus();
   } finally {
     observer.sendIntent("SetGeneralOption", undefined, { key: "colorScheme", value: originalScheme });
     await browser.execute(() => {

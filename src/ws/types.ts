@@ -46,6 +46,7 @@ export interface GitRepoStatus {
   aheadCount?: number;
   behindCount?: number;
   branches: string[];
+  remoteBranches: string[];
   changes: GitChange[];
 }
 
