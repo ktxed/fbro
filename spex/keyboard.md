@@ -51,8 +51,12 @@ and sharing patches do not move focus. Covered Settings controls remain inert.
   typing in editable fields.
 - Multi-file search-result Copy uses `U` to focus Repeated filenames. The native
   selector owns its selection keys; changing the policy does not submit.
-- The bookmark popover moves focus into its composite list. Up/Down and
-  Home/End move the active bookmark, Enter opens it, and Escape closes the
+- The bookmark popover moves focus into its composite list, or into the
+  current-folder action when the list is empty. Up/Down and Home/End move the
+  active bookmark. ArrowUp from the first bookmark focuses the add/remove
+  current-folder action; ArrowDown returns to the active bookmark without
+  changing its selection. Enter opens the active list bookmark, while Enter or
+  Space activates the focused current-folder button natively. Escape closes the
   popover; while it is open the underlying panel and global commands are held
   back.
 - Embedded terminal keys go to the PTY for the shell to interpret. On macOS,

@@ -116,6 +116,25 @@ export function BookmarksPopover({
         return;
       }
 
+      const target = event.target instanceof Node ? event.target : null;
+      if (event.key === "ArrowDown" && target === addButtonRef.current && bookmarks.length > 0) {
+        event.preventDefault();
+        event.stopPropagation();
+        listRef.current?.focus({ preventScroll: true });
+        return;
+      }
+      if (
+        event.key === "ArrowUp" &&
+        selectedIndex === 0 &&
+        target &&
+        listRef.current?.contains(target)
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+        addButtonRef.current?.focus({ preventScroll: true });
+        return;
+      }
+
       const nextIndex = rovingIndexForKey(event.key, selectedIndex, bookmarks.length, "vertical");
       if (nextIndex !== null) {
         event.preventDefault();
@@ -170,6 +189,7 @@ export function BookmarksPopover({
         style={{ ...floatingStyles, colorScheme: colorScheme.mode }}
         className="bookmarks-popover"
         data-testid="bookmarks-popover"
+        onKeyDown={(e) => e.stopPropagation()}
         onMouseDown={(e) => e.preventDefault()}
       >
         <div className="bookmarks-popover__header">Bookmarks</div>
@@ -179,6 +199,7 @@ export function BookmarksPopover({
             <button
               ref={addButtonRef}
               className="bookmarks-popover__add-btn bookmarks-popover__add-btn--added"
+              data-testid="bookmark-current-toggle"
               onClick={handleRemoveCurrent}
               title="Remove current folder from bookmarks"
             >
@@ -188,6 +209,7 @@ export function BookmarksPopover({
             <button
               ref={addButtonRef}
               className="bookmarks-popover__add-btn"
+              data-testid="bookmark-current-toggle"
               onClick={handleAdd}
               title="Bookmark current folder"
             >

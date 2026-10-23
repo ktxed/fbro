@@ -108,6 +108,7 @@ FBRO_E2E_REMOTE_ONLY=1 GDK_BACKEND=wayland npm run e2e:smoke:local_debug
 | Flag | Runs |
 | --- | --- |
 | `FBRO_E2E_FOCUS_ONLY=1` | Focus handoffs and modal ownership |
+| `FBRO_E2E_BOOKMARKS_ONLY=1` | Bookmark creation, keyboard navigation, focus, and list sizing |
 | `FBRO_E2E_BUTTON_BAR_ONLY=1` | Persistent button bar visibility, Settings and command palette, hidden-bar shortcuts, focus, both themes, and invalid values |
 | `FBRO_E2E_PANEL_SELECTION_ONLY=1` | Space selection, folder sizes, Shift+Space targeting, mask selection, and keyboard ownership in list/grid views |
 | `FBRO_E2E_SELECTION_MASK_ONLY=1` | Select/Deselect Files masks, defaults, keyboard/focus ownership, and full windowed-list matching |

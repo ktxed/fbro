@@ -498,7 +498,7 @@ async function verifyLocalSymlinkNavigation(browser, observer, aSrc) {
   if (observer.state.panels.left?.path !== linksDir) throw new Error("broken link changed panel path");
 }
 
-async function verifyBookmarksKeyboardNavigation(browser, observer, aSrc, restorePath) {
+export async function verifyBookmarksKeyboardNavigation(browser, observer, aSrc, restorePath) {
   const bookmarkNames = Array.from({ length: 18 }, (_, index) =>
     `bookmark-target-${String(index).padStart(2, "0")}`
   );
@@ -541,6 +541,40 @@ async function verifyBookmarksKeyboardNavigation(browser, observer, aSrc, restor
     throw new Error("bookmark list did not initially select its first entry");
   }
 
+  const currentBookmarkToggle = '[data-testid="bookmark-current-toggle"]';
+  const bookmarkList = '[data-testid="bookmarks-popover"] [role="listbox"]';
+  await waitFor(() => browser.$(bookmarkList).isFocused(), {
+    timeout: 5_000,
+    label: "bookmark list initial focus",
+  });
+  await browser.keys("ArrowUp");
+  await waitFor(() => browser.$(currentBookmarkToggle).isFocused(), {
+    timeout: 5_000,
+    label: "bookmark current-folder action focus",
+  });
+  await browser.keys("ArrowDown");
+  await waitFor(() => browser.$(bookmarkList).isFocused(), {
+    timeout: 5_000,
+    label: "bookmark list focus returns from current-folder action",
+  });
+  if (await selectedBookmarkPath() !== bookmarkPaths[0]) {
+    throw new Error("returning from the current-folder action changed the bookmark selection");
+  }
+  await browser.keys("ArrowUp");
+  await waitFor(() => browser.$(currentBookmarkToggle).isFocused(), {
+    timeout: 5_000,
+    label: "bookmark current-folder action refocus",
+  });
+  await browser.keys("Enter");
+  await waitFor(() => observer.state.bookmarks?.some((bookmark) => bookmark.path === aSrc), {
+    timeout: 10_000,
+    label: "keyboard-created bookmark",
+  });
+  await waitFor(() => browser.$(bookmarkList).isFocused(), {
+    timeout: 5_000,
+    label: "bookmark list focus after keyboard creation",
+  });
+
   await browser.keys("ArrowDown");
   await waitFor(async () => await selectedBookmarkPath() === bookmarkPaths[1], {
     timeout: 10_000,
@@ -571,7 +605,9 @@ async function verifyBookmarksKeyboardNavigation(browser, observer, aSrc, restor
     observer.sendIntent("RemoveBookmark", undefined, { path: bookmarkPath });
     fs.rmSync(hostPath(bookmarkPath), { recursive: true });
   }
-  await waitFor(() => bookmarkPaths.every((bookmarkPath) =>
+  observer.sendIntent("RemoveBookmark", undefined, { path: aSrc });
+  const fixtureBookmarks = [...bookmarkPaths, aSrc];
+  await waitFor(() => fixtureBookmarks.every((bookmarkPath) =>
     !observer.state.bookmarks?.some((bookmark) => bookmark.path === bookmarkPath)), {
     timeout: 10_000,
     label: "bookmark keyboard fixture cleanup",

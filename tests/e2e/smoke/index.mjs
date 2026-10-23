@@ -2,6 +2,7 @@ import path from "node:path";
 import {
   appBinary,
   artifactsDir,
+  backendPath,
   localMode,
   webdriverHosts,
   webdriverPorts,
@@ -28,7 +29,7 @@ import { runHashCheckFlow } from "./cases/hash-check.mjs";
 import { runGlobalSelectionFlow } from "./cases/global-selection.mjs";
 import { runGitFlow } from "./cases/git.mjs";
 import { runGitInitFlow } from "./cases/git-init.mjs";
-import { runLocalFlow } from "./cases/local.mjs";
+import { runLocalFlow, verifyBookmarksKeyboardNavigation } from "./cases/local.mjs";
 import { runPanelSelectionFlow } from "./cases/panel-selection.mjs";
 import { runSelectionMaskFlow } from "./cases/selection-mask.mjs";
 import { runFocusHandoffFlow } from "./cases/focus-handoff.mjs";
@@ -70,6 +71,12 @@ async function main() {
     browserA = await startBrowser("fbro-a", webdriverHosts.a, webdriverPorts.a, appA);
     observerA = new FbroObserver("fbro-a", wsUrls.a);
     await observerA.connect();
+
+    if (process.env.FBRO_E2E_BOOKMARKS_ONLY === "1") {
+      const aSrc = backendPath("a", "src");
+      await verifyBookmarksKeyboardNavigation(browserA, observerA, aSrc, aSrc);
+      return;
+    }
 
     if (process.env.FBRO_E2E_BUTTON_BAR_ONLY === "1") {
       await runButtonBarFlow(browserA, observerA);

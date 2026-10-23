@@ -943,8 +943,14 @@ body {
   text-overflow: ellipsis;
 }
 
-.bookmarks-popover__add-btn:hover {
+.bookmarks-popover__add-btn:hover,
+.bookmarks-popover__add-btn:focus-visible {
   background: var(--bg-focused);
+}
+
+.bookmarks-popover__add-btn:focus-visible {
+  outline: 1px solid var(--border-focus);
+  outline-offset: -1px;
 }
 
 .bookmarks-popover__add-btn--added {
