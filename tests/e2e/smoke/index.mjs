@@ -34,6 +34,7 @@ import { runSelectionMaskFlow } from "./cases/selection-mask.mjs";
 import { runFocusHandoffFlow } from "./cases/focus-handoff.mjs";
 import { runNotificationsFlow } from "./cases/notifications.mjs";
 import { runViewerFlow } from "./cases/viewer.mjs";
+import { runDiffFlow } from "./cases/diff.mjs";
 import { runHeicFlow } from "./cases/heic.mjs";
 import { runButtonBarFlow } from "./cases/button-bar.mjs";
 import { runQuickEditFlow } from "./cases/quick-edit.mjs";
@@ -114,6 +115,10 @@ async function main() {
       return;
     }
 
+    if (process.env.FBRO_E2E_DIFF_ONLY === "1") {
+      await runDiffFlow(browserA, observerA);
+      return;
+    }
     if (process.env.FBRO_E2E_GIT_ONLY === "1") {
       await runGitInitFlow(browserA, observerA);
       await runGitFlow(browserA, observerA);
@@ -138,6 +143,7 @@ async function main() {
     await runFocusHandoffFlow(browserA, observerA);
     if (process.env.FBRO_E2E_FOCUS_ONLY === "1") return;
     await runLocalFlow(browserA, observerA);
+    await runDiffFlow(browserA, observerA);
     await runViewerFlow(browserA, observerA);
     await runHeicFlow(browserA, observerA);
     await runQuickEditFlow(browserA, observerA);

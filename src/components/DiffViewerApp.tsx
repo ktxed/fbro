@@ -212,7 +212,7 @@ export function DiffViewerApp({ requestId, windowLabel, initialColorScheme }: Di
     });
   }, [changedBlocks.length]);
 
-  const scrollDiffVertically = useCallback((destination: "start" | "end" | "page-up" | "page-down") => {
+  const scrollDiffVertically = useCallback((destination: "start" | "end" | "page-up" | "page-down" | "line-up" | "line-down") => {
     const source = mode === "split" ? leftPaneRef.current : unifiedBodyRef.current;
     if (!source) return;
     let scrollTop: number;
@@ -220,6 +220,8 @@ export function DiffViewerApp({ requestId, windowLabel, initialColorScheme }: Di
       scrollTop = 0;
     } else if (destination === "end") {
       scrollTop = source.scrollHeight;
+    } else if (destination === "line-up" || destination === "line-down") {
+      scrollTop = source.scrollTop + (destination === "line-down" ? DIFF_ROW_HEIGHT : -DIFF_ROW_HEIGHT);
     } else {
       const page = Math.max(DIFF_ROW_HEIGHT, source.clientHeight - DIFF_ROW_HEIGHT);
       scrollTop = source.scrollTop + (destination === "page-down" ? page : -page);
@@ -296,11 +298,13 @@ export function DiffViewerApp({ requestId, windowLabel, initialColorScheme }: Di
       }
       if (event.key === "ArrowDown") {
         event.preventDefault();
-        jumpChange(1);
+        if (changedBlocks.length <= 1) scrollDiffVertically("line-down");
+        else jumpChange(1);
       }
       if (event.key === "ArrowUp") {
         event.preventDefault();
-        jumpChange(-1);
+        if (changedBlocks.length <= 1) scrollDiffVertically("line-up");
+        else jumpChange(-1);
       }
       if (event.key === "ArrowLeft") {
         event.preventDefault();
@@ -313,7 +317,7 @@ export function DiffViewerApp({ requestId, windowLabel, initialColorScheme }: Di
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [jumpChange, requestId, result?.navigation, scrollDiffHorizontally, scrollDiffVertically]);
+  }, [changedBlocks.length, jumpChange, requestId, result?.navigation, scrollDiffHorizontally, scrollDiffVertically]);
 
   const colorScheme = resolveColorScheme(colorSchemeId);
   const rowCount = result?.rows.length ?? 0;

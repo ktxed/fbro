@@ -225,6 +225,10 @@ History Load more is excluded from Tab order to avoid scrolling to it; Space
 from a commit row still loads the next page, and the button remains clickable.
 The diff viewer uses the same file order as the separate viewer: `J` opens
 the next changed file, and `K` opens the previous changed file.
+In the diff viewer, Up/Down jump between change blocks when there are multiple
+blocks. With zero or one block (including an entirely new or deleted file),
+Up/Down scroll by one line instead. Split panes scroll together. P/N always
+select the previous/next change block; Home/End and PageUp/PageDown scroll.
 Shift+J/Shift+K select the next/previous panel tab.
 
 ---

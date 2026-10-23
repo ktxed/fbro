@@ -114,6 +114,7 @@ FBRO_E2E_REMOTE_ONLY=1 GDK_BACKEND=wayland npm run e2e:smoke:local_debug
 | `FBRO_E2E_NOTIFICATIONS_ONLY=1` | Notification publication, FIFO toasts, history, clear, keyboard focus, and reload |
 | `FBRO_E2E_THUMBNAILS_ONLY=1` | Thumbnail settings, Jobs queue, and viewport behavior |
 | `FBRO_E2E_VIEWER_ONLY=1` | Viewer and preview regressions |
+| `FBRO_E2E_DIFF_ONLY=1` | New-file diff Up/Down scrolling in split and unified views |
 | `FBRO_E2E_GIT_ONLY=1` | Repository initialization and Git operations |
 | `FBRO_E2E_HASH_CHECK_ONLY=1` | Check hashes |
 | `FBRO_E2E_HASH_GENERATE_ONLY=1` | Generate hashes, followed by Check hashes |
@@ -139,6 +140,7 @@ coverage reference.
 
 | Area | Case files | Main checks |
 | --- | --- | --- |
+| Diff viewer | `diff.mjs` | Up/Down scroll an entirely new file in split and unified views; split panes stay synchronized |
 | Local files and UI | `local.mjs` | Create, copy, overwrite, rename, delete, sort, filtering, empty-folder suggestions, settings, bookmarks, Bros, clipboard feedback, grid navigation, and symlink routes |
 | Bottom button bar | `button-bar.mjs` | Keyboard toggle in Settings → Display, palette recovery while hidden, backend-confirmed state shared between clients, frontend reload with the bar hidden, reclaimed layout space in both themes, file shortcuts and zoom while hidden, modal guards, opener restoration, and invalid-setting rejection. Rust settings tests cover older-file defaults and persistence round-trips. |
 | File icons | `file-icons.mjs` (called by the local flow) | Exact extension keys, case normalization, and successfully loaded panel icons for HTML, PNG, JPEG, JSON, and TOML. Backend capability gates the cache control; on macOS keyboard clearing increments the icon revision and preserves button focus. Disk reuse, corruption recovery, and clearing are covered by `platform::macos::icon_cache::tests`. Native macOS PNG lookup is also covered by `platform::tests::native_extension_icons_are_png`; visually check both color schemes on macOS. |
