@@ -48,10 +48,72 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::oneshot;
 use tokio::time::timeout;
 
+use crate::journal::{RemoteJournal, RemoteKind, RemoteOperation, RemotePhase};
 use crate::remote::keys::{fingerprint_of, Identity};
 use crate::remote::pairing::{default_peers_path, derive_code, save_peers, HANDSHAKE_TTL};
 use crate::state::{PairedPeer, SharedState};
 use crate::ws::protocol::{now, ServerMessage};
+
+/// One context follows the actual handshake, including connection failures.
+/// Only explicit fields enter the journal; wire frames and errors may contain secrets.
+struct PairingAudit {
+    journal: RemoteJournal,
+    operation: Option<RemoteOperation>,
+    peer_fingerprint: Option<String>,
+    peer_name: Option<String>,
+}
+
+impl PairingAudit {
+    fn outgoing(journal: RemoteJournal, host: &str, port: u16) -> Self {
+        let operation = journal.begin(RemoteKind::Pairing, None, None, "outgoing");
+        operation.record(
+            RemotePhase::Requested,
+            serde_json::json!({"endpoint": format!("{host}:{port}")}),
+        );
+        Self {
+            journal,
+            operation: Some(operation),
+            peer_fingerprint: None,
+            peer_name: None,
+        }
+    }
+
+    fn incoming(journal: RemoteJournal) -> Self {
+        Self {
+            journal,
+            operation: None,
+            peer_fingerprint: None,
+            peer_name: None,
+        }
+    }
+
+    fn peer(&mut self, fingerprint: &str, name: &str) {
+        self.peer_fingerprint = Some(fingerprint.into());
+        self.peer_name = Some(name.into());
+        if self.operation.is_none() {
+            let operation = self.journal.begin(
+                RemoteKind::Pairing,
+                Some(fingerprint),
+                Some(name),
+                "incoming",
+            );
+            operation.record(RemotePhase::Requested, serde_json::json!({}));
+            self.operation = Some(operation);
+        }
+    }
+
+    fn finish(&mut self, phase: RemotePhase) {
+        if let Some(operation) = &self.operation {
+            operation.record(
+                phase,
+                serde_json::json!({
+                    "peerFingerprint": self.peer_fingerprint,
+                    "peerName": self.peer_name,
+                }),
+            );
+        }
+    }
+}
 
 pub const PAIR_PORT: u16 = 7880;
 
@@ -139,17 +201,30 @@ pub async fn initiate(
         let guard = state.lock().await;
         guard.share_config.allow_ipv6
     };
-    let endpoint = resolve_endpoint(&host, port, allow_ipv6).await?;
-    let sock = timeout(
-        std::time::Duration::from_secs(5),
-        TcpStream::connect(endpoint),
-    )
-    .await
-    .map_err(|_| "connect timeout".to_string())?
-    .map_err(|e| format!("connect: {e}"))?;
-    drive_handshake(sock, state, identity, true, endpoint_hint)
+    let journal = state.lock().await.remote_journal.clone();
+    let mut audit = PairingAudit::outgoing(journal, &host, port);
+    let result = async {
+        let endpoint = resolve_endpoint(&host, port, allow_ipv6).await?;
+        let sock = timeout(
+            std::time::Duration::from_secs(5),
+            TcpStream::connect(endpoint),
+        )
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|_| "connect timeout".to_string())?
+        .map_err(|e| format!("connect: {e}"))?;
+        drive_handshake(sock, state, identity, true, endpoint_hint, &mut audit)
+            .await
+            .map_err(|e| e.to_string())
+    }
+    .await;
+    if let Err(error) = &result {
+        audit.finish(if error == "connect timeout" {
+            RemotePhase::Timeout
+        } else {
+            RemotePhase::Failed
+        });
+    }
+    result
 }
 
 async fn resolve_endpoint(host: &str, port: u16, allow_ipv6: bool) -> Result<SocketAddr, String> {
@@ -178,7 +253,9 @@ async fn handle_inbound(
     let first = read_frame(&mut reader).await?;
     match first {
         Frame::Hello { .. } => {
-            run_handshake(
+            let journal = state.lock().await.remote_journal.clone();
+            let mut audit = PairingAudit::incoming(journal);
+            let result = run_handshake(
                 state,
                 identity,
                 &mut reader,
@@ -186,8 +263,13 @@ async fn handle_inbound(
                 /* initiator */ false,
                 /* peer_hello_already_read */ Some(first),
                 None,
+                &mut audit,
             )
-            .await
+            .await;
+            if result.is_err() {
+                audit.finish(RemotePhase::Failed);
+            }
+            result
         }
         Frame::Revoke {
             from_fp,
@@ -213,6 +295,7 @@ async fn drive_handshake(
     identity: Arc<Identity>,
     initiator: bool,
     endpoint_hint: Option<(String, u16)>,
+    audit: &mut PairingAudit,
 ) -> io::Result<()> {
     let (read_half, mut write_half) = sock.into_split();
     let mut reader = BufReader::new(read_half);
@@ -224,6 +307,7 @@ async fn drive_handshake(
         initiator,
         None,
         endpoint_hint,
+        audit,
     )
     .await
 }
@@ -236,6 +320,7 @@ async fn run_handshake<R, W>(
     initiator: bool,
     peer_hello_already_read: Option<Frame>,
     endpoint_hint: Option<(String, u16)>,
+    audit: &mut PairingAudit,
 ) -> io::Result<()>
 where
     R: AsyncBufReadExt + Unpin,
@@ -258,17 +343,13 @@ where
     // each other's Hello and the order doesn't matter. The dispatch
     // wrapper may have already consumed the peer's Hello for us.
     let peer_hello: Frame = if let Some(frame) = peer_hello_already_read {
-        // We're the responder and the dispatcher already read the Hello.
-        // Just send ours.
-        write_frame(write_half, &our_hello).await?;
+        // Validate the inbound request before recording it or sending our response.
         frame
     } else if initiator {
         write_frame(write_half, &our_hello).await?;
         read_frame(reader).await?
     } else {
-        let frame = read_frame(reader).await?;
-        write_frame(write_half, &our_hello).await?;
-        frame
+        read_frame(reader).await?
     };
 
     let Frame::Hello {
@@ -293,6 +374,10 @@ where
     let their_nonce = decode_16(&their_nonce_b64)
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "malformed peer nonce"))?;
     let their_fp = fingerprint_of(&their_pubkey);
+    audit.peer(&their_fp, &their_name);
+    if !initiator {
+        write_frame(write_half, &our_hello).await?;
+    }
 
     let our_pubkey = identity.public_bytes();
     let code = derive_code(&our_pubkey, &our_nonce, &their_pubkey, &their_nonce);
@@ -314,7 +399,11 @@ where
     // Publish at the handshake boundary, independently of GUI availability.
     let notifications = state.lock().await.notifications.clone();
     crate::notifications::remote::pairing_requested(
-        &notifications, initiator, &handshake_id, &their_name, expires_at,
+        &notifications,
+        initiator,
+        &handshake_id,
+        &their_name,
+        expires_at,
     );
 
     // Notify the local FE. (No matching `entityId` since the modal is
@@ -342,23 +431,32 @@ where
             // Sender dropped — likely a revoke or shutdown.
             eprintln!("[pair] {handshake_id} decision channel closed");
             cleanup_handshake(&state, &handshake_id).await;
+            audit.finish(RemotePhase::Rejected);
             emit_resolved(&state, &handshake_id, "rejected", None).await;
             return Ok(());
         }
         Err(_) => {
             eprintln!("[pair] {handshake_id} timed out waiting for local user");
             cleanup_handshake(&state, &handshake_id).await;
+            audit.finish(RemotePhase::Timeout);
             emit_resolved(&state, &handshake_id, "timeout", None).await;
             return Ok(());
         }
     };
-    write_frame(
+    if !local_decision {
+        audit.finish(RemotePhase::Rejected);
+    }
+    if let Err(error) = write_frame(
         write_half,
         &Frame::Decision {
             accept: local_decision,
         },
     )
-    .await?;
+    .await
+    {
+        cleanup_handshake(&state, &handshake_id).await;
+        return Err(error);
+    }
 
     // Now read the peer's decision. Bound by the same TTL — if the peer
     // takes longer than 60s we assume they ghosted.
@@ -371,6 +469,7 @@ where
         Ok(r) => r,
         Err(_) => {
             cleanup_handshake(&state, &handshake_id).await;
+            audit.finish(RemotePhase::Timeout);
             emit_resolved(&state, &handshake_id, "timeout", None).await;
             return Ok(());
         }
@@ -379,12 +478,14 @@ where
         Ok(Frame::Decision { accept }) => accept,
         Ok(_) => {
             cleanup_handshake(&state, &handshake_id).await;
+            audit.finish(RemotePhase::Rejected);
             emit_resolved(&state, &handshake_id, "rejected", None).await;
             return Ok(());
         }
         Err(e) => {
             eprintln!("[pair] {handshake_id} peer decision read failed: {e}");
             cleanup_handshake(&state, &handshake_id).await;
+            audit.finish(RemotePhase::Failed);
             emit_resolved(&state, &handshake_id, "rejected", None).await;
             return Ok(());
         }
@@ -425,12 +526,14 @@ where
         // and `shareConfig` reducers run first — by the time the modal
         // closes on PairingResolved, the auto-connect side effect can
         // already see `paired: true` on the discovered entry.
+        audit.finish(RemotePhase::Paired);
         emit_share_config_patch(&state).await;
         emit_discovered_peers_patch(&state).await;
         emit_resolved(&state, &handshake_id, "paired", Some(their_fp.clone())).await;
         eprintln!("[pair] {handshake_id} paired with {their_fp}");
     } else {
         cleanup_handshake(&state, &handshake_id).await;
+        audit.finish(RemotePhase::Rejected);
         emit_resolved(&state, &handshake_id, "rejected", None).await;
         eprintln!("[pair] {handshake_id} rejected (local={local_decision} peer={peer_accept})");
     }
@@ -566,7 +669,16 @@ async fn handle_revoke(
             g.sources.remove(id);
             g.drivers.remove(id);
         }
-        g.share_config.paired_peers.remove(from_fp);
+        if let Some(peer) = g.share_config.paired_peers.remove(from_fp) {
+            g.remote_journal
+                .begin(
+                    RemoteKind::Pairing,
+                    Some(from_fp),
+                    Some(&peer.name),
+                    "incoming",
+                )
+                .record(RemotePhase::Revoked, serde_json::json!({}));
+        }
         let snapshot = g.share_config.paired_peers.clone();
         drop(g);
         if let Err(e) = save_peers(&default_peers_path(), &snapshot) {
@@ -774,5 +886,114 @@ fn current_os() -> String {
         "windows".to_string()
     } else {
         "unknown".to_string()
+    }
+}
+
+#[cfg(test)]
+mod journal_tests {
+    use super::*;
+
+    struct TestJournal {
+        path: std::path::PathBuf,
+        journal: RemoteJournal,
+    }
+
+    impl TestJournal {
+        fn new() -> Self {
+            let path = std::env::temp_dir().join(format!(
+                "fbro-pair-journal-{}.sqlite3",
+                uuid::Uuid::new_v4()
+            ));
+            Self {
+                journal: RemoteJournal::new(path.clone()),
+                path,
+            }
+        }
+
+        async fn events(&self) -> Vec<serde_json::Value> {
+            self.journal.flush().await;
+            let conn = rusqlite::Connection::open(&self.path).unwrap();
+            let mut stmt = conn
+                .prepare("SELECT payload_json FROM journal_events ORDER BY timestamp_ms, rowid")
+                .unwrap();
+            stmt.query_map([], |row| row.get::<_, String>(0))
+                .unwrap()
+                .map(|row| serde_json::from_str(&row.unwrap()).unwrap())
+                .collect()
+        }
+    }
+
+    impl Drop for TestJournal {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
+
+    #[tokio::test]
+    async fn pairing_journal_records_one_requested_and_outcome_without_secrets() {
+        let fixture = TestJournal::new();
+        let mut audit = PairingAudit::outgoing(fixture.journal.clone(), "localhost", 7880);
+        audit.peer("peer-fingerprint", "other");
+        audit.finish(RemotePhase::Paired);
+        audit.finish(RemotePhase::Failed);
+        let rows = fixture.events().await;
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0]["operationId"], rows[1]["operationId"]);
+        assert_eq!(rows[0]["phase"], "requested");
+        assert_eq!(rows[0]["details"]["endpoint"], "localhost:7880");
+        assert_eq!(rows[1]["peerFingerprint"], "peer-fingerprint");
+        assert_eq!(rows[1]["peerName"], "other");
+        assert_eq!(rows[1]["phase"], "paired");
+        for payload in rows {
+            let text = payload.to_string();
+            for forbidden in ["code", "nonce", "pubkey", "signature"] {
+                assert!(!text.contains(forbidden), "{text}");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn unvalidated_incoming_pairing_is_not_journaled() {
+        let fixture = TestJournal::new();
+        let mut audit = PairingAudit::incoming(fixture.journal.clone());
+        audit.finish(RemotePhase::Failed);
+        assert!(audit.operation.is_none());
+        audit.peer("peer-fingerprint", "other");
+        audit.finish(RemotePhase::Rejected);
+        let rows = fixture.events().await;
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0]["direction"], "incoming");
+        assert_eq!(rows[0]["peerFingerprint"], "peer-fingerprint");
+        assert_eq!(rows[0]["phase"], "requested");
+        assert_eq!(rows[1]["phase"], "rejected");
+    }
+
+    #[tokio::test]
+    async fn pairing_outcomes_are_correlated_in_both_directions() {
+        for outgoing in [true, false] {
+            for (phase, expected) in [
+                (RemotePhase::Paired, "paired"),
+                (RemotePhase::Rejected, "rejected"),
+                (RemotePhase::Timeout, "timeout"),
+                (RemotePhase::Failed, "failed"),
+            ] {
+                let fixture = TestJournal::new();
+                let mut audit = if outgoing {
+                    PairingAudit::outgoing(fixture.journal.clone(), "localhost", 7880)
+                } else {
+                    PairingAudit::incoming(fixture.journal.clone())
+                };
+                audit.peer("peer-fingerprint", "other");
+                audit.finish(phase);
+                let rows = fixture.events().await;
+                assert_eq!(rows.len(), 2);
+                assert_eq!(rows[0]["operationId"], rows[1]["operationId"]);
+                assert_eq!(rows[1]["phase"], expected);
+                assert_eq!(
+                    rows[1]["direction"],
+                    if outgoing { "outgoing" } else { "incoming" }
+                );
+            }
+        }
     }
 }

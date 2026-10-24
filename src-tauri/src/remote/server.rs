@@ -869,7 +869,7 @@ impl SftpHandler {
         tokio::task::spawn_blocking(move || {
             let result =
                 build_manifest_on_remote(&state, &control_job_id, &*driver, &root_path, &job);
-            let (visible_job_id, terminal_event, terminal_error, processed, error_count) = {
+            let (visible_job_id, terminal_event, terminal_error, processed, error_count, files) = {
                 let mut guard = job.blocking_lock();
                 match result {
                     Ok(()) => {}
@@ -892,14 +892,24 @@ impl SftpHandler {
                 } else {
                     "Completed"
                 };
+                let files = guard.entries.iter().map(|entry| serde_json::json!({
+                    "name": entry.path.rsplit('/').next(),
+                    "sourcePath": compose_driver_path(&root_path, &entry.path),
+                    "size": entry.size, "bytesHashed": entry.size,
+                })).chain(guard.errors.iter().map(|entry| serde_json::json!({
+                    "sourcePath": compose_driver_path(&root_path, &entry.path), "error": entry.message,
+                }))).collect();
                 (
                     guard.visible_job_id.clone(),
                     event.to_string(),
                     guard.error.clone(),
                     guard.processed,
                     guard.errors.len(),
+                    files,
                 )
             };
+            crate::journal::jobs::attach_result(&mut state.blocking_lock(), &visible_job_id,
+                serde_json::json!({ "processed": processed, "errors": error_count }), Some(files));
             eprintln!(
                 "[remote-manifest] finish control_job={control_job_id} ui_job={visible_job_id} event={terminal_event} processed={processed} errors={error_count}"
             );
@@ -1173,6 +1183,7 @@ async fn start_outgoing_transfer(
                 keep_partial_files_on_cancel: Arc::new(AtomicBool::new(false)),
             },
         );
+        crate::journal::jobs::start(&mut guard, &job_id);
         (job_id, cancel_rx, guard.gui_senders.clone(), peer_label)
     };
 
@@ -1262,6 +1273,7 @@ async fn emit_outgoing_progress(state: &SharedState, transfer: &mut OutgoingTran
                 meta.completion_generation = transfer.completion_generation;
             }
         }
+        crate::journal::jobs::activity(&mut guard, &transfer.job_id, Some(&transfer.files));
         guard.gui_senders.clone()
     };
     for tx in senders {
@@ -1304,6 +1316,7 @@ async fn finish_outgoing_transfer_if_current(
             }
         };
         let error = job.error.clone();
+        crate::journal::jobs::terminal(&mut guard, &job_id, event, error.as_deref());
         (event.to_string(), error, guard.gui_senders.clone())
     };
     crate::notifications::jobs::publish_terminal(&state, &job_id, &event, error.as_deref()).await;
@@ -1371,6 +1384,7 @@ async fn start_remote_manifest_job(
                 keep_partial_files_on_cancel: Arc::new(AtomicBool::new(false)),
             },
         );
+        crate::journal::jobs::start(&mut guard, &job_id);
         (job_id, cancel_rx, guard.gui_senders.clone(), peer_label)
     };
 
@@ -1412,6 +1426,15 @@ fn emit_remote_manifest_progress_sync(state: &SharedState, job_id: &str, progres
             }
             job.state = JobState::Running;
             job.progress = progress.clone();
+        }
+        if let Some(path) = &progress.current_file {
+            let root = guard.job_store.jobs.get(job_id).and_then(|job| match &job.kind {
+                JobKind::RemoteManifest(meta) => Some(meta.root.clone()), _ => None,
+            });
+            if let Some(root) = root {
+                crate::journal::jobs::hashed_file(&mut guard, job_id, &compose_driver_path(&root, path),
+                    progress.current_file_bytes_total, progress.current_file_bytes_copied, None);
+            }
         }
         (guard.gui_senders.clone(), progress_schema(&progress))
     };
@@ -1471,6 +1494,7 @@ fn emit_remote_manifest_terminal_sync(
         } else {
             None
         };
+        crate::journal::jobs::terminal(&mut guard, job_id, event, error.as_deref());
         (guard.gui_senders.clone(), guard.notifications.clone(), feedback)
     };
     if let Some(feedback) = feedback {
@@ -1532,6 +1556,7 @@ async fn emit_remote_manifest_terminal(
         } else {
             None
         };
+        crate::journal::jobs::terminal(&mut guard, job_id, event, error.as_deref());
         (guard.gui_senders.clone(), guard.notifications.clone(), feedback)
     };
     if let Some(feedback) = feedback {

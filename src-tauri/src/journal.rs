@@ -13,6 +13,13 @@ use serde_json::{json, Value};
 use crate::vfs::{DirChild, VfsDriver, VfsEntry, VfsError, VfsKind};
 use crate::ws::protocol::{FilterSpec, SortSpec};
 
+pub(crate) mod jobs;
+mod remote;
+pub use remote::{RemoteJournal, RemoteKind, RemoteOperation, RemotePhase};
+
+#[cfg(test)]
+mod remote_tests;
+
 pub const SOURCE_ID: &str = "journal";
 
 pub(crate) fn database_path() -> std::path::PathBuf {
@@ -20,7 +27,10 @@ pub(crate) fn database_path() -> std::path::PathBuf {
 }
 
 fn open() -> Result<Connection, VfsError> {
-    let path = database_path();
+    open_path(&database_path())
+}
+
+fn open_path(path: &std::path::Path) -> Result<Connection, VfsError> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| VfsError::IOError(e.to_string()))?;
     }
@@ -300,6 +310,8 @@ fn event_name(row: &EventRow) -> String {
         "intent.command.v1" => "intent",
         "mutation.entry.v1" => "mutation",
         "operation.finished.v1" => row.outcome.as_deref().unwrap_or("finished"),
+        "remote.transfer.v1" | "remote.hash.v1" | "remote.sync.v1"
+        | "remote.connection.v1" | "remote.pairing.v1" => row.outcome.as_deref().unwrap_or("event"),
         _ => "event",
     };
     format!("{operation}_v1_{event}_{}.log", row.id)

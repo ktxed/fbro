@@ -21,6 +21,16 @@ delivery chatter. Selected stderr logging remains a separate delivery channel.
 Storage and delivery have separate boundaries; delivery failure cannot undo a
 recorded publication.
 
+Remote activity also has a separate durable record in the existing SQLite
+`journal_events` table, browsable through the read-only Journal source. Remote
+jobs, pairing, and peer connection transitions record semantic lifecycle events
+at their backend owner, independently of notification publication, GUI
+connections, focus, OS delivery preferences, and execution-duration thresholds.
+Clearing notification history does not delete Journal events. Publishing or
+clearing notifications does not itself add Journal events. See
+[remote-fbro.md](remote-fbro.md#durable-remote-activity-journal) for the lifecycle
+and payload contract.
+
 ## Publishing and channels
 
 `NotificationInput` contains `message`, optional `level` (`info`, `warning`, or
@@ -96,7 +106,8 @@ on the initiating instance share one summary. Serving-side transfer completion
 reuses the existing 1.5-second idle heuristic and may later resume; neutral
 “transfer ended” wording does not claim verified completion on the receiving peer.
 Pairing alerts contain the peer name, never the pairing code, and only incoming
-requests qualify.
+requests qualify for OS delivery. The durable Journal records pairing requests
+on both the initiating and receiving instances.
 
 The native sink has a bounded queue of 128 pending deliveries; no native I/O runs
 under notification history or shared-state locks. Linux notifications use fbro's

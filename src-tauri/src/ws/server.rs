@@ -499,6 +499,8 @@ async fn handle_connection(
                 let active_jobs = active_job_count(&state).await;
                 if active_jobs == 0 {
                     save_session(&state, &app_handle).await;
+                    let journal = state.lock().await.remote_journal.clone();
+                    journal.flush().await;
                     std::process::exit(0);
                 } else {
                     let _ = tx.send(ServerMessage::QuitConfirmRequired {
@@ -986,6 +988,8 @@ pub(crate) async fn apply_job_event_to_state(state: &SharedState, msg: &mut Serv
         }
         job_feedback = crate::notifications::jobs::terminal_feedback(job, event, error.as_deref());
     }
+
+    crate::journal::jobs::terminal(&mut state_guard, job_id, event, error.as_deref());
 
     if is_fp_job && matches!(event.as_str(), "Completed" | "Failed" | "Cancelled") {
         if state_guard.job_store.fp_running.as_deref() == Some(job_id.as_str()) {

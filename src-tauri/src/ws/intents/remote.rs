@@ -123,7 +123,11 @@ async fn connect(args: &Value, ctx: &mut IntentContext<'_>) {
             update_paired_endpoint(ctx, &paired.fingerprint, host, port).await;
             push_share_config_patch(ctx).await;
         }
-        Err(e) => send_error(ctx, "remote.connect.failed", &e).await,
+        Err(e) => {
+            let journal = ctx.state.lock().await.remote_journal.clone();
+            record_connection_failure(&journal, &paired.fingerprint, &paired.name, &host, port, "remote.connect.failed", &e);
+            send_error(ctx, "remote.connect.failed", &e).await;
+        }
     }
 }
 
@@ -178,7 +182,11 @@ async fn retry_last_peer(args: &Value, ctx: &mut IntentContext<'_>) {
             update_paired_endpoint(ctx, &paired.fingerprint, host, port).await;
             push_share_config_patch(ctx).await;
         }
-        Err(e) => send_error(ctx, "remote.retry.failed", &e).await,
+        Err(e) => {
+            let journal = ctx.state.lock().await.remote_journal.clone();
+            record_connection_failure(&journal, &paired.fingerprint, &paired.name, &host, port, "remote.retry.failed", &e);
+            send_error(ctx, "remote.retry.failed", &e).await;
+        }
     }
 }
 
@@ -319,6 +327,16 @@ async fn connect_to_endpoint(
     Ok(())
 }
 
+fn record_connection_failure(
+    journal: &crate::journal::RemoteJournal, fingerprint: &str, name: &str,
+    host: &str, port: u16, code: &str, error: &str,
+) {
+    journal.begin(crate::journal::RemoteKind::Connection, Some(fingerprint), Some(name), "outgoing")
+        .record(crate::journal::RemotePhase::Failed, serde_json::json!({
+            "host": host, "port": port, "errorCode": code, "error": error,
+        }));
+}
+
 async fn disconnect(args: &Value, ctx: &mut IntentContext<'_>) {
     let Some(source_id) = args.get("sourceId").and_then(Value::as_str) else {
         send_error(ctx, "remote.disconnect.missing-source", "sourceId required").await;
@@ -441,4 +459,27 @@ async fn send_error(ctx: &mut IntentContext<'_>, code: &str, message: &str) {
             extra: None,
         })
         .await;
+}
+
+#[cfg(test)]
+mod remote_journal_tests {
+    #[tokio::test]
+    async fn connection_execution_failure_is_journaled_without_a_false_connected_event() {
+        struct TempDir(std::path::PathBuf);
+        impl Drop for TempDir { fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); } }
+        let root = TempDir(std::env::temp_dir().join(format!("fbro-connect-audit-{}", uuid::Uuid::new_v4())));
+        let path = root.0.join("journal.sqlite3");
+        let journal = crate::journal::RemoteJournal::new(path.clone());
+        super::record_connection_failure(&journal, "peer", "Laptop", "127.0.0.1", 7879,
+            "remote.connect.failed", "connection refused");
+        journal.flush().await;
+        let conn = rusqlite::Connection::open(path).unwrap();
+        let payload: String = conn.query_row("SELECT payload_json FROM journal_events", [], |row| row.get(0)).unwrap();
+        let event: serde_json::Value = serde_json::from_str(&payload).unwrap();
+        assert_eq!(event["kind"], "remote-connection");
+        assert_eq!(event["phase"], "failed");
+        assert_eq!(event["peerFingerprint"], "peer");
+        assert_eq!(event["details"]["error"], "connection refused");
+        assert_eq!(conn.query_row("SELECT COUNT(*) FROM journal_events", [], |row| row.get::<_, u64>(0)).unwrap(), 1);
+    }
 }

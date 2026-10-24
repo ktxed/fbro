@@ -514,7 +514,11 @@ async fn revoke_pairing(args: &Value, ctx: &mut IntentContext<'_>) {
 
     {
         let mut state = ctx.state.lock().await;
-        state.share_config.paired_peers.remove(&fp);
+        if let Some(peer) = state.share_config.paired_peers.remove(&fp) {
+            state.remote_journal.begin(
+                crate::journal::RemoteKind::Pairing, Some(&fp), Some(&peer.name), "outgoing",
+            ).record(crate::journal::RemotePhase::Revoked, serde_json::json!({}));
+        }
         // Best-effort persist; if the write fails, the revoke is still
         // effective in-memory for this session.
         let snapshot = state.share_config.paired_peers.clone();

@@ -264,6 +264,46 @@ fn empty_test_state() -> SharedState {
 }
 
 #[tokio::test]
+async fn remote_journal_records_outgoing_idle_intervals_without_gui_or_notifications() {
+    struct TempDir(std::path::PathBuf);
+    impl Drop for TempDir {
+        fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); }
+    }
+    let root = TempDir(std::env::temp_dir().join(format!("fbro-remote-audit-{}", uuid::Uuid::new_v4())));
+    let path = root.0.join("journal.sqlite3");
+    let journal = crate::journal::RemoteJournal::new(path.clone());
+    let state = test_state_with_shared_home_and_volume(Arc::new(RecordingDriver::default()));
+    state.lock().await.remote_journal = journal.clone();
+    let mut handler = SftpHandler::new(state.clone(), "peer".into());
+    let first = open_test_transfer(&mut handler, "audit-intervals").await.unwrap();
+    let job_id = handler.transfers["client:audit-intervals"].job_id.clone();
+    handler.read(3, first.handle.clone(), 0, 3).await.unwrap();
+    handler.close(4, first.handle).await.unwrap();
+    finish_outgoing_transfer(state.clone(), job_id.clone()).await;
+    state.lock().await.notifications.clear();
+    let second = open_test_transfer(&mut handler, "audit-intervals").await.unwrap();
+    handler.read(5, second.handle.clone(), 3, 4).await.unwrap();
+    handler.close(6, second.handle).await.unwrap();
+    finish_outgoing_transfer(state.clone(), job_id.clone()).await;
+    finish_outgoing_transfer(state.clone(), job_id.clone()).await;
+    drop(handler);
+    journal.flush().await;
+    let rows: Vec<serde_json::Value> = if path.exists() {
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        let mut query = conn.prepare("SELECT payload_json FROM journal_events WHERE job_id = ?1 ORDER BY rowid").unwrap();
+        query.query_map([&job_id], |row| row.get::<_, String>(0)).unwrap()
+            .map(|row| serde_json::from_str(&row.unwrap()).unwrap()).collect()
+    } else { Vec::new() };
+    assert_eq!(rows.iter().map(|row| row["phase"].as_str().unwrap()).collect::<Vec<_>>(),
+        ["started", "ended", "resumed", "ended"]);
+    assert!(rows.iter().all(|row| row["operationId"] == rows[0]["operationId"]));
+    assert_eq!(rows[1]["details"]["progress"]["totalBytesCopied"], 3);
+    assert_eq!(rows[3]["details"]["progress"]["totalBytesCopied"], 7);
+    assert_eq!(rows[3]["details"]["files"][0]["name"], "file.jpg");
+    assert_eq!(rows[3]["peerFingerprint"], "peer");
+}
+
+#[tokio::test]
 async fn outgoing_job_file_location_uses_local_backing_path_for_internal_share() {
     struct TempDir(std::path::PathBuf);
     impl Drop for TempDir {
@@ -1251,4 +1291,66 @@ async fn outgoing_viewer_open_handles_and_reopens_prevent_idle_completion() {
         state.lock().await.job_store.jobs[&job_id].state,
         JobState::Completed
     );
+}
+
+#[tokio::test]
+async fn remote_journal_reconnect_retains_files_and_actual_served_totals() {
+    struct TempDir(std::path::PathBuf);
+    impl Drop for TempDir { fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); } }
+    let root = TempDir(std::env::temp_dir().join(format!("fbro-remote-reconnect-{}", uuid::Uuid::new_v4())));
+    let path = root.0.join("journal.sqlite3");
+    let journal = crate::journal::RemoteJournal::new(path.clone());
+    let state = empty_test_state();
+    state.lock().await.remote_journal = journal.clone();
+    let mut first = start_outgoing_transfer(&state, "peer", "client:reconnect-audit").await.unwrap();
+    first.files.push(FileOpFileSchema { name: "a.txt".into(), source_path: Some("/a.txt".into()),
+        size: Some(3), kind: "file".into(), dest_name: None, location: None });
+    first.progress.total_bytes_copied = 3;
+    emit_outgoing_progress(&state, &mut first, true).await;
+    finish_outgoing_transfer(state.clone(), first.job_id.clone()).await;
+    let mut second = start_outgoing_transfer(&state, "peer", "client:reconnect-audit").await.unwrap();
+    second.files.push(FileOpFileSchema { name: "b.txt".into(), source_path: Some("/b.txt".into()),
+        size: Some(4), kind: "file".into(), dest_name: None, location: None });
+    second.progress.total_bytes_copied = 4;
+    emit_outgoing_progress(&state, &mut second, true).await;
+    finish_outgoing_transfer(state.clone(), second.job_id.clone()).await;
+    journal.flush().await;
+    let conn = rusqlite::Connection::open(path).unwrap();
+    let mut query = conn.prepare("SELECT payload_json FROM journal_events ORDER BY rowid").unwrap();
+    let rows: Vec<serde_json::Value> = query.query_map([], |row| row.get::<_, String>(0)).unwrap()
+        .map(|row| serde_json::from_str(&row.unwrap()).unwrap()).collect();
+    assert_eq!(rows.len(), 4);
+    assert!(rows.iter().all(|row| row["operationId"] == rows[0]["operationId"]));
+    let last = rows.last().unwrap();
+    assert_eq!(last["details"]["files"].as_array().unwrap().len(), 2);
+    assert_eq!(last["details"]["operationTotals"]["bytesServed"], 7);
+    assert_eq!(last["details"]["progress"]["totalBytesCopied"], 4);
+    assert!(last["details"].get("destPath").is_none());
+}
+
+#[tokio::test]
+async fn remote_journal_hash_failure_retains_observed_partial_bytes() {
+    struct TempDir(std::path::PathBuf);
+    impl Drop for TempDir { fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); } }
+    let root = TempDir(std::env::temp_dir().join(format!("fbro-remote-hash-audit-{}", uuid::Uuid::new_v4())));
+    let path = root.0.join("journal.sqlite3");
+    let journal = crate::journal::RemoteJournal::new(path.clone());
+    let state = empty_test_state();
+    state.lock().await.remote_journal = journal.clone();
+    let (job_id, _) = start_remote_manifest_job(&state, "peer", "/root", "/share").await;
+    {
+        let mut guard = state.lock().await;
+        crate::journal::jobs::hashed_file(&mut guard, &job_id, "/root/a.txt", 7, 3, None);
+        crate::journal::jobs::hashed_file(&mut guard, &job_id, "/root/a.txt", 0, 0, Some("read failed"));
+        crate::journal::jobs::attach_result(&mut guard, &job_id, serde_json::json!({"errors": 1}),
+            Some(vec![serde_json::json!({"sourcePath": "/root/a.txt", "error": "read failed"})]));
+    }
+    emit_remote_manifest_terminal(&state, &job_id, "Failed", Some("read failed".into())).await;
+    journal.flush().await;
+    let conn = rusqlite::Connection::open(path).unwrap();
+    let row: String = conn.query_row("SELECT payload_json FROM journal_events WHERE outcome = 'failed'", [], |row| row.get(0)).unwrap();
+    let event: serde_json::Value = serde_json::from_str(&row).unwrap();
+    assert_eq!(event["details"]["bytesHashed"], 3);
+    assert_eq!(event["details"]["files"][0]["bytesHashed"], 3);
+    assert_eq!(event["details"]["files"][0]["size"], 7);
 }

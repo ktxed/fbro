@@ -285,6 +285,64 @@ not promise that the receiver verified the complete copy. No new completion
 handshake or remote wire format is introduced in this phase. See
 [notifications.md](notifications.md) for delivery, focus, and expiry policy.
 
+### Durable remote activity journal
+
+The backend records remote activity in the existing SQLite `journal_events`
+table. The read-only Journal VFS lists these records alongside existing command
+events and exposes each record as readable event text followed by a JSON
+`Payload:` section. This uses the existing schema and remote wire protocol;
+there is no migration or historical backfill.
+
+Journal recording belongs to the operation or peer lifecycle, before notification
+delivery. It runs without GUI clients and is independent of notification history,
+native focus, OS notification settings, delivery channels, and the 30-second OS
+cutoff. Clearing Notifications leaves the Journal intact; notification publication
+and history housekeeping remain excluded from command journaling. Journal write
+failures are diagnostic and do not change operation results.
+
+| Kind / filename prefix | Phases |
+|---|---|
+| `remote-transfer_v1_` | `started`, `resumed`, `ended`, `completed`, `cancelled`, `failed` |
+| `remote-hash_v1_` | `started`, `completed`, `cancelled`, `failed` |
+| `remote-sync_v1_` | `started`, `completed`, `cancelled`, `failed` |
+| `remote-connection_v1_` | `connected`, `disconnected` |
+| `remote-pairing_v1_` | `requested`, `paired`, `rejected`, `timeout`, `failed`, `revoked` |
+
+Filenames append the phase and unique event UUID, for example
+`remote-transfer_v1_ended_<event-uuid>.log`. Each payload contains a stable UUID
+`operationId`, increasing `sequence`, UTC `timestampMs`, `kind`, `phase`,
+`peerFingerprint`, `peerName`, `direction`, and operation-specific `details`.
+Peer identity is populated when known; credentials, pairing codes, nonces, and
+raw key material are never recorded. Both pairing initiators and receivers record
+requests and their terminal outcomes, unlike the incoming-only OS request alert.
+Connection records follow per-peer, per-direction transitions rather than
+individual SFTP channels or GUI subscriptions. Failed explicit Connect/Retry
+attempts record one failure with the known peer and endpoint, without inventing
+a connected/disconnected interval; unchanged automatic retry noise is excluded.
+Revocation records the local
+removal of a paired peer.
+
+Job details include `jobId`, backend-owned file-list snapshots, known source and
+destination roots/locations, actual progress, and terminal errors or comparison
+summaries when available. File details retain names and known paths so a summary
+can be inspected after the live job disappears. Serving records omit destinations
+unknown to that instance. Progress reports actual bytes served or processed;
+an idle viewer read does not imply that the complete file was downloaded or
+verified. Sync Bro records the initiating compare and the serving manifest/hash
+work in their respective instances.
+
+Every serving transfer idle interval records `ended`. Later reads record
+`resumed` and another `ended` under the same `operationId`, retaining the job's
+file snapshot and progress. Cancellation and failure are final and cannot resume.
+Tagged transfers retain their known file set across replacement SFTP sessions.
+Each record's `progress` describes its current job; `operationTotals.bytesServed`
+retains the sum of bytes actually served across those jobs, including retry reads.
+It does not invent unique-file completeness across resumed ranges. Hash failures
+retain the bytes already observed before the error.
+Lifecycle claims deduplicate repeated GUI delivery and completion races without
+suppressing later idle intervals. Records are queued in order to a dedicated
+writer; SQLite work does not run under the shared application-state lock.
+
 ### Shared folders
 
 Settings → Sharing retains the source/Home/bookmark checkboxes and adds a

@@ -98,6 +98,10 @@ pub async fn run_file_op(
     keep_partial_files_on_cancel: Arc<AtomicBool>,
 ) {
     let op_name = file_op_name(&op_type);
+    // Remote results are captured with peer/files/progress at the authoritative
+    // job transition. Retain the existing single result for local operations.
+    let remote = src_driver.as_any().is::<crate::vfs::sftp::SftpFsDriver>()
+        || dst_driver.as_ref().is_some_and(|driver| driver.as_any().is::<crate::vfs::sftp::SftpFsDriver>());
     let job_id_clone = job_id.clone();
     let tx_clone = tx.clone();
     let result = tokio::task::spawn_blocking(move || {
@@ -126,20 +130,20 @@ pub async fn run_file_op(
 
     match result {
         Ok(Ok(())) => {
-            crate::journal::record_operation_finished(&job_id, op_name, "completed", None);
+            if !remote { crate::journal::record_operation_finished(&job_id, op_name, "completed", None); }
             let _ = tx_event(&tx, &job_id, "Completed", None, None, None).await;
         }
         Ok(Err(err)) => {
             if err == CANCELLED_ERR {
-                crate::journal::record_operation_finished(&job_id, op_name, "cancelled", None);
+                if !remote { crate::journal::record_operation_finished(&job_id, op_name, "cancelled", None); }
                 let _ = tx_event(&tx, &job_id, "Cancelled", None, None, None).await;
             } else {
-                crate::journal::record_operation_finished(&job_id, op_name, "failed", Some(&err));
+                if !remote { crate::journal::record_operation_finished(&job_id, op_name, "failed", Some(&err)); }
                 let _ = tx_event(&tx, &job_id, "Failed", None, None, Some(err)).await;
             }
         }
         Err(_) => {
-            crate::journal::record_operation_finished(&job_id, op_name, "cancelled", None);
+            if !remote { crate::journal::record_operation_finished(&job_id, op_name, "cancelled", None); }
             let _ = tx_event(&tx, &job_id, "Cancelled", None, None, None).await;
         }
     }
