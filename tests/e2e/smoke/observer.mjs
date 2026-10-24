@@ -437,6 +437,7 @@ export class FbroObserver {
   #applyJobEvent(msg) {
     const job = this.state.jobs[msg.jobId];
     if (!job) return;
+    if (msg.files) job.files = msg.files;
     if (msg.event === "Queued") job.state = "Queued";
     if (msg.event === "Progress") job.state = "Running";
     if (msg.event === "DecisionRequired") job.state = "AwaitingDecision";

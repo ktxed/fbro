@@ -3863,6 +3863,11 @@ body {
   border-color: var(--border-focus);
 }
 
+.jobs-modal__row:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: -2px;
+}
+
 .jobs-modal__queue-order {
   flex-shrink: 0;
   min-width: 22px;
@@ -4155,7 +4160,7 @@ body {
 
 .jobs-modal__file-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 86px 86px;
+  grid-template-columns: minmax(0, 1fr) 60px 86px auto;
   gap: 8px;
   align-items: center;
   min-height: 24px;
@@ -4163,6 +4168,45 @@ body {
   font-size: 0.78em;
   color: var(--text-dim);
   background: rgba(255, 255, 255, 0.02);
+}
+
+.jobs-modal__file-row--focused {
+  background: var(--bg-focused);
+}
+
+.jobs-modal__file-row:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: -2px;
+}
+
+.jobs-modal__file-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.jobs-modal__file-actions button {
+  appearance: none;
+  font: inherit;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text);
+  background: var(--bg-header);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 2px 6px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.jobs-modal__file-actions button:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: var(--border-focus);
+}
+
+.jobs-modal__file-actions button:disabled {
+  color: var(--text-dim);
+  cursor: default;
 }
 
 .jobs-modal__file-row + .jobs-modal__file-row {

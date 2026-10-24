@@ -1150,6 +1150,15 @@ pub struct SearchProgressSchema {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct JobFileLocationSchema {
+    pub source_id: String,
+    pub path: String,
+    pub parent_path: String,
+    pub cursor_hint: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct FileOpFileSchema {
     pub name: String,
     pub size: Option<u64>,
@@ -1159,6 +1168,9 @@ pub struct FileOpFileSchema {
     /// Backend-resolved destination name in job metadata; never an input override.
     #[serde(default, rename = "destName", skip_serializing_if = "Option::is_none")]
     pub dest_name: Option<String>,
+    /// Backend-owned source location; independent of job display/digest paths.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub location: Option<JobFileLocationSchema>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

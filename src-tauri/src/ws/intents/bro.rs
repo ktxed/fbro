@@ -1221,7 +1221,10 @@ async fn launch_fp_bro(
             .map(|input| input.path.clone())
             .unwrap_or_default()
     });
-    let file_schemas = bro_input_files(&inputs);
+    let file_schemas = {
+        let state = ctx.state.lock().await;
+        bro_input_files(&inputs, &state)
+    };
 
     let job_id = {
         let mut state_guard = ctx.state.lock().await;
@@ -1509,7 +1512,10 @@ async fn launch_hash_bro(
     .map_err(|e| format!("Cannot resolve hash inputs: {e}"))??;
     journal_resolved_bro_launch(parsed, bro, &inputs);
     let source_panel = request.source_panel_id.clone();
-    let files = bro_input_files(&inputs);
+    let files = {
+        let state = ctx.state.lock().await;
+        bro_input_files(&inputs, &state)
+    };
     let (cancel_tx, cancel_rx) = watch::channel(false);
     let (pause_tx, _) = watch::channel(false);
     let job_id = {
@@ -1679,7 +1685,10 @@ async fn launch_fedup_bro(
     let report_path = report_dir
         .map(|dir| dir.join(FEDUP_REPORT_NAME).to_string_lossy().to_string())
         .unwrap_or_else(|| FEDUP_REPORT_NAME.to_string());
-    let file_schemas = bro_input_files(&inputs);
+    let file_schemas = {
+        let state = ctx.state.lock().await;
+        bro_input_files(&inputs, &state)
+    };
     let source_panel_id = request.source_panel_id.clone();
     let scan_options = fedup_scan_options(&launch_params, ctx).await?;
     let job_id = {
@@ -2042,7 +2051,7 @@ fn first_input_parent(inputs: &[BroInputItem]) -> Option<String> {
         .map(|path| path.to_string_lossy().to_string())
 }
 
-fn bro_input_files(inputs: &[BroInputItem]) -> Vec<FileOpFileSchema> {
+fn bro_input_files(inputs: &[BroInputItem], state: &crate::state::AppState) -> Vec<FileOpFileSchema> {
     inputs
         .iter()
         .map(|input| FileOpFileSchema {
@@ -2051,6 +2060,9 @@ fn bro_input_files(inputs: &[BroInputItem]) -> Vec<FileOpFileSchema> {
             kind: input.kind.clone(),
             source_path: None,
             dest_name: None,
+            location: super::navigation::source_for_local_path(state, &input.path)
+                .and_then(|source_id| state.drivers.get(&source_id))
+                .and_then(|driver| super::job_file_location(state, driver, &input.path)),
         })
         .collect()
 }

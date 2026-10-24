@@ -23,6 +23,52 @@ use serde_json::Value;
 
 use crate::ws::runtime::IntentContext;
 
+/// Resolve against the driver captured at launch, never a panel's later location.
+pub(crate) fn job_file_location(
+    state: &crate::state::AppState,
+    driver: &std::sync::Arc<dyn crate::vfs::VfsDriver>,
+    path: &str,
+) -> Option<crate::ws::protocol::JobFileLocationSchema> {
+    let (source_id, path) = if let Some(local_path) = driver.local_path(path) {
+        // LocalFsDriver accepts relative strings too; they are not host locations.
+        if !local_path.is_absolute() {
+            return None;
+        }
+        let path = crate::vfs::local::normalize_path(local_path);
+        (navigation::source_for_local_path(state, &path)?, path)
+    } else {
+        // A local driver without an explicit host-path mapping is not enough
+        // evidence to expose its synthetic or relative path as a host path.
+        if driver.is_local() {
+            return None;
+        }
+        let source_id = state
+            .sources
+            .values()
+            .filter(|source| source.mounted)
+            .filter(|source| {
+                state
+                    .drivers
+                    .get(&source.id)
+                    .is_some_and(|registered| std::sync::Arc::ptr_eq(registered, driver))
+            })
+            .map(|source| source.id.clone())
+            .min()?;
+        (source_id, path.to_string())
+    };
+    let parent_path = state.drivers.get(&source_id)?.parent_path(&path)?;
+    let cursor_hint = path.trim_end_matches('/').rsplit('/').next()?;
+    if cursor_hint.is_empty() {
+        return None;
+    }
+    Some(crate::ws::protocol::JobFileLocationSchema {
+        source_id,
+        parent_path,
+        cursor_hint: cursor_hint.to_string(),
+        path,
+    })
+}
+
 pub async fn dispatch(name: &str, scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
     // The journal observes semantic commands, not frontend/backend chatter.
     // Its own source is explicitly excluded to prevent recursive audit events.

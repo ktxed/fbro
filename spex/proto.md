@@ -547,6 +547,36 @@ by clients is ignored; the existing top-level single-item `destName` argument
 remains the supported explicit rename input. `sourcePath` always identifies the
 original source and is preserved in backend selection patches and snapshots.
 
+Job file metadata can also include a backend-resolved `location`:
+
+```ts
+type JobFileLocation = {
+  sourceId: string;
+  path: string;
+  parentPath: string;
+  cursorHint: string;
+};
+```
+
+`path` is the path to copy in that Source's path space. Local locations contain
+the actual absolute host path, including when an outgoing transfer exposes it
+under a different shared-root display path. `parentPath` and `cursorHint` reveal
+the file in a listing. Display paths and transfer digest identities remain
+independent of this location. The backend resolves locations from the original
+operation driver at launch, so panel navigation while a job waits does not
+change their meaning. Internal shared-folder drivers resolve to a mounted local
+panel Source by host path. Metadata omits `location` when no navigable source
+location is available; clients must not interpret display or relative virtual
+paths as host paths. Serving-side transfer metadata describes only source files.
+Client-supplied locations do not override backend resolution.
+
+To reveal a job file, `NavigateToHistoryEntry` accepts `{ panelId, sourceId,
+path, cursorHint? }`, with `path = location.parentPath`. The optional explicit
+`cursorHint` takes precedence over the saved history cursor hint. Source
+switching, archive restoration, search lifetime checks, and unavailable-source
+errors use the existing history navigation lifecycle. Copying uses
+`location.path` directly.
+
 ### 9.4 Global Selection Deletion
 
 Global selections are virtual state, not filesystem ownership. Deleting from the

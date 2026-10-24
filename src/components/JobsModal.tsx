@@ -1,13 +1,16 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { useAppDispatch, useAppState } from "../store";
 import type { ChildProcess, DirSizeTask, FileOpProgress, Job, PrefetchCacheStatus, ThumbnailQueue } from "../ws/types";
 import type { WsClient } from "../ws/client";
-import { IconEye, IconPlayerPlay, IconPlayerPause, IconX } from "@tabler/icons-react";
+import { IconArrowUpRight, IconEye, IconPlayerPlay, IconPlayerPause, IconX } from "@tabler/icons-react";
 import { cancelJobWithPartialPrompt } from "../utils/jobCancel";
 import { ResizableModal } from "./ResizableModal";
-import { ModalLayer } from "./ModalStack";
+import { advanceModalFocus, ModalLayer } from "./ModalStack";
 import { isLetterKey, rovingIndexForKey } from "./modalKeyboard";
 import { NotificationsTab } from "./NotificationsTab";
+import { CopyButton } from "./CopyButton";
+import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
+import { isAvailableFocusTarget } from "../utils/focusReturn";
 
 const FILE_LIST_PAGE_SIZE = 25;
 const JOB_TABS = ["jobs", "thumbnails", "procs", "cache", "notifications"] as const;
@@ -237,6 +240,10 @@ function JobRow({
 }) {
   const state = useAppState();
   const dispatch = useAppDispatch();
+  const rowRef = useRef<HTMLDivElement>(null);
+  const fileRefs = useRef<Array<HTMLDivElement | null>>([]);
+  const [activeFileIndex, setActiveFileIndex] = useState(0);
+  const copyToClipboard = useCopyToClipboard();
   const isActive = job.state === "Queued" || job.state === "Running" || job.state === "AwaitingDecision";
   const isTerminal = isTerminalJob(job);
   const typeLabel = job.kind === "outgoing-transfer"
@@ -264,8 +271,122 @@ function JobRow({
   const fileEnd = Math.min(fileStart + FILE_LIST_PAGE_SIZE, job.files.length);
   const visibleFiles = filesExpanded ? job.files.slice(fileStart, fileEnd) : [];
 
+  const focusHeader = () => {
+    rowRef.current?.focus();
+    rowRef.current?.scrollIntoView({ block: "nearest" });
+  };
+  const focusFile = (index: number) => {
+    if (job.files.length === 0) return;
+    const owner = rowRef.current;
+    const ownedFocus = owner?.contains(document.activeElement);
+    const next = Math.max(0, Math.min(index, job.files.length - 1));
+    setActiveFileIndex(next);
+    onFilePageChange?.(Math.floor(next / FILE_LIST_PAGE_SIZE));
+    requestAnimationFrame(() => {
+      // Do not override a later outside click or a successor modal.
+      if (!owner || !isAvailableFocusTarget(owner)) return;
+      if (!owner.contains(document.activeElement)
+        && !(ownedFocus && document.activeElement === document.body)) return;
+      const target = fileRefs.current[next];
+      target?.focus();
+      target?.scrollIntoView({ block: "nearest" });
+    });
+  };
+  const focusAdjacentJob = (delta: number): boolean => {
+    const modal = rowRef.current?.closest<HTMLElement>('[data-modal-id="jobs"]');
+    if (!modal || !rowRef.current) return false;
+    const rows = Array.from(modal.querySelectorAll<HTMLElement>('[data-testid="job-row"]'));
+    const next = rows[rows.indexOf(rowRef.current) + delta];
+    if (!next) return false;
+    next.focus();
+    next.scrollIntoView({ block: "nearest" });
+    return true;
+  };
+  const revealFile = (index: number) => {
+    const location = job.files[index]?.location;
+    if (!location) return;
+    client.sendIntent("NavigateToHistoryEntry", undefined, {
+      panelId: state.focus, sourceId: location.sourceId,
+      path: location.parentPath, cursorHint: location.cursorHint,
+    });
+    onClose();
+  };
+  const onRowKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.defaultPrevented || event.nativeEvent.isComposing) return;
+    const target = event.target as HTMLElement;
+    const fileRow = target.closest<HTMLElement>('[data-testid="job-file-row"]');
+    const fileIndex = fileRow ? Number(fileRow.dataset.fileIndex) : null;
+    const headerFocused = target === rowRef.current;
+    if (event.key === "Tab") {
+      event.preventDefault();
+      event.stopPropagation();
+      const modal = rowRef.current?.closest<HTMLElement>('[data-modal-id="jobs"]');
+      if (fileRow) {
+        const controls: HTMLElement[] = [fileRow, ...fileRow.querySelectorAll<HTMLButtonElement>("button:not(:disabled)")];
+        const current = controls.indexOf(document.activeElement as HTMLElement);
+        const next = controls[current + (event.shiftKey ? -1 : 1)];
+        if (next) {
+          next.focus();
+          next.scrollIntoView({ block: "nearest", inline: "nearest" });
+          return;
+        }
+      }
+      if (fileRow || (headerFocused && event.shiftKey)) {
+        if (focusAdjacentJob(event.shiftKey ? -1 : 1)) return;
+        if (event.shiftKey) modal?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.focus();
+        else modal?.querySelector<HTMLElement>('[data-testid="jobs-close"]')?.focus();
+      } else if (modal) advanceModalFocus(modal, event.shiftKey);
+      return;
+    }
+    if (event.ctrlKey || event.metaKey || event.altKey) return;
+    if (fileIndex !== null && isLetterKey(event, "c")) {
+      event.preventDefault();
+      const location = job.files[fileIndex]?.location;
+      if (location) void copyToClipboard(location.path, "full path");
+      return;
+    }
+    if (fileIndex !== null && isLetterKey(event, "g")) {
+      event.preventDefault();
+      if (!event.repeat) revealFile(fileIndex);
+      return;
+    }
+    // Native buttons retain Enter/Space; tree navigation starts from rows.
+    if (!headerFocused && !fileRow) return;
+    if (fileRow && target !== fileRow && (event.key === "Enter" || event.key === " ")) return;
+    if (event.key === "ArrowLeft" || (event.key === "Escape" && fileRow)) {
+      event.preventDefault();
+      if (event.key === "Escape" && filesExpanded) onToggleFiles?.();
+      else if (headerFocused && filesExpanded) onToggleFiles?.();
+      focusHeader();
+    } else if (headerFocused && (event.key === "Enter" || event.key === "ArrowRight") && canExpandFiles) {
+      event.preventDefault();
+      if (!filesExpanded) onToggleFiles?.();
+      focusFile(0);
+    } else if (fileIndex !== null && event.key === "Enter") {
+      event.preventDefault();
+      if (!event.repeat) revealFile(fileIndex);
+    } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      if (headerFocused) {
+        if (event.key === "ArrowDown" && filesExpanded) focusFile(0);
+        else focusAdjacentJob(event.key === "ArrowDown" ? 1 : -1);
+      } else if (fileIndex !== null) {
+        if (fileIndex === 0 && event.key === "ArrowUp") focusHeader();
+        else if (fileIndex === job.files.length - 1 && event.key === "ArrowDown") focusAdjacentJob(1);
+        else focusFile(fileIndex + (event.key === "ArrowDown" ? 1 : -1));
+      }
+    } else if (fileIndex !== null && ["Home", "End", "PageUp", "PageDown"].includes(event.key)) {
+      event.preventDefault();
+      focusFile(event.key === "Home" ? 0 : event.key === "End" ? job.files.length - 1
+        : fileIndex + (event.key === "PageDown" ? FILE_LIST_PAGE_SIZE : -FILE_LIST_PAGE_SIZE));
+    }
+  };
+
   return (
-    <div className={`jobs-modal__row${isActive ? " jobs-modal__row--active" : ""}`} data-testid="job-row" data-job-id={job.jobId}>
+    <div ref={rowRef} tabIndex={0} role="group" aria-label={`${typeLabel}: ${stateLabel[job.state] ?? job.state}`}
+      aria-expanded={canExpandFiles ? filesExpanded : undefined} data-modal-owns-tab
+      onKeyDown={onRowKeyDown}
+      className={`jobs-modal__row${isActive ? " jobs-modal__row--active" : ""}`} data-testid="job-row" data-job-id={job.jobId}>
       <div className="jobs-modal__row-header">
         {prefix}
         <span className="jobs-modal__type">{typeLabel}</span>
@@ -395,13 +516,15 @@ function JobRow({
             <div className="jobs-modal__file-list-pager">
               <button
                 disabled={clampedFilePage === 0}
-                onClick={() => onFilePageChange(clampedFilePage - 1)}
+                tabIndex={-1}
+                onClick={() => focusFile(fileStart - FILE_LIST_PAGE_SIZE)}
               >
                 Previous
               </button>
               <button
                 disabled={clampedFilePage >= maxFilePage}
-                onClick={() => onFilePageChange(clampedFilePage + 1)}
+                tabIndex={-1}
+                onClick={() => focusFile(fileStart + FILE_LIST_PAGE_SIZE)}
               >
                 Next
               </button>
@@ -409,12 +532,30 @@ function JobRow({
           </div>
           <div className="jobs-modal__file-list-body">
             {visibleFiles.map((file, index) => {
-              const path = file.sourcePath ?? file.name;
+              const fileIndex = fileStart + index;
+              const path = file.location?.path ?? file.sourcePath ?? file.name;
               return (
-                <div key={`${path}:${fileStart + index}`} className="jobs-modal__file-row" title={path}>
+                <div key={`${path}:${fileIndex}`} ref={(node) => { fileRefs.current[fileIndex] = node; }}
+                  tabIndex={-1} role="group" aria-label={`File ${fileIndex + 1} of ${job.files.length}: ${file.name}`}
+                  data-testid="job-file-row" data-file-index={fileIndex}
+                  onFocus={() => setActiveFileIndex(fileIndex)}
+                  onClick={(event) => { if (!(event.target as HTMLElement).closest("button")) focusFile(fileIndex); }}
+                  className={`jobs-modal__file-row${activeFileIndex === fileIndex ? " jobs-modal__file-row--focused" : ""}`} title={path}>
                   <span className="jobs-modal__file-name">{file.name}{file.destName && file.destName !== file.name ? ` → ${file.destName}` : ""}</span>
                   <span className="jobs-modal__file-kind">{file.kind}</span>
                   <span className="jobs-modal__file-size">{fileSizeLabel(file.size)}</span>
+                  <div className="jobs-modal__file-actions">
+                    <CopyButton text={file.location?.path ?? ""} what="full path" tabIndex={-1}
+                      disabled={!file.location} data-testid="job-file-copy-path" aria-keyshortcuts="c"
+                      title={file.location ? `Copy path (C): ${file.location.path}` : "Path unavailable"}
+                      onCopied={() => {
+                        if (fileRefs.current[fileIndex]?.contains(document.activeElement)) focusFile(fileIndex);
+                      }} />
+                    <button type="button" tabIndex={-1} disabled={!file.location} data-testid="job-file-jump"
+                      title="Jump to location (G)" aria-label="Jump to location" aria-keyshortcuts="g" onClick={() => revealFile(fileIndex)}>
+                      <IconArrowUpRight size={14} aria-hidden />
+                    </button>
+                  </div>
                 </div>
               );
             })}
@@ -733,6 +874,7 @@ export function JobsModal({ onClose, client }: { onClose: () => void; client: Ws
       initialFocusRef={closeRef}
       onClick={onOverlayClick}
       onKeyDown={(e) => {
+        if (e.defaultPrevented) return;
         if (e.key === "Escape" || (isLetterKey(e, "j") && !e.shiftKey)) {
           e.preventDefault();
           onClose();
@@ -881,7 +1023,7 @@ export function JobsModal({ onClose, client }: { onClose: () => void; client: Ws
         </div>
 
         <div className="modal__actions">
-          <button ref={closeRef} className="modal__btn modal__btn--primary" type="button" onClick={onClose}>Close</button>
+          <button ref={closeRef} data-testid="jobs-close" className="modal__btn modal__btn--primary" type="button" onClick={onClose}>Close</button>
         </div>
       </ResizableModal>
     </ModalLayer>
