@@ -647,15 +647,17 @@ impl AppState {
                 && Path::new(path).starts_with(&source.root_path)
         })
     }
-    /// Apply the preferences associated with the panel's current local path.
-    /// Non-local panels keep their existing per-panel behavior.
+    /// Apply remembered local-path or Journal preferences. Other virtual
+    /// sources keep their existing per-panel behavior.
     pub fn apply_location_settings(&mut self, panel_id: &str, is_local: bool) -> Option<SortSpec> {
         let panel = self.panels.get(panel_id)?;
-        if !is_local || !self.settings.general.remember_sort_per_location {
+        if !self.settings.general.remember_sort_per_location {
             return Some(panel.sort.clone());
         }
-
-        let sort = location_settings::sort_for(&self.location_settings, &panel.path);
+        let Some(key) = location_settings::key_for(&panel.source_id, &panel.path, is_local) else {
+            return Some(panel.sort.clone());
+        };
+        let sort = location_settings::sort_for(&self.location_settings, &key);
         self.panels.get_mut(panel_id)?.sort = sort.clone();
         Some(sort)
     }
@@ -1436,6 +1438,70 @@ mod tests {
     use super::{fallback_source_id_for_home_candidates, AppState};
     use crate::platform::{EjectInfo, Platform, VolumeInfo};
     use std::sync::Arc;
+
+    #[test]
+    fn journal_sort_restores_only_when_location_memory_is_enabled_and_does_not_use_root_sort() {
+        use super::location_settings::LocationSettings;
+        use crate::ws::protocol::SortSpec;
+        let platform: Arc<dyn Platform> = Arc::new(TestPlatform { home: "/".into() });
+        let mut state = AppState::new_default(platform.clone(), Default::default(), 0,
+            crate::thumb_pool::ThumbPool::start(platform, 1),
+            Arc::new(crate::fileserver::ThumbCache::new(1)));
+        state.location_settings.clear();
+        state.settings.general.remember_sort_per_location = true;
+        let remembered = SortSpec { by: "date".into(), order: "asc".into() };
+        let root_sort = SortSpec { by: "size".into(), order: "desc".into() };
+        state.location_settings.insert("source:journal".into(), LocationSettings { sort: Some(remembered.clone()) });
+        state.location_settings.insert("/".into(), LocationSettings { sort: Some(root_sort.clone()) });
+        let panel = state.panels.get_mut("left").unwrap();
+        panel.source_id = crate::journal::SOURCE_ID.into();
+        panel.path = String::new();
+        panel.sort = super::location_settings::default_sort();
+        assert_eq!(state.apply_location_settings("left", false), Some(remembered.clone()));
+        state.panels.get_mut("left").unwrap().path = "/".into();
+        assert_eq!(state.apply_location_settings("left", false), Some(remembered.clone()));
+        state.settings.general.remember_sort_per_location = false;
+        state.panels.get_mut("left").unwrap().sort = root_sort.clone();
+        assert_eq!(state.apply_location_settings("left", false), Some(root_sort.clone()));
+        state.settings.general.remember_sort_per_location = true;
+        assert_eq!(state.apply_location_settings("left", false), Some(remembered));
+        let panel = state.panels.get_mut("left").unwrap();
+        panel.source_id = "fallback-root".into();
+        panel.path = "/".into();
+        assert_eq!(state.apply_location_settings("left", true), Some(root_sort));
+    }
+
+    #[test]
+    fn journal_sort_is_applied_to_restored_tabs_independently_of_filesystem_root() {
+        use crate::persistence::{SlotSession, TabSession};
+        use crate::ws::protocol::SortSpec;
+        let platform: Arc<dyn Platform> = Arc::new(TestPlatform { home: "/".into() });
+        let mut state = AppState::new_default(platform.clone(), Default::default(), 0,
+            crate::thumb_pool::ThumbPool::start(platform, 1),
+            Arc::new(crate::fileserver::ThumbCache::new(1)));
+        let local_source = state.panels["left"].source_id.clone();
+        let journal_sort = SortSpec { by: "date".into(), order: "desc".into() };
+        let root_sort = SortSpec { by: "size".into(), order: "asc".into() };
+        state.settings.general.remember_sort_per_location = true;
+        state.location_settings.clear();
+        state.location_settings.insert("source:journal".into(), super::location_settings::LocationSettings { sort: Some(journal_sort.clone()) });
+        state.location_settings.insert("/".into(), super::location_settings::LocationSettings { sort: Some(root_sort.clone()) });
+        super::restore_tabs_from_session(&mut state, &[SlotSession { slot_id: "left".into(), active_index: 1,
+            tabs: vec![
+                TabSession::Listing { source_id: Some("journal".into()), path: "".into() },
+                TabSession::Listing { source_id: Some("journal".into()), path: "/".into() },
+                TabSession::Listing { source_id: Some(local_source.clone()), path: "/".into() },
+            ],
+        }]);
+        let ids = &state.slots["left"].tab_panel_ids;
+        assert_eq!(ids.len(), 3);
+        for id in &ids[..2] {
+            assert_eq!(state.panels[id].source_id, "journal");
+            assert_eq!(state.panels[id].sort, journal_sort);
+        }
+        assert_eq!(state.panels[&ids[2]].source_id, local_source);
+        assert_eq!(state.panels[&ids[2]].sort, root_sort);
+    }
 
     #[test]
     fn thumbnail_visibility_uses_actual_viewport_and_only_active_listing_tabs() {

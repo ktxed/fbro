@@ -37,7 +37,7 @@ export async function startBrowser(name, host, port, application) {
 
 export async function waitForMainWindow(browser, name) {
   await waitFor(() => browser.execute(() =>
-    document.querySelector('[data-testid="panel-left"]')
+    document.querySelector('.panel[data-testid^="panel-"]')
       && document.querySelector('.app[data-ready="true"]')), {
     timeout: 30_000,
     label: `${name} main window`,
@@ -221,7 +221,8 @@ export async function longRightClickEntry(browser, panelId, name, holdMs = 500) 
 }
 
 export async function clickSource(browser, panelId, sourceId) {
-  const el = await browser.$(`[data-testid="panel-${panelId}"] [data-source-id="${cssString(sourceId)}"] .panel__volume-btn`);
+  const source = `[data-testid="panel-${panelId}"] [data-source-id="${cssString(sourceId)}"]`;
+  const el = await browser.$(`${source}.panel__volume-btn, ${source} .panel__volume-btn`);
   await el.waitForClickable({ timeout: 10_000 });
   await el.click();
   return el;

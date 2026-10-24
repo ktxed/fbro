@@ -431,6 +431,12 @@ Changing sort order:
 
 This is intentional to avoid cursor instability.
 
+Journal uses the same `SetSort` intent and authoritative rescan flow. When
+`rememberSortPerLocation` is enabled, Journal panels/tabs share its persisted
+source preference; other virtual sources retain their current behavior. The
+Journal driver observes all supported columns and both directions, including
+numeric millisecond Date ordering. No new protocol message is introduced.
+
 ---
 
 ## 9. Intents

@@ -239,6 +239,16 @@ memory-only Notifications history; clearing Notifications or disabling OS
 delivery does not remove or suppress these records. See
 [remote-fbro.md](remote-fbro.md#durable-remote-activity-journal).
 
+Journal honors Name, Kind, Size, and Date sorting in either direction. Date
+compares the original numeric event timestamps, including milliseconds; Size
+compares the UTF-8 byte length of the displayed event details. Equal keys use
+deterministic name/event-ID ordering; all entries have the same `.log` kind.
+With **Remember sorting per location** enabled, Journal shares and persists its
+own sort across panels/tabs, refresh, navigation and session restoration using
+`source:journal` in the existing settings database. Without a saved preference it
+uses Name ascending. With the setting disabled it retains panel-local sorting.
+Changing Journal sorting does not append journal events.
+
 Opening a local directory symlink resolves its target and selects the mounted
 local Source containing that canonical path. The panel path uses the resolved
 target, while the listing row and file jobs still identify the symlink itself.

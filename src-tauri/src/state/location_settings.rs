@@ -13,6 +13,7 @@ pub struct LocationSettings {
 
 pub type LocationSettingsMap = HashMap<String, LocationSettings>;
 pub const RETENTION_MS: u64 = 30 * 24 * 60 * 60 * 1_000;
+pub const JOURNAL_SORT_KEY: &str = "source:journal";
 const SCHEMA_VERSION: i64 = 2;
 
 const CREATE_TABLE: &str = "CREATE TABLE IF NOT EXISTS settings_location (
@@ -240,6 +241,15 @@ pub fn normalize_local_path(path: &str) -> String {
     trimmed.to_string()
 }
 
+/// Journal has one logical root; its key cannot collide with a host path.
+pub fn key_for(source_id: &str, path: &str, is_local: bool) -> Option<String> {
+    if source_id == crate::journal::SOURCE_ID {
+        Some(JOURNAL_SORT_KEY.to_string())
+    } else {
+        is_local.then(|| normalize_local_path(path))
+    }
+}
+
 pub fn default_sort() -> SortSpec {
     SortSpec {
         by: "name".to_string(),
@@ -266,6 +276,33 @@ pub fn retention_expired(disabled_at_ms: u64, now_ms: u64) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn journal_key_is_source_scoped_and_other_virtual_sources_stay_excluded() {
+        assert_eq!(key_for("journal", "", false).as_deref(), Some("source:journal"));
+        assert_eq!(key_for("journal", "/", false).as_deref(), Some("source:journal"));
+        assert_eq!(key_for("volume", "/", true).as_deref(), Some("/"));
+        for source in ["remote:peer:share", "search:job-1", "zip:/tmp/a.zip", "procs"] {
+            assert_eq!(key_for(source, "/", false), None, "{source}");
+        }
+    }
+
+    #[test]
+    fn journal_and_filesystem_preferences_reload_independently_and_reset_together() {
+        struct Cleanup(std::path::PathBuf);
+        impl Drop for Cleanup { fn drop(&mut self) { let _ = std::fs::remove_file(&self.0); } }
+        let database = Cleanup(temp_database("journal"));
+        let root = LocationSettings { sort: Some(SortSpec { by: "size".into(), order: "desc".into() }) };
+        let journal = LocationSettings { sort: Some(SortSpec { by: "date".into(), order: "asc".into() }) };
+        save_to(&database.0, "/", &root).unwrap();
+        save_to(&database.0, &key_for("journal", "", false).unwrap(), &journal).unwrap();
+        let loaded = load_from(&database.0).unwrap();
+        assert_eq!(loaded.get("/"), Some(&root));
+        assert_eq!(loaded.get("source:journal"), Some(&journal));
+        assert_eq!(sort_for(&loaded, "source:journal"), journal.sort.unwrap());
+        assert_eq!(clear_sorts_from(&database.0).unwrap(), 2);
+        assert!(load_from(&database.0).unwrap().is_empty());
+    }
 
     fn temp_database(name: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!(

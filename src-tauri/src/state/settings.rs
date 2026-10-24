@@ -49,7 +49,7 @@ pub struct GeneralSettings {
     /// When false (default), every session starts with both panels in list.
     #[serde(default)]
     pub save_panel_view_mode: bool,
-    /// Remember sorting independently for each local filesystem location.
+    /// Remember sorting independently for each local filesystem location and Journal.
     #[serde(default)]
     pub remember_sort_per_location: bool,
     /// Linux fbro-managed thumbnailer: when false, skip video thumbnail
