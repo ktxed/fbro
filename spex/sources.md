@@ -228,6 +228,17 @@ The peer mounts each shared root as a normal remote Source. See
 | ZIP archive | `zip:<absolute-archive-path>` | Archive navigation | `ZipFsDriver` | `virtual` / `true` | No | Mounted on entry; removed after the last panel exits |
 | 7z archive | `7z:<absolute-archive-path>` | Archive navigation | `SevenZipFsDriver` | `virtual` / `true` | No | Mounted on entry; removed after the last panel exits |
 
+The Journal source is read-only and projects persisted SQLite `journal_events`
+rows, including remote job, peer connection, and pairing lifecycle events.
+Semantic filenames such as `remote-transfer_v1_ended_<event-uuid>.log` resolve
+to the event UUID; file content contains event metadata and a JSON `Payload:`
+section. Related records carry the same `operationId`. Serving transfers retain
+that identity across every idle end/resume interval and include backend-owned
+file and progress snapshots. Journal contents outlive GUI connections and the
+memory-only Notifications history; clearing Notifications or disabling OS
+delivery does not remove or suppress these records. See
+[remote-fbro.md](remote-fbro.md#durable-remote-activity-journal).
+
 Opening a local directory symlink resolves its target and selects the mounted
 local Source containing that canonical path. The panel path uses the resolved
 target, while the listing row and file jobs still identify the symlink itself.

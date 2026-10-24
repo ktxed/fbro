@@ -1,3 +1,4 @@
+use crate::journal::{RemoteJournal, RemoteKind, RemoteOperation, RemotePhase};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::Instant;
 
@@ -9,7 +10,7 @@ pub struct PendingTransition {
     pub connected: bool,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ConnectionDirection {
     Incoming,
     Outgoing,
@@ -17,6 +18,7 @@ pub enum ConnectionDirection {
 
 #[derive(Default)]
 pub struct PeerTracker {
+    connection_operations: HashMap<(String, ConnectionDirection), RemoteOperation>,
     peers: HashMap<String, PeerState>,
     removed_sources: HashSet<String>,
     source_generations: HashMap<String, u64>,
@@ -55,6 +57,32 @@ impl PeerState {
 }
 
 impl PeerTracker {
+    /// Called only after coalescing confirms an actual per-direction edge.
+    pub fn journal_transition(
+        &mut self,
+        journal: &RemoteJournal,
+        pending: &PendingTransition,
+        name: &str,
+    ) {
+        let key = (pending.peer.clone(), pending.direction);
+        if pending.connected {
+            let direction = match pending.direction {
+                ConnectionDirection::Incoming => "incoming",
+                ConnectionDirection::Outgoing => "outgoing",
+            };
+            let operation = journal.begin(
+                RemoteKind::Connection,
+                Some(&pending.peer),
+                Some(name),
+                direction,
+            );
+            operation.record(RemotePhase::Connected, serde_json::json!({}));
+            self.connection_operations.insert(key, operation);
+        } else if let Some(operation) = self.connection_operations.remove(&key) {
+            operation.record(RemotePhase::Disconnected, serde_json::json!({}));
+        }
+    }
+
     /// The token survives SFTP transport replacement, so execution time must too.
     /// Bound remembered tokens to the same window as notification history.
     pub fn transfer_started_at(&mut self, peer: &str, token: &str) -> Instant {
@@ -164,6 +192,71 @@ impl PeerTracker {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct JournalFile(std::path::PathBuf);
+    impl Drop for JournalFile {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+
+    #[tokio::test]
+    async fn journal_connection_reuses_interval_and_keeps_directions_separate() {
+        let mut tracker = PeerTracker::default();
+        let path = std::env::temp_dir().join(format!(
+            "fbro-connection-journal-{}.sqlite3",
+            uuid::Uuid::new_v4()
+        ));
+        let _file = JournalFile(path.clone());
+        let journal = crate::journal::RemoteJournal::new(path.clone());
+        let connected = tracker.outgoing("peer", "source", true).unwrap();
+        assert!(tracker.confirm(&connected));
+        tracker.journal_transition(&journal, &connected, "other");
+        let outgoing = tracker
+            .connection_operations
+            .get(&("peer".into(), ConnectionDirection::Outgoing))
+            .unwrap()
+            .clone();
+        let incoming = tracker.incoming("peer", true).unwrap();
+        assert!(tracker.confirm(&incoming));
+        tracker.journal_transition(&journal, &incoming, "other");
+        assert_ne!(
+            outgoing.operation_id(),
+            tracker
+                .connection_operations
+                .get(&("peer".into(), ConnectionDirection::Incoming))
+                .unwrap()
+                .operation_id()
+        );
+        let disconnected = tracker.outgoing("peer", "source", false).unwrap();
+        assert!(tracker.confirm(&disconnected));
+        tracker.journal_transition(&journal, &disconnected, "other");
+        assert!(!outgoing.record(
+            crate::journal::RemotePhase::Disconnected,
+            serde_json::json!({})
+        ));
+        assert_eq!(tracker.connection_operations.len(), 1);
+        let reconnected = tracker.outgoing("peer", "source", true).unwrap();
+        assert!(tracker.confirm(&reconnected));
+        tracker.journal_transition(&journal, &reconnected, "other");
+        assert_ne!(
+            outgoing.operation_id(),
+            tracker
+                .connection_operations
+                .get(&("peer".into(), ConnectionDirection::Outgoing))
+                .unwrap()
+                .operation_id()
+        );
+        journal.flush().await;
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        assert_eq!(
+            conn.query_row("SELECT count(*) FROM journal_events", [], |row| row
+                .get::<_, i64>(0))
+                .unwrap(),
+            4
+        );
+        drop(conn);
+    }
 
     #[test]
     fn incoming_connect_and_disconnect_are_visible_while_outgoing_stays_connected() {

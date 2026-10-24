@@ -506,6 +506,8 @@ pub struct AppState {
     /// Application-lifetime history is independent of GUI connections.
     pub notifications: Arc<crate::notifications::NotificationService>,
     pub remote_notifications: crate::notifications::remote::RemoteNotificationState,
+    pub remote_journal: crate::journal::RemoteJournal,
+    pub remote_job_journals: crate::journal::jobs::RemoteJobTracker,
     pub panels: HashMap<String, Panel>,
     /// Slots in the panel layout. Each slot owns 1+ panels (tabs).
     pub slots: HashMap<String, PanelSlot>,
@@ -1021,6 +1023,8 @@ impl AppState {
         AppState {
             notifications: Arc::new(crate::notifications::NotificationService::default()),
             remote_notifications: Default::default(),
+            remote_journal: Default::default(),
+            remote_job_journals: Default::default(),
             panels,
             slots,
             layout_slots,

@@ -16,6 +16,7 @@ async fn quit(ctx: &mut IntentContext<'_>) {
     let active_jobs = active_job_count(ctx.state).await;
     if active_jobs == 0 {
         save_session(ctx.state, ctx.app_handle).await;
+        flush_remote_journal(ctx).await;
         std::process::exit(0);
     } else {
         let _ = ctx
@@ -30,7 +31,13 @@ async fn quit(ctx: &mut IntentContext<'_>) {
 
 async fn confirm_quit(ctx: &mut IntentContext<'_>) {
     save_session(ctx.state, ctx.app_handle).await;
+    flush_remote_journal(ctx).await;
     std::process::exit(0);
+}
+
+async fn flush_remote_journal(ctx: &IntentContext<'_>) {
+    let journal = ctx.state.lock().await.remote_journal.clone();
+    journal.flush().await;
 }
 
 async fn set_font_size(args: &Value, ctx: &mut IntentContext<'_>) {

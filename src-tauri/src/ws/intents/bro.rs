@@ -1440,6 +1440,7 @@ async fn launch_sync_bro(
         },
     );
 
+    crate::journal::jobs::start(&mut state_guard, &job_id);
     drop(state_guard);
     crate::notifications::jobs::publish_start(ctx.state, &job_id).await;
     let handle = tokio::spawn(run_sync_bro(
@@ -1452,6 +1453,7 @@ async fn launch_sync_bro(
         remote_driver,
         crate::notifications::worker_feedback_sender(ctx.state.clone(), ctx.tx.clone()),
         cancel_rx,
+        ctx.state.clone(),
     ));
 
     if let Some(job) = ctx.state.lock().await.job_store.jobs.get_mut(&job_id) {

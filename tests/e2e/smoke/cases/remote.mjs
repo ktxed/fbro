@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import { artifactsDir, backendPath, hostPath } from "../config.mjs";
 import {
   clickCommand,
@@ -16,6 +17,7 @@ import {
 import { waitFor } from "../wait.mjs";
 import { expectModalFocus } from "./modal-focus.mjs";
 import { verifyJobFiles } from "./job-files.mjs";
+import { verifyRemoteJournal } from "./remote-journal.mjs";
 
 function tinyBmp() {
   const width = 2;
@@ -41,6 +43,25 @@ function tinyBmp() {
 }
 
 export async function runRemoteFlow(browserA, observerA, browserB, observerB) {
+  const journalSince = Date.now();
+  const previousOsSettings = [observerA, observerB].map((observer) => observer.state.settings.general.osNotificationsEnabled);
+  try {
+    for (const observer of [observerA, observerB]) {
+      observer.sendIntent("SetGeneralOption", undefined, { key: "osNotificationsEnabled", value: false });
+      await waitFor(() => observer.state.settings.general.osNotificationsEnabled === false,
+        { label: "remote journaling runs with OS notifications disabled" });
+    }
+    await runRemoteFlowWithJournal(browserA, observerA, browserB, observerB, journalSince);
+  } finally {
+    for (const [index, observer] of [observerA, observerB].entries()) {
+      observer.sendIntent("SetGeneralOption", undefined, { key: "osNotificationsEnabled", value: previousOsSettings[index] });
+      await waitFor(() => observer.state.settings.general.osNotificationsEnabled === previousOsSettings[index],
+        { label: "restore OS notification preference after remote journal smoke" });
+    }
+  }
+}
+
+async function runRemoteFlowWithJournal(browserA, observerA, browserB, observerB, journalSince) {
   const bDst = backendPath("b", "dst");
   const bSync = backendPath("b", "sync-bro");
   const aHome = "/state/a/home";
@@ -241,6 +262,7 @@ export async function runRemoteFlow(browserA, observerA, browserB, observerB) {
   await observerB.waitForPanelPath("left", "Downloads");
   observerB.sendIntent("NavigatePanelTo", undefined, { panelId: "right", path: bDst });
   await observerB.waitForEntry("left", "remote.txt", "file", 20_000);
+  const viewerJobs = [];
   // Exercise the viewer's full-image and partial-range reads while keeping
   // the shared remote browsing session connected.
   for (const [filename, offset, size] of [
@@ -262,6 +284,19 @@ export async function runRemoteFlow(browserA, observerA, browserB, observerB) {
     { timeout: 10_000, label: `remote viewer outgoing job ${filename}` });
     await waitFor(() => servingJob.state === "Completed",
       { timeout: 10_000, label: `remote viewer idle completion ${filename}` });
+    viewerJobs.push(servingJob.jobId);
+    // A later range on the same browsing session resumes the same operation.
+    const resumedStart = observerB.messages.length;
+    observerB.sendIntent("ReadFileChunk", undefined, {
+      sourceId: remoteSource.id, path: viewerPath, offset: offset + 1, size: 1,
+    });
+    await waitFor(() => observerB.messages.slice(resumedStart).some((message) =>
+      message.type === "FileChunk" && message.path === viewerPath && message.offset === offset + 1),
+    { timeout: 20_000, label: `remote viewer resumed range ${filename}` });
+    // Wait beyond the idle deadline even when the short Running phase was not observed.
+    const resumedIdleAfter = Date.now() + 1_750;
+    await waitFor(() => Date.now() >= resumedIdleAfter && servingJob.state === "Completed",
+      { timeout: 10_000, label: `remote viewer second idle completion ${filename}` });
     if (!observerB.state.sources[remoteSource.id]) throw new Error("viewer completion disconnected the remote source");
   }
   const thumbEntry = await observerB.waitForEntry("left", "remote-thumb.bmp", "file", 20_000);
@@ -495,6 +530,41 @@ export async function runRemoteFlow(browserA, observerA, browserB, observerB) {
     entry.message.startsWith("Remote fbro disconnected:") && entry.message.endsWith("(incoming)")
     && entry.channels.includes("os")),
   { timeout: 10_000, label: "incoming remote disconnection notification recorded" });
+
+  const pairedFingerprintA = observerA.state.shareConfig.pairedPeers[0]?.fingerprint;
+  if (!pairedFingerprintA) throw new Error("Serving peer lost pairing before revocation");
+  observerB.sendIntent("RevokePairing", undefined, { fingerprint });
+  observerA.sendIntent("RevokePairing", undefined, { fingerprint: pairedFingerprintA });
+  await waitFor(() => !observerB.state.shareConfig.pairedPeers.some((peer) => peer.fingerprint === fingerprint)
+    && observerA.state.shareConfig.pairedPeers.length === 0,
+  { timeout: 15_000, label: "pairing revoked on both peers" });
+
+  // Clearing volatile feedback must leave the operation journal intact.
+  for (const observer of [observerA, observerB]) {
+    for (const [name, args] of [
+      ["PublishNotification", { message: "remote journal independence marker", channels: [] }],
+      ["ClearNotifications", {}],
+    ]) {
+      const requestId = randomUUID();
+      observer.sendIntent(name, undefined, { ...args, requestId });
+      await waitFor(() => observer.messages.some((message) => message.requestId === requestId && message.type === `${name}Ok`),
+        { label: `remote journal ${name} acknowledgement` });
+    }
+    await waitFor(() => observer.state.notifications.entries.length === 0,
+      { label: "remote notification history cleared before journal inspection" });
+  }
+  await verifyRemoteJournal(observerA, {
+    since: journalSince, direction: "incoming", viewerJobs,
+    cancelledJobId: outgoing.jobId, keyboardJobId: keyboardJob.jobId,
+    completedKind: "remote-hash", completedJobId: remoteManifestJob.jobId,
+    knownFile: path.posix.join(aHomeDownloads, "remote.txt"),
+    keyboardRoot: path.posix.join(aHomeDownloads, "Keyboard"),
+  });
+  await verifyRemoteJournal(observerB, {
+    since: journalSince, direction: "outgoing", peerFingerprint: fingerprint,
+    cancelledJobId: incoming.jobId, completedKind: "remote-sync", completedJobId: syncJob.jobId,
+    knownFile: path.posix.join(bDst, "remote.txt"),
+  });
 
   await browserA.getTitle();
   await browserB.getTitle();

@@ -1160,6 +1160,10 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
         .into_iter()
         .find_map(|driver| driver.as_any().downcast_ref::<crate::vfs::sftp::SftpFsDriver>()
             .map(|driver| driver.peer_fingerprint().to_string()));
+    if remote_peer.is_some() {
+        let direction = if src_driver.as_any().is::<crate::vfs::sftp::SftpFsDriver>() { "incoming" } else { "outgoing" };
+        crate::journal::jobs::prepare_transfer(&mut *ctx.state.lock().await, &job_id, direction, &file_schemas);
+    }
 
     if parsed.enqueue {
         let total_bytes_total: u64 = files.iter().map(|file| file.size.unwrap_or(0)).sum();
@@ -1678,6 +1682,10 @@ async fn cancel_job(args: &Value, ctx: &mut IntentContext<'_>) {
         }
     }
     ctx.decision_senders.remove(&parsed.job_id);
+    {
+        let mut state = ctx.state.lock().await;
+        crate::journal::jobs::terminal(&mut state, &parsed.job_id, "Cancelled", None);
+    }
     if send_cancelled_event {
         crate::notifications::jobs::publish_terminal(ctx.state, &parsed.job_id, "Cancelled", None).await;
         // For search jobs: mark the store done so the VFS driver knows the
@@ -1842,12 +1850,11 @@ pub(crate) async fn register_file_op_and_spawn(
     spawn_worker: impl FnOnce() -> tokio::task::JoinHandle<()>,
 ) {
     let job_id = job.job_id.clone();
-    state
-        .lock()
-        .await
-        .job_store
-        .jobs
-        .insert(job_id.clone(), job);
+    {
+        let mut guard = state.lock().await;
+        guard.job_store.jobs.insert(job_id.clone(), job);
+        crate::journal::jobs::start(&mut guard, &job_id);
+    }
     crate::notifications::jobs::publish_start(state, &job_id).await;
     let handle = spawn_worker();
     let mut state_guard = state.lock().await;
@@ -1884,6 +1891,7 @@ async fn start_queued_file_op(
         return Ok(());
     };
 
+    crate::journal::jobs::start(&mut *state.lock().await, &job_id);
     crate::notifications::jobs::publish_start(state, &job_id).await;
     let state_for_patch = state.clone();
     let tx_for_patch = tx.clone();

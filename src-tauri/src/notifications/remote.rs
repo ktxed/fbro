@@ -103,6 +103,10 @@ async fn settle_transition(state: &SharedState, pending: PendingTransition) {
             .get(&pending.peer)
             .map(|peer| peer.name.clone())
             .unwrap_or_else(|| "remote fbro".into());
+        let journal = guard.remote_journal.clone();
+        guard
+            .remote_notifications
+            .journal_transition(&journal, &pending, &name);
         (guard.notifications.clone(), name)
     };
     let status = if pending.connected {

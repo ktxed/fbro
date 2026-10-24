@@ -110,6 +110,7 @@ pub async fn run_sync_bro(
     remote_driver: Arc<dyn VfsDriver>,
     tx: mpsc::Sender<ServerMessage>,
     cancel_rx: watch::Receiver<bool>,
+    state: crate::state::SharedState,
 ) {
     let cancel_flag = Arc::new(AtomicBool::new(false));
     let cancel_for_task = Arc::clone(&cancel_flag);
@@ -259,6 +260,15 @@ pub async fn run_sync_bro(
     );
     summary.local_errors = local_build.errors;
     summary.remote_errors = remote_build.errors;
+    let audit_files = local_build.entries.iter().map(|entry| serde_json::json!({
+        "side": "local", "sourcePath": local_driver.resolve_child(&local_root, &entry.path),
+        "size": entry.size,
+    })).chain(remote_build.entries.iter().map(|entry| serde_json::json!({
+        "side": "remote", "sourcePath": remote_driver.resolve_child(&remote_root, &entry.path),
+        "size": entry.size,
+    }))).collect();
+    crate::journal::jobs::attach_result(&mut *state.lock().await, &job_id,
+        serde_json::to_value(summary_to_schema(&summary)).expect("sync summary serializes"), Some(audit_files));
     let status = format!(
         "{} matched, {} differing, {} local-only, {} remote-only, {} unverified, {} errors",
         summary.matched,
