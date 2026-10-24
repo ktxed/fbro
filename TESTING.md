@@ -164,7 +164,7 @@ coverage reference.
 | Hashes | `hash-check.mjs`, `hash-generate.mjs` | Discovery, stale targets, options, matching/malformed sidecars, skip/overwrite, reports/toasts, progress, background/reopen, cancellation, and preserving existing sidecars |
 | Archives | `archive.mjs` | Enter a ZIP, copy a file out, and verify its content |
 | Search | `search.mjs` | Activity without hits, inspected counts, cancellation, duplicate-name hints and viewer paths, toolbar/shortcut Copy with cursor and selection targets, repeated-filename exclusion/suffixes via inline and bottom actions, background copies, per-dialog defaults, both themes, Jump to location, Open With, duplicate cursor/selection preservation on reconnect, stale/deleted targets, modal keys, and date/size filters |
-| Remote | `remote.mjs` | Folder suggestions and typed shares, validation/history, unsharing, pairing, read-only browsing, copying, thumbnails, integrity, cancellation on both peers, a fresh transfer after cancellation, and incoming/outgoing connection and explicit disconnection notification history on both peers |
+| Remote | `remote.mjs` | Folder suggestions and typed shares, validation/history, unsharing, pairing, read-only browsing, viewer full-image/partial-range outgoing job idle completion while connected, copying, thumbnails, integrity, cancellation on both peers, a fresh transfer after cancellation, and incoming/outgoing connection and explicit disconnection notification history on both peers |
 
 Several UI flows check both `fbro-dark` and `daylight`. Modal tests sample common
 focus and cancellation paths; they do not cover every operation/conflict state.

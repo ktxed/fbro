@@ -985,3 +985,172 @@ async fn delayed_completion_cannot_change_cancelled_transfer() {
     );
     assert!(rx.try_recv().is_err());
 }
+
+#[tokio::test]
+async fn outgoing_viewer_requests_complete_after_close_and_idle() {
+    // Full images, partial media ranges, and abandoned opens all settle while
+    // the shared browsing session remains connected.
+    for bytes_to_read in [7, 3, 0] {
+        let state = test_state_with_shared_home_and_volume(Arc::new(RecordingDriver::default()));
+        let (tx, mut rx) = tokio::sync::mpsc::channel(32);
+        state.lock().await.gui_senders.push(tx);
+        let mut handler = SftpHandler::new(state.clone(), "peer".into());
+        let file = handler
+            .open(
+                1,
+                "/home-abc123/Downloads/file.jpg".into(),
+                OpenFlags::READ,
+                FileAttributes::default(),
+            )
+            .await
+            .unwrap();
+        let job_id = handler.transfers.values().next().unwrap().job_id.clone();
+        if bytes_to_read > 0 {
+            handler
+                .read(2, file.handle.clone(), 0, bytes_to_read)
+                .await
+                .unwrap();
+        }
+        handler.close(3, file.handle).await.unwrap();
+        while rx.try_recv().is_ok() {}
+        tokio::time::timeout(OUTGOING_COMPLETE_IDLE + Duration::from_secs(2), async {
+            loop {
+                if let Some(ServerMessage::JobEvent {
+                    job_id: id, event, ..
+                }) = rx.recv().await
+                {
+                    if id == job_id && event == "Completed" {
+                        break;
+                    }
+                }
+            }
+        })
+        .await
+        .expect("closed viewer request must publish completion without disconnecting");
+        assert_eq!(
+            state.lock().await.job_store.jobs[&job_id].state,
+            JobState::Completed
+        );
+        assert_eq!(
+            state.lock().await.job_store.jobs[&job_id]
+                .progress
+                .total_bytes_copied,
+            u64::from(bytes_to_read),
+            "idle completion must preserve actual byte progress"
+        );
+    }
+}
+
+#[tokio::test]
+async fn outgoing_viewer_request_resumes_after_idle_completion() {
+    let state = test_state_with_shared_home_and_volume(Arc::new(RecordingDriver::default()));
+    let mut handler = SftpHandler::new(state.clone(), "peer".into());
+    let file = open_test_transfer(&mut handler, "viewer-resume")
+        .await
+        .unwrap();
+    let job_id = handler.transfers["client:viewer-resume"].job_id.clone();
+    handler.read(3, file.handle.clone(), 0, 3).await.unwrap();
+    handler.close(4, file.handle).await.unwrap();
+    tokio::time::sleep(OUTGOING_COMPLETE_IDLE + Duration::from_millis(100)).await;
+    assert_eq!(
+        state.lock().await.job_store.jobs[&job_id].state,
+        JobState::Completed
+    );
+
+    let file = open_test_transfer(&mut handler, "viewer-resume")
+        .await
+        .unwrap();
+    handler.read(5, file.handle.clone(), 3, 4).await.unwrap();
+    assert_eq!(state.lock().await.job_store.jobs.len(), 1);
+    assert_eq!(
+        state.lock().await.job_store.jobs[&job_id].state,
+        JobState::Running
+    );
+    // A newly opened request remains running until it closes.
+    tokio::time::sleep(OUTGOING_COMPLETE_IDLE + Duration::from_millis(100)).await;
+    assert_eq!(
+        state.lock().await.job_store.jobs[&job_id].state,
+        JobState::Running
+    );
+    handler.close(6, file.handle).await.unwrap();
+    tokio::time::sleep(OUTGOING_COMPLETE_IDLE + Duration::from_millis(100)).await;
+    let guard = state.lock().await;
+    assert_eq!(guard.job_store.jobs[&job_id].state, JobState::Completed);
+    assert_eq!(guard.job_store.jobs[&job_id].progress.completed_files, 1);
+    assert_eq!(guard.job_store.jobs[&job_id].progress.total_bytes_copied, 7);
+}
+
+#[tokio::test]
+async fn outgoing_viewer_overlapping_reads_preserve_progress_until_last_close() {
+    for offset in [3, 0] {
+        let state = test_state_with_shared_home_and_volume(Arc::new(RecordingDriver::default()));
+        let mut handler = SftpHandler::new(state.clone(), "peer".into());
+        let first = open_test_transfer(&mut handler, "viewer-overlap")
+            .await
+            .unwrap();
+        let second = open_test_transfer(&mut handler, "viewer-overlap")
+            .await
+            .unwrap();
+        let job_id = handler.transfers["client:viewer-overlap"].job_id.clone();
+        handler.read(3, first.handle.clone(), 0, 3).await.unwrap();
+        handler.close(4, first.handle).await.unwrap();
+        handler
+            .read(5, second.handle.clone(), offset, 3)
+            .await
+            .unwrap();
+        tokio::time::sleep(OUTGOING_COMPLETE_IDLE + Duration::from_millis(100)).await;
+        assert_eq!(
+            state.lock().await.job_store.jobs[&job_id].state,
+            JobState::Running
+        );
+        handler.close(6, second.handle).await.unwrap();
+        tokio::time::sleep(OUTGOING_COMPLETE_IDLE + Duration::from_millis(100)).await;
+        let guard = state.lock().await;
+        let job = &guard.job_store.jobs[&job_id];
+        assert_eq!(job.state, JobState::Completed);
+        assert_eq!(
+            job.progress.total_bytes_copied,
+            if offset == 0 { 3 } else { 6 }
+        );
+    }
+}
+
+#[tokio::test]
+async fn outgoing_viewer_open_handles_and_reopens_prevent_idle_completion() {
+    let state = test_state_with_shared_home_and_volume(Arc::new(RecordingDriver::default()));
+    let mut handler = SftpHandler::new(state.clone(), "peer".into());
+    let first = open_test_transfer(&mut handler, "viewer-open-handles")
+        .await
+        .unwrap();
+    let second = open_test_transfer(&mut handler, "viewer-open-handles")
+        .await
+        .unwrap();
+    let job_id = handler.transfers["client:viewer-open-handles"]
+        .job_id
+        .clone();
+    handler.close(3, first.handle).await.unwrap();
+    // A second request may be waiting on slow I/O. Closing its sibling must
+    // not publish terminal state while that request still owns a file handle.
+    tokio::time::sleep(OUTGOING_COMPLETE_IDLE + Duration::from_millis(100)).await;
+    assert_eq!(
+        state.lock().await.job_store.jobs[&job_id].state,
+        JobState::Running
+    );
+    handler.close(4, second.handle).await.unwrap();
+    // Reopen before the close timer expires. Its old generation must not
+    // complete the new request, even if that request has not read any bytes.
+    let reopened = open_test_transfer(&mut handler, "viewer-open-handles")
+        .await
+        .unwrap();
+    tokio::time::sleep(OUTGOING_COMPLETE_IDLE + Duration::from_millis(100)).await;
+    assert_eq!(
+        state.lock().await.job_store.jobs[&job_id].state,
+        JobState::Running
+    );
+    handler.close(5, reopened.handle).await.unwrap();
+    tokio::time::sleep(OUTGOING_COMPLETE_IDLE + Duration::from_millis(100)).await;
+    assert_eq!(
+        state.lock().await.job_store.jobs[&job_id].state,
+        JobState::Completed
+    );
+}

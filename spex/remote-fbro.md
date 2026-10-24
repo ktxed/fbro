@@ -177,6 +177,16 @@ prove the result is byte-correct. Two flows exist:
   first opens one of our files and is keyed to a job via the transfer-context
   marker.
 
+Outgoing jobs settle after the last file handle closes and 1.5 seconds pass without
+another open or read for that transfer. This includes partial viewer ranges and
+handles closed before reading any bytes; byte/file progress remains the actual
+amount served. Keeping the shared browsing session connected does not keep the
+job running. Later opens invalidate pending completion and resume the same job;
+overlapping requests keep it running until all file handles close. Cancellation
+stays final.
+This serving-side completion describes a settled read request, not proof that
+the receiver downloaded or verified the entire file.
+
 ### Resume
 
 `resume_candidate` (`file_ops.rs`) decides whether an interrupted copy can

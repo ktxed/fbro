@@ -235,6 +235,29 @@ export async function runRemoteFlow(browserA, observerA, browserB, observerB) {
   await observerB.waitForPanelPath("left", "Downloads");
   observerB.sendIntent("NavigatePanelTo", undefined, { panelId: "right", path: bDst });
   await observerB.waitForEntry("left", "remote.txt", "file", 20_000);
+  // Exercise the viewer's full-image and partial-range reads while keeping
+  // the shared remote browsing session connected.
+  for (const [filename, offset, size] of [
+    ["remote-thumb.bmp", 0, 4096],
+    ["remote.txt", 1, 4],
+  ]) {
+    const viewerPath = `Downloads/${filename}`;
+    const messageStart = observerB.messages.length;
+    const jobsBefore = new Set(Object.keys(observerA.state.jobs));
+    observerB.sendIntent("ReadFileChunk", undefined, {
+      sourceId: remoteSource.id, path: viewerPath, offset, size,
+    });
+    await waitFor(() => observerB.messages.slice(messageStart).some((message) =>
+      message.type === "FileChunk" && message.path === viewerPath
+      && message.offset === offset && message.data.length > 0),
+    { timeout: 20_000, label: `remote viewer read ${filename}` });
+    const servingJob = await waitFor(() => Object.values(observerA.state.jobs).find((job) =>
+      job.kind === "outgoing-transfer" && !jobsBefore.has(job.jobId)),
+    { timeout: 10_000, label: `remote viewer outgoing job ${filename}` });
+    await waitFor(() => servingJob.state === "Completed",
+      { timeout: 10_000, label: `remote viewer idle completion ${filename}` });
+    if (!observerB.state.sources[remoteSource.id]) throw new Error("viewer completion disconnected the remote source");
+  }
   const thumbEntry = await observerB.waitForEntry("left", "remote-thumb.bmp", "file", 20_000);
   if (!observerB.state.panels.left?.supportsThumbnails) {
     throw new Error("remote Downloads panel does not advertise thumbnail support");

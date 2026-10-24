@@ -669,7 +669,7 @@ impl SftpHandler {
             return;
         }
         let state = self.state.clone();
-        let completion_to_schedule = {
+        let (job_id, generation) = {
             let Some(transfer) = self.transfers.get_mut(transfer_key) else {
                 return;
             };
@@ -692,21 +692,16 @@ impl SftpHandler {
             transfer.progress.current_file = Some(path.to_string());
             transfer.progress.current_file_bytes_total = size.unwrap_or(0);
             transfer.progress.current_file_bytes_copied = copied;
+            // Closing a partial viewer range (or an unread handle) also ends
+            // activity. The persistent browsing session need not disconnect.
+            transfer.completion_generation = transfer.completion_generation.wrapping_add(1);
             emit_outgoing_progress(&state, transfer, true).await;
-
-            let all_known_files_done = transfer.progress.total_files > 0
-                && transfer.progress.completed_files >= transfer.progress.total_files
-                && (transfer.progress.total_bytes_total == 0
-                    || transfer.progress.total_bytes_copied >= transfer.progress.total_bytes_total);
-            if all_known_files_done {
-                transfer.completion_generation = transfer.completion_generation.wrapping_add(1);
-                Some((transfer.job_id.clone(), transfer.completion_generation))
-            } else {
-                None
-            }
+            (transfer.job_id.clone(), transfer.completion_generation)
         };
-
-        if let Some((job_id, generation)) = completion_to_schedule {
+        let has_open_files = self.handles.values().any(|handle| {
+            matches!(handle, HandleState::File { transfer_key: key, .. } if key == transfer_key)
+        });
+        if !has_open_files {
             schedule_outgoing_completion(state, job_id, generation);
         }
     }
@@ -1268,11 +1263,29 @@ async fn emit_outgoing_progress(state: &SharedState, transfer: &mut OutgoingTran
 }
 
 async fn finish_outgoing_transfer(state: SharedState, job_id: String) {
+    finish_outgoing_transfer_if_current(state, job_id, None).await;
+}
+
+async fn finish_outgoing_transfer_if_current(
+    state: SharedState,
+    job_id: String,
+    generation: Option<u64>,
+) {
     let (event, error, senders) = {
         let mut guard = state.lock().await;
         let Some(job) = guard.job_store.jobs.get_mut(&job_id) else {
             return;
         };
+        if *job.cancel_tx.borrow() {
+            return;
+        }
+        if let Some(generation) = generation {
+            if !matches!(&job.kind, JobKind::OutgoingTransfer(meta)
+                if meta.completion_generation == generation)
+            {
+                return;
+            }
+        }
         let event = match job.state {
             JobState::Cancelled => return,
             JobState::Failed => "Failed",
@@ -1537,25 +1550,9 @@ async fn emit_remote_manifest_terminal(
 fn schedule_outgoing_completion(state: SharedState, job_id: String, generation: u64) {
     tokio::spawn(async move {
         tokio::time::sleep(OUTGOING_COMPLETE_IDLE).await;
-        let should_finish = {
-            let guard = state.lock().await;
-            guard
-                .job_store
-                .jobs
-                .get(&job_id)
-                .and_then(|job| match &job.kind {
-                    JobKind::OutgoingTransfer(meta) => Some(
-                        job.state != JobState::Cancelled
-                            && !*job.cancel_tx.borrow()
-                            && meta.completion_generation == generation,
-                    ),
-                    _ => None,
-                })
-                .unwrap_or(false)
-        };
-        if should_finish {
-            finish_outgoing_transfer(state, job_id).await;
-        }
+        // Check activity and finish under one lock so a new request cannot
+        // slip between the generation check and the state transition.
+        finish_outgoing_transfer_if_current(state, job_id, Some(generation)).await;
     });
 }
 
