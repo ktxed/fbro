@@ -307,6 +307,7 @@ impl PtyManager {
                                 };
                                 slot.tab_panel_ids.retain(|id| id != &owner);
                                 slot.active_panel_id = new_active.clone();
+                                slot.version += 1;
                                 if s.focus == owner {
                                     s.focus = new_active;
                                 }

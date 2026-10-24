@@ -462,6 +462,7 @@ body {
 }
 
 .panel__tabs-list {
+  position: relative;
   flex: 1;
   display: flex;
   flex-direction: row;
@@ -506,6 +507,8 @@ body {
 }
 
 .panel__tabs-arrow {
+  appearance: none;
+  font: inherit;
   flex-shrink: 0;
   background: none;
   border: none;
@@ -528,6 +531,7 @@ body {
 }
 
 .panel__tab {
+  user-select: none;
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -548,6 +552,21 @@ body {
   color: var(--text);
   border-color: var(--border-strong);
   background: var(--bg-hover);
+}
+
+.panel__tab--dragging {
+  opacity: 0.5;
+  cursor: grabbing;
+}
+
+.panel__tab-drop-marker {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--border-focus);
+  pointer-events: none;
+  z-index: 1;
 }
 
 .panel--focused .panel__tab:not(.panel__tab--active) {
@@ -583,6 +602,8 @@ body {
 }
 
 .panel__tab-close {
+  appearance: none;
+  font: inherit;
   background: none;
   border: none;
   padding: 0 1px;

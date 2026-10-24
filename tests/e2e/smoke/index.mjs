@@ -38,6 +38,7 @@ import { runViewerFlow } from "./cases/viewer.mjs";
 import { runDiffFlow } from "./cases/diff.mjs";
 import { runHeicFlow } from "./cases/heic.mjs";
 import { runButtonBarFlow } from "./cases/button-bar.mjs";
+import { runTabsFlow } from "./cases/tabs.mjs";
 import { runQuickEditFlow } from "./cases/quick-edit.mjs";
 import { verifyThumbnailQueue } from "./cases/thumbnails.mjs";
 import { runRemoteFlow } from "./cases/remote.mjs";
@@ -71,6 +72,11 @@ async function main() {
     browserA = await startBrowser("fbro-a", webdriverHosts.a, webdriverPorts.a, appA);
     observerA = new FbroObserver("fbro-a", wsUrls.a);
     await observerA.connect();
+
+    if (process.env.FBRO_E2E_TABS_ONLY === "1") {
+      await runTabsFlow(browserA, observerA);
+      return;
+    }
 
     if (process.env.FBRO_E2E_BOOKMARKS_ONLY === "1") {
       const aSrc = backendPath("a", "src");
@@ -150,6 +156,7 @@ async function main() {
     await runFocusHandoffFlow(browserA, observerA);
     if (process.env.FBRO_E2E_FOCUS_ONLY === "1") return;
     await runLocalFlow(browserA, observerA);
+    await runTabsFlow(browserA, observerA);
     await runDiffFlow(browserA, observerA);
     await runViewerFlow(browserA, observerA);
     await runHeicFlow(browserA, observerA);

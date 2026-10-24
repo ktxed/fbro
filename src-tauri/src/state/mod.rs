@@ -412,6 +412,15 @@ pub struct PanelSlot {
     pub slot_id: String,
     pub tab_panel_ids: Vec<String>,
     pub active_panel_id: String,
+    /// Version of the most recently emitted slot patch.
+    pub version: u64,
+}
+
+impl PanelSlot {
+    pub fn snapshot_for_patch(&mut self) -> Self {
+        self.version += 1;
+        self.clone()
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -851,6 +860,7 @@ impl AppState {
                 slot_id: "left".to_string(),
                 tab_panel_ids: vec!["left".to_string()],
                 active_panel_id: "left".to_string(),
+                version: 0,
             },
         );
         slots.insert(
@@ -859,6 +869,7 @@ impl AppState {
                 slot_id: "right".to_string(),
                 tab_panel_ids: vec!["right".to_string()],
                 active_panel_id: "right".to_string(),
+                version: 0,
             },
         );
         let layout_slots = vec!["left".to_string(), "right".to_string()];

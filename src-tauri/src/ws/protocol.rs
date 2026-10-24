@@ -770,6 +770,7 @@ pub struct PanelSlotSchema {
     pub slot_id: String,
     pub tab_panel_ids: Vec<String>,
     pub active_panel_id: String,
+    pub version: u64,
 }
 
 #[derive(Serialize, Clone, Debug)]

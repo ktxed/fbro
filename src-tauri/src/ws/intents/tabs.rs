@@ -1,10 +1,10 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use serde_json::Value;
 
 use crate::jobs::scan::run_scan;
-use crate::state::{Panel, PanelStatus, PanelViewMode, TabKind};
+use crate::state::{Panel, PanelSlot, PanelStatus, PanelViewMode, TabKind};
 use crate::ws::protocol::{now, ServerMessage};
 use crate::ws::runtime::IntentContext;
 
@@ -13,6 +13,7 @@ pub(crate) async fn handle(name: &str, _scope: &Value, args: &Value, ctx: &mut I
         "panel.tab.new" => new_tab(args, ctx).await,
         "panel.tab.close" => close_tab(args, ctx).await,
         "panel.tab.switch" => switch_tab(args, ctx).await,
+        "ReorderPanelTab" => reorder_tab(args, ctx).await,
         "panel.terminal.promote" => promote_terminal(args, ctx).await,
         _ => {}
     }
@@ -20,6 +21,56 @@ pub(crate) async fn handle(name: &str, _scope: &Value, args: &Value, ctx: &mut I
     state
         .thumb_pool
         .set_visible(crate::state::collect_visible_thumb_paths(&state));
+}
+
+/// Move relative to a sibling rather than trusting a frontend index that may
+/// have become stale after another client created or closed a tab.
+fn apply_tab_reorder(slots: &mut HashMap<String, PanelSlot>, args: &Value) -> Option<PanelSlot> {
+    let slot_id = super::arg_str(args, "slotId")?;
+    let panel_id = super::arg_str(args, "panelId")?;
+    let before_panel_id = match args.get("beforePanelId")? {
+        Value::Null => None,
+        Value::String(id) => Some(id.as_str()),
+        _ => return None,
+    };
+    let slot = slots.get_mut(slot_id)?;
+    let from = slot.tab_panel_ids.iter().position(|id| id == panel_id)?;
+    let to = match before_panel_id {
+        Some(id) if id == panel_id => return None,
+        Some(id) => slot.tab_panel_ids.iter().position(|candidate| candidate == id)?,
+        None => slot.tab_panel_ids.len(),
+    };
+    let to = if to > from { to - 1 } else { to };
+    if from == to {
+        return None;
+    }
+    let id = slot.tab_panel_ids.remove(from);
+    slot.tab_panel_ids.insert(to, id);
+    Some(slot.snapshot_for_patch())
+}
+
+async fn reorder_tab(args: &Value, ctx: &mut IntentContext<'_>) {
+    let (slot, gui_senders) = {
+        let mut state = ctx.state.lock().await;
+        let Some(slot) = apply_tab_reorder(&mut state.slots, args) else {
+            return;
+        };
+        (slot, state.gui_senders.clone())
+    };
+    let patch = ServerMessage::StatePatch {
+        timestamp: now(),
+        domain: "slots".into(),
+        entity_id: Some(slot.slot_id),
+        version: slot.version,
+        patch: serde_json::json!({
+            "tabPanelIds": slot.tab_panel_ids,
+            "activePanelId": slot.active_panel_id,
+        }),
+    };
+    let _ = ctx.tx.send(patch.clone()).await;
+    for sender in &gui_senders {
+        let _ = sender.send(patch.clone()).await;
+    }
 }
 
 /// Allocate a new panel id within a slot. Suffixed with an epoch counter so
@@ -61,8 +112,8 @@ async fn broadcast_slot_change(
     focus_to: Option<&str>,
 ) {
     let (panel_upsert, slot_patch, layout_patch, focus_patch, gui_senders) = {
-        let state_guard = ctx.state.lock().await;
-        let slot = state_guard.slots.get(slot_id).cloned();
+        let mut state_guard = ctx.state.lock().await;
+        let slot = state_guard.slots.get_mut(slot_id).map(|slot| slot.snapshot_for_patch());
         let gui = state_guard.gui_senders.clone();
 
         // If a brand-new panel was added, send a "create" upsert so the FE
@@ -100,7 +151,7 @@ async fn broadcast_slot_change(
             timestamp: now(),
             domain: "slots".to_string(),
             entity_id: Some(s.slot_id.clone()),
-            version: 0,
+            version: s.version,
             patch: serde_json::json!({
                 "tabPanelIds": s.tab_panel_ids,
                 "activePanelId": s.active_panel_id,
@@ -495,8 +546,8 @@ async fn promote_terminal(args: &Value, ctx: &mut IntentContext<'_>) {
     };
 
     let (panel_upsert, src_patch, slot_patch, layout_patch, focus_patch, gui_senders) = {
-        let state_guard = ctx.state.lock().await;
-        let slot = state_guard.slots.get(&slot_id).cloned();
+        let mut state_guard = ctx.state.lock().await;
+        let slot = state_guard.slots.get_mut(&slot_id).map(|slot| slot.snapshot_for_patch());
         let gui = state_guard.gui_senders.clone();
 
         // Source panel patch: clear terminal
@@ -546,7 +597,7 @@ async fn promote_terminal(args: &Value, ctx: &mut IntentContext<'_>) {
             timestamp: now(),
             domain: "slots".to_string(),
             entity_id: Some(s.slot_id.clone()),
-            version: 0,
+            version: s.version,
             patch: serde_json::json!({
                 "tabPanelIds": s.tab_panel_ids,
                 "activePanelId": s.active_panel_id,
@@ -641,7 +692,7 @@ async fn switch_tab(args: &Value, ctx: &mut IntentContext<'_>) {
         }
         let prev_active = slot.active_panel_id.clone();
         slot.active_panel_id = panel_id.clone();
-        let snapshot = slot.clone();
+        let snapshot = slot.snapshot_for_patch();
         let focus_follow = state_guard.focus == prev_active;
         if focus_follow {
             state_guard.focus = panel_id.clone();
@@ -670,7 +721,7 @@ async fn switch_tab(args: &Value, ctx: &mut IntentContext<'_>) {
         timestamp: now(),
         domain: "slots".to_string(),
         entity_id: Some(slot_snapshot.slot_id.clone()),
-        version: 0,
+        version: slot_snapshot.version,
         patch: serde_json::json!({
             "tabPanelIds": slot_snapshot.tab_panel_ids,
             "activePanelId": slot_snapshot.active_panel_id,
@@ -717,7 +768,68 @@ async fn switch_tab(args: &Value, ctx: &mut IntentContext<'_>) {
 #[cfg(test)]
 mod tests {
     use super::can_clone_active_tab;
-    use crate::state::TabKind;
+    use crate::state::{PanelSlot, TabKind};
+    use serde_json::json;
+    use std::collections::HashMap;
+
+    fn slots() -> HashMap<String, PanelSlot> {
+        [("left", vec!["a", "b", "c", "d"], "b"), ("right", vec!["other"], "other")]
+            .into_iter()
+            .map(|(id, tabs, active)| (id.into(), PanelSlot {
+                slot_id: id.into(),
+                tab_panel_ids: tabs.into_iter().map(str::to_string).collect(),
+                active_panel_id: active.into(),
+                version: 0,
+            }))
+            .collect()
+    }
+
+    #[test]
+    fn tab_reorder_moves_relative_to_current_siblings_without_activating() {
+        for (panel_id, before, expected) in [
+            ("d", Some("a"), vec!["d", "a", "b", "c"]),
+            ("a", Some("d"), vec!["b", "c", "a", "d"]),
+            ("b", None, vec!["a", "c", "d", "b"]),
+            ("c", Some("b"), vec!["a", "c", "b", "d"]),
+        ] {
+            let mut slots = slots();
+            let patch = super::apply_tab_reorder(&mut slots, &json!({
+                "slotId": "left", "panelId": panel_id, "beforePanelId": before,
+            })).expect("order changes");
+            assert_eq!(patch.tab_panel_ids, expected);
+            assert_eq!(patch.version, 1);
+            assert_eq!(slots["left"].tab_panel_ids, expected);
+            assert_eq!(slots["left"].active_panel_id, "b");
+            assert_eq!(slots["right"].tab_panel_ids, ["other"]);
+            assert_eq!(slots["right"].version, 0);
+            assert_eq!(slots["right"].active_panel_id, "other");
+        }
+    }
+
+    #[test]
+    fn tab_reorder_ignores_stale_cross_slot_malformed_and_unchanged_requests() {
+        for args in [
+            json!({"slotId":"missing", "panelId":"a", "beforePanelId":null}),
+            json!({"slotId":"left", "panelId":"gone", "beforePanelId":null}),
+            json!({"slotId":"left", "panelId":"other", "beforePanelId":"a"}),
+            json!({"slotId":"left", "panelId":"a", "beforePanelId":"other"}),
+            json!({"slotId":"left", "panelId":"a", "beforePanelId":"gone"}),
+            json!({"slotId":"left", "panelId":"a", "beforePanelId":"a"}),
+            json!({"slotId":"left", "panelId":"a", "beforePanelId":"b"}),
+            json!({"slotId":"left", "panelId":"d", "beforePanelId":null}),
+            json!({"slotId":"right", "panelId":"other", "beforePanelId":null}),
+            json!({"slotId":"left", "panelId":"a"}),
+            json!({"slotId":"left", "panelId":"a", "beforePanelId":1}),
+            json!({"slotId":null, "panelId":"a", "beforePanelId":null}),
+            json!({"slotId":"left", "panelId":null, "beforePanelId":null}),
+        ] {
+            let mut slots = slots();
+            assert!(super::apply_tab_reorder(&mut slots, &args).is_none(), "{args}");
+            assert_eq!(slots["left"].tab_panel_ids, ["a", "b", "c", "d"]);
+            assert_eq!(slots["left"].active_panel_id, "b");
+            assert_eq!(slots["right"].tab_panel_ids, ["other"]);
+        }
+    }
 
     #[test]
     fn local_filesystem_listing_is_cloneable() {

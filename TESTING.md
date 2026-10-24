@@ -18,6 +18,7 @@ The standard checks are:
 npm run build
 npm run test:build-info
 npm run test:selection-mask
+npm run test:tabs
 node --test tests/check-version.test.mjs
 cargo test --manifest-path src-tauri/Cargo.toml --locked
 cargo check --manifest-path tools/lfs-spy/Cargo.toml --locked
@@ -25,7 +26,8 @@ cargo check --manifest-path tools/lfs-spy/Cargo.toml --locked
 
 `npm run build` runs TypeScript checking and the production frontend build.
 There is no separate frontend lint command. The Node tests cover build metadata
-and release-version consistency, plus selection-mask prompt defaults. Rust tests
+and release-version consistency, plus selection-mask prompt defaults and stale
+tab-update rejection. Rust tests
 cover backend behavior and adapters;
 the last command checks the optional local-filesystem spy helper.
 
@@ -108,6 +110,7 @@ FBRO_E2E_REMOTE_ONLY=1 GDK_BACKEND=wayland npm run e2e:smoke:local_debug
 | Flag | Runs |
 | --- | --- |
 | `FBRO_E2E_FOCUS_ONLY=1` | Focus handoffs and modal ownership |
+| `FBRO_E2E_TABS_ONLY=1` | Mouse tab reordering, overflow scrolling, terminal ownership, cancellation, active-tab/focus preservation, and tab click/close behavior |
 | `FBRO_E2E_BOOKMARKS_ONLY=1` | Bookmark creation, keyboard navigation, focus, and list sizing |
 | `FBRO_E2E_BUTTON_BAR_ONLY=1` | Persistent button bar visibility, Settings and command palette, hidden-bar shortcuts, focus, both themes, and invalid values |
 | `FBRO_E2E_PANEL_SELECTION_ONLY=1` | Space selection, folder sizes, Shift+Space targeting, mask selection, and keyboard ownership in list/grid views |
@@ -146,6 +149,7 @@ coverage reference.
 | Bottom button bar | `button-bar.mjs` | Keyboard toggle in Settings → Display, palette recovery while hidden, backend-confirmed state shared between clients, frontend reload with the bar hidden, reclaimed layout space in both themes, file shortcuts and zoom while hidden, modal guards, opener restoration, and invalid-setting rejection. Rust settings tests cover older-file defaults and persistence round-trips. |
 | File icons | `file-icons.mjs` (called by the local flow) | Exact extension keys, case normalization, and successfully loaded panel icons for HTML, PNG, JPEG, JSON, and TOML. Backend capability gates the cache control; on macOS keyboard clearing increments the icon revision and preserves button focus. Disk reuse, corruption recovery, and clearing are covered by `platform::macos::icon_cache::tests`. Native macOS PNG lookup is also covered by `platform::tests::native_extension_icons_are_png`; visually check both color schemes on macOS. |
 | Panel selection and sizes | `panel-selection.mjs` (called by the local flow) | Space selects folders/files in list and grid views, calculates unknown sizes, reuses known/zero sizes, preserves cursor/focus, ignores held-key repeats, and respects modal/input/native controls; Shift+Space sizes selected/all folders without changing selection; Copy targets a selected folder despite a file cursor |
+| Panel tabs | `tabs.mjs` | Real mouse reordering in both directions and themes, backend authority before drop, inactive-tab and other-panel focus preservation, sub-threshold clicks, Escape/outside/pointer-cancel/blur/modal/concurrent-close cancellation, focused terminal identity/PTY preservation, overflowing edge auto-scroll, frontend reload, close button, middle click and empty-strip double click. Rust tests cover invalid/stale/cross-slot/no-op requests, slot versions, and listing session order/active-index serialization with terminal exclusion. |
 | Focus and modals | `focus-handoff.mjs`, `modal-focus.mjs`, and checks throughout the suite | Initial focus, exact opener restoration, covered layers ignoring keys, one submission per activation, nested Escape, backend rejection/removal, outside clicks, and preserving focus during toasts or toolbar actions |
 | Notifications | `notifications.mjs` | Frontend clipboard publication without duplicates, timestamps/severity, FIFO burst delivery, keyboard history navigation, Clear focus handoff, clearing without cancelling delivery, overflow arrivals preserving the browsed row, both schemes, and reload without replay |
 | Thumbnails | `thumbnails.mjs` (also called by the local flow) | Platform capability controls, Jobs tab navigation, queue refresh preserving focus, visible-card loading, off-screen cooldown, viewport promotion, selection fill, and abandoning old requests |
@@ -163,6 +167,9 @@ coverage reference.
 
 Several UI flows check both `fbro-dark` and `daylight`. Modal tests sample common
 focus and cancellation paths; they do not cover every operation/conflict state.
+Tab dragging uses native WebDriver mouse actions. Its middle-click close check
+dispatches `auxclick` directly because WebKitWebDriver on Wayland reports a
+middle-button release as button 0 and leaves the middle button held.
 Search viewer fixtures are isolated from files created by earlier flows.
 Created-time search checks depend on filesystem birth-time support.
 Hash progress/cancellation tests use sparse 8 GiB files, so their apparent size

@@ -27,6 +27,7 @@ pub struct PanelSlot {
     pub slot_id: String,
     pub tab_panel_ids: Vec<String>, // ordered, len >= 1
     pub active_panel_id: String,
+    pub version: u64, // incremented for each emitted slot patch
 }
 
 // Added to Panel:
@@ -51,6 +52,7 @@ interface PanelSlot {
   slotId: string;
   tabPanelIds: string[];
   activePanelId: string;
+  version: number;
 }
 
 // PanelState (existing) gains:
@@ -132,6 +134,20 @@ sequenceDiagram
     BE->>FE: StatePatch focus { panelId }
 ```
 
+### 3.6 Reorder tab (`ReorderPanelTab`)
+
+Move `panelId` immediately before `beforePanelId` within `slotId`; an explicit
+`null` target appends it. Resolve both identities against the current backend
+order. Missing/malformed arguments, unknown slots/tabs, cross-slot references,
+self-targets, and unchanged positions are no-ops. Only `tab_panel_ids` changes;
+active tab, focus, listing state, and PTY ownership stay intact. Broadcast a
+targeted slot patch containing `tabPanelIds` and the unchanged `activePanelId`,
+without a snapshot or layout/focus patch. Slot patch producers and natural
+terminal-exit snapshots share a per-slot monotonically increasing version.
+Snapshots expose the slot's current version. The frontend rejects older or
+duplicate slot updates, resetting its version baseline on a new connection.
+Reordering is recorded in the command journal.
+
 ---
 
 ## 4. Protocol
@@ -143,6 +159,7 @@ sequenceDiagram
 | `panel.tab.new` | `{ slotId, source: "clone" }` | New tab cloning active source + path. |
 | `panel.tab.close` | `{ panelId }` | Close tab; no-op when it's the only tab. |
 | `panel.tab.switch` | `{ slotId, panelId }` | Activate a tab. |
+| `ReorderPanelTab` | `{ slotId, panelId, beforePanelId: string \| null }` | Move before a sibling, or append when target is null. |
 | `panel.tab.rename` | `{ panelId, title }` | Override tab title (protocol only, no UI yet). |
 | `panel.terminal.promote` | `{ panelId }` | Promote embedded PTY to sibling tab. |
 
@@ -155,7 +172,7 @@ All tab operations use **targeted patches** — no full `StateSnapshot` is emitt
 | `panels` | `{ create:true, slotId, tabKind, … }` | New tab created |
 | `panels` | `{ remove:true }` | Tab closed |
 | `panels` | `{ terminalSessionId: null }` | Source panel cleared on promote |
-| `slots` | `{ tabPanelIds, activePanelId }` | Any tab membership/activation change |
+| `slots` | `{ tabPanelIds, activePanelId }` | Any tab membership/order/activation change |
 | `layout` | `{ panels: […] }` | Whenever `layout.panels` (active-per-slot list) changes |
 | `focus` | `{ panelId }` | Active panel changed |
 
@@ -208,6 +225,18 @@ These bindings are **panel-scoped**: they fire only when a panel listing has foc
 | `panel.tab.prev` | Shift+K | Activate previous tab (wraps) |
 
 Middle-click on a tab chip also closes it. Double-clicking on **empty space** in the tab bar uses the same New Tab behavior as Ctrl/Cmd+T: clone the active local filesystem listing, or open Home when the active tab is virtual, remote, or terminal.
+
+Tab reordering is intentionally mouse-only. Drag a tab body/label with the left
+button by at least 6px to show an insertion marker; the close button is excluded.
+Dragging an inactive tab leaves the displayed tab active, and preserves the
+exact existing keyboard focus owner, including in another panel. Drops commit
+only within the originating tab strip; its edges auto-scroll overflowing tabs.
+The frontend shows drag feedback without reordering chips before the backend
+patch. Escape consumes only an active drag; pointer cancellation, window blur,
+tab lifecycle changes, and a newly opened modal/menu cancel it too. Dropping
+outside the strip cancels. The click following a drag is suppressed, while a
+sub-threshold gesture remains a normal click. Listing and terminal tabs share
+the same behavior. Existing session settings govern saved listing-tab order.
 
 ---
 

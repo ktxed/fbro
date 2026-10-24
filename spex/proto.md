@@ -354,7 +354,8 @@ atomically with the destination and can display the focused file.
 {
   "slotId": "left",
   "tabPanelIds": ["left", "left-tab-2"],
-  "activePanelId": "left-tab-2"
+  "activePanelId": "left-tab-2",
+  "version": 3
 }
 ```
 
@@ -363,6 +364,13 @@ Slot patches use `domain: "slots"`. Patch payloads:
 * `upsert` fields: `tabPanelIds`, `activePanelId` (any subset may be present).
 * Slot removal: `{ "remove": true }`.
 
+Slot snapshots include their current `version`. Slot patch envelope versions
+increase per slot, including changes published by natural terminal exit.
+Membership/order/activation patches carry both `tabPanelIds` and
+`activePanelId`, so a newer patch is sufficient when an earlier one is delayed.
+The frontend ignores stale/duplicate slot updates and resets its acceptance
+baseline on `Welcome`, allowing counters to restart after a backend restart.
+
 ### 7.2 Tab Intents
 
 | Intent | Args | Behavior |
@@ -370,6 +378,7 @@ Slot patches use `domain: "slots"`. Patch payloads:
 | `panel.tab.new` | `{ slotId, source: "clone" }` | Creates a new tab after the active tab and activates it; clones an active local filesystem listing, otherwise opens the user's Home directory. |
 | `panel.tab.close` | `{ panelId }` | Closes the tab; activates the tab to its left. No-op when this is the slot's only tab. |
 | `panel.tab.switch` | `{ slotId, panelId }` | Activates `panelId` within `slotId`. |
+| `ReorderPanelTab` | `{ slotId, panelId, beforePanelId: string \| null }` | Moves a tab before a sibling in the same slot; explicit null appends. Valid changed requests broadcast only a slot patch with the order and unchanged active tab. Focus and panel state are preserved. Missing/malformed, stale, cross-slot and unchanged requests are no-ops. Recorded in the command journal; no new reply type. |
 | `panel.tab.rename` | `{ panelId, title }` | Sets `tabTitle` override (FUTURE — protocol only). |
 | `panel.terminal.promote` | `{ panelId }` | Detaches the panel's embedded PTY and inserts it as a sibling terminal tab; source panel returns to listing. |
 | `QuickEditFile` | panel id scope; `{ path, filename }` | Opens the explicitly named local file in the configured Nano/Vim embedded terminal editor. Both arguments are required; `path` must match the panel's current directory and `filename` must name a regular file in its complete backend listing. Cursor position, selection, and render-window offsets do not affect the target. Missing/invalid arguments or a changed directory produce the existing Quick Edit error and failed journal result, with no cursor fallback. `path` is the editor's working directory and the scoped panel hosts the terminal. On Windows, also probes Git for Windows `usr\\bin`, Scoop, Chocolatey, and WinGet for nano/vim/micro/edit. The temporary terminal closes when the editor exits. |

@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { IconChevronLeft, IconChevronRight, IconTerminal2, IconX } from "@tabler/icons-react";
 import type { PanelSlot, PanelState, Source } from "../ws/types";
 import type { WsClient } from "../ws/client";
 import { isSearchSourceId } from "../utils/sourceId";
+import { useTabReorder } from "../hooks/useTabReorder";
 
 const MAX_TAB_CHARS = 18;
 
@@ -45,10 +46,12 @@ interface Props {
   panels: Record<string, PanelState>;
   sources: Record<string, Source>;
   client: WsClient;
+  blocked: boolean;
 }
 
-export function PanelTabBar({ slot, panels, sources, client }: Props) {
-  const listRef = useRef<HTMLDivElement>(null);
+export function PanelTabBar({ slot, panels, sources, client, blocked }: Props) {
+  const drag = useTabReorder(slot, client, blocked);
+  const { listRef } = drag;
   const [canLeft, setCanLeft] = useState(false);
   const [canRight, setCanRight] = useState(false);
 
@@ -110,11 +113,21 @@ export function PanelTabBar({ slot, panels, sources, client }: Props) {
   };
 
   return (
-    <div className="panel__tabs">
+    <div className="panel__tabs" data-testid={`panel-tabs-${slot.slotId}`}
+      onPointerDownCapture={() => { drag.suppressClickRef.current = false; }}
+      onClickCapture={(event) => {
+        if (!drag.suppressClickRef.current) return;
+        event.preventDefault();
+        event.stopPropagation();
+        drag.suppressClickRef.current = false;
+      }}>
       <button
         className="panel__tabs-arrow"
         disabled={!canLeft}
         tabIndex={-1}
+        title="Scroll tabs left"
+        aria-label="Scroll tabs left"
+        onMouseDown={(event) => event.preventDefault()}
         onClick={() => scroll(-1)}
       >
         <IconChevronLeft size={14} />
@@ -126,6 +139,11 @@ export function PanelTabBar({ slot, panels, sources, client }: Props) {
           canRight ? "panel__tabs-list--fade-right" : "",
         ].filter(Boolean).join(" ")}
         ref={listRef}
+        onPointerMove={drag.onPointerMove}
+        onPointerUp={drag.onPointerUp}
+        onPointerCancel={drag.cancel}
+        onLostPointerCapture={drag.cancel}
+        onDragStart={(event) => event.preventDefault()}
         onScroll={updateArrows}
         onDoubleClick={(e) => {
           if (e.target === e.currentTarget) newTabFromActive();
@@ -143,8 +161,10 @@ export function PanelTabBar({ slot, panels, sources, client }: Props) {
           return (
             <div
               key={panelId}
-              className={`panel__tab${isActive ? " panel__tab--active" : ""}`}
+              data-tab-panel-id={panelId}
+              className={`panel__tab${isActive ? " panel__tab--active" : ""}${drag.draggedPanelId === panelId ? " panel__tab--dragging" : ""}`}
               title={tooltip}
+              onPointerDown={(event) => drag.onPointerDown(event, panelId)}
               onClick={() => switchTo(panelId)}
               onAuxClick={(e) => {
                 if (e.button === 1) {
@@ -166,6 +186,8 @@ export function PanelTabBar({ slot, panels, sources, client }: Props) {
                   className="panel__tab-close"
                   tabIndex={-1}
                   title="Close tab"
+                  aria-label="Close tab"
+                  onMouseDown={(event) => event.preventDefault()}
                   onClick={(e) => {
                     e.stopPropagation();
                     closeTab(panelId);
@@ -177,11 +199,16 @@ export function PanelTabBar({ slot, panels, sources, client }: Props) {
             </div>
           );
         })}
+        {drag.marker && <span className="panel__tab-drop-marker" data-testid="tab-drop-marker"
+          aria-hidden="true" style={{ left: drag.marker.left }} />}
       </div>
       <button
         className="panel__tabs-arrow"
         disabled={!canRight}
         tabIndex={-1}
+        title="Scroll tabs right"
+        aria-label="Scroll tabs right"
+        onMouseDown={(event) => event.preventDefault()}
         onClick={() => scroll(1)}
       >
         <IconChevronRight size={14} />

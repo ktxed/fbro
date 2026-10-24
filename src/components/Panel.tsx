@@ -2471,7 +2471,7 @@ export function Panel({
           (s) => s.tabPanelIds.length > 1,
         );
         if (!anyTabbed) return null;
-        return <PanelTabBar slot={slot} panels={appState.panels} sources={appState.sources} client={client} />;
+        return <PanelTabBar slot={slot} panels={appState.panels} sources={appState.sources} client={client} blocked={modalActive} />;
       })()}
 
       {panel.tabKind === "terminal" && panel.terminalSessionId !== undefined ? (

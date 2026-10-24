@@ -193,6 +193,7 @@ export interface PanelSlot {
   slotId: string;
   tabPanelIds: string[];
   activePanelId: string;
+  version: number;
 }
 
 export interface PanelState {

@@ -1,5 +1,6 @@
 import { createContext, useContext, useReducer, type Dispatch } from "react";
 import { isSearchSourceId } from "../utils/sourceId";
+import { applySlotUpdate } from "./slots";
 import { disposeCachedTerminal } from "../components/PanelTerminal";
 import { applyNotificationPatch, applyNotificationSnapshot, createNotificationState, expireNotificationToast, type NotificationState } from "../notifications/state";
 import type { NotificationRequest, NotificationRequestAction } from "../notifications/service";
@@ -535,7 +536,9 @@ function applySnapshot(state: AppState, msg: StateSnapshotMessage): AppState {
     };
   }
   if (domains.slots) {
-    next.slots = { ...domains.slots };
+    next.slots = Object.fromEntries(Object.entries(domains.slots).map(([id, slot]) => [
+      id, applySlotUpdate(state.slots[id], id, slot.version, slot)!,
+    ]));
   }
   if (domains.focus !== undefined) {
     next.focus = domains.focus;
@@ -914,17 +917,13 @@ function applyPatch(state: AppState, msg: StatePatchMessage): AppState {
     let nextLayout = state.layout;
 
     if (slotId) {
+      const existing = nextSlots[slotId];
+      if (existing && msg.version <= existing.version) return state;
       if (patch.remove) {
         nextSlots = { ...nextSlots };
         delete nextSlots[slotId];
       } else {
-        const existing = nextSlots[slotId];
-        const merged: PanelSlot = {
-          slotId,
-          tabPanelIds: patch.tabPanelIds ?? existing?.tabPanelIds ?? [],
-          activePanelId:
-            patch.activePanelId ?? existing?.activePanelId ?? slotId,
-        };
+        const merged = applySlotUpdate(existing, slotId, msg.version, patch)!;
         nextSlots = { ...nextSlots, [slotId]: merged };
       }
     }
@@ -1269,6 +1268,7 @@ function reducer(state: AppState, action: AppAction): AppState {
           return state;
         case "Welcome":
           return { ...state, sessionId: msg.sessionId, fileServerPort: msg.fileServerPort,
+            slots: Object.fromEntries(Object.entries(state.slots).map(([id, slot]) => [id, { ...slot, version: -1 }])),
             notificationConnectionReady: true, notifications: { ...state.notifications, version: -1 } };
         case "PublishNotificationOk":
         case "PublishNotificationFailed":

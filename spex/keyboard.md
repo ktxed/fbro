@@ -90,6 +90,12 @@ and sharing patches do not move focus. Covered Settings controls remain inert.
 
 ## Panel selection and folder sizes
 
+Panel tab reordering is mouse-only. During an active tab drag, Escape cancels
+the gesture before reaching the listing or PTY, without changing focus or
+activating the dragged tab. A modal/menu opening cancels the drag and retains
+the existing input priority. Clicking and the existing tab navigation commands
+keep their normal behavior. See [Tabs](tabs.md) for the drag contract.
+
 In list and grid listings, `+` opens **Select Files** and `-` opens
 **Deselect Files**. The registry commands are `panel.selection.select_by_mask`
 and `panel.selection.deselect_by_mask`; symbol matching includes Shift-produced

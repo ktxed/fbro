@@ -12,6 +12,7 @@ export class FbroObserver {
     this.messages = [];
     this.state = {
       panels: {},
+      slots: {},
       sources: {},
       jobs: {},
       shareConfig: { enabled: false, allowIpv6: false, sharedSourceIds: [], sharedRoots: [], shareSuggestions: [], pairedPeers: [] },
@@ -380,6 +381,7 @@ export class FbroObserver {
 
   #applySnapshot(domains) {
     if (domains.panels) this.state.panels = domains.panels;
+    if (domains.slots) this.state.slots = domains.slots;
     if (domains.sources) {
       this.state.sources = Object.fromEntries(domains.sources.map((source) => [source.id, source]));
     }
@@ -395,6 +397,10 @@ export class FbroObserver {
 
   #applyPatch(msg) {
     const patch = msg.patch ?? {};
+    if (msg.domain === "slots" && msg.entityId) {
+      if (patch.remove) delete this.state.slots[msg.entityId];
+      else this.state.slots[msg.entityId] = { ...this.state.slots[msg.entityId], ...patch };
+    }
     if (msg.domain === "notifications" && msg.version > this.state.notifications.version) {
       this.state.notifications = {
         version: msg.version,

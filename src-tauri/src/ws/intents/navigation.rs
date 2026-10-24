@@ -241,8 +241,8 @@ async fn broadcast_slot_change(
     focus_to: Option<&str>,
 ) {
     let (panel_upsert, slot_patch, layout_patch, focus_patch, gui_senders) = {
-        let state_guard = ctx.state.lock().await;
-        let slot = state_guard.slots.get(slot_id).cloned();
+        let mut state_guard = ctx.state.lock().await;
+        let slot = state_guard.slots.get_mut(slot_id).map(|slot| slot.snapshot_for_patch());
         let gui = state_guard.gui_senders.clone();
 
         let panel_upsert = new_panel_id.and_then(|pid| {
@@ -283,7 +283,7 @@ async fn broadcast_slot_change(
             timestamp: now(),
             domain: "slots".to_string(),
             entity_id: Some(s.slot_id.clone()),
-            version: 0,
+            version: s.version,
             patch: serde_json::json!({
                 "tabPanelIds": s.tab_panel_ids,
                 "activePanelId": s.active_panel_id,
