@@ -56,6 +56,19 @@ test("eviction and clear affect history while every pending toast still delivers
   assert.deepEqual(state.toastQueue.map((item) => item.id), ["first", "second"]);
 });
 
+test("OS delivery records history without frontend delivery or snapshot replay", () => {
+  const osOnly = entry("os-only", ["os"]);
+  const shared = entry("shared", ["toast", "log", "os"]);
+  let state = applyNotificationPatch(createNotificationState(), 1, { added: osOnly, removedIds: [] });
+  assert.deepEqual(state.entries.map((item) => item.id), ["os-only"]);
+  assert.deepEqual(state.toastQueue, []);
+  state = applyNotificationPatch(state, 2, { added: shared, removedIds: [] });
+  assert.deepEqual(state.toastQueue.map((item) => item.id), ["shared"]);
+  const restored = applyNotificationSnapshot(createNotificationState(), { version: 2, entries: [shared, osOnly] });
+  assert.deepEqual(restored.entries.map((item) => item.id), ["shared", "os-only"]);
+  assert.deepEqual(restored.toastQueue, []);
+});
+
 test("an old expiry cannot dismiss a newer active toast", () => {
   let state = applyNotificationPatch(createNotificationState(), 1, { added: entry("first"), removedIds: [] });
   state = applyNotificationPatch(state, 2, { added: entry("second"), removedIds: [] });

@@ -744,6 +744,9 @@ export interface BookmarkEntry {
 export interface GeneralSettings {
   showHiddenDefault: boolean;
   showButtonBar: boolean;
+  osNotificationsEnabled: boolean;
+  /** Read-only backend capability; native delivery is introduced per platform. */
+  supportsOsNotifications: boolean;
   rememberWindowState: boolean;
   preserveAttributes: boolean;
   autoResumeCopies: boolean;
@@ -804,12 +807,12 @@ export interface ChildProcess {
 }
 
 export type NotificationLevel = "info" | "warning" | "error";
-export type NotificationChannel = "toast" | "log";
+export type NotificationChannel = "toast" | "log" | "os";
 
 export interface NotificationInput {
   message: string;
   level?: NotificationLevel;
-  channels?: NotificationChannel[];
+  channels?: Exclude<NotificationChannel, "os">[];
 }
 
 export interface Notification {

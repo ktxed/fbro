@@ -1,5 +1,9 @@
 //! Application-lifetime notification history and delivery.
 
+pub mod desktop;
+pub mod jobs;
+pub mod remote;
+
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::io::Write;
@@ -19,6 +23,7 @@ pub enum NotificationLevel {
 pub enum NotificationChannel {
     Toast,
     Log,
+    Os,
 }
 #[derive(Clone, Debug, Serialize)]
 pub struct Notification {
@@ -69,6 +74,13 @@ pub struct NotificationUpdate {
 pub trait NotificationSink: Send + Sync {
     fn channel(&self) -> NotificationChannel;
     fn deliver(&self, notification: &Notification) -> Result<(), String>;
+    fn deliver_expiring(
+        &self,
+        notification: &Notification,
+        _expires_at: Option<u64>,
+    ) -> Result<(), String> {
+        self.deliver(notification)
+    }
 }
 struct StderrLogSink;
 impl NotificationSink for StderrLogSink {
@@ -117,6 +129,7 @@ pub struct NotificationService {
     capacity: usize,
     history: Mutex<NotificationHistory>,
     sinks: Vec<Arc<dyn NotificationSink>>,
+    activity: Arc<desktop::DesktopActivity>,
 }
 impl Default for NotificationService {
     fn default() -> Self {
@@ -129,17 +142,69 @@ impl NotificationService {
             capacity: capacity.max(1),
             history: Mutex::new(NotificationHistory::default()),
             sinks,
+            activity: Arc::new(desktop::DesktopActivity::default()),
         }
     }
+    pub fn with_desktop(platform: Arc<dyn crate::platform::Platform>) -> Self {
+        let activity = Arc::new(desktop::DesktopActivity::default());
+        let mut service = Self::new(1_000, vec![Arc::new(StderrLogSink)]);
+        if platform.supports_os_notifications() {
+            service
+                .sinks
+                .push(Arc::new(desktop::OsNotificationSink::start(
+                    platform,
+                    activity.clone(),
+                )));
+        }
+        service.activity = activity;
+        service
+    }
+    pub fn desktop_activity(&self) -> Arc<desktop::DesktopActivity> {
+        self.activity.clone()
+    }
+    pub fn set_os_enabled(&self, enabled: bool) {
+        self.activity.set_enabled(enabled);
+    }
     pub fn publish(&self, input: NotificationInput) -> Notification {
-        self.publish_inner(None, input)
+        self.publish_inner(None, input, None)
+    }
+    pub fn publish_once(&self, event_key: &str, input: NotificationInput) -> Notification {
+        self.publish_inner(Some(&format!("event:{event_key}")), input, None)
+    }
+    pub fn publish_os(
+        &self,
+        mut input: NotificationInput,
+        expires_at: Option<u64>,
+    ) -> Notification {
+        input
+            .channels
+            .get_or_insert_with(|| vec![NotificationChannel::Toast, NotificationChannel::Log])
+            .push(NotificationChannel::Os);
+        self.publish_inner(None, input, expires_at)
+    }
+    pub fn publish_os_once(
+        &self,
+        event_key: &str,
+        mut input: NotificationInput,
+        expires_at: Option<u64>,
+    ) -> Notification {
+        input
+            .channels
+            .get_or_insert_with(|| vec![NotificationChannel::Toast, NotificationChannel::Log])
+            .push(NotificationChannel::Os);
+        self.publish_inner(Some(&format!("event:{event_key}")), input, expires_at)
     }
     /// Request identity prevents duplicate frontend submissions, independently
     /// of text equality. The identity expires with its retained history entry.
     pub fn publish_request(&self, request_id: &str, input: NotificationInput) -> Notification {
-        self.publish_inner(Some(request_id), input)
+        self.publish_inner(Some(&format!("request:{request_id}")), input, None)
     }
-    fn publish_inner(&self, request_id: Option<&str>, input: NotificationInput) -> Notification {
+    fn publish_inner(
+        &self,
+        request_id: Option<&str>,
+        input: NotificationInput,
+        expires_at: Option<u64>,
+    ) -> Notification {
         let notification = {
             let mut history = self
                 .history
@@ -193,7 +258,7 @@ impl NotificationService {
         // never changes the committed record or recursively publishes feedback.
         for sink in &self.sinks {
             if notification.channels.contains(&sink.channel()) {
-                if let Err(error) = sink.deliver(&notification) {
+                if let Err(error) = sink.deliver_expiring(&notification, expires_at) {
                     eprintln!(
                         "[notifications] {:?} delivery failed: {error}",
                         sink.channel()
@@ -384,9 +449,26 @@ pub fn hash_generation_feedback(
     if saved == 0 {
         return None;
     }
+    let errors = meta
+        .result
+        .as_ref()
+        .map(|result| {
+            result
+                .items
+                .iter()
+                .filter(|item| item.status == HashGenerateStatus::Error)
+                .count()
+        })
+        .unwrap_or(0);
     let noun = if saved == 1 { "file" } else { "files" };
+    let (suffix, level) = if errors > 0 {
+        let noun = if errors == 1 { "error" } else { "errors" };
+        (format!(" ({errors} {noun})"), NotificationLevel::Error)
+    } else {
+        (String::new(), level)
+    };
     Some(NotificationInput {
-        message: format!("{prefix} {saved} hash {noun}"),
+        message: format!("{prefix} {saved} hash {noun}{suffix}"),
         level: Some(level),
         channels: None,
     })
@@ -399,7 +481,11 @@ pub async fn send_feedback(
 ) -> Result<(), mpsc::error::SendError<crate::ws::protocol::ServerMessage>> {
     if let Some(input) = backend_feedback(&message) {
         let service = state.lock().await.notifications.clone();
-        service.publish(input);
+        if jobs::is_operation_failure(&message) {
+            service.publish_os(input, None);
+        } else {
+            service.publish(input);
+        }
     }
     sender.send(message).await
 }
@@ -417,7 +503,11 @@ pub fn worker_feedback_sender(
         while let Some(mut message) = worker_rx.recv().await {
             if crate::ws::server::apply_job_event_to_state(&state, &mut message).await {
                 if let Some(input) = backend_feedback(&message) {
-                    notifications.publish(input);
+                    if jobs::is_operation_failure(&message) {
+                        notifications.publish_os(input, None);
+                    } else {
+                        notifications.publish(input);
+                    }
                 }
                 let _ = sender
                     .send(crate::ws::protocol::ServerMessage::AppliedWorkerMessage {
@@ -456,6 +546,65 @@ mod tests {
     }
     fn service() -> NotificationService {
         NotificationService::new(1_000, vec![Arc::new(CapturingSink::default())])
+    }
+    #[test]
+    fn notifications_os_channel_round_trips_without_changing_defaults() {
+        let channel = serde_json::from_str::<NotificationChannel>("\"os\"");
+        assert!(
+            channel.is_ok(),
+            "backend records must support native delivery"
+        );
+        assert_eq!(serde_json::to_string(&channel.unwrap()).unwrap(), "\"os\"");
+        assert_eq!(
+            service()
+                .publish(NotificationInput::new("ordinary"))
+                .channels
+                .len(),
+            2
+        );
+    }
+    #[test]
+    fn notifications_os_event_identity_is_separate_from_frontend_requests() {
+        let service = service();
+        let frontend = service.publish_request("event:pair", NotificationInput::new("frontend"));
+        let first = service.publish_os_once("pair", NotificationInput::new("pairing"), Some(42));
+        let repeated = service.publish_os_once("pair", NotificationInput::new("pairing"), Some(42));
+        assert_ne!(frontend.id, first.id);
+        assert_eq!(first.id, repeated.id);
+        assert!(first.channels.contains(&NotificationChannel::Os));
+        assert_eq!(service.snapshot().entries.len(), 2);
+    }
+
+    #[test]
+    fn notifications_native_expiry_is_forwarded_without_entering_history_wire_format() {
+        struct ExpiringSink(Mutex<Vec<Option<u64>>>);
+        impl NotificationSink for ExpiringSink {
+            fn channel(&self) -> NotificationChannel {
+                NotificationChannel::Os
+            }
+            fn deliver(&self, _: &Notification) -> Result<(), String> {
+                panic!("expiry path required")
+            }
+            fn deliver_expiring(
+                &self,
+                _: &Notification,
+                expiry: Option<u64>,
+            ) -> Result<(), String> {
+                self.0.lock().unwrap().push(expiry);
+                Err("no native service".into())
+            }
+        }
+        let sink = Arc::new(ExpiringSink(Mutex::new(vec![])));
+        let service = NotificationService::new(1_000, vec![sink.clone()]);
+        let entry = service.publish_os(NotificationInput::new("pairing"), Some(123));
+        assert_eq!(*sink.0.lock().unwrap(), vec![Some(123)]);
+        let snapshot = service.snapshot();
+        assert_eq!(snapshot.entries.len(), 1);
+        assert_eq!(snapshot.entries[0].id, entry.id);
+        assert!(serde_json::to_value(entry)
+            .unwrap()
+            .get("expiresAt")
+            .is_none());
     }
     fn added(update: NotificationUpdate) -> Notification {
         let NotificationPatch::Added { added, .. } = update.patch else {
@@ -761,7 +910,7 @@ mod tests {
         use crate::ws::protocol::{
             HashGenerateBroFileSchema, HashGenerateBroResultSchema, HashGenerateStatus,
         };
-        for (event, prefix, level) in [
+        for (event, prefix, _level) in [
             ("Completed", "Saved", NotificationLevel::Info),
             ("Cancelled", "Cancelled — saved", NotificationLevel::Warning),
             ("Failed", "Failed — saved", NotificationLevel::Error),
@@ -789,8 +938,8 @@ mod tests {
             };
             assert!(hash_generation_feedback(&mut meta, "Progress").is_none());
             let input = hash_generation_feedback(&mut meta, event).expect("terminal feedback");
-            assert_eq!(input.message, format!("{prefix} 2 hash files"));
-            assert_eq!(input.level, Some(level));
+            assert_eq!(input.message, format!("{prefix} 2 hash files (1 error)"));
+            assert_eq!(input.level, Some(NotificationLevel::Error));
             assert!(
                 hash_generation_feedback(&mut meta, event).is_none(),
                 "broadcast recipients cannot publish twice"

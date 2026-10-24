@@ -557,6 +557,9 @@ async fn revoke_pairing(args: &Value, ctx: &mut IntentContext<'_>) {
         }
         ids
     };
+    for source_id in &removed_sources {
+        crate::notifications::remote::source_removed(ctx.state, source_id).await;
+    }
     if !removed_sources.is_empty() {
         let _ = ctx
             .tx
@@ -651,9 +654,7 @@ pub async fn start_sharing_server_for(state: &crate::state::SharedState) -> Resu
     }
 
     let identity = ensure_identity_for(state).await?;
-    let events = Arc::new(GuiSessionEvents {
-        state: state.clone(),
-    });
+    let events = Arc::new(GuiSessionEvents::new(state.clone()));
     let handle = spawn(state.clone(), identity.clone(), DEFAULT_PORT, events)
         .await
         .map_err(|e| e.to_string())?;

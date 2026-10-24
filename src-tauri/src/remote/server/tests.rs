@@ -259,6 +259,164 @@ fn empty_test_state() -> SharedState {
 }
 
 #[tokio::test]
+async fn remote_peer_notification_is_published_without_any_gui_connection() {
+    let state = empty_test_state();
+    let service = state.lock().await.notifications.clone();
+    let (_, mut updates) = service.subscribe();
+    let one = crate::notifications::remote::source_registered(&state, "remote:peer:one").await;
+    let two = crate::notifications::remote::source_registered(&state, "remote:peer:two").await;
+    let broadcaster = GuiStatusBroadcaster::new(state.clone(), "remote:peer:one".into(), one);
+    let other = GuiStatusBroadcaster::new(state.clone(), "remote:peer:two".into(), two);
+    use crate::vfs::sftp::StatusBroadcaster;
+    broadcaster.emit("remote:peer:one", "connected", None, None);
+    other.emit("remote:peer:two", "connected", None, None);
+    let update = tokio::time::timeout(Duration::from_secs(4), updates.recv())
+        .await.expect("settled peer notification").expect("notification update");
+    let crate::notifications::NotificationPatch::Added { added, .. } = update.patch else {
+        panic!("expected notification publication");
+    };
+    assert!(added.channels.contains(&crate::notifications::NotificationChannel::Os));
+    assert!(added.message.contains("connected"));
+    assert_eq!(service.snapshot().entries.len(), 1, "one alert covers both sources");
+    assert!(state.lock().await.gui_senders.is_empty());
+}
+
+#[tokio::test]
+async fn short_incoming_sessions_keep_callback_order_without_false_peer_alerts() {
+    let state = empty_test_state();
+    let service = state.lock().await.notifications.clone();
+    let (_, mut updates) = service.subscribe();
+    let (sender, mut messages) = tokio::sync::mpsc::channel(4);
+    state.lock().await.gui_senders.push(sender);
+    let events = GuiSessionEvents::new(state.clone());
+    events.started("peer");
+    events.ended("peer");
+    let started = tokio::time::timeout(Duration::from_secs(1), messages.recv()).await.unwrap().unwrap();
+    let ended = tokio::time::timeout(Duration::from_secs(1), messages.recv()).await.unwrap().unwrap();
+    assert!(matches!(started, ServerMessage::RemoteSessionStarted { .. }));
+    assert!(matches!(ended, ServerMessage::RemoteSessionEnded { .. }));
+    assert!(tokio::time::timeout(Duration::from_millis(2200), updates.recv()).await.is_err());
+    assert!(service.snapshot().entries.is_empty());
+}
+
+#[tokio::test]
+async fn reverse_peer_connections_reach_os_delivery_while_outgoing_stays_open() {
+    struct DeliveryPlatform(tokio::sync::mpsc::UnboundedSender<String>);
+    impl Platform for DeliveryPlatform {
+        fn home_dir(&self) -> String { "/".into() }
+        fn open_in_editor(&self, _: &str) -> Result<String, String> { Err("unused".into()) }
+        fn supports_os_notifications(&self) -> bool { true }
+        fn send_os_notification(&self, message: &str) -> Result<(), String> {
+            self.0.send(message.into()).map_err(|error| error.to_string())
+        }
+    }
+    let state = empty_test_state();
+    let (delivered, mut deliveries) = tokio::sync::mpsc::unbounded_channel();
+    let service = Arc::new(crate::notifications::NotificationService::with_desktop(
+        Arc::new(DeliveryPlatform(delivered)),
+    ));
+    service.desktop_activity().observe_window("main", Some(false));
+    state.lock().await.notifications = service.clone();
+    let source = "remote:peer:one";
+    let generation = crate::notifications::remote::source_registered(&state, source).await;
+    let broadcaster = GuiStatusBroadcaster::new(state.clone(), source.into(), generation);
+    use crate::vfs::sftp::StatusBroadcaster;
+    broadcaster.emit(source, "connected", None, None);
+    let outgoing = tokio::time::timeout(Duration::from_secs(4), deliveries.recv()).await.unwrap().unwrap();
+    assert!(outgoing.starts_with("Remote fbro connected:"));
+    assert!(outgoing.ends_with("(outgoing)"));
+
+    let sessions = GuiSessionEvents::new(state.clone());
+    sessions.started("peer");
+    let incoming = tokio::time::timeout(Duration::from_secs(4), deliveries.recv()).await.unwrap().unwrap();
+    assert!(incoming.starts_with("Remote fbro connected:"));
+    assert!(incoming.ends_with("(incoming)"));
+    sessions.ended("peer");
+    let disconnected = tokio::time::timeout(Duration::from_secs(4), deliveries.recv()).await.unwrap().unwrap();
+    assert!(disconnected.starts_with("Remote fbro disconnected:"));
+    assert!(disconnected.ends_with("(incoming)"));
+
+    crate::notifications::remote::source_removed(&state, source).await;
+    let outgoing_disconnected = tokio::time::timeout(Duration::from_secs(4), deliveries.recv()).await.unwrap().unwrap();
+    assert!(outgoing_disconnected.starts_with("Remote fbro disconnected:"));
+    assert!(outgoing_disconnected.ends_with("(outgoing)"));
+    assert_eq!(service.snapshot().entries.len(), 4);
+    assert!(state.lock().await.gui_senders.is_empty());
+}
+
+#[tokio::test]
+async fn outgoing_transfer_notification_is_owned_by_the_server_before_gui_delivery() {
+    let state = empty_test_state();
+    let first = start_outgoing_transfer(&state, "peer", "client:notification-test")
+        .await.expect("outgoing transfer");
+    let service = state.lock().await.notifications.clone();
+    let entries = service.snapshot().entries;
+    assert_eq!(entries.len(), 1);
+    assert!(entries[0].channels.contains(&crate::notifications::NotificationChannel::Os));
+    assert!(state.lock().await.gui_senders.is_empty());
+    let _second = start_outgoing_transfer(&state, "peer", "client:notification-test")
+        .await.expect("reconnected transfer");
+    assert_eq!(service.snapshot().entries.len(), 1, "transfer identity survives transport reconnect");
+    finish_outgoing_transfer(state.clone(), first.job_id).await;
+    assert!(!service.snapshot().entries.iter().any(|entry| {
+        entry.channels.contains(&crate::notifications::NotificationChannel::Os)
+            && entry.message.contains("ended")
+    }), "short successful transfer must not emit an OS end alert");
+}
+
+#[tokio::test]
+async fn outgoing_transfer_resumed_after_short_idle_can_publish_a_long_end_notification() {
+    let state = empty_test_state();
+    let mut transfer = start_outgoing_transfer(&state, "peer", "client:resumed-notification")
+        .await.expect("outgoing transfer");
+    finish_outgoing_transfer(state.clone(), transfer.job_id.clone()).await;
+    {
+        let mut guard = state.lock().await;
+        let job = guard.job_store.jobs.get_mut(&transfer.job_id).unwrap();
+        assert_eq!(job.state, JobState::Completed);
+        job.notification.started_at = Some(Instant::now() - Duration::from_secs(31));
+    }
+    emit_outgoing_progress(&state, &mut transfer, true).await;
+    finish_outgoing_transfer(state.clone(), transfer.job_id.clone()).await;
+    let service = state.lock().await.notifications.clone();
+    assert_eq!(service.snapshot().entries.iter().filter(|entry| {
+        entry.channels.contains(&crate::notifications::NotificationChannel::Os)
+            && entry.message.contains("ended")
+    }).count(), 1, "the first short idle end must not swallow the later long completion");
+}
+
+#[tokio::test]
+async fn remote_manifest_failures_publish_without_a_gui_from_sync_and_async_workers() {
+    let state = empty_test_state();
+    let service = state.lock().await.notifications.clone();
+    let (sync_job, _) = start_remote_manifest_job(&state, "peer", "/sync", "/sync").await;
+    let worker_state = state.clone();
+    let worker_job = sync_job.clone();
+    tokio::task::spawn_blocking(move || {
+        emit_remote_manifest_terminal_sync(
+            &worker_state, &worker_job, "Failed", Some("Cannot hash remote file".into()),
+        );
+    }).await.unwrap();
+    // Socket-side application or a second worker callback cannot publish twice.
+    emit_remote_manifest_terminal(&state, &sync_job, "Failed", None).await;
+    assert_eq!(service.snapshot().entries.len(), 1);
+
+    let (async_job, _) = start_remote_manifest_job(&state, "peer", "/async", "/async").await;
+    emit_remote_manifest_terminal(
+        &state, &async_job, "Failed", Some("Remote hashing worker stopped".into()),
+    ).await;
+    let entries = service.snapshot().entries;
+    assert_eq!(entries.len(), 2);
+    assert!(entries.iter().all(|entry| {
+        entry.level == crate::notifications::NotificationLevel::Error
+            && entry.channels.contains(&crate::notifications::NotificationChannel::Os)
+    }));
+    assert!(entries.iter().any(|entry| entry.message.contains("Cannot hash remote file")));
+    assert!(entries.iter().any(|entry| entry.message.contains("Remote hashing worker stopped")));
+    assert!(state.lock().await.gui_senders.is_empty());
+}
+
+#[tokio::test]
 async fn shared_folder_is_listed_resolved_and_removed_without_a_panel_source() {
     let state = empty_test_state();
     let root = SharedRoot {

@@ -875,6 +875,7 @@ pub(crate) async fn apply_job_event_to_state(state: &SharedState, msg: &mut Serv
 
     let notifications = state_guard.notifications.clone();
     let mut terminal_feedback = None;
+    let mut job_feedback = None;
 
     let is_search_job = state_guard
         .job_store
@@ -983,6 +984,7 @@ pub(crate) async fn apply_job_event_to_state(state: &SharedState, msg: &mut Serv
             }
             _ => {}
         }
+        job_feedback = crate::notifications::jobs::terminal_feedback(job, event, error.as_deref());
     }
 
     if is_fp_job && matches!(event.as_str(), "Completed" | "Failed" | "Cancelled") {
@@ -992,23 +994,23 @@ pub(crate) async fn apply_job_event_to_state(state: &SharedState, msg: &mut Serv
         state_guard.job_store.remove_from_fp_queue(job_id);
     }
 
-    if let Some(input) = terminal_feedback {
-        // Claiming the summary happened under SharedState; routing and sink
-        // I/O happen after releasing it.
-        drop(state_guard);
-        notifications.publish(input);
-        return true;
+    let search_store = if is_search_job && matches!(event.as_str(), "Completed" | "Failed" | "Cancelled") {
+        state_guard.search_stores.get(&format!("search:{job_id}")).cloned()
+    } else { None };
+    drop(state_guard);
+    // Results become authoritative before any terminal summary is delivered.
+    if let Some(store) = search_store {
+        store.lock().await.done = true;
     }
-
-    // For search jobs: mark the store as done on terminal events
-    if is_search_job && matches!(event.as_str(), "Completed" | "Failed" | "Cancelled") {
-        let source_id = format!("search:{job_id}");
-        if let Some(store) = state_guard.search_stores.get(&source_id) {
-            let store = store.clone();
-            drop(state_guard);
-            store.lock().await.done = true;
-            return true;
+    if let Some(input) = terminal_feedback {
+        if input.level == Some(crate::notifications::NotificationLevel::Error) {
+            notifications.publish_os_once(&format!("hash-generation:{job_id}"), input, None);
+        } else {
+            notifications.publish(input);
         }
+    }
+    if let Some(feedback) = job_feedback {
+        feedback.publish(&notifications);
     }
     true
 }

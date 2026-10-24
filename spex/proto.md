@@ -914,9 +914,12 @@ late cancellation never changes an already committed row into cancelled.
 ## Notification service
 
 `PublishNotification` accepts `{ requestId, message, level?, channels? }`.
-Levels are `info`, `warning`, and `error`; channels are `toast` and `log`.
-Defaults are `info` and both channels. An explicit `channels: []` records history
-without delivery. Backend-generated records are
+Levels are `info`, `warning`, and `error`; frontend-requestable channels are
+`toast` and `log`. Defaults are `info` and both channels. An explicit
+`channels: []` records history without delivery. Backend-selected operation
+publications may additionally use the `os` delivery channel; requesting `os`
+through `PublishNotification` fails with `INVALID_NOTIFICATION`.
+Backend-generated records are
 `{ id, timestamp, message, level, channels }`, with UTC millisecond timestamps.
 
 The reply is `PublishNotificationOk { timestamp, requestId, notificationId }`
@@ -943,4 +946,11 @@ Frontend history mirrors snapshots and ordered patches. Only live added records
 requesting toast delivery join the FIFO toast queue. Snapshots do not replay
 toasts. Operation acknowledgements, including `*ClipboardWritten`, retain their
 wire formats; notification feedback is separately published once at its owner.
+`os` channels in records describe requested delivery, not acknowledgement that a
+desktop displayed a notification. Frontends render these records without invoking
+native delivery or replaying it from snapshots. Native eligibility, focus,
+expiry, and operation correlation remain backend-only policy. Settings snapshots
+include `general.osNotificationsEnabled` and read-only
+`general.supportsOsNotifications`; the preference is changed through
+`SetGeneralOption { key: "osNotificationsEnabled", value: boolean }`.
 See [notifications.md](./notifications.md).

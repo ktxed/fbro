@@ -95,6 +95,16 @@ Search is a full-featured file search capability that operates as a **job-based 
 - Results accessible via JobsBar
 - Cancelable at any time
 
+Search terminal state also publishes a backend-owned notification summary after
+final results and the result-store completion flag are committed. Publication is
+claimed once per job before GUI delivery and survives a GUI disconnect. Successful
+or cancelled searches qualify for OS delivery after at least 30 seconds of
+execution, excluding queue time and including pauses/decision waits; failures
+qualify immediately. Native delivery additionally requires the OS preference to
+be enabled and no native fbro window to be focused. The threshold and activity
+checks do not remove history or existing toast/log delivery, and suppressed OS
+alerts never replay on later blur. See [notifications.md](notifications.md).
+
 ## Data Structures
 
 ### Backend (Rust)

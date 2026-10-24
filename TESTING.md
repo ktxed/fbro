@@ -17,6 +17,7 @@ The standard checks are:
 ```bash
 npm run build
 npm run test:build-info
+npm run test:notifications
 npm run test:selection-mask
 npm run test:tabs
 node --test tests/check-version.test.mjs
@@ -26,8 +27,8 @@ cargo check --manifest-path tools/lfs-spy/Cargo.toml --locked
 
 `npm run build` runs TypeScript checking and the production frontend build.
 There is no separate frontend lint command. The Node tests cover build metadata
-and release-version consistency, plus selection-mask prompt defaults and stale
-tab-update rejection. Rust tests
+and release-version consistency, notification history/toast projection,
+selection-mask prompt defaults, and stale tab-update rejection. Rust tests
 cover backend behavior and adapters;
 the last command checks the optional local-filesystem spy helper.
 
@@ -151,7 +152,7 @@ coverage reference.
 | Panel selection and sizes | `panel-selection.mjs` (called by the local flow) | Space selects folders/files in list and grid views, calculates unknown sizes, reuses known/zero sizes, preserves cursor/focus, ignores held-key repeats, and respects modal/input/native controls; Shift+Space sizes selected/all folders without changing selection; Copy targets a selected folder despite a file cursor |
 | Panel tabs | `tabs.mjs` | Real mouse reordering in both directions and themes, backend authority before drop, inactive-tab and other-panel focus preservation, sub-threshold clicks, Escape/outside/pointer-cancel/blur/modal/concurrent-close cancellation, focused terminal identity/PTY preservation, overflowing edge auto-scroll, frontend reload, close button, middle click and empty-strip double click. Rust tests cover invalid/stale/cross-slot/no-op requests, slot versions, and listing session order/active-index serialization with terminal exclusion. |
 | Focus and modals | `focus-handoff.mjs`, `modal-focus.mjs`, and checks throughout the suite | Initial focus, exact opener restoration, covered layers ignoring keys, one submission per activation, nested Escape, backend rejection/removal, outside clicks, and preserving focus during toasts or toolbar actions |
-| Notifications | `notifications.mjs` | Frontend clipboard publication without duplicates, timestamps/severity, FIFO burst delivery, keyboard history navigation, Clear focus handoff, clearing without cancelling delivery, overflow arrivals preserving the browsed row, both schemes, and reload without replay |
+| Notifications | `notifications.mjs` | Frontend clipboard publication without duplicates, timestamps/severity, FIFO burst delivery, keyboard history navigation, Clear focus handoff, clearing without cancelling delivery, overflow arrivals preserving the browsed row, both schemes, reload without replay, and OS notification capability/keyboard setting controls with backend confirmation, invalid-setting rejection, backend-only OS publication, and opener restoration |
 | Thumbnails | `thumbnails.mjs` (also called by the local flow) | Platform capability controls, Jobs tab navigation, queue refresh preserving focus, visible-card loading, off-screen cooldown, viewport promotion, selection fill, and abandoning old requests |
 | Viewers | `viewer.mjs` | Large and delayed images, J-next/K-previous rapid/reverse navigation, invalid-image recovery, text and binary content, horizontal arrow scrolling in small/large text with find-input cursor ownership, Enter/Shift+Enter find navigation from input/content with wrapping, native buttons, history priority, empty results and focus restoration, PDF, Markdown/HTML images, Mermaid, zoom, audio/video controls, preview keyboard ownership, and opener restoration |
 | HEIC conversion | `heic.mjs` | Backend-confirmed opt-in settings, startup settings delivery, errors, optional real-file decoding, and live disabling |
@@ -163,7 +164,7 @@ coverage reference.
 | Hashes | `hash-check.mjs`, `hash-generate.mjs` | Discovery, stale targets, options, matching/malformed sidecars, skip/overwrite, reports/toasts, progress, background/reopen, cancellation, and preserving existing sidecars |
 | Archives | `archive.mjs` | Enter a ZIP, copy a file out, and verify its content |
 | Search | `search.mjs` | Activity without hits, inspected counts, cancellation, duplicate-name hints and viewer paths, toolbar/shortcut Copy with cursor and selection targets, repeated-filename exclusion/suffixes via inline and bottom actions, background copies, per-dialog defaults, both themes, Jump to location, Open With, duplicate cursor/selection preservation on reconnect, stale/deleted targets, modal keys, and date/size filters |
-| Remote | `remote.mjs` | Folder suggestions and typed shares, validation/history, unsharing, pairing, read-only browsing, copying, thumbnails, integrity, cancellation on both peers, and a fresh transfer after cancellation |
+| Remote | `remote.mjs` | Folder suggestions and typed shares, validation/history, unsharing, pairing, read-only browsing, copying, thumbnails, integrity, cancellation on both peers, a fresh transfer after cancellation, and incoming/outgoing connection and explicit disconnection notification history on both peers |
 
 Several UI flows check both `fbro-dark` and `daylight`. Modal tests sample common
 focus and cancellation paths; they do not cover every operation/conflict state.
@@ -180,6 +181,59 @@ does not require 8 GiB of allocated disk space.
 Notification state projection and toast queue tests: `npm run test:notifications`
 (Node.js 22.19 or newer). Backend service, channel routing, retention, intent
 validation, and producer ownership: `cargo test --manifest-path src-tauri/Cargo.toml notifications`.
+
+OS notification checks cover the 30-second boundary, execution rather than queue
+time, cancellation/failure classification, aggregate hash mismatches, duplicate
+lifecycle events, peer/session correlation (including reverse-direction connect
+and disconnect while the opposite direction stays open), incoming pairing expiry,
+native activity handoffs, and disabled or failed delivery. Fake native delivery keeps
+these policy checks independent of an actual desktop notification server.
+The frontend projection tests include `os` records without frontend native delivery
+or toast/snapshot replay. The Rust settings test
+`os_notifications_default_enabled_for_legacy_settings_and_preserve_opt_out`
+covers legacy defaults, persistence round-trips, and incorrect JSON value types.
+
+The Linux native adapter has an ignored fixture using a private session bus:
+
+```bash
+dbus-run-session -- env FBRO_NOTIFICATION_TEST_BUS=1 cargo test --manifest-path src-tauri/Cargo.toml --locked linux_notifications_private_bus_roundtrip_and_missing_service -- --ignored --nocapture
+```
+
+It checks app identity/icon, escaped peer/file text, normal urgency, default
+expiry, absence of native actions, and unavailable-service errors. More than 128
+notifications without native closure signals verify that bounded handle retention
+continues accepting deliveries. This fixture does not contact the user's desktop
+notification service. Fake worker tests exercise activity epochs and suppression
+of pending deliveries. The worker queue and retained native handles are each
+bounded at 128; native service calls have a three-second timeout.
+
+### Native OS notification validation
+
+Automated policy and Linux fixture tests do not verify real desktop presentation.
+Before release, manually validate Linux on Wayland and X11 with a notification
+daemon, including an installed package/AppImage identity and icon:
+
+1. Background fbro and finish a copy/search/hash-check job that runs at least 30
+   seconds. Confirm one native alert and its retained history entry. Repeat a
+   short operation and confirm no native completion alert.
+2. Focus the main window, a detached viewer, and a detached diff in turn. Finish
+   eligible work in each case and verify no native alert or focus stealing.
+   Switch between fbro windows while completion occurs; return from another
+   application before a pending send and check it is suppressed.
+3. Toggle **Show background OS notifications** using the keyboard. Confirm
+   disabling leaves history and in-app feedback intact, survives restart, and
+   does not replay old alerts when reenabled.
+4. Check incoming pairing, both directions of peer connections, transfers,
+   failures, and hash mismatches. Pairing alerts must omit the code and offer no
+   approval button. Remote end wording must not imply receiver verification.
+5. Exercise Do Not Disturb and an unavailable notification service. Operations
+   and history must remain correct; failed native delivery must not recursively
+   create another notification.
+
+Phase 1 provides no macOS/Windows notification adapter. Native authorization,
+packaged `.app` identity, Windows installed-app identity, and Windows 10/11
+presentation require validation during their respective phases. No real native
+desktop validation is implied by Linux fixtures or the smoke suite.
 
 Append a filter to the Rust test command:
 

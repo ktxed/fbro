@@ -1274,6 +1274,7 @@ async fn launch_fp_bro(
         state_guard.job_store.jobs.insert(
             job_id.clone(),
             AppJob {
+                notification: Default::default(),
                 job_id: job_id.clone(),
                 kind: JobKind::FpBro(FpBroJobMeta {
                     bro_id: bro.option.id.clone(),
@@ -1405,6 +1406,39 @@ async fn launch_sync_bro(
 
     let (cancel_tx, cancel_rx) = watch::channel(false);
     let (pause_tx, _pause_rx) = watch::channel(false);
+    let mut state_guard = ctx.state.lock().await;
+    state_guard.job_store.jobs.insert(
+        job_id.clone(),
+        AppJob {
+            notification: Default::default(),
+            job_id: job_id.clone(),
+            kind: JobKind::SyncBro(SyncBroJobMeta {
+                local_panel: local_panel.clone(),
+                remote_panel: remote_panel.clone(),
+                local_root: local_root.clone(),
+                remote_root: remote_root.clone(),
+                report_path,
+            }),
+            source_panel: local_panel.clone(),
+            dest_panel: Some(remote_panel.clone()),
+            source_path: local_root.clone(),
+            dest_path: Some(remote_root.clone()),
+            state: JobState::Running,
+            progress: FileOpProgress::default(),
+            decision: None,
+            error: None,
+            background: false,
+            paused: false,
+            handle: None,
+            cancel_tx,
+            pause_tx,
+            skip_current_file: Arc::new(AtomicBool::new(false)),
+            keep_partial_files_on_cancel: Arc::new(AtomicBool::new(false)),
+        },
+    );
+
+    drop(state_guard);
+    crate::notifications::jobs::publish_start(ctx.state, &job_id).await;
     let handle = tokio::spawn(run_sync_bro(
         job_id.clone(),
         local_panel.clone(),
@@ -1413,40 +1447,15 @@ async fn launch_sync_bro(
         remote_root.clone(),
         local_driver,
         remote_driver,
-        ctx.tx.clone(),
+        crate::notifications::worker_feedback_sender(ctx.state.clone(), ctx.tx.clone()),
         cancel_rx,
     ));
 
-    let mut state_guard = ctx.state.lock().await;
-    state_guard.job_store.jobs.insert(
-        job_id.clone(),
-        AppJob {
-            job_id,
-            kind: JobKind::SyncBro(SyncBroJobMeta {
-                local_panel: local_panel.clone(),
-                remote_panel: remote_panel.clone(),
-                local_root: local_root.clone(),
-                remote_root: remote_root.clone(),
-                report_path,
-            }),
-            source_panel: local_panel,
-            dest_panel: Some(remote_panel),
-            source_path: local_root,
-            dest_path: Some(remote_root),
-            state: JobState::Running,
-            progress: FileOpProgress::default(),
-            decision: None,
-            error: None,
-            background: false,
-            paused: false,
-            handle: Some(handle),
-            cancel_tx,
-            pause_tx,
-            skip_current_file: Arc::new(AtomicBool::new(false)),
-            keep_partial_files_on_cancel: Arc::new(AtomicBool::new(false)),
-        },
-    );
-
+    if let Some(job) = ctx.state.lock().await.job_store.jobs.get_mut(&job_id) {
+        if !matches!(job.state, JobState::Completed | JobState::Cancelled | JobState::Failed) {
+            job.handle = Some(handle);
+        }
+    }
     Ok(())
 }
 
@@ -1509,6 +1518,7 @@ async fn launch_hash_bro(
         state.job_store.jobs.insert(
             job_id.clone(),
             AppJob {
+                notification: Default::default(),
                 job_id: job_id.clone(),
                 kind: if generate {
                     JobKind::HashGenerateBro(HashGenerateBroJobMeta { result: None, terminal_feedback_published: false })
@@ -1569,6 +1579,7 @@ async fn launch_hash_bro(
             },
         })
         .await;
+    crate::notifications::jobs::publish_start(ctx.state, &job_id).await;
     let handle = if generate {
         tokio::spawn(run_generate_hashes(
             job_id.clone(),
@@ -1683,6 +1694,7 @@ async fn launch_fedup_bro(
         state_guard.job_store.jobs.insert(
             job_id.clone(),
             AppJob {
+                notification: Default::default(),
                 job_id: job_id.clone(),
                 kind: JobKind::FedupBro(FedupBroJobMeta {
                     inputs: inputs.clone(),
@@ -1735,12 +1747,13 @@ async fn launch_fedup_bro(
         })
         .await;
 
+    crate::notifications::jobs::publish_start(ctx.state, &job_id).await;
     let handle = tokio::spawn(run_fedup_bro(
         job_id.clone(),
         inputs.clone(),
         scan_options,
         Arc::clone(ctx.state),
-        ctx.tx.clone(),
+        crate::notifications::worker_feedback_sender(ctx.state.clone(), ctx.tx.clone()),
         cancel_rx,
     ));
 
@@ -1926,13 +1939,14 @@ async fn start_fp_job(
         )
     };
 
+    crate::notifications::jobs::publish_start(state, &job_id).await;
     let handle = tokio::spawn(run_fp_bro(
         job_id.clone(),
         bro,
         inputs,
         output_path,
         params,
-        tx.clone(),
+        crate::notifications::worker_feedback_sender(state.clone(), tx.clone()),
         cancel_rx,
     ));
 

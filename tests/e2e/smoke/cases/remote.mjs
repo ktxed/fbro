@@ -201,6 +201,14 @@ export async function runRemoteFlow(browserA, observerA, browserB, observerB) {
   if (remoteSource.supports.includes("DeleteSelection") || remoteSource.supports.includes("NewFolder")) {
     throw new Error("remote source exposes write capabilities");
   }
+  await waitFor(() => observerA.state.notifications.entries.some((entry) =>
+    entry.message.startsWith("Remote fbro connected:") && entry.message.endsWith("(incoming)")
+    && entry.channels.includes("os")),
+  { timeout: 10_000, label: "incoming remote connection notification recorded" });
+  await waitFor(() => observerB.state.notifications.entries.some((entry) =>
+    entry.message.startsWith("Remote fbro connected:") && entry.message.endsWith("(outgoing)")
+    && entry.channels.includes("os")),
+  { timeout: 10_000, label: "outgoing remote connection notification recorded" });
 
   observerB.sendIntent("NavigateToSource", "left", { sourceId: remoteSource.id });
   await waitFor(() => observerB.state.panels.left?.sourceId === remoteSource.id, {
@@ -434,6 +442,18 @@ export async function runRemoteFlow(browserA, observerA, browserB, observerB) {
     timeout: 10_000,
     label: "Sync Bro report-saved confirmation",
   });
+
+  observerB.sendIntent("DisconnectRemotePeer", undefined, { sourceId: remoteSource.id });
+  await waitFor(() => !observerB.state.sources[remoteSource.id],
+    { timeout: 10_000, label: "explicit remote disconnect removes mounted source" });
+  await waitFor(() => observerB.state.notifications.entries.some((entry) =>
+    entry.message.startsWith("Remote fbro disconnected:") && entry.message.endsWith("(outgoing)")
+    && entry.channels.includes("os")),
+  { timeout: 10_000, label: "outgoing remote disconnection notification recorded" });
+  await waitFor(() => observerA.state.notifications.entries.some((entry) =>
+    entry.message.startsWith("Remote fbro disconnected:") && entry.message.endsWith("(incoming)")
+    && entry.channels.includes("os")),
+  { timeout: 10_000, label: "incoming remote disconnection notification recorded" });
 
   await browserA.getTitle();
   await browserB.getTitle();

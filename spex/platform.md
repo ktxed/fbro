@@ -88,6 +88,35 @@ de-duplicating by normalised (label, detail).
 crosses the FE/BE boundary only as the underlying file ops — the FE does not
 see the payload directly.
 
+### 2.5 OS notifications
+
+The PAL advertises `supports_os_notifications() -> bool`, defaulting to false.
+`send_os_notification(&self, message: &str) -> Result<(), String>` has an
+unsupported default, so platform rollout does not change shared notification
+policy or force incomplete adapters.
+Consumers use the backend notification service rather than calling this surface
+directly.
+
+Linux is the first supported adapter. It uses `notify-rust` with the session
+freedesktop service, application name and desktop-entry identity `fbro`, the
+application icon, escaped body text, normal urgency, and desktop-controlled
+expiry. Native submission runs on the notification worker after shared locks are
+released, with a three-second native service timeout. The adapter retains the
+newest 128 native handles and evicts the oldest on overflow, preserving recent
+notification connections without depending on closure signals for capacity.
+No `notify-send` executable or custom D-Bus protocol is required. Missing session
+services return a delivery error without changing operation state or history.
+
+Application activity is tracked centrally from Tauri native focus/destruction
+events across main, viewer, and diff windows. A 150 ms handoff grace period
+prevents notifications between fbro windows. The worker rechecks activity,
+enablement, and notification expiry before submission; no frontend-derived focus
+intent or preference is needed. See [notifications.md](notifications.md).
+
+macOS and Windows retain unsupported defaults in phase 1. Their native adapters
+and packaged-application validation are tracked in
+[the notification roadmap](plans/os-notifications.md).
+
 ---
 
 ## 3. Implementations

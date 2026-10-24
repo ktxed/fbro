@@ -13,19 +13,22 @@ retains the newest 1,000 entries in publication order. Oldest entries are evicte
 when full. Repeated messages are separate publications.
 
 History is memory-only: frontend reloads and reconnects retain it, backend exit
-clears it. No user preference or history is stored in localStorage or on disk.
+clears it. The OS delivery preference is persisted in backend settings; no
+notification history or preferences are stored in localStorage.
 Notification publication and history housekeeping are excluded from the
 persistent command journal, which records semantic user commands rather than
 delivery chatter. Selected stderr logging remains a separate delivery channel.
-Storage and delivery have separate boundaries so persistence and OS delivery can
-be introduced without changing publishers.
+Storage and delivery have separate boundaries; delivery failure cannot undo a
+recorded publication.
 
 ## Publishing and channels
 
 `NotificationInput` contains `message`, optional `level` (`info`, `warning`, or
-`error`), and optional `channels` (`toast`, `log`). The defaults are `info` and
-both channels. An explicit empty channel list retains history without delivery.
-Log-only publications also appear in history.
+`error`), and optional `channels`. The ordinary defaults are `info` and
+`toast`/`log`. An explicit empty channel list retains history without delivery.
+Log-only publications also appear in history. Backend-selected operation events
+may additionally request `os`; frontend `PublishNotification` requests remain
+limited to `toast` and `log`, and reject `os` with `INVALID_NOTIFICATION`.
 
 Frontend command code uses `publishNotification(dispatch, input)`; components
 and hooks use `useNotifications()`. These enqueue publication requests, not
@@ -45,8 +48,71 @@ files, and cancelled partial output use `warning`; failures use `error`. Existin
 messages and the clipboard wording “Copied <what>” are preserved.
 
 Logging writes to stderr using the `[notifications]` prefix. A failed delivery
-preserves history and must not generate another notification recursively. OS
-notifications are deferred; no native permissions or bubbles are enabled.
+preserves history and must not generate another notification recursively.
+
+## Background OS delivery
+
+The backend owns native delivery and activity policy. Phase 1 supports Linux
+through `notify-rust` and the session's freedesktop notification service, behind
+the Platform Abstraction Layer. macOS and Windows adapters are unsupported until
+their respective phases; the common event and settings contract is portable.
+
+`general.osNotificationsEnabled` defaults to true and persists through backend
+settings. The read-only `general.supportsOsNotifications` capability controls
+visibility of the General settings checkbox. Disabling native delivery leaves
+history and requested toast/log delivery intact.
+
+OS delivery requires no focused native fbro window, including detached viewers
+and diffs. Native focus/destruction events maintain this state; startup uncertainty
+suppresses delivery. A 150 ms focus handoff grace period prevents alerts while
+switching between fbro windows. Delivery rechecks activity and the preference
+immediately before submission. Suppressed notifications are never replayed when
+fbro loses focus or a setting changes.
+
+| Event | OS eligibility while inactive |
+|---|---|
+| Copy completion/cancellation; search, Fedup, and hash-check completion/cancellation | At least 30 seconds of operation execution |
+| Remote transfer start | Immediate |
+| Remote transfer completion/cancellation | At least 30 seconds of transfer execution |
+| Peer connection/disconnection in either direction | Per-peer, per-direction transition, coalesced over two seconds |
+| Incoming pairing request | Immediate; expires with the handshake |
+| Operation failure or hash mismatch | Immediate, regardless of duration |
+
+Execution starts when a job runs, excluding queue time and including subsequent
+pauses and decision waits. The threshold filters OS delivery, not the authoritative
+history or existing in-app feedback. Publishers classify typed outcomes rather
+than message text, commit final state/results first, and claim each lifecycle
+publication once before GUI delivery. File errors and hash mismatches are
+aggregated into operation summaries. Validation errors and diagnostic logs are
+not automatically OS notifications.
+
+Remote notifications aggregate connections per peer **within each direction** and
+deduplicate transfer events by stable operation identity. Incoming and outgoing
+connections have independent reported state and debounce generations: an open
+outgoing mount must not hide a peer connecting to or disconnecting from local
+shares, and an incoming session must not hide outgoing changes. Messages identify
+the direction as incoming or outgoing. Copy and remote-transfer terminal feedback
+on the initiating instance share one summary. Serving-side transfer completion
+reuses the existing 1.5-second idle heuristic and may later resume; neutral
+“transfer ended” wording does not claim verified completion on the receiving peer.
+Pairing alerts contain the peer name, never the pairing code, and only incoming
+requests qualify.
+
+The native sink has a bounded queue of 128 pending deliveries; no native I/O runs
+under notification history or shared-state locks. Linux notifications use fbro's
+identity/icon, escaped body text, normal urgency, and desktop-controlled expiry. Missing session
+services, delivery failures, or desktop suppression leave operation results and
+history intact. Native delivery errors are logged without recursive publication
+or stale retries. Native service calls time out after three seconds. The adapter
+retains the newest 128 native handles, evicting older connections rather than
+depending on native closure signals to accept future notifications. Queue overflow
+logs a delivery error and leaves the canonical history entry intact.
+Native UI remains informational: no activation, navigation, or
+approval actions, and no forced focus or Do Not Disturb override.
+
+Native delivery is available only while the desktop application is running.
+After-exit delivery, push services, per-event preferences, and notification actions
+are outside this phase. See [the phase roadmap](plans/os-notifications.md).
 
 ## Projection and toast delivery
 
@@ -84,5 +150,5 @@ subsequent arrivals retain that entry and keep it visible.
 Clearing affects retained history only, produces no notification, and leaves queued
 toasts and diagnostic logs intact.
 
-Search, severity filtering, unread counts, persistence, notification settings,
-and native notification bubbles are outside this version.
+History search, severity filtering, unread counts, and history persistence are
+outside this version.

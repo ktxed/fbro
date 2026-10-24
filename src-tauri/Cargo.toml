@@ -48,6 +48,7 @@ scraper = { version = "0.27", default-features = false }
 png = "0.17"
 
 [target.'cfg(target_os = "linux")'.dependencies]
+notify-rust = { version = "4.18", default-features = false, features = ["z-with-tokio"] }
 gio = "0.18.4"
 zbus = { version = "5", default-features = false, features = ["tokio"] }
 gtk = "0.18.2"

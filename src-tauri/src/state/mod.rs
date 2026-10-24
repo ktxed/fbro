@@ -505,6 +505,7 @@ pub struct FileClipboard {
 pub struct AppState {
     /// Application-lifetime history is independent of GUI connections.
     pub notifications: Arc<crate::notifications::NotificationService>,
+    pub remote_notifications: crate::notifications::remote::RemoteNotificationState,
     pub panels: HashMap<String, Panel>,
     /// Slots in the panel layout. Each slot owns 1+ panels (tabs).
     pub slots: HashMap<String, PanelSlot>,
@@ -1019,6 +1020,7 @@ impl AppState {
 
         AppState {
             notifications: Arc::new(crate::notifications::NotificationService::default()),
+            remote_notifications: Default::default(),
             panels,
             slots,
             layout_slots,
@@ -1524,6 +1526,7 @@ mod tests {
         app.job_store.jobs.insert(
             "hash-job".into(),
             AppJob {
+                notification: Default::default(),
                 job_id: "hash-job".into(),
                 kind: JobKind::HashGenerateBro(HashGenerateBroJobMeta {
                     result: None,
@@ -1788,6 +1791,44 @@ mod tests {
             fallback_source_id_for_home_candidates(candidates, "/home/user/projects").as_deref(),
             Some("vol-home")
         );
+    }
+
+    #[tokio::test]
+    async fn notifications_copy_completion_commits_without_a_gui_and_never_replays() {
+        use crate::jobs::{FileOpJobMeta, FileOpType, JobKind};
+        use crate::notifications::{NotificationChannel, worker_feedback_sender};
+        use crate::ws::protocol::ServerMessage;
+        let state = notifications_hash_job_state();
+        let notifications = {
+            let mut guard = state.lock().await;
+            let job = guard.job_store.jobs.get_mut("hash-job").unwrap();
+            job.kind = JobKind::FileOp(FileOpJobMeta {
+                op_type: FileOpType::Copy, files: vec![],
+                conflict_policy: crate::jobs::ConflictPolicy::Ask, apply_to_all_decision: None,
+            });
+            job.notification.start_at(std::time::Instant::now() - std::time::Duration::from_secs(30));
+            guard.notifications.clone()
+        };
+        let (_, mut updates) = notifications.subscribe();
+        let (gui_tx, gui_rx) = tokio::sync::mpsc::channel(1);
+        drop(gui_rx);
+        let worker = worker_feedback_sender(state.clone(), gui_tx);
+        let completed = || ServerMessage::JobEvent {
+            timestamp: 1, job_id: "hash-job".into(), event: "Completed".into(),
+            files: None, progress: None, search_progress: None, decision: None,
+            error: None, result_path: None, result_panel_id: None,
+        };
+        worker.send(completed()).await.unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(2), updates.recv()).await.unwrap().unwrap();
+        let entries = notifications.snapshot().entries;
+        assert_eq!(entries.len(), 1);
+        assert!(entries[0].message.contains("Copy finished"));
+        assert!(entries[0].channels.contains(&NotificationChannel::Os));
+        notifications.clear();
+        let _ = updates.recv().await;
+        let mut duplicate = completed();
+        assert!(crate::ws::server::apply_job_event_to_state(&state, &mut duplicate).await);
+        assert!(notifications.snapshot().entries.is_empty());
     }
 
     #[test]

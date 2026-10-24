@@ -128,6 +128,7 @@ pub struct ConflictDecision {
 #[allow(dead_code)]
 pub struct AppJob {
     pub job_id: String,
+    pub notification: crate::notifications::jobs::JobNotificationLifecycle,
     pub kind: JobKind,
     pub source_panel: String,
     pub dest_panel: Option<String>,

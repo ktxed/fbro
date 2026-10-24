@@ -49,6 +49,13 @@ generation/cache controls and the Jobs modal's Thumbnails tab. It is not persist
 or writable through `SetGeneralOption`. Thumbnail streaming remains configurable
 on all platforms. Settings patches merge with the snapshot and preserve this flag.
 
+`settings.general.supportsOsNotifications` is a read-only backend capability,
+currently true on Linux only. General settings shows **Show background OS
+notifications** only when this capability is true. The persistent
+`general.osNotificationsEnabled` preference defaults to true; changing it updates
+the native delivery policy immediately and then projects the authoritative backend
+value. Unsupported platforms retain the preference without native delivery.
+
 ```json
 {
   "type": "StateSnapshot",
@@ -95,6 +102,7 @@ Supported keys:
 |---|---|---|---|
 | `showHiddenDefault` | `bool` | `false` | Whether new panels start with hidden files visible. Changing this also applies immediately to all open panels. |
 | `showButtonBar` | `bool` | `true` | Show the classic bottom command bar. Settings → Display provides **Show bottom button bar**; the command palette provides **Toggle Button Bar** (`app.toggle_button_bar`, no default binding). Hiding the bar reclaims its space while preserving global shortcuts and zoom. The preference applies to all GUI clients connected to the backend. |
+| `osNotificationsEnabled` | `bool` | `true` | Deliver selected operation notifications through the OS while no native fbro window is focused. Completion and cancellation require at least 30 seconds of execution; failures, pairing requests, transfer starts, and connection changes bypass that cutoff. The General settings control is capability-gated. See [notifications.md](notifications.md). |
 | `rememberSortPerLocation` | `bool` | `false` | Remember and share sorting for each local filesystem location. |
 | `enableHeic2any` | `bool` | `false` | Enable local browser conversion of HEIC/HEIF previews in the embedded and detached viewers on Windows (including Windows 10) and Linux. The control is hidden on macOS, which retains native decoding. Existing image caps apply. Changes update open viewers through backend patches; conversion is preview-only and does not write files. |
 | `zshEmacsKeymap` | `bool` | `false` | On macOS, start new interactive zsh terminals with `-o emacs`. The control is hidden and the setting has no effect on other platforms. Other shells and Quick Edit commands are unaffected. Existing terminal sessions keep their current keymap. |
@@ -105,6 +113,11 @@ Unknown key or type mismatch → `Error { code: "BAD_SETTING", recoverable: true
 Button bar visibility persists as `general.show_button_bar` in `settings.json`.
 Older settings files without the field default to visible. Both controls use
 `SetGeneralOption`; visibility changes only after a backend settings patch.
+
+OS notification preference persists as `general.os_notifications_enabled`.
+Older settings files without this field default to enabled. A non-boolean value
+is rejected; the capability `supportsOsNotifications` is neither persisted nor
+writable through `SetGeneralOption`.
 
 ## StatePatch: settings domain
 

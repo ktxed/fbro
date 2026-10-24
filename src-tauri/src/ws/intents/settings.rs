@@ -122,6 +122,15 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
         let mut state_guard = ctx.state.lock().await;
 
         match key {
+            "osNotificationsEnabled" => {
+                let Some(v) = value.as_bool() else {
+                    drop(state_guard);
+                    bad_setting(ctx.tx, "osNotificationsEnabled must be a boolean").await;
+                    return;
+                };
+                state_guard.settings.general.os_notifications_enabled = v;
+                state_guard.notifications.set_os_enabled(v);
+            }
             "showButtonBar" => {
                 let Some(v) = value.as_bool() else {
                     drop(state_guard);
@@ -540,6 +549,7 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
             "general": {
                 "showHiddenDefault": general.show_hidden_default,
                 "showButtonBar": general.show_button_bar,
+                "osNotificationsEnabled": general.os_notifications_enabled,
                 "rememberWindowState": general.remember_window_state,
                 "preserveAttributes": general.preserve_attributes,
                 "autoResumeCopies": general.auto_resume_copies,

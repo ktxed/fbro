@@ -123,6 +123,13 @@ pub struct ShellCommandRemoveResult {
 
 /// Abstraction over platform-specific environment queries and services.
 pub trait Platform: Send + Sync {
+    /// Native background notification delivery capability. Linux is enabled first.
+    fn supports_os_notifications(&self) -> bool { false }
+
+    /// Called only on the native notification worker, outside state locks.
+    fn send_os_notification(&self, _message: &str) -> Result<(), String> {
+        Err("OS notifications are not supported on this platform".into())
+    }
     /// Returns the current user's home directory.
     fn home_dir(&self) -> String;
 

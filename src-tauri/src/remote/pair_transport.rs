@@ -311,6 +311,12 @@ where
             .insert(handshake_id.clone(), decision_tx);
     }
 
+    // Publish at the handshake boundary, independently of GUI availability.
+    let notifications = state.lock().await.notifications.clone();
+    crate::notifications::remote::pairing_requested(
+        &notifications, initiator, &handshake_id, &their_name, expires_at,
+    );
+
     // Notify the local FE. (No matching `entityId` since the modal is
     // singleton — only one pending pairing at a time, in v1.)
     emit_to_fe(
@@ -548,7 +554,7 @@ async fn handle_revoke(
     // Tear down trust + mounts for this peer, mirror the local revoke
     // intent. Drop sources first (so the FE sees them gone), then update
     // paired_peers + persist.
-    let removed_any_source = {
+    let removed_sources = {
         let mut g = state.lock().await;
         let ids: Vec<String> = g
             .sources
@@ -566,12 +572,15 @@ async fn handle_revoke(
         if let Err(e) = save_peers(&default_peers_path(), &snapshot) {
             eprintln!("[pair] failed to persist peers.json after inbound revoke: {e}");
         }
-        !ids.is_empty()
+        ids
     };
+    for source_id in &removed_sources {
+        crate::notifications::remote::source_removed(state, source_id).await;
+    }
 
     // Push the standard set of patches so the FE updates the volume bar
     // and Sharing tab immediately.
-    if removed_any_source {
+    if !removed_sources.is_empty() {
         emit_sources_patch(state).await;
     }
     emit_share_config_patch(state).await;

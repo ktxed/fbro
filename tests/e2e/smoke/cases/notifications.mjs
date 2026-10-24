@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { backendPath, hostPath } from "../config.mjs";
-import { clickEntry, goToPanelPath } from "../browser.mjs";
+import { clickEntry, goToPanelPath, pressWindowKey } from "../browser.mjs";
 import { waitFor } from "../wait.mjs";
 
 async function request(observer, name, args = {}) {
@@ -36,6 +36,50 @@ async function openHistory(browser) {
   await (await browser.$('[data-testid="notification-history"]')).waitForDisplayed({ timeout: 5_000 });
 }
 
+async function verifyOsNotificationSettings(browser, observer) {
+  const previous = observer.state.settings.general.osNotificationsEnabled;
+  await pressWindowKey(browser, ",", { ctrl: true });
+  await pressWindowKey(browser, ",", { meta: true });
+  await browser.$('[data-modal-id="settings"]').waitForDisplayed({ timeout: 10_000 });
+  const selector = '[data-testid="os-notifications-enabled"]';
+  try {
+    const supported = observer.state.settings.general.supportsOsNotifications;
+    if (await browser.$(selector).isExisting() !== supported) {
+      throw new Error("OS notification setting visibility does not match backend capability");
+    }
+    if (supported) {
+      // Native Space activation owns the checkbox, and only backend patches update it.
+      await browser.execute((selector) => document.querySelector(selector)?.focus(), selector);
+      await browser.keys(" ");
+      await waitFor(() => observer.state.settings.general.osNotificationsEnabled === !previous,
+        { label: "keyboard toggles backend OS notification setting" });
+      await waitFor(async () => await browser.$(selector).isSelected() === !previous,
+        { label: "OS notification checkbox reflects backend patch" });
+      await expectFocused(browser, selector, "OS notification setting keeps focus after patch");
+      await browser.keys(" ");
+      await waitFor(() => observer.state.settings.general.osNotificationsEnabled === previous,
+        { label: "keyboard restores OS notification preference" });
+    }
+    const start = observer.messages.length;
+    observer.sendIntent("SetGeneralOption", undefined, { key: "osNotificationsEnabled", value: "false" });
+    await waitFor(() => observer.messages.slice(start).some((message) => message.type === "Error" && message.code === "BAD_SETTING"),
+      { label: "OS notification setting rejects a non-boolean value" });
+    if (observer.state.settings.general.osNotificationsEnabled !== previous) {
+      throw new Error("invalid OS notification preference changed backend state");
+    }
+    const requestId = randomUUID();
+    observer.sendIntent("PublishNotification", undefined, { requestId, message: "disallowed OS publication", channels: ["os"] });
+    await waitFor(() => observer.messages.some((message) => message.type === "PublishNotificationFailed"
+      && message.requestId === requestId && message.code === "INVALID_NOTIFICATION"),
+    { label: "OS notification delivery remains backend-selected" });
+  } finally {
+    observer.sendIntent("SetGeneralOption", undefined, { key: "osNotificationsEnabled", value: previous });
+    await browser.keys("Escape");
+    await browser.$('[data-modal-id="settings"]').waitForDisplayed({ reverse: true });
+  }
+  await expectFocused(browser, '[data-testid="panel-left"]', "OS notification settings returns to its panel opener");
+}
+
 export async function runNotificationsFlow(browser, observer) {
   const previousPath = observer.state.panels.left.path;
   const previousScheme = observer.state.settings.general.colorScheme;
@@ -45,6 +89,7 @@ export async function runNotificationsFlow(browser, observer) {
   try {
     await goToPanelPath(browser, observer, "left", directory);
     await clickEntry(browser, "left", "note.txt");
+    await verifyOsNotificationSettings(browser, observer);
     await waitFor(() => browser.execute(() => !document.querySelector('[data-testid="transient-hint"]')),
       { timeout: 20_000, label: "initial toast queue drained" });
     await request(observer, "ClearNotifications");

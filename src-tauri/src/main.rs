@@ -468,6 +468,16 @@ fn main() {
                     Arc::clone(&thumb_pool),
                     Arc::clone(&thumb_cache),
                 );
+                let notifications = Arc::new(crate::notifications::NotificationService::with_desktop(
+                    app_state.platform.clone(),
+                ));
+                notifications.set_os_enabled(settings.general.os_notifications_enabled);
+                let activity = notifications.desktop_activity();
+                app.manage(activity.clone());
+                for (label, window) in app.webview_windows() {
+                    activity.observe_window(&label, window.is_focused().ok());
+                }
+                app_state.notifications = notifications;
                 // Restore extra tabs (beyond the seed panel) from the saved
                 // session when the new slot-aware schema is present.
                 crate::state::restore_tabs_from_session(&mut app_state, &session.slots);
@@ -550,6 +560,22 @@ fn main() {
             }
         })
         .on_window_event(|window, event| {
+            use tauri::Manager;
+            if let Some(activity) = window
+                .app_handle()
+                .try_state::<Arc<crate::notifications::desktop::DesktopActivity>>()
+            {
+                if !activity.knows_window(window.label()) {
+                    activity.observe_window(window.label(), window.is_focused().ok());
+                }
+                match event {
+                    tauri::WindowEvent::Focused(focused) => {
+                        activity.observe_window(window.label(), Some(*focused));
+                    }
+                    tauri::WindowEvent::Destroyed => activity.remove_window(window.label()),
+                    _ => {}
+                }
+            }
             if !frontend_only() && window.label() == "main" {
                 if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                     api.prevent_close();

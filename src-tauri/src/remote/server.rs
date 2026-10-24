@@ -68,22 +68,65 @@ impl SessionEvents for NoopSessionEvents {
 /// Production session-events impl — sends `RemoteSession*` messages to all
 /// `gui_senders` registered on the shared state.
 pub struct GuiSessionEvents {
-    pub state: SharedState,
+    events: tokio::sync::mpsc::UnboundedSender<(String, bool)>,
+}
+
+impl GuiSessionEvents {
+    pub fn new(state: SharedState) -> Self {
+        let (events, mut receiver) = tokio::sync::mpsc::unbounded_channel::<(String, bool)>();
+        // This worker belongs to the application runtime. Auth/drop callbacks
+        // enqueue in order, so a short session cannot end before it starts.
+        tokio::spawn(async move {
+            while let Some((fingerprint, started)) = receiver.recv().await {
+                emit_session(&state, fingerprint, started).await;
+            }
+        });
+        Self { events }
+    }
 }
 
 impl SessionEvents for GuiSessionEvents {
     fn started(&self, fingerprint: &str) {
-        emit_session(&self.state, fingerprint.to_string(), true);
+        let _ = self.events.send((fingerprint.to_string(), true));
     }
     fn ended(&self, fingerprint: &str) {
-        emit_session(&self.state, fingerprint.to_string(), false);
+        let _ = self.events.send((fingerprint.to_string(), false));
     }
 }
 
 /// Production `StatusBroadcaster` for the SFTP driver — sends
 /// `RemoteSourceStatus` messages to every connected GUI client.
 pub struct GuiStatusBroadcaster {
-    pub state: SharedState,
+    events: tokio::sync::mpsc::UnboundedSender<ServerMessage>,
+}
+
+impl GuiStatusBroadcaster {
+    pub fn new(state: SharedState, source_id: String, generation: u64) -> Self {
+        let (events, mut receiver) = tokio::sync::mpsc::unbounded_channel::<ServerMessage>();
+        // The driver has its own runtime, which is torn down when unmounted.
+        // Process its ordered status events on the application runtime instead.
+        tokio::spawn(async move {
+            while let Some(message) = receiver.recv().await {
+                if let ServerMessage::RemoteSourceStatus {
+                    source_id: message_source, status, ..
+                } = &message {
+                    if message_source != &source_id {
+                        continue;
+                    }
+                    if !crate::notifications::remote::source_status(
+                        &state, &source_id, generation, status,
+                    ).await {
+                        continue;
+                    }
+                }
+                let senders = state.lock().await.gui_senders.clone();
+                for tx in senders {
+                    let _ = tx.try_send(message.clone());
+                }
+            }
+        });
+        Self { events }
+    }
 }
 
 impl crate::vfs::sftp::StatusBroadcaster for GuiStatusBroadcaster {
@@ -94,7 +137,6 @@ impl crate::vfs::sftp::StatusBroadcaster for GuiStatusBroadcaster {
         message: Option<String>,
         next_retry_at: Option<u64>,
     ) {
-        let state = self.state.clone();
         let msg = ServerMessage::RemoteSourceStatus {
             timestamp: now(),
             source_id: source_id.to_string(),
@@ -102,44 +144,31 @@ impl crate::vfs::sftp::StatusBroadcaster for GuiStatusBroadcaster {
             message,
             next_retry_at,
         };
-        tokio::spawn(async move {
-            let senders = {
-                let guard = state.lock().await;
-                guard.gui_senders.clone()
-            };
-            for tx in senders {
-                let _ = tx.try_send(msg.clone());
-            }
-        });
+        let _ = self.events.send(msg);
     }
 }
 
-fn emit_session(state: &SharedState, fingerprint: String, started: bool) {
-    let state = state.clone();
-    tokio::spawn(async move {
-        let senders = {
-            let guard = state.lock().await;
-            guard.gui_senders.clone()
-        };
-        // source_id is empty here — the FE tracks active sessions per-peer,
-        // not per-source. Future: emit one event per opened source.
-        let msg = if started {
-            ServerMessage::RemoteSessionStarted {
-                timestamp: now(),
-                fingerprint,
-                source_id: String::new(),
-            }
-        } else {
-            ServerMessage::RemoteSessionEnded {
-                timestamp: now(),
-                fingerprint,
-                source_id: String::new(),
-            }
-        };
-        for tx in senders {
-            let _ = tx.try_send(msg.clone());
+async fn emit_session(state: &SharedState, fingerprint: String, started: bool) {
+    crate::notifications::remote::incoming_session(state, &fingerprint, started).await;
+    let senders = state.lock().await.gui_senders.clone();
+    // source_id is empty here — the FE tracks active sessions per-peer,
+    // not per-source. Future: emit one event per opened source.
+    let msg = if started {
+        ServerMessage::RemoteSessionStarted {
+            timestamp: now(),
+            fingerprint,
+            source_id: String::new(),
         }
-    });
+    } else {
+        ServerMessage::RemoteSessionEnded {
+            timestamp: now(),
+            fingerprint,
+            source_id: String::new(),
+        }
+    };
+    for tx in senders {
+        let _ = tx.try_send(msg.clone());
+    }
 }
 
 const OUTGOING_PROGRESS_INTERVAL: Duration = Duration::from_millis(120);
@@ -1116,6 +1145,7 @@ async fn start_outgoing_transfer(
             job_id.clone(),
             AppJob {
                 job_id: job_id.clone(),
+                notification: Default::default(),
                 kind: JobKind::OutgoingTransfer(OutgoingTransferJobMeta {
                     peer_fp: peer_fp.to_string(),
                     transfer_key: transfer_key.to_string(),
@@ -1143,6 +1173,8 @@ async fn start_outgoing_transfer(
         );
         (job_id, cancel_rx, guard.gui_senders.clone(), peer_label)
     };
+
+    crate::notifications::jobs::publish_start(state, &job_id).await;
 
     let msg = ServerMessage::JobStarted {
         timestamp: now(),
@@ -1217,6 +1249,11 @@ async fn emit_outgoing_progress(state: &SharedState, transfer: &mut OutgoingTran
             if job.state == JobState::Cancelled || *job.cancel_tx.borrow() {
                 return;
             }
+            // Idle completion is provisional: a later file can resume the same
+            // transfer. Keep its clock, but allow the next settled end summary.
+            if job.state == JobState::Completed {
+                job.notification.terminal_published = false;
+            }
             job.state = JobState::Running;
             job.progress = transfer.progress.clone();
             if let JobKind::OutgoingTransfer(meta) = &mut job.kind {
@@ -1231,7 +1268,7 @@ async fn emit_outgoing_progress(state: &SharedState, transfer: &mut OutgoingTran
 }
 
 async fn finish_outgoing_transfer(state: SharedState, job_id: String) {
-    let (event, senders) = {
+    let (event, error, senders) = {
         let mut guard = state.lock().await;
         let Some(job) = guard.job_store.jobs.get_mut(&job_id) else {
             return;
@@ -1246,8 +1283,10 @@ async fn finish_outgoing_transfer(state: SharedState, job_id: String) {
                 "Completed"
             }
         };
-        (event.to_string(), guard.gui_senders.clone())
+        let error = job.error.clone();
+        (event.to_string(), error, guard.gui_senders.clone())
     };
+    crate::notifications::jobs::publish_terminal(&state, &job_id, &event, error.as_deref()).await;
     let msg = ServerMessage::JobEvent {
         timestamp: now(),
         job_id,
@@ -1287,6 +1326,7 @@ async fn start_remote_manifest_job(
             job_id.clone(),
             AppJob {
                 job_id: job_id.clone(),
+                notification: Default::default(),
                 kind: JobKind::RemoteManifest(RemoteManifestJobMeta {
                     root: root_path.to_string(),
                     peer_fp: peer_fp.to_string(),
@@ -1378,9 +1418,9 @@ fn emit_remote_manifest_terminal_sync(
     event: &str,
     error: Option<String>,
 ) {
-    let senders = {
+    let (senders, notifications, feedback) = {
         let mut guard = state.blocking_lock();
-        if let Some(job) = guard.job_store.jobs.get_mut(job_id) {
+        let feedback = if let Some(job) = guard.job_store.jobs.get_mut(job_id) {
             match event {
                 "Completed" => {
                     job.state = JobState::Completed;
@@ -1407,9 +1447,15 @@ fn emit_remote_manifest_terminal_sync(
             job.paused = false;
             job.decision = None;
             job.handle = None;
-        }
-        guard.gui_senders.clone()
+            crate::notifications::jobs::terminal_feedback(job, event, error.as_deref())
+        } else {
+            None
+        };
+        (guard.gui_senders.clone(), guard.notifications.clone(), feedback)
     };
+    if let Some(feedback) = feedback {
+        feedback.publish(&notifications);
+    }
     let msg = ServerMessage::JobEvent {
         timestamp: now(),
         job_id: job_id.to_string(),
@@ -1433,9 +1479,9 @@ async fn emit_remote_manifest_terminal(
     event: &str,
     error: Option<String>,
 ) {
-    let senders = {
+    let (senders, notifications, feedback) = {
         let mut guard = state.lock().await;
-        if let Some(job) = guard.job_store.jobs.get_mut(job_id) {
+        let feedback = if let Some(job) = guard.job_store.jobs.get_mut(job_id) {
             match event {
                 "Completed" => {
                     job.state = JobState::Completed;
@@ -1462,9 +1508,15 @@ async fn emit_remote_manifest_terminal(
             job.paused = false;
             job.decision = None;
             job.handle = None;
-        }
-        guard.gui_senders.clone()
+            crate::notifications::jobs::terminal_feedback(job, event, error.as_deref())
+        } else {
+            None
+        };
+        (guard.gui_senders.clone(), guard.notifications.clone(), feedback)
     };
+    if let Some(feedback) = feedback {
+        feedback.publish(&notifications);
+    }
     let msg = ServerMessage::JobEvent {
         timestamp: now(),
         job_id: job_id.to_string(),

@@ -68,6 +68,12 @@ fn parse_input(args: &Value) -> Result<NotificationInput, String> {
     let channels = args
         .get("channels")
         .map(|value| {
+            if value
+                .as_array()
+                .is_some_and(|channels| channels.iter().any(|channel| channel == "os"))
+            {
+                return Err("OS delivery is selected by backend operations".to_string());
+            }
             serde_json::from_value(value.clone())
                 .map_err(|_| "Notification channels must be an array of toast or log".to_string())
         })
@@ -110,6 +116,8 @@ mod tests {
             serde_json::json!({"message": "x", "level": "critical"}),
             serde_json::json!({"message": "x", "channels": "toast"}),
             serde_json::json!({"message": "x", "channels": ["system"]}),
+            serde_json::json!({"message": "x", "channels": ["os"]}),
+            serde_json::json!({"message": "x", "channels": ["toast", "os"]}),
         ] {
             assert!(parse_input(&args).is_err(), "{args}");
         }

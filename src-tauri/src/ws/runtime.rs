@@ -145,6 +145,8 @@ pub(crate) fn build_state_snapshot(
                 general: GeneralSettingsSchema {
                     show_hidden_default: state.settings.general.show_hidden_default,
                     show_button_bar: state.settings.general.show_button_bar,
+                    os_notifications_enabled: state.settings.general.os_notifications_enabled,
+                    supports_os_notifications: state.platform.supports_os_notifications(),
                     remember_window_state: state.settings.general.remember_window_state,
                     preserve_attributes: state.settings.general.preserve_attributes,
                     auto_resume_copies: state.settings.general.auto_resume_copies,

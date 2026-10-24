@@ -263,10 +263,11 @@ async fn connect_to_endpoint(
     for remote_source in remote_sources.iter().filter(|s| !s.id.starts_with('.')) {
         let remote_source_id = remote_source.id.clone();
         let local_source_id = format!("remote:{}:{remote_source_id}", paired.fingerprint);
+        let notification_generation = crate::notifications::remote::source_registered(ctx.state, &local_source_id).await;
         let status: Arc<dyn crate::vfs::sftp::StatusBroadcaster> =
-            Arc::new(crate::remote::server::GuiStatusBroadcaster {
-                state: ctx.state.clone(),
-            });
+            Arc::new(crate::remote::server::GuiStatusBroadcaster::new(
+                ctx.state.clone(), local_source_id.clone(), notification_generation,
+            ));
         let driver = match build_driver(
             &host,
             port,
@@ -346,6 +347,9 @@ async fn disconnect(args: &Value, ctx: &mut IntentContext<'_>) {
         state.drivers.remove(id);
     }
     drop(state);
+    for id in &to_remove {
+        crate::notifications::remote::source_removed(ctx.state, id).await;
+    }
     push_sources_patch(ctx).await;
 }
 

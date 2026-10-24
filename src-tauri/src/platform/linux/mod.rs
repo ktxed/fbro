@@ -1,4 +1,5 @@
 pub mod thumbnail;
+mod notifications;
 pub mod udisks2;
 pub mod volume_watcher;
 
@@ -55,6 +56,11 @@ fn decode_proc_mount_field(field: &str) -> String {
 }
 
 impl Platform for LinuxPlatform {
+    fn supports_os_notifications(&self) -> bool { true }
+
+    fn send_os_notification(&self, message: &str) -> Result<(), String> {
+        notifications::send(message)
+    }
     fn supports_managed_thumbnails(&self) -> bool {
         true
     }

@@ -135,6 +135,24 @@ export function SettingsGeneralTab({ general, client }: SettingsGeneralTabProps)
 
   return (
     <div className="settings-tab">
+      {general.supportsOsNotifications && (
+        <div className="settings-tab__section">
+          <h3 className="settings-tab__section-title">Notifications</h3>
+          <label className="settings-tab__option">
+            <input
+              type="checkbox"
+              data-testid="os-notifications-enabled"
+              checked={general.osNotificationsEnabled}
+              onChange={(e) => send("osNotificationsEnabled", e.target.checked)}
+              aria-describedby="os-notifications-hint"
+            />
+            <span>Show background OS notifications</span>
+          </label>
+          <div id="os-notifications-hint" className="settings-tab__hint">
+            Notify while no fbro window is active. Completion and cancellation alerts require operations lasting at least 30 seconds. Failures, transfer starts, pairing requests, and connection changes notify immediately.
+          </div>
+        </div>
+      )}
       <div className="settings-tab__section">
         <h3 className="settings-tab__section-title">Shell command</h3>
         <div className="settings-tab__option">

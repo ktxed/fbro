@@ -30,6 +30,9 @@ pub struct GeneralSettings {
     /// Show the classic bottom command buttons without affecting shortcuts.
     #[serde(default = "default_true")]
     pub show_button_bar: bool,
+    /// Deliver selected operation feedback through the OS while fbro is inactive.
+    #[serde(default = "default_true")]
+    pub os_notifications_enabled: bool,
     pub remember_window_state: bool,
     #[serde(default = "default_true")]
     pub preserve_attributes: bool,
@@ -277,6 +280,7 @@ impl Default for GeneralSettings {
         Self {
             show_hidden_default: false,
             show_button_bar: true,
+            os_notifications_enabled: true,
             remember_window_state: true,
             preserve_attributes: true,
             auto_resume_copies: true,
@@ -477,6 +481,32 @@ mod tests {
         assert_eq!(QuickTerminalEditor::from_str("nano"), Some(QuickTerminalEditor::Nano));
         assert_eq!(QuickTerminalEditor::from_str("vim"), Some(QuickTerminalEditor::Vim));
         assert_eq!(QuickTerminalEditor::from_str("emacs"), None);
+    }
+
+    #[test]
+    fn os_notifications_default_enabled_for_legacy_settings_and_preserve_opt_out() {
+        let defaults = serde_json::to_value(GeneralSettings::default()).unwrap();
+        assert_eq!(defaults["os_notifications_enabled"], true);
+        let mut legacy = defaults.clone();
+        legacy
+            .as_object_mut()
+            .unwrap()
+            .remove("os_notifications_enabled");
+        let restored: GeneralSettings = serde_json::from_value(legacy).unwrap();
+        assert_eq!(
+            serde_json::to_value(restored).unwrap()["os_notifications_enabled"],
+            true
+        );
+        let mut disabled = defaults.clone();
+        disabled["os_notifications_enabled"] = serde_json::json!(false);
+        let restored: GeneralSettings = serde_json::from_value(disabled).unwrap();
+        assert_eq!(
+            serde_json::to_value(restored).unwrap()["os_notifications_enabled"],
+            false
+        );
+        let mut invalid = defaults;
+        invalid["os_notifications_enabled"] = serde_json::json!("false");
+        assert!(serde_json::from_value::<GeneralSettings>(invalid).is_err());
     }
 
     #[test]

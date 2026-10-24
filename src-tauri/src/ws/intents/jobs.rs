@@ -1149,6 +1149,13 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
         })
         .collect();
 
+    // Keep transfer provenance with the resolved drivers, independently of
+    // later panel navigation while a job waits in the queue.
+    let remote_peer = [&src_driver, dst_driver.as_ref().unwrap_or(&src_driver)]
+        .into_iter()
+        .find_map(|driver| driver.as_any().downcast_ref::<crate::vfs::sftp::SftpFsDriver>()
+            .map(|driver| driver.peer_fingerprint().to_string()));
+
     if parsed.enqueue {
         let total_bytes_total: u64 = files.iter().map(|file| file.size.unwrap_or(0)).sum();
         let total_files_for_job = files.len();
@@ -1185,6 +1192,7 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
             state_guard.job_store.jobs.insert(
                 job_id.clone(),
                 AppJob {
+                    notification: crate::notifications::jobs::JobNotificationLifecycle { remote_peer: remote_peer.clone(), ..Default::default() },
                     job_id: job_id.clone(),
                     kind: JobKind::FileOp(FileOpJobMeta {
                         op_type,
@@ -1403,6 +1411,7 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
 
     // Register authoritative metadata before any producer can emit events.
     let job = AppJob {
+        notification: crate::notifications::jobs::JobNotificationLifecycle { remote_peer, ..Default::default() },
         job_id: job_id.clone(),
         kind: JobKind::FileOp(FileOpJobMeta {
             op_type,
@@ -1430,7 +1439,7 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
     register_file_op_and_spawn(ctx.state, job, || {
         if let Some((targets, total)) = archive_extract {
             let src_driver_extract = Arc::clone(&src_driver);
-            let tx_extract = tx_for_patch.clone();
+            let tx_extract = crate::notifications::worker_feedback_sender(state_for_patch.clone(), tx_for_patch.clone());
             let job_id_extract = job_id_spawn;
             let extract_options = crate::jobs::extract_archive::ExtractOptions {
                 sevenzip_binary: crate::jobs::extract_archive::resolve_sevenzip_binary(
@@ -1665,6 +1674,7 @@ async fn cancel_job(args: &Value, ctx: &mut IntentContext<'_>) {
     }
     ctx.decision_senders.remove(&parsed.job_id);
     if send_cancelled_event {
+        crate::notifications::jobs::publish_terminal(ctx.state, &parsed.job_id, "Cancelled", None).await;
         // For search jobs: mark the store done so the VFS driver knows the
         // result set is finalised.
         let search_source_id = format!("search:{}", &parsed.job_id);
@@ -1833,6 +1843,7 @@ pub(crate) async fn register_file_op_and_spawn(
         .job_store
         .jobs
         .insert(job_id.clone(), job);
+    crate::notifications::jobs::publish_start(state, &job_id).await;
     let handle = spawn_worker();
     let mut state_guard = state.lock().await;
     if let Some(job) = state_guard.job_store.jobs.get_mut(&job_id) {
@@ -1868,6 +1879,7 @@ async fn start_queued_file_op(
         return Ok(());
     };
 
+    crate::notifications::jobs::publish_start(state, &job_id).await;
     let state_for_patch = state.clone();
     let tx_for_patch = tx.clone();
     let job_id_spawn = job_id.clone();
@@ -2048,6 +2060,7 @@ async fn delete_queued_job(args: &Value, ctx: &mut IntentContext<'_>) {
         }
     }
     if should_send {
+        crate::notifications::jobs::publish_terminal(ctx.state, &parsed.job_id, "Cancelled", None).await;
         ctx.decision_senders.remove(&parsed.job_id);
         let _ = ctx
             .tx
@@ -2905,6 +2918,7 @@ async fn start_search(args: &Value, ctx: &mut IntentContext<'_>) {
             .insert(source_id.clone(), Arc::clone(&store));
 
         let job = AppJob {
+            notification: Default::default(),
             job_id: job_id.clone(),
             kind: JobKind::Search(SearchJobMeta {
                 params: params.clone(),
@@ -3002,8 +3016,9 @@ async fn start_search(args: &Value, ctx: &mut IntentContext<'_>) {
         Arc::new(map)
     };
 
-    // Spawn the search worker
-    let tx = ctx.tx.clone();
+    // Commit lifecycle before the producer can emit and before GUI delivery.
+    crate::notifications::jobs::publish_start(ctx.state, &job_id).await;
+    let tx = crate::notifications::worker_feedback_sender(ctx.state.clone(), ctx.tx.clone());
     let handle = tokio::spawn(run_search(
         job_id.clone(),
         params,

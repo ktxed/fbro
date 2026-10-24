@@ -241,6 +241,10 @@ pub struct RemoteSourceInfo {
 // ─── Driver lifecycle ─────────────────────────────────────────────────────────
 
 impl SftpFsDriver {
+    pub fn peer_fingerprint(&self) -> &str {
+        &self.config.expected_peer_fp
+    }
+
     pub fn new(config: SftpDriverConfig, status: Arc<dyn StatusBroadcaster>) -> io::Result<Self> {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)

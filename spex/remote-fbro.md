@@ -240,6 +240,41 @@ transfer to accumulate.
 
 ## 5. Relevant settings
 
+### Background notification delivery
+
+Linux can publish remote lifecycle events through the backend notification
+service's `os` channel. `general.osNotificationsEnabled` defaults to true;
+delivery requires no focused native fbro window, including detached viewers and
+diffs. macOS and Windows delivery adapters are deferred to later phases.
+
+Connection notifications cover both outgoing browsing connections and incoming
+authenticated peer sessions. State is aggregated per peer and direction and
+coalesced over two seconds so per-source connections and unchanged reconnect
+attempts do not create duplicate logical connected/disconnected alerts. An open
+outgoing mount does not hide incoming connections or disconnections from the same
+peer, and incoming sessions do not hide outgoing changes. Messages include the
+direction. Discovery and probe-only transport details are not themselves
+user-facing connection notifications.
+
+An incoming pairing handshake publishes an informational alert before GUI delivery,
+containing the peer name but never the pairing code. The alert expires with the
+handshake and offers no approval action; confirmation remains in fbro's existing
+pairing dialog. Locally initiated handshakes do not publish incoming-request
+alerts.
+
+Transfer starts qualify immediately. Successful or cancelled ends require at
+least 30 seconds of execution, including subsequent pauses/decision waits;
+operation failures bypass the cutoff. Publication is correlated by stable
+operation/transfer identity rather than emitted for every GUI client or reconnect.
+The initiating instance combines overlapping copy and transfer terminal feedback
+into one summary.
+
+Serving-side “transfer ended” follows the existing job/session lifecycle, whose
+1.5-second idle completion heuristic can later resume the same transfer. It does
+not promise that the receiver verified the complete copy. No new completion
+handshake or remote wire format is introduced in this phase. See
+[notifications.md](notifications.md) for delivery, focus, and expiry policy.
+
 ### Shared folders
 
 Settings → Sharing retains the source/Home/bookmark checkboxes and adds a
