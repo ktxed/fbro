@@ -51,7 +51,27 @@ pub struct GitRepoStatus {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub behind_count: Option<usize>,
     pub branches: Vec<String>,
+    pub remote_branches: Vec<GitRemoteBranch>,
     pub changes: Vec<GitChange>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitRemoteBranch {
+    pub name: String,
+    pub ref_name: String,
+}
+
+fn remote_branches(root: &str) -> Result<Vec<GitRemoteBranch>, String> {
+    let output = git(root, &["for-each-ref", "--sort=refname", "--format=%(refname)%09%(symref)", "refs/remotes/"])?;
+    Ok(String::from_utf8_lossy(&output).lines().filter_map(|line| {
+        let (ref_name, symbolic_target) = line.split_once('\t')?;
+        if !symbolic_target.is_empty() { return None; }
+        Some(GitRemoteBranch {
+            name: ref_name.strip_prefix("refs/remotes/")?.to_string(),
+            ref_name: ref_name.to_string(),
+        })
+    }).collect())
 }
 
 /// A ref decoration attached to a log entry (`git log` `%D`).
@@ -170,11 +190,12 @@ pub fn inspect(path: &str) -> Option<GitRepoStatus> {
         let mut values = counts.split_whitespace().filter_map(|value| value.parse::<usize>().ok());
         Some((values.next()?, values.next()?))
     }).map(|(behind, ahead)| (Some(ahead), Some(behind))).unwrap_or((None, None));
-    let branches = String::from_utf8(git(&root, &["for-each-ref", "--format=%(refname:short)", "refs/heads"]).unwrap_or_default())
+    let branches = String::from_utf8(git(&root, &["for-each-ref", "--format=%(refname:lstrip=2)", "refs/heads/"]).unwrap_or_default())
         .unwrap_or_default().lines().map(str::to_string).collect();
     // fbro considers a work area dirty only when it contains staged changes.
     // Untracked and unstaged changes remain visible, but do not gate Git actions.
-    Some(GitRepoStatus { root, branch, detached, clean: has_no_staged_changes(staged_count), staged_count, modified_count, untracked_count, conflicted_count, upstream, ahead_count, behind_count, branches, changes })
+    let remote_branches = remote_branches(&root).unwrap_or_default();
+    Some(GitRepoStatus { root, branch, detached, clean: has_no_staged_changes(staged_count), staged_count, modified_count, untracked_count, conflicted_count, upstream, ahead_count, behind_count, branches, remote_branches, changes })
 }
 
 fn has_no_staged_changes(staged_count: usize) -> bool {
@@ -228,6 +249,67 @@ fn status_label(change: &GitChange) -> String {
 pub fn create_branch(root: &str, branch: &str) -> Result<(), String> {
     let branch = validate_branch_name(root, branch)?;
     run(root, &["switch".into(), "--create".into(), branch.into()])
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum RemoteCheckoutOutcome {
+    Switched,
+    NameRequired { suggested_branch_name: String, message: String },
+}
+
+pub fn switch_branch(root: &str, branch: &str) -> Result<(), String> {
+    let branch = validate_branch_name(root, branch)?;
+    git(root, &["show-ref", "--verify", &format!("refs/heads/{branch}")])
+        .map_err(|_| format!("Local branch {branch} no longer exists."))?;
+    run(root, &["switch".into(), "--no-guess".into(), branch.into()])
+}
+
+/// Resolve tracking and conflicts from fresh refs; never reset or retarget a branch.
+pub fn checkout_remote_branch(root: &str, remote_ref: &str, local_branch: Option<&str>) -> Result<RemoteCheckoutOutcome, String> {
+    let remote = remote_branches(root)?.into_iter().find(|branch| branch.ref_name == remote_ref)
+        .ok_or("The selected remote branch no longer exists. Refresh and try again.")?;
+    let remotes = git(root, &["remote"])?;
+    let remotes = String::from_utf8_lossy(&remotes);
+    let remote_name = remotes.lines()
+        .filter(|name| remote.name.starts_with(&format!("{name}/")))
+        .max_by_key(|name| name.len())
+        .ok_or("The selected branch has no configured remote.")?;
+    let suggested = &remote.name[remote_name.len() + 1..];
+    let branch = if let Some(name) = local_branch {
+        validate_branch_name(root, name)?.to_string()
+    } else {
+        let output = git(root, &["for-each-ref", "--format=%(refname:lstrip=2)%09%(upstream)", "refs/heads/"])?;
+        let output = String::from_utf8_lossy(&output);
+        let locals: Vec<_> = output.lines().filter_map(|line| line.split_once('\t')).collect();
+        let tracked: Vec<_> = locals.iter().filter(|(_, upstream)| *upstream == remote_ref).collect();
+        let existing = tracked.iter().find(|(name, _)| *name == suggested)
+            .or_else(|| if tracked.len() == 1 { tracked.first() } else { None });
+        if let Some((name, _)) = existing {
+            switch_branch(root, name)?;
+            return Ok(RemoteCheckoutOutcome::Switched);
+        }
+        // symbolic-ref also catches the current unborn branch, absent from refs/heads.
+        let current = git(root, &["symbolic-ref", "--quiet", "HEAD"]).unwrap_or_default();
+        let conflicts = |name: &str| name == suggested
+            || name.starts_with(&format!("{suggested}/"))
+            || suggested.starts_with(&format!("{name}/"));
+        let occupied = locals.iter().any(|(name, _)| conflicts(name))
+            || String::from_utf8_lossy(&current).trim().strip_prefix("refs/heads/").is_some_and(conflicts);
+        if occupied || tracked.len() > 1 {
+            return Ok(RemoteCheckoutOutcome::NameRequired {
+                suggested_branch_name: suggested.to_string(),
+                message: if occupied {
+                    format!("Local branch name {suggested} conflicts with an existing branch. Choose another name to track {}.", remote.name)
+                } else {
+                    format!("Multiple local branches track {}. Choose a new name, or select an existing local branch.", remote.name)
+                },
+            });
+        }
+        validate_branch_name(root, suggested)?.to_string()
+    };
+    run(root, &["switch".into(), "--no-guess".into(), "--create".into(), branch,
+        "--track".into(), remote.ref_name])?;
+    Ok(RemoteCheckoutOutcome::Switched)
 }
 
 fn validate_branch_name<'a>(root: &str, branch: &'a str) -> Result<&'a str, String> {
@@ -1044,6 +1126,157 @@ mod tests {
         assert!(!repo.join("new.txt").exists());
         assert!(super::inspect(repo.to_str().unwrap()).unwrap().changes.is_empty());
         fs::remove_dir_all(repo).unwrap();
+    }
+
+    #[test]
+    fn inspect_lists_remote_branches_without_symbolic_aliases() {
+        with_test_repo(|repo| {
+            git(repo, &["remote", "add", "origin", "."]);
+            git(repo, &["update-ref", "refs/remotes/origin/feature/nested", "HEAD"]);
+            git(repo, &["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/feature/nested"]);
+            git(repo, &["branch", "origin/feature/nested"]);
+            let status = super::inspect(repo.to_str().unwrap()).unwrap();
+            assert!(status.branches.contains(&"origin/feature/nested".to_string()));
+            let status = serde_json::to_value(status).unwrap();
+            assert_eq!(status["remoteBranches"], serde_json::json!([
+                { "name": "origin/feature/nested", "refName": "refs/remotes/origin/feature/nested" }
+            ]));
+        });
+    }
+
+    #[test]
+    fn remote_checkout_creates_tracking_branch_and_reuses_it() {
+        with_test_repo(|repo| {
+            let root = repo.to_str().unwrap();
+            git(repo, &["remote", "add", "origin", "."]);
+            git(repo, &["update-ref", "refs/remotes/origin/feature/nested", "HEAD"]);
+            fs::write(repo.join("tracked.txt"), "local work\n").unwrap();
+            assert_eq!(super::checkout_remote_branch(root, "refs/remotes/origin/feature/nested", None).unwrap(), super::RemoteCheckoutOutcome::Switched);
+            let status = super::inspect(root).unwrap();
+            assert_eq!(status.branch, "feature/nested");
+            assert_eq!(status.upstream.as_deref(), Some("origin/feature/nested"));
+            assert!(!status.detached);
+            git(repo, &["branch", "-m", "renamed"]);
+            git(repo, &["switch", "--detach"]);
+            super::checkout_remote_branch(root, "refs/remotes/origin/feature/nested", None).unwrap();
+            assert_eq!(super::inspect(root).unwrap().branch, "renamed");
+            assert_eq!(fs::read_to_string(repo.join("tracked.txt")).unwrap(), "local work\n");
+        });
+    }
+
+    #[test]
+    fn remote_checkout_requests_name_for_conflicts_and_ambiguous_tracking() {
+        with_test_repo(|repo| {
+            let root = repo.to_str().unwrap();
+            git(repo, &["remote", "add", "origin", "."]);
+            git(repo, &["remote", "add", "other", "."]);
+            git(repo, &["update-ref", "refs/remotes/origin/topic", "HEAD"]);
+            git(repo, &["update-ref", "refs/remotes/other/topic", "HEAD"]);
+            git(repo, &["branch", "topic"]);
+            let original = super::inspect(root).unwrap().branch;
+            assert!(matches!(super::checkout_remote_branch(root, "refs/remotes/origin/topic", None).unwrap(), super::RemoteCheckoutOutcome::NameRequired { .. }));
+            assert_eq!(super::inspect(root).unwrap().branch, original);
+            super::checkout_remote_branch(root, "refs/remotes/origin/topic", Some("chosen")).unwrap();
+            assert_eq!(super::inspect(root).unwrap().upstream.as_deref(), Some("origin/topic"));
+            git(repo, &["branch", "--track", "second", "origin/topic"]);
+            assert!(matches!(super::checkout_remote_branch(root, "refs/remotes/origin/topic", None).unwrap(), super::RemoteCheckoutOutcome::NameRequired { .. }));
+            assert!(matches!(super::checkout_remote_branch(root, "refs/remotes/other/topic", None).unwrap(), super::RemoteCheckoutOutcome::NameRequired { .. }));
+            assert!(super::checkout_remote_branch(root, "refs/remotes/other/topic", Some("chosen")).is_err());
+            assert_eq!(super::inspect(root).unwrap().upstream.as_deref(), Some("origin/topic"));
+            super::checkout_remote_branch(root, "refs/remotes/origin/topic", Some("topic-tracked")).unwrap();
+            // A matching conventional name wins over other tracking branches.
+            git(repo, &["branch", "--set-upstream-to=origin/topic", "topic"]);
+            super::checkout_remote_branch(root, "refs/remotes/origin/topic", None).unwrap();
+            assert_eq!(super::inspect(root).unwrap().branch, "topic");
+        });
+    }
+
+    #[test]
+    fn remote_checkout_rejects_invalid_refs_and_names_without_mutation() {
+        with_test_repo(|repo| {
+            let root = repo.to_str().unwrap();
+            git(repo, &["remote", "add", "origin", "."]);
+            git(repo, &["update-ref", "refs/remotes/origin/topic", "HEAD"]);
+            git(repo, &["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/topic"]);
+            let before = super::inspect(root).unwrap();
+            for remote in ["--detach", "HEAD", "origin/topic", "refs/remotes/origin/missing", "refs/remotes/origin/HEAD"] {
+                assert!(super::checkout_remote_branch(root, remote, None).is_err(), "accepted {remote}");
+            }
+            for name in ["", "--force", "bad..name", "@{-1}"] {
+                assert!(super::checkout_remote_branch(root, "refs/remotes/origin/topic", Some(name)).is_err(), "accepted {name}");
+            }
+            assert_eq!(super::inspect(root).unwrap(), before);
+        });
+    }
+
+    #[test]
+    fn remote_checkout_failure_does_not_create_branch_or_change_work() {
+        with_test_repo(|repo| {
+            let root = repo.to_str().unwrap();
+            let original = super::inspect(root).unwrap().branch;
+            git(repo, &["switch", "-c", "different"]);
+            fs::write(repo.join("tracked.txt"), "remote change\n").unwrap();
+            git(repo, &["commit", "-am", "remote change"]);
+            git(repo, &["remote", "add", "origin", "."]);
+            git(repo, &["update-ref", "refs/remotes/origin/topic", "HEAD"]);
+            git(repo, &["switch", &original]);
+            fs::write(repo.join("tracked.txt"), "local change\n").unwrap();
+            let before = super::inspect(root).unwrap();
+            assert!(super::checkout_remote_branch(root, "refs/remotes/origin/topic", None).is_err());
+            assert_eq!(super::inspect(root).unwrap(), before);
+            assert_eq!(fs::read_to_string(repo.join("tracked.txt")).unwrap(), "local change\n");
+        });
+    }
+
+    #[test]
+    fn remote_checkout_creates_from_detached_head_without_local_branches() {
+        with_test_repo(|repo| {
+            let root = repo.to_str().unwrap();
+            let original = super::inspect(root).unwrap().branch;
+            git(repo, &["remote", "add", "team/origin", "."]);
+            git(repo, &["update-ref", "refs/remotes/team/origin/feature/nested", "HEAD"]);
+            git(repo, &["switch", "--detach"]);
+            git(repo, &["branch", "-D", &original]);
+            super::checkout_remote_branch(root, "refs/remotes/team/origin/feature/nested", None).unwrap();
+            let status = super::inspect(root).unwrap();
+            assert_eq!(status.branch, "feature/nested");
+            assert_eq!(status.upstream.as_deref(), Some("team/origin/feature/nested"));
+            assert!(!status.detached);
+        });
+    }
+
+    #[test]
+    fn remote_checkout_respects_tracking_branch_in_another_worktree() {
+        with_test_repo(|repo| {
+            with_empty_folder(|worktree| {
+                let root = repo.to_str().unwrap();
+                git(repo, &["remote", "add", "origin", "."]);
+                git(repo, &["update-ref", "refs/remotes/origin/topic", "HEAD"]);
+                git(repo, &["branch", "--track", "topic", "origin/topic"]);
+                git(repo, &["worktree", "add", worktree.to_str().unwrap(), "topic"]);
+                let before = super::inspect(root).unwrap();
+                assert!(super::checkout_remote_branch(root, "refs/remotes/origin/topic", None).is_err());
+                assert_eq!(super::inspect(root).unwrap(), before);
+            });
+        });
+    }
+
+    #[test]
+    fn remote_checkout_requests_name_for_parent_and_child_ref_conflicts() {
+        for (local, remote) in [("topic", "topic/sub"), ("topic/sub", "topic")] {
+            with_test_repo(|repo| {
+                let root = repo.to_str().unwrap();
+                git(repo, &["remote", "add", "origin", "."]);
+                let remote_ref = format!("refs/remotes/origin/{remote}");
+                git(repo, &["update-ref", &remote_ref, "HEAD"]);
+                git(repo, &["branch", local]);
+                let before = super::inspect(root).unwrap();
+                assert!(matches!(super::checkout_remote_branch(root, &remote_ref, None).unwrap(), super::RemoteCheckoutOutcome::NameRequired { .. }));
+                assert_eq!(super::inspect(root).unwrap(), before);
+                super::checkout_remote_branch(root, &remote_ref, Some("chosen")).unwrap();
+                assert_eq!(super::inspect(root).unwrap().branch, "chosen");
+            });
+        }
     }
 
     #[test]

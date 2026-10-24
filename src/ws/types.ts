@@ -33,6 +33,11 @@ export interface GitChange {
   worktreeStatus: string;
 }
 
+export interface GitRemoteBranch {
+  name: string;
+  refName: string;
+}
+
 export interface GitRepoStatus {
   root: string;
   branch: string;
@@ -46,6 +51,7 @@ export interface GitRepoStatus {
   aheadCount?: number;
   behindCount?: number;
   branches: string[];
+  remoteBranches: GitRemoteBranch[];
   changes: GitChange[];
 }
 
@@ -1081,6 +1087,8 @@ export interface GitActionFinishedMessage {
   success: boolean;
   message?: string;
   suggestedUrl?: string;
+  code?: string;
+  suggestedBranchName?: string;
 }
 
 export interface InitGitRepositoryOkMessage {

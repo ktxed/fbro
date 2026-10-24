@@ -1,21 +1,30 @@
 import { autoUpdate, flip, FloatingFocusManager, FloatingPortal, offset, shift, size, useDismiss, useFloating, useInteractions } from "@floating-ui/react";
 import { IconCheck, IconChevronDown } from "@tabler/icons-react";
-import { forwardRef, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { Fragment, forwardRef, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import type { GitRemoteBranch } from "../ws/types";
 import { useAppState } from "../store";
 import { resolveColorScheme } from "../theme/colorSchemes";
 import { mergeRefs } from "../utils/mergeRefs";
 import { rovingIndexForKey } from "./modalKeyboard";
 
+export interface GitBranchChoice {
+  name: string;
+  kind: "local" | "remote";
+  refName: string;
+}
+
 interface GitBranchPickerProps {
   branches: string[];
+  remoteBranches: GitRemoteBranch[];
+  detached: boolean;
   value: string;
   disabled: boolean;
-  onSelect: (branch: string) => void;
+  onSelect: (branch: GitBranchChoice) => void;
   onInteract: () => void;
 }
 
 export const GitBranchPicker = forwardRef<HTMLButtonElement, GitBranchPickerProps>(function GitBranchPicker(
-  { branches, value, disabled, onSelect, onInteract }, forwardedRef,
+  { branches, remoteBranches, detached, value, disabled, onSelect, onInteract }, forwardedRef,
 ) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -26,10 +35,15 @@ export const GitBranchPicker = forwardRef<HTMLButtonElement, GitBranchPickerProp
   const selectionPendingRef = useRef(false);
   const listId = useId();
   const colorScheme = resolveColorScheme(useAppState().settings.general.colorScheme);
+  const choices = useMemo<GitBranchChoice[]>(() => [
+    ...branches.map(name => ({ name, kind: "local" as const, refName: `refs/heads/${name}` })),
+    ...remoteBranches.map(branch => ({ ...branch, kind: "remote" as const })),
+  ], [branches, remoteBranches]);
+  const isCurrent = (branch: GitBranchChoice) => !detached && branch.kind === "local" && branch.name === value;
   const matches = useMemo(() => {
     const pattern = query.trim().toLowerCase();
-    return branches.filter(branch => branch.toLowerCase().includes(pattern));
-  }, [branches, query]);
+    return choices.filter(branch => branch.name.toLowerCase().includes(pattern));
+  }, [choices, query]);
   const visibleIndex = Math.min(activeIndex, Math.max(0, matches.length - 1));
   const isOpen = open && !disabled;
   const { refs, floatingStyles, context } = useFloating({
@@ -64,14 +78,14 @@ export const GitBranchPicker = forwardRef<HTMLButtonElement, GitBranchPickerProp
     onInteract();
     selectionPendingRef.current = false;
     setQuery("");
-    setActiveIndex(Math.max(0, branches.indexOf(value)));
+    setActiveIndex(Math.max(0, choices.findIndex(isCurrent)));
     setOpen(true);
   };
-  const selectBranch = (branch: string) => {
+  const selectBranch = (branch: GitBranchChoice) => {
     if (disabled || selectionPendingRef.current) return;
     selectionPendingRef.current = true;
     setOpen(false);
-    if (branch !== value) onSelect(branch);
+    if (!isCurrent(branch)) onSelect(branch);
   };
   const onSearchKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.defaultPrevented || event.nativeEvent.isComposing) return;
@@ -184,24 +198,31 @@ export const GitBranchPicker = forwardRef<HTMLButtonElement, GitBranchPickerProp
               />
               <div id={listId} role="listbox" aria-label="Branches" className="git-branch-picker__list">
                 {matches.map((branch, index) => (
-                  <button
-                    ref={node => { optionRefs.current[index] = node; }}
-                    key={branch}
-                    id={`${listId}-${index}`}
-                    type="button"
-                    role="option"
-                    aria-selected={branch === value}
-                    tabIndex={-1}
-                    className="git-branch-picker__option"
-                    data-testid="git-branch-option"
-                    data-active={index === visibleIndex}
-                    title={branch === value ? `${branch} (current branch)` : branch}
-                    onMouseDown={event => event.preventDefault()}
-                    onClick={() => selectBranch(branch)}
-                  >
-                    <span>{branch}</span>
-                    {branch === value && <IconCheck size={14} aria-hidden />}
-                  </button>
+                  <Fragment key={branch.refName}>
+                    {(index === 0 || matches[index - 1].kind !== branch.kind) && (
+                      <div className="git-branch-picker__group-label" role="presentation">{branch.kind === "local" ? "Local" : "Remote"}</div>
+                    )}
+                    <button
+                      ref={node => { optionRefs.current[index] = node; }}
+                      id={`${listId}-${index}`}
+                      type="button"
+                      role="option"
+                      aria-selected={isCurrent(branch)}
+                      tabIndex={-1}
+                      className="git-branch-picker__option"
+                      data-testid="git-branch-option"
+                      data-active={index === visibleIndex}
+                      data-kind={branch.kind}
+                      data-ref={branch.refName}
+                      aria-label={`${branch.name} (${branch.kind}${isCurrent(branch) ? ", current branch" : ""})`}
+                      title={isCurrent(branch) ? `${branch.name} (current local branch)` : `${branch.name} (${branch.kind} branch)`}
+                      onMouseDown={event => event.preventDefault()}
+                      onClick={() => selectBranch(branch)}
+                    >
+                      <span>{branch.name}</span>
+                      {isCurrent(branch) && <IconCheck size={14} aria-hidden />}
+                    </button>
+                  </Fragment>
                 ))}
                 {matches.length === 0 && <div className="git-branch-picker__empty" role="status">No matching branches.</div>}
               </div>

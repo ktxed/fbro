@@ -1690,6 +1690,7 @@ body {
 .git-modal__toolbar .git-branch-picker__trigger[aria-disabled="true"] { opacity: 0.45; cursor: not-allowed; }
 .git-branch-picker__popup { z-index: 3; display: flex; flex-direction: column; width: 340px; box-sizing: border-box; padding: 8px; gap: 8px; border: 1px solid var(--border-focus); border-radius: 4px; background: var(--bg-panel); color: var(--text); box-shadow: var(--shadow-modal); overflow: hidden; }
 .git-branch-picker__popup input { appearance: none; -webkit-appearance: none; font: inherit; width: 100%; min-width: 0; box-sizing: border-box; flex-shrink: 0; padding: 5px 8px; border: 1px solid var(--border); border-radius: 3px; background: var(--bg-input); color: var(--text); }
+.git-branch-picker__group-label { padding: 6px 8px; color: var(--text-dim); font-size: 0.85em; font-weight: 600; }
 .git-branch-picker__list { min-height: 0; overflow-y: auto; }
 .git-branch-picker__option { appearance: none; -webkit-appearance: none; font: inherit; display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; padding: 5px 8px; border: 1px solid transparent; border-radius: 3px; background: var(--bg-panel); color: var(--text); text-align: left; cursor: pointer; }
 .git-branch-picker__option > span { min-width: 0; overflow-wrap: anywhere; }

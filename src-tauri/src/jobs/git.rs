@@ -27,6 +27,16 @@ pub(crate) async fn create_branch(root: String, branch: String) -> Result<(), St
         .map_err(|e| format!("Branch creation job failed: {e}"))?
 }
 
+pub(crate) async fn switch_branch(root: String, branch: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || crate::git::switch_branch(&root, &branch))
+        .await.map_err(|e| format!("Branch switch job failed: {e}"))?
+}
+
+pub(crate) async fn checkout_remote_branch(root: String, remote_ref: String, local_branch: Option<String>) -> Result<crate::git::RemoteCheckoutOutcome, String> {
+    tokio::task::spawn_blocking(move || crate::git::checkout_remote_branch(&root, &remote_ref, local_branch.as_deref()))
+        .await.map_err(|e| format!("Remote branch checkout job failed: {e}"))?
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

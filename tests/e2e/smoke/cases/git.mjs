@@ -29,6 +29,15 @@ export async function runGitFlow(browser, observer) {
   fs.writeFileSync(path.join(hostRepo, "changed.txt"), "conflicting branch\n");
   git(hostRepo, ["commit", "-qam", "conflicting branch"]);
   git(hostRepo, ["switch", "-q", initialBranch]);
+  git(hostRepo, ["remote", "add", "origin", "."]);
+  git(hostRepo, ["update-ref", "refs/remotes/origin/remote-topic", "HEAD"]);
+  git(hostRepo, ["update-ref", "refs/remotes/origin/remote-name-conflict", "HEAD"]);
+  git(hostRepo, ["update-ref", "refs/remotes/origin/remote-rejected", "feature/picker-rejected"]);
+  git(hostRepo, ["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/remote-topic"]);
+  git(hostRepo, ["branch", "remote-name-conflict"]);
+  git(hostRepo, ["branch", "remote-namespace-conflict"]);
+  git(hostRepo, ["branch", "origin/remote-topic"]);
+  git(hostRepo, ["update-ref", "refs/remotes/origin/remote-namespace-conflict/nested", "HEAD"]);
   fs.writeFileSync(path.join(hostRepo, "changed.txt"), "after\n");
   fs.writeFileSync(path.join(hostRepo, "inline.txt"), "after inline\n");
   fs.writeFileSync(path.join(hostRepo, "nested", "inside.txt"), "after nested\n");
@@ -200,6 +209,7 @@ export async function runGitFlow(browser, observer) {
     throw new Error("Branch creation changed uncommitted work");
   }
   await runGitBranchPickerFlow(browser, observer);
+  await runGitRemoteBranchFlow(browser, observer, hostRepo);
 
   await (await browser.$('[data-testid="git-tab-log"]')).click();
   await waitFor(async () => (await browser.$('[data-testid="git-log-row"]')).isDisplayed(), {
@@ -656,7 +666,7 @@ async function runGitBranchPickerFlow(browser, observer) {
     await browser.keys("Enter");
     if ((await optionNames()).length !== 0 || !await browser.$(`${popupSelector} [role="status"]`).isDisplayed() || await sentCount() !== 0) throw new Error("Empty branch search submitted a switch");
     await setTextInputValue(browser, searchSelector, "");
-    if ((await optionNames()).length !== observer.state.panels.left.git.branches.length) throw new Error("Clearing branch search did not restore the list");
+    if ((await optionNames()).length !== (observer.state.panels.left.git.branches.length + observer.state.panels.left.git.remoteBranches.length)) throw new Error("Clearing branch search did not restore the list");
     await browser.keys("Escape");
     await expectClosed();
     await expectPickerFocus();
@@ -742,6 +752,65 @@ async function runGitBranchPickerFlow(browser, observer) {
       delete window.__pickerHeldSend;
     });
   }
+}
+
+async function runGitRemoteBranchFlow(browser, observer, hostRepo) {
+  const picker = await browser.$('[data-testid="git-branch-picker"]');
+  const original = observer.state.panels.left.git.branch;
+  const select = async (name, pointer = false, kind = "remote") => {
+    await picker.click();
+    await waitFor(async () => await browser.$('[data-testid="git-branch-search"]').isFocused(), { timeout: 5_000, label: "remote branch search focus" });
+    const groups = await browser.execute(() => [...document.querySelectorAll('.git-branch-picker__group-label')].map(el => el.textContent));
+    if (groups.join("|") !== "Local|Remote") throw new Error("Branch groups are missing");
+    if (await browser.$('[data-testid="git-branch-option"][data-ref="refs/remotes/origin/HEAD"]').isExisting()) throw new Error("Remote HEAD alias was offered for checkout");
+    await setTextInputValue(browser, '[data-testid="git-branch-search"]', name);
+    if (pointer) await browser.$(`[data-testid="git-branch-option"][data-kind="${kind}"]`).click();
+    else {
+      // A local branch may have the same display name; the remote group is last.
+      await browser.keys(kind === "local" ? "Home" : "End");
+      await browser.keys("Enter");
+    }
+  };
+  const expectBranch = async name => {
+    await waitFor(async () => observer.state.panels.left.git.branch === name && await picker.getAttribute("aria-disabled") === "false", { timeout: 10_000, label: `checkout ${name}` });
+    await waitFor(() => picker.isFocused(), { timeout: 5_000, label: "remote checkout focus return" });
+  };
+  await select("origin/remote-topic");
+  await expectBranch("remote-topic");
+  const upstream = () => execFileSync("git", ["-C", hostRepo, "rev-parse", "--symbolic-full-name", "@{upstream}"], { encoding: "utf8" }).trim();
+  if (upstream() !== "refs/remotes/origin/remote-topic" || observer.state.panels.left.git.detached) throw new Error("Remote checkout did not create a tracking branch");
+  await select(original);
+  await expectBranch(original);
+  await select("origin/remote-topic", true);
+  await expectBranch("remote-topic");
+
+  await select("origin/remote-topic", true, "local");
+  await expectBranch("origin/remote-topic");
+  await select("origin/remote-topic");
+  await expectBranch("remote-topic");
+
+  await select("origin/remote-namespace-conflict/nested");
+  const input = await browser.$('[data-testid="git-branch-name"]');
+  await waitFor(() => input.isFocused(), { timeout: 5_000, label: "remote conflict name input" });
+  await browser.keys("Escape");
+  await waitFor(() => picker.isFocused(), { timeout: 5_000, label: "remote conflict cancellation" });
+  if (observer.state.panels.left.git.branch !== "remote-topic") throw new Error("Cancelling remote conflict changed HEAD");
+  await select("origin/remote-name-conflict");
+  await waitFor(() => input.isFocused(), { timeout: 5_000, label: "remote conflict retry input" });
+  await setTextInputValue(browser, '[data-testid="git-branch-name"]', "bad..name");
+  await browser.keys("Enter");
+  await waitFor(async () => await browser.$('.git-modal__branch-error').isDisplayed() && await input.isEnabled(), { timeout: 10_000, label: "remote name validation failure" });
+  if (await input.getValue() !== "bad..name") throw new Error("Remote checkout error discarded the entered name");
+  await setTextInputValue(browser, '[data-testid="git-branch-name"]', "remote-chosen");
+  await browser.keys("Enter");
+  await expectBranch("remote-chosen");
+  if (upstream() !== "refs/remotes/origin/remote-name-conflict") throw new Error("Named remote checkout has wrong upstream");
+  await select("origin/remote-rejected");
+  await waitFor(async () => await picker.getAttribute("aria-disabled") === "false" && /overwritten|commit your changes/i.test(await browser.$('.git-modal__activity').getText()), { timeout: 10_000, label: "remote checkout rejection" });
+  if (observer.state.panels.left.git.branch !== "remote-chosen") throw new Error("Rejected remote checkout changed HEAD");
+  await waitFor(() => picker.isFocused(), { timeout: 5_000, label: "rejected remote checkout focus" });
+  await select(original);
+  await expectBranch(original);
 }
 
 async function panelGitStatus(browser, name) {

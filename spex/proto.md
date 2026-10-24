@@ -804,6 +804,33 @@ lifecycle: `GitActionFinished` correlates by `activityId`, with success/failure
 and an error message. Successful panel rescan precedes completion. Closing the
 modal backgrounds the activity without interrupting an atomic switch.
 
+## Git branch listing and remote checkout
+
+`GitRepoStatus.branches` remains the local branch-name list. `remoteBranches`
+adds `{ name, refName }` entries for non-symbolic refs under `refs/remotes/`,
+ordered by ref name. Names include the remote prefix (for example
+`origin/feature/nested`); `refName` is the full identity. Listing is local and
+performs no fetch. Symbolic aliases such as `origin/HEAD` are excluded.
+
+`GitCheckoutRemoteBranch` accepts `{ panelId, remoteRef, localBranch?, activityId }`.
+The backend validates the exact remote ref against fresh repository state. With
+no explicit local name, it prefers the conventional local branch if it tracks
+that remote ref, otherwise reuses the sole tracking local branch, otherwise
+creates a tracking branch using the remote branch's name. An occupied name or
+multiple tracking candidates returns `GitActionFinished` with `success: false`,
+`code: GIT_LOCAL_BRANCH_NAME_REQUIRED`, `suggestedBranchName`, and an explanatory
+`message`, without mutation or a separate generic error. The frontend requests
+a new name inline; retry sends `localBranch` and creates a new tracking branch.
+Existing branches and their upstreams are never overwritten or reassigned.
+These optional reply fields are omitted from ordinary Git action completions.
+
+Local and remote checkout run as short atomic jobs on the blocking pool, using
+the existing correlated activity, journal, and rescan-before-completion flow.
+`GitSwitchBranch` accepts literal existing local names only. Checkout preserves
+local work; conflicting changes or worktree ownership are reported as Git
+failures. Closing the modal backgrounds started checkout without interrupting it.
+No automatic stash, force, fetch, pull, or detached checkout is performed.
+
 ## Git repository initialization
 
 `InitGitRepository` accepts `{ panelId, sourceId, targetPath, branch, requestId }`.

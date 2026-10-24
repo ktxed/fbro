@@ -137,9 +137,28 @@ pub(crate) async fn handle(name: &str, args: &Value, ctx: &mut IntentContext<'_>
                 .map(|_| None)
         },
         "GitSwitchBranch" => {
-            let branch = args.get("branch").and_then(Value::as_str).unwrap_or("").trim();
-            if branch.is_empty() { Err("A branch is required.".to_string()) }
-            else { crate::git::run(&root, &["switch".into(), branch.into()]).map(|_| None) }
+            let branch = super::arg_str(args, "branch").unwrap_or("").to_string();
+            crate::jobs::git::switch_branch(root.clone(), branch).await.map(|_| None)
+        },
+        "GitCheckoutRemoteBranch" => {
+            let remote_ref = super::arg_str(args, "remoteRef").unwrap_or("").to_string();
+            let local_branch = super::arg_str(args, "localBranch").map(str::to_string);
+            match crate::jobs::git::checkout_remote_branch(root.clone(), remote_ref, local_branch).await {
+                Ok(crate::git::RemoteCheckoutOutcome::Switched) => Ok(None),
+                Ok(crate::git::RemoteCheckoutOutcome::NameRequired { suggested_branch_name, message }) => {
+                    if let Some(operation) = operation.as_ref() {
+                        crate::journal::record_git_result(operation, "failed", Some(&message));
+                    }
+                    let _ = ctx.tx.send(ServerMessage::GitActionFinished {
+                        timestamp: now(), panel_id: panel_id.clone(), action: name.into(),
+                        activity_id, success: false, message: Some(message), suggested_url: None,
+                        code: Some("GIT_LOCAL_BRANCH_NAME_REQUIRED".into()),
+                        suggested_branch_name: Some(suggested_branch_name),
+                    }).await;
+                    return;
+                },
+                Err(message) => Err(message),
+            }
         },
         "GitPull" => guarded(clean, || crate::git::run(&root, &["pull".into()])).map(|_| None),
         "GitPush" => match args.get("forceMode").and_then(Value::as_str).unwrap_or("") {
@@ -219,6 +238,23 @@ fn init_target_in_panel(panel_path: &str, target_path: &str) -> bool {
 #[cfg(test)]
 mod init_tests {
     use super::*;
+
+    #[test]
+    fn remote_checkout_name_request_has_correlated_camel_case_fields() {
+        let reply = serde_json::to_value(ServerMessage::GitActionFinished {
+            timestamp: 1, panel_id: "left".into(), action: "GitCheckoutRemoteBranch".into(),
+            activity_id: Some("checkout-1".into()), success: false,
+            message: Some("Choose another name".into()), suggested_url: None,
+            code: Some("GIT_LOCAL_BRANCH_NAME_REQUIRED".into()),
+            suggested_branch_name: Some("topic".into()),
+        }).unwrap();
+        assert_eq!(reply["panelId"], "left");
+        assert_eq!(reply["activityId"], "checkout-1");
+        assert_eq!(reply["code"], "GIT_LOCAL_BRANCH_NAME_REQUIRED");
+        assert_eq!(reply["suggestedBranchName"], "topic");
+        assert!(reply.get("suggested_branch_name").is_none());
+        assert!(reply.get("suggestedUrl").is_none());
+    }
 
     #[test]
     fn initialization_target_is_the_current_folder_or_one_direct_child() {
@@ -410,6 +446,8 @@ async fn send_action_finished(
             success,
             message: message.map(str::to_string),
             suggested_url: suggested_url.map(str::to_string),
+            code: None,
+            suggested_branch_name: None,
         })
         .await;
 }

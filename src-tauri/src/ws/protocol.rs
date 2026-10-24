@@ -418,6 +418,10 @@ pub enum ServerMessage {
         message: Option<String>,
         #[serde(rename = "suggestedUrl", skip_serializing_if = "Option::is_none")]
         suggested_url: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        code: Option<String>,
+        #[serde(rename = "suggestedBranchName", skip_serializing_if = "Option::is_none")]
+        suggested_branch_name: Option<String>,
     },
     /// Request text input from the FE (e.g. archive password).
     InputRequired {

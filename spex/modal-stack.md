@@ -308,6 +308,13 @@ control deliberately took focus. Closing the Git layer retains the stack's
 normal opener restoration. Async log arrival does not take focus after picker
 interaction. Filtering and highlighting are temporary UI state; the displayed
 current branch changes only from backend status, including after rejection.
+The dropdown has nonselectable Local/Remote headings and searches both groups;
+only the current local branch is marked selected. Remote selection uses the same
+busy and focus lifecycle. A correlated backend name-required response opens the
+inline branch form with the remote source and suggested local name. Cancel
+restores the picker; success restores its refreshed value. Validation failures
+retain the input. Late results after the Git layer closes never reopen a form.
+While a branch form is open, the picker cannot activate.
 
 New branch expands an inline form inside the existing Git layer, with no new
 modal layer. Focus moves to its name input on this user-triggered state change.

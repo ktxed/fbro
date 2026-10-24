@@ -305,8 +305,9 @@ blocked while the dialog is open, and the shared focus handoff restores its open
 
 The Git modal's branch picker is a custom searchable dropdown. `B` focuses its
 trigger; Enter, Space, or ArrowDown opens it and focuses the search input.
-Typing filters the backend-provided local branches by case-insensitive literal
-substring. Up/Down and Home/End highlight results without moving input focus;
+The dropdown groups backend-provided branches under Local and Remote; remote
+names include their remote prefix. Typing filters both groups by case-insensitive
+literal substring. Group headings are not selectable. Up/Down and Home/End highlight results without moving input focus;
 Enter switches to the highlighted branch once. Options are not separate Tab
 stops. Escape dismisses the dropdown before other Git nested state. Tab or
 Shift+Tab uses the modal's normal focus cycle and dismisses without selecting.
@@ -314,6 +315,13 @@ An outside click dismisses and preserves intentionally moved focus. The picker
 cannot open or switch during Git activity; its trigger remains focusable so
 checkout dismissal can return focus to it. Modified editing keys and IME
 composition retain native input behavior.
+
+Selecting a remote branch creates or reuses a local tracking branch. When the
+backend requests another local name, the existing inline branch form opens with
+the selected remote as its source. Enter submits once; failure retains the name
+for retry. Cancel/Escape restores the branch picker, and successful checkout
+closes the form and restores the refreshed picker. The picker is unavailable
+while either branch form is open; its trigger remains focusable.
 
 The Git modal's New branch action uses local `N` outside editable fields. It
 opens an inline toolbar form and focuses the name input. Enter submits once;

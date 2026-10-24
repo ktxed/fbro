@@ -4,4 +4,6 @@ export interface GitActivity {
   message: string;
   status: "running" | "complete" | "failed";
   suggestedUrl?: string;
+  code?: string;
+  suggestedBranchName?: string;
 }

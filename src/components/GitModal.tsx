@@ -43,6 +43,8 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
   const [branchFormOpen, setBranchFormOpen] = useState(false);
   const [branchName, setBranchName] = useState("");
   const [branchActivityId, setBranchActivityId] = useState<string | null>(null);
+  const [branchRemoteRef, setBranchRemoteRef] = useState<string | null>(null);
+  const [remoteCheckout, setRemoteCheckout] = useState<{ refName: string; activityId: string } | null>(null);
   const branchHistory = useInputHistory("git-branch-name", setBranchName);
   const commitRef = useRef<HTMLButtonElement>(null);
   const selectAllRef = useRef<HTMLInputElement>(null);
@@ -89,19 +91,22 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
   const closeBranchForm = () => {
     branchHistory.close();
     setBranchFormOpen(false);
-    requestAnimationFrame(() => newBranchRef.current?.focus());
+    requestAnimationFrame(() => (branchRemoteRef ? branchRef : newBranchRef).current?.focus());
   };
   const openBranchForm = () => {
     if (actionInFlightRef.current) return;
     if (branchFormOpen) { branchHistory.inputRef.current?.focus(); return; }
     didAutoFocusLogRef.current = true;
+    setBranchRemoteRef(null);
     setBranchName("");
     setBranchActivityId(null);
     setBranchFormOpen(true);
   };
   const submitBranch = () => {
     if (!branchName.trim() || actionInFlightRef.current) return;
-    const id = runAction("GitCreateBranch", "Creating branch…", { branch: branchName.trim() });
+    const id = branchRemoteRef
+      ? runAction("GitCheckoutRemoteBranch", "Checking out remote branch…", { remoteRef: branchRemoteRef, localBranch: branchName.trim() })
+      : runAction("GitCreateBranch", "Creating branch…", { branch: branchName.trim() });
     if (id) setBranchActivityId(id);
   };
   useEffect(() => {
@@ -116,6 +121,16 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
       (branchRef.current ?? newBranchRef.current)?.focus();
     } else if (activity.status === "failed") branchHistory.inputRef.current?.focus();
   }, [activity, branchActivityId, branchFormOpen]);
+  useEffect(() => {
+    if (!remoteCheckout || activity?.id !== remoteCheckout.activityId || activity.status === "running") return;
+    if (activity.code === "GIT_LOCAL_BRANCH_NAME_REQUIRED") {
+      setBranchRemoteRef(remoteCheckout.refName);
+      setBranchName(activity.suggestedBranchName ?? "");
+      setBranchActivityId(activity.id);
+      setBranchFormOpen(true);
+    }
+    setRemoteCheckout(null);
+  }, [activity, remoteCheckout]);
   const openSuggestedReview = () => {
     if (activity?.suggestedUrl) {
       act("OpenGitReviewRequest", { url: activity.suggestedUrl });
@@ -640,7 +655,7 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
         u: () => { if (canSetUpstream) runAction("GitSetUpstream", "Setting upstream…", { branch: git.branch }); },
         c: () => { if (activeTab === "changes" && canCommit) commitRef.current?.click(); },
       };
-      if (git.branches.length > 0) accelerators.b = () => branchRef.current?.focus();
+      if (git.branches.length > 0 || git.remoteBranches.length > 0) accelerators.b = () => branchRef.current?.focus();
       const action = !hasShortcutModifier && letter ? accelerators[letter] : undefined;
       if (action) {
         event.preventDefault();
@@ -691,15 +706,23 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
           </div>
         )}
         <div className="git-modal__toolbar">
-          {git.branches.length > 0 && (
+          {(git.branches.length > 0 || git.remoteBranches.length > 0) && (
             <>
               <GitBranchPicker
                 ref={branchRef}
                 branches={git.branches}
+                remoteBranches={git.remoteBranches}
+                detached={git.detached}
                 value={git.branch}
-                disabled={actionInFlight}
+                disabled={actionInFlight || branchFormOpen}
                 onInteract={() => { didAutoFocusLogRef.current = true; }}
-                onSelect={branch => runAction("GitSwitchBranch", "Switching branch…", { branch })}
+                onSelect={branch => {
+                  if (branch.kind === "local") runAction("GitSwitchBranch", "Switching branch…", { branch: branch.name });
+                  else {
+                    const id = runAction("GitCheckoutRemoteBranch", "Checking out remote branch…", { remoteRef: branch.refName });
+                    if (id) setRemoteCheckout({ refName: branch.refName, activityId: id });
+                  }
+                }}
               />
               <kbd>B</kbd>
             </>
@@ -726,10 +749,10 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
 
         {branchFormOpen && (
           <form className="git-modal__branch-form git-modal__toolbar" data-testid="git-branch-form" onKeyDown={event => { if (event.key === "Enter" || event.key === " ") event.stopPropagation(); }} onSubmit={event => { event.preventDefault(); submitBranch(); }}>
-            <span className="git-modal__branch-base">From {git.branch}</span>
+            <span className="git-modal__branch-base">From {branchRemoteRef ? branchRemoteRef.replace(/^refs\/remotes\//, "") : git.branch}</span>
             <label htmlFor={`git-branch-name-${panelId}`}>Branch name</label>
             <input id={`git-branch-name-${panelId}`} ref={element => { branchHistory.inputRef.current = element; }} data-testid="git-branch-name" value={branchName} disabled={actionInFlight} autoComplete="off" onChange={event => setBranchName(event.target.value)} onKeyDown={branchHistory.onKeyDown} />
-            <button type="submit" data-testid="git-create-branch" disabled={actionInFlight || !branchName.trim()}>{actionInFlight ? "Creating…" : "Create & switch"}</button>
+            <button type="submit" data-testid="git-create-branch" disabled={actionInFlight || !branchName.trim()}>{actionInFlight ? (branchRemoteRef ? "Checking out…" : "Creating…") : (branchRemoteRef ? "Checkout" : "Create & switch")}</button>
             <button type="button" onClick={closeBranchForm} disabled={actionInFlight}>Cancel</button>
             {activity?.id === branchActivityId && activity.status === "failed" && <div className="git-modal__branch-error" role="alert">{activity.message}</div>}
             {branchHistory.isOpen && <InputHistoryDropdown anchorEl={branchHistory.inputRef.current} items={branchHistory.items} activeIndex={branchHistory.activeIndex} onSelect={branchHistory.selectItem} onClose={branchHistory.close} />}

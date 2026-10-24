@@ -132,7 +132,7 @@ pub async fn dispatch(name: &str, scope: &Value, args: &Value, ctx: &mut IntentC
             bookmarks::handle(name, scope, args, ctx).await
         }
         "EnterHistorySource" => history::handle(name, scope, args, ctx).await,
-        "InitGitRepository" | "RefreshGitStatus" | "GitRefresh" | "GitFetch" | "GitStagePaths" | "GitUnstagePaths" | "GitRollbackPaths" | "GitCommit" | "GitCreateBranch" | "GitSwitchBranch" | "GitPull" | "GitPush" | "GitSetUpstream" | "GitGetLog" | "GitGetCommitShow" | "GitCopyRawFile" | "OpenGitReviewRequest" => git::handle(name, args, ctx).await,
+        "InitGitRepository" | "RefreshGitStatus" | "GitRefresh" | "GitFetch" | "GitStagePaths" | "GitUnstagePaths" | "GitRollbackPaths" | "GitCommit" | "GitCreateBranch" | "GitCheckoutRemoteBranch" | "GitSwitchBranch" | "GitPull" | "GitPush" | "GitSetUpstream" | "GitGetLog" | "GitGetCommitShow" | "GitCopyRawFile" | "OpenGitReviewRequest" => git::handle(name, args, ctx).await,
         "EnterProcsSource" => procs::handle(name, scope, args, ctx).await,
         "Quit" | "ConfirmQuit" | "SetFontSize" => app::handle(name, args, ctx).await,
         "SetGeneralOption"
@@ -174,6 +174,7 @@ fn should_record_command(name: &str) -> bool {
         name,
         "ClearIconCache"
             | "GitCreateBranch"
+            | "GitCheckoutRemoteBranch"
             | "AddSharedFolder"
             | "InitGitRepository"
             | "StartFileOp"
