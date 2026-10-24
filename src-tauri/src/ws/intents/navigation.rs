@@ -51,6 +51,15 @@ impl NavigatePanelArgs {
             cursor_hint: arg_str(args, "cursorHint").map(String::from),
         }
     }
+
+    fn restore_history_cursor(
+        &self,
+        context: &mut crate::state::navigation::NavigationContext,
+        source_id: &str,
+    ) -> Option<String> {
+        let saved_hint = context.restore_history(source_id, &self.path);
+        self.cursor_hint.clone().or(saved_hint)
+    }
 }
 
 struct OpenPathArgs {
@@ -152,6 +161,32 @@ mod tests {
     use std::collections::HashMap;
 
     use super::{most_specific_source_for_path, remembered_path_for_source};
+
+    #[test]
+    fn history_navigation_explicit_cursor_overrides_saved_symlink_hint() {
+        let mut context = crate::state::navigation::NavigationContext::default();
+        context.enter_link(crate::state::navigation::SymlinkReturn {
+            source_id: "vol-root".into(), path: "/origin".into(), name: "saved-link".into(),
+            target_source_id: "vol-root".into(), target_path: "/target".into(),
+        });
+        let args = super::NavigatePanelArgs::from_args(&serde_json::json!({
+            "panelId": "left", "path": "/origin", "cursorHint": "job-file.txt"
+        }));
+        assert_eq!(args.restore_history_cursor(&mut context, "vol-root").as_deref(), Some("job-file.txt"));
+    }
+
+    #[test]
+    fn history_navigation_without_explicit_cursor_retains_saved_hint() {
+        let mut context = crate::state::navigation::NavigationContext::default();
+        context.enter_link(crate::state::navigation::SymlinkReturn {
+            source_id: "vol-root".into(), path: "/origin".into(), name: "saved-link".into(),
+            target_source_id: "vol-root".into(), target_path: "/target".into(),
+        });
+        let args = super::NavigatePanelArgs::from_args(&serde_json::json!({
+            "panelId": "left", "path": "/origin"
+        }));
+        assert_eq!(args.restore_history_cursor(&mut context, "vol-root").as_deref(), Some("saved-link"));
+    }
 
     fn pick_source<'a>(sources: &'a [(&'a String, &'a str)], path: &str) -> Option<String> {
         most_specific_source_for_path(sources.iter().copied(), path)
@@ -1981,8 +2016,9 @@ async fn navigate_up(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
 /// Navigate to a specific (path, sourceId) history entry, handling source switching,
 /// archive re-entry, and search source restoration.
 async fn navigate_to_history_entry(args: &Value, ctx: &mut IntentContext<'_>) {
-    let panel_id = arg_str(args, "panelId").unwrap_or("").to_string();
-    let target_path = arg_str(args, "path").unwrap_or("").to_string();
+    let parsed = NavigatePanelArgs::from_args(args);
+    let panel_id = parsed.panel_id.clone();
+    let target_path = parsed.path.clone();
     let target_source_id = arg_str(args, "sourceId").unwrap_or("").to_string();
 
     if panel_id.is_empty() || target_source_id.is_empty() {
@@ -1994,9 +2030,7 @@ async fn navigate_to_history_entry(args: &Value, ctx: &mut IntentContext<'_>) {
         let Some(panel) = state.panels.get_mut(&panel_id) else {
             return;
         };
-        panel
-            .navigation_context
-            .restore_history(&target_source_id, &target_path)
+        parsed.restore_history_cursor(&mut panel.navigation_context, &target_source_id)
     };
 
     // Read current panel state.

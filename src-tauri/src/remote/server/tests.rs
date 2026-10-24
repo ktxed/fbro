@@ -10,11 +10,16 @@ use russh_sftp::server::Handler as SftpServerHandler;
 
 #[derive(Default)]
 struct RecordingDriver {
+    local: bool,
     read_paths: StdMutex<Vec<String>>,
     cancel_during_read: StdMutex<Option<(SharedState, String)>>,
 }
 
 impl VfsDriver for RecordingDriver {
+    fn is_local(&self) -> bool {
+        self.local
+    }
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
@@ -256,6 +261,98 @@ fn empty_test_state() -> SharedState {
         crate::thumb_pool::ThumbPool::start(platform, 1),
         Arc::new(crate::fileserver::ThumbCache::new(1)),
     )))
+}
+
+#[tokio::test]
+async fn outgoing_job_file_location_uses_local_backing_path_for_internal_share() {
+    struct TempDir(std::path::PathBuf);
+    impl Drop for TempDir {
+        fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); }
+    }
+    let root = TempDir(std::env::temp_dir().join(format!("fbro-job-location-{}", uuid::Uuid::new_v4())));
+    std::fs::create_dir_all(root.0.join("nested")).unwrap();
+    let path = root.0.join("nested/file.txt");
+    std::fs::write(&path, b"hello").unwrap();
+    let state = empty_test_state();
+    {
+        let mut guard = state.lock().await;
+        guard.drivers.insert("share-folder:test".into(), Arc::new(crate::vfs::local::LocalFsDriver));
+        guard.share_config.shared_roots = vec![SharedRoot {
+            id: "folder-test".into(), name: "Shared folder".into(),
+            path: root.0.to_string_lossy().into_owned(), source_id: "share-folder:test".into(),
+            origin: SharedRootOrigin::Folder, icon_name: None,
+        }];
+    }
+    let mut handler = SftpHandler::new(state, "peer".into());
+    handler.open(1, "/folder-test/nested/file.txt".into(), OpenFlags::READ, FileAttributes::default()).await.unwrap();
+    let file = serde_json::to_value(&handler.transfers.values().next().unwrap().files[0]).unwrap();
+    assert_eq!(file["sourcePath"], "/folder-test/nested/file.txt", "display and digest identity stay unchanged");
+    assert_eq!(file["location"]["path"], path.to_string_lossy().as_ref());
+    assert_eq!(file["location"]["sourceId"], "vol-root");
+    assert_eq!(file["location"]["parentPath"], root.0.join("nested").to_string_lossy().as_ref());
+    assert_eq!(file["location"]["cursorHint"], "file.txt");
+}
+
+#[tokio::test]
+async fn job_file_location_chooses_mounted_local_source_and_rejects_relative_paths() {
+    let state = empty_test_state();
+    let mut state = state.lock().await;
+    let driver: Arc<dyn VfsDriver> = Arc::new(crate::vfs::local::LocalFsDriver);
+    let mut nested = state.sources["vol-root"].clone();
+    nested.id = "nested".into();
+    nested.root_path = "/home/user".into();
+    state.sources.insert(nested.id.clone(), nested);
+    state.drivers.insert("nested".into(), driver.clone());
+    let location = crate::ws::intents::job_file_location(&state, &driver, "/home/user/file.txt").unwrap();
+    assert_eq!(location.source_id, "nested");
+    let boundary = crate::ws::intents::job_file_location(&state, &driver, "/home/user-other/file.txt").unwrap();
+    assert_eq!(boundary.source_id, "vol-root");
+    state.sources.get_mut("nested").unwrap().mounted = false;
+    let fallback = crate::ws::intents::job_file_location(&state, &driver, "/home/user/file.txt").unwrap();
+    assert_eq!(fallback.source_id, "vol-root");
+    assert!(crate::ws::intents::job_file_location(&state, &driver, "relative/file.txt").is_none());
+    state.sources.clear();
+    assert!(crate::ws::intents::job_file_location(&state, &driver, "/home/user/file.txt").is_none());
+}
+
+#[tokio::test]
+async fn job_file_location_keeps_remote_driver_identity_after_panel_navigation() {
+    let state = empty_test_state();
+    let mut state = state.lock().await;
+    let driver: Arc<dyn VfsDriver> = Arc::new(RecordingDriver::default());
+    let mut remote = state.sources["vol-root"].clone();
+    remote.id = "remote:peer:share".into();
+    remote.kind = "remote".into();
+    remote.root_path = String::new();
+    state.sources.insert(remote.id.clone(), remote);
+    state.drivers.insert("remote:peer:share".into(), driver.clone());
+    state.panels.get_mut("left").unwrap().source_id = "vol-root".into();
+    let location = crate::ws::intents::job_file_location(&state, &driver, "folder/file.txt").unwrap();
+    assert_eq!(location.source_id, "remote:peer:share");
+    assert_eq!(location.path, "folder/file.txt");
+    assert_eq!(location.parent_path, "folder");
+    assert_eq!(location.cursor_hint, "file.txt");
+    state.sources.remove("remote:peer:share");
+    assert!(crate::ws::intents::job_file_location(&state, &driver, "folder/file.txt").is_none());
+}
+
+#[tokio::test]
+async fn job_file_location_without_local_backing_path_does_not_guess_host_paths() {
+    let state = empty_test_state();
+    let mut state = state.lock().await;
+    let driver: Arc<dyn VfsDriver> = Arc::new(RecordingDriver { local: true, ..Default::default() });
+    state.drivers.insert("vol-root".into(), driver.clone());
+    assert!(crate::ws::intents::job_file_location(&state, &driver, "relative/file.txt").is_none());
+    assert!(crate::ws::intents::job_file_location(&state, &driver, "/unverified/file.txt").is_none());
+}
+
+#[test]
+fn job_file_location_is_optional_for_older_file_metadata() {
+    let file: FileOpFileSchema = serde_json::from_value(serde_json::json!({
+        "name": "file.txt", "size": 1, "kind": "file"
+    })).unwrap();
+    assert!(file.location.is_none());
+    assert!(serde_json::to_value(file).unwrap().get("location").is_none());
 }
 
 #[tokio::test]
@@ -818,6 +915,7 @@ async fn cancelled_transfer_rejects_reopens_and_reconnects_but_allows_new_jobs_a
             "client:cancel-token",
             "/home-abc123/Downloads/file.jpg",
             Some(7),
+            None,
         )
         .await;
     handler.close(5, file.handle).await.unwrap();

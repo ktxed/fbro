@@ -426,6 +426,8 @@ export interface FileOpFile {
   sourcePath?: string;
   /** Backend-resolved destination name in job metadata. */
   destName?: string;
+  /** Backend-resolved source location, independent of later panel navigation. */
+  location?: { sourceId: string; path: string; parentPath: string; cursorHint: string };
 }
 
 export type DuplicateNamePolicy = "exclude" | "suffix";

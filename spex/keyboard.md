@@ -290,6 +290,23 @@ must not lose focus to suggestions.
    window return remain explicit focus transitions; clearing an overlay guard
    alone does not refocus the panel, and there is no hover or polling recovery.
 
+Jobs headers accept Enter/Right to expand the file list and enter its first
+row. Right reenters an expanded list; Up/Down navigate its files, Home/End
+reach the first/last file, and PageUp/PageDown move by a file page. Pagination
+follows keyboard focus and keeps the active item visible. Left returns to the
+parent job, then collapses its list. Escape from a file collapses the list
+before dismissing Jobs. Tab visits the active file row, its enabled Copy and
+Jump buttons, then the next job (or Close). Shift+Tab reverses that row/action
+order, then goes to the preceding job (or the tablist). Inactive file rows and
+their actions stay outside the Tab sequence. Header buttons retain normal Tab
+access and native activation.
+
+Each file with a backend-resolved location offers Copy path (`C`) and Jump to
+location (`G`, or Enter on its row). Copy uses the shared clipboard feedback
+and preserves the active row; Jump closes Jobs and reveals the file in the
+active panel. Unavailable locations disable these actions. Job progress does
+not move focus, and covered panels remain inert.
+
 The `j` Jobs modal includes a Notifications tab. Its tablist uses Left/Right
 and Home/End with one Tab stop. The history list also exposes one Tab stop;
 Up/Down and Home/End move the active entry and keep it visible. Incoming

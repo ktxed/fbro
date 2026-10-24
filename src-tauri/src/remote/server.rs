@@ -547,7 +547,13 @@ impl SftpHandler {
         self.transfers.get_mut(key)
     }
 
-    async fn note_file_opened(&mut self, transfer_key: &str, path: &str, size: Option<u64>) {
+    async fn note_file_opened(
+        &mut self,
+        transfer_key: &str,
+        path: &str,
+        size: Option<u64>,
+        location: Option<crate::ws::protocol::JobFileLocationSchema>,
+    ) {
         if self.transfer_cancelled_for(transfer_key).await {
             return;
         }
@@ -585,6 +591,7 @@ impl SftpHandler {
                 kind: "file".to_string(),
                 source_path: Some(path.to_string()),
                 dest_name: None,
+                location,
             };
             transfer
                 .file_indexes
@@ -2467,6 +2474,10 @@ impl russh_sftp::server::Handler for SftpHandler {
             return Err(StatusCode::NoSuchFile);
         }
         let size = driver.file_size(&driver_path);
+        let location = {
+            let state = self.state.lock().await;
+            crate::ws::intents::job_file_location(&state, &driver, &driver_path)
+        };
         let handle = self.fresh_handle();
         self.handles.insert(
             handle.clone(),
@@ -2479,7 +2490,7 @@ impl russh_sftp::server::Handler for SftpHandler {
                 completed: false,
             },
         );
-        self.note_file_opened(&transfer_key, &display_path, size)
+        self.note_file_opened(&transfer_key, &display_path, size, location)
             .await;
         if self.transfer_cancelled_for(&transfer_key).await {
             self.handles.remove(&handle);

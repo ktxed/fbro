@@ -15,6 +15,7 @@ import {
 } from "../browser.mjs";
 import { waitFor } from "../wait.mjs";
 import { expectModalFocus } from "./modal-focus.mjs";
+import { verifyJobFiles } from "./job-files.mjs";
 
 function tinyBmp() {
   const width = 2;
@@ -61,6 +62,11 @@ export async function runRemoteFlow(browserA, observerA, browserB, observerB) {
   fs.rmSync(path.join(bSyncHost, "fbro-sync-report.txt"), { force: true });
   fs.writeFileSync(path.join(aHomeDownloadsHost, "remote.txt"), "remote payload\n");
   fs.writeFileSync(path.join(aHomeDownloadsHost, "remote-thumb.bmp"), tinyBmp());
+  const keyboardFilesHost = path.join(aHomeDownloadsHost, "Keyboard");
+  fs.mkdirSync(keyboardFilesHost, { recursive: true });
+  for (let index = 1; index <= 28; index += 1) {
+    fs.writeFileSync(path.join(keyboardFilesHost, `job-file-${String(index).padStart(2, "0")}.txt`), "job keyboard fixture\n");
+  }
   fs.writeFileSync(path.join(aHomeDeepHost, "deep.txt"), "deep remote payload\n");
   fs.writeFileSync(path.join(aHomeSyncHost, "sync.txt"), "sync payload\n");
   fs.writeFileSync(path.join(bSyncHost, "sync.txt"), "sync payload\n");
@@ -259,6 +265,18 @@ export async function runRemoteFlow(browserA, observerA, browserB, observerB) {
     if (!observerB.state.sources[remoteSource.id]) throw new Error("viewer completion disconnected the remote source");
   }
   const thumbEntry = await observerB.waitForEntry("left", "remote-thumb.bmp", "file", 20_000);
+  const beforeKeyboardJobs = new Set(Object.keys(observerA.state.jobs));
+  for (let index = 1; index <= 28; index += 1) {
+    const viewerPath = `Downloads/Keyboard/job-file-${String(index).padStart(2, "0")}.txt`;
+    const messageStart = observerB.messages.length;
+    observerB.sendIntent("ReadFileChunk", undefined, { sourceId: remoteSource.id, path: viewerPath, offset: 0, size: 4096 });
+    await waitFor(() => observerB.messages.slice(messageStart).some((message) => message.type === "FileChunk" && message.path === viewerPath),
+      { label: `job keyboard fixture read ${index}` });
+  }
+  const keyboardJob = await waitFor(() => Object.values(observerA.state.jobs).find((job) =>
+    !beforeKeyboardJobs.has(job.jobId) && job.kind === "outgoing-transfer" && job.files.length === 28),
+  { label: "outgoing multi-page job ready" });
+  await verifyJobFiles(browserA, observerA, keyboardJob.jobId, path.posix.join(aHomeDownloads, "Keyboard"));
   if (!observerB.state.panels.left?.supportsThumbnails) {
     throw new Error("remote Downloads panel does not advertise thumbnail support");
   }

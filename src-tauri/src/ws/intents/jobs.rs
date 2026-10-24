@@ -367,6 +367,7 @@ fn schema_from_source_path(source_path: &str) -> Result<FileOpFileSchema, String
         kind: kind.to_string(),
         source_path: Some(source_path.replace('\\', "/")),
         dest_name: None,
+        location: None,
     })
 }
 
@@ -1138,16 +1139,20 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
         (job_id, preserve, auto_resume, mode, custom)
     };
 
-    let file_schemas: Vec<FileOpFileSchema> = files
-        .iter()
-        .map(|file| FileOpFileSchema {
-            name: file.name.clone(),
-            size: file.size,
-            kind: file.kind.clone(),
-            source_path: Some(file.source_path.clone()),
-            dest_name: file.dest_name.clone(),
-        })
-        .collect();
+    let file_schemas: Vec<FileOpFileSchema> = {
+        let state = ctx.state.lock().await;
+        files
+            .iter()
+            .map(|file| FileOpFileSchema {
+                name: file.name.clone(),
+                size: file.size,
+                kind: file.kind.clone(),
+                source_path: Some(file.source_path.clone()),
+                dest_name: file.dest_name.clone(),
+                location: super::job_file_location(&state, &src_driver, &file.source_path),
+            })
+            .collect()
+    };
 
     // Keep transfer provenance with the resolved drivers, independently of
     // later panel navigation while a job waits in the queue.

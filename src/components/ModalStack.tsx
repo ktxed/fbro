@@ -66,6 +66,22 @@ function focusableElements(root: HTMLElement): HTMLElement[] {
   });
 }
 
+/** Shared Tab traversal for modal composites that provide their own exit. */
+export function advanceModalFocus(root: HTMLElement, reverse: boolean) {
+  const controls = focusableElements(root);
+  if (controls.length === 0) {
+    root.focus({ preventScroll: true });
+    return;
+  }
+  const active = document.activeElement as HTMLElement | null;
+  const index = active ? controls.indexOf(active) : -1;
+  const next = reverse
+    ? controls[(index <= 0 ? controls.length : index) - 1]
+    : controls[(index + 1) % controls.length];
+  next.focus({ preventScroll: true });
+  next.scrollIntoView({ block: "nearest", inline: "nearest" });
+}
+
 function focusLayer(entry: Pick<ModalEntry, "element" | "initialFocusRef">) {
   const root = entry.element;
   const preferred = entry.initialFocusRef?.current;
@@ -150,21 +166,9 @@ export function ModalStackProvider({ children }: { children: ReactNode }) {
       // A list may claim Tab as its own navigation key (see modal-stack.md §4).
       if (event.target instanceof Element && event.target.closest("[data-modal-owns-tab]")) return;
 
-      const controls = focusableElements(top.element);
       event.preventDefault();
       event.stopImmediatePropagation();
-      if (controls.length === 0) {
-        top.element.focus({ preventScroll: true });
-        return;
-      }
-
-      const active = document.activeElement as HTMLElement | null;
-      const index = active ? controls.indexOf(active) : -1;
-      const next = event.shiftKey
-        ? controls[(index <= 0 ? controls.length : index) - 1]
-        : controls[(index + 1) % controls.length];
-      next.focus({ preventScroll: true });
-      next.scrollIntoView({ block: "nearest", inline: "nearest" });
+      advanceModalFocus(top.element, event.shiftKey);
     };
 
     const onFocusIn = (event: FocusEvent) => {

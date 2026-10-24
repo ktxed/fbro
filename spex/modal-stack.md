@@ -139,6 +139,14 @@ is mounted:
   excluded from the cycle. Tab leaves after the active row's last action;
   Shift+Tab reverses the order without entering another row. The existing
   Space shortcut retains keyboard access to history pagination.
+  Jobs file lists also claim Tab: it visits the active row's enabled Copy and
+  Jump buttons before leaving for the next job header or Close. Shift+Tab
+  reverses the row/action order, then reaches the preceding job or tablist.
+  Job header buttons keep the shared modal Tab cycle, via `advanceModalFocus`.
+  Enter/Right expands a job into its first file; Left leaves/collapses it.
+  Escape from a file collapses to its job header before closing Jobs. Copy
+  returns to the active file without overriding deliberate outside focus;
+  Jump closes Jobs through the stack's normal opener handoff.
 - Focus attempting to leave the top layer is redirected into it.
 - A key event whose target is outside the top layer is stopped and redispatched
   from the top layer. This covers browser timing cases where a focused button
