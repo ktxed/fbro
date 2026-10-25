@@ -76,6 +76,8 @@ impl Platform for MacOSPlatform {
         notifications::supported()
     }
 
+    fn os_notification_platform(&self) -> &'static str { "macos" }
+
     fn supports_os_notification_settings(&self) -> bool {
         // The system settings pane belongs to the installed app and can also
         // be opened from a bare development executable without native delivery.

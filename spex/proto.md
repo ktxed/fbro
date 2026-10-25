@@ -8,14 +8,19 @@
 ## 1. Overview
 
 Settings snapshots expose read-only `general.supportsOsNotificationSettings`,
-false by default and true on macOS, including development executables. It gates the macOS
-permission notice and the **Open notification settings** action.
+false by default and true on macOS and Windows, including development executables.
+It gates the host notification notice and the **Open notification settings** action.
+Snapshots also expose read-only `general.osNotificationPlatform`
+(`linux`, `macos`, `windows`, or `none`), which selects that notice. The field is
+not part of settings patches; clients preserve it across merges. It is not
+persisted or writable.
 The section is visible when either notification capability is true. If native
-delivery is unavailable but the system pane is available, the delivery checkbox
+delivery is unavailable but the system page is available, the delivery checkbox
 is disabled and development guidance is displayed. The two capabilities remain
 independent; a settings link never implies native delivery support.
-`OpenOsNotificationSettings { requestId }` opens the backend host's fbro-specific
-OS notification pane through PAL on a blocking worker. It replies with
+`OpenOsNotificationSettings { requestId }` opens the backend host's notification
+settings through PAL on a blocking worker. macOS opens fbro's notification pane.
+Windows opens the system Notifications page. It replies with
 `OpenOsNotificationSettingsOk { timestamp, requestId }` or
 `OpenOsNotificationSettingsFailed { timestamp, requestId, code, message }`, using
 `OPEN_OS_NOTIFICATION_SETTINGS_FAILED` for invalid/missing request IDs, unsupported
@@ -1004,6 +1009,7 @@ desktop displayed a notification. Frontends render these records without invokin
 native delivery or replaying it from snapshots. Native eligibility, focus,
 expiry, and operation correlation remain backend-only policy. Settings snapshots
 include `general.osNotificationsEnabled` and read-only
-`general.supportsOsNotifications`; the preference is changed through
+`general.supportsOsNotifications`, `general.supportsOsNotificationSettings`, and
+`general.osNotificationPlatform`; the preference is changed through
 `SetGeneralOption { key: "osNotificationsEnabled", value: boolean }`.
 See [notifications.md](./notifications.md).

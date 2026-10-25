@@ -148,6 +148,7 @@ pub(crate) fn build_state_snapshot(
                     os_notifications_enabled: state.settings.general.os_notifications_enabled,
                     supports_os_notifications: state.platform.supports_os_notifications(),
                     supports_os_notification_settings: state.platform.supports_os_notification_settings(),
+                    os_notification_platform: state.platform.os_notification_platform().to_string(),
                     remember_window_state: state.settings.general.remember_window_state,
                     preserve_attributes: state.settings.general.preserve_attributes,
                     auto_resume_copies: state.settings.general.auto_resume_copies,

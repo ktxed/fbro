@@ -104,10 +104,14 @@ prompts asynchronously. `os_notifications_authorized() -> Result<bool, String>`
 defaults to `Ok(true)`; the delivery worker calls it outside locks and rechecks
 activity, preference generation, and expiry afterward before native submission.
 
+`os_notification_platform() -> &'static str` defaults to `"none"` and is one of
+`linux`, `macos`, `windows`, or `none`. It is projected read-only as
+`general.osNotificationPlatform` so help copy follows the host. It is not persisted.
+
 `supports_os_notification_settings() -> bool` defaults to false and gates the
-settings notice/action through a backend capability. macOS opts in for both
-packaged and bare development executables: opening the installed fbro app's
-settings is independent of the calling process's native delivery identity.
+settings notice/action through a backend capability. macOS and Windows opt in for
+both packaged and bare development executables: opening the system notification
+page is independent of the calling process's native delivery identity.
 `open_os_notification_settings() -> Result<(), String>` defaults to an
 unsupported error and runs on a blocking worker after an explicit user action,
 outside shared locks. macOS invokes `/usr/bin/open` with a fixed app-specific
@@ -115,6 +119,9 @@ notification-pane URL (`?id=dev.fbro.app`), using the System Settings extension
 identifier on macOS 13+ and the legacy System Preferences pane on older releases.
 The URI pattern follows [Chromium's `OpenSystemSettingsPane(kNotifications)`](https://chromium.googlesource.com/chromium/src/+/HEAD/base/mac/mac_util.mm);
 there is no shell interpolation, arbitrary URL argument, or permission change.
+Windows opens the fixed URI `ms-settings:notifications` with `ShellExecuteW`.
+Unpackaged apps have no stable per-app settings URI, so the page is the system
+Notifications list. The call does not change a Windows toggle or the app preference.
 
 Linux is the first supported adapter. It uses `notify-rust` with the session
 freedesktop service, application name and desktop-entry identity `fbro`, the
@@ -153,9 +160,25 @@ worker. Completion blocks convert borrowed native errors to owned Rust text;
 late callbacks are safe after timeout. The bundle supplies name/icon. No sound,
 badge, custom action, focus change, or Do Not Disturb override is requested.
 
-Windows retains the unsupported defaults. Packaged-application validation and
-the remaining platform rollout are tracked in
-[the notification roadmap](plans/os-notifications.md).
+Windows uses `notify-rust` 4.18, whose Windows backend posts a WinRT toast
+through `tauri-winrt-notification`. Capability requires the running executable
+to sit outside Cargo's `target/debug` and `target/release` trees and a Start
+Menu shortcut (`fbro\fbro.lnk` or `fbro.lnk`, per-user or per-machine) whose
+`System.AppUserModel.ID` is `dev.fbro.app` and whose target is that executable.
+Tauri's NSIS and WiX installers already stamp that id from `identifier`. The
+adapter does not create a shortcut and does not call
+`SetCurrentProcessExplicitAppUserModelID`. A missing shortcut, a build-tree
+executable, or any other app id — including notify-rust's PowerShell fallback —
+is unsupported and does not call WinRT. Name and icon come from the shortcut;
+`appname` and `icon` are ignored on this backend. The body is plain text.
+Submission is synchronous, bounded by three seconds, silent, normal urgency,
+and the short toast duration. No actions are added. Authorization reads
+`HKCU\Software\Microsoft\Windows\CurrentVersion\Notifications\Settings\dev.fbro.app`
+`Enabled` and `HKCU\Software\Microsoft\Windows\CurrentVersion\PushNotifications`
+`ToastEnabled` on the worker. A missing value for either toggle allows
+delivery. An explicit `0` discards that delivery. Any other numeric value, or a
+value of the wrong type, is logged and not retried. `prepare_os_notifications()` stays a no-op because Windows
+does not prompt. Focus assist is left to the system.
 
 ---
 
@@ -222,6 +245,9 @@ Home from `USERPROFILE`. `SHGetKnownFolderPath` for canonical folders,
 and the "Open with" list, `ShellExecuteEx` for launches, `OleSetClipboard` for
 file clipboard payloads in `CF_HDROP` format, `SetClipboardData(CF_UNICODETEXT)`
 for `write_text_clipboard` (Copy Paths bro).
+
+Background OS notifications use the WinRT toast adapter in
+`platform/windows/notifications.rs`. See §2.5.
 
 Release builds set `windows_subsystem = "windows"` (`src-tauri/src/main.rs`),
 so the process has no console. A console-subsystem child such as `git.exe`

@@ -45,11 +45,15 @@ async function verifyOsNotificationSettings(browser, observer) {
   try {
     const supported = observer.state.settings.general.supportsOsNotifications;
     const settingsAvailable = observer.state.settings.general.supportsOsNotificationSettings;
+    const platform = observer.state.settings.general.osNotificationPlatform;
+    const noticeSelector = platform === "windows"
+      ? '[data-testid="windows-notifications-notice"]'
+      : '[data-testid="macos-notifications-notice"]';
     if (await browser.$(selector).isExisting() !== (supported || settingsAvailable)) {
       throw new Error("OS notification setting visibility does not match backend capability");
     }
     if (await browser.$('[data-testid="open-os-notification-settings"]').isExisting() !== settingsAvailable) {
-      throw new Error("macOS notification guidance/action visibility does not match backend capability");
+      throw new Error("OS notification guidance/action visibility does not match backend capability");
     }
     if (supported || settingsAvailable) {
       const help = '[data-testid="notification-help"]';
@@ -57,7 +61,7 @@ async function verifyOsNotificationSettings(browser, observer) {
       if (await browser.$(tooltip).isDisplayed()) throw new Error("Notification help should not occupy space initially");
       await browser.execute((selector) => document.querySelector(selector)?.focus(), help);
       await browser.$(tooltip).waitForDisplayed();
-      if (await browser.$('[data-testid="macos-notifications-notice"]').isExisting() !== settingsAvailable) {
+      if (await browser.$(noticeSelector).isExisting() !== settingsAvailable) {
         throw new Error("Notification help does not match the backend platform capability");
       }
       if (settingsAvailable && !supported) {

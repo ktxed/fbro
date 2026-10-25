@@ -64,9 +64,9 @@ preserves history and must not generate another notification recursively.
 
 The backend owns native delivery and activity policy. Linux uses `notify-rust`
 and the session's freedesktop notification service; macOS uses Notification
-Center's `UNUserNotificationCenter` through `objc2-user-notifications`. Both live
-behind the Platform Abstraction Layer and share the event, settings, queue, and
-activity policy below. Windows remains unsupported.
+Center's `UNUserNotificationCenter` through `objc2-user-notifications`; Windows
+uses `notify-rust`'s WinRT toast backend. All three live behind the Platform
+Abstraction Layer and share the event, settings, queue, and activity policy below.
 
 `general.osNotificationsEnabled` defaults to true and persists through backend
 settings. The read-only `general.supportsOsNotifications` capability controls
@@ -104,6 +104,20 @@ Each background delivery reads actual system authorization. Undetermined,
 denied, unknown, and failed/timed-out lookups discard that delivery. Authorized
 and provisional status allow submission, subject to macOS presentation settings.
 Returning to the app or granting permission does not replay suppressed alerts.
+
+On Windows, delivery requires the installed application whose Start Menu shortcut
+carries AppUserModelID `dev.fbro.app` and points at the running executable.
+`tauri dev`, `cargo test`, and other executables under `target/debug` or
+`target/release` are unsupported and never call WinRT. There is no PowerShell
+identity fallback. Windows does not show a permission prompt. Each delivery
+reads the per-app `Enabled` value and the global `ToastEnabled` value. A missing
+value allows delivery. An explicit `0` discards that delivery. Any other numeric
+value, or a value of the wrong type, is an error: the worker logs it and does
+not retry. Turning notifications back on applies to the next eligible event.
+Focus assist and Do Not Disturb stay under Windows. Development runs still show
+the section, with the delivery checkbox disabled, and can open the system
+Notifications page. The tooltip says delivery requires the installed fbro
+application.
 
 OS delivery requires no focused native fbro window, including detached viewers
 and diffs. Native focus/destruction events maintain this state; startup uncertainty
@@ -161,6 +175,16 @@ macOS submissions use unique request identifiers, plain body text, and immediate
 delivery with no sound, badge, category actions, or foreground presentation
 override. Notification Center owns its display lifetime; no native handles are
 retained and failed submissions are not retried.
+Windows submissions use AppUserModelID `dev.fbro.app`, title `fbro`, and the
+message as plain body text. `notify-rust` escapes the toast XML. Urgency is
+normal, the timeout is the short toast duration, and no sound or action is set.
+The returned handle is dropped immediately so the worker does not wait for a
+click or dismissal. Action Center owns the display lifetime; no native handles
+are retained. `notify-rust` 4.18 also emits an empty subtitle element. Installed
+package acceptance checks whether that draws a blank line. A click may focus
+the installed app because Windows activates the registered shortcut; this phase
+adds no button, protocol argument, or COM activator. A submission that exceeds
+three seconds is reported as a timeout and is not retried.
 
 Native delivery is available only while the desktop application is running.
 After-exit delivery, push services, per-event preferences, and notification actions

@@ -297,8 +297,61 @@ In addition to steps 1–5 above, validate:
    is requested. System settings may retain entries without displaying banners.
 
 Real macOS permission UI and desktop presentation remain manual acceptance
-checks; unit payloads and Linux fixtures do not verify them. Windows has no
-adapter yet; installed-app identity and Windows 10/11 presentation remain pending.
+checks; unit payloads and Linux fixtures do not verify them.
+
+Windows adapter coverage runs on a native Windows host with
+`cargo test --manifest-path src-tauri/Cargo.toml --locked windows_notifications`.
+It verifies installed identity: a matching Start Menu target and `dev.fbro.app`
+pass, while `target/debug`, `target/release`, a dependency test executable, a
+different link target, a mismatched id, and the PowerShell AppUserModelID fail.
+It also checks that `tauri.conf.json` `identifier` equals the adapter constant,
+that payloads stay plain, silent, short, and actionless, that the authorization
+predicate allows a missing value or `1`, denies an explicit `0`, and errors on
+any other number, that the settings URI is exactly `ms-settings:notifications`,
+and that shortcut candidates use Tauri's per-user and per-machine Start Menu
+layouts (`fbro\fbro.lnk` and `fbro.lnk`). The development capability test
+requires the test executable to stay inside Cargo's build tree:
+`supports_os_notifications` is false and `supports_os_notification_settings`
+stays true, so the test never initializes WinRT. None of these tests post a toast.
+
+`tauri dev` and other build-tree binaries deliberately expose no native OS
+delivery. They still expose the Windows notification settings link. In a
+development run, verify that the Notifications section remains visible, the
+delivery checkbox is disabled, and the info tooltip says the installed fbro
+application is required. Tab reaches **Open notification settings**; Enter or
+Space opens Settings → System → Notifications and does not change a Windows
+toggle or the fbro preference.
+
+Build and install an NSIS or MSI package (`npm run tauri -- build`) before
+toast acceptance. The installer stamps `dev.fbro.app` on the Start Menu
+shortcut; the adapter does not register one itself. In addition to steps 1–5
+above, validate on Windows 10 and Windows 11:
+
+1. Confirm the Start Menu shortcut (`fbro\fbro.lnk` or `fbro.lnk`, per-user or
+   per-machine) has `System.AppUserModel.ID` `dev.fbro.app` and targets the
+   installed executable. The toast name and icon come from that shortcut.
+2. Background the installed app and finish an eligible job. Confirm one silent
+   short toast and its retained history entry. A click may focus the app.
+   There is no button, protocol argument, or extra action.
+3. In General → Notifications, Tab to **About OS notifications** and verify
+   the tooltip includes the Windows banner notice. For an unpackaged
+   executable it also includes the installed-application limitation. Escape
+   dismisses only the tooltip and keeps focus on the info button. Tab to
+   **Open notification settings**, then Enter or Space. Windows Settings
+   should open the Notifications page without changing a system toggle or the
+   fbro preference. Repeat in both color schemes.
+4. Turn fbro's banner off and on under Settings → System → Notifications →
+   fbro, and turn the global toast toggle off and on, while the app runs.
+   Only newly eligible events deliver. A missing per-app value allows
+   delivery. An explicit disable discards that event and leaves history intact.
+5. Check Focus assist. It may hide banners. fbro does not override it. If the
+   toast shows a blank line under the title, record it: `notify-rust` 4.18
+   emits an empty subtitle element, and switching the submission path is
+   deferred until that is visible on an installed package.
+
+Real Windows toast presentation, the shortcut icon, Focus assist, and installed
+MSI/NSIS behavior remain manual acceptance checks. They have not been run for
+this adapter. Unit tests do not post a toast.
 
 On the development macOS host, packaged startup/signature and real saved-denial
 handling have been verified. Info-tooltip focus opening and Escape dismissal

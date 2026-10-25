@@ -9,7 +9,29 @@ use std::process::Command;
 use std::ptr;
 use std::slice;
 
+mod notifications;
+
 pub struct WindowsPlatform;
+
+fn launch_with_shell(target: &str) -> Result<(), String> {
+    let operation = to_wide("open");
+    let target = to_wide(target);
+    let result = unsafe {
+        ShellExecuteW(
+            ptr::null_mut(),
+            operation.as_ptr(),
+            target.as_ptr(),
+            ptr::null(),
+            ptr::null(),
+            1,
+        )
+    };
+    if result > 32 {
+        Ok(())
+    } else {
+        Err(format!("Could not open the link (system error {result})."))
+    }
+}
 
 // ── WinAPI declarations ──────────────────────────────────────────────────────
 
@@ -80,6 +102,26 @@ fn to_wide(s: &str) -> Vec<u16> {
 }
 
 impl Platform for WindowsPlatform {
+    fn os_notification_platform(&self) -> &'static str { "windows" }
+
+    fn supports_os_notifications(&self) -> bool {
+        notifications::supported()
+    }
+
+    fn supports_os_notification_settings(&self) -> bool { true }
+
+    fn open_os_notification_settings(&self) -> Result<(), String> {
+        notifications::open_settings()
+    }
+
+    fn os_notifications_authorized(&self) -> Result<bool, String> {
+        notifications::authorized()
+    }
+
+    fn send_os_notification(&self, message: &str) -> Result<(), String> {
+        notifications::send(message)
+    }
+
     fn home_dir(&self) -> String {
         std::env::var("USERPROFILE")
             .or_else(|_| {
@@ -109,23 +151,7 @@ impl Platform for WindowsPlatform {
     }
 
     fn open_url(&self, url: &str) -> Result<(), String> {
-        let operation = to_wide("open");
-        let url = to_wide(url);
-        let result = unsafe {
-            ShellExecuteW(
-                ptr::null_mut(),
-                operation.as_ptr(),
-                url.as_ptr(),
-                ptr::null(),
-                ptr::null(),
-                1,
-            )
-        };
-        if result > 32 {
-            Ok(())
-        } else {
-            Err(format!("Could not open the link (system error {result})."))
-        }
+        launch_with_shell(url)
     }
 
     fn open_terminal(&self, path: &str) {

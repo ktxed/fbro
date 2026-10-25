@@ -750,6 +750,8 @@ export interface GeneralSettings {
   /** Read-only backend capability; native delivery is introduced per platform. */
   supportsOsNotifications: boolean;
   supportsOsNotificationSettings: boolean;
+  /** Read-only host for notification help copy. */
+  osNotificationPlatform: "linux" | "macos" | "windows" | "none";
   rememberWindowState: boolean;
   preserveAttributes: boolean;
   autoResumeCopies: boolean;

@@ -200,17 +200,27 @@ export function SettingsGeneralTab({ general, client }: SettingsGeneralTabProps)
             clickable delayShow={0} delayHide={100}
             isOpen={notificationHelpOpen} setIsOpen={setNotificationHelpOpen}
             globalCloseEvents={{ clickOutsideAnchor: true }}>
-            {!general.supportsOsNotifications && (
+            {!general.supportsOsNotifications && general.osNotificationPlatform === "macos" && (
               <p data-testid="os-notifications-unavailable">
                 Native notifications are unavailable in this development build. Use the signed fbro.app to receive them. The system settings below apply to that app.
+              </p>
+            )}
+            {!general.supportsOsNotifications && general.osNotificationPlatform === "windows" && (
+              <p data-testid="os-notifications-unavailable">
+                Native notifications are unavailable in this development build. Use the installed fbro application to receive them. The system settings below apply to that app.
               </p>
             )}
             <p>
               Notify while no fbro window is active. Completion and cancellation alerts require operations lasting at least 30 seconds. Failures, transfer starts, pairing requests, and connection changes notify immediately.
             </p>
-            {general.supportsOsNotificationSettings && (
+            {general.supportsOsNotificationSettings && general.osNotificationPlatform === "macos" && (
               <p data-testid="macos-notifications-notice">
                 macOS also controls notification permission. Enable Allow notifications in System Settings → Notifications → fbro. If permission was denied, macOS won’t ask again.
+              </p>
+            )}
+            {general.supportsOsNotificationSettings && general.osNotificationPlatform === "windows" && (
+              <p data-testid="windows-notifications-notice">
+                Windows controls notification banners in Settings → System → Notifications → fbro. Windows does not ask for permission. Focus assist can hide banners.
               </p>
             )}
           </Tooltip>

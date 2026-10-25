@@ -46,13 +46,18 @@ authorization lookup. Before release, complete the packaged macOS acceptance
 checklist in [TESTING.md](../../TESTING.md#native-os-notification-validation),
 including real permission grant/denial, icon, all-window focus, and Do Not Disturb.
 
-## Phase 3 — Windows
+## Phase 3 — Windows (implemented; installed-package acceptance pending)
 
-Implement the PAL adapter using `notify-rust`'s Windows backend with fbro's
-installed application identity. Validate name/icon, installed MSI/NSIS package
-behavior, system notification settings, and Windows 10/11 delivery. Development
-executables do not replace installed-package checks. Retain the same shared
-event, duration, focus, and settings contract.
+The PAL adapter uses `notify-rust`'s WinRT backend with AppUserModelID
+`dev.fbro.app`, the same id Tauri's NSIS and WiX installers stamp on the Start
+Menu shortcut. Build-tree executables stay unsupported and never call WinRT.
+There is no PowerShell identity fallback. Windows has no permission prompt;
+each delivery reads the per-app and global toast toggles. The settings action
+opens `ms-settings:notifications`. Payloads are silent, short, plain text, and
+actionless. Development executables do not replace installed-package checks.
+Before release, complete the Windows 10/11 checklist in
+[TESTING.md](../../TESTING.md#native-os-notification-validation), including
+installed name and icon, system notification settings, and Focus assist.
 
 ## Deferred capabilities
 
