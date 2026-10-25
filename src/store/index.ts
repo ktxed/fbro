@@ -440,7 +440,7 @@ const initialState: AppState = {
   globalSelections: [],
   fontSize: 13,
   settings: {
-    general: { showHiddenDefault: false, showButtonBar: true, osNotificationsEnabled: true, supportsOsNotifications: false, rememberWindowState: true, preserveAttributes: true, autoResumeCopies: true, ludicrousMode: false, enableHeic2any: false, maxImageSizeMb: 512, savePanelViewMode: false, rememberSortPerLocation: false, locationSettingsCount: 0, iconCacheDir: "", iconCacheRevision: 0, supportsManagedThumbnails: false, enableVideoThumbnails: true, thumbnailMaxImageSizeMb: 100, thumbnailVideoFrameSkip: 5, streamThumbnails: true, sessionPath: "", bookmarksPath: "", thumbnailCacheDir: "", thumbnailCacheItemCount: 0, thumbnailCacheSizeBytes: 0, persistPanelTabs: true, procTreeMode: false, colorScheme: "fbro-dark", sevenzipExtractor: "auto", sevenzipCustomPath: "", sevenzipResolvedPath: "", fedupDefaultIgnorePatterns: ".git\n.idea\n.vscode\n.venv\nnode_modules\n__MACOSX\n._*\n.DS_Store\nartifacts/e2e\ndist/assets\ntarget/debug\ntarget/release\ntarget/bundle\n.m2", compareMaxFileSizeMb: 10, compareDifferMode: "internal", compareExternalCommand: "", quickTerminalEditor: "nano", zshEmacsKeymap: false },
+    general: { showHiddenDefault: false, showButtonBar: true, osNotificationsEnabled: true, supportsOsNotifications: false, supportsOsNotificationSettings: false, rememberWindowState: true, preserveAttributes: true, autoResumeCopies: true, ludicrousMode: false, enableHeic2any: false, maxImageSizeMb: 512, savePanelViewMode: false, rememberSortPerLocation: false, locationSettingsCount: 0, iconCacheDir: "", iconCacheRevision: 0, supportsManagedThumbnails: false, enableVideoThumbnails: true, thumbnailMaxImageSizeMb: 100, thumbnailVideoFrameSkip: 5, streamThumbnails: true, sessionPath: "", bookmarksPath: "", thumbnailCacheDir: "", thumbnailCacheItemCount: 0, thumbnailCacheSizeBytes: 0, persistPanelTabs: true, procTreeMode: false, colorScheme: "fbro-dark", sevenzipExtractor: "auto", sevenzipCustomPath: "", sevenzipResolvedPath: "", fedupDefaultIgnorePatterns: ".git\n.idea\n.vscode\n.venv\nnode_modules\n__MACOSX\n._*\n.DS_Store\nartifacts/e2e\ndist/assets\ntarget/debug\ntarget/release\ntarget/bundle\n.m2", compareMaxFileSizeMb: 10, compareDifferMode: "internal", compareExternalCommand: "", quickTerminalEditor: "nano", zshEmacsKeymap: false },
     modalSizes: {},
   },
 };
@@ -1704,6 +1704,8 @@ function reducer(state: AppState, action: AppAction): AppState {
           return applyQuitConfirmRequired(state, msg);
         case "ClearIconCacheOk":
         case "ClearIconCacheFailed":
+        case "OpenOsNotificationSettingsOk":
+        case "OpenOsNotificationSettingsFailed":
           return state; // Settings consumes the correlated operation reply.
         case "CacheStatusReady":
           return { ...state, cacheStatus: { prefetchCache: (msg as CacheStatusReadyMessage).prefetchCache } };

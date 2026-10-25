@@ -119,6 +119,6 @@ jobs:
 
             - Linux: AppImage, deb, and rpm.
             - Windows: NSIS installer and MSI. These builds are unsigned, so SmartScreen may warn until you choose More info, then Run anyway.
-            - macOS: Apple silicon disk image. This build is unsigned and not notarized. The first time, right-click the app and choose Open. Intel Macs are not in this release.
+            - macOS: Apple silicon disk image. The app bundle is ad hoc signed and not notarized. The first time, right-click the app and choose Open. Intel Macs are not in this release.
 
             There is no in-app updater yet.

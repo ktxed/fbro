@@ -30,6 +30,11 @@ impl Default for DesktopActivity {
 }
 
 impl DesktopActivity {
+    pub(super) fn authorization_eligible(&self) -> bool {
+        let state = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        state.enabled && state.windows.values().any(|focused| *focused == Some(true))
+    }
+
     pub fn set_enabled(&self, enabled: bool) {
         let mut state = self.0.lock().unwrap_or_else(|e| e.into_inner());
         if state.enabled != enabled {
@@ -108,6 +113,22 @@ impl OsNotificationSink {
                     let delay = pending.not_before.saturating_duration_since(Instant::now());
                     if !delay.is_zero() {
                         std::thread::sleep(delay);
+                    }
+                    // Permission lookup can involve native IPC. Skip stale work
+                    // first, then recheck again after IPC before submitting it.
+                    if expired(pending.expires_at)
+                        || worker_activity.eligibility(Instant::now())
+                            != Some((Duration::ZERO, pending.generation))
+                    {
+                        continue;
+                    }
+                    match platform.os_notifications_authorized() {
+                        Ok(true) => {}
+                        Ok(false) => continue,
+                        Err(error) => {
+                            eprintln!("[notifications] OS authorization lookup failed: {error}");
+                            continue;
+                        }
                     }
                     if expired(pending.expires_at)
                         || worker_activity.eligibility(Instant::now())
@@ -196,6 +217,137 @@ mod tests {
         activity.set_enabled(false);
         activity.observe_at("diff", Some(false), now);
         assert_eq!(delay(&activity, now + FOCUS_HANDOFF), None);
+    }
+
+    struct PermissionPlatform {
+        checked: mpsc::Sender<()>,
+        result: Mutex<mpsc::Receiver<Result<bool, String>>>,
+        sent: mpsc::Sender<String>,
+    }
+
+    impl Platform for PermissionPlatform {
+        fn home_dir(&self) -> String {
+            "/".into()
+        }
+        fn open_in_editor(&self, _: &str) -> Result<String, String> {
+            Err("unused".into())
+        }
+        fn os_notifications_authorized(&self) -> Result<bool, String> {
+            self.checked.send(()).unwrap();
+            self.result.lock().unwrap().recv().unwrap()
+        }
+        fn send_os_notification(&self, message: &str) -> Result<(), String> {
+            self.sent.send(message.to_string()).unwrap();
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn desktop_notifications_authorization_denial_and_errors_discard_without_replay() {
+        let (checked_tx, checked_rx) = mpsc::channel();
+        let (result_tx, result_rx) = mpsc::channel();
+        let (sent_tx, sent_rx) = mpsc::channel();
+        let activity = Arc::new(DesktopActivity::default());
+        activity.observe_at("main", Some(false), Instant::now() - FOCUS_HANDOFF);
+        let sink = OsNotificationSink::start(
+            Arc::new(PermissionPlatform {
+                checked: checked_tx,
+                result: Mutex::new(result_rx),
+                sent: sent_tx,
+            }),
+            activity,
+        );
+        for result in [Ok(false), Err("service unavailable".into())] {
+            sink.deliver(&notification("discarded")).unwrap();
+            checked_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+            result_tx.send(result).unwrap();
+        }
+        sink.deliver(&notification("fresh")).unwrap();
+        checked_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        result_tx.send(Ok(true)).unwrap();
+        assert_eq!(
+            sent_rx.recv_timeout(Duration::from_secs(2)).unwrap(),
+            "fresh"
+        );
+        assert!(sent_rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn desktop_notifications_recheck_focus_and_preference_after_authorization_ipc() {
+        for change_setting in [false, true] {
+            let (checked_tx, checked_rx) = mpsc::channel();
+            let (result_tx, result_rx) = mpsc::channel();
+            let (sent_tx, sent_rx) = mpsc::channel();
+            let activity = Arc::new(DesktopActivity::default());
+            activity.observe_at("main", Some(false), Instant::now() - FOCUS_HANDOFF);
+            let sink = OsNotificationSink::start(
+                Arc::new(PermissionPlatform {
+                    checked: checked_tx,
+                    result: Mutex::new(result_rx),
+                    sent: sent_tx,
+                }),
+                activity.clone(),
+            );
+            sink.deliver(&notification("stale")).unwrap();
+            checked_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+            if change_setting {
+                activity.set_enabled(false);
+                activity.set_enabled(true);
+            } else {
+                activity.observe_window("viewer", Some(true));
+                activity.observe_at("viewer", Some(false), Instant::now() - FOCUS_HANDOFF);
+            }
+            result_tx.send(Ok(true)).unwrap();
+            sink.deliver(&notification("fresh")).unwrap();
+            checked_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+            result_tx.send(Ok(true)).unwrap();
+            assert_eq!(
+                sent_rx.recv_timeout(Duration::from_secs(2)).unwrap(),
+                "fresh"
+            );
+            assert!(sent_rx.try_recv().is_err());
+        }
+    }
+
+    #[test]
+    fn desktop_notifications_permission_preparation_requires_enabled_foreground_window() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        struct PreparingPlatform(Arc<AtomicUsize>);
+        impl Platform for PreparingPlatform {
+            fn home_dir(&self) -> String {
+                "/".into()
+            }
+            fn open_in_editor(&self, _: &str) -> Result<String, String> {
+                Err("unused".into())
+            }
+            fn supports_os_notifications(&self) -> bool {
+                true
+            }
+            fn prepare_os_notifications(&self) {
+                self.0.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+        let count = Arc::new(AtomicUsize::new(0));
+        let service = super::super::NotificationService::with_desktop(Arc::new(PreparingPlatform(
+            count.clone(),
+        )));
+        let activity = service.desktop_activity();
+        service.prepare_os_notifications();
+        activity.observe_window("main", None);
+        service.prepare_os_notifications();
+        activity.observe_window("main", Some(false));
+        service.prepare_os_notifications();
+        assert_eq!(count.load(Ordering::SeqCst), 0);
+        service.set_os_enabled(false);
+        activity.observe_window("viewer", Some(true));
+        service.prepare_os_notifications();
+        assert_eq!(count.load(Ordering::SeqCst), 0);
+        service.set_os_enabled(true);
+        service.prepare_os_notifications();
+        assert_eq!(count.load(Ordering::SeqCst), 1);
+        activity.remove_window("viewer");
+        service.prepare_os_notifications();
+        assert_eq!(count.load(Ordering::SeqCst), 1);
     }
 
     struct FakePlatform(mpsc::Sender<String>);

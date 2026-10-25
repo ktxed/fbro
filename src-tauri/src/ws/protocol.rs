@@ -445,6 +445,18 @@ pub enum ServerMessage {
         #[serde(rename = "requestId")]
         request_id: String,
     },
+    OpenOsNotificationSettingsOk {
+        timestamp: u64,
+        #[serde(rename = "requestId")]
+        request_id: String,
+    },
+    OpenOsNotificationSettingsFailed {
+        timestamp: u64,
+        #[serde(rename = "requestId")]
+        request_id: String,
+        code: String,
+        message: String,
+    },
     ClearIconCacheFailed {
         timestamp: u64,
         #[serde(rename = "requestId")]
@@ -689,6 +701,7 @@ pub struct GeneralSettingsSchema {
     pub show_button_bar: bool,
     pub os_notifications_enabled: bool,
     pub supports_os_notifications: bool,
+    pub supports_os_notification_settings: bool,
     pub remember_window_state: bool,
     pub preserve_attributes: bool,
     pub auto_resume_copies: bool,

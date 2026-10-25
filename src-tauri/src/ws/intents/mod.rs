@@ -184,6 +184,7 @@ pub async fn dispatch(name: &str, scope: &Value, args: &Value, ctx: &mut IntentC
         "SetGeneralOption"
         | "SetModalSizePreference"
         | "ClearIconCache"
+        | "OpenOsNotificationSettings"
         | "ClearThumbnailCache"
         | "ResetLocationSortSettings" => {
             settings::handle(name, args, ctx).await

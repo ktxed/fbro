@@ -232,10 +232,85 @@ daemon, including an installed package/AppImage identity and icon:
    and history must remain correct; failed native delivery must not recursively
    create another notification.
 
-Phase 1 provides no macOS/Windows notification adapter. Native authorization,
-packaged `.app` identity, Windows installed-app identity, and Windows 10/11
-presentation require validation during their respective phases. No real native
-desktop validation is implied by Linux fixtures or the smoke suite.
+macOS adapter and policy coverage runs on a native macOS host with the same Rust
+`notifications` filter. It verifies packaged identity requirements, plain-text
+Unicode payloads, distinct immediate request IDs, informational content, actual
+authorization status classification, owned native error conversion, foreground
+and enabled permission preparation, and denial/error suppression. Worker tests
+hold authorization IPC open while focus or the preference changes and verify
+that only a subsequent fresh event reaches native submission.
+
+Build the macOS application with `npm run tauri -- build --debug --bundles app`.
+Use `src-tauri/target/debug/bundle/macos/fbro.app` for native acceptance; bare
+`tauri dev` and cargo test binaries deliberately expose no native OS delivery
+capability. They still expose the macOS notification settings link. In a bare
+development run verify the Notifications section remains visible, the delivery
+checkbox is disabled with a development-build explanation in the info tooltip, and Tab/Enter reaches
+and activates the installed app's system settings button. The
+`macos_notifications_development_keeps_settings_available_without_native_delivery`
+unit test verifies this capability separation on the bare test executable.
+`npm run test:notifications:macos` briefly launches that bundle with an isolated
+configuration, verifies the real backend's native capability and disabled
+preference, then closes its own process. Before launch it verifies the complete
+bundle signature, signing identifier `dev.fbro.app`, and bound Info.plist. A
+linker-only executable signature must fail this check. It leaves a temporary log and neither
+requests permission nor sends alerts. `FBRO_APP_BINARY` may select another
+packaged executable. This check needs a logged-in macOS desktop session.
+Run `npm run test:notifications:macos -- --request-permission` to additionally
+exercise real authorization with the test app foregrounded. This opt-in mode
+waits up to two minutes for Allow/Deny, fails on a native API error, and records
+the native completion. The test activates its exact PID through AppKit so an
+existing fbro instance cannot leave the test window in the background and skip
+the foreground permission hook. A native error accompanied by a saved denied
+authorization state is an ordinary denial, not a service failure.
+macOS remembers the answer for fbro; it will not prompt
+again after a decision. The test never answers or resets system permission.
+`npm run test:notifications:macos -- --open-settings` exercises the explicit
+backend action and correlated reply, opening the system notification pane for
+fbro. It does not change notification permission or the app's delivery preference.
+
+In addition to steps 1–5 above, validate:
+
+1. On first enabled foreground launch, macOS requests alert permission for
+   **fbro**. Grant permission and check System Settings → Notifications → fbro.
+   Verify bundle identifier `dev.fbro.app`, application name, and bundled icon.
+2. Deny permission on a fresh authorization state. History and toast/log feedback
+   continue, without native alerts, repeated prompts, or stale delivery after a
+   later grant in System Settings. Restart and confirm denial is respected.
+3. Start with the app preference disabled. No permission prompt should appear.
+   Enable it by keyboard while foregrounded; a first-time authorization request
+   should appear. Enabling from a background observer must defer the request
+   until a native window gains focus.
+   In General → Notifications, Tab to **About OS notifications** and verify the
+   tooltip includes the macOS permission notice (and development limitation for
+   a bare executable). Check hover and Enter/Space as well. Escape must dismiss
+   only the tooltip and retain info-button focus; Tab dismisses it while moving
+   to the next enabled control. The help must not occupy section space when closed.
+   From the delivery checkbox press Tab to **Open notification settings**, then
+   Enter or Space. System Settings should open Notifications → fbro without
+   changing either permission or the fbro preference. Return to fbro and verify
+   the settings modal and button focus are retained. Repeat in both color schemes;
+   rapid activation must send one request, and launch failure must appear inline.
+4. Turn macOS notifications off and on in System Settings while the app runs.
+   Only newly eligible events deliver. Check banners/Notification Center and
+   Focus/Do Not Disturb; no sound, badge, approval action, or foreground banner
+   is requested. System settings may retain entries without displaying banners.
+
+Real macOS permission UI and desktop presentation remain manual acceptance
+checks; unit payloads and Linux fixtures do not verify them. Windows has no
+adapter yet; installed-app identity and Windows 10/11 presentation remain pending.
+
+On the development macOS host, packaged startup/signature and real saved-denial
+handling have been verified. Info-tooltip focus opening and Escape dismissal
+(retaining the Settings modal and info-button focus) were verified in both
+themes. The native notification-settings notice, Tab/Enter
+activation, actual Notifications → fbro destination, focus return to the button,
+and Escape dismissal were verified in both fbro-dark and daylight using the
+native accessibility helper and an isolated app configuration.
+Grant/banner/Do Not Disturb acceptance remains
+pending. The denial regression test verifies that `UNErrorDomain:1` with actual
+denied status does not re-arm permission requests, while the same native error
+with undetermined status remains diagnosable and retryable.
 
 Append a filter to the Rust test command:
 

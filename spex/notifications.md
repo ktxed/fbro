@@ -62,15 +62,48 @@ preserves history and must not generate another notification recursively.
 
 ## Background OS delivery
 
-The backend owns native delivery and activity policy. Phase 1 supports Linux
-through `notify-rust` and the session's freedesktop notification service, behind
-the Platform Abstraction Layer. macOS and Windows adapters are unsupported until
-their respective phases; the common event and settings contract is portable.
+The backend owns native delivery and activity policy. Linux uses `notify-rust`
+and the session's freedesktop notification service; macOS uses Notification
+Center's `UNUserNotificationCenter` through `objc2-user-notifications`. Both live
+behind the Platform Abstraction Layer and share the event, settings, queue, and
+activity policy below. Windows remains unsupported.
 
 `general.osNotificationsEnabled` defaults to true and persists through backend
 settings. The read-only `general.supportsOsNotifications` capability controls
 visibility of the General settings checkbox. Disabling native delivery leaves
 history and requested toast/log delivery intact.
+
+On macOS, the capability requires the packaged `fbro.app` with bundle identifier
+`dev.fbro.app`; bare development/test executables are unsupported and never call
+Notification Center. The bundle is explicitly ad hoc signed by default
+(`bundle.macOS.signingIdentity: "-"`), binding its Info.plist and resources to
+`dev.fbro.app`. The linker's executable-only signature does not provide this
+notification identity and can make authorization fail without a prompt.
+App identity and icon come from that bundle. While enabled,
+the first focused native window (including startup and enabling the preference
+in the foreground) requests alert authorization asynchronously on the UI thread,
+at most once per process unless the request itself fails. No permission request
+originates from a background notification. Denial is logged and remains under
+System Settings → Notifications → fbro; the app preference cannot override it.
+macOS may return `UNErrorDomain:1` with a saved denial. The adapter reads actual
+notification settings after an authorization error: denied status is logged
+without retrying on later focus gains; other statuses retain the error and
+status in diagnostics and permit a later foreground retry. No permission state
+is reset or changed outside the system prompt and System Settings.
+Settings → General keeps an info tooltip beside the Notifications heading, explaining
+the system permission path and remembered denial. A backend-capability-gated
+**Open notification settings** button opens fbro's native notification pane via
+the PAL. It is usable through Tab/Enter/Space and shows opening errors inline.
+The help remains available regardless of the app preference or system
+authorization; it does not claim permission has been granted or denied.
+Bare macOS development runs retain this section and the system settings button.
+Their native delivery checkbox is disabled, and the tooltip explains that delivery
+requires the signed fbro.app. The settings action targets that installed app and
+does not attempt Notification Center initialization in the bare executable.
+Each background delivery reads actual system authorization. Undetermined,
+denied, unknown, and failed/timed-out lookups discard that delivery. Authorized
+and provisional status allow submission, subject to macOS presentation settings.
+Returning to the app or granting permission does not replay suppressed alerts.
 
 OS delivery requires no focused native fbro window, including detached viewers
 and diffs. Native focus/destruction events maintain this state; startup uncertainty
@@ -114,12 +147,20 @@ under notification history or shared-state locks. Linux notifications use fbro's
 identity/icon, escaped body text, normal urgency, and desktop-controlled expiry. Missing session
 services, delivery failures, or desktop suppression leave operation results and
 history intact. Native delivery errors are logged without recursive publication
-or stale retries. Native service calls time out after three seconds. The adapter
+or stale retries. Native service calls time out after three seconds (macOS
+authorization lookup and submission each have this bound; the asynchronous user
+permission prompt does not block a worker or the UI). Focus, preference
+generation, and expiry are rechecked after authorization lookup and before
+submission. The Linux adapter
 retains the newest 128 native handles, evicting older connections rather than
 depending on native closure signals to accept future notifications. Queue overflow
 logs a delivery error and leaves the canonical history entry intact.
 Native UI remains informational: no activation, navigation, or
 approval actions, and no forced focus or Do Not Disturb override.
+macOS submissions use unique request identifiers, plain body text, and immediate
+delivery with no sound, badge, category actions, or foreground presentation
+override. Notification Center owns its display lifetime; no native handles are
+retained and failed submissions are not retried.
 
 Native delivery is available only while the desktop application is running.
 After-exit delivery, push services, per-event preferences, and notification actions

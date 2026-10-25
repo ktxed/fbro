@@ -83,8 +83,15 @@ Assets land on the draft release, not as Actions artifacts:
   the H.264 parser, decoder, and WebVTT encoder.
 - Windows: NSIS installer and MSI. These builds are unsigned, so SmartScreen
   may warn until you choose More info, then Run anyway.
-- macOS: Apple silicon disk image. This build is unsigned and not notarized.
+- macOS: Apple silicon disk image. The app bundle is ad hoc signed and not notarized.
   The first time, right-click the app and choose Open.
+
+macOS uses `bundle.macOS.signingIdentity: "-"` to bind the complete app bundle
+and Info.plist to `dev.fbro.app`. This is required for native notification
+authorization; the compiler/linker's executable-only signature is insufficient.
+Ad hoc signing needs no Apple Developer account and does not establish a
+Developer ID or remove Gatekeeper warnings. An Apple signing identity can be
+provided for certificate-signed releases later.
 
 There is no Intel Mac build and no in-app updater. The workflow always creates
 a draft and does not mark the release as a prerelease, including for tags such

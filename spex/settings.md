@@ -50,11 +50,42 @@ or writable through `SetGeneralOption`. Thumbnail streaming remains configurable
 on all platforms. Settings patches merge with the snapshot and preserve this flag.
 
 `settings.general.supportsOsNotifications` is a read-only backend capability,
-currently true on Linux only. General settings shows **Show background OS
-notifications** only when this capability is true. The persistent
+true on Linux and in the packaged macOS `fbro.app` (false for bare macOS
+development/test executables and Windows). It describes adapter availability,
+independently of macOS user authorization. General settings shows **Show background OS
+notifications** enabled only when this capability is true. The section is also
+visible when `supportsOsNotificationSettings` is true (macOS development), with a
+disabled delivery checkbox and an explanation that native delivery requires the
+signed fbro.app. The persistent
 `general.osNotificationsEnabled` preference defaults to true; changing it updates
 the native delivery policy immediately and then projects the authoritative backend
 value. Unsupported platforms retain the preference without native delivery.
+On macOS, enabling while a native window is focused also prepares the system
+authorization prompt on the UI thread after releasing shared state. The callback
+rechecks focus and the preference before requesting permission. System denial
+does not change the persisted preference; permission is controlled separately by
+System Settings → Notifications → fbro. See [notifications.md](notifications.md).
+
+`general.supportsOsNotificationSettings` is a read-only PAL capability, true on
+macOS, including bare development executables, and false by default on other platforms. It is neither
+persisted nor writable. When true, General → Notifications offers help explaining that
+macOS permission must be enabled in **System Settings → Notifications → fbro**
+and that denial prevents another prompt. **Open notification settings** sends
+`OpenOsNotificationSettings { requestId }` to the backend. The button is reachable
+with Tab and native Enter/Space activation, retains its focus while opening,
+guards duplicate requests and displays “Opening…”, and shows correlated failures
+inline. Disconnect clears the pending request and reports an inline error.
+The checkbox remains fbro's independent delivery preference; the notice does not
+assert current system authorization. Opening the system pane never changes a
+permission or the app preference.
+The explanatory paragraphs live in an info tooltip beside the Notifications
+heading, leaving the controls visible in the compact section. Its labelled info
+button opens on hover, focus, or native activation. Escape dismisses the tooltip
+before Settings, retains button focus, and subsequent Tab/blur dismisses it.
+Opening the installed app's system pane does not initialize Notification Center
+in the development executable. Development guidance is included in the same
+tooltip. The preference is preserved across development
+and packaged runs; the disabled control never claims delivery is available in dev.
 
 ```json
 {

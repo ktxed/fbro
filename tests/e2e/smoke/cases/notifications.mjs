@@ -44,8 +44,34 @@ async function verifyOsNotificationSettings(browser, observer) {
   const selector = '[data-testid="os-notifications-enabled"]';
   try {
     const supported = observer.state.settings.general.supportsOsNotifications;
-    if (await browser.$(selector).isExisting() !== supported) {
+    const settingsAvailable = observer.state.settings.general.supportsOsNotificationSettings;
+    if (await browser.$(selector).isExisting() !== (supported || settingsAvailable)) {
       throw new Error("OS notification setting visibility does not match backend capability");
+    }
+    if (await browser.$('[data-testid="open-os-notification-settings"]').isExisting() !== settingsAvailable) {
+      throw new Error("macOS notification guidance/action visibility does not match backend capability");
+    }
+    if (supported || settingsAvailable) {
+      const help = '[data-testid="notification-help"]';
+      const tooltip = '#notification-help-tooltip';
+      if (await browser.$(tooltip).isDisplayed()) throw new Error("Notification help should not occupy space initially");
+      await browser.execute((selector) => document.querySelector(selector)?.focus(), help);
+      await browser.$(tooltip).waitForDisplayed();
+      if (await browser.$('[data-testid="macos-notifications-notice"]').isExisting() !== settingsAvailable) {
+        throw new Error("Notification help does not match the backend platform capability");
+      }
+      if (settingsAvailable && !supported) {
+        await browser.$('[data-testid="os-notifications-unavailable"]').waitForDisplayed();
+      }
+      await browser.keys("Escape");
+      await browser.$(tooltip).waitForDisplayed({ reverse: true });
+      await browser.$('[data-modal-id="settings"]').waitForDisplayed();
+      await expectFocused(browser, help, "Escape dismisses help without closing Settings or moving focus");
+    }
+    if (settingsAvailable && !supported) {
+      if (await browser.$(selector).isEnabled()) {
+        throw new Error("Unavailable native delivery must disable the preference control");
+      }
     }
     if (supported) {
       // Native Space activation owns the checkbox, and only backend patches update it.
@@ -59,6 +85,13 @@ async function verifyOsNotificationSettings(browser, observer) {
       await browser.keys(" ");
       await waitFor(() => observer.state.settings.general.osNotificationsEnabled === previous,
         { label: "keyboard restores OS notification preference" });
+      if (settingsAvailable) {
+        await browser.keys("Tab");
+        await expectFocused(browser, '[data-testid="open-os-notification-settings"]',
+          "Tab reaches macOS notification settings after the delivery preference");
+        await browser.keys(["Shift", "Tab"]);
+        await expectFocused(browser, selector, "Shift+Tab returns to the delivery preference");
+      }
     }
     const start = observer.messages.length;
     observer.sendIntent("SetGeneralOption", undefined, { key: "osNotificationsEnabled", value: "false" });

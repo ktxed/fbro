@@ -123,8 +123,24 @@ pub struct ShellCommandRemoveResult {
 
 /// Abstraction over platform-specific environment queries and services.
 pub trait Platform: Send + Sync {
-    /// Native background notification delivery capability. Linux is enabled first.
+    /// Native background notification delivery capability, independent of permission.
     fn supports_os_notifications(&self) -> bool { false }
+
+    /// Whether the host offers an application-specific notification settings pane.
+    fn supports_os_notification_settings(&self) -> bool { false }
+
+    /// Explicit user action, called on a blocking worker outside shared locks.
+    fn open_os_notification_settings(&self) -> Result<(), String> {
+        Err("OS notification settings are not available on this platform".into())
+    }
+
+    /// Called on the UI thread while enabled and a native fbro window is focused.
+    /// Must return immediately; permission prompts complete asynchronously.
+    fn prepare_os_notifications(&self) {}
+
+    /// Called on the notification worker before the final activity/expiry check.
+    /// Platforms with permissions must query actual system authorization here.
+    fn os_notifications_authorized(&self) -> Result<bool, String> { Ok(true) }
 
     /// Called only on the native notification worker, outside state locks.
     fn send_os_notification(&self, _message: &str) -> Result<(), String> {

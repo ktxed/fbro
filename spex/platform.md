@@ -97,6 +97,25 @@ policy or force incomplete adapters.
 Consumers use the backend notification service rather than calling this surface
 directly.
 
+`prepare_os_notifications()` defaults to a no-op. The service calls it on the UI
+thread only while enabled and a native fbro window is focused, at startup, focus
+gain, or preference enablement. It must return immediately and handle permission
+prompts asynchronously. `os_notifications_authorized() -> Result<bool, String>`
+defaults to `Ok(true)`; the delivery worker calls it outside locks and rechecks
+activity, preference generation, and expiry afterward before native submission.
+
+`supports_os_notification_settings() -> bool` defaults to false and gates the
+settings notice/action through a backend capability. macOS opts in for both
+packaged and bare development executables: opening the installed fbro app's
+settings is independent of the calling process's native delivery identity.
+`open_os_notification_settings() -> Result<(), String>` defaults to an
+unsupported error and runs on a blocking worker after an explicit user action,
+outside shared locks. macOS invokes `/usr/bin/open` with a fixed app-specific
+notification-pane URL (`?id=dev.fbro.app`), using the System Settings extension
+identifier on macOS 13+ and the legacy System Preferences pane on older releases.
+The URI pattern follows [Chromium's `OpenSystemSettingsPane(kNotifications)`](https://chromium.googlesource.com/chromium/src/+/HEAD/base/mac/mac_util.mm);
+there is no shell interpolation, arbitrary URL argument, or permission change.
+
 Linux is the first supported adapter. It uses `notify-rust` with the session
 freedesktop service, application name and desktop-entry identity `fbro`, the
 application icon, escaped body text, normal urgency, and desktop-controlled
@@ -113,8 +132,29 @@ prevents notifications between fbro windows. The worker rechecks activity,
 enablement, and notification expiry before submission; no frontend-derived focus
 intent or preference is needed. See [notifications.md](notifications.md).
 
-macOS and Windows retain unsupported defaults in phase 1. Their native adapters
-and packaged-application validation are tracked in
+macOS uses `objc2-user-notifications` with `UNUserNotificationCenter`, rather than
+the deprecated `NSUserNotification` backend. Capability requires an `.app` main
+bundle with identifier `dev.fbro.app`; bare binaries return unsupported without
+calling Notification Center, whose initialization can throw for missing identity.
+Packaging signs the complete app bundle with ad hoc identity `-` by default,
+binding Info.plist and resources to the app identifier. A linker-signed executable
+alone is insufficient for Notification Center authorization. Release builds may
+override this with an Apple signing identity; ad hoc signing is not notarization.
+Authorization requests ask only for alerts, once per process from a foreground
+UI hook; errors allow a later foreground retry and denial is logged with the
+System Settings path. An authorization error triggers an asynchronous settings
+read: a saved denied status is terminal for the process even if the native
+completion included an error (macOS can return `UNErrorDomain:1` for denial).
+Other states retain status/error diagnostics and allow a later foreground retry.
+Delivery queries actual authorization (authorized or
+provisional), then sends immediate requests with unique UUIDs, title `fbro`, and
+plain body text. Both lookup and submission wait at most three seconds on the
+worker. Completion blocks convert borrowed native errors to owned Rust text;
+late callbacks are safe after timeout. The bundle supplies name/icon. No sound,
+badge, custom action, focus change, or Do Not Disturb override is requested.
+
+Windows retains the unsupported defaults. Packaged-application validation and
+the remaining platform rollout are tracked in
 [the notification roadmap](plans/os-notifications.md).
 
 ---

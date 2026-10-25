@@ -364,3 +364,18 @@ Overwrite existing checkbox uses native Space activation, launch occurs once
 from its primary button, and the results modal initially focuses Close.
 Enter/Escape dismiss the view without cancelling; completion retains focus and
 Jobs remains the cancellation entry point.
+
+Settings → General → Notifications first exposes an **About OS notifications**
+info button. Focus, hover, or Enter/Space opens a tooltip containing the event,
+permission, and development-build guidance. Escape dismisses it without closing
+Settings or moving focus; Tab/blur dismisses it as focus moves to the next control.
+It never takes focus, adds a modal layer, or installs a global keyboard handler.
+
+The section exposes **Open notification settings** where
+the backend supports it (macOS). Tab reaches the button after the delivery
+checkbox; native Enter/Space activates it once. While opening, an aria-disabled
+guard blocks duplicate activation without removing the focused control. Opening
+System Settings retains the fbro modal and its focused button so returning to
+fbro resumes there; replies and inline errors do not move focus. In a bare macOS
+development run the delivery checkbox is disabled, so Tab reaches the settings
+button after the info control; explanatory text remains available through the tooltip.

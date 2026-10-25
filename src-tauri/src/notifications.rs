@@ -130,6 +130,7 @@ pub struct NotificationService {
     history: Mutex<NotificationHistory>,
     sinks: Vec<Arc<dyn NotificationSink>>,
     activity: Arc<desktop::DesktopActivity>,
+    desktop_platform: Option<Arc<dyn crate::platform::Platform>>,
 }
 impl Default for NotificationService {
     fn default() -> Self {
@@ -143,6 +144,7 @@ impl NotificationService {
             history: Mutex::new(NotificationHistory::default()),
             sinks,
             activity: Arc::new(desktop::DesktopActivity::default()),
+            desktop_platform: None,
         }
     }
     pub fn with_desktop(platform: Arc<dyn crate::platform::Platform>) -> Self {
@@ -152,9 +154,10 @@ impl NotificationService {
             service
                 .sinks
                 .push(Arc::new(desktop::OsNotificationSink::start(
-                    platform,
+                    platform.clone(),
                     activity.clone(),
                 )));
+            service.desktop_platform = Some(platform);
         }
         service.activity = activity;
         service
@@ -164,6 +167,14 @@ impl NotificationService {
     }
     pub fn set_os_enabled(&self, enabled: bool) {
         self.activity.set_enabled(enabled);
+    }
+    /// UI-thread lifecycle hook; never request permission from a background job.
+    pub fn prepare_os_notifications(&self) {
+        if self.activity.authorization_eligible() {
+            if let Some(platform) = &self.desktop_platform {
+                platform.prepare_os_notifications();
+            }
+        }
     }
     pub fn publish(&self, input: NotificationInput) -> Notification {
         self.publish_inner(None, input, None)
