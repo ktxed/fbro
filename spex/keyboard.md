@@ -372,10 +372,10 @@ Settings or moving focus; Tab/blur dismisses it as focus moves to the next contr
 It never takes focus, adds a modal layer, or installs a global keyboard handler.
 
 The section exposes **Open notification settings** where
-the backend supports it (macOS). Tab reaches the button after the delivery
+the backend supports it (macOS and Windows). Tab reaches the button after the delivery
 checkbox; native Enter/Space activates it once. While opening, an aria-disabled
 guard blocks duplicate activation without removing the focused control. Opening
-System Settings retains the fbro modal and its focused button so returning to
+system settings retains the fbro modal and its focused button so returning to
 fbro resumes there; replies and inline errors do not move focus. In a bare macOS
-development run the delivery checkbox is disabled, so Tab reaches the settings
+or Windows development run the delivery checkbox is disabled, so Tab reaches the settings
 button after the info control; explanatory text remains available through the tooltip.

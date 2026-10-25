@@ -58,6 +58,8 @@ fn decode_proc_mount_field(field: &str) -> String {
 impl Platform for LinuxPlatform {
     fn supports_os_notifications(&self) -> bool { true }
 
+    fn os_notification_platform(&self) -> &'static str { "linux" }
+
     fn send_os_notification(&self, message: &str) -> Result<(), String> {
         notifications::send(message)
     }

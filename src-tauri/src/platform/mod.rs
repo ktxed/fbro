@@ -126,6 +126,9 @@ pub trait Platform: Send + Sync {
     /// Native background notification delivery capability, independent of permission.
     fn supports_os_notifications(&self) -> bool { false }
 
+    /// Host that owns the notification help copy. One of `linux`, `macos`, `windows`, or `none`.
+    fn os_notification_platform(&self) -> &'static str { "none" }
+
     /// Whether the host offers an application-specific notification settings pane.
     fn supports_os_notification_settings(&self) -> bool { false }
 

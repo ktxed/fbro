@@ -1629,6 +1629,7 @@ dependencies = [
  "tokio-tungstenite",
  "toml 0.8.2",
  "uuid",
+ "windows 0.62.2",
  "zbus",
  "zip",
 ]

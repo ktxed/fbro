@@ -50,13 +50,21 @@ or writable through `SetGeneralOption`. Thumbnail streaming remains configurable
 on all platforms. Settings patches merge with the snapshot and preserve this flag.
 
 `settings.general.supportsOsNotifications` is a read-only backend capability,
-true on Linux and in the packaged macOS `fbro.app` (false for bare macOS
-development/test executables and Windows). It describes adapter availability,
-independently of macOS user authorization. General settings shows **Show background OS
+true on Linux, in the packaged macOS `fbro.app`, and in the installed Windows
+application whose Start Menu shortcut carries `dev.fbro.app`. It is false for
+bare macOS and Windows development/test executables. It describes adapter
+availability, independently of macOS user authorization and of the Windows
+notification toggles. General settings shows **Show background OS
 notifications** enabled only when this capability is true. The section is also
-visible when `supportsOsNotificationSettings` is true (macOS development), with a
-disabled delivery checkbox and an explanation that native delivery requires the
-signed fbro.app. The persistent
+visible when `supportsOsNotificationSettings` is true (macOS and Windows,
+including development builds), with a disabled delivery checkbox when native
+delivery is unavailable. The macOS explanation says delivery requires the signed
+fbro.app. The Windows explanation says delivery requires the installed fbro
+application. `general.osNotificationPlatform` is the read-only host
+(`linux`, `macos`, `windows`, or `none`) that selects this copy. It is projected
+on the settings snapshot, omitted from later settings patches, and preserved by
+the snapshot merge. It is not persisted or writable through `SetGeneralOption`.
+The persistent
 `general.osNotificationsEnabled` preference defaults to true; changing it updates
 the native delivery policy immediately and then projects the authoritative backend
 value. Unsupported platforms retain the preference without native delivery.
@@ -67,10 +75,13 @@ does not change the persisted preference; permission is controlled separately by
 System Settings → Notifications → fbro. See [notifications.md](notifications.md).
 
 `general.supportsOsNotificationSettings` is a read-only PAL capability, true on
-macOS, including bare development executables, and false by default on other platforms. It is neither
-persisted nor writable. When true, General → Notifications offers help explaining that
-macOS permission must be enabled in **System Settings → Notifications → fbro**
-and that denial prevents another prompt. **Open notification settings** sends
+macOS and Windows, including bare development executables, and false by default
+on other platforms. It is neither persisted nor writable. When true, General →
+Notifications offers host-specific help. On macOS it explains that permission
+must be enabled in **System Settings → Notifications → fbro** and that denial
+prevents another prompt. On Windows it explains that banners are controlled in
+**Settings → System → Notifications → fbro**, that Windows does not ask for
+permission, and that Focus assist can hide banners. **Open notification settings** sends
 `OpenOsNotificationSettings { requestId }` to the backend. The button is reachable
 with Tab and native Enter/Space activation, retains its focus while opening,
 guards duplicate requests and displays “Opening…”, and shows correlated failures

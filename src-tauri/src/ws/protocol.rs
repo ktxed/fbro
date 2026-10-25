@@ -702,6 +702,8 @@ pub struct GeneralSettingsSchema {
     pub os_notifications_enabled: bool,
     pub supports_os_notifications: bool,
     pub supports_os_notification_settings: bool,
+    /// `linux`, `macos`, `windows`, or `none`. Read-only; selects notification help copy.
+    pub os_notification_platform: String,
     pub remember_window_state: bool,
     pub preserve_attributes: bool,
     pub auto_resume_copies: bool,
