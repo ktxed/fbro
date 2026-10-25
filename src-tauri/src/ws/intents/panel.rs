@@ -254,20 +254,19 @@ async fn set_sort(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
     let (rescans, persisted, count_patch) = {
         let mut state_guard = ctx.state.lock().await;
         let remember_per_location = state_guard.settings.general.remember_sort_per_location;
-        let local_location = remember_per_location
+        let location_key = remember_per_location
             .then(|| {
                 state_guard.panels.get(&panel_id).and_then(|panel| {
                     state_guard
                         .drivers
                         .get(&panel.source_id)
-                        .filter(|driver| driver.is_local())
-                        .map(|_| {
-                            crate::state::location_settings::normalize_local_path(&panel.path)
+                        .and_then(|driver| {
+                            crate::state::location_settings::key_for(&panel.source_id, &panel.path, driver.is_local())
                         })
                 })
             })
             .flatten();
-        let affected_panel_ids = if let Some(location) = local_location.as_deref() {
+        let affected_panel_ids = if let Some(location) = location_key.as_deref() {
             state_guard
                 .panels
                 .iter()
@@ -276,9 +275,8 @@ async fn set_sort(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
                         && state_guard
                             .drivers
                             .get(&panel.source_id)
-                            .is_some_and(|driver| driver.is_local())
-                        && crate::state::location_settings::normalize_local_path(&panel.path)
-                            == location
+                            .and_then(|driver| crate::state::location_settings::key_for(&panel.source_id, &panel.path, driver.is_local()))
+                            .as_deref() == Some(location)
                 })
                 .map(|(id, _)| id.clone())
                 .collect::<Vec<_>>()
@@ -296,7 +294,7 @@ async fn set_sort(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
                 panel.sort = sort.clone();
             }
         }
-        let persisted = local_location.map(|location| {
+        let persisted = location_key.map(|location| {
             let settings = crate::state::location_settings::LocationSettings {
                 sort: Some(sort.clone()),
             };

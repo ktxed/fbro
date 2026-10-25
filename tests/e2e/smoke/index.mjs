@@ -40,6 +40,7 @@ import { runHeicFlow } from "./cases/heic.mjs";
 import { runButtonBarFlow } from "./cases/button-bar.mjs";
 import { runTabsFlow } from "./cases/tabs.mjs";
 import { runQuickEditFlow } from "./cases/quick-edit.mjs";
+import { runJournalSortFlow } from "./cases/journal-sort.mjs";
 import { verifyThumbnailQueue } from "./cases/thumbnails.mjs";
 import { runRemoteFlow } from "./cases/remote.mjs";
 import { runDatetimeSearchFlow, runSearchActionsFlow, runSearchActivityFlow, runSearchFlow, runSizeSearchFlow } from "./cases/search.mjs";
@@ -72,6 +73,11 @@ async function main() {
     browserA = await startBrowser("fbro-a", webdriverHosts.a, webdriverPorts.a, appA);
     observerA = new FbroObserver("fbro-a", wsUrls.a);
     await observerA.connect();
+
+    if (process.env.FBRO_E2E_JOURNAL_SORT_ONLY === "1") {
+      await runJournalSortFlow(browserA, observerA);
+      return;
+    }
 
     if (process.env.FBRO_E2E_TABS_ONLY === "1") {
       await runTabsFlow(browserA, observerA);

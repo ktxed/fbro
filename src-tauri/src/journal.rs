@@ -19,6 +19,8 @@ pub use remote::{RemoteJournal, RemoteKind, RemoteOperation, RemotePhase};
 
 #[cfg(test)]
 mod remote_tests;
+#[cfg(test)]
+mod sort_tests;
 
 pub const SOURCE_ID: &str = "journal";
 
@@ -374,6 +376,42 @@ fn query_event(id: &str) -> Result<EventRow, VfsError> {
     .map_err(|e| VfsError::NotFound(e.to_string()))
 }
 
+fn list_from_connection(
+    conn: &Connection,
+    sort: &SortSpec,
+    filter: Option<&FilterSpec>,
+) -> Result<Vec<VfsEntry>, VfsError> {
+    let mut stmt = conn.prepare("SELECT event_id, timestamp_ms, event_type, outcome, payload_json FROM journal_events")
+        .map_err(|e| VfsError::IOError(e.to_string()))?;
+    let rows = stmt.query_map([], |r| Ok(EventRow { id: r.get(0)?, timestamp_ms: r.get(1)?, event_type: r.get(2)?, outcome: r.get(3)?, payload: r.get(4)? }))
+        .map_err(|e| VfsError::IOError(e.to_string()))?;
+    let needle = filter.map(|f| f.value.to_lowercase());
+    let mut entries = rows.filter_map(Result::ok).filter(|row| {
+        needle.as_ref().map_or(true, |n| event_name(row).to_lowercase().contains(n) || row.payload.to_lowercase().contains(n))
+    }).map(|row| {
+        let name = event_name(&row);
+        let folded_name = name.to_lowercase();
+        // fbro's shared VFS wire format uses Unix seconds as a string;
+        // the panel formats it with `new Date(seconds * 1000)`.
+        let entry = VfsEntry { name, kind: VfsKind::File, target_kind: None, path_hint: None, size: Some(event_detail(&row).len() as u64), mtime: Some((row.timestamp_ms / 1_000).to_string()), btime: None, permissions: None, icon_name: Some("text-x-generic".into()), cc: Some("cc-file".into()), source_path: Some(row.id) };
+        (entry, row.timestamp_ms, folded_name)
+    }).collect::<Vec<_>>();
+    entries.sort_by(|(a, a_timestamp, a_name), (b, b_timestamp, b_name)| {
+        let order = match sort.by.as_str() {
+            "size" => a.size.cmp(&b.size),
+            // Keep milliseconds here: the displayed Unix-second mtime loses precision.
+            "date" => a_timestamp.cmp(b_timestamp),
+            // Every journal entry is a file with the same .log kind.
+            _ => a_name.cmp(b_name),
+        }
+        .then_with(|| a_name.cmp(b_name))
+        .then_with(|| a.name.cmp(&b.name))
+        .then_with(|| a.source_path.cmp(&b.source_path));
+        if sort.order == "desc" { order.reverse() } else { order }
+    });
+    Ok(entries.into_iter().map(|(entry, _, _)| entry).collect())
+}
+
 pub struct JournalDriver;
 
 impl VfsDriver for JournalDriver {
@@ -381,22 +419,7 @@ impl VfsDriver for JournalDriver {
 
     fn list(&self, _path: &str, sort: &SortSpec, filter: Option<&FilterSpec>, _show_hidden: bool) -> Result<Vec<VfsEntry>, VfsError> {
         let conn = open()?;
-        let mut stmt = conn.prepare("SELECT event_id, timestamp_ms, event_type, outcome, payload_json FROM journal_events ORDER BY timestamp_ms DESC")
-            .map_err(|e| VfsError::IOError(e.to_string()))?;
-        let rows = stmt.query_map([], |r| Ok(EventRow { id: r.get(0)?, timestamp_ms: r.get(1)?, event_type: r.get(2)?, outcome: r.get(3)?, payload: r.get(4)? }))
-            .map_err(|e| VfsError::IOError(e.to_string()))?;
-        let needle = filter.map(|f| f.value.to_lowercase());
-        let mut entries = rows.filter_map(Result::ok).filter(|row| {
-            needle.as_ref().map_or(true, |n| event_name(row).to_lowercase().contains(n) || row.payload.to_lowercase().contains(n))
-        }).map(|row| {
-            let name = event_name(&row);
-            // fbro's shared VFS wire format uses Unix seconds as a string;
-            // the panel formats it with `new Date(seconds * 1000)`.
-            VfsEntry { name, kind: VfsKind::File, target_kind: None, path_hint: None, size: Some(event_detail(&row).len() as u64), mtime: Some((row.timestamp_ms / 1_000).to_string()), btime: None, permissions: None, icon_name: Some("text-x-generic".into()), cc: Some("cc-file".into()), source_path: Some(row.id) }
-        }).collect::<Vec<_>>();
-        if sort.by == "name" && sort.order == "asc" { entries.sort_by(|a, b| a.name.cmp(&b.name)); }
-        if sort.by == "name" && sort.order == "desc" { entries.sort_by(|a, b| b.name.cmp(&a.name)); }
-        Ok(entries)
+        list_from_connection(&conn, sort, filter)
     }
 
     fn resolve_child(&self, _base: &str, name: &str) -> String {

@@ -103,7 +103,7 @@ Supported keys:
 | `showHiddenDefault` | `bool` | `false` | Whether new panels start with hidden files visible. Changing this also applies immediately to all open panels. |
 | `showButtonBar` | `bool` | `true` | Show the classic bottom command bar. Settings → Display provides **Show bottom button bar**; the command palette provides **Toggle Button Bar** (`app.toggle_button_bar`, no default binding). Hiding the bar reclaims its space while preserving global shortcuts and zoom. The preference applies to all GUI clients connected to the backend. |
 | `osNotificationsEnabled` | `bool` | `true` | Deliver selected operation notifications through the OS while no native fbro window is focused. Completion and cancellation require at least 30 seconds of execution; failures, pairing requests, transfer starts, and connection changes bypass that cutoff. The General settings control is capability-gated. See [notifications.md](notifications.md). |
-| `rememberSortPerLocation` | `bool` | `false` | Remember and share sorting for each local filesystem location. |
+| `rememberSortPerLocation` | `bool` | `false` | Remember and share sorting for each local filesystem location and for the Journal source. |
 | `enableHeic2any` | `bool` | `false` | Enable local browser conversion of HEIC/HEIF previews in the embedded and detached viewers on Windows (including Windows 10) and Linux. The control is hidden on macOS, which retains native decoding. Existing image caps apply. Changes update open viewers through backend patches; conversion is preview-only and does not write files. |
 | `zshEmacsKeymap` | `bool` | `false` | On macOS, start new interactive zsh terminals with `-o emacs`. The control is hidden and the setting has no effect on other platforms. Other shells and Quick Edit commands are unaffected. Existing terminal sessions keep their current keymap. |
 | `fedupDefaultIgnorePatterns` | `string` | `.git`, `.idea`, `.vscode`, `.venv`, `node_modules`, `__MACOSX`, `._*`, `.DS_Store`, `artifacts/e2e`, `dist/assets`, `target/debug`, `target/release`, `target/bundle`, `.m2` | Newline/comma separated wildcard name/path patterns Fedup Bro can use to skip files and folders before scanning. |
@@ -159,7 +159,7 @@ The configuration directory is:
 | File | Contents | Format and write behavior |
 |---|---|---|
 | `settings.json` | `GeneralSettings`, saved panel view modes, modal sizes, and the internal location-sort retention timestamp | Pretty-printed JSON using Rust `snake_case` field names. The complete `Settings` value is rewritten after an accepted JSON-backed settings change. |
-| `fbro.sqlite3` | Mutable structured application state. Currently the `settings_location` table stores sort column and direction by normalized local path. | SQLite. Settings tables use a `settings_` prefix. Sort changes use an UPSERT; reset and retention expiry use `DELETE`. `PRAGMA user_version` versions its schema. |
+| `fbro.sqlite3` | Mutable structured application state. Currently the `settings_location` table stores sort column and direction by normalized local path or Journal source key. | SQLite. Settings tables use a `settings_` prefix. Sort changes use an UPSERT; reset and retention expiry use `DELETE`. `PRAGMA user_version` versions its schema. |
 | `journal.sqlite3` | Audit events, including outcomes of manual location-sort resets and automatic expiry cleanup. | Append-only SQLite `journal_events`; ordinary setting changes are not journaled. It does not store current setting values. |
 
 `session.toml` and `bookmarks.toml` share the configuration directory but are
@@ -178,7 +178,7 @@ individually, allowing compatible settings additions.
 
 ### Local location settings
 
-Preferences associated with a local filesystem directory are stored in the
+Preferences associated with a local filesystem directory or the Journal source are stored in the
 `settings_location` table of `fbro.sqlite3`. This database owns mutable,
 structured application state; the separate `journal.sqlite3` database remains
 an append-only audit log. The domain model is `LocationSettings`; sorting is
@@ -190,13 +190,17 @@ from the older `journal.sqlite3` location table. Each old table is removed after
 its rows are copied. Existing `journal_events` are not modified.
 `PRAGMA user_version` tracks future `fbro.sqlite3` schema migrations.
 
-Rows are keyed by normalized absolute local path. They are loaded into
+Filesystem rows are keyed by normalized absolute local path. Journal uses the
+reserved `source:journal` key independently of its empty/slash root, so its
+preference cannot collide with the filesystem root. No schema migration is
+needed, and existing filesystem keys retain their meaning. Rows are loaded into
 `AppState.location_settings` at startup and updated with an UPSERT whenever
 sorting changes while **Remember sorting per location** is enabled. Panels and
 tabs then share the same preference for a location, and an unseen location uses
 name ascending. When disabled, sorting remains panel-local and navigation keeps
-the panel's current sort. Remote, archive, search, and other virtual sources do
-not participate.
+the panel's current sort. Journal follows the same enable/disable, sharing,
+reset, remembered-location count, and 30-day retention policy. Remote, archive,
+search, and other virtual sources do not participate.
 
 The General settings UI reports the number of valid remembered locations and
 offers a confirmed reset. Disabling retains rows for 30 days; re-enabling within

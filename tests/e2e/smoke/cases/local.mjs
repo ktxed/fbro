@@ -23,6 +23,7 @@ import { expectModalFocus, expectCoveredModal } from "./modal-focus.mjs";
 import { verifyThumbnailQueue } from "./thumbnails.mjs";
 import { runPanelSelectionFlow } from "./panel-selection.mjs";
 import { runSelectionMaskFlow } from "./selection-mask.mjs";
+import { verifyJournalSort } from "./journal-sort.mjs";
 
 import { verifyFileIcons } from "./file-icons.mjs";
 
@@ -349,6 +350,7 @@ export async function runLocalFlow(browser, observer) {
   await observer.waitForSort("left", "date", "asc");
 
   await verifyLocationSortReset(browser, observer);
+  await verifyJournalSort(browser, observer);
   await verifyInlinePreviewNavigation(browser, observer, aSrc, sortDir);
   await verifyBookmarksKeyboardNavigation(browser, observer, aSrc, sortDir);
   await goToPanelPath(browser, observer, "right", path.posix.join(aDst, "alpha"));
