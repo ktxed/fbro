@@ -477,6 +477,8 @@ fn main() {
                 for (label, window) in app.webview_windows() {
                     activity.observe_window(&label, window.is_focused().ok());
                 }
+                app.manage(notifications.clone());
+                notifications.prepare_os_notifications();
                 app_state.notifications = notifications;
                 // Restore extra tabs (beyond the seed panel) from the saved
                 // session when the new slot-aware schema is present.
@@ -571,6 +573,14 @@ fn main() {
                 match event {
                     tauri::WindowEvent::Focused(focused) => {
                         activity.observe_window(window.label(), Some(*focused));
+                        if *focused {
+                            if let Some(notifications) = window
+                                .app_handle()
+                                .try_state::<Arc<crate::notifications::NotificationService>>()
+                            {
+                                notifications.prepare_os_notifications();
+                            }
+                        }
                     }
                     tauri::WindowEvent::Destroyed => activity.remove_window(window.label()),
                     _ => {}

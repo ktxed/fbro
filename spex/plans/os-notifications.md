@@ -25,15 +25,26 @@ Validate policy with fake native delivery, isolated Linux service fixtures,
 settings/history smoke cases, and real packaged desktop checks on Wayland/X11.
 macOS and Windows remain unsupported during this phase.
 
-## Phase 2 — macOS
+## Phase 2 — macOS (implemented; native acceptance pending)
 
-Implement the existing PAL contract through Notification Center's
-`UNUserNotificationCenter`, using existing Rust bindings such as
-`objc2-user-notifications`. Handle actual authorization and denial, requesting
-permission while fbro is foregrounded; do not infer authorization from an API
-that always reports granted. Verify packaged `.app` identity, the shared
-all-window activity policy, system notification settings, and nonintrusive
-delivery. Enable the capability/settings control only with the native adapter.
+The PAL adapter uses `objc2-user-notifications` and Notification Center's
+`UNUserNotificationCenter`. Foreground UI hooks asynchronously request alert
+permission; worker delivery queries actual authorization and rechecks activity
+after native IPC. Capability is enabled only for the packaged `dev.fbro.app`
+bundle; bare development/test executables stay unsupported. Denial and native
+errors preserve history, and system settings remain authoritative.
+Packaging explicitly signs the complete app bundle (ad hoc by default), rather
+than leaving only the linker's executable signature. The native smoke rejects an
+unbound bundle signature before launching; its optional permission mode checks
+the real native completion so an authorization error cannot pass as delivery
+support merely because the capability flag is true.
+
+Unit coverage includes identity validation, native plain-text payloads and unique
+identifiers, denied/undetermined/unknown authorization, owned completion errors,
+foreground/enabled permission preparation, and stale deliveries during native
+authorization lookup. Before release, complete the packaged macOS acceptance
+checklist in [TESTING.md](../../TESTING.md#native-os-notification-validation),
+including real permission grant/denial, icon, all-window focus, and Do Not Disturb.
 
 ## Phase 3 — Windows
 

@@ -7,6 +7,23 @@
 
 ## 1. Overview
 
+Settings snapshots expose read-only `general.supportsOsNotificationSettings`,
+false by default and true on macOS, including development executables. It gates the macOS
+permission notice and the **Open notification settings** action.
+The section is visible when either notification capability is true. If native
+delivery is unavailable but the system pane is available, the delivery checkbox
+is disabled and development guidance is displayed. The two capabilities remain
+independent; a settings link never implies native delivery support.
+`OpenOsNotificationSettings { requestId }` opens the backend host's fbro-specific
+OS notification pane through PAL on a blocking worker. It replies with
+`OpenOsNotificationSettingsOk { timestamp, requestId }` or
+`OpenOsNotificationSettingsFailed { timestamp, requestId, code, message }`, using
+`OPEN_OS_NOTIFICATION_SETTINGS_FAILED` for invalid/missing request IDs, unsupported
+hosts, worker errors, and native launch failures. No URL/path is accepted from
+the client; no preference, authorization state, notification history, or command
+journal is changed. The success reply acknowledges the launch request, not a
+permission grant. Settings consumes correlated replies and shows failures inline.
+
 Settings snapshots and settings-domain patches expose `general.showButtonBar`
 as a boolean. `SetGeneralOption { key: "showButtonBar", value: true | false }`
 updates and persists the application-wide bottom button bar visibility, then

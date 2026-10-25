@@ -12,6 +12,7 @@ use std::process::{Command, Stdio};
 use std::collections::HashMap;
 
 mod icon_cache;
+mod notifications;
 
 pub struct MacOSPlatform;
 
@@ -71,6 +72,32 @@ extern "C" {
 }
 
 impl Platform for MacOSPlatform {
+    fn supports_os_notifications(&self) -> bool {
+        notifications::supported()
+    }
+
+    fn supports_os_notification_settings(&self) -> bool {
+        // The system settings pane belongs to the installed app and can also
+        // be opened from a bare development executable without native delivery.
+        true
+    }
+
+    fn open_os_notification_settings(&self) -> Result<(), String> {
+        notifications::open_settings()
+    }
+
+    fn prepare_os_notifications(&self) {
+        notifications::prepare();
+    }
+
+    fn os_notifications_authorized(&self) -> Result<bool, String> {
+        notifications::authorized()
+    }
+
+    fn send_os_notification(&self, message: &str) -> Result<(), String> {
+        notifications::send(message)
+    }
+
     fn home_dir(&self) -> String {
         std::env::var("HOME").unwrap_or_else(|_| "/".to_string())
     }

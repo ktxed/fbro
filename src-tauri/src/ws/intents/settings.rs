@@ -2,6 +2,8 @@ use std::sync::Arc;
 
 use serde_json::Value;
 
+use super::arg_str;
+
 use crate::state::settings::ModalSizePreference;
 use crate::vfs::VfsDriver;
 use crate::ws::protocol::{now, ServerMessage};
@@ -12,9 +14,39 @@ pub(crate) async fn handle(name: &str, args: &Value, ctx: &mut IntentContext<'_>
         "SetGeneralOption" => set_general_option(args, ctx).await,
         "SetModalSizePreference" => set_modal_size_preference(args, ctx).await,
         "ClearIconCache" => clear_icon_cache(args, ctx).await,
+        "OpenOsNotificationSettings" => open_os_notification_settings(args, ctx).await,
         "ClearThumbnailCache" => clear_thumbnail_cache(ctx).await,
         "ResetLocationSortSettings" => reset_location_sort_settings(ctx).await,
         _ => {}
+    }
+}
+
+async fn open_os_notification_settings(args: &Value, ctx: &mut IntentContext<'_>) {
+    let platform = ctx.state.lock().await.platform.clone();
+    let reply = open_notification_settings_reply(args, move || async move {
+        tokio::task::spawn_blocking(move || platform.open_os_notification_settings())
+            .await
+            .map_err(|error| format!("Open OS notification settings worker: {error}"))?
+    }).await;
+    let _ = ctx.tx.send(reply).await;
+}
+
+async fn open_notification_settings_reply<F, Fut>(args: &Value, open: F) -> ServerMessage
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = Result<(), String>>,
+{
+    let request_id = arg_str(args, "requestId").unwrap_or_default().to_string();
+    let result = if request_id.trim().is_empty() {
+        Err("A requestId is required".into())
+    } else {
+        open().await
+    };
+    match result {
+        Ok(()) => ServerMessage::OpenOsNotificationSettingsOk { timestamp: now(), request_id },
+        Err(message) => ServerMessage::OpenOsNotificationSettingsFailed {
+            timestamp: now(), request_id, code: "OPEN_OS_NOTIFICATION_SETTINGS_FAILED".into(), message,
+        },
     }
 }
 
@@ -28,6 +60,34 @@ async fn bad_setting(tx: &tokio::sync::mpsc::Sender<ServerMessage>, msg: &str) {
             extra: None,
         })
         .await;
+}
+
+#[cfg(test)]
+mod notification_settings_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn notification_settings_open_rejects_invalid_requests_without_native_work() {
+        for args in [serde_json::json!({}), serde_json::json!({"requestId": "  "}), serde_json::json!({"requestId": 4})] {
+            let reply = open_notification_settings_reply(&args, || async {
+                panic!("Invalid requests must not open native settings");
+            }).await;
+            assert!(matches!(reply, ServerMessage::OpenOsNotificationSettingsFailed { .. }));
+        }
+    }
+
+    #[tokio::test]
+    async fn notification_settings_open_replies_correlate_success_and_host_failure() {
+        let args = serde_json::json!({"requestId": "settings-1"});
+        let ok = serde_json::to_value(open_notification_settings_reply(&args, || async { Ok(()) }).await).unwrap();
+        assert_eq!(ok["type"], "OpenOsNotificationSettingsOk");
+        assert_eq!(ok["requestId"], "settings-1");
+        let failed = serde_json::to_value(open_notification_settings_reply(&args, || async { Err("Host refused to open settings".into()) }).await).unwrap();
+        assert_eq!(failed["type"], "OpenOsNotificationSettingsFailed");
+        assert_eq!(failed["requestId"], "settings-1");
+        assert_eq!(failed["code"], "OPEN_OS_NOTIFICATION_SETTINGS_FAILED");
+        assert_eq!(failed["message"], "Host refused to open settings");
+    }
 }
 
 async fn set_modal_size_preference(args: &Value, ctx: &mut IntentContext<'_>) {
@@ -117,6 +177,7 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
     let mut show_hidden_changed: Option<bool> = None;
     // Track whether proc_tree_mode changed so we can reload the procs driver.
     let mut proc_tree_mode_changed: Option<bool> = None;
+    let mut prepare_notifications = None;
 
     let (gui_senders, viewer_senders) = {
         let mut state_guard = ctx.state.lock().await;
@@ -130,6 +191,9 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
                 };
                 state_guard.settings.general.os_notifications_enabled = v;
                 state_guard.notifications.set_os_enabled(v);
+                if v {
+                    prepare_notifications = Some(state_guard.notifications.clone());
+                }
             }
             "showButtonBar" => {
                 let Some(v) = value.as_bool() else {
@@ -430,6 +494,14 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
             state_guard.viewer_senders.clone(),
         )
     };
+
+    if let Some(notifications) = prepare_notifications {
+        if let Err(error) = ctx.app_handle.run_on_main_thread(move || {
+            notifications.prepare_os_notifications();
+        }) {
+            eprintln!("[notifications] Cannot prepare OS authorization: {error}");
+        }
+    }
 
     // Apply show_hidden_default to all panels immediately.
     if let Some(new_show_hidden) = show_hidden_changed {

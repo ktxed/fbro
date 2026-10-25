@@ -5922,6 +5922,50 @@ body {
   margin: 6px 0 0;
 }
 
+.settings-notifications-heading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.settings-notifications-heading .settings-tab__section-title { margin: 0; }
+
+.settings-notifications-info {
+  appearance: none;
+  font: inherit;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 2px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: help;
+}
+
+.settings-notifications-info:hover { color: var(--text); background: var(--bg-focused); }
+.settings-notifications-info:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 2px; }
+
+.settings-notifications-tooltip {
+  z-index: 1;
+  max-width: min(420px, calc(100vw - 48px));
+  padding: 10px 12px !important;
+  border-radius: 4px;
+  background: var(--bg-elev) !important;
+  color: var(--text) !important;
+  box-shadow: var(--shadow-modal);
+  font: inherit;
+  line-height: 1.4;
+  opacity: 1 !important;
+}
+
+.settings-notifications-tooltip p { margin: 0; }
+.settings-notifications-tooltip p + p { margin-top: 8px; }
+
 /* Sharing settings */
 
 .sharing-tab {

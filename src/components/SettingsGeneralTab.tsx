@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { IconInfoCircle } from "@tabler/icons-react";
+import { Tooltip, type TooltipRefProps } from "react-tooltip";
 import type { GeneralSettings } from "../ws/types";
 import type { WsClient } from "../ws/client";
 
@@ -7,6 +9,7 @@ import { stepNumberInputOnWheel } from "../utils/numberInputWheel";
 import { isMac } from "../utils/platform";
 import { ModalLayer } from "./ModalStack";
 import { ModalDialog } from "./ModalDialog";
+import { useAppState } from "../store";
 
 interface SettingsGeneralTabProps {
   general: GeneralSettings;
@@ -21,6 +24,34 @@ interface ShellCommandStatus {
 }
 
 export function SettingsGeneralTab({ general, client }: SettingsGeneralTabProps) {
+  const { connected } = useAppState();
+  const notificationHelpRef = useRef<TooltipRefProps>(null);
+  const [notificationHelpOpen, setNotificationHelpOpen] = useState(false);
+  const notificationSettingsRequest = useRef<string | null>(null);
+  const [openingNotificationSettings, setOpeningNotificationSettings] = useState(false);
+  const [notificationSettingsError, setNotificationSettingsError] = useState<string>();
+  useEffect(() => client.subscribeMessages((message) => {
+    if ((message.type !== "OpenOsNotificationSettingsOk" && message.type !== "OpenOsNotificationSettingsFailed")
+      || message.requestId !== notificationSettingsRequest.current) return;
+    notificationSettingsRequest.current = null;
+    setOpeningNotificationSettings(false);
+    setNotificationSettingsError(message.type === "OpenOsNotificationSettingsFailed" ? message.message : undefined);
+  }), [client]);
+  useEffect(() => {
+    if (!connected && notificationSettingsRequest.current) {
+      notificationSettingsRequest.current = null;
+      setOpeningNotificationSettings(false);
+      setNotificationSettingsError("Connection lost. Reconnect to try again.");
+    }
+  }, [connected]);
+  const openNotificationSettings = () => {
+    if (!connected || notificationSettingsRequest.current) return;
+    const requestId = crypto.randomUUID();
+    notificationSettingsRequest.current = requestId;
+    setOpeningNotificationSettings(true);
+    setNotificationSettingsError(undefined);
+    client.sendIntent("OpenOsNotificationSettings", undefined, { requestId });
+  };
   const send = (key: string, value: boolean | number | string) => {
     client.sendIntent("SetGeneralOption", undefined, { key, value });
   };
@@ -135,22 +166,68 @@ export function SettingsGeneralTab({ general, client }: SettingsGeneralTabProps)
 
   return (
     <div className="settings-tab">
-      {general.supportsOsNotifications && (
+      {(general.supportsOsNotifications || general.supportsOsNotificationSettings) && (
         <div className="settings-tab__section">
-          <h3 className="settings-tab__section-title">Notifications</h3>
+          <div className="settings-notifications-heading">
+            <h3 className="settings-tab__section-title">Notifications</h3>
+            <button type="button" className="settings-notifications-info"
+              title="About OS notifications" aria-label="About OS notifications"
+              aria-describedby={notificationHelpOpen ? "notification-help-tooltip" : undefined}
+              data-testid="notification-help" data-tooltip-id="notification-help-tooltip"
+              onClick={() => notificationHelpRef.current?.open({ anchorSelect: '[data-testid="notification-help"]' })}
+              onKeyDown={(e) => {
+                if (e.defaultPrevented || e.key !== "Escape" || !notificationHelpOpen) return;
+                e.preventDefault();
+                e.stopPropagation();
+                setNotificationHelpOpen(false);
+              }}>
+              <IconInfoCircle size={16} aria-hidden />
+            </button>
+          </div>
           <label className="settings-tab__option">
             <input
               type="checkbox"
               data-testid="os-notifications-enabled"
               checked={general.osNotificationsEnabled}
+              disabled={!general.supportsOsNotifications}
               onChange={(e) => send("osNotificationsEnabled", e.target.checked)}
-              aria-describedby="os-notifications-hint"
             />
             <span>Show background OS notifications</span>
           </label>
-          <div id="os-notifications-hint" className="settings-tab__hint">
-            Notify while no fbro window is active. Completion and cancellation alerts require operations lasting at least 30 seconds. Failures, transfer starts, pairing requests, and connection changes notify immediately.
-          </div>
+          <Tooltip id="notification-help-tooltip" ref={notificationHelpRef}
+            className="settings-notifications-tooltip" place="bottom-start" positionStrategy="fixed"
+            border="1px solid var(--border-focus)" arrowColor="var(--bg-elev)"
+            clickable delayShow={0} delayHide={100}
+            isOpen={notificationHelpOpen} setIsOpen={setNotificationHelpOpen}
+            globalCloseEvents={{ clickOutsideAnchor: true }}>
+            {!general.supportsOsNotifications && (
+              <p data-testid="os-notifications-unavailable">
+                Native notifications are unavailable in this development build. Use the signed fbro.app to receive them. The system settings below apply to that app.
+              </p>
+            )}
+            <p>
+              Notify while no fbro window is active. Completion and cancellation alerts require operations lasting at least 30 seconds. Failures, transfer starts, pairing requests, and connection changes notify immediately.
+            </p>
+            {general.supportsOsNotificationSettings && (
+              <p data-testid="macos-notifications-notice">
+                macOS also controls notification permission. Enable Allow notifications in System Settings → Notifications → fbro. If permission was denied, macOS won’t ask again.
+              </p>
+            )}
+          </Tooltip>
+          {general.supportsOsNotificationSettings && (
+            <>
+              <div className="settings-tab__option">
+                <button type="button" className="settings-button"
+                  data-testid="open-os-notification-settings"
+                  disabled={!connected} aria-disabled={openingNotificationSettings || !connected}
+                  aria-busy={openingNotificationSettings}
+                  onClick={openNotificationSettings}>
+                  {openingNotificationSettings ? "Opening…" : "Open notification settings"}
+                </button>
+              </div>
+              {notificationSettingsError && <p role="alert">{notificationSettingsError}</p>}
+            </>
+          )}
         </div>
       )}
       <div className="settings-tab__section">

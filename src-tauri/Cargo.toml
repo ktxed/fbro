@@ -47,6 +47,12 @@ scraper = { version = "0.27", default-features = false }
 [target.'cfg(target_os = "windows")'.dependencies]
 png = "0.17"
 
+[target.'cfg(target_os = "macos")'.dependencies]
+block2 = "0.6"
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSBundle", "NSError", "NSProcessInfo", "NSString"] }
+objc2-user-notifications = { version = "0.3", default-features = false, features = ["std", "block2", "UNNotificationContent", "UNNotificationRequest", "UNNotificationSettings", "UNNotificationSound", "UNNotificationTrigger", "UNUserNotificationCenter"] }
+
 [target.'cfg(target_os = "linux")'.dependencies]
 notify-rust = { version = "4.18", default-features = false, features = ["z-with-tokio"] }
 gio = "0.18.4"

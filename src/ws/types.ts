@@ -749,6 +749,7 @@ export interface GeneralSettings {
   osNotificationsEnabled: boolean;
   /** Read-only backend capability; native delivery is introduced per platform. */
   supportsOsNotifications: boolean;
+  supportsOsNotificationSettings: boolean;
   rememberWindowState: boolean;
   preserveAttributes: boolean;
   autoResumeCopies: boolean;
@@ -1135,6 +1136,18 @@ export interface ClearIconCacheOkMessage {
   timestamp: number;
   requestId: string;
 }
+export interface OpenOsNotificationSettingsOkMessage {
+  type: "OpenOsNotificationSettingsOk";
+  timestamp: number;
+  requestId: string;
+}
+export interface OpenOsNotificationSettingsFailedMessage {
+  type: "OpenOsNotificationSettingsFailed";
+  timestamp: number;
+  requestId: string;
+  code: string;
+  message: string;
+}
 export interface ClearIconCacheFailedMessage {
   type: "ClearIconCacheFailed";
   timestamp: number;
@@ -1361,6 +1374,8 @@ export type BEMessage =
   | InputRequiredMessage
   | ClearIconCacheOkMessage
   | ClearIconCacheFailedMessage
+  | OpenOsNotificationSettingsOkMessage
+  | OpenOsNotificationSettingsFailedMessage
   | CacheStatusReadyMessage
   | ThumbnailQueueReadyMessage
   | TerminalSessionOpenedMessage

@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "build:macos:debug": "tauri build --debug --bundles app",
     "preview": "vite preview",
     "tauri": "tauri",
     "spy": "FBRO_SPY=1 tauri dev",
@@ -18,6 +19,7 @@
     "e2e:smoke:runner": "node tests/e2e/smoke/index.mjs",
     "test:build-info": "node --test tests/build-info.test.mjs",
     "test:notifications": "node --test --test-isolation=none tests/notifications.test.mjs",
+    "test:notifications:macos": "node tests/e2e/macos-notifications.mjs",
     "test:selection-mask": "node --test --test-isolation=none tests/selection-mask.test.mjs",
     "test:tabs": "node --test --test-isolation=none tests/tabs.test.mjs",
     "showcase": "node tools/showcase/index.mjs"
