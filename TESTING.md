@@ -20,6 +20,7 @@ npm run test:build-info
 npm run test:notifications
 npm run test:selection-mask
 npm run test:tabs
+npm run test:modal-keyboard
 node --test tests/check-version.test.mjs
 cargo test --manifest-path src-tauri/Cargo.toml --locked
 cargo check --manifest-path tools/lfs-spy/Cargo.toml --locked
@@ -28,7 +29,8 @@ cargo check --manifest-path tools/lfs-spy/Cargo.toml --locked
 `npm run build` runs TypeScript checking and the production frontend build.
 There is no separate frontend lint command. The Node tests cover build metadata
 and release-version consistency, notification history/toast projection,
-selection-mask prompt defaults, and stale tab-update rejection. Rust tests
+selection-mask prompt defaults, stale tab-update rejection, and cyclic keyboard
+navigation (including empty-bookmark navigation). Rust tests
 cover backend behavior and adapters;
 the last command checks the optional local-filesystem spy helper.
 
@@ -112,7 +114,7 @@ FBRO_E2E_REMOTE_ONLY=1 GDK_BACKEND=wayland npm run e2e:smoke:local_debug
 | --- | --- |
 | `FBRO_E2E_FOCUS_ONLY=1` | Focus handoffs and modal ownership |
 | `FBRO_E2E_TABS_ONLY=1` | Mouse tab reordering, overflow scrolling, terminal ownership, cancellation, active-tab/focus preservation, and tab click/close behavior |
-| `FBRO_E2E_BOOKMARKS_ONLY=1` | Bookmark creation, keyboard navigation, focus, and list sizing |
+| `FBRO_E2E_BOOKMARKS_ONLY=1` | Current-folder initial focus, cyclic Up/Down navigation, Home/End, keyboard creation/removal, focus, and list sizing |
 | `FBRO_E2E_BUTTON_BAR_ONLY=1` | Persistent button bar visibility, Settings and command palette, hidden-bar shortcuts, focus, both themes, and invalid values |
 | `FBRO_E2E_PANEL_SELECTION_ONLY=1` | Space selection, folder sizes, Shift+Space targeting, mask selection, and keyboard ownership in list/grid views |
 | `FBRO_E2E_SELECTION_MASK_ONLY=1` | Select/Deselect Files masks, defaults, keyboard/focus ownership, and full windowed-list matching |

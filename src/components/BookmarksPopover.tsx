@@ -36,10 +36,8 @@ export function BookmarksPopover({
   const listRef = useRef<HTMLUListElement>(null);
   const addButtonRef = useRef<HTMLButtonElement>(null);
   const returnFocusRef = useFocusReturn(panelId);
-  const [selectedIndex, setSelectedIndex] = useState(() => {
-    const currentIndex = bookmarks.findIndex((bookmark) => bookmark.path === currentPath);
-    return currentIndex >= 0 ? currentIndex : 0;
-  });
+  // Position zero is the current-folder action; bookmarks occupy positions 1…N.
+  const [navigationIndex, setNavigationIndex] = useState(0);
   const [listMaxHeight, setListMaxHeight] = useState<number>();
   const colorScheme = resolveColorScheme(state.settings.general.colorScheme);
 
@@ -57,7 +55,7 @@ export function BookmarksPopover({
     refs.setFloating(node);
     popoverRef.current = node;
     const cleanup = returnFocusRef(node);
-    if (node) (listRef.current ?? addButtonRef.current)?.focus({ preventScroll: true });
+    if (node) addButtonRef.current?.focus({ preventScroll: true });
     return cleanup;
   }, [refs.setFloating, returnFocusRef]);
 
@@ -77,17 +75,17 @@ export function BookmarksPopover({
   }, [anchorEl]);
 
   useLayoutEffect(() => {
-    (listRef.current ?? addButtonRef.current)?.focus({ preventScroll: true });
+    addButtonRef.current?.focus({ preventScroll: true });
   }, [bookmarks.length]);
 
   useEffect(() => {
-    setSelectedIndex((current) => Math.min(current, Math.max(0, bookmarks.length - 1)));
+    setNavigationIndex((current) => Math.min(current, bookmarks.length));
   }, [bookmarks.length]);
 
   useEffect(() => {
     const selected = listRef.current?.querySelector<HTMLElement>("[data-selected='true']");
     selected?.scrollIntoView({ block: "nearest" });
-  }, [selectedIndex]);
+  }, [navigationIndex]);
 
   // Close on outside click
   useEffect(() => {
@@ -116,31 +114,13 @@ export function BookmarksPopover({
         return;
       }
 
-      const target = event.target instanceof Node ? event.target : null;
-      if (event.key === "ArrowDown" && target === addButtonRef.current && bookmarks.length > 0) {
-        event.preventDefault();
-        event.stopPropagation();
-        listRef.current?.focus({ preventScroll: true });
-        return;
-      }
-      if (
-        event.key === "ArrowUp" &&
-        selectedIndex === 0 &&
-        target &&
-        listRef.current?.contains(target)
-      ) {
-        event.preventDefault();
-        event.stopPropagation();
-        addButtonRef.current?.focus({ preventScroll: true });
-        return;
-      }
-
-      const nextIndex = rovingIndexForKey(event.key, selectedIndex, bookmarks.length, "vertical");
+      const currentIndex = event.target === addButtonRef.current ? 0 : navigationIndex;
+      const nextIndex = rovingIndexForKey(event.key, currentIndex, bookmarks.length + 1, "vertical");
       if (nextIndex !== null) {
         event.preventDefault();
         event.stopPropagation();
-        setSelectedIndex(nextIndex);
-        listRef.current?.focus({ preventScroll: true });
+        setNavigationIndex(nextIndex);
+        (nextIndex === 0 ? addButtonRef.current : listRef.current)?.focus({ preventScroll: true });
         return;
       }
 
@@ -148,7 +128,7 @@ export function BookmarksPopover({
         ? event.target.closest(".bookmarks-popover button")
         : null;
       if (event.key === "Enter" && !nativeButton) {
-        const selected = bookmarks[selectedIndex];
+        const selected = bookmarks[navigationIndex - 1];
         if (!selected) return;
         event.preventDefault();
         event.stopPropagation();
@@ -157,7 +137,7 @@ export function BookmarksPopover({
     };
     document.addEventListener("keydown", handler, true);
     return () => document.removeEventListener("keydown", handler, true);
-  }, [bookmarks, selectedIndex]);
+  }, [bookmarks, navigationIndex]);
 
   const lastName = currentPath.trim().replace(/\/$/, "").split("/").filter(Boolean).pop() ?? currentPath;
   const isBookmarked = bookmarks.some((b) => b.path === currentPath);
@@ -189,7 +169,7 @@ export function BookmarksPopover({
         style={{ ...floatingStyles, colorScheme: colorScheme.mode }}
         className="bookmarks-popover"
         data-testid="bookmarks-popover"
-        onKeyDown={(e) => e.stopPropagation()}
+        onKeyDown={(event) => event.stopPropagation()}
         onMouseDown={(e) => e.preventDefault()}
       >
         <div className="bookmarks-popover__header">Bookmarks</div>
@@ -200,16 +180,18 @@ export function BookmarksPopover({
               ref={addButtonRef}
               className="bookmarks-popover__add-btn bookmarks-popover__add-btn--added"
               data-testid="bookmark-current-toggle"
+              onFocus={() => setNavigationIndex(0)}
               onClick={handleRemoveCurrent}
               title="Remove current folder from bookmarks"
             >
-              ✓ {lastName}
+              − {lastName}
             </button>
           ) : (
             <button
               ref={addButtonRef}
               className="bookmarks-popover__add-btn"
               data-testid="bookmark-current-toggle"
+              onFocus={() => setNavigationIndex(0)}
               onClick={handleAdd}
               title="Bookmark current folder"
             >
@@ -226,12 +208,13 @@ export function BookmarksPopover({
               className="bookmarks-popover__list"
               role="listbox"
               aria-label="Bookmarks"
-              aria-activedescendant={bookmarks[selectedIndex] ? `bookmark-option-${selectedIndex}` : undefined}
+              aria-activedescendant={bookmarks[navigationIndex - 1] ? `bookmark-option-${navigationIndex - 1}` : undefined}
               tabIndex={0}
+              onFocus={() => setNavigationIndex((current) => Math.max(1, current))}
               style={listMaxHeight === undefined ? undefined : { maxHeight: `${listMaxHeight}px` }}
             >
               {bookmarks.map((bm, index) => {
-                const selected = index === selectedIndex;
+                const selected = index + 1 === navigationIndex;
                 return (
                   <li
                     key={bm.path}
@@ -241,7 +224,10 @@ export function BookmarksPopover({
                     data-selected={selected ? "true" : "false"}
                     data-testid="bookmark-option"
                     className={`bookmarks-popover__item${bm.path === currentPath ? " bookmarks-popover__item--active" : ""}${selected ? " bookmarks-popover__item--selected" : ""}`}
-                    onMouseEnter={() => setSelectedIndex(index)}
+                    onFocus={() => setNavigationIndex(index + 1)}
+                    onMouseEnter={() => {
+                      if (listRef.current?.contains(document.activeElement)) setNavigationIndex(index + 1);
+                    }}
                     onClick={() => handleNavigate(bm.path)}
                   >
                     <span className="bookmarks-popover__item-name">{bm.name}</span>

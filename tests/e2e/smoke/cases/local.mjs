@@ -539,42 +539,70 @@ export async function verifyBookmarksKeyboardNavigation(browser, observer, aSrc,
   const selectedBookmarkPath = () => browser.execute(() =>
     document.querySelector('[data-testid="bookmark-option"][data-selected="true"] .bookmarks-popover__item-path')?.textContent ?? null
   );
-  if (await selectedBookmarkPath() !== bookmarkPaths[0]) {
-    throw new Error("bookmark list did not initially select its first entry");
-  }
-
   const currentBookmarkToggle = '[data-testid="bookmark-current-toggle"]';
   const bookmarkList = '[data-testid="bookmarks-popover"] [role="listbox"]';
-  await waitFor(() => browser.$(bookmarkList).isFocused(), {
-    timeout: 5_000,
-    label: "bookmark list initial focus",
-  });
-  await browser.keys("ArrowUp");
   await waitFor(() => browser.$(currentBookmarkToggle).isFocused(), {
     timeout: 5_000,
-    label: "bookmark current-folder action focus",
+    label: "bookmark current-folder action initial focus",
+  });
+  if (await selectedBookmarkPath() !== null) {
+    throw new Error("bookmark list highlights an entry instead of initially focusing the current-folder action");
+  }
+
+  await browser.keys("ArrowUp");
+  await waitFor(async () => await browser.$(bookmarkList).isFocused()
+    && await selectedBookmarkPath() === bookmarkPaths.at(-1), {
+    timeout: 5_000,
+    label: "bookmark ArrowUp cycles from the current-folder action to the last bookmark",
   });
   await browser.keys("ArrowDown");
-  await waitFor(() => browser.$(bookmarkList).isFocused(), {
+  await waitFor(() => browser.$(currentBookmarkToggle).isFocused(), {
     timeout: 5_000,
-    label: "bookmark list focus returns from current-folder action",
+    label: "bookmark ArrowDown cycles from the last bookmark to the current-folder action",
   });
-  if (await selectedBookmarkPath() !== bookmarkPaths[0]) {
-    throw new Error("returning from the current-folder action changed the bookmark selection");
-  }
+  await browser.keys("ArrowDown");
+  await waitFor(async () => await browser.$(bookmarkList).isFocused()
+    && await selectedBookmarkPath() === bookmarkPaths[0], {
+    timeout: 5_000,
+    label: "bookmark ArrowDown moves directly from the current-folder action to the first bookmark",
+  });
   await browser.keys("ArrowUp");
   await waitFor(() => browser.$(currentBookmarkToggle).isFocused(), {
     timeout: 5_000,
-    label: "bookmark current-folder action refocus",
+    label: "bookmark ArrowUp returns from the first bookmark to the current-folder action",
+  });
+  await browser.keys("End");
+  await waitFor(async () => await selectedBookmarkPath() === bookmarkPaths.at(-1), {
+    timeout: 5_000,
+    label: "bookmark End reaches the last bookmark",
+  });
+  await browser.keys("Home");
+  await waitFor(() => browser.$(currentBookmarkToggle).isFocused(), {
+    timeout: 5_000,
+    label: "bookmark Home reaches the current-folder action",
   });
   await browser.keys("Enter");
   await waitFor(() => observer.state.bookmarks?.some((bookmark) => bookmark.path === aSrc), {
     timeout: 10_000,
     label: "keyboard-created bookmark",
   });
-  await waitFor(() => browser.$(bookmarkList).isFocused(), {
+  await waitFor(() => browser.$(currentBookmarkToggle).isFocused(), {
     timeout: 5_000,
-    label: "bookmark list focus after keyboard creation",
+    label: "bookmark current-folder action remains focused after keyboard creation",
+  });
+  await browser.keys(" ");
+  await waitFor(() => !observer.state.bookmarks?.some((bookmark) => bookmark.path === aSrc), {
+    timeout: 10_000,
+    label: "keyboard removal of current-folder bookmark",
+  });
+  await waitFor(() => browser.$(currentBookmarkToggle).isFocused(), {
+    timeout: 5_000,
+    label: "bookmark current-folder action remains focused after keyboard removal",
+  });
+  await browser.keys("ArrowDown");
+  await waitFor(async () => await selectedBookmarkPath() === bookmarkPaths[0], {
+    timeout: 5_000,
+    label: "bookmark ArrowDown selects the first bookmark after removal",
   });
 
   await browser.keys("ArrowDown");
