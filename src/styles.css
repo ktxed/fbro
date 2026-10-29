@@ -591,6 +591,10 @@ body {
   background: var(--bg-panel);
 }
 
+.panel__tab-icon {
+  flex-shrink: 0;
+}
+
 .panel__tab-label {
   display: inline-flex;
   align-items: center;

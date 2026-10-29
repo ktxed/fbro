@@ -177,8 +177,10 @@ export function PanelTabBar({ slot, panels, sources, client, blocked }: Props) {
                 // Rename hook lands here in a future iteration.
               }}
             >
+              {panel?.tabKind === "terminal" && (
+                <IconTerminal2 className="panel__tab-icon" size={16} aria-hidden="true" />
+              )}
               <span className="panel__tab-label">
-                {panel?.tabKind === "terminal" && <IconTerminal2 size={16} />}
                 {displayed}
               </span>
               {slot.tabPanelIds.length > 1 && (
