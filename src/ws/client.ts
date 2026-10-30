@@ -1,4 +1,4 @@
-import type { BEMessage, FEMessage, IntentMessage } from "./types";
+import type { BEMessage, FEMessage, IntentMessage, CommandBindingsIntent } from "./types";
 import { invoke } from "@tauri-apps/api/core";
 
 const DEFAULT_WS_URL = "ws://127.0.0.1:7878";
@@ -150,6 +150,10 @@ export class WsClient {
       console.log("WS ERROR", this.clientKind, "readyState=", this.ws?.readyState);
       // onclose fires after onerror, reconnect is handled there
     };
+  }
+
+  sendCommandBindings(intent: CommandBindingsIntent) {
+    this.sendIntent(intent.name, undefined, intent.args);
   }
 
   sendIntent(

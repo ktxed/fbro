@@ -548,6 +548,8 @@ pub struct AppState {
     pub has_gui_connected: bool,
     pub bookmarks: Vec<BookmarkEntry>,
     pub font_size: u8,
+    pub command_revision: u64,
+    pub settings_mutation: std::sync::Arc<tokio::sync::Mutex<()>>,
     pub settings: settings::Settings,
     /// Per-local-directory preferences loaded from the shared SQLite store.
     pub location_settings: location_settings::LocationSettingsMap,
@@ -1050,6 +1052,8 @@ impl AppState {
             has_gui_connected: false,
             bookmarks: crate::bookmarks::load(),
             font_size: crate::persistence::load().font_size.unwrap_or(13),
+            command_revision: 0,
+            settings_mutation: std::sync::Arc::new(tokio::sync::Mutex::new(())),
             settings: loaded_settings,
             location_settings,
             child_processes: HashMap::new(),

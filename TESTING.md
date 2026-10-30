@@ -21,6 +21,7 @@ npm run test:notifications
 npm run test:selection-mask
 npm run test:tabs
 npm run test:modal-keyboard
+npm run test:keyboard-shortcuts
 node --test tests/check-version.test.mjs
 cargo test --manifest-path src-tauri/Cargo.toml --locked
 cargo check --manifest-path tools/lfs-spy/Cargo.toml --locked
@@ -476,3 +477,25 @@ Keep dated run results, test counts, dependency advisories, and platform results
 in the relevant PR or implementation plan. The
 [dependency refresh record](spex/plans/2026-10-09-dependency-refresh.md) contains
 that change's validation results and remaining audit warnings.
+
+## Keyboard shortcut customization
+
+Run the focused Linux native flow against a current Tauri build:
+
+```bash
+npm run tauri -- build --debug --no-bundle
+FBRO_E2E_KEYBOARD_SHORTCUTS_ONLY=1 FBRO_APP_BINARY=src-tauri/target/debug/fbro FBRO_E2E_COMPOSE_FILES=docker-compose.e2e.host.yml:docker-compose.e2e.debug.yml GDK_BACKEND=wayland npm run e2e:smoke:local
+```
+
+The flow covers keyboard-only addition, alternate dispatch, Tab/Enter/Escape
+capture, recording ownership and reserved zoom, duplicate rejection,
+Override/Abort and partial List/Grid transfer, live toolbar labels, removal,
+per-command and global resets, reload persistence, and nested focus restoration.
+Recorder/review screenshots cover both themes with large text, including Record
+again and control clipping checks. Conflict screenshots cover emphasized command
+names, separate List/Grid badges, and restoration to the Save opener. The palette
+check verifies that a customized About shortcut stays beside its loaded logo.
+Rust tests cover binding validation, settings-file persistence, explicit
+unassignment, conflicts, revision rejection, and storage failures. Frontend
+tests cover capture, matching, formatting, view modes, and stale registry patches.
+Native macOS/Windows checks are separate from this Linux flow.

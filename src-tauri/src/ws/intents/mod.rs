@@ -1,4 +1,5 @@
 mod app;
+mod command_bindings;
 mod bookmarks;
 pub(crate) mod bro;
 mod cache;
@@ -83,6 +84,7 @@ pub async fn dispatch(name: &str, scope: &Value, args: &Value, ctx: &mut IntentC
         );
     }
     match name {
+        "SetCommandBindings" | "ResetCommandBindings" | "ResetAllCommandBindings" => command_bindings::handle(name, args, ctx).await,
         "PublishNotification" | "ClearNotifications" => notifications::handle(name, args, ctx).await,
         "EjectSource" => eject::handle(args, ctx).await,
         "RefreshPanels"
@@ -219,7 +221,7 @@ fn should_record_command(name: &str) -> bool {
     // Journaling it would persist message payloads and ignore their channels.
     matches!(
         name,
-        "ClearIconCache"
+        "SetCommandBindings" | "ResetCommandBindings" | "ResetAllCommandBindings" | "ClearIconCache"
             | "ReorderPanelTab"
             | "GitCreateBranch"
             | "GitCheckoutRemoteBranch"

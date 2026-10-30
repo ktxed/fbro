@@ -11,6 +11,8 @@ export class FbroObserver {
     this.ws = null;
     this.messages = [];
     this.state = {
+      commands: {},
+      commandRevision: 0,
       panels: {},
       slots: {},
       sources: {},
@@ -380,6 +382,7 @@ export class FbroObserver {
   }
 
   #applySnapshot(domains) {
+    if (domains.commands) { this.state.commands = Object.fromEntries(domains.commands.map(command => [command.id, command])); this.state.commandRevision = domains.commandRevision; }
     if (domains.panels) this.state.panels = domains.panels;
     if (domains.slots) this.state.slots = domains.slots;
     if (domains.sources) {
@@ -397,6 +400,10 @@ export class FbroObserver {
 
   #applyPatch(msg) {
     const patch = msg.patch ?? {};
+    if (msg.domain === "commands" && msg.version > this.state.commandRevision) {
+      this.state.commands = Object.fromEntries(patch.commands.map(command => [command.id, command]));
+      this.state.commandRevision = msg.version;
+    }
     if (msg.domain === "slots" && msg.entityId) {
       if (patch.remove) delete this.state.slots[msg.entityId];
       else this.state.slots[msg.entityId] = { ...this.state.slots[msg.entityId], ...patch };

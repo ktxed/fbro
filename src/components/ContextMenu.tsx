@@ -294,7 +294,7 @@ export function ContextMenu({ client, menu }: ContextMenuProps) {
     const shortcutIndex = items.findIndex((item) => {
       if (item.kind !== "command" || !item.commandId) return false;
       const command = state.commands[item.commandId];
-      return !!command && command.bindings.some((binding) => bindingMatches(event as KeyboardEvent, binding));
+      return !!command && command.bindings.some((binding) => bindingMatches(event as KeyboardEvent, binding, state.panels[menu.panelId]?.viewMode ?? "list"));
     });
     if (shortcutIndex >= 0) {
       event.preventDefault();

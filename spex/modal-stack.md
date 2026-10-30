@@ -350,3 +350,34 @@ focus. The scrollable result area is keyboard reachable. Close, Escape, and
 Enter outside native activation targets dismiss/background the view without
 cancelling; Jobs owns reopening and cancellation. Shared stack restoration
 returns focus to the available opener or active listing.
+
+## Keyboard shortcut settings dialogs
+
+The shortcut recorder, conflict confirmation, and reset-all confirmation are
+nested `ModalLayer`/`ModalDialog` pairs above Settings. Recorder initial focus is
+the capture surface. While recording it claims Tab via `data-modal-owns-tab` and
+consumes the next supported non-modifier key in capture phase, even Enter or
+Escape. After capture the normal Tab trap resumes; Escape cancels the editor.
+Conflict confirmation initially focuses Abort; reset-all initially focuses
+Cancel. Each closing layer restores its available opener through the stack.
+
+The shortcut editor uses the standard compact modal header and action footer.
+The command name appears in the body above a single focusable capture surface;
+recording state has a static indicator and review renders the shortcut as a key
+cap. Short help text is separated from a row containing View context and Record
+again. Controls stack at narrow widths; large text and both color schemes retain
+visible focus and contained controls. Recording, review, saving, and cancellation
+retain the same keyboard ownership and focus handoffs.
+
+Shortcut conflict warnings emphasize each affected command by name in a separate
+highlighted row with List view / Grid view badges. The explanatory text describes
+reassignment without exposing registry IDs. Override and Abort retain native
+button activation, initial Abort focus, and restoration to the opener.
+
+Shortcut Save and per-command Reset use an aria-disabled busy state with guarded
+handlers while awaiting replies, keeping the eventual conflict opener focused.
+Closing the warning returns focus to that same control through the shared stack.
+
+Command palette rows give the command text the remaining width. Effective
+shortcut labels and the optional About logo stay adjacent at the trailing edge,
+including when About gains a customized shortcut.

@@ -1013,3 +1013,26 @@ include `general.osNotificationsEnabled` and read-only
 `general.osNotificationPlatform`; the preference is changed through
 `SetGeneralOption { key: "osNotificationsEnabled", value: boolean }`.
 See [notifications.md](./notifications.md).
+
+## Command binding mutations
+
+`StateSnapshot.domains.commands` contains the full effective registry, including
+`defaultBindings` and `customized`; `domains.commandRevision` is its revision.
+Bindings use `{strokes:[{key,shift?,ctrl?,alt?,meta?}],modes:[]}`. Empty `modes`
+means List and Grid; only one stroke is accepted in V1.
+
+Typed intents carry `requestId` and the snapshot's `revision`:
+
+- `SetCommandBindings {commandId,bindings,revision,override,requestId}`
+- `ResetCommandBindings {commandId,revision,override,requestId}`
+- `ResetAllCommandBindings {revision,requestId}`
+
+Replies are correlated `CommandBindingsOk {requestId,revision}`,
+`CommandBindingsConflict {requestId,revision,conflicts:[{commandId,title,modes}]}`,
+or `CommandBindingsFailed {requestId,revision,code,message}`. Failure codes are
+`INVALID_BINDINGS`, `STALE_REVISION`, and `STORAGE_FAILED`. Override always
+rechecks the reviewed revision. Abort sends no mutation. Success saves the
+complete candidate before activation, increments the revision, broadcasts
+`StatePatch {domain:"commands",version:revision,patch:{commands,commandRevision}}`
+with the full effective registry, and replies Ok. Clients reject patches whose
+version is not newer. Dispatch and all labels consume this same registry.

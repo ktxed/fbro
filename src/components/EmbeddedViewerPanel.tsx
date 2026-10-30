@@ -7,6 +7,7 @@ import { FileViewer, type FileViewerHandle } from "./FileViewer";
 import { isVideoExt } from "../viewers/media";
 import { IMAGE_DIRECT_LIMIT } from "../viewers/DirectFileViewer";
 import { findMatchingCommand, formatPrimaryBinding, getCommand, GLOBAL_SHORTCUT_COMMAND_IDS } from "../commands/interactive";
+import { zoomAction } from "../commands/bindings";
 import { useFocusReturn } from "../hooks/useFocusReturn";
 import { isAvailableFocusTarget } from "../utils/focusReturn";
 
@@ -103,17 +104,17 @@ export function EmbeddedViewerPanel({ ref, panelId, sourcePanelId, state, client
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.defaultPrevented || blocked) return;
-    if (findMatchingCommand(state.commands, ["file.view"], event.nativeEvent)) {
+    if (findMatchingCommand(state.commands, ["file.view"], event.nativeEvent, state.panels[sourcePanelId]?.viewMode ?? "list")) {
       event.preventDefault(); event.stopPropagation(); openViewer(); return;
     }
-    if (findMatchingCommand(state.commands, ["panel.viewer.embed"], event.nativeEvent)) {
+    if (findMatchingCommand(state.commands, ["panel.viewer.embed"], event.nativeEvent, state.panels[sourcePanelId]?.viewMode ?? "list")) {
       event.preventDefault(); event.stopPropagation(); onClose(); return;
     }
     // Application commands/zoom remain global; file operations for the hidden
     // listing never receive quick-preview keys.
-    if (((event.ctrlKey || event.metaKey) && ["=", "+", "-", "0"].includes(event.key))
+    if (zoomAction(event.nativeEvent) !== null
       || ((event.ctrlKey || event.metaKey || event.altKey)
-        && findMatchingCommand(state.commands, GLOBAL_SHORTCUT_COMMAND_IDS.filter(id => id.startsWith("app.")), event.nativeEvent))) return;
+        && findMatchingCommand(state.commands, GLOBAL_SHORTCUT_COMMAND_IDS.filter(id => id.startsWith("app.")), event.nativeEvent, state.panels[sourcePanelId]?.viewMode ?? "list"))) return;
     if (event.key === "Escape") {
       event.preventDefault(); event.stopPropagation(); onClose(); return;
     }

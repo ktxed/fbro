@@ -1,6 +1,8 @@
-import { useRef } from "react";
+import { useRef, type ReactNode } from "react";
+import { IconSettings, IconDeviceDesktop, IconRobot, IconShare, IconKeyboard } from "@tabler/icons-react";
 import { useAppDispatch, useAppState } from "../store";
 import type { SettingsTab } from "../store";
+import { SettingsKeyboardTab } from "./SettingsKeyboardTab";
 import { SettingsGeneralTab } from "./SettingsGeneralTab";
 import { SettingsDisplayTab } from "./SettingsDisplayTab";
 import { SettingsBrosTab } from "./SettingsBrosTab";
@@ -10,11 +12,12 @@ import { ResizableModal } from "./ResizableModal";
 import { ModalLayer } from "./ModalStack";
 import { rovingIndexForKey } from "./modalKeyboard";
 
-const TABS: { id: SettingsTab; label: string }[] = [
-  { id: "general", label: "General" },
-  { id: "display", label: "Display" },
-  { id: "bros", label: "Bros" },
-  { id: "sharing", label: "Sharing" },
+const TABS: { id: SettingsTab; label: string; icon: ReactNode }[] = [
+  { id: "general", label: "General", icon: <IconSettings size={16} aria-hidden="true" /> },
+  { id: "display", label: "Display", icon: <IconDeviceDesktop size={16} aria-hidden="true" /> },
+  { id: "bros", label: "Bros", icon: <IconRobot size={16} aria-hidden="true" /> },
+  { id: "sharing", label: "Sharing", icon: <IconShare size={16} aria-hidden="true" /> },
+  { id: "keyboard", label: "Shortcuts", icon: <IconKeyboard size={16} aria-hidden="true" /> },
 ];
 
 interface SettingsModalProps {
@@ -73,7 +76,7 @@ export function SettingsModal({ client }: SettingsModalProps) {
       >
         <div className="modal__header">Settings</div>
         <div className="settings-modal__layout">
-          <div className="settings-modal__sidebar" role="tablist" aria-label="Settings tabs">
+          <div className="settings-modal__sidebar" role="tablist" aria-label="Settings tabs" aria-orientation="vertical">
             {TABS.map((tab, i) => (
               <button
                 key={tab.id}
@@ -96,7 +99,8 @@ export function SettingsModal({ client }: SettingsModalProps) {
                   tabRefs.current[nextIndex]?.focus();
                 }}
               >
-                {tab.label}
+                {tab.icon}
+                <span>{tab.label}</span>
               </button>
             ))}
           </div>
@@ -112,6 +116,7 @@ export function SettingsModal({ client }: SettingsModalProps) {
             {activeTab === "display" && (
               <SettingsDisplayTab general={state.settings.general} client={client} />
             )}
+            {activeTab === "keyboard" && <SettingsKeyboardTab client={client} />}
             {activeTab === "bros" && <SettingsBrosTab client={client} />}
             {activeTab === "sharing" && <SettingsSharingTab client={client} />}
           </div>

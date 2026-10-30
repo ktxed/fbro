@@ -22,6 +22,7 @@
     "test:notifications:macos": "node tests/e2e/macos-notifications.mjs",
     "test:selection-mask": "node --test --test-isolation=none tests/selection-mask.test.mjs",
     "test:tabs": "node --test --test-isolation=none tests/tabs.test.mjs",
+    "test:keyboard-shortcuts": "node --test --test-isolation=none tests/keyboard-shortcuts.test.mjs",
     "test:modal-keyboard": "node --test --test-isolation=none tests/modal-keyboard.test.mjs",
     "showcase": "node tools/showcase/index.mjs"
   },

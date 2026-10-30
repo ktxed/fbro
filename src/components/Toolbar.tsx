@@ -11,7 +11,7 @@ import {
   GLOBAL_SHORTCUT_COMMAND_IDS,
   TOOLBAR_COMMAND_IDS,
 } from "../commands/interactive";
-import { modKey } from "../utils/platform";
+import { zoomAction } from "../commands/bindings";
 import { isArchiveSourceId, isGlobalSelectionSourceId } from "../utils/sourceId";
 import { applyZoom, nextZoomSize, DEFAULT_FONT_SIZE } from "../utils/zoom";
 import {
@@ -71,13 +71,18 @@ export function Toolbar({ client, onOpenJobsView }: { client: WsClient; onOpenJo
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.defaultPrevented) return;
-      if (modKey(e) && (e.key === "=" || e.key === "+")) { e.preventDefault(); const s = nextZoomSize(state.fontSize, 1);  applyZoom(s); client.sendIntent("SetFontSize", undefined, { value: s }); return; }
-      if (modKey(e) && e.key === "-")                    { e.preventDefault(); const s = nextZoomSize(state.fontSize, -1); applyZoom(s); client.sendIntent("SetFontSize", undefined, { value: s }); return; }
-      if (modKey(e) && e.key === "0")                    { e.preventDefault(); applyZoom(DEFAULT_FONT_SIZE); client.sendIntent("SetFontSize", undefined, { value: DEFAULT_FONT_SIZE }); return; }
+      const zoom = zoomAction(e);
+      if (zoom !== null) {
+        e.preventDefault();
+        const size = zoom === 0 ? DEFAULT_FONT_SIZE : nextZoomSize(state.fontSize, zoom);
+        applyZoom(size);
+        client.sendIntent("SetFontSize", undefined, { value: size });
+        return;
+      }
 
       const blockingModalActive = hasActiveModal || !!state.pendingContextMenu || !!state.pendingSourceMenu || !!state.bookmarksOpen;
       const paletteCommand = getCommand(state.commands, COMMAND_PALETTE_COMMAND_ID);
-      if (!blockingModalActive && paletteCommand && paletteCommand.bindings.some((binding) => bindingMatches(e, binding))) {
+      if (!blockingModalActive && !isEditableTarget(e.target) && paletteCommand && paletteCommand.bindings.some((binding) => bindingMatches(e, binding, state.panels[state.focus]?.viewMode ?? "list"))) {
         e.preventDefault();
         executeCommand(paletteCommand.id, {
           state,
