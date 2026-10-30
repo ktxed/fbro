@@ -1,4 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  IconSearch, IconSettings, IconListDetails, IconLayoutBottombar, IconTerminal2,
+  IconDeviceUsb, IconTerminal, IconLogout, IconInfoCircle, IconPencil, IconEye,
+  IconEdit, IconFilePlus, IconCopy, IconArrowsMove, IconCut, IconClipboard,
+  IconFolderPlus, IconTrash, IconFiles, IconLock, IconHome, IconFolder, IconRefresh,
+  IconHistory, IconFilter, IconArrowsExchange, IconDots, IconEyeOff, IconLayoutGrid,
+  IconArrowsSort, IconGitBranch, IconBookmark, IconBookmarks, IconPlus, IconX,
+  IconRobot, IconLayoutSidebar, IconArrowUp, IconArrowDown, IconArrowLeft,
+  IconArrowRight, IconArrowBarToUp, IconArrowBarToDown, IconChevronsUp,
+  IconChevronsDown, IconChevronLeft, IconChevronRight, IconArrowsLeftRight,
+  IconFolderOpen, IconCheckbox, IconCalculator, IconSelectAll, IconSquareOff,
+  IconCommand,
+} from "@tabler/icons-react";
 
 import {
   COMMAND_PALETTE_COMMAND_IDS,
@@ -14,6 +27,86 @@ import { ModalLayer } from "./ModalStack";
 import { isNativeActivationTarget } from "./modalKeyboard";
 
 const fbroIcon = new URL("../../logo256.png", import.meta.url).href;
+
+// Icons are visual cues; related navigation and selection commands deliberately
+// reuse directional/action icons while their labels describe the exact action.
+const COMMAND_ICONS: Partial<Record<string, typeof IconSearch>> = {
+  "app.search": IconSearch,
+  "app.settings": IconSettings,
+  "app.open_jobs": IconListDetails,
+  "app.toggle_button_bar": IconLayoutBottombar,
+  "app.install_fbro_command": IconTerminal2,
+  "app.eject_source": IconDeviceUsb,
+  "app.open_terminal": IconTerminal,
+  "app.quit": IconLogout,
+  "file.info": IconInfoCircle,
+  "file.rename": IconPencil,
+  "file.view": IconEye,
+  "file.edit": IconEdit,
+  "file.quick_edit": IconEdit,
+  "file.touch": IconFilePlus,
+  "file.copy": IconCopy,
+  "file.copy_external": IconCopy,
+  "file.move": IconArrowsMove,
+  "file.cut_external": IconCut,
+  "file.paste_external": IconClipboard,
+  "file.paste_external_move": IconClipboard,
+  "file.mkdir": IconFolderPlus,
+  "file.delete": IconTrash,
+  "file.compare": IconFiles,
+  "file.set_permissions": IconLock,
+  "panel.navigate_home": IconHome,
+  "panel.navigate_to_path": IconFolder,
+  "panel.navigate_source_root": IconFolder,
+  "panel.refresh": IconRefresh,
+  "panel.history.open": IconHistory,
+  "panel.filter.open": IconFilter,
+  "panel.path.sync": IconArrowsExchange,
+  "panel.context_menu": IconDots,
+  "panel.toggle_hidden": IconEyeOff,
+  "panel.toggle_view_mode": IconLayoutGrid,
+  "panel.sort.open": IconArrowsSort,
+  "panel.git.actions": IconGitBranch,
+  "git.init": IconGitBranch,
+  "panel.bookmarks.open": IconBookmark,
+  "panel.bookmarks.browse": IconBookmarks,
+  "panel.toggle_embedded_terminal": IconTerminal,
+  "panel.tab.new": IconPlus,
+  "panel.tab.close": IconX,
+  "panel.pass_to_bro": IconRobot,
+  "panel.viewer.embed": IconLayoutSidebar,
+  "panel.cursor.up": IconArrowUp,
+  "panel.cursor.down": IconArrowDown,
+  "panel.cursor.left": IconArrowLeft,
+  "panel.cursor.right": IconArrowRight,
+  "panel.cursor.first": IconArrowBarToUp,
+  "panel.cursor.last": IconArrowBarToDown,
+  "panel.cursor.page_up": IconChevronsUp,
+  "panel.cursor.page_down": IconChevronsDown,
+  "panel.selection.extend_up": IconArrowUp,
+  "panel.selection.extend_down": IconArrowDown,
+  "panel.selection.extend_left": IconArrowLeft,
+  "panel.selection.extend_right": IconArrowRight,
+  "panel.selection.extend_first": IconArrowBarToUp,
+  "panel.selection.extend_last": IconArrowBarToDown,
+  "panel.selection.toggle_or_size": IconCheckbox,
+  "panel.selection.calculate_sizes": IconCalculator,
+  "panel.selection.select_all": IconSelectAll,
+  "panel.selection.clear": IconSquareOff,
+  "panel.selection.invert": IconArrowsExchange,
+  "panel.selection.select_by_mask": IconFilter,
+  "panel.selection.deselect_by_mask": IconFilter,
+  "panel.open": IconFolderOpen,
+  "panel.open_entry": IconFolderOpen,
+  "panel.navigate_up": IconArrowUp,
+  "panel.history.back": IconArrowLeft,
+  "panel.history.forward": IconArrowRight,
+  "panel.focus.switch": IconArrowsLeftRight,
+  "panel.source.next": IconChevronRight,
+  "panel.source.previous": IconChevronLeft,
+  "panel.tab.next": IconChevronRight,
+  "panel.tab.prev": IconChevronLeft,
+};
 
 interface CommandPaletteModalProps {
   client: WsClient;
@@ -142,6 +235,7 @@ export function CommandPaletteModal({ client, onOpenJobsView }: CommandPaletteMo
           <div id="command-palette-list" className="command-palette__list" ref={listRef} role="listbox">
             {filteredCommands.map((command, index) => {
               const binding = formatPrimaryBinding(command);
+              const CommandIcon = COMMAND_ICONS[command.id] ?? IconCommand;
               const selected = index === selectedIndex;
               return (
                 <button
@@ -153,18 +247,20 @@ export function CommandPaletteModal({ client, onOpenJobsView }: CommandPaletteMo
                   tabIndex={-1}
                   className={`command-palette__item${selected ? " command-palette__item--selected" : ""}`}
                   data-selected={selected ? "true" : "false"}
+                  data-command-id={command.id}
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={() => executeSelectedCommand(command.id)}
                 >
+                  <span className="command-palette__item-icon" aria-hidden="true">
+                    {command.id === "app.about" ? <img src={fbroIcon} alt="" />
+                      : <CommandIcon size={20} />}
+                  </span>
                   <span className="command-palette__item-main">
                     <span className="command-palette__item-title">{command.title}</span>
                     <span className="command-palette__item-category">{command.category}</span>
                   </span>
                   {binding && (
                     <span className="command-palette__item-binding">{binding}</span>
-                  )}
-                  {command.id === "app.about" && (
-                    <img className="command-palette__item-icon" src={fbroIcon} alt="" aria-hidden="true" />
                   )}
                 </button>
               );

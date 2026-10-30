@@ -416,8 +416,9 @@ changes until the complete candidate settings have been saved successfully.
 Viewer/dialog-local customization, multi-stroke dispatch, profiles, and
 import/export remain deferred.
 
-Dispatch and recording canonicalize `KeyA`–`KeyZ` and `Digit0`–`Digit9` to
-physical letters/digits before matching. This resolves key/code ambiguity to
+History navigation symbols `[` and `]` retain their logical identity even when
+WebKit reports a physical digit code. Other events in dispatch and recording
+canonicalize `KeyA`–`KeyZ` and `Digit0`–`Digit9` to physical letters/digits. This resolves key/code ambiguity to
 one stroke on remapped and non-Latin layouts, including Option-produced keys.
 Symbols from other physical codes (for example `Equal`, `Backquote`, or numpad
 symbols) use the produced symbol; an unshifted symbol binding also accepts

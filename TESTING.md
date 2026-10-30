@@ -494,8 +494,15 @@ per-command and global resets, reload persistence, and nested focus restoration.
 Recorder/review screenshots cover both themes with large text, including Record
 again and control clipping checks. Conflict screenshots cover emphasized command
 names, separate List/Grid badges, and restoration to the Save opener. The palette
-check verifies that a customized About shortcut stays beside its loaded logo.
+check verifies the leading About logo, recognizable action icons, aligned titles,
+and right-aligned customized shortcuts.
 Rust tests cover binding validation, settings-file persistence, explicit
 unassignment, conflicts, revision rejection, and storage failures. Frontend
 tests cover capture, matching, formatting, view modes, and stale registry patches.
 Native macOS/Windows checks are separate from this Linux flow.
+
+For the local directory/file symlink and Back/Forward regression, run the same
+current-build smoke command with `FBRO_E2E_SYMLINKS_ONLY=1`. This isolates
+navigation through a directory link, nested Up, bracket-key history return,
+file-link viewing, and broken-link feedback. A history timeout reports the
+actual browser key/code/modifier event to identify layout-specific matching.

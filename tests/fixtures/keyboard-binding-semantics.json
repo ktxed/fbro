@@ -6,5 +6,9 @@
   {"left":{"strokes":[{"key":"=" ,"shift":true}],"modes":[]},"right":{"strokes":[{"key":"+"}],"modes":[]},"event":{"key":"+","code":"Equal","shiftKey":true},"overlap":false},
   {"left":{"strokes":[{"key":"a","alt":true}],"modes":[]},"right":{"strokes":[{"key":"a"}],"modes":[]},"event":{"key":"å","code":"KeyA","altKey":true},"overlap":false},
   {"left":{"strokes":[{"key":"F12"}],"modes":["list"]},"right":{"strokes":[{"key":"F12"}],"modes":["grid"]},"event":{"key":"F12","code":"F12"},"overlap":false},
-  {"left":{"strokes":[{"key":"F12"}],"modes":[]},"right":{"strokes":[{"key":"F12"}],"modes":["grid"]},"event":{"key":"F12","code":"F12"},"overlap":true}
+  {"left":{"strokes":[{"key":"F12"}],"modes":[]},"right":{"strokes":[{"key":"F12"}],"modes":["grid"]},"event":{"key":"F12","code":"F12"},"overlap":true},
+  {"left":{"strokes":[{"key":"["}],"modes":[]},"right":{"strokes":[{"key":"["}],"modes":[]},"event":{"key":"[","code":"Digit8"},"overlap":true},
+  {"left":{"strokes":[{"key":"["}],"modes":[]},"right":{"strokes":[{"key":"8"}],"modes":[]},"event":{"key":"[","code":"Digit8"},"overlap":false},
+  {"left":{"strokes":[{"key":"]"}],"modes":[]},"right":{"strokes":[{"key":"]"}],"modes":[]},"event":{"key":"]","code":"Digit9"},"overlap":true},
+  {"left":{"strokes":[{"key":"]"}],"modes":[]},"right":{"strokes":[{"key":"9"}],"modes":[]},"event":{"key":"]","code":"Digit9"},"overlap":false}
 ]

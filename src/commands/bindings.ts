@@ -21,8 +21,8 @@ export function bindingMatches(event: KeyboardLikeEvent, binding: KeyBinding, mo
   if (binding.modes?.length && (!mode || !binding.modes.includes(mode))) return false;
   const stroke = binding.strokes[0];
   const key = normalizeKey(stroke.key);
-  // Letter/digit physical keys own their event, even when a layout produces
-  // another letter or symbol. Capture uses this same canonical interpretation.
+  // Matching and capture share one key interpretation, including logical
+  // history brackets reported by WebKit with a physical digit code.
   const eventKey = canonicalEventKey(event);
   const shiftSymbol = eventKey === key && key.length === 1 && key.trim().length > 0 && /[^a-z0-9]/i.test(key) && !stroke.shift && event.shiftKey;
   return eventKey === key
@@ -31,6 +31,9 @@ export function bindingMatches(event: KeyboardLikeEvent, binding: KeyBinding, mo
 }
 
 function canonicalEventKey(event: KeyboardLikeEvent) {
+  // WebKit can emit bracket characters with Digit8/Digit9 and no modifiers.
+  // Preserve history navigation rather than interpreting those symbols as digits.
+  if (event.key === "[" || event.key === "]") return event.key;
   if (/^Key[A-Z]$/.test(event.code)) return event.code.slice(3).toLowerCase();
   if (/^Digit[0-9]$/.test(event.code)) return event.code.slice(5);
   return normalizeKey(event.key);

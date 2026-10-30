@@ -426,6 +426,15 @@ async function verifyEmptyFolder(browser, observer) {
   await observer.waitForEntry("left", "note.txt", "file");
 }
 
+export async function runSymlinkNavigationFlow(browser, observer) {
+  const aSrc = backendPath("a", "src");
+  const alpha = hostPath(path.posix.join(aSrc, "alpha"));
+  fs.mkdirSync(path.join(alpha, "nested", "child"), { recursive: true });
+  fs.writeFileSync(path.join(alpha, "note.txt"), "symlink viewer fixture\n");
+  fs.writeFileSync(path.join(alpha, "remove.txt"), "symlink fixture\n");
+  await verifyLocalSymlinkNavigation(browser, observer, aSrc);
+}
+
 async function verifyLocalSymlinkNavigation(browser, observer, aSrc) {
   const linksDir = path.posix.join(aSrc, "symlink-test");
   const hostLinksDir = hostPath(linksDir);
@@ -469,8 +478,26 @@ async function verifyLocalSymlinkNavigation(browser, observer, aSrc) {
 
   await browser.keys("ArrowRight");
   await observer.waitForPanelPath("left", path.posix.join(aSrc, "alpha"));
-  await browser.keys("[");
-  await observer.waitForPanelPath("left", linksDir);
+  await browser.execute(() => {
+    window.__fbroHistoryKey = null;
+    window.__fbroHistoryKeyListener = event => { window.__fbroHistoryKey = {
+      key: event.key, code: event.code, ctrl: event.ctrlKey, alt: event.altKey, shift: event.shiftKey, meta: event.metaKey,
+    }; };
+    window.addEventListener("keydown", window.__fbroHistoryKeyListener, true);
+  });
+  try {
+    await browser.keys("[");
+    await observer.waitForPanelPath("left", linksDir);
+  } catch (error) {
+    const keyEvent = await browser.execute(() => window.__fbroHistoryKey);
+    throw new Error(`${error.message}; history-back key event: ${JSON.stringify(keyEvent)}`);
+  } finally {
+    await browser.execute(() => {
+      window.removeEventListener("keydown", window.__fbroHistoryKeyListener, true);
+      delete window.__fbroHistoryKeyListener;
+      delete window.__fbroHistoryKey;
+    });
+  }
   await expectLinkCursor();
   await browser.keys("]");
   await observer.waitForPanelPath("left", path.posix.join(aSrc, "alpha"));
