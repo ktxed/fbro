@@ -1,0 +1,10 @@
+[
+  {"left":{"strokes":[{"key":"a"}],"modes":[]},"right":{"strokes":[{"key":"A"}],"modes":[]},"event":{"key":"ж","code":"KeyA"},"overlap":true},
+  {"left":{"strokes":[{"key":"a"}],"modes":[]},"right":{"strokes":[{"key":"q"}],"modes":[]},"event":{"key":"q","code":"KeyA"},"overlap":false},
+  {"left":{"strokes":[{"key":"1","shift":true}],"modes":[]},"right":{"strokes":[{"key":"!","shift":true}],"modes":[]},"event":{"key":"!","code":"Digit1","shiftKey":true},"overlap":false},
+  {"left":{"strokes":[{"key":"+"}],"modes":[]},"right":{"strokes":[{"key":"+","shift":true}],"modes":[]},"event":{"key":"+","code":"Equal","shiftKey":true},"overlap":true},
+  {"left":{"strokes":[{"key":"=" ,"shift":true}],"modes":[]},"right":{"strokes":[{"key":"+"}],"modes":[]},"event":{"key":"+","code":"Equal","shiftKey":true},"overlap":false},
+  {"left":{"strokes":[{"key":"a","alt":true}],"modes":[]},"right":{"strokes":[{"key":"a"}],"modes":[]},"event":{"key":"å","code":"KeyA","altKey":true},"overlap":false},
+  {"left":{"strokes":[{"key":"F12"}],"modes":["list"]},"right":{"strokes":[{"key":"F12"}],"modes":["grid"]},"event":{"key":"F12","code":"F12"},"overlap":false},
+  {"left":{"strokes":[{"key":"F12"}],"modes":[]},"right":{"strokes":[{"key":"F12"}],"modes":["grid"]},"event":{"key":"F12","code":"F12"},"overlap":true}
+]

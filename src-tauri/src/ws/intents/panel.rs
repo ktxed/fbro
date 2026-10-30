@@ -1460,6 +1460,8 @@ fn neighbors_for_prefetch(
 }
 
 async fn set_panel_view_mode(scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
+    let mutation = { ctx.state.lock().await.settings_mutation.clone() };
+    let _mutation = mutation.lock().await;
     let panel_id = resolve_panel_id(scope, ctx.state).await;
     let mode_str = arg_str(args, "mode").unwrap_or("list");
     let target = match crate::state::PanelViewMode::from_str(mode_str) {
@@ -1535,7 +1537,7 @@ async fn set_panel_view_mode(scope: &Value, args: &Value, ctx: &mut IntentContex
     if let Some(settings) = persist_payload {
         let _ = tokio::task::spawn_blocking(move || {
             let _ = crate::state::settings::save(&settings);
-        });
+        }).await;
     }
 }
 

@@ -12,7 +12,7 @@ use crate::persistence::{PanelSession, SessionState, SlotSession, TabSession};
 use crate::state::{AppState, Panel, PanelStatus, SharedState};
 use crate::vfs::VfsDriver;
 use crate::watcher::WatcherCommand;
-use crate::ws::commands::build_interactive_commands;
+
 use crate::ws::protocol::{
     now, DirSizeQueueSnapshot, DirSizeTaskSchema, FileOpFileSchema, GeneralSettingsSchema,
     JobQueueSchema, LayoutDomain, ModalSizePreferenceSchema, PanelSlotSchema, PanelSnapshot,
@@ -138,7 +138,8 @@ pub(crate) fn build_state_snapshot(
                     })
                     .collect(),
             },
-            commands: build_interactive_commands(),
+            commands: crate::ws::command_bindings::effective_commands(&state.settings),
+            command_revision: state.command_revision,
             bookmarks: state.bookmarks.clone(),
             font_size: state.font_size,
             settings: SettingsSnapshot {

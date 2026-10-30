@@ -10,6 +10,9 @@ use crate::ws::protocol::{now, ServerMessage};
 use crate::ws::runtime::{rescan_panel, selected_names_for, IntentContext};
 
 pub(crate) async fn handle(name: &str, args: &Value, ctx: &mut IntentContext<'_>) {
+    // Serialize complete settings-file snapshots with shortcut edits.
+    let mutation = { ctx.state.lock().await.settings_mutation.clone() };
+    let _mutation = mutation.lock().await;
     match name {
         "SetGeneralOption" => set_general_option(args, ctx).await,
         "SetModalSizePreference" => set_modal_size_preference(args, ctx).await,

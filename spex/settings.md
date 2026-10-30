@@ -9,7 +9,7 @@ Settings are exposed through a tabbed modal dialog triggered by **Ctrl+,** (or *
 
 | Concern | Choice |
 |---|---|
-| Modal shape | Vertical tab list (left) + content area (right) |
+| Modal shape | Vertical icon-and-label tab list (left) + content area (right) |
 | Trigger | Command `app.settings`, default binding **Ctrl+,** / **Cmd+,**, also reachable from the command palette |
 | Apply model | Live-apply — no Save button. Each control dispatches its own typed intent on change; BE pushes `StatePatch` |
 | Wire surface | Per-setting intents (typed). One fat `UpdateSetting { path, value }` intent was rejected. |
@@ -275,3 +275,31 @@ visible journal.
 3. Write `SettingsXTab.tsx`.
 4. Add the tab id to `TABS` in `SettingsModal.tsx`.
 5. No changes to the modal shell or state machinery needed.
+
+## Keyboard Shortcuts
+
+The Shortcuts tab (keyboard icon) uses the backend command registry rather than the
+general-options tree. `settings.json` stores `command_bindings`, a map from
+command ID to an ordered binding array. A missing entry uses the platform
+defaults; `[]` explicitly unassigns the command. Each binding has `strokes`
+(exactly one `{key,shift?,ctrl?,alt?,meta?}` in V1) and `modes` (empty means both
+views). Snapshots include effective commands, default bindings, `customized`,
+and `commandRevision`.
+
+Add/Edit opens a recording modal, then a review step with Save and Cancel.
+Other actions apply only after backend confirmation. Save failures leave the
+editor open with an inline error. Per-command reset reviews conflicts like any
+other save. Reset all uses a nested confirmation initially focused on Cancel
+and clears every override in one persisted transaction. Closing nested dialogs
+restores the opener through the shared modal stack. Shortcut writes and other
+runtime settings writes share a serialization gate to prevent lost settings.
+
+The settings sidebar uses decorative Tabler icons for General, Display, Bros,
+Sharing, and Shortcuts. Labels stay on one line and the sidebar sizes to its
+content, including at larger text sizes. Tabs retain their existing order,
+roving keyboard focus, and selected-state semantics.
+
+Shortcuts search uses an inline magnifying-glass icon and an accessible Search
+commands label. The All / Customized / Unassigned filter has an inline funnel icon and sits to
+its right with
+an accessible Show commands label; keyboard order remains search then filter.

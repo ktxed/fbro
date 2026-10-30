@@ -1,18 +1,11 @@
-use crate::ws::protocol::{InteractiveCommandSchema, KeyBindingSchema};
+use crate::ws::protocol::{InteractiveCommandSchema, KeyBindingSchema, KeyStrokeSchema};
 
 fn is_macos() -> bool {
     cfg!(target_os = "macos")
 }
 
 fn keybinding(key: &str) -> KeyBindingSchema {
-    KeyBindingSchema {
-        key: key.to_string(),
-        shift: false,
-        ctrl: false,
-        alt: false,
-        meta: false,
-        modes: Vec::new(),
-    }
+    keybinding_with_modifiers(key, false, false, false, false)
 }
 
 fn keybinding_with_modifiers(
@@ -23,11 +16,13 @@ fn keybinding_with_modifiers(
     meta: bool,
 ) -> KeyBindingSchema {
     KeyBindingSchema {
-        key: key.to_string(),
-        shift,
-        ctrl,
-        alt,
-        meta,
+        strokes: vec![KeyStrokeSchema {
+            key: key.to_string(),
+            shift,
+            ctrl,
+            alt,
+            meta,
+        }],
         modes: Vec::new(),
     }
 }
@@ -66,6 +61,7 @@ fn command(
     intent_name: Option<&str>,
 ) -> InteractiveCommandSchema {
     InteractiveCommandSchema {
+        customized: false,
         id: id.to_string(),
         category: category.to_string(),
         title: title.to_string(),
@@ -85,7 +81,13 @@ pub(crate) fn build_interactive_commands() -> Vec<InteractiveCommandSchema> {
             None,
         ),
         command("app.about", "App", "About fbro", vec![], None),
-        command("app.toggle_button_bar", "App", "Toggle Button Bar", vec![], None),
+        command(
+            "app.toggle_button_bar",
+            "App",
+            "Toggle Button Bar",
+            vec![],
+            None,
+        ),
         command(
             "app.search",
             "App",

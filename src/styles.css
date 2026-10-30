@@ -3167,6 +3167,7 @@ body {
 }
 
 .command-palette__item-main {
+  flex: 1;
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -5739,24 +5740,36 @@ body {
 }
 
 .settings-modal__sidebar {
-  width: 130px;
-  flex-shrink: 0;
+  width: max-content;
+  flex: 0 0 auto;
   border-right: 1px solid var(--border);
-  padding: 8px 0;
+  padding: 8px 6px;
   display: flex;
   flex-direction: column;
+  gap: 4px;
 }
 
 .settings-modal__tab {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   background: none;
   border: none;
   text-align: left;
-  padding: 6px 12px;
-  font-family: var(--font);
-  font-size: var(--font-size);
+  padding: 8px 10px;
+  font: inherit;
+  line-height: 1.4;
+  white-space: nowrap;
   color: var(--text-dim);
   cursor: pointer;
-  border-radius: 0;
+  border-radius: 4px;
+}
+
+.settings-modal__tab svg {
+  width: 1.15em;
+  height: 1.15em;
+  flex-shrink: 0;
 }
 
 .settings-modal__tab:hover {
@@ -5776,6 +5789,7 @@ body {
 
 .settings-modal__content {
   flex: 1;
+  min-width: 0;
   overflow-y: auto;
   padding: 12px 16px;
 }
@@ -7001,3 +7015,82 @@ body {
 .git-modal__branch-base { color: var(--text-dim); overflow-wrap: anywhere; }
 .git-modal__branch-form input { appearance: none; font: inherit; background: var(--bg-input); color: var(--text); border: 1px solid var(--border); border-radius: 3px; padding: 4px 8px; min-width: 140px; flex: 1; }
 .git-modal__branch-error { flex-basis: 100%; color: var(--text-warning); overflow-wrap: anywhere; }
+
+/* Keyboard shortcut settings share the existing theme and modal primitives. */
+.keyboard-settings { display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+.keyboard-settings label, .keyboard-settings__dialog label { display: flex; align-items: center; gap: 10px; }
+.keyboard-settings input, .keyboard-settings select, .keyboard-settings__dialog select {
+  appearance: none; font: inherit; color: var(--text); background: var(--bg);
+  border: 1px solid var(--border); border-radius: 4px; padding: 5px 8px;
+}
+.keyboard-settings input { flex: 1; min-width: 0; }
+.keyboard-settings__search-row { display: flex; align-items: center; gap: 10px; }
+.keyboard-settings__search { position: relative; display: flex; flex: 1; min-width: 0; }
+.keyboard-settings__search input { width: 100%; padding-left: calc(1em + 20px); }
+.keyboard-settings__search > svg { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); width: 1em; height: 1em; color: var(--text-dim); pointer-events: none; }
+.keyboard-settings__filter { position: relative; display: flex; flex-shrink: 0; }
+.keyboard-settings__filter select { padding-left: calc(1em + 20px); padding-right: 30px; }
+.keyboard-settings__filter > svg { position: absolute; right: 9px; top: 50%; transform: translateY(-50%); color: var(--text-dim); pointer-events: none; }
+.keyboard-settings__filter > .keyboard-settings__filter-icon { left: 10px; right: auto; width: 1em; height: 1em; }
+.keyboard-settings__search-row input, .keyboard-settings__search-row select { height: max(32px, calc(1.4em + 12px)); line-height: 1.4; }
+.keyboard-settings__help { margin: 0; color: var(--text-muted); font-size: 0.9em; }
+.keyboard-settings__commands { max-height: 220px; overflow-y: auto; border: 1px solid var(--border); }
+.keyboard-settings__command {
+  appearance: none; font: inherit; color: var(--text); background: var(--bg);
+  border: 0; border-bottom: 1px solid var(--border); width: 100%; padding: 8px;
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; text-align: left;
+}
+.keyboard-settings__command[aria-selected="true"] { background: var(--bg-selected); }
+.keyboard-settings__command small { display: block; color: var(--text-muted); }
+.keyboard-settings__chip { display: inline-block; margin-left: 8px; }
+.keyboard-settings__details { display: flex; flex-direction: column; gap: 8px; }
+.keyboard-settings__binding, .keyboard-settings__actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.keyboard-settings__binding > span { flex: 1; }
+
+.modal.shortcut-editor { width: min(92vw, 480px); min-width: 0; max-height: calc(100dvh - 32px); }
+.shortcut-editor__body { display: flex; flex-direction: column; gap: 12px; padding: 16px; }
+.shortcut-editor__command { font-weight: bold; overflow-wrap: anywhere; }
+.shortcut-editor__capture {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
+  min-height: 104px; padding: 16px; background: var(--bg-input);
+  border: 1px solid var(--border); border-radius: 4px; text-align: center;
+}
+.shortcut-editor .shortcut-editor__capture:focus { outline: none; border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.shortcut-editor__status { display: flex; align-items: center; gap: 6px; color: var(--text-dim); font-size: 0.92em; }
+.shortcut-editor__dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+.shortcut-editor__capture kbd { margin: 0; padding: 5px 10px; color: var(--text); font-size: inherit; line-height: 1.4; background: var(--bg-elev); }
+.shortcut-editor__help { color: var(--text-dim); font-size: 0.92em; line-height: 1.5; }
+.shortcut-editor__controls { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 12px; }
+.shortcut-editor .shortcut-editor__context { display: flex; flex-direction: column; align-items: stretch; gap: 6px; }
+.shortcut-editor__select { position: relative; display: flex; }
+.shortcut-editor__select select { width: 100%; min-width: 0; padding-right: 30px; background: var(--bg-input); }
+.shortcut-editor__select:has(select:disabled) { opacity: 0.55; }
+.shortcut-editor__select svg { position: absolute; right: 9px; top: 50%; transform: translateY(-50%); pointer-events: none; color: var(--text-dim); }
+.shortcut-editor__controls select, .shortcut-editor__controls .modal__btn { height: max(32px, calc(1.4em + 12px)); line-height: 1.4; padding-top: 5px; padding-bottom: 5px; }
+.shortcut-editor__error { color: var(--text-warning); overflow-wrap: anywhere; }
+.shortcut-editor__review { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; overflow-wrap: anywhere; }
+@media (max-width: 420px) {
+  .shortcut-editor__controls { grid-template-columns: minmax(0, 1fr); }
+  .shortcut-editor__controls .modal__btn { justify-self: start; }
+}
+
+
+.modal.shortcut-conflicts { min-width: 0; max-height: calc(100dvh - 32px); }
+.shortcut-conflicts__body { display: flex; flex-direction: column; gap: 12px; padding: 16px; }
+.shortcut-conflicts__commands { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.shortcut-conflicts__command {
+  display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px 16px;
+  padding: 12px; background: var(--bg-input); border: 1px solid var(--border);
+  border-left: 3px solid var(--text-warning); border-radius: 4px;
+}
+.shortcut-conflicts__command strong { flex: 1 1 220px; min-width: 0; color: var(--text); overflow-wrap: anywhere; }
+.shortcut-conflicts__contexts { display: flex; flex-wrap: wrap; gap: 6px; }
+.shortcut-conflicts__context { padding: 2px 6px; border: 1px solid var(--border); border-radius: 3px; background: var(--bg-header); font-size: 0.85em; white-space: nowrap; }
+.shortcut-conflicts__help { color: var(--text-dim); font-size: 0.92em; line-height: 1.5; }
+
+/* Keep async conflict openers focusable while their handlers reject repeats. */
+.keyboard-settings .modal__btn[aria-disabled="true"],
+.shortcut-editor .modal__btn[aria-disabled="true"] {
+  opacity: 0.55; cursor: wait; background: var(--bg-footer);
+  color: var(--text-dim); border-color: var(--border);
+}

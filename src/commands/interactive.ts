@@ -2,7 +2,6 @@ import { publishNotification } from "../notifications/service";
 import type { Dispatch } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
-import { isMac } from "../utils/platform";
 import { selectionMaskForEntry } from "../utils/selectionMask";
 import type { AppAction, AppState } from "../store";
 import { markHistoryNavPending } from "../store";
@@ -13,7 +12,6 @@ import type {
   FileOpFile,
   FileOpType,
   InteractiveCommand,
-  KeyBinding,
   PanelState,
   Source,
   VFSEntry,
@@ -119,15 +117,8 @@ export const COMMAND_PALETTE_COMMAND_IDS = [
   ]),
 ].filter((commandId) => commandId !== COMMAND_PALETTE_COMMAND_ID);
 
-const KEY_LABELS: Record<string, string> = {
-  " ": "Space",
-  ArrowUp: "Up",
-  ArrowDown: "Down",
-  ArrowLeft: "Left",
-  ArrowRight: "Right",
-};
-
-type KeyboardLikeEvent = Pick<KeyboardEvent, "key" | "shiftKey" | "ctrlKey" | "altKey" | "metaKey" | "code">;
+import { bindingMatches, formatBinding, type KeyboardLikeEvent } from "./bindings";
+export { bindingMatches, formatBinding } from "./bindings";
 
 interface ExecuteCommandContext {
   state: AppState;
@@ -158,16 +149,6 @@ export interface ContextActionTarget {
   size?: number;
   scope?: "entry" | "selection";
   entries?: FileOpFile[];
-}
-
-function normalizeKey(key: string): string {
-  return key.length === 1 ? key.toLowerCase() : key;
-}
-
-function keyLabel(key: string): string {
-  if (KEY_LABELS[key]) return KEY_LABELS[key];
-  if (key.length === 1) return key === " " ? "Space" : key.toUpperCase();
-  return key;
 }
 
 function entryAt(panel: Pick<PanelState, "entries" | "windowStart">, absIndex: number) {
@@ -487,47 +468,8 @@ export function getCommand(commands: Record<string, InteractiveCommand>, command
   return commands[commandId];
 }
 
-export function formatBinding(binding: KeyBinding) {
-  const parts: string[] = [];
-  if (binding.meta) parts.push(isMac ? "Cmd" : "Meta");
-  if (binding.ctrl) parts.push("Ctrl");
-  if (binding.alt) parts.push("Alt");
-  if (binding.shift) parts.push("Shift");
-  parts.push(keyLabel(binding.key));
-  return parts.join("+");
-}
-
 export function formatPrimaryBinding(command?: InteractiveCommand) {
   return command?.bindings[0] ? formatBinding(command.bindings[0]) : "";
-}
-
-export function bindingMatches(event: KeyboardLikeEvent, binding: KeyBinding, mode?: "list" | "grid") {
-  if (binding.modes && binding.modes.length > 0) {
-    if (!mode || !binding.modes.includes(mode)) return false;
-  }
-  const normalizedEventKey = normalizeKey(event.key);
-  const normalizedBindingKey = normalizeKey(binding.key);
-  const matchesPhysicalLetterKey =
-    normalizedBindingKey.length === 1
-    && /^[a-z]$/i.test(normalizedBindingKey)
-    && event.code === `Key${normalizedBindingKey.toUpperCase()}`;
-  const matchesPhysicalDigitKey =
-    normalizedBindingKey.length === 1
-    && /^[0-9]$/.test(normalizedBindingKey)
-    && event.code === `Digit${normalizedBindingKey}`;
-  const isShiftProducedSymbol =
-    normalizedEventKey === normalizedBindingKey
-    && normalizedBindingKey.length === 1
-    && normalizedBindingKey.trim().length > 0
-    && /[^a-z0-9]/i.test(normalizedBindingKey)
-    && !binding.shift
-    && event.shiftKey;
-
-  return (normalizedEventKey === normalizedBindingKey || matchesPhysicalLetterKey || matchesPhysicalDigitKey)
-    && (isShiftProducedSymbol || !!binding.shift === event.shiftKey)
-    && !!binding.ctrl === event.ctrlKey
-    && !!binding.alt === event.altKey
-    && !!binding.meta === event.metaKey;
 }
 
 export function findMatchingCommand(

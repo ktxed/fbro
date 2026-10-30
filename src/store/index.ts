@@ -1,3 +1,4 @@
+import { applyCommandsUpdate } from "../commands/bindings";
 import { createContext, useContext, useReducer, type Dispatch } from "react";
 import { isSearchSourceId } from "../utils/sourceId";
 import { applySlotUpdate } from "./slots";
@@ -268,7 +269,7 @@ export interface PendingSearch {
   searchParams: SearchParams | null;
 }
 
-export type SettingsTab = "general" | "display" | "bros" | "sharing";
+export type SettingsTab = "general" | "display" | "bros" | "sharing" | "keyboard";
 
 export interface PendingAttributes {
   panelId: string;
@@ -296,6 +297,7 @@ export interface AppState {
   jobQueue: JobQueue;
   dirSizeQueue: DirSizeTask[];
   commands: Record<string, InteractiveCommand>;
+  commandRevision: number;
   pendingOp: PendingOp | null;
   activeJobId: string | null;
   pendingQuit: { activeJobs: number } | null;
@@ -391,6 +393,7 @@ const initialState: AppState = {
   jobQueue: { jobIds: [], completedCount: 0 },
   dirSizeQueue: [],
   commands: {},
+  commandRevision: 0,
   pendingOp: null,
   activeJobId: null,
   pendingQuit: null,
@@ -582,6 +585,7 @@ function applySnapshot(state: AppState, msg: StateSnapshotMessage): AppState {
     const commands: Record<string, InteractiveCommand> = {};
     for (const command of domains.commands) commands[command.id] = command;
     next.commands = commands;
+    next.commandRevision = domains.commandRevision ?? 0;
   }
   if (domains.bookmarks) {
     next.bookmarks = domains.bookmarks;
@@ -616,6 +620,9 @@ function applySnapshot(state: AppState, msg: StateSnapshotMessage): AppState {
 }
 
 function applyPatch(state: AppState, msg: StatePatchMessage): AppState {
+  if (msg.domain === "commands") {
+    return applyCommandsUpdate(state, msg.version, msg.patch.commands as InteractiveCommand[]);
+  }
   if (msg.domain === "notifications") {
     return { ...state, notifications: applyNotificationPatch(state.notifications, msg.version, msg.patch as NotificationsPatch) };
   }

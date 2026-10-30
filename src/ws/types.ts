@@ -432,12 +432,16 @@ export interface FileOpFile {
 
 export type DuplicateNamePolicy = "exclude" | "suffix";
 
-export interface KeyBinding {
+export interface KeyStroke {
   key: string;
   shift?: boolean;
   ctrl?: boolean;
   alt?: boolean;
   meta?: boolean;
+}
+
+export interface KeyBinding {
+  strokes: KeyStroke[];
   /** When non-empty, the binding only matches when the focused panel's
    *  viewMode is in this list. Absent/empty = applies in all modes. */
   modes?: ("list" | "grid")[];
@@ -449,6 +453,7 @@ export interface InteractiveCommand {
   title: string;
   bindings: KeyBinding[];
   defaultBindings: KeyBinding[];
+  customized: boolean;
   intentName?: string;
 }
 
@@ -856,6 +861,7 @@ export interface StateSnapshotMessage {
     jobQueue?: JobQueue;
     dirSizeQueue?: { tasks: DirSizeTask[] };
     commands?: InteractiveCommand[];
+    commandRevision?: number;
     bookmarks?: BookmarkEntry[];
     fontSize?: number;
     settings?: SettingsState;
@@ -869,7 +875,7 @@ export interface StateSnapshotMessage {
 export interface StatePatchMessage {
   type: "StatePatch";
   timestamp: number;
-  domain: "panels" | "layout" | "slots" | "focus" | "selections" | "jobs" | "jobQueue" | "sources" | "dirSizeQueue" | "bookmarks" | "procs" | "settings" | "discoveredPeers" | "shareConfig" | "globalSelections" | "notifications";
+  domain: "commands" | "panels" | "layout" | "slots" | "focus" | "selections" | "jobs" | "jobQueue" | "sources" | "dirSizeQueue" | "bookmarks" | "procs" | "settings" | "discoveredPeers" | "shareConfig" | "globalSelections" | "notifications";
   entityId?: string;
   version: number;
   patch: {
@@ -1322,7 +1328,19 @@ export interface AddSharedFolderFailedMessage {
   message: string;
 }
 
+export interface CommandBindingConflict { commandId: string; title: string; modes: ("list" | "grid")[] }
+export type CommandBindingsReply =
+  | { type: "CommandBindingsOk"; timestamp: number; requestId: string; revision: number }
+  | { type: "CommandBindingsConflict"; timestamp: number; requestId: string; revision: number; conflicts: CommandBindingConflict[] }
+  | { type: "CommandBindingsFailed"; timestamp: number; requestId: string; revision: number; code: string; message: string };
+
+export type CommandBindingsIntent =
+  | { name: "SetCommandBindings"; args: { requestId: string; commandId: string; bindings: KeyBinding[]; revision: number; override: boolean } }
+  | { name: "ResetCommandBindings"; args: { requestId: string; commandId: string; revision: number; override: boolean } }
+  | { name: "ResetAllCommandBindings"; args: { requestId: string; revision: number } };
+
 export type BEMessage =
+  | CommandBindingsReply
   | NotificationReply
   | AddSharedFolderOkMessage
   | AddSharedFolderFailedMessage

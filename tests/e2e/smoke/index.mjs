@@ -1,4 +1,5 @@
 import path from "node:path";
+import { runKeyboardShortcutsFlow } from "./cases/keyboard-shortcuts.mjs";
 import {
   appBinary,
   artifactsDir,
@@ -73,6 +74,11 @@ async function main() {
     browserA = await startBrowser("fbro-a", webdriverHosts.a, webdriverPorts.a, appA);
     observerA = new FbroObserver("fbro-a", wsUrls.a);
     await observerA.connect();
+
+    if (process.env.FBRO_E2E_KEYBOARD_SHORTCUTS_ONLY === "1") {
+      await runKeyboardShortcutsFlow(browserA, observerA);
+      return;
+    }
 
     if (process.env.FBRO_E2E_JOURNAL_SORT_ONLY === "1") {
       await runJournalSortFlow(browserA, observerA);
@@ -157,6 +163,7 @@ async function main() {
       await runViewerFlow(browserA, observerA);
       return;
     }
+    await runKeyboardShortcutsFlow(browserA, observerA);
     await runNotificationsFlow(browserA, observerA);
     await runButtonBarFlow(browserA, observerA);
     await runFocusHandoffFlow(browserA, observerA);

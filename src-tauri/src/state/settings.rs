@@ -5,6 +5,9 @@ use std::path::PathBuf;
 #[derive(Serialize, Deserialize, Clone, Default)]
 pub struct Settings {
     pub general: GeneralSettings,
+    /// Missing command IDs use defaults; empty lists explicitly unassign.
+    #[serde(default)]
+    pub command_bindings: HashMap<String, Vec<crate::ws::protocol::KeyBindingSchema>>,
     /// Per-panel view mode ("list" or "grid"), keyed by panel_id. Only
     /// honoured when `general.save_panel_view_mode` is true.
     #[serde(default)]
@@ -323,7 +326,10 @@ pub fn load() -> Settings {
 }
 
 pub fn save(settings: &Settings) -> std::io::Result<()> {
-    let path = settings_path();
+    save_to_path(settings, &settings_path())
+}
+
+pub(crate) fn save_to_path(settings: &Settings, path: &std::path::Path) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -377,6 +383,7 @@ mod tests {
             panel_view_modes: HashMap::new(),
             modal_sizes: HashMap::new(),
             location_sort_disabled_at_ms: None,
+            command_bindings: HashMap::new(),
         };
         let mut value = serde_json::to_value(settings).unwrap();
         value.as_object_mut().unwrap().remove("modal_sizes");
@@ -420,6 +427,7 @@ mod tests {
             panel_view_modes: HashMap::new(),
             modal_sizes,
             location_sort_disabled_at_ms: None,
+            command_bindings: HashMap::new(),
         };
 
         let encoded = serde_json::to_string(&settings).unwrap();
@@ -440,6 +448,7 @@ mod tests {
             panel_view_modes: HashMap::new(),
             modal_sizes: HashMap::new(),
             location_sort_disabled_at_ms: None,
+            command_bindings: HashMap::new(),
         };
 
         migrate_settings(&mut settings);
@@ -461,6 +470,7 @@ mod tests {
             panel_view_modes: HashMap::new(),
             modal_sizes: HashMap::new(),
             location_sort_disabled_at_ms: None,
+            command_bindings: HashMap::new(),
         };
 
         migrate_settings(&mut settings);

@@ -8,6 +8,9 @@ use std::collections::HashMap;
 #[derive(Serialize, Clone, Debug)]
 #[serde(tag = "type")]
 pub enum ServerMessage {
+    CommandBindingsOk { timestamp: u64, #[serde(rename = "requestId")] request_id: String, revision: u64 },
+    CommandBindingsConflict { timestamp: u64, #[serde(rename = "requestId")] request_id: String, revision: u64, conflicts: Vec<CommandBindingConflictSchema> },
+    CommandBindingsFailed { timestamp: u64, #[serde(rename = "requestId")] request_id: String, code: String, message: String, revision: u64 },
     /// Internal delivery envelope. The originating worker has already applied
     /// this message to authoritative state; it must be unwrapped before WS I/O.
     #[serde(skip)]
@@ -660,6 +663,8 @@ pub struct StateDomains {
     #[serde(rename = "dirSizeQueue")]
     pub dir_size_queue: DirSizeQueueSnapshot,
     pub commands: Vec<InteractiveCommandSchema>,
+    #[serde(rename = "commandRevision")]
+    pub command_revision: u64,
     pub bookmarks: Vec<crate::bookmarks::BookmarkEntry>,
     #[serde(rename = "fontSize")]
     pub font_size: u8,
@@ -953,9 +958,9 @@ pub struct SourceCapabilities {
     pub supports_jobs: bool,
 }
 
-#[derive(Serialize, Clone, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct KeyBindingSchema {
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct KeyStrokeSchema {
     pub key: String,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub shift: bool,
@@ -965,15 +970,22 @@ pub struct KeyBindingSchema {
     pub alt: bool,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub meta: bool,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct KeyBindingSchema {
+    pub strokes: Vec<KeyStrokeSchema>,
     /// When non-empty, the binding only matches if the focused panel's
     /// viewMode is in this list. Empty = applies in all modes.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub modes: Vec<String>,
 }
 
 #[derive(Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct InteractiveCommandSchema {
+    pub customized: bool,
     pub id: String,
     pub category: String,
     pub title: String,
@@ -1389,3 +1401,7 @@ pub enum ViewerTargetSchema {
     Empty,
     Error { message: String },
 }
+
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct CommandBindingConflictSchema { pub command_id: String, pub title: String, pub modes: Vec<String> }

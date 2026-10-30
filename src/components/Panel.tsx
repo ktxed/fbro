@@ -1618,7 +1618,7 @@ export function Panel({
       e.stopPropagation();
       return;
     }
-    if (unmodified && e.key === "ArrowRight" && panel.viewMode === "list") {
+    if (panel.viewMode === "list" && findMatchingCommand(appState.commands, ["panel.open_entry"], e.nativeEvent, panel.viewMode)) {
       const cursorRow = listRef.current?.querySelector<HTMLElement>(`[data-abs-index="${panel.cursor}"]`);
       // Singleton directories have no toolbar, so Right drills down. A
       // directory anchoring a multi-selection does have bulk actions and Right
@@ -2192,7 +2192,7 @@ export function Panel({
               <button
                 type="button"
                 className="panel__card-info-btn"
-                title="File info (i)"
+                title={["File info", formatPrimaryBinding(appState.commands["file.info"])].filter(Boolean).join(" · ")}
                 onMouseDown={(e) => {
                   // Don't let the listing's cursor / focus logic intercept.
                   e.stopPropagation();
@@ -2499,7 +2499,7 @@ export function Panel({
         <button
           className="panel__home-btn"
           tabIndex={-1}
-          title="New tab (Ctrl+T)"
+          title={["New tab", formatPrimaryBinding(appState.commands["panel.tab.new"])].filter(Boolean).join(" · ")}
           onClick={() => client.sendIntent("panel.tab.new", undefined, { slotId: panel.slotId, source: "clone" })}
         >+</button>
         <button
@@ -2518,7 +2518,7 @@ export function Panel({
           ref={bookmarkBtnRef}
           className={`panel__bookmark-btn${appState.bookmarks.some((b) => b.path === panel.path) ? " panel__bookmark-btn--active" : ""}`}
           tabIndex={-1}
-          title="Bookmarks (Ctrl+D)"
+          title={["Bookmarks", formatPrimaryBinding(appState.commands["panel.bookmarks.open"])].filter(Boolean).join(" · ")}
           onClick={() => {
             if (appState.bookmarksOpen?.panelId === panelId) dispatch({ type: "CLOSE_BOOKMARKS" });
             else dispatch({ type: "OPEN_BOOKMARKS", panelId });

@@ -383,3 +383,52 @@ system settings retains the fbro modal and its focused button so returning to
 fbro resumes there; replies and inline errors do not move focus. In a bare macOS
 or Windows development run the delivery checkbox is disabled, so Tab reaches the settings
 button after the info control; explanatory text remains available through the tooltip.
+
+## Configurable registry shortcuts
+
+Settings → Shortcuts lists every backend registry command, including
+unassigned commands. Search covers titles, IDs, categories, and formatted
+shortcuts; All, Customized, and Unassigned filters narrow the list. The command
+list uses one Tab stop with Up/Down and Home/End navigation. Selected-command
+controls add, edit, remove, remove all, or restore default bindings. Registry
+hints and dispatch always read the current effective registry.
+
+Bindings contain an ordered `strokes` array plus `modes` (`list`, `grid`, or an
+empty array for both). V1 validates exactly one stroke. Editing retains its
+position; adding appends. Defaults remain platform-specific in `ws/commands.rs`.
+The top recorder modal explicitly captures the next supported non-modifier key,
+including Tab, Enter, and Escape, consumes its event, and then returns to normal
+modal navigation. The capture surface claims Tab through `data-modal-owns-tab`.
+Escape after capture cancels. Recording suppresses application shortcuts,
+including zoom. Ctrl/Cmd plus, minus, equals, and zero, plus the fixed
+ContextMenu / Shift+F10 context-menu aliases, are reserved and rejected
+by the backend. Existing modal, text editor, terminal, and viewer ownership rules
+continue to take precedence over customized application commands.
+
+Conflicting changes require Override or Abort. Conflicts name every affected
+command and overlapping view context. Override removes only overlapping
+contexts from other bindings; a Both-views binding can become Grid-only.
+Disjoint List/Grid bindings may share a combination. Overlapping duplicates
+within one command are invalid. A stale revision rejects even an Override;
+users must review and retry with the current registry. No dispatch or label
+changes until the complete candidate settings have been saved successfully.
+
+Viewer/dialog-local customization, multi-stroke dispatch, profiles, and
+import/export remain deferred.
+
+Dispatch and recording canonicalize `KeyA`–`KeyZ` and `Digit0`–`Digit9` to
+physical letters/digits before matching. This resolves key/code ambiguity to
+one stroke on remapped and non-Latin layouts, including Option-produced keys.
+Symbols from other physical codes (for example `Equal`, `Backquote`, or numpad
+symbols) use the produced symbol; an unshifted symbol binding also accepts
+Shift-produced versions. A symbol on a physical digit is recorded as that digit
+plus its modifiers. On layouts placing a default symbol on a letter/digit key,
+users can record that physical combination explicitly. This deterministic rule
+replaces the previous logical-or-physical matcher, which could dispatch two
+different commands from one event depending on registry order. Shared frontend
+and Rust conflict fixtures cover the canonical interpretation.
+
+A stale editor never silently advances its revision or applies an old index to
+a new array. It shows the current bindings and requires explicit review; edits
+follow the original binding identity after reordering. If that original changed
+or was removed, the user cancels and reopens the current binding instead.
