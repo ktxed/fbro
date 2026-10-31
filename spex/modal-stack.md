@@ -378,6 +378,11 @@ Shortcut Save and per-command Reset use an aria-disabled busy state with guarded
 handlers while awaiting replies, keeping the eventual conflict opener focused.
 Closing the warning returns focus to that same control through the shared stack.
 
-Command palette rows give the command text the remaining width. Effective
-shortcut labels and the optional About logo stay adjacent at the trailing edge,
-including when About gains a customized shortcut.
+Command palette rows have a leading decorative icon column, followed by the
+command title/category and a right-aligned effective shortcut. About uses the
+fbro logo; recognizable actions such as Search, Settings, and file operations
+use Tabler icons. Cursor movement, selection extension, paging, sources, and
+tabs reuse directional icons as visual cues. Other selection commands use
+selection, filter, or calculator icons; unfamiliar commands have a generic
+command icon. All titles stay aligned. Icons do not add focus stops or alter
+command activation.

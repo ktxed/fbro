@@ -73,3 +73,13 @@ test('reserved zoom uses the same canonical key as recording and command matchin
   assert.equal(zoomAction(event('-', {metaKey:true}), true), -1);
   assert.equal(zoomAction(event('-', {ctrlKey:true}), true), null);
 });
+
+test('history brackets keep their logical symbol when WebKit reports a physical digit', () => {
+  for (const [symbol, digit] of [['[', '8'], [']', '9']]) {
+    const e = event(symbol, {code:`Digit${digit}`});
+    assert.equal(bindingMatches(e, binding(symbol)), true);
+    assert.equal(bindingMatches(e, binding(digit)), false);
+    assert.equal(captureStroke(e).key, symbol);
+    assert.equal(bindingMatches(event(digit, {code:`Digit${digit}`}), binding(digit)), true);
+  }
+});

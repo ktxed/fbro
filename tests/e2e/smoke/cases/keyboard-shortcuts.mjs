@@ -66,18 +66,49 @@ export async function runKeyboardShortcutsFlow(browser, observer) {
     await browser.$(".command-palette__input").waitForDisplayed();
     await (await browser.$(".command-palette__input")).setValue("app.about");
     const aboutLayout = await browser.execute(() => {
-      const icon = document.querySelector('.command-palette__item-icon');
+      const icon = document.querySelector('img.command-palette__item-icon, .command-palette__item-icon img');
       const row = icon?.closest('button');
       const binding = row?.querySelector('.command-palette__item-binding');
-      if (!icon || !binding) return null;
+      const main = row?.querySelector('.command-palette__item-main');
+      if (!icon || !binding || !main) return null;
       const image = icon.getBoundingClientRect();
       const shortcut = binding.getBoundingClientRect();
-      return { gap: image.left - shortcut.right, loaded: icon.complete && icon.naturalWidth > 0, binding: binding.textContent };
+      return { gap: main.getBoundingClientRect().left - image.right, loaded: icon.complete && icon.naturalWidth > 0, binding: binding.textContent, trailing: row.getBoundingClientRect().right - shortcut.right };
     });
     assert.ok(aboutLayout?.loaded, "About logo loads with a customized shortcut");
     assert.equal(aboutLayout.binding, "F12");
-    assert.ok(aboutLayout.gap >= 0 && aboutLayout.gap <= 20, "customized About shortcut stays beside its trailing icon");
+    assert.ok(aboutLayout.gap >= 0 && aboutLayout.gap <= 20, "About logo precedes its command title");
+    assert.ok(aboutLayout.trailing >= 0 && aboutLayout.trailing <= 20, "customized About shortcut remains right-aligned");
     await browser.saveScreenshot(path.join(artifactsDir, "screenshots", "palette-about-custom-shortcut.png"));
+    await (await browser.$(".command-palette__input")).click();
+    await browser.keys(["Control", "a"]);
+    await key("Backspace");
+    await browser.$('.command-palette [data-command-id="app.search"]').waitForDisplayed();
+    for (const scheme of ["fbro-dark", "daylight"]) {
+      observer.sendIntent("SetGeneralOption", undefined, { key: "colorScheme", value: scheme });
+      observer.sendIntent("SetFontSize", undefined, { value: 20 });
+      await waitFor(() => browser.execute(scheme => document.querySelector(".app")?.dataset.colorScheme === scheme
+        && parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--font-size")) === 20, scheme), { label: `palette icons ${scheme} large text` });
+      const paletteIcons = await browser.execute(() => {
+        const row = id => document.querySelector(`.command-palette [data-command-id="${id}"]`);
+        return {
+          actions: ["app.search", "app.settings", "file.copy", "panel.cursor.up", "panel.selection.extend_up", "panel.selection.calculate_sizes"].every(id => row(id)?.querySelector('.command-palette__item-icon svg')
+            && row(id).querySelector('.command-palette__item-icon').getAttribute('aria-hidden') === 'true'),
+          complete: [...document.querySelectorAll('.command-palette__item')].every(item => item.querySelector('.command-palette__item-icon svg, .command-palette__item-icon img')),
+          titles: ["app.search", "app.about", "panel.cursor.up"].map(id => row(id)?.querySelector('.command-palette__item-main')?.getBoundingClientRect().left),
+        };
+      });
+      assert.equal(paletteIcons.actions, true, "navigation, selection, and familiar actions have decorative icons");
+      assert.equal(paletteIcons.complete, true, "every command has a visual cue");
+      assert.ok(paletteIcons.titles.every(left => Number.isFinite(left) && Math.abs(left - paletteIcons.titles[0]) <= 1), "titles stay aligned across different command icons");
+      await browser.execute(() => { document.querySelector('.command-palette__list').scrollTop = 0; });
+      await browser.saveScreenshot(path.join(artifactsDir, "screenshots", `palette-leading-icons-${scheme}.png`));
+      await browser.execute(() => document.querySelector('.command-palette [data-command-id="panel.cursor.up"]').scrollIntoView({ block: "start" }));
+      await browser.saveScreenshot(path.join(artifactsDir, "screenshots", `palette-navigation-icons-${scheme}.png`));
+    }
+    observer.sendIntent("SetGeneralOption", undefined, { key: "colorScheme", value: previousScheme });
+    observer.sendIntent("SetFontSize", undefined, { value: previousFontSize });
+    await waitFor(() => browser.execute(size => parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--font-size")) === size, previousFontSize), { label: "restore palette font size" });
     await key("Escape");
     await key("F12"); await browser.$('[data-modal-id="about"]').waitForDisplayed();
     await key("Escape");

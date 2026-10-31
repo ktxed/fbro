@@ -3189,11 +3189,18 @@ body {
 }
 
 .command-palette__item-icon {
-  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 32px;
   width: 32px;
   height: 32px;
-  object-fit: contain;
+  color: var(--text-dim);
 }
+
+.command-palette__item-icon img { width: 100%; height: 100%; object-fit: contain; }
+.command-palette__item-icon svg { width: 20px; height: 20px; }
+.command-palette__item--selected .command-palette__item-icon { color: var(--accent); }
 
 .command-palette__empty {
   color: var(--text-dim);
