@@ -3916,6 +3916,7 @@ body {
 .jobs-modal__state--queued     { color: var(--text-warning); }
 .jobs-modal__state--awaitingdecision { color: var(--text-warning); }
 .jobs-modal__state--completed  { color: var(--text-success); }
+.jobs-modal__state--cancelling { color: var(--text-warning); }
 .jobs-modal__state--cancelled  { color: var(--text-dim); }
 .jobs-modal__state--failed     { color: var(--text-danger); }
 .jobs-modal__state--paused     { color: var(--text-paused); }

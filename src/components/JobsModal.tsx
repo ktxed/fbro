@@ -641,7 +641,7 @@ function DirSizeTaskRow({ task, client }: { task: DirSizeTask; client: WsClient 
     ? `${elapsedSeconds}s`
     : `${Math.floor(elapsedSeconds / 60)}m ${elapsedSeconds % 60}s`;
   const idleLabel = task.status === "Running" && idleSeconds >= 10 ? `No progress for ${idleSeconds}s` : null;
-  const currentPath = task.status === "Running" ? task.currentPath : null;
+  const currentPath = task.status !== "Queued" ? task.currentPath : null;
   const currentAction = task.status === "Queued"
     ? "Waiting for a folder-size slot"
     : actionLabel(task.currentAction);
@@ -654,13 +654,15 @@ function DirSizeTaskRow({ task, client }: { task: DirSizeTask; client: WsClient 
         <span className={`jobs-modal__state jobs-modal__state--${task.status.toLowerCase()}`}>
           {task.status}
         </span>
-        <button
-          className="jobs-modal__cancel"
-          title="Cancel folder size calculation"
-          onClick={() => client.sendIntent("CancelSizeCalculation", task.panelId, { name: task.entryName })}
-        >
-          <IconX size={12} /> Cancel
-        </button>
+        {task.status !== "Cancelling" && (
+          <button
+            className="jobs-modal__cancel"
+            title="Cancel folder size calculation"
+            onClick={() => client.sendIntent("CancelSizeCalculation", task.panelId, { name: task.entryName })}
+          >
+            <IconX size={12} /> Cancel
+          </button>
+        )}
       </div>
 
       <div className="jobs-modal__paths">
@@ -978,7 +980,7 @@ export function JobsModal({ onClose, client }: { onClose: () => void; client: Ws
                   <div className="jobs-modal__section-title">Folder Size Queue</div>
                   {dirSizeTasks.map(task => (
                     <DirSizeTaskRow
-                      key={`${task.panelId}:${task.entryName}:${task.enqueuedAt}`}
+                      key={task.taskId}
                       task={task}
                       client={client}
                     />

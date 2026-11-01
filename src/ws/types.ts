@@ -390,7 +390,7 @@ export interface DirSizeTask {
   enqueuedAt: number;
   startedAt?: number;
   lastProgressAt?: number;
-  status: "Queued" | "Running";
+  status: "Queued" | "Running" | "Cancelling";
   dirsScanned: number;
   filesScanned: number;
   bytesScanned: number;

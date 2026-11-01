@@ -23,6 +23,9 @@ const STALE_LOG_INTERVAL: Duration = Duration::from_secs(5);
 enum DirSizeTaskStatus {
     Queued,
     Running,
+    /// Cancelled (or replaced) while running; the blocking worker still holds
+    /// its slot until the scan returns, so the row stays visible until then.
+    Cancelling,
 }
 
 impl DirSizeTaskStatus {
@@ -30,6 +33,7 @@ impl DirSizeTaskStatus {
         match self {
             Self::Queued => "Queued",
             Self::Running => "Running",
+            Self::Cancelling => "Cancelling",
         }
     }
 }
@@ -44,6 +48,96 @@ struct TrackedTask {
     status: DirSizeTaskStatus,
     cancel_tx: watch::Sender<bool>,
     progress: DirSizeProgress,
+}
+
+/// A runner whose task was cancelled or replaced but whose blocking worker has
+/// not returned yet.
+struct DetachedTask {
+    panel_id: String,
+    entry_name: String,
+    task: TrackedTask,
+}
+
+/// Active tasks keyed by `(panel_id, entry_name)`, plus runners that are still
+/// winding down after a cancel. Derefs to the active map.
+#[derive(Default)]
+struct TaskTable {
+    active: HashMap<(String, String), TrackedTask>,
+    detached: HashMap<u64, DetachedTask>,
+}
+
+type Tasks = Arc<Mutex<TaskTable>>;
+
+impl std::ops::Deref for TaskTable {
+    type Target = HashMap<(String, String), TrackedTask>;
+    fn deref(&self) -> &Self::Target {
+        &self.active
+    }
+}
+
+impl std::ops::DerefMut for TaskTable {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.active
+    }
+}
+
+impl TaskTable {
+    /// Keep a cancelled task visible if its worker is already running.
+    fn detach(&mut self, panel_id: &str, entry_name: &str, mut task: TrackedTask) {
+        if task.status != DirSizeTaskStatus::Running {
+            return;
+        }
+        task.status = DirSizeTaskStatus::Cancelling;
+        task.progress.current_action = Some("cancel_waiting_worker_exit".to_string());
+        self.detached.insert(
+            task.task_id,
+            DetachedTask {
+                panel_id: panel_id.to_string(),
+                entry_name: entry_name.to_string(),
+                task,
+            },
+        );
+    }
+
+    fn snapshot(&self) -> Vec<DirSizeTaskSnapshot> {
+        let mut snapshot: Vec<DirSizeTaskSnapshot> = self
+            .active
+            .iter()
+            .map(|((panel_id, entry_name), task)| task_snapshot(panel_id, entry_name, task))
+            .chain(
+                self.detached
+                    .values()
+                    .map(|d| task_snapshot(&d.panel_id, &d.entry_name, &d.task)),
+            )
+            .collect();
+        snapshot.sort_by(|left, right| {
+            left.enqueued_at
+                .cmp(&right.enqueued_at)
+                .then_with(|| left.panel_id.cmp(&right.panel_id))
+                .then_with(|| left.entry_name.cmp(&right.entry_name))
+                .then_with(|| left.task_id.cmp(&right.task_id))
+        });
+        snapshot
+    }
+}
+
+fn task_snapshot(panel_id: &str, entry_name: &str, task: &TrackedTask) -> DirSizeTaskSnapshot {
+    DirSizeTaskSnapshot {
+        task_id: task.task_id,
+        panel_id: panel_id.to_string(),
+        entry_name: entry_name.to_string(),
+        full_path: task.full_path.clone(),
+        enqueued_at: task.enqueued_at,
+        started_at: task.started_at,
+        last_progress_at: task.last_progress_at,
+        status: task.status.as_str().to_string(),
+        dirs_scanned: task.progress.dirs_scanned,
+        files_scanned: task.progress.files_scanned,
+        bytes_scanned: task.progress.bytes_scanned,
+        errors: task.progress.errors,
+        current_path: task.progress.current_path.clone(),
+        current_action: task.progress.current_action.clone(),
+    }
 }
 
 struct DirSizeWorkItem {
@@ -176,7 +270,7 @@ impl DirSizeCache {
 // ── DirSizeQueue ─────────────────────────────────────────────────────────────
 
 pub struct DirSizeQueue {
-    tasks: Arc<Mutex<HashMap<(String, String), TrackedTask>>>,
+    tasks: Tasks,
     pending: Arc<Mutex<VecDeque<DirSizeWorkItem>>>,
     notify: Arc<Notify>,
     cache: Arc<Mutex<DirSizeCache>>,
@@ -185,7 +279,7 @@ pub struct DirSizeQueue {
 
 impl DirSizeQueue {
     pub fn new() -> Self {
-        let tasks = Arc::new(Mutex::new(HashMap::new()));
+        let tasks: Tasks = Arc::new(Mutex::new(TaskTable::default()));
         let pending = Arc::new(Mutex::new(VecDeque::new()));
         let notify = Arc::new(Notify::new());
         let cache = Arc::new(Mutex::new(DirSizeCache::new()));
@@ -211,33 +305,7 @@ impl DirSizeQueue {
     }
 
     pub async fn snapshot(&self) -> Vec<DirSizeTaskSnapshot> {
-        let tasks = self.tasks.lock().await;
-        let mut snapshot: Vec<DirSizeTaskSnapshot> = tasks
-            .iter()
-            .map(|((panel_id, entry_name), task)| DirSizeTaskSnapshot {
-                task_id: task.task_id,
-                panel_id: panel_id.clone(),
-                entry_name: entry_name.clone(),
-                full_path: task.full_path.clone(),
-                enqueued_at: task.enqueued_at,
-                started_at: task.started_at,
-                last_progress_at: task.last_progress_at,
-                status: task.status.as_str().to_string(),
-                dirs_scanned: task.progress.dirs_scanned,
-                files_scanned: task.progress.files_scanned,
-                bytes_scanned: task.progress.bytes_scanned,
-                errors: task.progress.errors,
-                current_path: task.progress.current_path.clone(),
-                current_action: task.progress.current_action.clone(),
-            })
-            .collect();
-        snapshot.sort_by(|left, right| {
-            left.enqueued_at
-                .cmp(&right.enqueued_at)
-                .then_with(|| left.panel_id.cmp(&right.panel_id))
-                .then_with(|| left.entry_name.cmp(&right.entry_name))
-        });
-        snapshot
+        self.tasks.lock().await.snapshot()
     }
 
     /// Return a cached size for `path` if one exists and has not expired.
@@ -291,7 +359,11 @@ impl DirSizeQueue {
                 );
                 let _ = old.cancel_tx.send(true);
             }
-            old.map(|task| task.task_id)
+            old.map(|task| {
+                let old_task_id = task.task_id;
+                tasks.detach(&panel_id, &entry_name, task);
+                old_task_id
+            })
         };
         if let Some(old_task_id) = replaced_task_id {
             remove_pending_task(&self.pending, old_task_id).await;
@@ -391,9 +463,15 @@ impl DirSizeQueue {
     /// immediately (called from the intent handler) so the FE gets instant
     /// feedback; the background task will clean up when it detects the signal.
     pub async fn cancel(&self, panel_id: &str, entry_name: &str, tx: &mpsc::Sender<ServerMessage>) {
+        // Detach under the same lock as the removal so the runner never
+        // disappears from the queue while its worker is still alive.
         let removed = {
             let mut tasks = self.tasks.lock().await;
-            tasks.remove(&(panel_id.to_string(), entry_name.to_string()))
+            let removed = tasks.remove(&(panel_id.to_string(), entry_name.to_string()));
+            if let Some(task) = &removed {
+                tasks.detach(panel_id, entry_name, task.clone());
+            }
+            removed
         };
         if let Some(task) = removed {
             eprintln!(
@@ -428,7 +506,7 @@ struct MonitorTaskSnapshot {
 
 fn spawn_worker_loop(
     worker_id: usize,
-    tasks: Arc<Mutex<HashMap<(String, String), TrackedTask>>>,
+    tasks: Tasks,
     pending: Arc<Mutex<VecDeque<DirSizeWorkItem>>>,
     notify: Arc<Notify>,
     cache: Arc<Mutex<DirSizeCache>>,
@@ -464,7 +542,7 @@ fn spawn_worker_loop(
 async fn run_work_item(
     worker_id: usize,
     item: DirSizeWorkItem,
-    tasks: &Arc<Mutex<HashMap<(String, String), TrackedTask>>>,
+    tasks: &Tasks,
     cache: &Arc<Mutex<DirSizeCache>>,
 ) {
     let DirSizeWorkItem {
@@ -876,7 +954,7 @@ fn outcome_name(outcome: &DirSizeOutcome) -> &'static str {
 }
 
 fn spawn_queue_monitor(
-    tasks: Arc<Mutex<HashMap<(String, String), TrackedTask>>>,
+    tasks: Tasks,
     pending: Arc<Mutex<VecDeque<DirSizeWorkItem>>>,
 ) {
     tokio::spawn(async move {
@@ -963,12 +1041,14 @@ fn spawn_queue_monitor(
 }
 
 async fn remove_task_if_matches(
-    tasks: &Arc<Mutex<HashMap<(String, String), TrackedTask>>>,
+    tasks: &Tasks,
     panel_id: &str,
     entry_name: &str,
     task_id: u64,
 ) -> bool {
     let mut tasks = tasks.lock().await;
+    // The worker for this task has returned, so it no longer holds a slot.
+    tasks.detached.remove(&task_id);
     let key = (panel_id.to_string(), entry_name.to_string());
     let should_remove = tasks
         .get(&key)
@@ -986,7 +1066,7 @@ async fn remove_task_if_matches(
 }
 
 async fn is_current_task(
-    tasks: &Arc<Mutex<HashMap<(String, String), TrackedTask>>>,
+    tasks: &Tasks,
     panel_id: &str,
     entry_name: &str,
     task_id: u64,
@@ -1009,7 +1089,7 @@ async fn remove_pending_task(pending: &Arc<Mutex<VecDeque<DirSizeWorkItem>>>, ta
 }
 
 async fn update_task_progress(
-    tasks: &Arc<Mutex<HashMap<(String, String), TrackedTask>>>,
+    tasks: &Tasks,
     panel_id: &str,
     entry_name: &str,
     task_id: u64,
@@ -1026,38 +1106,10 @@ async fn update_task_progress(
 }
 
 async fn emit_queue_patch(
-    tasks: &Arc<Mutex<HashMap<(String, String), TrackedTask>>>,
+    tasks: &Tasks,
     tx: &mpsc::Sender<ServerMessage>,
 ) {
-    let snapshot = {
-        let tasks = tasks.lock().await;
-        let mut snapshot: Vec<DirSizeTaskSnapshot> = tasks
-            .iter()
-            .map(|((panel_id, entry_name), task)| DirSizeTaskSnapshot {
-                task_id: task.task_id,
-                panel_id: panel_id.clone(),
-                entry_name: entry_name.clone(),
-                full_path: task.full_path.clone(),
-                enqueued_at: task.enqueued_at,
-                started_at: task.started_at,
-                last_progress_at: task.last_progress_at,
-                status: task.status.as_str().to_string(),
-                dirs_scanned: task.progress.dirs_scanned,
-                files_scanned: task.progress.files_scanned,
-                bytes_scanned: task.progress.bytes_scanned,
-                errors: task.progress.errors,
-                current_path: task.progress.current_path.clone(),
-                current_action: task.progress.current_action.clone(),
-            })
-            .collect();
-        snapshot.sort_by(|left, right| {
-            left.enqueued_at
-                .cmp(&right.enqueued_at)
-                .then_with(|| left.panel_id.cmp(&right.panel_id))
-                .then_with(|| left.entry_name.cmp(&right.entry_name))
-        });
-        snapshot
-    };
+    let snapshot = tasks.lock().await.snapshot();
     match tx.try_send(ServerMessage::StatePatch {
         timestamp: now(),
         domain: "dirSizeQueue".to_string(),
@@ -1282,4 +1334,45 @@ fn calculate_dir_size(
         size: total,
         progress,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tracked(task_id: u64, status: DirSizeTaskStatus) -> TrackedTask {
+        let (cancel_tx, _) = watch::channel(false);
+        TrackedTask {
+            task_id,
+            full_path: "/x".to_string(),
+            enqueued_at: task_id,
+            started_at: None,
+            last_progress_at: None,
+            status,
+            cancel_tx,
+            progress: DirSizeProgress::default(),
+        }
+    }
+
+    #[test]
+    fn cancelled_running_task_stays_listed_until_worker_exits() {
+        let mut table = TaskTable::default();
+        table.detach("p", "a", tracked(1, DirSizeTaskStatus::Running));
+        let snap = table.snapshot();
+        assert_eq!(snap.len(), 1);
+        assert_eq!(snap[0].status, "Cancelling");
+        assert_eq!(
+            snap[0].current_action.as_deref(),
+            Some("cancel_waiting_worker_exit")
+        );
+        table.detached.remove(&1);
+        assert!(table.snapshot().is_empty());
+    }
+
+    #[test]
+    fn cancelled_queued_task_is_not_listed() {
+        let mut table = TaskTable::default();
+        table.detach("p", "a", tracked(1, DirSizeTaskStatus::Queued));
+        assert!(table.snapshot().is_empty());
+    }
 }
