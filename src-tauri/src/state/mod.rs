@@ -400,11 +400,13 @@ impl Default for PanelViewMode {
 // ─── Tabs / Slots ─────────────────────────────────────────────────────────────
 
 /// What kind of content a tab carries. Listing is the default folder view;
-/// Terminal is a promoted PTY session.
+/// Terminal is a promoted PTY session; Editor is a built-in editor tab whose
+/// listing fields describe the edited file's folder.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TabKind {
     Listing,
     Terminal,
+    Editor,
 }
 
 impl TabKind {
@@ -412,6 +414,7 @@ impl TabKind {
         match self {
             TabKind::Listing => "listing",
             TabKind::Terminal => "terminal",
+            TabKind::Editor => "editor",
         }
     }
 
@@ -419,6 +422,7 @@ impl TabKind {
         match s {
             "listing" => Some(TabKind::Listing),
             "terminal" => Some(TabKind::Terminal),
+            "editor" => Some(TabKind::Editor),
             _ => None,
         }
     }
@@ -494,6 +498,8 @@ pub struct Panel {
     pub shadow_source: Option<ShadowSource>,
     /// Set when the panel hosts an embedded terminal split. Holds the PTY session id.
     pub terminal_session: Option<u32>,
+    /// Set for `TabKind::Editor` panels.
+    pub editor: Option<crate::editor::EditorTab>,
     pub git: Option<crate::git::GitRepoStatus>,
 }
 
@@ -620,6 +626,13 @@ pub struct AppState {
     /// Requests from short-lived CLI invocations. They are drained by the
     /// active GUI connection so scans/watchers stay owned by that connection.
     pub pending_cli_opens: Vec<CliOpenRequest>,
+    /// Where notes live. Note intents use only this trait object.
+    pub note_store: Arc<dyn crate::notes::NoteStore>,
+    /// Source of editor-tab session ids (frontend cache keys).
+    pub next_editor_session_id: u64,
+    /// Set when quitting asked the frontend to flush editor tabs; a second
+    /// quit request shortly after proceeds without asking again.
+    pub editor_flush_requested_at: Option<std::time::Instant>,
 }
 
 #[derive(Clone, Debug)]
@@ -858,6 +871,7 @@ impl AppState {
             navigation_context: Default::default(),
             shadow_source: None,
             terminal_session: None,
+            editor: None,
             git: None,
         };
 
@@ -889,6 +903,7 @@ impl AppState {
             navigation_context: Default::default(),
             shadow_source: None,
             terminal_session: None,
+            editor: None,
             git: None,
         };
 
@@ -1062,6 +1077,7 @@ impl AppState {
 
         crate::remote::shared_folder::sync_drivers(&mut drivers, &share_config.shared_roots);
 
+        let note_store = crate::notes::store_for(&loaded_settings.general.notes_folder);
         AppState {
             notifications: Arc::new(crate::notifications::NotificationService::default()),
             remote_notifications: Default::default(),
@@ -1106,6 +1122,9 @@ impl AppState {
             identity: None,
             remote_server_handle: None,
             discovery_handle: None,
+            note_store,
+            next_editor_session_id: 1,
+            editor_flush_requested_at: None,
             pair_listener_handle: None,
             active_handshakes: HashMap::new(),
             pending_cli_opens: Vec::new(),
@@ -1276,6 +1295,13 @@ pub fn restore_tabs_from_session(
             continue;
         }
 
+        // Saved index → restored panel id, for editor origins.
+        let mut restored_ids: Vec<(usize, String)> = Vec::new();
+        let first_is_editor = matches!(slot_session.tabs.first(), Some(TabSession::Editor { .. }));
+        if !first_is_editor {
+            restored_ids.push((0, slot.tab_panel_ids[0].clone()));
+        }
+
         // The first tab corresponds to the existing seed panel — set its
         // path/source from the saved tab so the home-fallback case lines up.
         if let Some(first) = slot_session.tabs.first() {
@@ -1305,14 +1331,30 @@ pub fn restore_tabs_from_session(
                         panel.path = resolved_path;
                         panel.tab_kind = TabKind::Listing;
                     }
+                    TabSession::Editor { source_id, path, .. } => {
+                        // The seed stays a listing: show the file's folder.
+                        let folder = Path::new(path).parent().map(|p| p.to_string_lossy().to_string());
+                        if let Some(folder) = folder.filter(|f| Path::new(f).is_dir()) {
+                            panel.source_id = pick_source(source_id).unwrap_or_else(|| panel.source_id.clone());
+                            panel.path = folder;
+                        }
+                        panel.tab_kind = TabKind::Listing;
+                    }
                 }
             }
         }
+        let extra_tabs: Vec<(usize, &TabSession)> = slot_session
+            .tabs
+            .iter()
+            .enumerate()
+            .skip(if first_is_editor { 0 } else { 1 })
+            .collect();
 
         // Build the additional tabs (index 1..). Allocate fresh panel ids
         // inside this slot.
         let mut added_ids: Vec<String> = Vec::new();
-        for tab in slot_session.tabs.iter().skip(1) {
+        for (saved_index, tab) in extra_tabs {
+            let mut editor: Option<crate::editor::EditorTab> = None;
             let (path, source_id) = match tab {
                 TabSession::Listing { source_id, path } => {
                     let path = if Path::new(path).is_dir() {
@@ -1343,6 +1385,34 @@ pub fn restore_tabs_from_session(
                         .unwrap_or_default();
                     (path, source_id)
                 }
+                TabSession::Editor { source_id, path: file, note_store_id, note_id, .. } => {
+                    let folder = Path::new(file)
+                        .parent()
+                        .map(|p| p.to_string_lossy().to_string())
+                        .filter(|f| Path::new(f).is_dir());
+                    let source_id = pick_source(source_id).unwrap_or_else(|| {
+                        state
+                            .panels
+                            .get(&slot.tab_panel_ids[0])
+                            .map(|p| p.source_id.clone())
+                            .unwrap_or_default()
+                    });
+                    if Path::new(file).is_file() {
+                        let session_id = state.next_editor_session_id;
+                        state.next_editor_session_id += 1;
+                        let created_note = note_store_id.clone().zip(note_id.clone()).map(|(store_id, note_id)| {
+                            crate::editor::CreatedNote { store_id, note_id }
+                        });
+                        editor = Some(crate::editor::EditorTab::new(session_id, file.clone(), None, created_note));
+                    } else {
+                        state.notifications.publish(crate::notifications::NotificationInput {
+                            message: format!("{file} no longer exists; its editor tab was not restored."),
+                            level: Some(crate::notifications::NotificationLevel::Warning),
+                            channels: None,
+                        });
+                    }
+                    (folder.unwrap_or_else(|| home.clone()), source_id)
+                }
             };
 
             if source_id.is_empty() {
@@ -1362,7 +1432,7 @@ pub fn restore_tabs_from_session(
             let new_panel = Panel {
                 panel_id: new_panel_id.clone(),
                 slot_id: slot.slot_id.clone(),
-                tab_kind: TabKind::Listing,
+                tab_kind: if editor.is_some() { TabKind::Editor } else { TabKind::Listing },
                 tab_title_override: None,
                 source_id,
                 path,
@@ -1387,10 +1457,23 @@ pub fn restore_tabs_from_session(
                 navigation_context: Default::default(),
                 shadow_source: None,
                 terminal_session: None,
+                editor,
                 git: None,
             };
             state.panels.insert(new_panel_id.clone(), new_panel);
+            restored_ids.push((saved_index, new_panel_id.clone()));
             added_ids.push(new_panel_id);
+        }
+
+        // Point restored editor tabs back at their origin listing tabs.
+        for (saved_index, panel_id) in &restored_ids {
+            let Some(TabSession::Editor { origin_index: Some(origin), .. }) = slot_session.tabs.get(*saved_index) else {
+                continue;
+            };
+            let origin_id = restored_ids.iter().find(|(index, _)| index == origin).map(|(_, id)| id.clone());
+            if let Some(editor) = state.panels.get_mut(panel_id).and_then(|p| p.editor.as_mut()) {
+                editor.origin_panel_id = origin_id;
+            }
         }
 
         // Wire the tabs into the slot, preserving active_index.

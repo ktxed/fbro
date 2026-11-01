@@ -2,7 +2,7 @@ import { publishNotification } from "../notifications/service";
 import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Tooltip, type TooltipRefProps } from "react-tooltip";
-import type { PanelState, VFSEntry, Source } from "../ws/types";
+import type { PanelState, PinnedLocation, VFSEntry, Source } from "../ws/types";
 import type { WsClient } from "../ws/client";
 import {
   executeCommand,
@@ -13,7 +13,7 @@ import {
   PANEL_SHORTCUT_COMMAND_IDS,
 } from "../commands/interactive";
 import { useAppDispatch, useAppState } from "../store";
-import { IconChevronDown, IconChevronUp, IconChevronRight, IconChevronLeft, IconArrowUpRight, IconX, IconAlertTriangle, IconActivity, IconHistory, IconGitBranch, IconGitCompare, IconLock, IconMinus, IconNetwork, IconListCheck, IconPlus, IconRestore, IconCopy, IconPhoto, IconTrash, IconPencil, IconRobot, IconArrowsMove, IconFolderOpen, IconFolder, IconFile } from "@tabler/icons-react";
+import { IconChevronDown, IconChevronUp, IconChevronRight, IconChevronLeft, IconArrowUpRight, IconX, IconAlertTriangle, IconActivity, IconHistory, IconGitBranch, IconGitCompare, IconLock, IconMinus, IconNetwork, IconListCheck, IconPlus, IconRestore, IconCopy, IconPhoto, IconTrash, IconPencil, IconRobot, IconArrowsMove, IconFolderOpen, IconFolder, IconFile, IconNotes } from "@tabler/icons-react";
 import { contextualEntryIsSelected, contextualOperationAvailable, resolveContextualTarget, type ContextualTarget } from "../contextualOperations";
 
 // Maps Source.iconName (BE-provided) to a Tabler icon component for rendering
@@ -23,10 +23,12 @@ const SOURCE_ICONS: Record<string, React.ComponentType<{ size?: number }>> = {
   activity: IconActivity,
   history: IconHistory,
   "list-check": IconListCheck,
+  notes: IconNotes,
 };
 import { BookmarksPopover } from "./BookmarksPopover";
 import { PanelTabBar } from "./PanelTabBar";
 import { PanelTerminal } from "./PanelTerminal";
+import { PanelEditor } from "./PanelEditor";
 import { EntryThumb } from "./EntryThumb";
 import { isLikelyBinaryPath } from "../utils/binaryPath";
 import { isArchiveSourceId, isGlobalSelectionSourceId, isSearchSourceId } from "../utils/sourceId";
@@ -362,7 +364,7 @@ function VolumeHeader({ sources, panel, onNavigateToSource, onMountSource, clien
   client: WsClient;
 }) {
   const dispatch = useAppDispatch();
-  const remoteStatus = useAppState().remoteSourceStatus;
+  const { remoteSourceStatus: remoteStatus, pinnedLocations } = useAppState();
   const listRef = useRef<HTMLDivElement>(null);
   const [canLeft, setCanLeft] = useState(false);
   const [canRight, setCanRight] = useState(false);
@@ -423,115 +425,140 @@ function VolumeHeader({ sources, panel, onNavigateToSource, onMountSource, clien
     el.scrollBy({ left: e.deltaY !== 0 ? e.deltaY : e.deltaX, behavior: "smooth" });
   };
 
+  const visibleSources = Object.values(sources).filter(src => !src.shadow);
+  const renderSource = (src: Source) => {
+    const Icon = src.iconName ? SOURCE_ICONS[src.iconName] : undefined;
+    const isVirtual = src.kind === "virtual";
+    const isRemote = src.kind === "remote";
+    const status = isRemote ? remoteStatus[src.id] : undefined;
+    // The reducer drops the entry when "connected" — anything we
+    // see here means the supervisor is unhappy.
+    const isDegraded = !!status;
+    const classes = [
+      "panel__volume-btn",
+      src.id === panel.sourceId ? "panel__volume-btn--active" : "",
+      !src.mounted ? "panel__volume-btn--unmounted" : "",
+      Icon ? "panel__volume-btn--icon-only" : "",
+      isVirtual ? "panel__volume-btn--virtual" : "",
+      isRemote ? "panel__volume-btn--remote" : "",
+      isDegraded ? `panel__volume-btn--${status!.status}` : "",
+    ].filter(Boolean).join(" ");
+    const baseTitle = src.mounted
+      ? isRemote && src.peer
+        ? `Remote source:\n\t${src.name}\nPeer: \n\t${src.peer.name}${src.peer.os ? ` (${src.peer.os})` : ""}\nAccess: read-only`
+        : (Icon ? src.name : src.rootPath)
+      : `${src.name} (unmounted — click to mount)`;
+    const title = isDegraded
+      ? `${baseTitle}\n${status!.status}${status!.message ? `: ${status!.message}` : ""}\nClick to reconnect now.`
+      : baseTitle;
+    const onClick = () => {
+      if (isDegraded) {
+        client.sendIntent("ReconnectRemoteSource", undefined, { sourceId: src.id });
+        return;
+      }
+      if (src.mounted) onNavigateToSource(src.id);
+      else onMountSource(src.id);
+    };
+    if (isRemote) {
+      const expanded = expandedRemoteIds.has(src.id);
+      const canExpand = overflowingRemoteIds.has(src.id);
+      const toggleExpanded = () => {
+        setExpandedRemoteIds((current) => {
+          const next = new Set(current);
+          if (next.has(src.id)) next.delete(src.id);
+          else next.add(src.id);
+          return next;
+        });
+      };
+      return (
+        <span
+          key={src.id}
+          data-source-id={src.id}
+          className={`panel__remote-volume${src.id === panel.sourceId ? " panel__remote-volume--active" : ""}${canExpand ? " panel__remote-volume--expandable" : ""}${expanded ? " panel__remote-volume--expanded" : ""}${isDegraded ? ` panel__remote-volume--${status!.status}` : ""}`}
+          title={title}
+        >
+          <button
+            className={classes}
+            tabIndex={-1}
+            onClick={onClick}
+            title={title}
+          >
+            <IconNetwork size={13} className="panel__volume-btn-net" aria-hidden />
+            {!isDegraded && <IconLock size={12} className="panel__volume-btn-lock" aria-hidden />}
+            <span className="panel__volume-btn-label">{src.name}</span>
+            {isDegraded && (
+              <span className="panel__volume-btn-spinner" aria-hidden title="Reconnecting — click to retry">
+                ⟳
+              </span>
+            )}
+          </button>
+          {canExpand && (
+            <button
+              className="panel__remote-volume-toggle"
+              tabIndex={-1}
+              onClick={toggleExpanded}
+              title={expanded ? "Collapse remote volume label" : "Expand remote volume label"}
+            >
+              {expanded ? "<<" : ">>"}
+            </button>
+          )}
+        </span>
+      );
+    }
+    return (
+      <button
+        key={src.id}
+        data-source-id={src.id}
+        className={classes}
+        tabIndex={-1}
+        onClick={onClick}
+        onContextMenu={src.eject ? (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          event.currentTarget.focus();
+          const rect = event.currentTarget.getBoundingClientRect();
+          dispatch({ type: "OPEN_SOURCE_MENU", menu: {
+            sourceId: src.id,
+            anchorLeft: rect.left,
+            anchorRight: rect.right,
+            anchorTop: rect.top,
+            anchorBottom: rect.bottom,
+          } });
+        } : undefined}
+        title={title}
+      >
+        {Icon ? <Icon size={14} /> : src.name}
+      </button>
+    );
+  };
+  // Pinned locations hand off to a real source (e.g. the notes folder).
+  const renderPinned = (location: PinnedLocation) => {
+    const Icon = SOURCE_ICONS[location.iconName];
+    return (
+      <button
+        key={`pinned:${location.id}`}
+        data-testid={`pinned-location-${location.id}`}
+        className={`panel__volume-btn panel__volume-btn--virtual${Icon ? " panel__volume-btn--icon-only" : ""}`}
+        tabIndex={-1}
+        title={location.name}
+        aria-label={location.name}
+        onClick={() => client.sendIntent(location.action, undefined, { panelId: panel.panelId, requestId: crypto.randomUUID() })}
+      >
+        {Icon ? <Icon size={14} /> : location.name}
+      </button>
+    );
+  };
+
   return (
     <div className="panel__volumes">
       <button className="panel__volumes-arrow" disabled={!canLeft} tabIndex={-1} onClick={() => scroll(-1)}><IconChevronLeft size={14} /></button>
       <div className="panel__volumes-list" ref={listRef} onScroll={updateArrows} onWheel={onWheel}>
-        {Object.values(sources).filter(src => !src.shadow).map(src => {
-          const Icon = src.iconName ? SOURCE_ICONS[src.iconName] : undefined;
-          const isVirtual = src.kind === "virtual";
-          const isRemote = src.kind === "remote";
-          const status = isRemote ? remoteStatus[src.id] : undefined;
-          // The reducer drops the entry when "connected" — anything we
-          // see here means the supervisor is unhappy.
-          const isDegraded = !!status;
-          const classes = [
-            "panel__volume-btn",
-            src.id === panel.sourceId ? "panel__volume-btn--active" : "",
-            !src.mounted ? "panel__volume-btn--unmounted" : "",
-            Icon ? "panel__volume-btn--icon-only" : "",
-            isVirtual ? "panel__volume-btn--virtual" : "",
-            isRemote ? "panel__volume-btn--remote" : "",
-            isDegraded ? `panel__volume-btn--${status!.status}` : "",
-          ].filter(Boolean).join(" ");
-          const baseTitle = src.mounted
-            ? isRemote && src.peer
-              ? `Remote source:\n\t${src.name}\nPeer: \n\t${src.peer.name}${src.peer.os ? ` (${src.peer.os})` : ""}\nAccess: read-only`
-              : (Icon ? src.name : src.rootPath)
-            : `${src.name} (unmounted — click to mount)`;
-          const title = isDegraded
-            ? `${baseTitle}\n${status!.status}${status!.message ? `: ${status!.message}` : ""}\nClick to reconnect now.`
-            : baseTitle;
-          const onClick = () => {
-            if (isDegraded) {
-              client.sendIntent("ReconnectRemoteSource", undefined, { sourceId: src.id });
-              return;
-            }
-            if (src.mounted) onNavigateToSource(src.id);
-            else onMountSource(src.id);
-          };
-          if (isRemote) {
-            const expanded = expandedRemoteIds.has(src.id);
-            const canExpand = overflowingRemoteIds.has(src.id);
-            const toggleExpanded = () => {
-              setExpandedRemoteIds((current) => {
-                const next = new Set(current);
-                if (next.has(src.id)) next.delete(src.id);
-                else next.add(src.id);
-                return next;
-              });
-            };
-            return (
-              <span
-                key={src.id}
-                data-source-id={src.id}
-                className={`panel__remote-volume${src.id === panel.sourceId ? " panel__remote-volume--active" : ""}${canExpand ? " panel__remote-volume--expandable" : ""}${expanded ? " panel__remote-volume--expanded" : ""}${isDegraded ? ` panel__remote-volume--${status!.status}` : ""}`}
-                title={title}
-              >
-                <button
-                  className={classes}
-                  tabIndex={-1}
-                  onClick={onClick}
-                  title={title}
-                >
-                  <IconNetwork size={13} className="panel__volume-btn-net" aria-hidden />
-                  {!isDegraded && <IconLock size={12} className="panel__volume-btn-lock" aria-hidden />}
-                  <span className="panel__volume-btn-label">{src.name}</span>
-                  {isDegraded && (
-                    <span className="panel__volume-btn-spinner" aria-hidden title="Reconnecting — click to retry">
-                      ⟳
-                    </span>
-                  )}
-                </button>
-                {canExpand && (
-                  <button
-                    className="panel__remote-volume-toggle"
-                    tabIndex={-1}
-                    onClick={toggleExpanded}
-                    title={expanded ? "Collapse remote volume label" : "Expand remote volume label"}
-                  >
-                    {expanded ? "<<" : ">>"}
-                  </button>
-                )}
-              </span>
-            );
-          }
-          return (
-            <button
-              key={src.id}
-              data-source-id={src.id}
-              className={classes}
-              tabIndex={-1}
-              onClick={onClick}
-              onContextMenu={src.eject ? (event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                event.currentTarget.focus();
-                const rect = event.currentTarget.getBoundingClientRect();
-                dispatch({ type: "OPEN_SOURCE_MENU", menu: {
-                  sourceId: src.id,
-                  anchorLeft: rect.left,
-                  anchorRight: rect.right,
-                  anchorTop: rect.top,
-                  anchorBottom: rect.bottom,
-                } });
-              } : undefined}
-              title={title}
-            >
-              {Icon ? <Icon size={14} /> : src.name}
-            </button>
-          );
-        })}
+        {visibleSources.flatMap(src => [renderSource(src), ...pinnedLocations
+          .filter((location) => location.afterSourceId === src.id)
+          .map(renderPinned)])}
+        {pinnedLocations
+          .filter((location) => !location.afterSourceId || !visibleSources.some((src) => src.id === location.afterSourceId))
+          .map(renderPinned)}
       </div>
       <button className="panel__volumes-arrow" disabled={!canRight} tabIndex={-1} onClick={() => scroll(1)}><IconChevronRight size={14} /></button>
     </div>
@@ -762,6 +789,7 @@ function isRestricted(entry: VFSEntry): boolean {
 function shouldKeepWindowFocusTarget(active: Element | null): boolean {
   if (!(active instanceof HTMLElement)) return false;
   if (active.closest(".panel-terminal")) return true;
+  if (active.closest(".panel-editor")) return true;
   if (active.closest(".embedded-viewer")) return true;
   if (active.closest(".dt-input")) return true;
   if (active.isContentEditable) return true;
@@ -1181,13 +1209,14 @@ export function Panel({
     }
     if (modalActive || !activationFocusPendingRef.current) return;
     activationFocusPendingRef.current = false;
+    if (panel.tabKind === "editor") return; // PanelEditor focuses CodeMirror itself
     if (focusDivRef.current?.contains(document.activeElement)) return;
     if (panel.filterModeActive && shouldFocusFilterRef.current) {
       window.setTimeout(() => filterInputRef.current?.focus(), 0);
     } else {
       focusListing();
     }
-  }, [isFocused, modalActive, panel.filterModeActive, focusListing]);
+  }, [isFocused, modalActive, panel.filterModeActive, panel.tabKind, focusListing]);
 
   // The filter input may mount only after the backend accepts SetFilterMode.
   useEffect(() => {
@@ -1228,6 +1257,10 @@ export function Panel({
       if (modalActive) return;
       const active = document.activeElement;
       if (shouldKeepWindowFocusTarget(active)) return;
+      if (panel.tabKind === "editor") {
+        focusDivRef.current?.querySelector<HTMLElement>(".cm-content")?.focus({ preventScroll: true });
+        return;
+      }
       if (panel.filterModeActive) {
         filterInputRef.current?.focus({ preventScroll: true });
         return;
@@ -1256,7 +1289,7 @@ export function Panel({
       window.removeEventListener("focus", restoreFocus);
       unlisten?.();
     };
-  }, [isFocused, modalActive, panel.filterModeActive, focusListing]);
+  }, [isFocused, modalActive, panel.filterModeActive, panel.tabKind, focusListing]);
 
   useEffect(() => {
     if (sortSelectorOpen) {
@@ -1602,7 +1635,7 @@ export function Panel({
     }
     // Keys typed inside the embedded terminal must not trigger panel shortcuts —
     // otherwise typing a literal `t` into the shell would close the terminal.
-    if (e.target instanceof Element && e.target.closest(".panel-terminal")) {
+    if (e.target instanceof Element && e.target.closest(".panel-terminal, .panel-editor")) {
       return;
     }
     if (sortSelectorOpen) {
@@ -2474,7 +2507,19 @@ export function Panel({
         return <PanelTabBar slot={slot} panels={appState.panels} sources={appState.sources} client={client} blocked={modalActive} />;
       })()}
 
-      {panel.tabKind === "terminal" && panel.terminalSessionId !== undefined ? (
+      {panel.tabKind === "editor" && panel.editor ? (
+        <PanelEditor
+          panelId={panelId}
+          panel={{ ...panel, editor: panel.editor }}
+          client={client}
+          dispatch={dispatch}
+          commands={appState.commands}
+          focused={isFocused}
+          blocked={modalActive}
+          previewing={!!appState.embeddedViewer && appState.embeddedViewer.sourceSlotId === panel.slotId}
+          maximized={appState.maximizedEditorPanelId === panelId}
+        />
+      ) : panel.tabKind === "terminal" && panel.terminalSessionId !== undefined ? (
         <PanelTerminal
           client={client}
           panelId={panelId}

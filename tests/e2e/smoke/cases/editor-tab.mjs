@@ -1,0 +1,418 @@
+import fs from "node:fs";
+import path from "node:path";
+
+import { clickContextMenuItem, clickEntry, goToPanelPath, openPanelContextMenu } from "../browser.mjs";
+import { artifactsDir, backendPath, hostPath } from "../config.mjs";
+import { sleep, waitFor } from "../wait.mjs";
+
+const KEY = {
+  ctrl: "",
+  shift: "",
+  escape: "",
+  end: "",
+  f3: "",
+  f4: "",
+};
+
+/** Real key actions: CodeMirror ignores synthetic keydown events for text. */
+async function chord(browser, modifiers, key) {
+  await browser.performActions([{
+    type: "key",
+    id: "editor-tab-keyboard",
+    actions: [
+      ...modifiers.map((value) => ({ type: "keyDown", value })),
+      { type: "keyDown", value: key },
+      { type: "keyUp", value: key },
+      ...modifiers.slice().reverse().map((value) => ({ type: "keyUp", value })),
+    ],
+  }]);
+  await browser.releaseActions();
+}
+
+async function runPaletteCommand(browser, title) {
+  await chord(browser, [KEY.ctrl, KEY.shift], "p");
+  await waitFor(() => browser.execute(() => document.activeElement?.tagName === "INPUT"),
+    { timeout: 10_000, label: "command palette input" });
+  await typeText(browser, title);
+  await browser.keys("Enter");
+}
+
+async function typeText(browser, text) {
+  await browser.keys(text.split(""));
+}
+
+function editorPanelId(observer, slotId = "left") {
+  const slot = observer.state.slots[slotId];
+  return slot?.tabPanelIds.find((id) => observer.state.panels[id]?.tabKind === "editor");
+}
+
+async function expectEditorFocus(browser, label) {
+  await waitFor(() => browser.execute(() =>
+    Boolean(document.activeElement?.closest(".panel-editor .cm-content"))),
+  { timeout: 10_000, label });
+}
+
+async function expectListingFocus(browser, panelId, cursorName, label) {
+  await waitFor(() => browser.execute(({ panelId, cursorName }) => {
+    const panel = document.querySelector(`[data-testid="panel-${panelId}"]`);
+    const cursor = panel?.querySelector(".panel__row--cursor, .panel__card--cursor");
+    return document.activeElement === panel
+      && (cursorName === null || cursor?.getAttribute("data-entry-name") === cursorName);
+  }, { panelId, cursorName }), { timeout: 10_000, label });
+}
+
+async function editorText(browser) {
+  return browser.execute(() => {
+    const lines = Array.from(document.querySelectorAll(".panel-editor .cm-line"));
+    return lines.map((line) => line.textContent).join("\n");
+  });
+}
+
+/** Record intents the GUI sends, to prove what a flow does and doesn't use. */
+async function recordIntents(browser) {
+  await browser.execute(() => {
+    window.__editorIntents = [];
+    window.__editorOriginalSend = WebSocket.prototype.send;
+    WebSocket.prototype.send = function(data) {
+      if (typeof data === "string") {
+        const message = JSON.parse(data);
+        if (message.type === "Intent") window.__editorIntents.push(message.name);
+      }
+      return window.__editorOriginalSend.call(this, data);
+    };
+  });
+}
+
+async function stopRecordingIntents(browser) {
+  return browser.execute(() => {
+    const intents = window.__editorIntents ?? [];
+    if (window.__editorOriginalSend) WebSocket.prototype.send = window.__editorOriginalSend;
+    delete window.__editorOriginalSend;
+    delete window.__editorIntents;
+    return intents;
+  });
+}
+
+export async function runEditorTabFlow(browser, observer) {
+  const directory = backendPath("a", "src", "editor-tab");
+  fs.rmSync(hostPath(directory), { recursive: true, force: true });
+  fs.mkdirSync(hostPath(directory), { recursive: true });
+  const fileName = "note.md";
+  const hostFile = hostPath(path.posix.join(directory, fileName));
+  fs.writeFileSync(hostFile, "# Title\r\nfirst line\r\n");
+
+  await goToPanelPath(browser, observer, "left", directory);
+  await observer.waitForEntry("left", fileName, "file");
+  await clickEntry(browser, "left", fileName);
+
+  // "Edit in Editor Tab" (context menu) opens an editor tab right after the origin listing tab.
+  await openPanelContextMenu(browser, "left");
+  await clickContextMenuItem(browser, "Edit in Editor Tab");
+  await waitFor(() => {
+    const slot = observer.state.slots.left;
+    const editorId = editorPanelId(observer);
+    return editorId && slot.activePanelId === editorId
+      && slot.tabPanelIds.indexOf(editorId) === slot.tabPanelIds.indexOf("left") + 1
+      && observer.state.focus === editorId;
+  }, { timeout: 10_000, label: "editor tab opened after the origin" });
+  const editorId = editorPanelId(observer);
+  await expectEditorFocus(browser, "editor takes focus");
+  await waitFor(async () => (await editorText(browser)).startsWith("# Title"), {
+    timeout: 10_000, label: "editor shows the file",
+  });
+
+  // Typing autosaves; CRLF line endings are kept. Shift+S types text instead
+  // of opening the listing's sort menu.
+  await chord(browser, [KEY.ctrl], KEY.end);
+  await typeText(browser, "autosaved");
+  await chord(browser, [KEY.shift], "s");
+  await waitFor(() => fs.readFileSync(hostFile, "utf8") === "# Title\r\nfirst line\r\nautosavedS", {
+    timeout: 10_000, label: "autosave writes the typed text with CRLF kept",
+  });
+  if (await browser.execute(() => Boolean(document.querySelector('[data-testid="panel-sort-selector"]')))) {
+    throw new Error("Shift+S in the editor opened the listing sort menu");
+  }
+
+  // Escape returns to the origin listing with the cursor on the file; the
+  // editor tab stays open.
+  await chord(browser, [], KEY.escape);
+  await waitFor(() => observer.state.slots.left?.activePanelId === "left"
+    && observer.state.focus === "left"
+    && observer.state.slots.left.tabPanelIds.includes(editorId),
+  { timeout: 10_000, label: "Escape returns to the origin tab" });
+  await expectListingFocus(browser, "left", fileName, "listing focus on the edited file after Escape");
+
+  // Back to the editor: undo history survived the tab switch.
+  observer.sendIntent("panel.tab.switch", undefined, { slotId: "left", panelId: editorId });
+  await expectEditorFocus(browser, "editor focus after switching back");
+  // WebDriver maps "z" through the host keyboard layout (Ctrl+Y on QWERTZ),
+  // so send Ctrl+Z as the event a real Z key produces.
+  await browser.execute(() => {
+    document.querySelector(".panel-editor .cm-content")?.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "z", code: "KeyZ", keyCode: 90, ctrlKey: true, bubbles: true, cancelable: true,
+    }));
+  });
+  await waitFor(() => !fs.readFileSync(hostFile, "utf8").includes("autosavedS"), {
+    timeout: 10_000, label: "undo after a tab switch, then autosave",
+  });
+
+  // A fully saved buffer follows external edits silently.
+  await sleep(1_500);
+  fs.writeFileSync(hostFile, "external one\r\n");
+  await waitFor(async () => (await editorText(browser)).startsWith("external one"), {
+    timeout: 10_000, label: "clean editor reloads an external change",
+  });
+
+  // Unsaved changes plus an external edit: autosave pauses, Ctrl+S resolves.
+  await chord(browser, [KEY.ctrl], KEY.end);
+  await typeText(browser, "mine");
+  fs.writeFileSync(hostFile, "external two\r\n");
+  await waitFor(() => browser.execute(() =>
+    Boolean(document.querySelector('[data-testid="editor-conflict-bar"]'))),
+  { timeout: 10_000, label: "conflict bar after an external change with unsaved text" });
+  if (fs.readFileSync(hostFile, "utf8") !== "external two\r\n") {
+    throw new Error("Autosave overwrote an external change");
+  }
+  await chord(browser, [KEY.ctrl], "s");
+  await waitFor(() => browser.execute(() =>
+    document.activeElement?.getAttribute("data-testid") === "editor-conflict-overwrite"),
+  { timeout: 10_000, label: "conflict dialog focuses Overwrite" });
+  // The covered editor ignores keys while the dialog is open.
+  const beforeCovered = await editorText(browser);
+  await typeText(browser, "x");
+  if (await editorText(browser) !== beforeCovered) throw new Error("Covered editor received keys");
+  await typeText(browser, "r");
+  await waitFor(async () => (await editorText(browser)).startsWith("external two")
+    && !(await browser.execute(() => Boolean(document.querySelector('[data-testid="editor-conflict-bar"]')))),
+  { timeout: 10_000, label: "Reload takes the disk version and resumes autosave" });
+  await expectEditorFocus(browser, "focus returns to the editor after the conflict dialog");
+
+  // A long note, so the preview has something to follow (clean buffer: reloads).
+  const sections = Array.from({ length: 40 }, (_, i) => `## Section ${i + 1}\r\n\r\nBody of section ${i + 1}.\r\n`);
+  fs.writeFileSync(hostFile, `external two\r\n\r\n${sections.join("\r\n")}`);
+  await waitFor(async () => (await editorText(browser)).includes("## Section 2"), {
+    timeout: 10_000, label: "long note reloaded into the editor",
+  });
+
+  // Quick preview follows the editor and refreshes after autosave.
+  await chord(browser, [KEY.ctrl], KEY.f3);
+  await waitFor(() => browser.execute(() =>
+    Boolean(document.querySelector('[data-testid="preview-right"]'))),
+  { timeout: 10_000, label: "quick preview opens beside the editor" });
+  await expectEditorFocus(browser, "focus stays in the editor with preview open");
+  // The preview follows the cursor line: end of the note, then back to the top.
+  const sectionVisible = (title) => browser.execute((title) => {
+    const scroller = document.querySelector('[data-testid="preview-right"] .viewer__markdown');
+    const heading = Array.from(scroller?.querySelectorAll("h2") ?? []).find((h) => h.textContent === title);
+    if (!scroller || !heading) return false;
+    const box = scroller.getBoundingClientRect();
+    const rect = heading.getBoundingClientRect();
+    return rect.top >= box.top && rect.bottom <= box.bottom;
+  }, title);
+  await chord(browser, [KEY.ctrl], KEY.end);
+  await waitFor(() => sectionVisible("Section 40"), { timeout: 10_000, label: "preview follows the cursor to the end" });
+  await chord(browser, [KEY.ctrl], "\uE011");
+  await waitFor(() => sectionVisible("Section 1"), { timeout: 10_000, label: "preview follows the cursor back to the top" });
+  await waitFor(() => browser.execute(() =>
+    document.querySelector('[data-testid="preview-right"]')?.textContent?.includes("external two")),
+  { timeout: 10_000, label: "preview shows the note" });
+  const previewSession = () => browser.execute(() =>
+    document.querySelector('[data-testid="preview-right"]')?.getAttribute("data-preview-request-id"));
+  const sessionBefore = await previewSession();
+  await chord(browser, [KEY.ctrl], KEY.end);
+  await typeText(browser, "\npreviewed words");
+  await waitFor(() => browser.execute(() =>
+    document.querySelector('[data-testid="preview-right"]')?.textContent?.includes("previewed words")),
+  { timeout: 10_000, label: "preview shows the autosaved text" });
+  await typeText(browser, "!");
+  await waitFor(() => browser.execute(() =>
+    document.querySelector('[data-testid="preview-right"]')?.textContent?.includes("previewed words!")),
+  { timeout: 10_000, label: "preview follows a one-letter change" });
+  // Autosaves refresh the preview in place: same content session, no remount.
+  if (await previewSession() !== sessionBefore) {
+    throw new Error("Quick preview remounted its content on an autosave");
+  }
+  await chord(browser, [KEY.ctrl], KEY.f3);
+  await waitFor(() => browser.execute(() => !document.querySelector('[data-testid="preview-right"]')),
+    { timeout: 10_000, label: "quick preview closes" });
+
+  // Full screen: Ctrl+Shift+M fills the window, Escape restores first.
+  const editorBox = () => browser.execute(() => {
+    const el = document.querySelector(".panel-editor");
+    const r = el?.getBoundingClientRect();
+    return r ? { maximized: el.hasAttribute("data-maximized"), w: r.width, h: r.height, ww: window.innerWidth, wh: window.innerHeight } : null;
+  });
+  await chord(browser, [KEY.ctrl, KEY.shift], "m");
+  await waitFor(async () => {
+    const box = await editorBox();
+    return box?.maximized && Math.abs(box.w - box.ww) < 2 && Math.abs(box.h - box.wh) < 2;
+  }, { timeout: 10_000, label: "editor fills the window" });
+  await expectEditorFocus(browser, "editor focus in full screen");
+  await chord(browser, [], KEY.escape);
+  await waitFor(async () => !(await editorBox())?.maximized, { timeout: 10_000, label: "Escape restores full screen" });
+  await expectEditorFocus(browser, "editor focus after restoring");
+  if (observer.state.slots.left?.activePanelId !== editorId) {
+    throw new Error("Escape in full screen must restore, not leave the editor tab");
+  }
+  await (await browser.$('[data-testid="editor-maximize"]')).click();
+  await waitFor(async () => (await editorBox())?.maximized, { timeout: 10_000, label: "button enters full screen" });
+  await chord(browser, [KEY.ctrl, KEY.shift], "m");
+  await waitFor(async () => !(await editorBox())?.maximized, { timeout: 10_000, label: "Ctrl+Shift+M restores" });
+
+  // Ctrl+W saves and closes the tab; focus returns to a listing.
+  await expectEditorFocus(browser, "editor focus before Ctrl+W");
+  await typeText(browser, " closing");
+  await chord(browser, [KEY.ctrl], "w");
+  await waitFor(() => !observer.state.slots.left?.tabPanelIds.includes(editorId), {
+    timeout: 10_000, label: "Ctrl+W closes the editor tab",
+  });
+  if (!fs.readFileSync(hostFile, "utf8").includes("previewed words! closing")) {
+    throw new Error("Closing did not save the last change");
+  }
+  await expectListingFocus(browser, "left", null, "listing focus after closing the editor");
+
+  // The command palette opens the cursor file too.
+  await clickEntry(browser, "left", fileName);
+  await runPaletteCommand(browser, "edit_builtin");
+  await waitFor(() => {
+    const id = editorPanelId(observer);
+    return id && observer.state.focus === id;
+  }, { timeout: 10_000, label: "palette Edit in Editor Tab opens the file" });
+  await expectEditorFocus(browser, "editor focus after opening from the palette");
+  await chord(browser, [KEY.ctrl], "w");
+  await waitFor(() => !editorPanelId(observer), { timeout: 10_000, label: "palette-opened editor closes" });
+
+  await runNotesFlow(browser, observer, directory);
+}
+
+async function runNotesFlow(browser, observer, returnDirectory) {
+  const scratchBackend = "/state/a/config/fbro/scratch";
+  const scratchHost = path.join(artifactsDir, "fbro-a/state/config/fbro/scratch");
+  const notesBefore = fs.existsSync(scratchHost) ? fs.readdirSync(scratchHost) : [];
+
+  // The Scratch source-bar entry sits right after the Journal and opens the notes folder.
+  const afterJournal = await browser.execute(() => {
+    const journal = document.querySelector('[data-testid="panel-left"] [data-source-id="journal"]');
+    return journal?.nextElementSibling?.getAttribute("data-testid");
+  });
+  if (afterJournal !== "pinned-location-scratch") {
+    throw new Error(`Scratch should follow the Journal in the source bar, found ${afterJournal}`);
+  }
+
+  await (await browser.$('[data-testid="panel-left"] [data-testid="pinned-location-scratch"]')).click();
+  await observer.waitForPanelPath("left", scratchBackend);
+
+  // Ctrl+Shift+F4 creates a note in an editor tab; it never goes through New File.
+  await recordIntents(browser);
+  let intents;
+  try {
+    await chord(browser, [KEY.ctrl, KEY.shift], KEY.f4);
+    await waitFor(() => {
+      const id = editorPanelId(observer);
+      return id && observer.state.panels[id]?.editor?.isNote && observer.state.focus === id;
+    }, { timeout: 10_000, label: "New Note opens an editor tab" });
+    await expectEditorFocus(browser, "new note editor focus");
+  } finally {
+    intents = await stopRecordingIntents(browser);
+  }
+  if (!intents.includes("CreateNote") || intents.includes("TouchFile")) {
+    throw new Error(`New Note must use CreateNote, not TouchFile: ${JSON.stringify(intents)}`);
+  }
+  const created = fs.readdirSync(scratchHost).filter((name) => !notesBefore.includes(name));
+  if (created.length !== 1 || !created[0].endsWith(".md")) {
+    throw new Error(`Expected one new note, found ${JSON.stringify(created)}`);
+  }
+
+  // Escape returns to the listing, cursor unchanged; the note tab stays.
+  const noteId = editorPanelId(observer);
+  await chord(browser, [], KEY.escape);
+  await waitFor(() => observer.state.slots.left?.activePanelId === "left"
+    && observer.state.slots.left.tabPanelIds.includes(noteId),
+  { timeout: 10_000, label: "Escape from a new note returns to the listing" });
+
+  // Closing a new note nobody typed in removes the empty file.
+  observer.sendIntent("panel.tab.switch", undefined, { slotId: "left", panelId: noteId });
+  await expectEditorFocus(browser, "note editor focus before closing");
+  await chord(browser, [KEY.ctrl], "w");
+  await waitFor(() => !fs.existsSync(path.join(scratchHost, created[0])), {
+    timeout: 10_000, label: "untouched new note discarded on close",
+  });
+
+  // An existing note in the Scratch folder opens from the context menu.
+  fs.mkdirSync(scratchHost, { recursive: true });
+  fs.writeFileSync(path.join(scratchHost, "existing-note.md"), "# Kept\n");
+  await observer.waitForEntry("left", "existing-note.md", "file");
+  await clickEntry(browser, "left", "existing-note.md");
+  await openPanelContextMenu(browser, "left");
+  await clickContextMenuItem(browser, "Edit in Editor Tab");
+  await waitFor(() => {
+    const id = editorPanelId(observer);
+    return id && observer.state.panels[id]?.editor?.fileName === "existing-note.md" && observer.state.focus === id;
+  }, { timeout: 10_000, label: "existing Scratch note opens from the context menu" });
+  await expectEditorFocus(browser, "editor focus on an existing note");
+  await chord(browser, [KEY.ctrl], "w");
+  await waitFor(() => !editorPanelId(observer), { timeout: 10_000, label: "existing note tab closes" });
+  if (!fs.existsSync(path.join(scratchHost, "existing-note.md"))) {
+    throw new Error("Closing an existing note must not delete it");
+  }
+
+  await runNotesFolderSettingFlow(browser, observer);
+
+  observer.sendIntent("NavigatePanelTo", undefined, { panelId: "left", path: returnDirectory });
+  await observer.waitForPanelPath("left", returnDirectory);
+  await observer.waitForPanelReady("left");
+}
+
+async function runNotesFolderSettingFlow(browser, observer) {
+  const customBackend = backendPath("a", "src", "custom-notes");
+  const customHost = hostPath(customBackend);
+  fs.rmSync(customHost, { recursive: true, force: true });
+
+  // Settings → General → Notes folder: relative paths are rejected inline.
+  await chord(browser, [KEY.ctrl], ",");
+  const input = await browser.$('[data-testid="settings-notes-folder"]');
+  await input.waitForDisplayed({ timeout: 10_000 });
+  await input.scrollIntoView();
+  await input.click();
+  await typeText(browser, "relative");
+  await browser.keys("Enter");
+  await waitFor(() => browser.execute(() =>
+    document.querySelector('[data-testid="settings-notes-folder-hint"]')?.textContent?.includes("absolute path")),
+  { timeout: 10_000, label: "relative notes folder rejected inline" });
+  if (observer.state.settings.general.notesFolder) throw new Error("A relative notes folder was accepted");
+
+  // An absolute folder is accepted; it is created on first use.
+  await browser.execute(() => {
+    const field = document.querySelector('[data-testid="settings-notes-folder"]');
+    field.select();
+  });
+  await typeText(browser, customBackend);
+  await browser.keys("Enter");
+  await waitFor(() => observer.state.settings.general.notesFolder === customBackend,
+    { timeout: 10_000, label: "notes folder setting saved" });
+  await chord(browser, [], KEY.escape);
+  await waitFor(() => browser.execute(() => !document.querySelector('[data-testid="settings-notes-folder"]')),
+    { timeout: 10_000, label: "settings closed" });
+
+  // New notes and the Scratch entry use the configured folder.
+  await browser.execute(() => document.querySelector('[data-testid="panel-left"]')?.focus());
+  await chord(browser, [KEY.ctrl, KEY.shift], KEY.f4);
+  await waitFor(() => {
+    const id = editorPanelId(observer);
+    return id && observer.state.panels[id]?.editor?.filePath?.startsWith(`${customBackend}/`);
+  }, { timeout: 10_000, label: "new note created in the configured folder" });
+  await expectEditorFocus(browser, "editor focus on a note in the configured folder");
+  await typeText(browser, "kept");
+  await waitFor(() => fs.existsSync(customHost)
+    && fs.readdirSync(customHost).some((name) => fs.readFileSync(path.join(customHost, name), "utf8") === "kept"),
+  { timeout: 10_000, label: "note saved in the configured folder" });
+  await chord(browser, [KEY.ctrl], "w");
+  await waitFor(() => !editorPanelId(observer), { timeout: 10_000, label: "configured-folder note closes" });
+  await (await browser.$('[data-testid="panel-left"] [data-testid="pinned-location-scratch"]')).click();
+  await observer.waitForPanelPath("left", customBackend);
+
+  // Back to the default for later flows.
+  observer.sendIntent("SetGeneralOption", undefined, { key: "notesFolder", value: "" });
+  await waitFor(() => observer.state.settings.general.notesFolder === "",
+    { timeout: 10_000, label: "notes folder reset to the default" });
+}

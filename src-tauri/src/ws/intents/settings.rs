@@ -452,6 +452,27 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
                     }
                 }
             }
+            "notesFolder" => {
+                let Some(v) = value.as_str() else {
+                    drop(state_guard);
+                    bad_setting(ctx.tx, "notesFolder must be a string").await;
+                    return;
+                };
+                let home = state_guard.platform.home_dir();
+                match crate::notes::normalize_notes_folder_setting(v, &home) {
+                    Ok(folder) => {
+                        // New notes and Open Notes use the new folder; open
+                        // editor tabs keep editing their files where they are.
+                        state_guard.note_store = crate::notes::store_for(&folder);
+                        state_guard.settings.general.notes_folder = folder;
+                    }
+                    Err(message) => {
+                        drop(state_guard);
+                        bad_setting(ctx.tx, &message).await;
+                        return;
+                    }
+                }
+            }
             "zshEmacsKeymap" => {
                 let Some(v) = value.as_bool() else {
                     drop(state_guard);
@@ -646,6 +667,10 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
                 "compareExternalCommand": general.compare_external_command,
                 "quickTerminalEditor": general.quick_terminal_editor.program(),
                 "zshEmacsKeymap": general.zsh_emacs_keymap,
+                "notesFolder": general.notes_folder,
+                "notesFolderResolved": crate::vfs::local::normalize_path(
+                    crate::notes::resolve_notes_folder(&general.notes_folder),
+                ),
             }
         }),
     };

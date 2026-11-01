@@ -95,7 +95,9 @@ This protocol defines communication between a **Backend (BE)** and one or more *
 * BE is the **single source of truth**
 * FE maintains a **non-authoritative cached projection**
 * Communication is **event-based**
-* Filesystem mutations occur **only via jobs**
+* Filesystem mutations occur **only via jobs**, except single small writes
+  that have nothing to report, cancel, pause, or skip (New File, built-in editor
+  saves, note creation); those run on a blocking thread with a correlated reply
 * All user input is expressed as **intents**
 * Long-running operations are **interruptible jobs**
 
@@ -112,6 +114,9 @@ target }`, where `target.kind` is `file`, `directory`, `empty`, or `error`:
 - `file` carries `file: { panelId, path, sourceId, filename, fileSize, isLocal,
   initialFindQuery }`; unknown size/query are `null`.
 - `directory` carries `name`; `error` carries `message`; `empty` has no payload.
+
+For a built-in editor tab (`tabKind: "editor"`) the target is the tab's own
+file rather than a cursor entry.
 
 `ViewFile` also accepts optional `filePath` and `initialFindQuery`, alongside
 `panelId`, `sourceId`, and `filename`. An explicit file path identifies a resolved
@@ -378,7 +383,12 @@ atomically with the destination and can display the focused file.
 ```
 
 * `slotId` — id of the slot this panel belongs to. Panels sharing a slot are tabs.
-* `tabKind` — `"listing"` (default folder view) or `"terminal"` (promoted PTY).
+* `tabKind` — `"listing"` (default folder view), `"terminal"` (promoted PTY), or
+  `"editor"` (built-in editor tab; see [Tabs](tabs.md) §5a).
+* `editor` — editor tabs only: `{ sessionId, filePath, fileName, originPanelId,
+  savedVersion, isNote }`. Editor patches carry envelope version 0 so they are
+  never dropped by the listing's structural version guard; `editor: null` with
+  `tabKind: "listing"` turns a lone editor tab back into a listing.
 * `tabTitle` — user-supplied tab title; omitted means "derive from path/cwd".
 
 ### 7.1 Slot Model
@@ -414,7 +424,47 @@ baseline on `Welcome`, allowing counters to restart after a backend restart.
 | `ReorderPanelTab` | `{ slotId, panelId, beforePanelId: string \| null }` | Moves a tab before a sibling in the same slot; explicit null appends. Valid changed requests broadcast only a slot patch with the order and unchanged active tab. Focus and panel state are preserved. Missing/malformed, stale, cross-slot and unchanged requests are no-ops. Recorded in the command journal; no new reply type. |
 | `panel.tab.rename` | `{ panelId, title }` | Sets `tabTitle` override (FUTURE — protocol only). |
 | `panel.terminal.promote` | `{ panelId }` | Detaches the panel's embedded PTY and inserts it as a sibling terminal tab; source panel returns to listing. |
+| `OpenEditorTab` | `{ panelId, requestId, path, filename }` | Resolves the entry against that listing (path must match, entry must exist and be a file or a symlink to one), checks the file itself (local, regular, ≤ 2 MiB, UTF-8), and opens an editor tab after `panelId` — or activates the existing tab for that canonical path. Refusals reply `EditorOpenFailed { requestId, code, message }` (`NOT_LOCAL`, `NOT_REGULAR_FILE`, `TOO_LARGE`, `NOT_UTF8`, `MISSING`, `IO`), published as a warning notification. Recorded in the command journal. |
+| `ReturnToOriginTab` | `{ panelId }` | From an editor tab: activates its origin listing tab (cursor moves to the file only when that listing shows it), or opens a listing of the file's folder when there is none. Not journaled. |
 | `QuickEditFile` | panel id scope; `{ path, filename }` | Opens the explicitly named local file in the configured Nano/Vim embedded terminal editor. Both arguments are required; `path` must match the panel's current directory and `filename` must name a regular file in its complete backend listing. Cursor position, selection, and render-window offsets do not affect the target. Missing/invalid arguments or a changed directory produce the existing Quick Edit error and failed journal result, with no cursor fallback. `path` is the editor's working directory and the scoped panel hosts the terminal. On Windows, also probes Git for Windows `usr\\bin`, Scoop, Chocolatey, and WinGet for nano/vim/micro/edit. The temporary terminal closes when the editor exits. |
+
+### 7.3 Built-in editor session intents
+
+Text travels as UTF-8 with `\n` line endings; the backend restores the file's
+original line ending and BOM on save. Every reply carries the request's
+`requestId`. None of these are recorded in the command journal (autosaves would
+flood it); the backend records one `"edit"` mutation per tab at its first
+successful save.
+
+| Intent | Args | Replies |
+|---|---|---|
+| `LoadEditorSession` | `{ panelId, requestId }` | `EditorSessionReady { requestId, panelId, sessionId, text, eol: "lf"\|"crlf", bom }` or `EditorSessionFailed { requestId, panelId, code, message }` |
+| `ReloadEditorSession` | `{ panelId, requestId }` | As above; also bumps `editor.savedVersion` |
+| `SaveEditorFile` | `{ panelId, requestId, revision, text, force }` | `SaveEditorOk { requestId, panelId, revision }` or `SaveEditorFailed { requestId, panelId, revision, code, message }` with `STALE` (file differs from what was loaded/saved), `MISSING`, `TOO_LARGE`, `NOT_LOCAL`, or `IO`. `force` skips the change check. Success broadcasts the panel's `editor` patch. |
+| `KeepBothEditorVersions` | `{ panelId, requestId, text }` | Writes `text` as `<stem> (conflict <date time>).<ext>` next to the file, then `EditorSessionReady { …, conflictCopyPath }` with the disk version (published as an info notification), or `SaveEditorFailed` |
+
+Unsolicited:
+
+* `EditorFileChanged { panelId, sessionId, state: "modified" | "missing" }` —
+  the folder watcher saw a change and the file's hash differs from what the
+  editor last loaded or saved (checked after any save in flight).
+* `EditorFlushRequested { requestId }` — quitting with editor tabs open. The
+  frontend saves every editor tab and sends `Quit { editorsFlushed: true }`.
+  A second quit request within 3 s proceeds without asking again.
+
+### 7.4 Note intents
+
+Notes are kept by a `NoteStore` (today `FolderNoteStore`, a `scratch` folder in
+the config directory). Note messages speak only `storeId` / `noteId`, never a
+store-specific field, so the store can be replaced (e.g. by an Obsidian vault)
+without a protocol change. `StateSnapshot.domains.pinnedLocations` lists
+source-bar entries that are not sources: `[{ id, name, iconName, action, afterSourceId? }]` (placed after that source, else at the end);
+activating one sends `action` with `{ panelId, requestId }`.
+
+| Intent | Args | Replies |
+|---|---|---|
+| `CreateNote` | `{ panelId, requestId, title? }` | Creates an empty note (exclusive create, `-2`/`-3` suffix on collisions) and opens it in an editor tab next to the listing `panelId` resolves to. `NoteCreated { requestId, panelId, storeId, noteId, editorPanelId }` after the tab patches, or `NoteCreateFailed { requestId, code, message }` (`NOTES_UNAVAILABLE`, `IO`, or an editor refusal code; the empty note is removed again). Journaled as a command and a `"note-create"` mutation. Never uses `TouchFile`/`TouchFileOk`. |
+| `OpenNotes` | `{ panelId, requestId }` | Navigates the listing `panelId` resolves to (a new listing tab when the slot has none) to the store's folder on the local source that contains it; replies `NavigateOk`, or `OpenNotesFailed { requestId, code, message }`. Not journaled. |
 
 ---
 

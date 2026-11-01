@@ -28,8 +28,15 @@
     "showcase": "node tools/showcase/index.mjs"
   },
   "dependencies": {
+    "@codemirror/commands": "^6.11.1",
+    "@codemirror/lang-markdown": "^6.5.2",
+    "@codemirror/language": "^6.13.1",
+    "@codemirror/search": "^6.7.2",
+    "@codemirror/state": "^6.7.6",
+    "@codemirror/view": "^6.43.15",
     "@floating-ui/react": "^0.27.20",
     "@fontsource/jetbrains-mono": "^5.3.0",
+    "@lezer/highlight": "^1.2.5",
     "@tabler/icons-react": "^3.49.0",
     "@tauri-apps/api": "^2.12.2",
     "@xterm/addon-fit": "^0.10.0",

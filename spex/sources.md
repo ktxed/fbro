@@ -263,6 +263,18 @@ The source bar renders every `Source` for which `shadow == false`; it is not
 restricted to physical volumes. Sorting uses `sort_priority`, then a
 case-insensitive name comparison.
 
+It also renders **pinned locations**
+(`StateSnapshot.domains.pinnedLocations`: `{ id, name, iconName, action, afterSourceId? }`),
+each right after the source named by `afterSourceId` (Scratch follows the
+Journal), or at the end when that source is absent.
+A pinned location is not a `Source`: activating it sends its `action` intent
+with `{ panelId, requestId }`, which navigates to a folder on the real local
+source that contains it. The only one today is the notes store's folder
+(`OpenNotes`, labelled with the store's display name, "Scratch"); see
+[Protocol](proto.md) §7.4. Giving a folder a second source id instead would
+make one path reachable under two ids and lose features that require
+`kind == "filesystem"` (Git, sharing, global selections).
+
 Mounted removable volumes expose a right-click menu with **Unmount volume…**
 and, when the platform supports it, **Eject entire drive…**. The command
 palette opens the same source/action picker. Unmount affects only the selected

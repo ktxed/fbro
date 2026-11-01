@@ -51,6 +51,8 @@ export const GLOBAL_SHORTCUT_COMMAND_IDS = [
   "file.cut_external",
   "file.paste_external",
   "file.paste_external_move",
+  "notes.new",
+  "notes.open",
   ...TOOLBAR_COMMAND_IDS,
 ] as const;
 
@@ -107,6 +109,7 @@ export const PANEL_SHORTCUT_COMMAND_IDS = [
   "panel.tab.prev",
   "file.touch",
   "file.quick_edit",
+  "file.edit_builtin",
   "file.compare",
 ] as const;
 
@@ -383,6 +386,16 @@ export function executeTargetedCommand(
         ...(explicitPath ? { targetPath: explicitPath } : {}),
       });
       return true;
+    case "file.edit_builtin":
+      // The backend resolves the entry against this listing and checks the file.
+      if (files.length !== 1 || target.kind === "directory") return false;
+      context.client.sendIntent("OpenEditorTab", undefined, {
+        panelId: target.panelId,
+        requestId: crypto.randomUUID(),
+        path: target.dirPath,
+        filename: target.name,
+      });
+      return true;
     case "file.copy":
       return openFileOpForEntries(context.state, context.dispatch, target.panelId, files, "copy");
     case "file.move":
@@ -595,6 +608,30 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
       });
       return true;
     }
+    case "file.edit_builtin": {
+      // The backend checks the file itself (local, regular, size, UTF-8).
+      if (!focused || focused.panel.tabKind !== "listing" || focused.panel.shadowSource) return false;
+      const entry = currentEntry(focused.panel);
+      const isFile = entry && (entry.kind === "file" || (entry.kind === "symlink" && entry.targetKind === "file"));
+      if (!entry || !isFile) return false;
+      client.sendIntent("OpenEditorTab", undefined, {
+        panelId: focused.panelId,
+        requestId: crypto.randomUUID(),
+        path: focused.panel.path,
+        filename: entry.name,
+      });
+      return true;
+    }
+    case "notes.new": {
+      if (state.pendingNote) return false;
+      const requestId = crypto.randomUUID();
+      dispatch({ type: "SET_PENDING_NOTE", note: { requestId } });
+      client.sendIntent("CreateNote", undefined, { panelId: focused?.panelId ?? state.focus, requestId });
+      return true;
+    }
+    case "notes.open":
+      client.sendIntent("OpenNotes", undefined, { panelId: focused?.panelId ?? state.focus, requestId: crypto.randomUUID() });
+      return true;
     case "file.copy":
       if (!focused || (!focused.panel.shadowSource && !sourceCapability("CopySelection"))) return false;
       return openFileOp(state, dispatch, focused.panel, "copy");

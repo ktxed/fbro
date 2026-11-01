@@ -226,6 +226,10 @@ pub(crate) fn build_state_snapshot(
                         .program()
                         .to_string(),
                     zsh_emacs_keymap: state.settings.general.zsh_emacs_keymap,
+                    notes_folder: state.settings.general.notes_folder.clone(),
+                    notes_folder_resolved: crate::vfs::local::normalize_path(
+                        crate::notes::resolve_notes_folder(&state.settings.general.notes_folder),
+                    ),
                 },
                 modal_sizes: state
                     .settings
@@ -245,6 +249,13 @@ pub(crate) fn build_state_snapshot(
             discovered_peers: build_discovered_peers(state),
             share_config: build_share_config(state),
             global_selections: build_global_selection_summaries(state),
+            pinned_locations: vec![crate::ws::protocol::PinnedLocationSchema {
+                id: state.note_store.id().to_string(),
+                name: state.note_store.display_name().to_string(),
+                icon_name: "notes".to_string(),
+                action: "OpenNotes".to_string(),
+                after_source_id: Some(crate::journal::SOURCE_ID.to_string()),
+            }],
         },
     }
 }
@@ -1251,14 +1262,32 @@ fn session_for_slot(
         if panel.tab_kind == crate::state::TabKind::Terminal {
             continue;
         }
-        tabs.push(TabSession::Listing {
-            source_id: Some(panel.source_id.clone()),
-            path: panel.path.clone(),
+        tabs.push(match panel.editor.as_ref() {
+            Some(editor) => TabSession::Editor {
+                source_id: Some(panel.source_id.clone()),
+                path: editor.file_path.clone(),
+                origin_index: None, // filled in below, once all kept ids are known
+                note_store_id: editor.created_note.as_ref().map(|note| note.store_id.clone()),
+                note_id: editor.created_note.as_ref().map(|note| note.note_id.clone()),
+            },
+            None => TabSession::Listing {
+                source_id: Some(panel.source_id.clone()),
+                path: panel.path.clone(),
+            },
         });
         kept_ids.push(*pid);
     }
     if tabs.is_empty() {
         return None;
+    }
+    for (tab, pid) in tabs.iter_mut().zip(&kept_ids) {
+        if let TabSession::Editor { origin_index, .. } = tab {
+            let origin = panels
+                .get(*pid)
+                .and_then(|panel| panel.editor.as_ref())
+                .and_then(|editor| editor.origin_panel_id.as_ref());
+            *origin_index = origin.and_then(|origin| kept_ids.iter().position(|id| *id == origin));
+        }
     }
     // Map the live active panel id onto an index in the kept list.
     // If the active tab was a terminal (and thus dropped), fall back
@@ -1609,6 +1638,7 @@ mod patch_tests {
         let paths: Vec<_> = saved.tabs.iter().map(|tab| match tab {
             TabSession::Listing { path, .. } => path.as_str(),
             TabSession::Terminal { .. } => panic!("terminal must not persist"),
+            TabSession::Editor { .. } => panic!("no editor tab in this slot"),
         }).collect();
         assert_eq!(paths, ["/third", "/first", "/second"]);
         let active_only = session_for_slot(&slot, &state.panels, false).unwrap();
@@ -1618,6 +1648,78 @@ mod patch_tests {
         let mut terminal_active = slot.clone();
         terminal_active.active_panel_id = "terminal".into();
         assert_eq!(session_for_slot(&terminal_active, &state.panels, true).unwrap().active_index, 0);
+    }
+
+    #[tokio::test]
+    async fn editor_tabs_persist_with_their_origin_and_note_marker_and_restore() {
+        struct TempDir(PathBuf);
+        impl Drop for TempDir {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        let dir = TempDir(std::env::temp_dir().join(format!("fbro-editor-session-{}", uuid::Uuid::new_v4())));
+        std::fs::create_dir_all(&dir.0).unwrap();
+        let note = dir.0.join("note.md");
+        std::fs::write(&note, "x").unwrap();
+        let folder = dir.0.to_string_lossy().to_string();
+        let note = note.to_string_lossy().to_string();
+
+        let state = test_state();
+        let mut state = state.lock().await;
+        state.panels.get_mut("left").unwrap().path = folder.clone();
+        let mut editor = state.panels["left"].clone();
+        editor.panel_id = "ed".into();
+        editor.tab_kind = crate::state::TabKind::Editor;
+        editor.editor = Some(crate::editor::EditorTab::new(
+            7,
+            note.clone(),
+            Some("left".into()),
+            Some(crate::editor::CreatedNote { store_id: "scratch".into(), note_id: "note.md".into() }),
+        ));
+        state.panels.insert("ed".into(), editor);
+        let slot = crate::state::PanelSlot {
+            slot_id: "left".into(),
+            tab_panel_ids: vec!["left".into(), "ed".into()],
+            active_panel_id: "ed".into(),
+            version: 0,
+        };
+        let saved = session_for_slot(&slot, &state.panels, true).unwrap();
+        let session = SessionState { slots: vec![saved], ..Default::default() };
+        let saved: SessionState = toml::from_str(&toml::to_string(&session).unwrap()).unwrap();
+        assert_eq!(saved.slots[0].active_index, 1);
+        assert!(matches!(
+            &saved.slots[0].tabs[1],
+            TabSession::Editor { path, origin_index: Some(0), note_id: Some(id), .. } if path == &note && id == "note.md"
+        ));
+
+        // Restore into a fresh state: the editor tab comes back after its origin.
+        state.panels.remove("ed");
+        crate::state::restore_tabs_from_session(&mut state, &saved.slots);
+        let tabs = state.slots["left"].tab_panel_ids.clone();
+        assert_eq!(tabs.len(), 2);
+        let restored = &state.panels[&tabs[1]];
+        assert_eq!(restored.tab_kind, crate::state::TabKind::Editor);
+        assert_eq!(restored.path, folder);
+        let restored_editor = restored.editor.as_ref().unwrap();
+        assert_eq!(restored_editor.file_path, note);
+        assert_eq!(restored_editor.origin_panel_id.as_deref(), Some(tabs[0].as_str()));
+        assert_eq!(restored_editor.created_note.as_ref().unwrap().note_id, "note.md");
+        assert!(restored_editor.disk.is_none(), "restore must not read the file");
+        assert_eq!(state.slots["left"].active_panel_id, tabs[1]);
+
+        // A file that disappeared restores as a listing of its folder.
+        std::fs::remove_file(&note).unwrap();
+        let right_before = state.slots["right"].tab_panel_ids.len();
+        let mut missing = saved.slots[0].clone();
+        missing.slot_id = "right".into();
+        crate::state::restore_tabs_from_session(&mut state, &[missing]);
+        let right = &state.slots["right"].tab_panel_ids;
+        assert_eq!(right.len(), right_before + 1);
+        let fallback = &state.panels[right.last().unwrap()];
+        assert_eq!(fallback.tab_kind, crate::state::TabKind::Listing);
+        assert!(fallback.editor.is_none());
+        assert_eq!(fallback.path, folder);
     }
 
     #[tokio::test]
@@ -2034,6 +2136,7 @@ fn build_panel_snapshot(panel: &Panel, supports_thumbnails: bool) -> PanelSnapsh
             cursor_hint: ss.cursor_hint.clone(),
         }),
         terminal_session_id: panel.terminal_session,
+        editor: panel.editor.as_ref().map(crate::editor::EditorTab::to_json),
         git: panel.git.clone(),
     }
 }

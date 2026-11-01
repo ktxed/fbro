@@ -346,6 +346,105 @@ body {
 
 .embedded-viewer--focused { border-color: var(--border-focus); }
 
+/* ── Built-in editor tab ─────────────────────────────────────────────── */
+.panel-editor {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-panel);
+}
+
+/* Full screen, like a maximized terminal, but below dialogs (z-index 100)
+   so the conflict dialog stays visible. */
+.panel-editor--maximized {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+}
+
+.panel-editor__header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 4px 3px 8px;
+  font-size: var(--font-size);
+  color: var(--text-dim);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.panel-editor__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+
+.panel-editor__state {
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.panel-editor__btn,
+.panel-editor__bar-btn {
+  appearance: none;
+  font: inherit;
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-dim);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  padding: 2px 4px;
+  cursor: pointer;
+}
+
+.panel-editor__btn:hover:not(:disabled),
+.panel-editor__bar-btn:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+.panel-editor__bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  font-size: var(--font-size);
+  color: var(--text-warning);
+  background: var(--bg-elev);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.panel-editor__bar > span {
+  flex: 1;
+  min-width: 0;
+}
+
+.panel-editor__bar-btn {
+  color: var(--text);
+  border-color: var(--border);
+}
+
+.panel-editor__host {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.panel-editor__host .cm-editor {
+  height: 100%;
+}
+
+.panel-editor__error {
+  padding: 12px;
+  color: var(--text-danger);
+}
+
 .embedded-viewer__header {
   order: -1;
   display: flex;
@@ -594,6 +693,22 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
+}
+
+/* Built-in editor tab save state, placed before the fixed close button. */
+.panel__tab-dot {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  margin-left: 4px;
+  border-radius: 50%;
+  background: var(--text-dim);
+}
+
+.panel__tab-warning {
+  flex-shrink: 0;
+  margin-left: 4px;
+  color: var(--text-warning);
 }
 
 .panel__tab-close {

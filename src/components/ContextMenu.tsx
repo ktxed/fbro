@@ -49,6 +49,7 @@ export function ContextMenu({ client, menu }: ContextMenuProps) {
           canOpenWith: can("platform.open-with"),
           canPassToBro: can("panel.pass-to-bro"),
           canCompare: can("file.compare"),
+          canEditBuiltin: can("file.edit_builtin"),
           canGitDiff: can("git.view-diff"),
           canGitInit: can("git.init"),
           canAddToGlobalSelection: can("selection.to-global"),

@@ -51,6 +51,51 @@ const MAX_COL     = 512;    // chars — wrap long lines into multiple display r
 
 export interface FileViewerHandle {
   togglePlayback: (repeat?: boolean) => boolean;
+  /** Re-read the displayed file in place, keeping the rendered content (and
+   *  scroll) until the new content arrives. False when the current renderer
+   *  cannot (large/chunked or direct image views); the caller remounts. */
+  refresh: () => boolean;
+  /** Rendered Markdown: scroll so source `line` sits at `fraction` of the
+   *  view height. Remembered and re-applied after each render. */
+  syncToSourceLine: (line: number, fraction: number) => void;
+}
+
+/** Vertical offset (in scroll coordinates) of a source line in rendered
+ *  Markdown, from the renderer's `data-sourcepos` attributes. */
+export function sourceLineOffset(scroller: HTMLElement, line: number): number | null {
+  type Block = { el: HTMLElement; start: number; end: number };
+  let containing: Block | null = null;
+  let before: Block | null = null;
+  let after: Block | null = null;
+  for (const el of scroller.querySelectorAll<HTMLElement>("[data-sourcepos]")) {
+    const match = /^(\d+):\d+-(\d+):\d+$/.exec(el.dataset.sourcepos ?? "");
+    if (!match || el.getClientRects().length === 0) continue;
+    const block = { el, start: Number(match[1]), end: Number(match[2]) };
+    if (block.start <= line && line <= block.end) {
+      // The innermost (shortest) element covering the line is the most precise.
+      if (!containing || block.end - block.start < containing.end - containing.start) containing = block;
+    } else if (block.end < line) {
+      if (!before || block.end >= before.end) before = block;
+    } else if (!after || block.start < after.start) {
+      after = block;
+    }
+  }
+  const box = scroller.getBoundingClientRect();
+  const top = (el: HTMLElement) => el.getBoundingClientRect().top - box.top + scroller.scrollTop;
+  const bottom = (el: HTMLElement) => el.getBoundingClientRect().bottom - box.top + scroller.scrollTop;
+  if (containing) {
+    const span = containing.end - containing.start + 1;
+    const height = bottom(containing.el) - top(containing.el);
+    return top(containing.el) + (height * (line - containing.start)) / span;
+  }
+  if (before && after) {
+    // A blank line between blocks: interpolate across the gap.
+    const share = (line - before.end) / Math.max(1, after.start - before.end);
+    return bottom(before.el) + (top(after.el) - bottom(before.el)) * share;
+  }
+  if (before) return bottom(before.el);
+  if (after) return top(after.el);
+  return null;
 }
 
 export interface FileViewerProps {
@@ -376,7 +421,6 @@ export function FileViewer({ ref, path: initPath, sourceId: initSourceId, filena
     }
     return true;
   }, []);
-  useImperativeHandle(ref, () => ({ togglePlayback }), [togglePlayback]);
 
   // 1-based file line number of the first raw line in the current buffer.
   // null = unknown (after a scrollbar jump to an arbitrary byte offset).
@@ -557,6 +601,30 @@ export function FileViewer({ ref, path: initPath, sourceId: initSourceId, filena
       path: curPathRef.current, sourceId: curSourceIdRef.current, offset: off, size,
     });
   }, []); // stable: reads current path/sourceId via refs, never recreated
+
+  const isSmallRef = useRef(isSmall);
+  isSmallRef.current = isSmall;
+  const useDirectRef = useRef(useDirect);
+  useDirectRef.current = useDirect;
+  const refresh = useCallback(() => {
+    if (isSmallRef.current !== true || useDirectRef.current) return false;
+    requestChunk(0, SMALL_LIMIT);
+    return true;
+  }, [requestChunk]);
+  const sourceSyncRef = useRef<{ line: number; fraction: number } | null>(null);
+  const applySourceSync = useCallback(() => {
+    const target = sourceSyncRef.current;
+    const scroller = contentRef.current;
+    if (!target || !scroller?.classList.contains("viewer__markdown")) return;
+    const offset = sourceLineOffset(scroller, target.line);
+    if (offset === null) return;
+    scroller.scrollTop = Math.max(0, offset - target.fraction * scroller.clientHeight);
+  }, []);
+  const syncToSourceLine = useCallback((line: number, fraction: number) => {
+    sourceSyncRef.current = { line, fraction };
+    applySourceSync();
+  }, [applySourceSync]);
+  useImperativeHandle(ref, () => ({ togglePlayback, refresh, syncToSourceLine }), [togglePlayback, refresh, syncToSourceLine]);
 
   // ── Measure viewport on resize ────────────────────────────────────────────
 
@@ -1392,6 +1460,8 @@ export function FileViewer({ ref, path: initPath, sourceId: initSourceId, filena
       wheelZoomMermaid(block, event, container);
     };
     container.addEventListener("wheel", handleWheel, { passive: false });
+    // New content shifts block positions: re-apply editor-following.
+    requestAnimationFrame(applySourceSync);
     const codeBlocks = Array.from(
       container.querySelectorAll<HTMLElement>("code.language-mermaid"),
     );
@@ -1408,7 +1478,12 @@ export function FileViewer({ ref, path: initPath, sourceId: initSourceId, filena
           if (cancelled || !pre.isConnected) return;
           const safeSvg = sanitizedMermaidSvg(svg);
           if (!safeSvg) throw new Error("Mermaid returned invalid SVG");
-          pre.replaceWith(buildMermaidBlock(document.importNode(safeSvg, true) as SVGSVGElement));
+          const block = buildMermaidBlock(document.importNode(safeSvg, true) as SVGSVGElement);
+          // Keep the source position so editor-following still finds the diagram.
+          const sourcepos = pre.getAttribute("data-sourcepos");
+          if (sourcepos) block.setAttribute("data-sourcepos", sourcepos);
+          pre.replaceWith(block);
+          applySourceSync();
         } catch (err) {
           console.error("mermaid render failed:", err);
         }
@@ -1419,7 +1494,7 @@ export function FileViewer({ ref, path: initPath, sourceId: initSourceId, filena
       container.removeEventListener("click", handleClick);
       container.removeEventListener("wheel", handleWheel);
     };
-  }, [markdownHtml, markdownPreview, colorSchemeId, colorSchemeCatalog, panelId, quick]);
+  }, [markdownHtml, markdownPreview, colorSchemeId, colorSchemeCatalog, panelId, quick, applySourceSync]);
 
   // ── Status bar info ───────────────────────────────────────────────────────
 

@@ -1210,6 +1210,7 @@ async fn create_right_listing_tab(
             navigation_context: Default::default(),
             shadow_source: None,
             terminal_session: None,
+            editor: None,
             git: base.as_ref().and_then(|panel| panel.git.clone()),
         };
 
@@ -1240,7 +1241,7 @@ async fn create_right_listing_tab(
     Some(panel_id)
 }
 
-async fn navigate_panel_to(args: &Value, ctx: &mut IntentContext<'_>) {
+pub(super) async fn navigate_panel_to(args: &Value, ctx: &mut IntentContext<'_>) {
     let parsed = NavigatePanelArgs::from_args(args);
     if parsed.panel_id.is_empty() {
         return;

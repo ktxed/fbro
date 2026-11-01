@@ -194,6 +194,11 @@ Package hex, mermaid, md, media into named modes; add SQLite browser, JSON tree,
 
 Not a full IDE: dual quick-edit PTYs or dual text buffers for “two config files” workflows.
 
+**Shipped base:** built-in editor tabs (CodeMirror 6, autosave, conflict
+handling) and notes in a scratch folder behind a `NoteStore` — see
+`spex/tabs.md` §5a. Follow-ups: live preview of unsaved text, an Obsidian vault
+store, a configurable notes folder, editor tabs for remote sources.
+
 ---
 
 ### E. AI / automation (only where the kernel makes it safe)
@@ -323,7 +328,7 @@ The best next features feel like inevitable consequences of the architecture —
 
 ## Appendix — current surface (cheat sheet)
 
-**Implemented:** dual panel, tabs, terminals/quick edit, jobs+conflicts, search-as-VFS, zip/7z, bros (incl. fedup/sync), git inline+modals, remote pair/browse/copy, viewer/diff, bookmarks/history/procs/journal/global selections, grid thumbs, settings, e2e smoke for core paths.
+**Implemented:** dual panel, tabs, terminals/quick edit, built-in editor tabs + scratch notes, jobs+conflicts, search-as-VFS, zip/7z, bros (incl. fedup/sync), git inline+modals, remote pair/browse/copy, viewer/diff, bookmarks/history/procs/journal/global selections, grid thumbs, settings, e2e smoke for core paths.
 
 **Spec / incomplete:** n-panel, tab rename, keyboard modal polish, remote write, generic remotes, undo, plugins, user key rebinding UI.
 

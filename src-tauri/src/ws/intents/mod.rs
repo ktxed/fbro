@@ -1,22 +1,24 @@
-mod app;
+pub(crate) mod app;
 mod command_bindings;
 mod bookmarks;
 pub(crate) mod bro;
 mod cache;
 mod git;
 mod compare;
+pub(crate) mod editor;
 mod eject;
 pub(crate) mod global_selection;
 mod history;
 pub(crate) mod jobs;
 mod navigation;
+mod notes;
 mod notifications;
 mod panel;
 mod procs;
 mod remote;
 mod settings;
 pub(crate) mod sharing;
-mod tabs;
+pub(crate) mod tabs;
 mod terminal;
 mod themes;
 mod viewer;
@@ -199,6 +201,13 @@ pub async fn dispatch(name: &str, scope: &Value, args: &Value, ctx: &mut IntentC
         "panel.tab.new" | "panel.tab.close" | "panel.tab.switch" | "panel.terminal.promote" | "ReorderPanelTab" => {
             tabs::handle(name, scope, args, ctx).await
         }
+        "OpenEditorTab"
+        | "LoadEditorSession"
+        | "ReloadEditorSession"
+        | "SaveEditorFile"
+        | "KeepBothEditorVersions"
+        | "ReturnToOriginTab" => editor::handle(name, args, ctx).await,
+        "CreateNote" | "OpenNotes" => notes::handle(name, args, ctx).await,
         "EnableSharing"
         | "AddSharedFolder"
         | "SetSharedTargets"
@@ -245,6 +254,8 @@ fn should_record_command(name: &str) -> bool {
             | "KillProcess"
             | "OpenTerminal"
             | "EjectSource"
+            | "OpenEditorTab"
+            | "CreateNote"
     )
 }
 
@@ -258,6 +269,15 @@ mod notification_journal_tests {
         assert!(!should_record_command("ClearNotifications"));
         assert!(should_record_command("WriteExternalClipboard"));
         assert!(should_record_command("ClearIconCache"));
+    }
+
+    #[test]
+    fn editor_autosaves_and_navigation_are_not_journaled_as_commands() {
+        assert!(should_record_command("OpenEditorTab"));
+        assert!(should_record_command("CreateNote"));
+        for chatter in ["SaveEditorFile", "LoadEditorSession", "ReturnToOriginTab", "OpenNotes"] {
+            assert!(!should_record_command(chatter), "{chatter}");
+        }
     }
 }
 

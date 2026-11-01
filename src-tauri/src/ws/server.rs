@@ -471,10 +471,21 @@ async fn handle_connection(
             Some(action) = watcher_action_rx.recv() => {
                 match action {
                     WatcherAction::DirChanged { panel_id } => {
-                        let names = {
+                        let (names, is_editor) = {
                             let state_guard = state.lock().await;
-                            selected_names_for(&state_guard, &panel_id)
+                            (
+                                selected_names_for(&state_guard, &panel_id),
+                                state_guard.panels.get(&panel_id).is_some_and(|panel| panel.editor.is_some()),
+                            )
                         };
+                        if is_editor {
+                            // The editor tab's folder changed: maybe its file did.
+                            tokio::spawn(crate::ws::intents::editor::check_external_change(
+                                Arc::clone(&state),
+                                tx.clone(),
+                                panel_id.clone(),
+                            ));
+                        }
                         quiet_rescan_panel(
                             &panel_id,
                             &state,
@@ -510,6 +521,9 @@ async fn handle_connection(
             }
 
             _ = quit_notify.notified(), if is_gui => {
+                if crate::ws::intents::app::request_editor_flush(&state, &tx).await {
+                    continue;
+                }
                 let active_jobs = active_job_count(&state).await;
                 if active_jobs == 0 {
                     save_session(&state, &app_handle).await;

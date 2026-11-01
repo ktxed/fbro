@@ -4,6 +4,7 @@ import { isSearchSourceId } from "../utils/sourceId";
 import { EMPTY_COLOR_SCHEME_CATALOG } from "../theme/colorSchemes";
 import { applySlotUpdate } from "./slots";
 import { disposeCachedTerminal } from "../components/PanelTerminal";
+import { disposeEditorSession } from "../editor/sessions";
 import { applyNotificationPatch, applyNotificationSnapshot, createNotificationState, expireNotificationToast, type NotificationState } from "../notifications/state";
 import type { NotificationRequest, NotificationRequestAction } from "../notifications/service";
 import type {
@@ -57,6 +58,8 @@ import type {
   GlobalSelectionSummary,
   NotificationsPatch,
   NotificationInput,
+  PinnedLocation,
+  EditorTabInfo,
 } from "../ws/types";
 
 // ─── State ───────────────────────────────────────────────────────────────────
@@ -109,6 +112,19 @@ export interface PendingGitInit {
   requestId: string;
   submitting: boolean;
   error?: string;
+}
+
+/** A `CreateNote` request awaiting `NoteCreated` / `NoteCreateFailed`. */
+export interface PendingNote {
+  requestId: string;
+}
+
+/** The editor's file changed on disk while it had unsaved changes. */
+export interface PendingEditorConflict {
+  panelId: string;
+  sessionId: number;
+  fileName: string;
+  kind: "conflict" | "missing";
 }
 
 export interface PendingTouch {
@@ -310,6 +326,11 @@ export interface AppState {
   pendingMkdir: PendingMkdir | null;
   pendingGitInit: PendingGitInit | null;
   pendingTouch: PendingTouch | null;
+  pendingNote: PendingNote | null;
+  pendingEditorConflict: PendingEditorConflict | null;
+  /** Quitting found editor tabs it could not save. */
+  pendingEditorQuit: { failed: number } | null;
+  pinnedLocations: PinnedLocation[];
   pendingSelectionMask: PendingSelectionMask | null;
   pendingNoEditor: PendingNoEditor | null;
   pendingGoToPath: PendingGoToPath | null;
@@ -356,6 +377,8 @@ export interface AppState {
   bookmarks: BookmarkEntry[];
   bookmarksOpen: { panelId: string } | null;
   maximizedTerminalPanelId: string | null;
+  /** Editor tab filling the window; UI state only, never persisted. */
+  maximizedEditorPanelId: string | null;
   childProcesses: Record<number, ChildProcess>;
   globalSelections: GlobalSelectionSummary[];
   fontSize: number;
@@ -406,6 +429,10 @@ const initialState: AppState = {
   pendingMkdir: null,
   pendingGitInit: null,
   pendingTouch: null,
+  pendingNote: null,
+  pendingEditorConflict: null,
+  pendingEditorQuit: null,
+  pinnedLocations: [],
   pendingSelectionMask: null,
   pendingNoEditor: null,
   pendingGoToPath: null,
@@ -443,11 +470,12 @@ const initialState: AppState = {
   bookmarks: [],
   bookmarksOpen: null,
   maximizedTerminalPanelId: readMaximizedTerminalPanelId(),
+  maximizedEditorPanelId: null,
   childProcesses: {},
   globalSelections: [],
   fontSize: 13,
   settings: {
-    general: { showHiddenDefault: false, showButtonBar: true, osNotificationsEnabled: true, supportsOsNotifications: false, supportsOsNotificationSettings: false, osNotificationPlatform: "none", rememberWindowState: true, preserveAttributes: true, autoResumeCopies: true, ludicrousMode: false, enableHeic2any: false, maxImageSizeMb: 512, savePanelViewMode: false, rememberSortPerLocation: false, locationSettingsCount: 0, iconCacheDir: "", iconCacheRevision: 0, supportsManagedThumbnails: false, enableVideoThumbnails: true, thumbnailMaxImageSizeMb: 100, thumbnailVideoFrameSkip: 5, streamThumbnails: true, sessionPath: "", bookmarksPath: "", thumbnailCacheDir: "", thumbnailCacheItemCount: 0, thumbnailCacheSizeBytes: 0, persistPanelTabs: true, procTreeMode: false, colorScheme: "fbro-dark", followSystemColorScheme: false, activeColorScheme: "fbro-dark", colorSchemes: EMPTY_COLOR_SCHEME_CATALOG, systemColorScheme: null, sevenzipExtractor: "auto", sevenzipCustomPath: "", sevenzipResolvedPath: "", fedupDefaultIgnorePatterns: ".git\n.idea\n.vscode\n.venv\nnode_modules\n__MACOSX\n._*\n.DS_Store\nartifacts/e2e\ndist/assets\ntarget/debug\ntarget/release\ntarget/bundle\n.m2", compareMaxFileSizeMb: 10, compareDifferMode: "internal", compareExternalCommand: "", quickTerminalEditor: "nano", zshEmacsKeymap: false },
+    general: { showHiddenDefault: false, showButtonBar: true, osNotificationsEnabled: true, supportsOsNotifications: false, supportsOsNotificationSettings: false, osNotificationPlatform: "none", rememberWindowState: true, preserveAttributes: true, autoResumeCopies: true, ludicrousMode: false, enableHeic2any: false, maxImageSizeMb: 512, savePanelViewMode: false, rememberSortPerLocation: false, locationSettingsCount: 0, iconCacheDir: "", iconCacheRevision: 0, supportsManagedThumbnails: false, enableVideoThumbnails: true, thumbnailMaxImageSizeMb: 100, thumbnailVideoFrameSkip: 5, streamThumbnails: true, sessionPath: "", bookmarksPath: "", thumbnailCacheDir: "", thumbnailCacheItemCount: 0, thumbnailCacheSizeBytes: 0, persistPanelTabs: true, procTreeMode: false, colorScheme: "fbro-dark", followSystemColorScheme: false, activeColorScheme: "fbro-dark", colorSchemes: EMPTY_COLOR_SCHEME_CATALOG, systemColorScheme: null, sevenzipExtractor: "auto", sevenzipCustomPath: "", sevenzipResolvedPath: "", fedupDefaultIgnorePatterns: ".git\n.idea\n.vscode\n.venv\nnode_modules\n__MACOSX\n._*\n.DS_Store\nartifacts/e2e\ndist/assets\ntarget/debug\ntarget/release\ntarget/bundle\n.m2", compareMaxFileSizeMb: 10, compareDifferMode: "internal", compareExternalCommand: "", quickTerminalEditor: "nano", zshEmacsKeymap: false, notesFolder: "", notesFolderResolved: "" },
     modalSizes: {},
   },
 };
@@ -473,6 +501,11 @@ export type AppAction =
   | { type: "CLOSE_GIT_INIT" }
   | { type: "OPEN_TOUCH"; touch: PendingTouch }
   | { type: "CLOSE_TOUCH" }
+  | { type: "SET_PENDING_NOTE"; note: PendingNote | null }
+  | { type: "OPEN_EDITOR_CONFLICT"; conflict: PendingEditorConflict }
+  | { type: "CLOSE_EDITOR_CONFLICT" }
+  | { type: "OPEN_EDITOR_QUIT"; failed: number }
+  | { type: "CLOSE_EDITOR_QUIT" }
   | { type: "OPEN_SELECTION_MASK"; selectionMask: PendingSelectionMask }
   | { type: "CLOSE_SELECTION_MASK" }
   | { type: "OPEN_NO_EDITOR"; noEditor: PendingNoEditor }
@@ -528,7 +561,8 @@ export type AppAction =
   | { type: "SET_SHARED_FOLDER_INPUT"; path: string }
   | { type: "SUBMIT_SHARED_FOLDER"; requestId: string }
   | { type: "SET_PAIRING_DECISION"; handshakeId: string; accept: boolean }
-  | { type: "SET_MAXIMIZED_TERMINAL"; panelId: string | null };
+  | { type: "SET_MAXIMIZED_TERMINAL"; panelId: string | null }
+  | { type: "SET_MAXIMIZED_EDITOR"; panelId: string | null };
 
 // ─── Reducer ─────────────────────────────────────────────────────────────────
 
@@ -612,6 +646,9 @@ function applySnapshot(state: AppState, msg: StateSnapshotMessage): AppState {
   if (domains.globalSelections !== undefined) {
     next.globalSelections = domains.globalSelections;
   }
+  if (domains.pinnedLocations !== undefined) {
+    next.pinnedLocations = domains.pinnedLocations;
+  }
   if (domains.notifications !== undefined) {
     next.notifications = applyNotificationSnapshot(state.notifications, domains.notifications);
   }
@@ -663,6 +700,7 @@ function applyPatch(state: AppState, msg: StatePatchMessage): AppState {
         calculatingSize: [],
         shadowSource: p.shadowSource,
         terminalSessionId: p.terminalSessionId,
+        editor: p.editor ?? undefined,
         git: p.git,
       };
       return {
@@ -843,6 +881,13 @@ function applyPatch(state: AppState, msg: StatePatchMessage): AppState {
     if (msg.patch.terminalSessionId !== undefined) {
       updated = { ...updated, terminalSessionId: msg.patch.terminalSessionId === null ? undefined : msg.patch.terminalSessionId as number };
     }
+    if (msg.patch.editor !== undefined) {
+      if (msg.patch.editor === null && updated.editor) disposeEditorSession(updated.editor.sessionId);
+      updated = { ...updated, editor: msg.patch.editor === null ? undefined : msg.patch.editor as EditorTabInfo };
+    }
+    if (msg.patch.tabKind !== undefined) {
+      updated = { ...updated, tabKind: msg.patch.tabKind as PanelState["tabKind"] };
+    }
     if (msg.patch.git !== undefined) {
       updated = { ...updated, git: msg.patch.git === null ? undefined : msg.patch.git as PanelState["git"] };
     }
@@ -936,6 +981,10 @@ function applyPatch(state: AppState, msg: StatePatchMessage): AppState {
       } else {
         const merged = applySlotUpdate(existing, slotId, msg.version, patch)!;
         nextSlots = { ...nextSlots, [slotId]: merged };
+        for (const closedId of existing?.tabPanelIds ?? []) {
+          const editor = state.panels[closedId]?.editor;
+          if (editor && !merged.tabPanelIds.includes(closedId)) disposeEditorSession(editor.sessionId);
+        }
       }
     }
 
@@ -1491,6 +1540,10 @@ function reducer(state: AppState, action: AppAction): AppState {
           return requestNotification(state, action.notificationRequestId, { message: msg.message, level: "error" });
         case "TouchFileOk":
           return { ...state, pendingTouch: null };
+        case "NoteCreated":
+        case "NoteCreateFailed":
+          // Failures are toasted by the backend's notification service.
+          return state.pendingNote?.requestId === msg.requestId ? { ...state, pendingNote: null } : state;
         case "SetPermissionsOk":
           return { ...state, pendingAttributes: null };
         case "NavigateOk":
@@ -1852,6 +1905,16 @@ function reducer(state: AppState, action: AppAction): AppState {
       return { ...state, pendingTouch: action.touch };
     case "CLOSE_TOUCH":
       return { ...state, pendingTouch: null };
+    case "SET_PENDING_NOTE":
+      return { ...state, pendingNote: action.note };
+    case "OPEN_EDITOR_CONFLICT":
+      return { ...state, pendingEditorConflict: action.conflict };
+    case "CLOSE_EDITOR_CONFLICT":
+      return { ...state, pendingEditorConflict: null };
+    case "OPEN_EDITOR_QUIT":
+      return { ...state, pendingEditorQuit: { failed: action.failed } };
+    case "CLOSE_EDITOR_QUIT":
+      return { ...state, pendingEditorQuit: null };
     case "OPEN_SELECTION_MASK":
       return { ...state, pendingSelectionMask: action.selectionMask };
     case "CLOSE_SELECTION_MASK":
@@ -1897,6 +1960,8 @@ function reducer(state: AppState, action: AppAction): AppState {
         ...state,
         pendingPairing: { ...state.pendingPairing, localDecision: action.accept },
       };
+    case "SET_MAXIMIZED_EDITOR":
+      return { ...state, maximizedEditorPanelId: action.panelId };
     case "SET_MAXIMIZED_TERMINAL":
       storeMaximizedTerminalPanelId(action.panelId);
       return { ...state, maximizedTerminalPanelId: action.panelId };

@@ -64,6 +64,9 @@ export function SettingsGeneralTab({ general, client }: SettingsGeneralTabProps)
   const [confirmLocationReset, setConfirmLocationReset] = useState(false);
   const locationResetCancelRef = useRef<HTMLButtonElement>(null);
   const [sevenzipPathDraft, setSevenzipPathDraft] = useState(general.sevenzipCustomPath);
+  const [notesFolderDraft, setNotesFolderDraft] = useState(general.notesFolder);
+  const [notesFolderError, setNotesFolderError] = useState<string | null>(null);
+  const notesFolderInputRef = useRef<HTMLInputElement>(null);
   const [fedupIgnoreDraft, setFedupIgnoreDraft] = useState(general.fedupDefaultIgnorePatterns);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sevenzipPathDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -72,6 +75,29 @@ export function SettingsGeneralTab({ general, client }: SettingsGeneralTabProps)
   useEffect(() => {
     setSevenzipPathDraft(general.sevenzipCustomPath);
   }, [general.sevenzipCustomPath]);
+
+  useEffect(() => {
+    setNotesFolderDraft(general.notesFolder);
+    setNotesFolderError(null);
+  }, [general.notesFolder]);
+
+  // Committed on Enter or blur, never per keystroke: a half-typed path must not
+  // become the notes folder. The backend validates; a rejection shows inline.
+  const commitNotesFolder = (value: string) => {
+    if (value.trim() === general.notesFolder) {
+      setNotesFolderError(null);
+      return;
+    }
+    const unsubscribe = client.subscribeMessages((message) => {
+      if (message.type === "Error" && message.code === "BAD_SETTING") {
+        unsubscribe();
+        setNotesFolderError(message.message);
+      } else if (message.type === "StatePatch" && message.domain === "settings") {
+        unsubscribe();
+      }
+    });
+    send("notesFolder", value);
+  };
 
   useEffect(() => {
     setFedupIgnoreDraft(general.fedupDefaultIgnorePatterns);
@@ -450,6 +476,46 @@ export function SettingsGeneralTab({ general, client }: SettingsGeneralTabProps)
                   : `Path not found — will fall back to the in-process extractor`
                 : "No 7z / 7zz / 7za binary found on PATH — will fall back to the in-process extractor"}
         </div>
+      </div>
+      <div className="settings-tab__section">
+        <h3 className="settings-tab__section-title">Notes</h3>
+        <label className="settings-tab__option" style={{ flexDirection: "column", alignItems: "flex-start", gap: 6 }}>
+          <span>Notes folder</span>
+          <input
+            ref={notesFolderInputRef}
+            type="text"
+            data-testid="settings-notes-folder"
+            placeholder="Default (scratch folder in the fbro config directory)"
+            value={notesFolderDraft}
+            aria-invalid={notesFolderError ? true : undefined}
+            onChange={(e) => setNotesFolderDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.defaultPrevented || e.key !== "Enter") return;
+              e.preventDefault();
+              commitNotesFolder(notesFolderDraft);
+            }}
+            onBlur={() => commitNotesFolder(notesFolderDraft)}
+            style={{ width: "100%", maxWidth: 480 }}
+          />
+        </label>
+        <div className="settings-tab__hint" role={notesFolderError ? "alert" : undefined} data-testid="settings-notes-folder-hint">
+          {notesFolderError
+            ?? `New notes go to ${general.notesFolderResolved}. Changing the folder does not move existing notes.`}
+        </div>
+        {general.notesFolder !== "" && (
+          <button
+            type="button"
+            className="modal__btn"
+            data-testid="settings-notes-folder-default"
+            onClick={() => {
+              setNotesFolderDraft("");
+              commitNotesFolder("");
+              notesFolderInputRef.current?.focus();
+            }}
+          >
+            Use default folder
+          </button>
+        )}
       </div>
       <div className="settings-tab__section">
         <h3 className="settings-tab__section-title">Data files</h3>

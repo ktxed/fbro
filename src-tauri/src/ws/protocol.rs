@@ -145,6 +145,100 @@ pub enum ServerMessage {
         #[serde(rename = "panelId")]
         panel_id: String,
     },
+    // ── Built-in editor tabs (file level) ──
+    EditorOpenFailed {
+        timestamp: u64,
+        #[serde(rename = "requestId")]
+        request_id: String,
+        code: String,
+        message: String,
+    },
+    EditorSessionReady {
+        timestamp: u64,
+        #[serde(rename = "requestId")]
+        request_id: String,
+        #[serde(rename = "panelId")]
+        panel_id: String,
+        #[serde(rename = "sessionId")]
+        session_id: u64,
+        text: String,
+        eol: String,
+        bom: bool,
+        /// Set when Keep both saved the local text as a sibling copy.
+        #[serde(rename = "conflictCopyPath", skip_serializing_if = "Option::is_none")]
+        conflict_copy_path: Option<String>,
+    },
+    EditorSessionFailed {
+        timestamp: u64,
+        #[serde(rename = "requestId")]
+        request_id: String,
+        #[serde(rename = "panelId")]
+        panel_id: String,
+        code: String,
+        message: String,
+    },
+    SaveEditorOk {
+        timestamp: u64,
+        #[serde(rename = "requestId")]
+        request_id: String,
+        #[serde(rename = "panelId")]
+        panel_id: String,
+        revision: u64,
+    },
+    SaveEditorFailed {
+        timestamp: u64,
+        #[serde(rename = "requestId")]
+        request_id: String,
+        #[serde(rename = "panelId")]
+        panel_id: String,
+        revision: u64,
+        code: String,
+        message: String,
+    },
+    EditorFileChanged {
+        timestamp: u64,
+        #[serde(rename = "panelId")]
+        panel_id: String,
+        #[serde(rename = "sessionId")]
+        session_id: u64,
+        /// "modified" or "missing".
+        state: String,
+    },
+    /// Quitting: the frontend saves every editor tab, then sends
+    /// `Quit { editorsFlushed: true }`.
+    EditorFlushRequested {
+        timestamp: u64,
+        #[serde(rename = "requestId")]
+        request_id: String,
+    },
+    // ── Notes ──
+    NoteCreated {
+        timestamp: u64,
+        #[serde(rename = "requestId")]
+        request_id: String,
+        #[serde(rename = "panelId")]
+        panel_id: String,
+        #[serde(rename = "storeId")]
+        store_id: String,
+        #[serde(rename = "noteId")]
+        note_id: String,
+        #[serde(rename = "editorPanelId")]
+        editor_panel_id: String,
+    },
+    NoteCreateFailed {
+        timestamp: u64,
+        #[serde(rename = "requestId")]
+        request_id: String,
+        code: String,
+        message: String,
+    },
+    OpenNotesFailed {
+        timestamp: u64,
+        #[serde(rename = "requestId")]
+        request_id: String,
+        code: String,
+        message: String,
+    },
     SetPermissionsOk {
         timestamp: u64,
         #[serde(rename = "panelId")]
@@ -688,6 +782,8 @@ pub struct StateDomains {
     pub share_config: serde_json::Value,
     #[serde(rename = "globalSelections")]
     pub global_selections: Vec<crate::vfs::global_selection::GlobalSelectionSummary>,
+    #[serde(rename = "pinnedLocations")]
+    pub pinned_locations: Vec<PinnedLocationSchema>,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -768,6 +864,10 @@ pub struct GeneralSettingsSchema {
     pub compare_external_command: String,
     pub quick_terminal_editor: String,
     pub zsh_emacs_keymap: bool,
+    /// Configured notes folder; empty means the default.
+    pub notes_folder: String,
+    /// Read-only: the folder notes actually use.
+    pub notes_folder_resolved: String,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -859,8 +959,25 @@ pub struct PanelSnapshot {
     pub shadow_source: Option<ShadowSourceSchema>,
     #[serde(rename = "terminalSessionId", skip_serializing_if = "Option::is_none")]
     pub terminal_session_id: Option<u32>,
+    /// `EditorTab::to_json` for editor tabs.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub editor: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub git: Option<crate::git::GitRepoStatus>,
+}
+
+/// A source-bar entry that is not a `Source`: activating it sends `action`,
+/// which hands off to a real source (e.g. the notes folder).
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct PinnedLocationSchema {
+    pub id: String,
+    pub name: String,
+    pub icon_name: String,
+    pub action: String,
+    /// Rendered right after this source; at the end when absent or missing.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub after_source_id: Option<String>,
 }
 
 #[derive(Serialize, Clone, Debug)]

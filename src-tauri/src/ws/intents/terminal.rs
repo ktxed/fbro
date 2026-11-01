@@ -371,7 +371,7 @@ mod tests {
             windowed: false, window_start: 0, window_count: 0,
             thumbnail_viewport: None, window_version: 0, source_paths: Default::default(),
             navigation_context: Default::default(), shadow_source: None,
-            terminal_session: None, git: None,
+            terminal_session: None, editor: None, git: None,
         }
     }
 

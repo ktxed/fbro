@@ -5,14 +5,38 @@ use crate::ws::runtime::{active_job_count, save_session, IntentContext};
 
 pub(crate) async fn handle(name: &str, args: &Value, ctx: &mut IntentContext<'_>) {
     match name {
-        "Quit" => quit(ctx).await,
+        "Quit" => quit(args, ctx).await,
         "ConfirmQuit" => confirm_quit(ctx).await,
         "SetFontSize" => set_font_size(args, ctx).await,
         _ => {}
     }
 }
 
-async fn quit(ctx: &mut IntentContext<'_>) {
+/// Ask the frontend to save editor tabs before quitting. It answers with
+/// `Quit { editorsFlushed: true }`. Returns true when the request went out.
+pub(crate) async fn request_editor_flush(
+    state: &crate::state::SharedState,
+    tx: &tokio::sync::mpsc::Sender<ServerMessage>,
+) -> bool {
+    if !crate::ws::intents::editor::needs_flush_before_quit(&mut *state.lock().await) {
+        return false;
+    }
+    let _ = tx
+        .send(ServerMessage::EditorFlushRequested {
+            timestamp: now(),
+            request_id: uuid::Uuid::new_v4().to_string(),
+        })
+        .await;
+    true
+}
+
+async fn quit(args: &Value, ctx: &mut IntentContext<'_>) {
+    let editors_flushed = args.get("editorsFlushed").and_then(Value::as_bool).unwrap_or(false);
+    if editors_flushed {
+        ctx.state.lock().await.editor_flush_requested_at = None;
+    } else if request_editor_flush(ctx.state, ctx.tx).await {
+        return;
+    }
     let active_jobs = active_job_count(ctx.state).await;
     if active_jobs == 0 {
         save_session(ctx.state, ctx.app_handle).await;

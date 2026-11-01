@@ -6,12 +6,14 @@ mod bookmarks;
 mod bro;
 mod config;
 mod drag_out;
+mod editor;
 mod fileserver;
 mod git;
 #[cfg(target_os = "linux")]
 mod input_history;
 mod journal;
 mod jobs;
+mod notes;
 mod notifications;
 mod persistence;
 mod platform;

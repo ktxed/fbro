@@ -20,6 +20,7 @@ export interface ContextMenuOptions {
   canOpenWith?: boolean;
   canPassToBro?: boolean;
   canCompare?: boolean;
+  canEditBuiltin?: boolean;
   canGitDiff?: boolean;
   canGitInit?: boolean;
   canAddToGlobalSelection?: boolean;
@@ -101,6 +102,7 @@ export function buildContextMenuItems(
 
   return [
     ...(options.canPlatform ? [platformItem()] : []),
+    ...(options.canEditBuiltin ? [commandItem("file.edit_builtin", "Edit in Editor Tab", commands)] : []),
     ...(compareItem ? [compareItem] : []),
     ...(gitDiffItem ? [gitDiffItem] : []),
     ...(options.canGitInit && kind === "directory" ? [commandItem("git.init", "Initialize Git repository…", commands)] : []),

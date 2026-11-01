@@ -382,12 +382,33 @@ async fn resolve_panel_viewer_file(args: &Value, ctx: &IntentContext<'_>) {
     // Clone the authoritative cursor entry before any blocking driver call.
     let entry = {
         let state = ctx.state.lock().await;
-        state.panels.get(panel_id).map(|panel| {
-            (
+        state.panels.get(panel_id).map(|panel| match panel.editor.as_ref() {
+            // An editor tab previews its own file, not a listing entry.
+            Some(editor) => (
+                panel.source_id.clone(),
+                panel.path.clone(),
+                Some(crate::ws::protocol::EntrySchema {
+                    name: editor.file_name(),
+                    kind: "file".into(),
+                    target_kind: None,
+                    browsable_archive: false,
+                    size: None,
+                    mtime: None,
+                    btime: None,
+                    permissions: None,
+                    icon_name: None,
+                    cc: None,
+                    source_path: None,
+                    path_hint: None,
+                    git_status: None,
+                    git_details: None,
+                }),
+            ),
+            None => (
                 panel.source_id.clone(),
                 panel.path.clone(),
                 panel.entries.get(panel.cursor).cloned(),
-            )
+            ),
         })
     };
     let target = match entry {
@@ -1164,6 +1185,9 @@ fn render_markdown(
     options.extension.tasklist = true;
     options.extension.tagfilter = true;
     options.render.r#unsafe = false;
+    // `data-sourcepos="line:col-line:col"` on rendered elements lets quick
+    // preview follow the built-in editor's cursor line.
+    options.render.sourcepos = true;
     let root = parse_document(&arena, markdown, &options);
     let nodes: Vec<_> = root.descendants().collect();
     let mut links = Vec::new();
@@ -1772,6 +1796,15 @@ mod tests {
         assert!(inline.html.contains("<img src="));
         assert!(!inline.html.contains("width="));
         assert!(!inline.html.contains("height="));
+
+        // Blocks carry their source lines so a preview can follow an editor cursor.
+        let positions = render_markdown(
+            &LocalFsDriver, &current.to_string_lossy(),
+            "# Title\n\nfirst\nparagraph\n\n- item\n", 43210, 1024,
+        );
+        assert!(positions.html.contains("<h1 data-sourcepos=\"1:1-1:7\">"), "{}", positions.html);
+        assert!(positions.html.contains("<p data-sourcepos=\"3:1-4:9\">"), "{}", positions.html);
+        assert!(positions.html.contains("<ul data-sourcepos=\"6:1-6:6\">"), "{}", positions.html);
 
         fs::remove_dir_all(&dir).unwrap();
     }

@@ -10,6 +10,7 @@ export type ContextualOperationId =
   | "panel.jump-to-location"
   | "panel.pass-to-bro"
   | "file.compare"
+  | "file.edit_builtin"
   | "git.view-diff"
   | "git.init"
   | "git.stage"
@@ -51,6 +52,7 @@ export const OPERATION_CARDINALITY: Record<ContextualOperationId, OperationCardi
   "panel.jump-to-location": { min: 1, max: 1 },
   "panel.pass-to-bro": { min: 1 },
   "file.compare": { min: 1, max: 2 },
+  "file.edit_builtin": { min: 1, max: 1 },
   "git.view-diff": { min: 1, max: 1 },
   "git.init": { min: 1, max: 1 },
   "git.stage": { min: 1, max: 1 },
@@ -181,6 +183,10 @@ export function contextualOperationAvailable(
       return isLocalFilesystem || isGlobalRoot || canCompareTarget(state, target);
     case "file.compare":
       return canCompareTarget(state, target);
+    case "file.edit_builtin":
+      return isLocalFilesystem && panel.tabKind === "listing"
+        && (target.primary.kind === "file" || target.primary.entry?.targetKind === "file")
+        && !isLikelyBinaryPath(target.primary.fullPath || target.primary.name);
     case "git.view-diff":
       return isLocalFilesystem
         && target.primary.kind === "file"

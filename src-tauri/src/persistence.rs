@@ -45,6 +45,24 @@ pub enum TabSession {
     /// plain listing at the recorded cwd. The user can re-promote a terminal
     /// later if desired.
     Terminal { cwd: String },
+    /// Built-in editor tab. Restored without reading the file; the frontend
+    /// loads it when the tab first mounts. A missing file restores as a
+    /// listing of its folder.
+    Editor {
+        #[serde(default)]
+        source_id: Option<String>,
+        /// The edited file (absolute).
+        path: String,
+        /// Index of the origin listing tab within this slot's saved tabs.
+        #[serde(default)]
+        origin_index: Option<usize>,
+        /// Set for a note created by `CreateNote`, so closing it while still
+        /// empty discards it after a restart too.
+        #[serde(default)]
+        note_store_id: Option<String>,
+        #[serde(default)]
+        note_id: Option<String>,
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone)]

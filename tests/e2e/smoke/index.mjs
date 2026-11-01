@@ -43,6 +43,7 @@ import { runColorSchemeFlow } from "./cases/color-scheme.mjs";
 import { runColorSchemeEditorFlow } from "./cases/color-scheme-editor.mjs";
 import { runTabsFlow } from "./cases/tabs.mjs";
 import { runQuickEditFlow } from "./cases/quick-edit.mjs";
+import { runEditorTabFlow } from "./cases/editor-tab.mjs";
 import { runJournalSortFlow } from "./cases/journal-sort.mjs";
 import { verifyThumbnailQueue } from "./cases/thumbnails.mjs";
 import { runRemoteFlow } from "./cases/remote.mjs";
@@ -89,6 +90,11 @@ async function main() {
 
     if (process.env.FBRO_E2E_JOURNAL_SORT_ONLY === "1") {
       await runJournalSortFlow(browserA, observerA);
+      return;
+    }
+
+    if (process.env.FBRO_E2E_EDITOR_ONLY === "1") {
+      await runEditorTabFlow(browserA, observerA);
       return;
     }
 
@@ -189,6 +195,7 @@ async function main() {
     await runViewerFlow(browserA, observerA);
     await runHeicFlow(browserA, observerA);
     await runQuickEditFlow(browserA, observerA);
+    await runEditorTabFlow(browserA, observerA);
     await runGlobalSelectionFlow(browserA, observerA);
     await runGitFlow(browserA, observerA);
     await runGitInitFlow(browserA, observerA);

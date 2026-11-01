@@ -1589,6 +1589,7 @@ dependencies = [
  "blake3",
  "block2",
  "bytes",
+ "chrono",
  "comrak",
  "drag",
  "ed25519-dalek 2.2.0",

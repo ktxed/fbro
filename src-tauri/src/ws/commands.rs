@@ -655,6 +655,22 @@ pub(crate) fn build_interactive_commands() -> Vec<InteractiveCommandSchema> {
         }],
         Some("QuickEditFile"),
     ));
+    // Built-in editor tab for an existing file: context menu and palette only.
+    commands.push(command("file.edit_builtin", "File", "Edit in Editor Tab", vec![], Some("OpenEditorTab")));
+    // New Note. Cmd+Shift+4 is the macOS screenshot shortcut and never reaches
+    // the app, so macOS uses Cmd+Alt+4.
+    commands.push(command(
+        "notes.new",
+        "Notes",
+        "New Note",
+        vec![if is_macos() {
+            keybinding_with_modifiers("4", false, false, true, true)
+        } else {
+            keybinding_with_modifiers("F4", true, true, false, false)
+        }],
+        Some("CreateNote"),
+    ));
+    commands.push(command("notes.open", "Notes", "Open Notes", vec![], Some("OpenNotes")));
     if !cfg!(target_os = "windows") {
         commands.push(command(
             "app.eject_source",
@@ -681,5 +697,22 @@ mod tests {
         assert_eq!(about.category, "App");
         assert_eq!(about.title, "About fbro");
         assert!(about.bindings.is_empty());
+    }
+
+    #[test]
+    fn new_note_binding_is_not_shared() {
+        let commands = build_interactive_commands();
+        let find = |id: &str| commands.iter().find(|c| c.id == id).unwrap_or_else(|| panic!("{id}"));
+        let edit = find("notes.new");
+        let stroke = |c: &super::InteractiveCommandSchema| {
+            c.bindings.iter().map(|b| serde_json::to_string(&b.strokes).unwrap()).collect::<Vec<_>>()
+        };
+        let edit_strokes = stroke(edit);
+        assert_eq!(edit_strokes.len(), 1);
+        for other in commands.iter().filter(|c| c.id != "notes.new") {
+            assert!(!stroke(other).iter().any(|s| edit_strokes.contains(s)), "{} shares the binding", other.id);
+        }
+        assert!(find("file.edit_builtin").bindings.is_empty());
+        assert!(find("notes.open").bindings.is_empty());
     }
 }

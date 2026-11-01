@@ -123,6 +123,10 @@ pub struct GeneralSettings {
     /// Other shells and Quick Edit commands keep their own keymaps.
     #[serde(default)]
     pub zsh_emacs_keymap: bool,
+    /// Absolute folder where notes live. Empty means the default
+    /// `config_dir()/scratch`. Existing notes are not moved when it changes.
+    #[serde(default)]
+    pub notes_folder: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -336,6 +340,7 @@ impl Default for GeneralSettings {
             compare_external_command: String::new(),
             quick_terminal_editor: QuickTerminalEditor::default(),
             zsh_emacs_keymap: false,
+            notes_folder: String::new(),
         }
     }
 }

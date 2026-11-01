@@ -334,6 +334,8 @@ fn command_operation(command: &str) -> Option<&'static str> {
         "KillProcess" => Some("kill-process"),
         "OpenTerminal" => Some("terminal"),
         "QuickEditFile" => Some("quick-edit"),
+        "OpenEditorTab" => Some("edit-builtin"),
+        "CreateNote" => Some("note-create"),
         "ResetLocationSortSettings" => Some("reset-location-sort-settings"),
         "GitFetch" => Some("git-fetch"),
         "GitStagePaths" => Some("git-stage"),
@@ -466,6 +468,8 @@ mod tests {
             ("GitSetUpstream", "git-set-upstream"),
             ("GitViewDiff", "git-view-diff"),
             ("QuickEditFile", "quick-edit"),
+            ("OpenEditorTab", "edit-builtin"),
+            ("CreateNote", "note-create"),
             ("ResetLocationSortSettings", "reset-location-sort-settings"),
         ];
         for (command, operation) in expected {

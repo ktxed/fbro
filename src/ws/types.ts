@@ -189,7 +189,33 @@ export interface ShadowSource {
   cursorHint?: string;
 }
 
-export type TabKind = "listing" | "terminal";
+export type TabKind = "listing" | "terminal" | "editor";
+
+/** Built-in editor tab state carried by `tabKind: "editor"` panels. */
+export interface EditorTabInfo {
+  /** Frontend cache key for the CodeMirror state; new for every tab. */
+  sessionId: number;
+  /** Canonical local path of the edited file. */
+  filePath: string;
+  fileName: string;
+  /** Listing tab Escape returns to, when there is one. */
+  originPanelId: string | null;
+  /** Bumped on every save, reload, and Keep both; quick preview refreshes on it. */
+  savedVersion: number;
+  /** True for a note created by `CreateNote`. */
+  isNote: boolean;
+}
+
+/** A source-bar entry that hands off to a real source (e.g. the notes folder). */
+export interface PinnedLocation {
+  id: string;
+  name: string;
+  iconName: string;
+  /** Intent sent with `{ panelId, requestId }` when activated. */
+  action: string;
+  /** Rendered right after this source; at the end when absent or missing. */
+  afterSourceId?: string;
+}
 
 export interface PanelSlot {
   slotId: string;
@@ -239,6 +265,8 @@ export interface PanelState {
   shadowSource?: ShadowSource;
   /** When set, this panel is hosting an embedded terminal split with this PTY session id. */
   terminalSessionId?: number;
+  /** Set for `tabKind: "editor"` panels. */
+  editor?: EditorTabInfo;
   git?: GitRepoStatus;
 }
 
@@ -807,6 +835,10 @@ export interface GeneralSettings {
   /** "nano" | "vim" */
   quickTerminalEditor: string;
   zshEmacsKeymap: boolean;
+  /** Configured notes folder; empty means the default `<config>/scratch`. */
+  notesFolder: string;
+  /** Read-only: the folder notes actually use. */
+  notesFolderResolved: string;
 }
 
 export interface ModalSizePreference {
@@ -879,6 +911,7 @@ export interface StateSnapshotMessage {
     shareConfig?: ShareConfig;
     globalSelections?: GlobalSelectionSummary[];
     notifications?: NotificationsSnapshot;
+    pinnedLocations?: PinnedLocation[];
   };
 }
 
@@ -991,6 +1024,98 @@ export interface TouchFileOkMessage {
   type: "TouchFileOk";
   timestamp: number;
   panelId: string;
+}
+
+// ── Built-in editor tabs (file level) ──
+export interface EditorOpenFailedMessage {
+  type: "EditorOpenFailed";
+  timestamp: number;
+  requestId: string;
+  code: string;
+  message: string;
+}
+
+export interface EditorSessionReadyMessage {
+  type: "EditorSessionReady";
+  timestamp: number;
+  requestId: string;
+  panelId: string;
+  sessionId: number;
+  /** Text with "\n" line endings and no BOM. */
+  text: string;
+  eol: "lf" | "crlf";
+  bom: boolean;
+  /** Set when Keep both saved the local text as a sibling copy. */
+  conflictCopyPath?: string;
+}
+
+export interface EditorSessionFailedMessage {
+  type: "EditorSessionFailed";
+  timestamp: number;
+  requestId: string;
+  panelId: string;
+  code: string;
+  message: string;
+}
+
+export interface SaveEditorOkMessage {
+  type: "SaveEditorOk";
+  timestamp: number;
+  requestId: string;
+  panelId: string;
+  revision: number;
+}
+
+export interface SaveEditorFailedMessage {
+  type: "SaveEditorFailed";
+  timestamp: number;
+  requestId: string;
+  panelId: string;
+  revision: number;
+  /** STALE, MISSING, IO, TOO_LARGE, NOT_LOCAL, … */
+  code: string;
+  message: string;
+}
+
+export interface EditorFileChangedMessage {
+  type: "EditorFileChanged";
+  timestamp: number;
+  panelId: string;
+  sessionId: number;
+  state: "modified" | "missing";
+}
+
+export interface EditorFlushRequestedMessage {
+  type: "EditorFlushRequested";
+  timestamp: number;
+  requestId: string;
+}
+
+// ── Notes ──
+export interface NoteCreatedMessage {
+  type: "NoteCreated";
+  timestamp: number;
+  requestId: string;
+  panelId: string;
+  storeId: string;
+  noteId: string;
+  editorPanelId: string;
+}
+
+export interface NoteCreateFailedMessage {
+  type: "NoteCreateFailed";
+  timestamp: number;
+  requestId: string;
+  code: string;
+  message: string;
+}
+
+export interface OpenNotesFailedMessage {
+  type: "OpenNotesFailed";
+  timestamp: number;
+  requestId: string;
+  code: string;
+  message: string;
 }
 
 export interface SetPermissionsOkMessage {
@@ -1382,6 +1507,16 @@ export type BEMessage =
   | RenameOkMessage
   | MkdirOkMessage
   | TouchFileOkMessage
+  | EditorOpenFailedMessage
+  | EditorSessionReadyMessage
+  | EditorSessionFailedMessage
+  | SaveEditorOkMessage
+  | SaveEditorFailedMessage
+  | EditorFileChangedMessage
+  | EditorFlushRequestedMessage
+  | NoteCreatedMessage
+  | NoteCreateFailedMessage
+  | OpenNotesFailedMessage
   | SetPermissionsOkMessage
   | NavigateOkMessage
   | EjectSourceOkMessage

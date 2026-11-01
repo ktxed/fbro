@@ -370,6 +370,17 @@ pub fn backend_feedback(message: &crate::ws::protocol::ServerMessage) -> Option<
             (format!("Saved hash check report to {path}"), Info)
         }
         ServerMessage::HashCheckReportFailed { message, .. } => (message.clone(), Error),
+        ServerMessage::EditorOpenFailed { message, .. } => (message.clone(), Warning),
+        ServerMessage::EditorSessionFailed { message, .. } => (message.clone(), Error),
+        ServerMessage::EditorSessionReady { conflict_copy_path: Some(path), .. } => {
+            let name = std::path::Path::new(path)
+                .file_name()
+                .map(|name| name.to_string_lossy().to_string())
+                .unwrap_or_else(|| path.clone());
+            (format!("Saved your version as {name}"), Info)
+        }
+        ServerMessage::NoteCreateFailed { message, .. } => (message.clone(), Error),
+        ServerMessage::OpenNotesFailed { message, .. } => (message.clone(), Error),
         ServerMessage::FedupReportSaved { path, .. } => {
             (format!("Saved Fedup report to {path}"), Info)
         }

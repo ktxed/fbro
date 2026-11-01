@@ -73,9 +73,28 @@ async fn reorder_tab(args: &Value, ctx: &mut IntentContext<'_>) {
     }
 }
 
+/// The `create` panel patch that lets the FE seed a new tab.
+fn panel_create_payload(p: &Panel, supports_thumbs: bool) -> Value {
+    serde_json::json!({
+        "create": true,
+        "slotId": p.slot_id,
+        "tabKind": p.tab_kind.as_str(),
+        "tabTitle": p.tab_title_override,
+        "path": p.path,
+        "sourceId": p.source_id,
+        "status": p.status.as_str(),
+        "sort": p.sort,
+        "showHidden": p.show_hidden,
+        "viewMode": p.view_mode.as_str(),
+        "supportsThumbnails": supports_thumbs,
+        "terminalSessionId": p.terminal_session,
+        "editor": p.editor.as_ref().map(crate::editor::EditorTab::to_json),
+    })
+}
+
 /// Allocate a new panel id within a slot. Suffixed with an epoch counter so
 /// rapid creates don't collide. Slot id stays as the panel id "prefix".
-fn alloc_panel_id(slot_id: &str, existing: &HashSet<String>) -> String {
+pub(super) fn alloc_panel_id(slot_id: &str, existing: &HashSet<String>) -> String {
     let mut n = 1u64;
     loop {
         let candidate = format!("{slot_id}-tab-{n}");
@@ -105,7 +124,7 @@ fn can_clone_active_tab(
 /// Emit the targeted patches needed when a slot's membership (and possibly the
 /// set of known panels) changes. Avoids re-serializing every panel's entries
 /// like a full snapshot would.
-async fn broadcast_slot_change(
+pub(super) async fn broadcast_slot_change(
     ctx: &IntentContext<'_>,
     slot_id: &str,
     new_panel_id: Option<&str>,
@@ -130,20 +149,7 @@ async fn broadcast_slot_change(
                 domain: "panels".to_string(),
                 entity_id: Some(pid.to_string()),
                 version: p.version,
-                patch: serde_json::json!({
-                    "create": true,
-                    "slotId": p.slot_id,
-                    "tabKind": p.tab_kind.as_str(),
-                    "tabTitle": p.tab_title_override,
-                    "path": p.path,
-                    "sourceId": p.source_id,
-                    "status": p.status.as_str(),
-                    "sort": p.sort,
-                    "showHidden": p.show_hidden,
-                    "viewMode": p.view_mode.as_str(),
-                    "supportsThumbnails": supports_thumbs,
-                    "terminalSessionId": p.terminal_session,
-                }),
+                patch: panel_create_payload(p, supports_thumbs),
             })
         });
 
@@ -298,6 +304,7 @@ async fn new_tab(args: &Value, ctx: &mut IntentContext<'_>) {
             },
             shadow_source: None,
             terminal_session: None,
+            editor: None,
             git,
         };
 
@@ -375,9 +382,23 @@ async fn close_tab(args: &Value, ctx: &mut IntentContext<'_>) {
         None => return,
     };
 
+    // An editor tab finishes any in-flight save before it goes away.
+    let editor_lock = {
+        let state_guard = ctx.state.lock().await;
+        state_guard
+            .panels
+            .get(&panel_id)
+            .and_then(|panel| panel.editor.as_ref())
+            .map(|editor| Arc::clone(&editor.io_lock))
+    };
+    let _editor_guard = match &editor_lock {
+        Some(lock) => Some(lock.lock().await),
+        None => None,
+    };
+
     // Resolve the slot and decide who the new active will be. Abort if this
     // is the slot's only tab.
-    let (slot_id, new_active, terminal_session) = {
+    let (slot_id, new_active, terminal_session, closed_editor) = {
         let state_guard = ctx.state.lock().await;
         let Some(panel) = state_guard.panels.get(&panel_id) else {
             return;
@@ -387,6 +408,11 @@ async fn close_tab(args: &Value, ctx: &mut IntentContext<'_>) {
             return;
         };
         if slot.tab_panel_ids.len() <= 1 {
+            if panel.editor.is_some() {
+                drop(state_guard);
+                // The only tab: show the file's folder instead of closing.
+                super::editor::convert_to_listing(ctx, &panel_id).await;
+            }
             return; // last tab — no-op
         }
         let idx = match slot.tab_panel_ids.iter().position(|id| id == &panel_id) {
@@ -399,7 +425,7 @@ async fn close_tab(args: &Value, ctx: &mut IntentContext<'_>) {
         } else {
             slot.tab_panel_ids[idx + 1].clone()
         };
-        (slot_id, new_active, panel.terminal_session)
+        (slot_id, new_active, panel.terminal_session, panel.editor.clone())
     };
 
     // If the tab has a PTY, kill it.
@@ -440,6 +466,10 @@ async fn close_tab(args: &Value, ctx: &mut IntentContext<'_>) {
         },
     )
     .await;
+
+    if let Some(editor) = closed_editor {
+        super::editor::discard_if_untouched_note(ctx, &editor).await;
+    }
 }
 
 async fn promote_terminal(args: &Value, ctx: &mut IntentContext<'_>) {
@@ -499,6 +529,7 @@ async fn promote_terminal(args: &Value, ctx: &mut IntentContext<'_>) {
             navigation_context: Default::default(),
             shadow_source: None,
             terminal_session: Some(sid),
+            editor: None,
             git: source.git.clone(),
         };
 
@@ -576,20 +607,7 @@ async fn promote_terminal(args: &Value, ctx: &mut IntentContext<'_>) {
                 domain: "panels".to_string(),
                 entity_id: Some(new_panel_id.clone()),
                 version: p.version,
-                patch: serde_json::json!({
-                    "create": true,
-                    "slotId": p.slot_id,
-                    "tabKind": p.tab_kind.as_str(),
-                    "tabTitle": p.tab_title_override,
-                    "path": p.path,
-                    "sourceId": p.source_id,
-                    "status": p.status.as_str(),
-                    "sort": p.sort,
-                    "showHidden": p.show_hidden,
-                    "viewMode": p.view_mode.as_str(),
-                    "supportsThumbnails": supports_thumbs,
-                    "terminalSessionId": p.terminal_session,
-                }),
+                patch: panel_create_payload(p, supports_thumbs),
             }
         });
 
@@ -667,6 +685,164 @@ async fn promote_terminal(args: &Value, ctx: &mut IntentContext<'_>) {
     for s in &gui_senders {
         let _ = s.send(focus_patch.clone()).await;
     }
+}
+
+/// Start the listing scan for a freshly inserted panel (which also registers
+/// its folder watcher).
+pub(super) async fn spawn_panel_scan(ctx: &mut IntentContext<'_>, panel_id: &str, cursor_hint: Option<String>) {
+    let (source_id, epoch, path, sort, filter, version, show_hidden, driver) = {
+        let state = ctx.state.lock().await;
+        let Some(panel) = state.panels.get(panel_id) else { return };
+        let Some(driver) = state.drivers.get(&panel.source_id).cloned() else { return };
+        (
+            panel.source_id.clone(),
+            panel.panel_epoch,
+            panel.path.clone(),
+            panel.sort.clone(),
+            panel.filter.clone(),
+            panel.version,
+            panel.show_hidden,
+            driver,
+        )
+    };
+    // run_scan lists but does not watch; navigation registers watches itself.
+    if driver.is_local() {
+        let _ = ctx
+            .watcher_cmd_tx
+            .send(crate::watcher::WatcherCommand::Watch {
+                panel_id: panel_id.to_string(),
+                path: std::path::PathBuf::from(&path),
+            })
+            .await;
+    }
+    let handle = tokio::spawn(run_scan(
+        panel_id.to_string(),
+        source_id,
+        epoch,
+        path,
+        sort,
+        filter,
+        version,
+        ctx.tx.clone(),
+        driver,
+        cursor_hint,
+        None,
+        None,
+        Arc::clone(ctx.state),
+        Arc::clone(ctx.dir_size_queue),
+        false,
+        show_hidden,
+        ctx.watcher_cmd_tx.clone(),
+        true,
+    ));
+    ctx.scan_handles.insert(panel_id.to_string(), crate::jobs::ScanHandle { handle });
+}
+
+/// A blank panel record for a new tab in `slot_id`.
+pub(super) fn blank_panel(
+    panel_id: &str,
+    slot_id: &str,
+    tab_kind: TabKind,
+    source_id: &str,
+    path: &str,
+    template: Option<&Panel>,
+    show_hidden_default: bool,
+) -> Panel {
+    Panel {
+        panel_id: panel_id.to_string(),
+        slot_id: slot_id.to_string(),
+        tab_kind,
+        tab_title_override: None,
+        source_id: source_id.to_string(),
+        path: path.to_string(),
+        status: PanelStatus::Loading,
+        sort: template.map(|p| p.sort.clone()).unwrap_or(crate::ws::protocol::SortSpec {
+            by: "name".into(),
+            order: "asc".into(),
+        }),
+        filter: None,
+        filter_mode_active: false,
+        show_hidden: template.map(|p| p.show_hidden).unwrap_or(show_hidden_default),
+        view_mode: PanelViewMode::List,
+        cursor: 0,
+        selection: vec![],
+        entries: vec![],
+        version: 0,
+        panel_epoch: 0,
+        calculating_size: Default::default(),
+        windowed: false,
+        window_start: 0,
+        window_count: 0,
+        thumbnail_viewport: None,
+        window_version: 0,
+        source_paths: HashMap::new(),
+        navigation_context: Default::default(),
+        shadow_source: None,
+        terminal_session: None,
+        editor: None,
+        git: None,
+    }
+}
+
+/// Insert `panel` right after `after_panel_id` in its slot, activate it, focus
+/// it, and broadcast the change. Returns false when the slot is gone.
+pub(super) async fn insert_tab_after(ctx: &mut IntentContext<'_>, panel: Panel, after_panel_id: &str) -> bool {
+    let slot_id = panel.slot_id.clone();
+    let panel_id = panel.panel_id.clone();
+    {
+        let mut state = ctx.state.lock().await;
+        let Some(slot) = state.slots.get_mut(&slot_id) else { return false };
+        let index = slot
+            .tab_panel_ids
+            .iter()
+            .position(|id| id == after_panel_id)
+            .map(|i| i + 1)
+            .unwrap_or(slot.tab_panel_ids.len());
+        slot.tab_panel_ids.insert(index, panel_id.clone());
+        slot.active_panel_id = panel_id.clone();
+        state.panels.insert(panel_id.clone(), panel);
+        state.focus = panel_id.clone();
+    }
+    broadcast_slot_change(ctx, &slot_id, Some(&panel_id), Some(&panel_id)).await;
+    true
+}
+
+/// Open a listing tab of `path` after `after_panel_id`, with the cursor on
+/// `cursor_hint` when given.
+pub(super) async fn open_listing_tab_after(
+    ctx: &mut IntentContext<'_>,
+    slot_id: &str,
+    after_panel_id: &str,
+    source_id: &str,
+    path: &str,
+    cursor_hint: Option<String>,
+) -> Option<String> {
+    let panel = {
+        let state = ctx.state.lock().await;
+        let ids: HashSet<String> = state.panels.keys().cloned().collect();
+        let id = alloc_panel_id(slot_id, &ids);
+        blank_panel(&id, slot_id, TabKind::Listing, source_id, path, None, state.settings.general.show_hidden_default)
+    };
+    let panel_id = panel.panel_id.clone();
+    if !insert_tab_after(ctx, panel, after_panel_id).await {
+        return None;
+    }
+    spawn_panel_scan(ctx, &panel_id, cursor_hint).await;
+    Some(panel_id)
+}
+
+/// Activate `panel_id` in `slot_id` and move focus to it.
+pub(super) async fn activate_tab(ctx: &mut IntentContext<'_>, slot_id: &str, panel_id: &str) {
+    {
+        let mut state = ctx.state.lock().await;
+        let Some(slot) = state.slots.get_mut(slot_id) else { return };
+        if !slot.tab_panel_ids.iter().any(|id| id == panel_id) {
+            return;
+        }
+        slot.active_panel_id = panel_id.to_string();
+        state.focus = panel_id.to_string();
+    }
+    broadcast_slot_change(ctx, slot_id, None, Some(panel_id)).await;
 }
 
 async fn switch_tab(args: &Value, ctx: &mut IntentContext<'_>) {

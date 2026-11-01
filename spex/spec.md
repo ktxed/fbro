@@ -32,6 +32,37 @@ resolves its target using the same logic as F3. Open viewer opens that displayed
 target while retaining quick preview; it does not derive a file from the hidden
 panel's selection. See [Keyboard](keyboard.md) and [Protocol](proto.md).
 
+A built-in editor tab can be the quick preview's source: the preview shows the
+edited file as last autosaved, scrolled to follow the editor's cursor line via
+`data-sourcepos` (see [Tabs](tabs.md) §5a.6). There is still one Markdown renderer; previewing
+unsaved text would need `FileViewer`'s renderer to accept a string and an image
+policy for unsaved links.
+
+### Built-in editor tabs and notes
+
+Editor tabs (CodeMirror 6, loaded lazily) edit small UTF-8 local files with
+autosave; the backend owns the file and every write, the frontend only the text
+being edited. See [Tabs](tabs.md) §5a and [Keyboard](keyboard.md) §3a.
+
+Notes sit on a separate layer behind the `NoteStore` trait
+(`src-tauri/src/notes/`), and note intents use only that trait. A store must:
+
+- name itself (`id`, `display_name`) for the source bar;
+- return a local folder to browse (`browse_location`), created on demand;
+- create an empty note without overwriting anything and return its `note_id`
+  plus the local file the built-in editor opens (`create_note`);
+- remove a note it created that was never written to (`discard_empty_note`).
+
+The default `FolderNoteStore` keeps notes as plain `.md` files in the folder
+set by the `notesFolder` setting (default `config_dir()/scratch`; see
+[Settings](settings.md)). Changing the setting replaces the store; existing notes
+are not moved. `discard_empty_note` takes the expected file path and refuses
+when the note id now resolves elsewhere, so a folder change can never delete a
+same-named file in the new folder. A future Obsidian store fits the same trait: a vault is
+a folder of Markdown files, so it would follow the vault's new-note location,
+naming, and templates. Every store is assumed to hand back a local file; a
+store without files would need note-level load/save intents.
+
 ### Markdown viewer images
 
 The backend resolves image paths relative to the viewed Markdown file through

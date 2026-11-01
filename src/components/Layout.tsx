@@ -6,6 +6,8 @@ import { Panel } from "./Panel";
 import { PanelErrorBoundary } from "./PanelErrorBoundary";
 import { OperationModal } from "./OperationModal";
 import { QuitModal } from "./QuitModal";
+import { EditorConflictModal } from "./EditorConflictModal";
+import { EditorQuitModal } from "./EditorQuitModal";
 import { RenameModal } from "./RenameModal";
 import { AttributesModal } from "./AttributesModal";
 import { InfoModal } from "./InfoModal";
@@ -556,6 +558,12 @@ export function Layout({ client, jobsViewOpen, onCloseJobsView, onOpenJobsView }
       />
       {state.pendingQuit && (
         <QuitModal client={client} />
+      )}
+      {state.pendingEditorConflict && (
+        <EditorConflictModal conflict={state.pendingEditorConflict} />
+      )}
+      {state.pendingEditorQuit && (
+        <EditorQuitModal client={client} failed={state.pendingEditorQuit.failed} />
       )}
       {state.pendingRename && (
         <RenameModal rename={state.pendingRename} client={client} />

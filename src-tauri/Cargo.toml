@@ -39,6 +39,7 @@ russh = { version = "0.64.1", default-features = false, features = ["ring", "fla
 russh-sftp = "2.1"
 bytes = "1"
 blake3 = { version = "1", features = ["rayon", "mmap"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 memmap2 = "0.9"
 rusqlite = { version = "0.32", features = ["bundled"] }
 comrak = { version = "0.54.0", default-features = false }

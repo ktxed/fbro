@@ -63,6 +63,8 @@ and sharing patches do not move focus. Covered Settings controls remain inert.
   focused current-folder button natively. Escape closes the
   popover; while it is open the underlying panel and global commands are held
   back.
+- Built-in editor tabs own their keys (§3a); nothing typed there reaches
+  panel or global shortcuts.
 - Embedded terminal keys go to the PTY for the shell to interpret. On macOS,
   fbro can start interactive zsh sessions with Emacs bindings when the backend
   `zshEmacsKeymap` setting is enabled; it passes `-o emacs` at launch. The
@@ -178,6 +180,68 @@ delegates video Space to the shared playback action. Input history
 handles Alt+Down only for its own focused input. Replacing a preview content
 session hands focus through its persistent panel root without taking an outside
 control's focus.
+
+When the quick preview's source slot shows a built-in editor tab, the preview
+displays the edited file and refreshes after every autosave (§3a), keeping its
+scroll position, and scrolls to keep the editor's cursor line roughly level
+with the matching rendered block. Focus stays in the editor: its `panel.viewer.embed` binding
+saves and toggles the preview without leaving the editor. Switching back to
+the origin listing makes the preview follow the listing cursor again.
+
+## 3a. Built-in editor tabs
+
+`notes.new` (Ctrl+Shift+F4; macOS Cmd+Alt+4, because macOS takes Cmd+Shift+4
+for screenshots before the app sees it) creates a note and opens it in an
+editor tab next to the current tab; it also works from inside an editor tab.
+`file.edit_builtin` (context menu and command palette, no default binding)
+opens the cursor file in an editor tab; `notes.open` (command palette, or the
+Scratch source-bar entry) opens the notes folder. New File stays on Shift+F4.
+See [Tabs](tabs.md) §5a.
+
+**Ownership.** While the editor has focus it receives every key. Its root
+stops propagation, `Panel` ignores keys from `.panel-editor`, and the Toolbar
+skips editable targets, so panel-scoped bindings such as Shift+S, Shift+J/K,
+and letter commands type text. Only these leave the editor:
+
+| Key | Action |
+|---|---|
+| Escape | After CodeMirror's own layers (find panel, multi-selection): in full screen, restore the layout; otherwise save, then return to the origin tab (`ReturnToOriginTab`). The editor tab stays open. |
+| Ctrl/Cmd+Shift+M | Toggle full screen (also the header's maximize button) |
+| Ctrl/Cmd+S | Save now; while autosave is paused, open the conflict dialog |
+| Ctrl/Cmd+W | Save, then close the editor tab |
+| `file.view` binding (F3) | Save, then open the separate viewer on the file. Only bindings with a modifier or an F-key pass through: macOS binds `file.view` to plain `3`, which types. |
+| `panel.viewer.embed` binding (Ctrl+F3, macOS Cmd+3) | Save, then toggle quick preview |
+| `notes.new` binding (Ctrl+Shift+F4, macOS Cmd+Alt+4) | Save, then create another note in a tab after this one |
+| Tab | Indents (CodeMirror `indentWithTab`); Escape is the way out, per CodeMirror's guidance for Tab-capturing editors |
+
+CodeMirror's find panel uses Ctrl/Cmd+F, Enter, Ctrl/Cmd+G; its F3 binding is
+removed because F3 belongs to the viewer.
+
+The capture-phase window/document listeners (`ModalStack`, input history and
+its dropdown, `ContextMenu`, tab-reorder drag) act only when their own layer is
+open or their input has focus, so they leave editor keys alone. Under a modal
+the editor host is `inert` and its handlers ignore keys.
+
+**Autosave.** Every user change bumps a revision; the frontend saves about
+1 s after the last change (400 ms while quick preview shows the file), with at
+most one save in flight. It also saves on Escape, Ctrl/Cmd+W, the tab chip's
+close button, switching away from the tab, window blur, and quitting. The tab
+chip shows a dot while a save is pending and a warning icon when autosave is
+paused or a save failed.
+
+**Conflicts.** When the file changes on disk (`EditorFileChanged`) and the
+buffer is fully saved, the editor reloads it silently. With unsaved changes, or
+when a save is refused (`STALE` / `MISSING`), autosave pauses and a
+non-modal bar says so without taking focus. Ctrl/Cmd+S or the bar's button
+opens a dialog: **Overwrite** (O, primary) / **Reload** (R) / **Keep both** (K) /
+Cancel; for a deleted file **Save it again** (S) / Cancel. Escape cancels; the
+modal stack returns focus to the editor. A failed write (`IO`) shows the error
+in the bar and is retried by the next change.
+
+**Focus.** Activating an editor tab focuses CodeMirror once it has loaded;
+`Panel`'s activation and window-focus handlers leave editor tabs to it.
+Closing the tab or returning to the origin hands focus to the listing tab the
+backend activates.
 
 ### Separate viewer window
 

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { AppContext, useAppReducer } from "./store";
 import { resolveWsUrl, WsClient } from "./ws/client";
+import { attachEditorSessions } from "./editor/sessions";
 import { Layout } from "./components/Layout";
 import { JobsBar } from "./components/JobsBar";
 import { Toolbar } from "./components/Toolbar";
@@ -34,6 +35,7 @@ export function App() {
   useEffect(() => {
     let cancelled = false;
 
+    let detachEditors: (() => void) | undefined;
     resolveWsUrl().then((wsUrl) => {
       if (cancelled) return;
       const client = new WsClient("gui", wsUrl);
@@ -58,10 +60,13 @@ export function App() {
         }
       };
 
+      // Editor-tab autosave runs outside React so it survives tab switches.
+      detachEditors = attachEditorSessions(client, (failed) => dispatch({ type: "OPEN_EDITOR_QUIT", failed }));
       client.connect();
     });
     return () => {
       cancelled = true;
+      detachEditors?.();
       clientRef.current?.destroy();
       clientRef.current = null;
     };

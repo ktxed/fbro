@@ -1827,6 +1827,7 @@ mod tests {
             navigation_context: Default::default(),
             shadow_source: None,
             terminal_session: None,
+            editor: None,
             git: None,
         }
     }

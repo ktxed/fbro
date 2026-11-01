@@ -10,6 +10,7 @@ import { findMatchingCommand, formatPrimaryBinding, getCommand, GLOBAL_SHORTCUT_
 import { zoomAction } from "../commands/bindings";
 import { useFocusReturn } from "../hooks/useFocusReturn";
 import { isAvailableFocusTarget } from "../utils/focusReturn";
+import { lastEditorCursor, subscribeEditorCursor, type EditorCursor } from "../editor/sessions";
 
 export interface EmbeddedViewerHandle {
   toggleVideoPlayback: (repeat: boolean) => boolean;
@@ -34,6 +35,10 @@ export function EmbeddedViewerPanel({ ref, panelId, sourcePanelId, state, client
   const [contentRequestId, setContentRequestId] = useState("");
   const focusReturnRef = useFocusReturn(sourcePanelId);
   const requestRef = useRef("");
+  /** Path shown now, and the scroll position to restore when a refresh
+   *  reloads that same file (an editor tab autosaving it). */
+  const shownPathRef = useRef<string | null>(null);
+  const pendingScrollRef = useRef<number | null>(null);
   const setRootRef = useCallback((element: HTMLDivElement | null) => {
     rootRef.current = element;
     return focusReturnRef(element);
@@ -60,16 +65,56 @@ export function EmbeddedViewerPanel({ ref, panelId, sourcePanelId, state, client
         contentHandoffRef.current = true;
         root.focus({ preventScroll: true });
       }
+      const nextPath = message.target.kind === "file" ? message.target.file.path : null;
+      // Same file again (an editor tab autosaved it): reload in place, so the
+      // rendered content stays up until the new version replaces it.
+      if (nextPath !== null && nextPath === shownPathRef.current && viewerRef.current?.refresh()) return;
+      pendingScrollRef.current = nextPath !== null && nextPath === shownPathRef.current
+        ? scrollFraction(rootRef.current)
+        : null;
+      shownPathRef.current = nextPath;
       setTarget(message.target);
       setContentRequestId(message.requestId);
     }
   }), [client]);
 
+  // Refreshing the same file keeps its reading position while the new
+  // content (Markdown, diagrams) finishes rendering.
+  useEffect(() => {
+    const fraction = pendingScrollRef.current;
+    pendingScrollRef.current = null;
+    if (fraction === null) return;
+    const until = performance.now() + 1000;
+    let frame = 0;
+    const apply = () => {
+      const scroller = findScroller(rootRef.current);
+      if (scroller) scroller.scrollTop = fraction * (scroller.scrollHeight - scroller.clientHeight);
+      if (performance.now() < until) frame = requestAnimationFrame(apply);
+    };
+    frame = requestAnimationFrame(apply);
+    return () => cancelAnimationFrame(frame);
+  }, [fileKey]);
+
   // Cursor/entry identity is only an invalidation signal. The backend resolves
   // the actual target, including search rows, symlinks and opaque VFS paths.
   const entry = sourcePanel?.entries[sourcePanel.cursor - (sourcePanel.windowStart ?? 0)];
-  const revision = JSON.stringify([sourcePanelId, sourcePanel?.sourceId, sourcePanel?.path,
-    sourcePanel?.cursor, entry?.name, entry?.sourcePath, entry?.size, entry?.mtime, imageLimit]);
+  // Follow the source editor's cursor line in rendered Markdown.
+  const editorFilePath = sourcePanel?.editor?.filePath;
+  useEffect(() => {
+    if (!editorFilePath) return;
+    const sync = (cursor: EditorCursor) => viewerRef.current?.syncToSourceLine(cursor.line, cursor.fraction);
+    const last = lastEditorCursor(editorFilePath);
+    if (last) sync(last);
+    return subscribeEditorCursor(editorFilePath, sync);
+  }, [editorFilePath, fileKey]);
+
+  // An editor tab previews its own file and refreshes once per save; its
+  // hidden folder listing (rescanned on every save) must not add refreshes.
+  const editor = sourcePanel?.editor;
+  const revision = editor
+    ? JSON.stringify([sourcePanelId, editor.filePath, editor.savedVersion, imageLimit])
+    : JSON.stringify([sourcePanelId, sourcePanel?.sourceId, sourcePanel?.path,
+      sourcePanel?.cursor, entry?.name, entry?.sourcePath, entry?.size, entry?.mtime, imageLimit]);
   useEffect(() => {
     const requestId = crypto.randomUUID();
     requestRef.current = requestId;
@@ -188,4 +233,19 @@ export function EmbeddedViewerPanel({ ref, panelId, sourcePanelId, state, client
       </div>
     </div>
   );
+}
+
+function findScroller(root: HTMLElement | null): HTMLElement | null {
+  const candidates = root?.querySelectorAll<HTMLElement>(".viewer__markdown, .viewer__body") ?? [];
+  for (const element of candidates) {
+    if (element.scrollHeight > element.clientHeight + 1) return element;
+  }
+  return null;
+}
+
+function scrollFraction(root: HTMLElement | null): number | null {
+  const scroller = findScroller(root);
+  if (!scroller) return null;
+  const range = scroller.scrollHeight - scroller.clientHeight;
+  return range > 0 ? scroller.scrollTop / range : 0;
 }

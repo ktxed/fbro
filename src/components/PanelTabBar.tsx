@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
-import { IconChevronLeft, IconChevronRight, IconTerminal2, IconX } from "@tabler/icons-react";
+import { useEffect, useState, useSyncExternalStore } from "react";
+import { IconAlertTriangle, IconChevronLeft, IconChevronRight, IconPencil, IconTerminal2, IconX } from "@tabler/icons-react";
+import { editorStatus, editorStatusVersion, flushEditor, subscribeEditorStatus } from "../editor/sessions";
 import type { PanelSlot, PanelState, Source } from "../ws/types";
 import type { WsClient } from "../ws/client";
 import { isSearchSourceId } from "../utils/sourceId";
@@ -24,6 +25,7 @@ function tabTitle(
 ): string {
   if (!panel) return "…";
   if (panel.tabTitle) return panel.tabTitle;
+  if (panel.editor) return panel.editor.fileName;
   if (panel.tabKind === "terminal") {
     const base = basename(panel.path) || "~";
     return base;
@@ -54,6 +56,7 @@ export function PanelTabBar({ slot, panels, sources, client, blocked }: Props) {
   const { listRef } = drag;
   const [canLeft, setCanLeft] = useState(false);
   const [canRight, setCanRight] = useState(false);
+  useSyncExternalStore(subscribeEditorStatus, editorStatusVersion);
 
   const updateArrows = () => {
     const el = listRef.current;
@@ -102,7 +105,10 @@ export function PanelTabBar({ slot, panels, sources, client, blocked }: Props) {
 
   const closeTab = (panelId: string) => {
     if (slot.tabPanelIds.length <= 1) return;
-    client.sendIntent("panel.tab.close", undefined, { panelId });
+    const editor = panels[panelId]?.editor;
+    // An editor tab saves before it closes.
+    if (editor) void flushEditor(editor.sessionId).then(() => client.sendIntent("panel.tab.close", undefined, { panelId }));
+    else client.sendIntent("panel.tab.close", undefined, { panelId });
   };
 
   const newTabFromActive = () => {
@@ -155,9 +161,12 @@ export function PanelTabBar({ slot, panels, sources, client, blocked }: Props) {
           const title = tabTitle(panel, sources);
           const displayed =
             title.length > MAX_TAB_CHARS ? title.slice(0, MAX_TAB_CHARS - 1) + "…" : title;
-          const tooltip = panel && sourceTabTitle(panel, sources)
-            ? title
-            : panel?.path ?? title;
+          const tooltip = panel?.editor
+            ? panel.editor.filePath
+            : panel && sourceTabTitle(panel, sources)
+              ? title
+              : panel?.path ?? title;
+          const status = panel?.editor ? editorStatus(panel.editor.sessionId) : null;
           return (
             <div
               key={panelId}
@@ -180,9 +189,22 @@ export function PanelTabBar({ slot, panels, sources, client, blocked }: Props) {
               {panel?.tabKind === "terminal" && (
                 <IconTerminal2 className="panel__tab-icon" size={16} aria-hidden="true" />
               )}
+              {panel?.tabKind === "editor" && (
+                <IconPencil className="panel__tab-icon" size={15} aria-hidden="true" />
+              )}
               <span className="panel__tab-label">
                 {displayed}
               </span>
+              {status?.problem ? (
+                <IconAlertTriangle
+                  className="panel__tab-warning"
+                  size={12}
+                  aria-label={status.problem === "error" ? "Save failed" : "Autosave paused"}
+                  data-testid={`tab-editor-warning-${panelId}`}
+                />
+              ) : status?.pending ? (
+                <span className="panel__tab-dot" aria-label="Saving" data-testid={`tab-editor-pending-${panelId}`} />
+              ) : null}
               {slot.tabPanelIds.length > 1 && (
                 <button
                   className="panel__tab-close"
