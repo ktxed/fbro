@@ -44,6 +44,7 @@ keyboard, or modal behaviour **updates the matching spec in the same commit**.
 
 - Dev: `npm run tauri dev` · with local-FS spy: `npm run spy` + `tools/lfs-spy`
 - Frontend type check + build: `npm run build` (`tsc` is the only frontend check)
+- Clean frontend output (`dist`, Vite cache) and Cargo targets: `npm run clean`
 - Rust tests: `cargo test --manifest-path src-tauri/Cargo.toml [filter]`
 - E2E smoke (fast host run, see `TESTING.md`):
   `npm run tauri -- build --no-bundle && FBRO_E2E_COMPOSE_FILES=docker-compose.e2e.host.yml GDK_BACKEND=wayland npm run e2e:smoke:local`

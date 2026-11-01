@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "clean": "node scripts/clean.mjs",
     "build:macos:debug": "tauri build --debug --bundles app",
     "preview": "vite preview",
     "tauri": "tauri",

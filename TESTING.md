@@ -23,15 +23,17 @@ npm run test:tabs
 npm run test:modal-keyboard
 npm run test:keyboard-shortcuts
 node --test tests/check-version.test.mjs
+node --test tests/clean.test.mjs
 cargo test --manifest-path src-tauri/Cargo.toml --locked
 cargo check --manifest-path tools/lfs-spy/Cargo.toml --locked
 ```
 
 `npm run build` runs TypeScript checking and the production frontend build.
-There is no separate frontend lint command. The Node tests cover build metadata
-and release-version consistency, notification history/toast projection,
-selection-mask prompt defaults, stale tab-update rejection, and cyclic keyboard
-navigation (including empty-bookmark navigation). Rust tests
+There is no separate frontend lint command. The Node tests cover build metadata,
+release-version consistency, the `npm run clean` script, notification
+history/toast projection, selection-mask prompt defaults, stale tab-update
+rejection, and cyclic keyboard navigation (including empty-bookmark
+navigation). Rust tests
 cover backend behavior and adapters;
 the last command checks the optional local-filesystem spy helper.
 
