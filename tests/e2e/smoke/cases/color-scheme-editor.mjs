@@ -38,6 +38,15 @@ export async function runColorSchemeEditorFlow(browser, observer) {
     observer.sendIntent("SetGeneralOption", undefined, { key: "colorScheme", value: "fbro-dark" });
     await waitFor(() => general().activeColorScheme === "fbro-dark", { label: "dark scheme active" });
 
+    // Schemes shipped with fbro are listed, selectable, and read-only.
+    const bundled = general().colorSchemes?.items.find((item) => item.id === "bundled:matrix");
+    if (!bundled?.bundled) throw new Error("Bundled Matrix scheme missing from the catalog");
+    const start = observer.messages.length;
+    observer.sendIntent("UpdateColorScheme", undefined, { requestId: "bundled-edit", id: "bundled:matrix", colors: { bg: "#123456" }, terminal: {} });
+    await waitFor(() => observer.messages.slice(start).some((m) =>
+      m.type === "ColorSchemeFailed" && m.requestId === "bundled-edit" && m.code === "BAD_COLOR_SCHEME"),
+    { label: "bundled scheme rejects edits" });
+
     // Not offered when Settings is opened normally.
     await openSettings();
     if (await exists(tabSelector)) throw new Error("Color Scheme tab visible without Customize…");

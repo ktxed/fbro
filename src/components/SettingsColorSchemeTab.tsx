@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { RgbaColorPicker } from "react-colorful";
+import { IconArrowBackUp, IconCheck, IconCopy, IconFilter, IconFolderOpen, IconPlus, IconTrash, IconX } from "@tabler/icons-react";
 import type { GeneralSettings } from "../ws/types";
 import type { WsClient } from "../ws/client";
 import { useAppDispatch, useAppState } from "../store";
@@ -150,10 +151,10 @@ export function SettingsColorSchemeTab({ general, client }: Props) {
     const captured = captureRenderedTokens(probe);
     const values = {
       ...captured,
-      ...(current.custom ? (catalog?.items.find((i) => i.id === selectedId)?.colors ?? {}) : {}),
+      ...(catalog?.items.find((i) => i.id === selectedId)?.colors ?? {}),
       ...terminalValues(current.terminal),
     };
-    const initial: Draft = { id: selectedId, name: current.label, description: current.custom ? (catalog?.items.find((i) => i.id === selectedId)?.description ?? "") : current.description, mode: current.mode, values };
+    const initial: Draft = { id: selectedId, name: current.label, description: catalog?.items.find((i) => i.id === selectedId)?.description ?? current.description, mode: current.mode, values };
     draftRef.current = initial;
     originalRef.current = initial;
     dirtyRef.current = false;
@@ -385,7 +386,7 @@ export function SettingsColorSchemeTab({ general, client }: Props) {
               onChange={(e) => { flush(); setSelectedId(e.target.value); }}
             >
               {schemes.map((s) => (
-                <option key={s.id} value={s.id}>{s.custom ? `${s.label} (custom)` : s.label}</option>
+                <option key={s.id} value={s.id}>{s.custom ? `${s.label} (custom)` : s.bundled ? `${s.label} (bundled)` : s.label}</option>
               ))}
             </select>
           </label>
@@ -397,22 +398,22 @@ export function SettingsColorSchemeTab({ general, client }: Props) {
             onClick={useScheme}
             title={followingSystem ? "Applies when “Match system appearance” is off" : undefined}
           >
-            {isManual ? "In use" : "Use this scheme"}
+            {<IconCheck size={14} aria-hidden="true" />}{isManual ? "In use" : "Use this scheme"}
           </button>
         </div>
 
         <div className="color-editor__bar">
           <button ref={duplicateBtnRef} className={`modal__btn${readOnly ? " modal__btn--primary" : ""}`} type="button" data-testid="color-editor-duplicate" disabled={!connected || busy || !draft} onClick={startDuplicate}>
-            Duplicate…
+            <IconCopy size={14} aria-hidden="true" />Duplicate…
           </button>
           <button ref={deleteBtnRef} className="modal__btn" type="button" data-testid="color-editor-delete" disabled={readOnly || !connected || busy} onClick={() => setPrompt("delete")}>
-            Delete…
+            <IconTrash size={14} aria-hidden="true" />Delete…
           </button>
           <button className="modal__btn" type="button" data-testid="color-editor-revert" disabled={readOnly || !dirty} onClick={revert}>
-            Revert
+            <IconArrowBackUp size={14} aria-hidden="true" />Revert
           </button>
           <button className="modal__btn" type="button" data-testid="color-editor-open-folder" disabled={!catalog?.dir || !focus} onClick={openFolder} title={catalog?.dir}>
-            Open themes folder
+            <IconFolderOpen size={14} aria-hidden="true" />Open themes folder
           </button>
           <span className="color-editor__status" role="status" aria-live="polite" data-testid="color-editor-status">
             {status === "saving" ? "Saving…" : status === "saved" ? "Saved" : ""}
@@ -436,24 +437,24 @@ export function SettingsColorSchemeTab({ general, client }: Props) {
               />
             </label>
             <button className="modal__btn modal__btn--primary" type="submit" data-testid="color-editor-duplicate-confirm" disabled={busy || !duplicateName.trim()}>
-              {busy ? "Creating…" : "Create"}
+              <IconPlus size={14} aria-hidden="true" />{busy ? "Creating…" : "Create"}
             </button>
-            <button className="modal__btn" type="button" onClick={closePrompt}>Cancel</button>
+            <button className="modal__btn" type="button" onClick={closePrompt}><IconX size={14} aria-hidden="true" />Cancel</button>
           </form>
         )}
         {prompt === "delete" && (
           <div className="color-editor__prompt" role="alertdialog" aria-label={`Delete ${scheme.label}`}>
             <span>Delete “{scheme.label}”? This removes its file.</span>
             <button className="modal__btn modal__btn--primary" type="button" data-testid="color-editor-delete-confirm" disabled={busy} onClick={submitDelete} autoFocus>
-              {busy ? "Deleting…" : "Delete"}
+              <IconTrash size={14} aria-hidden="true" />{busy ? "Deleting…" : "Delete"}
             </button>
-            <button className="modal__btn" type="button" onClick={closePrompt}>Cancel</button>
+            <button className="modal__btn" type="button" onClick={closePrompt}><IconX size={14} aria-hidden="true" />Cancel</button>
           </div>
         )}
 
         {readOnly ? (
           <p className="settings-tab__hint" data-testid="color-editor-readonly-hint">
-            {scheme.label} is built in and read-only. Duplicate it to create a scheme you can edit.
+            {scheme.label} is {scheme.bundled ? "bundled with fbro" : "built in"} and read-only. Duplicate it to create a scheme you can edit.
           </p>
         ) : draft && (
           <div className="color-editor__meta">
@@ -488,15 +489,18 @@ export function SettingsColorSchemeTab({ general, client }: Props) {
       {draft && (
         <div className="color-editor__main">
           <div className="color-editor__tokens">
-            <input
-              className="settings-tab__text-input color-editor__filter"
-              type="search"
-              placeholder="Filter colors…"
-              aria-label="Filter colors"
-              data-testid="color-editor-filter"
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-            />
+            <div className="color-editor__filter">
+              <IconFilter size={14} aria-hidden="true" />
+              <input
+                className="settings-tab__text-input"
+                type="text"
+                placeholder="Filter colors…"
+                aria-label="Filter colors"
+                data-testid="color-editor-filter"
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+              />
+            </div>
             <div className="color-editor__list" role="listbox" aria-label="Colors" data-testid="color-editor-list">
               {grouped.map(({ group, rows }) => (
                 <div key={group.id} role="group" aria-label={group.label}>

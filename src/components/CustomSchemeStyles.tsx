@@ -4,7 +4,7 @@ import { COLOR_RE } from "../theme/colorValue";
 // The backend already rejects anything but hex and rgb()/rgba() colours; this
 // keeps a malformed patch from reaching the stylesheet.
 const KEY_RE = /^[a-z][a-z0-9-]{0,63}$/;
-const ID_RE = /^custom:[a-z0-9][a-z0-9_-]{0,63}$/;
+const ID_RE = /^(?:custom|bundled):[a-z0-9][a-z0-9_-]{0,63}$/;
 
 export function buildCustomSchemeCss(catalog: ColorSchemeCatalog | undefined): string {
   if (!catalog) return "";

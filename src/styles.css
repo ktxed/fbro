@@ -7108,6 +7108,12 @@ body {
   padding: 2px 0;
 }
 
+.color-editor .modal__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
 .color-editor__status {
   min-width: 56px;
   color: var(--text-dim);
@@ -7161,7 +7167,27 @@ body {
 }
 
 .color-editor__filter {
+  position: relative;
+  display: flex;
   width: 100%;
+}
+
+.color-editor__filter input {
+  width: 100%;
+  height: 24px;
+  padding-top: 0;
+  padding-bottom: 0;
+  padding-left: calc(14px + 14px);
+  line-height: 1.4;
+}
+
+.color-editor__filter > svg {
+  position: absolute;
+  left: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-dim);
+  pointer-events: none;
 }
 
 .color-editor__list {

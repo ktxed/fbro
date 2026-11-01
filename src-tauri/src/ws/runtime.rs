@@ -1907,6 +1907,7 @@ mod patch_tests {
                     colors: Default::default(),
                     terminal: TerminalColors::default(),
                 },
+            bundled: false,
             }],
             errors: vec![],
         };
@@ -1944,6 +1945,7 @@ mod patch_tests {
                 items: vec![ThemeEntry {
                     slug: "mine".into(),
                     theme: Theme { version: 1, name: "Mine".into(), description: String::new(), mode: "dark".into(), base: "fbro-dark".into(), colors: Default::default(), terminal: TerminalColors::default() },
+                    bundled: false,
                 }],
                 errors: vec![],
             };

@@ -15,6 +15,20 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 pub const CUSTOM_PREFIX: &str = "custom:";
+/// Schemes shipped inside the binary (`src-tauri/themes/*.toml`): read-only,
+/// listed beside the built-ins, and never written to the user's folder.
+pub const BUNDLED_PREFIX: &str = "bundled:";
+
+const BUNDLED_SOURCES: &[(&str, &str)] = &[
+    ("cde-motif", include_str!("../themes/cde-motif.toml")),
+    ("intellij-dark", include_str!("../themes/intellij-dark.toml")),
+    ("intellij-light", include_str!("../themes/intellij-light.toml")),
+    ("magenta", include_str!("../themes/magenta.toml")),
+    ("matrix", include_str!("../themes/matrix.toml")),
+    ("solarized-dark", include_str!("../themes/solarized-dark.toml")),
+    ("solarized-light", include_str!("../themes/solarized-light.toml")),
+    ("windows-xp", include_str!("../themes/windows-xp.toml")),
+];
 pub const FORMAT_VERSION: u32 = 1;
 const MAX_NAME: usize = 60;
 const MAX_DESCRIPTION: usize = 200;
@@ -85,6 +99,15 @@ fn default_base() -> String {
 pub struct ThemeEntry {
     pub slug: String,
     pub theme: Theme,
+    /// Shipped with fbro: read-only, id `bundled:<slug>`.
+    pub bundled: bool,
+}
+
+impl ThemeEntry {
+    pub fn id(&self) -> String {
+        let prefix = if self.bundled { BUNDLED_PREFIX } else { CUSTOM_PREFIX };
+        format!("{prefix}{}", self.slug)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -101,8 +124,7 @@ pub struct ThemeCatalog {
 
 impl ThemeCatalog {
     pub fn get(&self, id: &str) -> Option<&ThemeEntry> {
-        let slug = id.strip_prefix(CUSTOM_PREFIX)?;
-        self.items.iter().find(|entry| entry.slug == slug)
+        self.items.iter().find(|entry| entry.id() == id)
     }
 
     /// Wire projection (`general.colorSchemes`). Terminal colours are resolved
@@ -115,7 +137,8 @@ impl ThemeCatalog {
                 let t = &entry.theme;
                 let defaults = builtin_terminal(&t.base);
                 json!({
-                    "id": format!("{CUSTOM_PREFIX}{}", entry.slug),
+                    "id": entry.id(),
+                    "bundled": entry.bundled,
                     "name": t.name,
                     "description": t.description,
                     "mode": t.mode,
@@ -294,7 +317,7 @@ pub fn load_all_from(dir: &Path) -> ThemeCatalog {
             continue;
         }
         match read_theme(&path) {
-            Ok(theme) => catalog.items.push(ThemeEntry { slug: stem, theme }),
+            Ok(theme) => catalog.items.push(ThemeEntry { slug: stem, theme, bundled: false }),
             Err(message) => catalog.errors.push(ThemeError { file, message }),
         }
     }
@@ -302,8 +325,32 @@ pub fn load_all_from(dir: &Path) -> ThemeCatalog {
     catalog
 }
 
+/// The schemes embedded in the binary. A malformed one is a build-time bug
+/// (covered by a unit test); it is skipped rather than crashing at runtime.
+pub fn bundled_entries() -> Vec<ThemeEntry> {
+    let mut entries: Vec<ThemeEntry> = BUNDLED_SOURCES
+        .iter()
+        .filter_map(|(slug, source)| {
+            let theme: Theme = toml::from_str(source).ok()?;
+            validate_theme(&theme).ok()?;
+            Some(ThemeEntry { slug: (*slug).to_string(), theme, bundled: true })
+        })
+        .collect();
+    entries.sort_by(|a, b| a.theme.name.to_lowercase().cmp(&b.theme.name.to_lowercase()));
+    entries
+}
+
+/// Bundled schemes first, then the user's files from `dir`.
+pub fn load_with_bundled_from(dir: &Path) -> ThemeCatalog {
+    let mut catalog = load_all_from(dir);
+    let mut items = bundled_entries();
+    items.append(&mut catalog.items);
+    catalog.items = items;
+    catalog
+}
+
 pub fn load_all() -> ThemeCatalog {
-    load_all_from(&themes_dir())
+    load_with_bundled_from(&themes_dir())
 }
 
 /// Existing file stems (valid or not), so new slugs never overwrite anything.
@@ -520,13 +567,51 @@ mod tests {
     }
 
     #[test]
+    fn every_bundled_scheme_is_valid_complete_and_uniquely_named() {
+        let entries = bundled_entries();
+        assert_eq!(entries.len(), BUNDLED_SOURCES.len(), "a bundled scheme failed to parse or validate");
+        let mut slugs: Vec<_> = entries.iter().map(|e| e.slug.clone()).collect();
+        slugs.sort();
+        slugs.dedup();
+        assert_eq!(slugs.len(), entries.len(), "duplicate bundled slug");
+        let mut names: Vec<_> = entries.iter().map(|e| e.theme.name.clone()).collect();
+        names.sort();
+        names.dedup();
+        assert_eq!(names.len(), entries.len(), "duplicate bundled name");
+        // Every scheme defines the same token set, so none silently relies on its base.
+        let reference: Vec<_> = entries[0].theme.colors.keys().cloned().collect();
+        for entry in &entries {
+            assert!(is_valid_slug(&entry.slug));
+            assert!(entry.bundled && entry.id().starts_with(BUNDLED_PREFIX));
+            let keys: Vec<_> = entry.theme.colors.keys().cloned().collect();
+            assert_eq!(keys, reference, "{} has a different token set", entry.slug);
+            assert!(entry.theme.terminal.background.is_some() && entry.theme.terminal.foreground.is_some());
+        }
+    }
+
+    #[test]
+    fn bundled_schemes_load_before_user_files_and_cannot_be_shadowed() {
+        let dir = TempDir::new("bundled");
+        save_to(&dir.0, "matrix", &sample()).unwrap();
+        let catalog = load_with_bundled_from(&dir.0);
+        let bundled_matrix = catalog.get("bundled:matrix").expect("bundled matrix");
+        assert!(bundled_matrix.bundled);
+        let user_matrix = catalog.get("custom:matrix").expect("user matrix");
+        assert!(!user_matrix.bundled);
+        assert_eq!(user_matrix.theme.name, "Midnight");
+        assert!(catalog.items.iter().take_while(|e| e.bundled).count() >= 8);
+        assert!(catalog.items.last().is_some_and(|e| !e.bundled));
+        assert!(catalog.to_wire(&dir.0)["items"][0]["bundled"].as_bool().unwrap());
+    }
+
+    #[test]
     fn window_background_uses_theme_bg_then_base() {
         let mut catalog = ThemeCatalog::default();
-        catalog.items.push(ThemeEntry { slug: "a".into(), theme: sample() });
+        catalog.items.push(ThemeEntry { slug: "a".into(), theme: sample(), bundled: false });
         let mut light = sample();
         light.base = BASE_LIGHT.into();
         light.colors.clear();
-        catalog.items.push(ThemeEntry { slug: "b".into(), theme: light });
+        catalog.items.push(ThemeEntry { slug: "b".into(), theme: light, bundled: false });
         assert_eq!(window_background("custom:a", &catalog), (13, 13, 13, 255));
         assert_eq!(window_background("custom:b", &catalog), (244, 246, 248, 255));
         assert_eq!(window_background("custom:missing", &catalog), (13, 13, 13, 255));

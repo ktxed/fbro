@@ -939,6 +939,7 @@ mod appearance_option_tests {
                 colors: Default::default(),
                 terminal: TerminalColors::default(),
             },
+            bundled: false,
         });
         assert_eq!(
             apply_appearance_option(&mut general, &catalog, "colorScheme", &json!("custom:mine")),

@@ -109,8 +109,16 @@ async fn create(args: &Value, ctx: &mut IntentContext<'_>) -> Result<String, Fai
     Ok(format!("{}{slug}", themes::CUSTOM_PREFIX))
 }
 
+fn reject_bundled(id: &str) -> Result<(), Failure> {
+    if id.starts_with(themes::BUNDLED_PREFIX) {
+        return Err(bad("Bundled color schemes are read-only; duplicate it to make an editable copy"));
+    }
+    Ok(())
+}
+
 async fn update(args: &Value, ctx: &mut IntentContext<'_>) -> Result<String, Failure> {
     let id = arg_str(args, "id").unwrap_or_default().to_string();
+    reject_bundled(&id)?;
     let slug = themes::slug_of(&id).ok_or_else(|| bad("Unknown color scheme"))?.to_string();
     let name = arg_str(args, "name").map(|s| s.trim().to_string());
     let description = arg_str(args, "description").map(|s| s.trim().to_string());
@@ -153,6 +161,7 @@ async fn update(args: &Value, ctx: &mut IntentContext<'_>) -> Result<String, Fai
 
 async fn delete(args: &Value, ctx: &mut IntentContext<'_>) -> Result<String, Failure> {
     let id = arg_str(args, "id").unwrap_or_default().to_string();
+    reject_bundled(&id)?;
     let slug = themes::slug_of(&id).ok_or_else(|| bad("Unknown color scheme"))?.to_string();
     let base = tokio::task::spawn_blocking(move || -> Result<String, Failure> {
         let dir = themes::themes_dir();

@@ -2,7 +2,8 @@ export const DARK_SCHEME_ID = "fbro-dark";
 export const LIGHT_SCHEME_ID = "daylight";
 export const CUSTOM_SCHEME_PREFIX = "custom:";
 
-/** Built-in ids are fixed; custom ids are `custom:<file stem>`. */
+/** Built-in ids are fixed; user files are `custom:<file stem>`; schemes shipped
+ *  inside fbro are `bundled:<name>`. */
 export type ColorSchemeId = string;
 export type BuiltinColorSchemeId = typeof DARK_SCHEME_ID | typeof LIGHT_SCHEME_ID;
 
@@ -22,7 +23,10 @@ export interface ColorScheme {
   base: BuiltinColorSchemeId;
   terminal: TerminalColors;
   mermaidTheme: "dark" | "default";
+  /** A user file in the themes folder: the only kind the editor can change. */
   custom: boolean;
+  /** Shipped inside fbro: read-only, duplicate to edit. */
+  bundled: boolean;
 }
 
 /** A custom scheme as projected by the backend (`general.colorSchemes.items`). */
@@ -32,6 +36,7 @@ export interface CustomColorScheme {
   description: string;
   mode: "dark" | "light";
   base: BuiltinColorSchemeId;
+  bundled?: boolean;
   /** CSS token name (without `--`) to colour. May be partial. */
   colors: Record<string, string>;
   /** Already resolved against the base by the backend. */
@@ -61,6 +66,7 @@ export const COLOR_SCHEMES: ColorScheme[] = [
     },
     mermaidTheme: "dark",
     custom: false,
+    bundled: false,
   },
   {
     id: LIGHT_SCHEME_ID,
@@ -76,6 +82,7 @@ export const COLOR_SCHEMES: ColorScheme[] = [
     },
     mermaidTheme: "default",
     custom: false,
+    bundled: false,
   },
 ];
 
@@ -85,12 +92,13 @@ function fromCustom(item: CustomColorScheme): ColorScheme {
   return {
     id: item.id,
     label: item.name,
-    description: item.description || `Custom scheme based on ${item.base === LIGHT_SCHEME_ID ? "fbro Light" : "fbro Dark"}`,
+    description: item.description || `${item.bundled ? "Bundled" : "Custom"} scheme based on ${item.base === LIGHT_SCHEME_ID ? "fbro Light" : "fbro Dark"}`,
     mode: item.mode,
     base: item.base,
     terminal: item.terminal,
     mermaidTheme: item.mode === "dark" ? "dark" : "default",
-    custom: true,
+    custom: !item.bundled,
+    bundled: item.bundled === true,
   };
 }
 

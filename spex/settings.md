@@ -170,6 +170,17 @@ New schemes are written complete (every token in `src/theme/tokens.ts`, copied
 from the rendered template); a hand-written file may omit tokens, which then
 cascade from `base` through `data-color-scheme-base` in `styles.css`.
 
+**Bundled schemes.** fbro ships Matrix, Magenta, Windows XP, IntelliJ Dark/Light,
+CDE Motif and Solarized Dark/Light as `src-tauri/themes/*.toml`, embedded with
+`include_str!` and loaded ahead of the user's files. They use the same format,
+appear in `colorSchemes.items` with `bundled: true` and id `bundled:<slug>`, are
+read-only (`UpdateColorScheme`/`DeleteColorScheme` fail with `BAD_COLOR_SCHEME`),
+and are never written to the themes folder, so a user file with the same stem
+(`custom:matrix`) is a separate scheme that cannot shadow one. Duplicate them to
+edit. To add one: drop a complete TOML (same token set as the others) into
+`src-tauri/themes/` and list it in `BUNDLED_SOURCES`; a unit test checks that every
+bundled scheme is valid, uniquely named, and defines the same tokens.
+
 **Validation (backend, `themes.rs`).** Token names match `[a-z][a-z0-9-]*`; values
 are `#rgb[a]`, `#rrggbb[aa]`, `rgb()` or `rgba()` only, so a theme can never inject
 CSS into the generated stylesheet. `mode` is `dark`/`light`, `base` a built-in.
@@ -181,11 +192,11 @@ valid file are preserved by updates.
 in the snapshot, every settings patch, and the viewer lightweight patch, and is
 rejected by `SetGeneralOption`. Each item carries `id, name, description, mode,
 base, colors` and a terminal palette already resolved against the base.
-`activeColorScheme` may be a built-in id or a loaded `custom:<slug>`. A
+`activeColorScheme` may be a built-in id or a loaded `custom:<slug>` / `bundled:<slug>`. A
 `colorScheme` that names a custom scheme whose file is missing or invalid renders
 as `fbro-dark`; the preference is kept, so restoring the file restores the scheme.
 Following the system still maps to the built-ins. `SetGeneralOption colorScheme`
-accepts `custom:<slug>` only while that scheme is loaded.
+accepts `custom:<slug>` or `bundled:<slug>` only while that scheme is loaded.
 
 **Import.** A watcher on the themes folder (`notify`, debounced 300 ms) reloads
 the catalog and broadcasts it, so copying a `.toml` file in imports it and editing
@@ -248,7 +259,7 @@ Supported keys:
 | `osNotificationsEnabled` | `bool` | `true` | Deliver selected operation notifications through the OS while no native fbro window is focused. Completion and cancellation require at least 30 seconds of execution; failures, pairing requests, transfer starts, and connection changes bypass that cutoff. The General settings control is capability-gated. See [notifications.md](notifications.md). |
 | `rememberSortPerLocation` | `bool` | `false` | Remember and share sorting for each local filesystem location and for the Journal source. |
 | `enableHeic2any` | `bool` | `false` | Enable local browser conversion of HEIC/HEIF previews in the embedded and detached viewers on Windows (including Windows 10) and Linux. The control is hidden on macOS, which retains native decoding. Existing image caps apply. Changes update open viewers through backend patches; conversion is preview-only and does not write files. |
-| `colorScheme` | `string` | `"fbro-dark"` | Manual scheme: `fbro-dark`, `daylight`, or a loaded `custom:<slug>` ([Custom color schemes](#custom-color-schemes)). Other values return `BAD_SETTING`. Preserved while following the system, so unfollowing restores it. |
+| `colorScheme` | `string` | `"fbro-dark"` | Manual scheme: `fbro-dark`, `daylight`, or a loaded `custom:<slug>` or `bundled:<slug>` ([Custom color schemes](#custom-color-schemes)). Other values return `BAD_SETTING`. Preserved while following the system, so unfollowing restores it. |
 | `followSystemColorScheme` | `bool` | `false` | Match the OS light/dark preference: dark → `fbro-dark`, light → `daylight`. Applies live, to all clients. While the preference is unavailable the manual `colorScheme` applies. See [System appearance](#system-appearance). |
 | `zshEmacsKeymap` | `bool` | `false` | On macOS, start new interactive zsh terminals with `-o emacs`. The control is hidden and the setting has no effect on other platforms. Other shells and Quick Edit commands are unaffected. Existing terminal sessions keep their current keymap. |
 | `fedupDefaultIgnorePatterns` | `string` | `.git`, `.idea`, `.vscode`, `.venv`, `node_modules`, `__MACOSX`, `._*`, `.DS_Store`, `artifacts/e2e`, `dist/assets`, `target/debug`, `target/release`, `target/bundle`, `.m2` | Newline/comma separated wildcard name/path patterns Fedup Bro can use to skip files and folders before scanning. |
