@@ -212,6 +212,15 @@ export async function runFocusHandoffFlow(browser, observer) {
     await expectFocus(browser, terminalSelector, "backend rejection restores terminal opener");
     await hint.click();
     await expectFocus(browser, terminalSelector, "toast preserves terminal input");
+    // The terminal's action toolbar is opaque, so terminal text cannot hide it.
+    const toolbarBackground = await browser.execute((selector) => {
+      const toolbar = document.querySelector(`${selector} [data-testid="terminal-toolbar"]`);
+      return toolbar ? getComputedStyle(toolbar).backgroundColor : null;
+    }, panelSelector);
+    const alpha = /rgba\([^)]*,\s*([\d.]+)\)/.exec(toolbarBackground ?? "")?.[1];
+    if (!toolbarBackground || (alpha !== undefined && Number(alpha) < 1)) {
+      throw new Error(`Terminal toolbar background is not opaque: ${toolbarBackground}`);
+    }
     await (await browser.$(`${panelSelector} .panel-terminal__close`)).click();
     await waitFor(() => {
       observer.sendIntent("RequestStateSnapshot");

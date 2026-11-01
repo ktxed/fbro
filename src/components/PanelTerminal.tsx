@@ -248,33 +248,38 @@ export function PanelTerminal({
     <div
       className={`panel-terminal${solo ? " panel-terminal--solo" : ""}${maximized ? " panel-terminal--maximized" : ""}`}
     >
+      {/* One opaque toolbar, so terminal text underneath never shows through. */}
+      <div className="panel-terminal__toolbar" role="toolbar" aria-label="Terminal actions" data-testid="terminal-toolbar">
       {onPromote && (
         <button
           className="panel-terminal__promote"
           title="Promote terminal to its own tab"
+          aria-label="Promote terminal to its own tab"
           onClick={(e) => {
             e.stopPropagation();
             onPromote();
           }}
         >
-          <IconExternalLink size={12} />
+          <IconExternalLink size={12} aria-hidden />
         </button>
       )}
       {onToggleMaximize && (
         <button
           className="panel-terminal__maximize"
           title={maximized ? "Restore terminal" : "Maximize terminal"}
+          aria-label={maximized ? "Restore terminal" : "Maximize terminal"}
           onClick={(e) => {
             e.stopPropagation();
             onToggleMaximize();
           }}
         >
-          {maximized ? <IconMinimize size={12} /> : <IconMaximize size={12} />}
+          {maximized ? <IconMinimize size={12} aria-hidden /> : <IconMaximize size={12} aria-hidden />}
         </button>
       )}
       <button
         className="panel-terminal__close"
         title="Close terminal"
+        aria-label="Close terminal"
         onClick={(e) => {
           e.stopPropagation();
           onClose();
@@ -282,6 +287,7 @@ export function PanelTerminal({
       >
         ×
       </button>
+      </div>
       <div ref={containerRef} className="panel-terminal__xterm" />
     </div>
   );

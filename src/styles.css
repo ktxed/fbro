@@ -6702,69 +6702,48 @@ body {
   overflow: hidden;
 }
 
-.panel-terminal__close {
+/* Floating actions over the terminal. The toolbar is opaque (terminal
+   background plus a border) so text under it never hides the buttons; the
+   chip colours sit on top of it. */
+.panel-terminal__toolbar {
   position: absolute;
   top: 2px;
   right: 4px;
   z-index: 2;
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--bg-terminal);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35); /* fixed: neutral lift in every scheme */
+}
+
+.panel-terminal__close,
+.panel-terminal__maximize,
+.panel-terminal__promote {
+  appearance: none;
+  font: inherit;
   width: 18px;
   height: 18px;
   padding: 0;
   border: none;
   background: var(--bg-terminal-chip);
   color: var(--text-terminal-chip);
+  cursor: pointer;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.panel-terminal__close {
   font-size: 14px;
   line-height: 14px;
-  cursor: pointer;
-  border-radius: 3px;
 }
 
-.panel-terminal__close:hover {
-  background: var(--bg-terminal-chip-hover);
-  color: var(--text-terminal-chip-hover);
-}
-
-.panel-terminal__maximize {
-  position: absolute;
-  top: 2px;
-  right: 26px;
-  z-index: 2;
-  width: 18px;
-  height: 18px;
-  padding: 0;
-  border: none;
-  background: var(--bg-terminal-chip);
-  color: var(--text-terminal-chip);
-  cursor: pointer;
-  border-radius: 3px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.panel-terminal__maximize:hover {
-  background: var(--bg-terminal-chip-hover);
-  color: var(--text-terminal-chip-hover);
-}
-
-.panel-terminal__promote {
-  position: absolute;
-  top: 2px;
-  right: 48px;
-  z-index: 2;
-  width: 18px;
-  height: 18px;
-  padding: 0;
-  border: none;
-  background: var(--bg-terminal-chip);
-  color: var(--text-terminal-chip);
-  cursor: pointer;
-  border-radius: 3px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
+.panel-terminal__close:hover,
+.panel-terminal__maximize:hover,
 .panel-terminal__promote:hover {
   background: var(--bg-terminal-chip-hover);
   color: var(--text-terminal-chip-hover);
