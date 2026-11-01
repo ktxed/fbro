@@ -19,6 +19,7 @@ mod remote;
 mod state;
 mod storage;
 mod terminal;
+mod themes;
 mod thumb_pool;
 mod vfs;
 mod watcher;

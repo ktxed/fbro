@@ -334,7 +334,8 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
                 proc_tree_mode_changed = Some(v);
             }
             "colorScheme" | "followSystemColorScheme" => {
-                let result = apply_appearance_option(&mut state_guard.settings.general, key, value);
+                let catalog = state_guard.color_schemes.clone();
+                let result = apply_appearance_option(&mut state_guard.settings.general, &catalog, key, value);
                 if let Some(Err(msg)) = result {
                     drop(state_guard);
                     bad_setting(ctx.tx, &msg).await;
@@ -590,12 +591,13 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
         }
     }
 
-    let (general, location_settings_count, appearance) = {
+    let (general, location_settings_count, appearance, color_schemes) = {
         let state_guard = ctx.state.lock().await;
         (
             state_guard.settings.general.clone(),
             state_guard.location_settings.len(),
             crate::ws::appearance::appearance_patch_fields(&state_guard),
+            state_guard.color_schemes.to_wire(&crate::themes::themes_dir()),
         )
     };
 
@@ -634,6 +636,7 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
                 "followSystemColorScheme": appearance.follow_system_color_scheme,
                 "activeColorScheme": appearance.active_color_scheme,
                 "systemColorScheme": appearance.system_color_scheme,
+                "colorSchemes": color_schemes,
                 "sevenzipExtractor": general.sevenzip_extractor.as_str(),
                 "sevenzipCustomPath": general.sevenzip_custom_path,
                 "sevenzipResolvedPath": sevenzip_resolved,
@@ -660,12 +663,16 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
 /// deliberately not handled, so they are rejected as unknown keys.
 fn apply_appearance_option(
     general: &mut crate::state::settings::GeneralSettings,
+    catalog: &crate::themes::ThemeCatalog,
     key: &str,
     value: &Value,
 ) -> Option<Result<(), String>> {
     match key {
         "colorScheme" => Some(match value.as_str() {
-            Some(id) if crate::state::settings::is_known_color_scheme(id) => {
+            Some(id)
+                if crate::state::settings::is_known_color_scheme(id)
+                    || catalog.get(id).is_some() =>
+            {
                 general.color_scheme = id.to_string();
                 Ok(())
             }
@@ -879,45 +886,73 @@ async fn clear_icon_cache(args: &Value, ctx: &mut IntentContext<'_>) {
 mod appearance_option_tests {
     use super::apply_appearance_option;
     use crate::state::settings::GeneralSettings;
+    use crate::themes::{Theme, ThemeCatalog, ThemeEntry, TerminalColors};
     use serde_json::json;
 
     #[test]
     fn follow_system_color_scheme_requires_a_boolean() {
         let mut general = GeneralSettings::default();
+        let catalog = ThemeCatalog::default();
         assert_eq!(
-            apply_appearance_option(&mut general, "followSystemColorScheme", &json!(true)),
+            apply_appearance_option(&mut general, &catalog, "followSystemColorScheme", &json!(true)),
             Some(Ok(()))
         );
         assert!(general.follow_system_color_scheme);
         assert!(matches!(
-            apply_appearance_option(&mut general, "followSystemColorScheme", &json!("yes")),
+            apply_appearance_option(&mut general, &catalog, "followSystemColorScheme", &json!("yes")),
             Some(Err(_))
         ));
         assert!(general.follow_system_color_scheme);
     }
 
     #[test]
-    fn color_scheme_accepts_only_builtin_ids() {
+    fn color_scheme_accepts_builtin_and_loaded_custom_ids() {
         let mut general = GeneralSettings::default();
+        let catalog = ThemeCatalog::default();
         assert_eq!(
-            apply_appearance_option(&mut general, "colorScheme", &json!("daylight")),
+            apply_appearance_option(&mut general, &catalog, "colorScheme", &json!("daylight")),
             Some(Ok(()))
         );
         assert_eq!(general.color_scheme, "daylight");
         for bad in [json!("system"), json!(1)] {
             assert!(matches!(
-                apply_appearance_option(&mut general, "colorScheme", &bad),
+                apply_appearance_option(&mut general, &catalog, "colorScheme", &bad),
                 Some(Err(_))
             ));
         }
         assert_eq!(general.color_scheme, "daylight");
+
+        // Custom ids need a loaded file.
+        assert!(matches!(
+            apply_appearance_option(&mut general, &catalog, "colorScheme", &json!("custom:mine")),
+            Some(Err(_))
+        ));
+        let mut catalog = ThemeCatalog::default();
+        catalog.items.push(ThemeEntry {
+            slug: "mine".into(),
+            theme: Theme {
+                version: 1,
+                name: "Mine".into(),
+                description: String::new(),
+                mode: "dark".into(),
+                base: "fbro-dark".into(),
+                colors: Default::default(),
+                terminal: TerminalColors::default(),
+            },
+        });
+        assert_eq!(
+            apply_appearance_option(&mut general, &catalog, "colorScheme", &json!("custom:mine")),
+            Some(Ok(()))
+        );
+        assert_eq!(general.color_scheme, "custom:mine");
     }
 
     #[test]
     fn read_only_projections_are_not_writable() {
         let mut general = GeneralSettings::default();
-        for key in ["activeColorScheme", "systemColorScheme"] {
-            assert_eq!(apply_appearance_option(&mut general, key, &json!("daylight")), None);
+        let catalog = ThemeCatalog::default();
+        for key in ["activeColorScheme", "systemColorScheme", "colorSchemes"] {
+            assert_eq!(apply_appearance_option(&mut general, &catalog, key, &json!("daylight")), None);
         }
     }
 }

@@ -1,7 +1,7 @@
 import { autoUpdate, flip, FloatingPortal, offset, shift, useFloating } from "@floating-ui/react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useAppDispatch, useAppState, type EjectAction, type PendingSourceMenu } from "../store";
-import { resolveColorScheme } from "../theme/colorSchemes";
+import { useColorScheme } from "../theme/useColorScheme";
 import { useFocusReturn } from "../hooks/useFocusReturn";
 import { handoffFocusToOpener } from "../utils/focusReturn";
 
@@ -12,7 +12,7 @@ export function SourceContextMenu({ menu }: { menu: PendingSourceMenu }) {
   const [highlighted, setHighlighted] = useState(0);
   const menuRef = useRef<HTMLDivElement>(null);
   const returnFocusRef = useFocusReturn();
-  const colorScheme = resolveColorScheme(state.settings.general.activeColorScheme);
+  const colorScheme = useColorScheme();
   const items: Array<{ action: EjectAction; label: string }> = source?.eject
     ? [
         { action: "unmount-volume", label: "Unmount volume…" },
@@ -79,7 +79,7 @@ export function SourceContextMenu({ menu }: { menu: PendingSourceMenu }) {
 
   return (
     <FloatingPortal>
-      <div className="context-menu__overlay" data-color-scheme={colorScheme.id} style={{ colorScheme: colorScheme.mode }} onMouseDown={close} onContextMenu={(event) => event.preventDefault()}>
+      <div className="context-menu__overlay" data-color-scheme={colorScheme.id} data-color-scheme-base={colorScheme.base} style={{ colorScheme: colorScheme.mode }} onMouseDown={close} onContextMenu={(event) => event.preventDefault()}>
         <div
           className="context-menu"
           ref={setMenuRef}

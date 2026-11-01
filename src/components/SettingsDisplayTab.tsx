@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import type { GeneralSettings } from "../ws/types";
 import type { WsClient } from "../ws/client";
 import { stepNumberInputOnWheel } from "../utils/numberInputWheel";
-import { useAppState } from "../store";
-import { COLOR_SCHEMES, resolveColorScheme } from "../theme/colorSchemes";
+import { useAppDispatch, useAppState } from "../store";
+import { listColorSchemes, resolveColorScheme } from "../theme/colorSchemes";
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -18,6 +18,7 @@ interface SettingsDisplayTabProps {
 
 export function SettingsDisplayTab({ general, client }: SettingsDisplayTabProps) {
   const { connected } = useAppState();
+  const dispatch = useAppDispatch();
   const pendingIconClear = useRef<string | null>(null);
   const [clearingIcons, setClearingIcons] = useState(false);
   const [iconCacheError, setIconCacheError] = useState<string>();
@@ -175,10 +176,10 @@ export function SettingsDisplayTab({ general, client }: SettingsDisplayTabProps)
       </label>
     </div>
   );
-  const manualScheme = resolveColorScheme(general.colorScheme);
+  const manualScheme = resolveColorScheme(general.colorScheme, general.colorSchemes);
   const followingSystem = general.followSystemColorScheme && general.systemColorScheme !== null;
   const colorSchemeHint = followingSystem
-    ? `Following system: ${resolveColorScheme(general.activeColorScheme).label}`
+    ? `Following system: ${resolveColorScheme(general.activeColorScheme, general.colorSchemes).label}`
     : general.followSystemColorScheme
       ? `System appearance unavailable; using ${manualScheme.label}.`
       : manualScheme.description;
@@ -205,7 +206,7 @@ export function SettingsDisplayTab({ general, client }: SettingsDisplayTabProps)
           aria-describedby="color-scheme-hint"
           onChange={(e) => send("colorScheme", e.target.value)}
         >
-          {COLOR_SCHEMES.map((scheme) => (
+          {listColorSchemes(general.colorSchemes).map((scheme) => (
             <option key={scheme.id} value={scheme.id}>
               {scheme.label}
             </option>
@@ -215,6 +216,16 @@ export function SettingsDisplayTab({ general, client }: SettingsDisplayTabProps)
       <p className="settings-tab__hint" id="color-scheme-hint" data-testid="color-scheme-hint">
         {colorSchemeHint}
       </p>
+      <div className="settings-tab__option">
+        <button
+          className="modal__btn"
+          type="button"
+          data-testid="customize-color-scheme"
+          onClick={() => dispatch({ type: "OPEN_SETTINGS", tab: "colorScheme", showColorSchemeEditor: true })}
+        >
+          Customize…
+        </button>
+      </div>
     </div>
   );
 

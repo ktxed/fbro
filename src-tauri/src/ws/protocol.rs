@@ -460,6 +460,19 @@ pub enum ServerMessage {
         code: String,
         message: String,
     },
+    ColorSchemeSaved {
+        timestamp: u64,
+        #[serde(rename = "requestId")]
+        request_id: String,
+        id: String,
+    },
+    ColorSchemeFailed {
+        timestamp: u64,
+        #[serde(rename = "requestId")]
+        request_id: String,
+        code: String,
+        message: String,
+    },
     ClearIconCacheFailed {
         timestamp: u64,
         #[serde(rename = "requestId")]
@@ -739,6 +752,9 @@ pub struct GeneralSettingsSchema {
     /// Read-only: OS light/dark preference ("dark" / "light"), `null` while
     /// unavailable. Never skipped so clients can tell "unavailable" apart.
     pub system_color_scheme: Option<String>,
+    /// Read-only: custom color schemes from `<config_dir>/themes/`
+    /// (`{ dir, items, errors }`, see `themes::ThemeCatalog::to_wire`).
+    pub color_schemes: serde_json::Value,
     pub sevenzip_extractor: String,
     pub sevenzip_custom_path: String,
     /// Effective binary picked given the current mode + custom path. Empty

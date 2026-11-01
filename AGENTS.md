@@ -27,7 +27,7 @@ spec before changing an area.
 | `keyboard.md` | Input ownership and priority — any key handling |
 | `modal-stack.md` | `ModalLayer` invariants — adding or changing a dialog |
 | `modal-keyboard-audit.md` | Known modal keyboard pitfalls (Enter, double submit, focus) |
-| `settings.md` | Typed backend settings tree — adding a setting |
+| `settings.md` | Typed backend settings tree — adding a setting; custom color schemes |
 | `tabs.md` | Tabbed panel mode |
 | `search.md` | Backend search jobs and result sources |
 | `bro.md` | "Pass to Bro" processors — adding a bro |
@@ -116,7 +116,7 @@ keyboard, or modal behaviour **updates the matching spec in the same commit**.
 - Colours via `var(--…)` tokens in `src/styles.css`; check both `fbro-dark` and
   `daylight`. Literal colours belong only in the `:root` /
   `[data-color-scheme]` blocks; a deliberately fixed colour (video letterbox,
-  PDF paper) carries a comment. New tokens need a daylight value. Content rendered through `FloatingPortal` sets its own
+  PDF paper) carries a comment. New tokens need a daylight value and an entry in `src/theme/tokens.ts` (the custom-scheme editor and Duplicate read it). Content rendered through `FloatingPortal` sets its own
   `data-color-scheme` (`resolveColorScheme`).
 - Custom-styled controls need `appearance: none; font: inherit` and explicit
   colours, or Windows WebView2 paints native chrome.

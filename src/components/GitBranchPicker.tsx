@@ -2,8 +2,7 @@ import { autoUpdate, flip, FloatingFocusManager, FloatingPortal, offset, shift, 
 import { IconCheck, IconChevronDown } from "@tabler/icons-react";
 import { Fragment, forwardRef, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import type { GitRemoteBranch } from "../ws/types";
-import { useAppState } from "../store";
-import { resolveColorScheme } from "../theme/colorSchemes";
+import { useColorScheme } from "../theme/useColorScheme";
 import { mergeRefs } from "../utils/mergeRefs";
 import { rovingIndexForKey } from "./modalKeyboard";
 
@@ -34,7 +33,7 @@ export const GitBranchPicker = forwardRef<HTMLButtonElement, GitBranchPickerProp
   const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const selectionPendingRef = useRef(false);
   const listId = useId();
-  const colorScheme = resolveColorScheme(useAppState().settings.general.activeColorScheme);
+  const colorScheme = useColorScheme();
   const choices = useMemo<GitBranchChoice[]>(() => [
     ...branches.map(name => ({ name, kind: "local" as const, refName: `refs/heads/${name}` })),
     ...remoteBranches.map(branch => ({ ...branch, kind: "remote" as const })),
@@ -162,6 +161,7 @@ export const GitBranchPicker = forwardRef<HTMLButtonElement, GitBranchPickerProp
               aria-label="Choose branch"
               data-testid="git-branch-dropdown"
               data-color-scheme={colorScheme.id}
+        data-color-scheme-base={colorScheme.base}
               className="git-branch-picker__popup"
               style={{ ...floatingStyles, colorScheme: colorScheme.mode }}
               {...getFloatingProps({

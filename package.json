@@ -39,6 +39,7 @@
     "mermaid": "^11.17.2",
     "pdfjs-dist": "5.5.207",
     "react": "^19.3.0",
+    "react-colorful": "^5.8.1",
     "react-dom": "^19.3.0",
     "react-tooltip": "^5.30.1"
   },

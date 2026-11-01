@@ -7,8 +7,7 @@ import {
   useFloating,
 } from "@floating-ui/react";
 import { useEffect, useLayoutEffect, useRef } from "react";
-import { useAppState } from "../store";
-import { resolveColorScheme } from "../theme/colorSchemes";
+import { useColorScheme } from "../theme/useColorScheme";
 
 interface InputHistoryDropdownProps {
   anchorEl: HTMLElement | null;
@@ -25,9 +24,8 @@ export function InputHistoryDropdown({
   onSelect,
   onClose,
 }: InputHistoryDropdownProps) {
-  const state = useAppState();
   const popoverRef = useRef<HTMLDivElement>(null);
-  const colorScheme = resolveColorScheme(state.settings.general.activeColorScheme);
+  const colorScheme = useColorScheme();
 
   const { refs, floatingStyles } = useFloating({
     open: true,
@@ -73,6 +71,7 @@ export function InputHistoryDropdown({
     <FloatingPortal>
       <div
         data-color-scheme={colorScheme.id}
+        data-color-scheme-base={colorScheme.base}
         ref={(node) => {
           refs.setFloating(node);
           (popoverRef as React.MutableRefObject<HTMLDivElement | null>).current = node;

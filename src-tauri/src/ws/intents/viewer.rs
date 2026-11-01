@@ -451,8 +451,8 @@ async fn view_file(args: &Value, ctx: &mut IntentContext<'_>) {
     let (is_local, driver, file_server_port, image_cap_bytes, color_scheme, viewer_bg) = {
         let state_guard = ctx.state.lock().await;
         let driver = state_guard.drivers.get(&effective_source_id).cloned();
-        let color_scheme = state_guard.active_color_scheme().to_string();
-        let viewer_bg = crate::ws::appearance::window_background(&color_scheme);
+        let color_scheme = state_guard.active_color_scheme();
+        let viewer_bg = crate::ws::appearance::window_background(&color_scheme, &state_guard.color_schemes);
         (
             driver
                 .as_ref()

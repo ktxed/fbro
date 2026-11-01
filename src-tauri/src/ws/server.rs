@@ -59,6 +59,7 @@ pub async fn start(
         Arc::clone(&state),
         appearance_rx,
     ));
+    tokio::spawn(crate::ws::appearance::run_theme_watcher(Arc::clone(&state)));
     let (cli_open_notify_tx, _) = broadcast::channel::<()>(16);
 
     loop {
@@ -218,12 +219,13 @@ async fn handle_connection(
     } else {
         // Non-GUI clients (viewers) don't get the full snapshot but still need
         // display settings so they render consistently with the main window.
-        let (font_size, color_scheme, active_color_scheme, enable_heic2any) = {
+        let (font_size, color_scheme, active_color_scheme, color_schemes, enable_heic2any) = {
             let state_guard = state.lock().await;
             (
                 state_guard.font_size,
                 state_guard.settings.general.color_scheme.clone(),
                 state_guard.active_color_scheme(),
+                state_guard.color_schemes.to_wire(&crate::themes::themes_dir()),
                 state_guard.settings.general.enable_heic2any,
             )
         };
@@ -239,6 +241,7 @@ async fn handle_connection(
                     "general": {
                         "colorScheme": color_scheme,
                         "activeColorScheme": active_color_scheme,
+                        "colorSchemes": color_schemes,
                         "enableHeic2any": enable_heic2any,
                     },
                 }),

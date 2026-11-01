@@ -1,3 +1,5 @@
+import type { ColorSchemeCatalog } from "../theme/colorSchemes";
+
 // ─── Domain types ────────────────────────────────────────────────────────────
 
 export interface VFSEntry {
@@ -787,6 +789,8 @@ export interface GeneralSettings {
   followSystemColorScheme: boolean;
   /** Read-only: the scheme to render, resolved by the backend. */
   activeColorScheme: string;
+  /** Read-only: custom schemes loaded from the themes folder. */
+  colorSchemes?: ColorSchemeCatalog;
   /** Read-only: OS light/dark preference; null while unavailable. */
   systemColorScheme: "dark" | "light" | null;
   /** "auto" | "custom" | "internal" */
@@ -1162,6 +1166,21 @@ export interface OpenOsNotificationSettingsFailedMessage {
   code: string;
   message: string;
 }
+export interface ColorSchemeSavedMessage {
+  type: "ColorSchemeSaved";
+  timestamp: number;
+  requestId: string;
+  /** `custom:<slug>` */
+  id: string;
+}
+export interface ColorSchemeFailedMessage {
+  type: "ColorSchemeFailed";
+  timestamp: number;
+  requestId: string;
+  /** BAD_COLOR_SCHEME | THEME_IO */
+  code: string;
+  message: string;
+}
 export interface ClearIconCacheFailedMessage {
   type: "ClearIconCacheFailed";
   timestamp: number;
@@ -1401,6 +1420,8 @@ export type BEMessage =
   | ClearIconCacheOkMessage
   | ClearIconCacheFailedMessage
   | OpenOsNotificationSettingsOkMessage
+  | ColorSchemeSavedMessage
+  | ColorSchemeFailedMessage
   | OpenOsNotificationSettingsFailedMessage
   | CacheStatusReadyMessage
   | ThumbnailQueueReadyMessage

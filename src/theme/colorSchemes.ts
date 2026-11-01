@@ -1,25 +1,58 @@
-export type ColorSchemeId = "fbro-dark" | "daylight";
+export const DARK_SCHEME_ID = "fbro-dark";
+export const LIGHT_SCHEME_ID = "daylight";
+export const CUSTOM_SCHEME_PREFIX = "custom:";
+
+/** Built-in ids are fixed; custom ids are `custom:<file stem>`. */
+export type ColorSchemeId = string;
+export type BuiltinColorSchemeId = typeof DARK_SCHEME_ID | typeof LIGHT_SCHEME_ID;
+
+export interface TerminalColors {
+  background: string;
+  foreground: string;
+  cursor: string;
+  selectionBackground: string;
+}
 
 export interface ColorScheme {
   id: ColorSchemeId;
   label: string;
   description: string;
   mode: "dark" | "light";
-  terminal: {
-    background: string;
-    foreground: string;
-    cursor: string;
-    selectionBackground: string;
-  };
+  /** Built-in scheme whose stylesheet block supplies tokens a custom scheme omits. */
+  base: BuiltinColorSchemeId;
+  terminal: TerminalColors;
   mermaidTheme: "dark" | "default";
+  custom: boolean;
 }
+
+/** A custom scheme as projected by the backend (`general.colorSchemes.items`). */
+export interface CustomColorScheme {
+  id: string;
+  name: string;
+  description: string;
+  mode: "dark" | "light";
+  base: BuiltinColorSchemeId;
+  /** CSS token name (without `--`) to colour. May be partial. */
+  colors: Record<string, string>;
+  /** Already resolved against the base by the backend. */
+  terminal: TerminalColors;
+}
+
+export interface ColorSchemeCatalog {
+  dir: string;
+  items: CustomColorScheme[];
+  errors: { file: string; message: string }[];
+}
+
+export const EMPTY_COLOR_SCHEME_CATALOG: ColorSchemeCatalog = { dir: "", items: [], errors: [] };
 
 export const COLOR_SCHEMES: ColorScheme[] = [
   {
-    id: "fbro-dark",
+    id: DARK_SCHEME_ID,
     label: "fbro Dark",
     description: "Original dark blue scheme",
     mode: "dark",
+    base: DARK_SCHEME_ID,
     terminal: {
       background: "#1e1e1e",
       foreground: "#dddddd",
@@ -27,12 +60,14 @@ export const COLOR_SCHEMES: ColorScheme[] = [
       selectionBackground: "#2d228a",
     },
     mermaidTheme: "dark",
+    custom: false,
   },
   {
-    id: "daylight",
+    id: LIGHT_SCHEME_ID,
     label: "fbro Light",
     description: "Light neutral scheme",
     mode: "light",
+    base: LIGHT_SCHEME_ID,
     terminal: {
       background: "#ffffff",
       foreground: "#1e2933",
@@ -40,11 +75,42 @@ export const COLOR_SCHEMES: ColorScheme[] = [
       selectionBackground: "#cfe3ff",
     },
     mermaidTheme: "default",
+    custom: false,
   },
 ];
 
-export const DEFAULT_COLOR_SCHEME_ID: ColorSchemeId = "fbro-dark";
+export const DEFAULT_COLOR_SCHEME_ID: ColorSchemeId = DARK_SCHEME_ID;
 
-export function resolveColorScheme(id: string | undefined): ColorScheme {
-  return COLOR_SCHEMES.find((scheme) => scheme.id === id) ?? COLOR_SCHEMES[0];
+function fromCustom(item: CustomColorScheme): ColorScheme {
+  return {
+    id: item.id,
+    label: item.name,
+    description: item.description || `Custom scheme based on ${item.base === LIGHT_SCHEME_ID ? "fbro Light" : "fbro Dark"}`,
+    mode: item.mode,
+    base: item.base,
+    terminal: item.terminal,
+    mermaidTheme: item.mode === "dark" ? "dark" : "default",
+    custom: true,
+  };
+}
+
+/** Built-ins first, then the custom schemes the backend loaded. */
+export function listColorSchemes(catalog?: ColorSchemeCatalog): ColorScheme[] {
+  return [...COLOR_SCHEMES, ...(catalog?.items ?? []).map(fromCustom)];
+}
+
+/** Unknown or unloaded ids fall back to fbro Dark, like the backend. */
+export function resolveColorScheme(id: string | undefined | null, catalog?: ColorSchemeCatalog): ColorScheme {
+  const builtin = COLOR_SCHEMES.find((scheme) => scheme.id === id);
+  if (builtin) return builtin;
+  const custom = catalog?.items.find((item) => item.id === id);
+  return custom ? fromCustom(custom) : COLOR_SCHEMES[0];
+}
+
+/** Attributes that make an element a scheme root (portals set them too). */
+export function colorSchemeAttrs(scheme: ColorScheme) {
+  return {
+    "data-color-scheme": scheme.id,
+    "data-color-scheme-base": scheme.base,
+  } as const;
 }

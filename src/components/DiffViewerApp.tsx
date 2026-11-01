@@ -12,7 +12,8 @@ import type {
 } from "../ws/types";
 import { applyZoom, DEFAULT_FONT_SIZE } from "../utils/zoom";
 import { shortcutLetter } from "./modalKeyboard";
-import { DEFAULT_COLOR_SCHEME_ID, resolveColorScheme, type ColorSchemeId } from "../theme/colorSchemes";
+import { DEFAULT_COLOR_SCHEME_ID, resolveColorScheme, type ColorSchemeCatalog, type ColorSchemeId } from "../theme/colorSchemes";
+import { CustomSchemeStyles } from "./CustomSchemeStyles";
 
 type DiffViewMode = "split" | "unified";
 
@@ -68,9 +69,8 @@ export function DiffViewerApp({ requestId, windowLabel, initialColorScheme }: Di
   const [wordWrap, setWordWrap] = useState(false);
   const [loading, setLoading] = useState(true);
   const [activeChangeIndex, setActiveChangeIndex] = useState(0);
-  const [colorSchemeId, setColorSchemeId] = useState<ColorSchemeId>(() => (
-    resolveColorScheme(initialColorScheme ?? DEFAULT_COLOR_SCHEME_ID).id
-  ));
+  const [colorSchemeId, setColorSchemeId] = useState<ColorSchemeId>(() => initialColorScheme ?? DEFAULT_COLOR_SCHEME_ID);
+  const [colorSchemeCatalog, setColorSchemeCatalog] = useState<ColorSchemeCatalog | undefined>();
   const clientRef = useRef<WsClient | null>(null);
   const resultRef = useRef<CompareDiffResult | null>(null);
   const currentFontSizeRef = useRef(DEFAULT_FONT_SIZE);
@@ -100,7 +100,8 @@ export function DiffViewerApp({ requestId, windowLabel, initialColorScheme }: Di
             currentFontSizeRef.current = fontSize;
             applyZoom(fontSize);
           }
-          setColorSchemeId(resolveColorScheme(snapshot.domains.settings?.general.activeColorScheme).id);
+          setColorSchemeId(snapshot.domains.settings?.general.activeColorScheme ?? DEFAULT_COLOR_SCHEME_ID);
+          setColorSchemeCatalog(snapshot.domains.settings?.general.colorSchemes);
         }
         if (msg.type === "StatePatch") {
           const patch = msg as StatePatchMessage;
@@ -110,10 +111,9 @@ export function DiffViewerApp({ requestId, windowLabel, initialColorScheme }: Di
             applyZoom(fontSize);
           }
           if (patch.domain === "settings") {
-            const general = patch.patch.general as { activeColorScheme?: string } | undefined;
-            if (general?.activeColorScheme !== undefined) {
-              setColorSchemeId(resolveColorScheme(general.activeColorScheme).id);
-            }
+            const general = patch.patch.general as { activeColorScheme?: string; colorSchemes?: ColorSchemeCatalog } | undefined;
+            if (general?.colorSchemes !== undefined) setColorSchemeCatalog(general.colorSchemes);
+            if (general?.activeColorScheme !== undefined) setColorSchemeId(general.activeColorScheme);
           }
         }
         if (msg.type === "CompareDiffReady") {
@@ -319,7 +319,7 @@ export function DiffViewerApp({ requestId, windowLabel, initialColorScheme }: Di
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [changedBlocks.length, jumpChange, requestId, result?.navigation, scrollDiffHorizontally, scrollDiffVertically]);
 
-  const colorScheme = resolveColorScheme(colorSchemeId);
+  const colorScheme = resolveColorScheme(colorSchemeId, colorSchemeCatalog);
   const rowCount = result?.rows.length ?? 0;
   const changedCount = useMemo(
     () => result?.rows.filter((row) => row.kind !== "equal").length ?? 0,
@@ -459,8 +459,10 @@ export function DiffViewerApp({ requestId, windowLabel, initialColorScheme }: Di
       className={wordWrap ? "diff-viewer diff-viewer--wrap" : "diff-viewer"}
       data-testid="diff-viewer"
       data-color-scheme={colorScheme.id}
+      data-color-scheme-base={colorScheme.base}
       style={{ colorScheme: colorScheme.mode }}
     >
+      <CustomSchemeStyles catalog={colorSchemeCatalog} />
       <header className="diff-viewer__toolbar">
         <div className="diff-viewer__titles">
           <div className="diff-viewer__title">Compare</div>

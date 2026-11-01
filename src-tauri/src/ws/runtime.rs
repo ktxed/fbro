@@ -182,7 +182,10 @@ pub(crate) fn build_state_snapshot(
                     proc_tree_mode: state.settings.general.proc_tree_mode,
                     color_scheme: state.settings.general.color_scheme.clone(),
                     follow_system_color_scheme: state.settings.general.follow_system_color_scheme,
-                    active_color_scheme: state.active_color_scheme().to_string(),
+                    active_color_scheme: state.active_color_scheme(),
+                    color_schemes: state
+                        .color_schemes
+                        .to_wire(&crate::themes::themes_dir()),
                     system_color_scheme: state
                         .system_color_scheme
                         .map(|scheme| scheme.as_str().to_string()),
@@ -1884,6 +1887,70 @@ mod patch_tests {
         let general = general_patch(gui_rx.try_recv().unwrap());
         assert!(general["systemColorScheme"].is_null());
         assert_eq!(general["activeColorScheme"], "fbro-dark");
+    }
+
+    #[tokio::test]
+    async fn custom_scheme_is_active_while_loaded_and_falls_back_when_removed() {
+        use crate::themes::{Theme, ThemeCatalog, ThemeEntry, TerminalColors};
+        let state = test_state();
+        let (gui_tx, mut gui_rx) = mpsc::channel(8);
+        let (viewer_tx, mut viewer_rx) = mpsc::channel(8);
+        let catalog = ThemeCatalog {
+            items: vec![ThemeEntry {
+                slug: "mine".into(),
+                theme: Theme {
+                    version: 1,
+                    name: "Mine".into(),
+                    description: String::new(),
+                    mode: "dark".into(),
+                    base: "fbro-dark".into(),
+                    colors: Default::default(),
+                    terminal: TerminalColors::default(),
+                },
+            }],
+            errors: vec![],
+        };
+        {
+            let mut guard = state.lock().await;
+            guard.settings.general.follow_system_color_scheme = false;
+            guard.settings.general.color_scheme = "custom:mine".into();
+            guard.gui_senders.push(gui_tx);
+            guard.viewer_senders.push(viewer_tx);
+            // Preference set but the file is not loaded yet: dark.
+            assert_eq!(guard.active_color_scheme(), "fbro-dark");
+        }
+
+        crate::ws::appearance::publish_color_schemes(&state, catalog.clone()).await;
+        for rx in [&mut gui_rx, &mut viewer_rx] {
+            let general = general_patch(rx.try_recv().unwrap());
+            assert_eq!(general["activeColorScheme"], "custom:mine");
+            assert_eq!(general["colorSchemes"]["items"][0]["id"], "custom:mine");
+        }
+
+        // An identical catalog publishes nothing (our own writes re-trigger the watcher).
+        crate::ws::appearance::publish_color_schemes(&state, catalog).await;
+        assert!(gui_rx.try_recv().is_err());
+
+        // The file disappears: render the fallback, keep the preference.
+        crate::ws::appearance::publish_color_schemes(&state, ThemeCatalog::default()).await;
+        let general = general_patch(gui_rx.try_recv().unwrap());
+        assert_eq!(general["activeColorScheme"], "fbro-dark");
+        assert_eq!(state.lock().await.settings.general.color_scheme, "custom:mine");
+
+        // Following the system ignores a custom manual choice.
+        {
+            let mut guard = state.lock().await;
+            guard.color_schemes = ThemeCatalog {
+                items: vec![ThemeEntry {
+                    slug: "mine".into(),
+                    theme: Theme { version: 1, name: "Mine".into(), description: String::new(), mode: "dark".into(), base: "fbro-dark".into(), colors: Default::default(), terminal: TerminalColors::default() },
+                }],
+                errors: vec![],
+            };
+            guard.settings.general.follow_system_color_scheme = true;
+            guard.system_color_scheme = Some(crate::platform::SystemColorScheme::Light);
+            assert_eq!(guard.active_color_scheme(), "daylight");
+        }
     }
 
     #[tokio::test]

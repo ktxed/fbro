@@ -40,6 +40,7 @@ import { runDiffFlow } from "./cases/diff.mjs";
 import { runHeicFlow } from "./cases/heic.mjs";
 import { runButtonBarFlow } from "./cases/button-bar.mjs";
 import { runColorSchemeFlow } from "./cases/color-scheme.mjs";
+import { runColorSchemeEditorFlow } from "./cases/color-scheme-editor.mjs";
 import { runTabsFlow } from "./cases/tabs.mjs";
 import { runQuickEditFlow } from "./cases/quick-edit.mjs";
 import { runJournalSortFlow } from "./cases/journal-sort.mjs";
@@ -109,6 +110,7 @@ async function main() {
 
     if (process.env.FBRO_E2E_COLOR_SCHEME_ONLY === "1") {
       await runColorSchemeFlow(browserA, observerA);
+      await runColorSchemeEditorFlow(browserA, observerA);
       return;
     }
 
@@ -178,6 +180,7 @@ async function main() {
     await runNotificationsFlow(browserA, observerA);
     await runButtonBarFlow(browserA, observerA);
     await runColorSchemeFlow(browserA, observerA);
+    await runColorSchemeEditorFlow(browserA, observerA);
     await runFocusHandoffFlow(browserA, observerA);
     if (process.env.FBRO_E2E_FOCUS_ONLY === "1") return;
     await runLocalFlow(browserA, observerA);

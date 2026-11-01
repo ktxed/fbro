@@ -580,6 +580,9 @@ pub struct AppState {
     /// Latest OS light/dark preference from the platform appearance watcher;
     /// `None` while unavailable. Not persisted.
     pub system_color_scheme: Option<crate::platform::SystemColorScheme>,
+    /// Custom color schemes loaded from `<config_dir>/themes/`. Not persisted
+    /// in settings; the files are the source of truth.
+    pub color_schemes: crate::themes::ThemeCatalog,
     /// Per-local-directory preferences loaded from the shared SQLite store.
     pub location_settings: location_settings::LocationSettingsMap,
     pub child_processes: HashMap<u32, ChildProcessEntry>,
@@ -669,13 +672,22 @@ pub struct GitCompareNavigation {
 }
 
 impl AppState {
-    /// The built-in color scheme every client renders right now.
-    pub fn active_color_scheme(&self) -> &'static str {
+    /// The color scheme id every client renders right now: a built-in id or a
+    /// loaded `custom:<slug>`. A custom manual choice whose file is missing or
+    /// invalid renders as `fbro-dark`; the preference itself is untouched, so
+    /// restoring the file restores the scheme.
+    pub fn active_color_scheme(&self) -> String {
+        let general = &self.settings.general;
+        let following = general.follow_system_color_scheme && self.system_color_scheme.is_some();
+        if !following && self.color_schemes.get(&general.color_scheme).is_some() {
+            return general.color_scheme.clone();
+        }
         settings::resolve_active_color_scheme(
-            self.settings.general.follow_system_color_scheme,
-            &self.settings.general.color_scheme,
+            general.follow_system_color_scheme,
+            &general.color_scheme,
             self.system_color_scheme,
         )
+        .to_string()
     }
 
     pub fn path_on_ejecting_drive(&self, path: &str) -> bool {
@@ -1082,6 +1094,7 @@ impl AppState {
             settings_mutation: std::sync::Arc::new(tokio::sync::Mutex::new(())),
             settings: loaded_settings,
             system_color_scheme: None,
+            color_schemes: crate::themes::load_all(),
             location_settings,
             child_processes: HashMap::new(),
             pty_manager: Arc::new(crate::terminal::PtyManager::new()),

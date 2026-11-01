@@ -12,7 +12,8 @@ import { isMac } from "../utils/platform";
 import { isArchiveSourceId, isRemoteSourceId } from "../utils/sourceId";
 import { useInputHistory } from "../hooks/useInputHistory";
 import { InputHistoryDropdown } from "./InputHistoryDropdown";
-import { DEFAULT_COLOR_SCHEME_ID, resolveColorScheme, type ColorSchemeId } from "../theme/colorSchemes";
+import { DEFAULT_COLOR_SCHEME_ID, resolveColorScheme, type ColorSchemeCatalog, type ColorSchemeId } from "../theme/colorSchemes";
+import { CustomSchemeStyles } from "./CustomSchemeStyles";
 import { buildMermaidBlock, mermaidSvgOf, setMermaidScale, stepMermaidScale, wheelZoomMermaid, type MermaidAction } from "../viewers/mermaidZoom";
 import { MermaidOverlay, type MermaidOverlayHandle } from "../viewers/MermaidOverlay";
 import { useFocusReturn } from "../hooks/useFocusReturn";
@@ -324,7 +325,8 @@ export function FileViewer({ ref, path: initPath, sourceId: initSourceId, filena
   const [error, setError]         = useState<string | null>(null);
   const [navError, setNavError]   = useState<string | null>(null);
   const [pendingNavigation, setPendingNavigation] = useState(0);
-  const [colorSchemeId, setColorSchemeId] = useState<ColorSchemeId>(() => resolveColorScheme(initialColorScheme ?? DEFAULT_COLOR_SCHEME_ID).id);
+  const [colorSchemeId, setColorSchemeId] = useState<ColorSchemeId>(() => initialColorScheme ?? DEFAULT_COLOR_SCHEME_ID);
+  const [colorSchemeCatalog, setColorSchemeCatalog] = useState<ColorSchemeCatalog | undefined>();
 
   // Buffer
   const [buffer, setBuffer]             = useState<Uint8Array | null>(null);
@@ -661,7 +663,8 @@ export function FileViewer({ ref, path: initPath, sourceId: initSourceId, filena
           const snapshot = msg as StateSnapshotMessage;
           const fontSize = snapshot.domains.fontSize;
           if (fontSize !== undefined) { currentFontSizeRef.current = fontSize; applyZoom(fontSize); }
-          setColorSchemeId(resolveColorScheme(snapshot.domains.settings?.general.activeColorScheme).id);
+          setColorSchemeId(snapshot.domains.settings?.general.activeColorScheme ?? DEFAULT_COLOR_SCHEME_ID);
+          setColorSchemeCatalog(snapshot.domains.settings?.general.colorSchemes);
           applyHeicSetting(snapshot.domains.settings?.general.enableHeic2any ?? false);
         }
         if (msg.type === "StatePatch") {
@@ -672,11 +675,10 @@ export function FileViewer({ ref, path: initPath, sourceId: initSourceId, filena
             applyZoom(fontSize);
           }
           if (patch.domain === "settings") {
-            const general = patch.patch.general as { activeColorScheme?: string; enableHeic2any?: boolean } | undefined;
+            const general = patch.patch.general as { activeColorScheme?: string; colorSchemes?: ColorSchemeCatalog; enableHeic2any?: boolean } | undefined;
             if (general?.enableHeic2any !== undefined) applyHeicSetting(general.enableHeic2any);
-            if (general?.activeColorScheme !== undefined) {
-              setColorSchemeId(resolveColorScheme(general.activeColorScheme).id);
-            }
+            if (general?.colorSchemes !== undefined) setColorSchemeCatalog(general.colorSchemes);
+            if (general?.activeColorScheme !== undefined) setColorSchemeId(general.activeColorScheme);
           }
         }
         if (msg.type === "FileChunk") {
@@ -1326,8 +1328,8 @@ export function FileViewer({ ref, path: initPath, sourceId: initSourceId, filena
   // Start loading mermaid as soon as the viewer mounts on a markdown file, so
   // the async warm-up overlaps with the file fetch instead of running after.
   useEffect(() => {
-    if (isMdExt(filenameRef.current)) getMermaid(resolveColorScheme(colorSchemeId).mermaidTheme);
-  }, [colorSchemeId]);
+    if (isMdExt(filenameRef.current)) getMermaid(resolveColorScheme(colorSchemeId, colorSchemeCatalog).mermaidTheme);
+  }, [colorSchemeId, colorSchemeCatalog]);
 
   // An expanded diagram belongs to the document it was cloned from; drop it
   // when the preview is replaced (navigation, reload, theme) or left.
@@ -1395,7 +1397,7 @@ export function FileViewer({ ref, path: initPath, sourceId: initSourceId, filena
     );
 
     let cancelled = false;
-    if (codeBlocks.length > 0) getMermaid(resolveColorScheme(colorSchemeId).mermaidTheme).then(mermaid => {
+    if (codeBlocks.length > 0) getMermaid(resolveColorScheme(colorSchemeId, colorSchemeCatalog).mermaidTheme).then(mermaid => {
       if (cancelled) return;
       codeBlocks.forEach(async (code, i) => {
         const source = code.textContent ?? "";
@@ -1417,7 +1419,7 @@ export function FileViewer({ ref, path: initPath, sourceId: initSourceId, filena
       container.removeEventListener("click", handleClick);
       container.removeEventListener("wheel", handleWheel);
     };
-  }, [markdownHtml, markdownPreview, colorSchemeId, panelId, quick]);
+  }, [markdownHtml, markdownPreview, colorSchemeId, colorSchemeCatalog, panelId, quick]);
 
   // ── Status bar info ───────────────────────────────────────────────────────
 
@@ -1468,7 +1470,7 @@ export function FileViewer({ ref, path: initPath, sourceId: initSourceId, filena
     : findMatches.length === 0
       ? (findQuery ? "No matches" : "")
       : `${Math.min(findIdx + 1, findMatches.length)} / ${findMatches.length}`;
-  const colorScheme = resolveColorScheme(colorSchemeId);
+  const colorScheme = resolveColorScheme(colorSchemeId, colorSchemeCatalog);
 
   if (useDirect) {
     return (
@@ -1479,8 +1481,10 @@ export function FileViewer({ ref, path: initPath, sourceId: initSourceId, filena
         data-viewer-content={presentation}
         data-viewer-blocked={blocked}
         data-color-scheme={colorScheme.id}
+        data-color-scheme-base={colorScheme.base}
         style={{ colorScheme: colorScheme.mode }}
       >
+        <CustomSchemeStyles catalog={colorSchemeCatalog} />
         {!quick && <div className="viewer__header">
           <span className="viewer__filename">{curFilename}</span>
           <div className="viewer__mode-btns">
@@ -1544,8 +1548,10 @@ export function FileViewer({ ref, path: initPath, sourceId: initSourceId, filena
       data-viewer-blocked={blocked}
       className={`viewer${dosMode && effectiveMode === "text" && !markdownMode ? " viewer--dos" : ""}${markdownMode && effectiveMode === "text" ? " viewer--markdown" : ""}`}
       data-color-scheme={colorScheme.id}
+      data-color-scheme-base={colorScheme.base}
       style={{ colorScheme: colorScheme.mode }}
     >
+      <CustomSchemeStyles catalog={colorSchemeCatalog} />
       {!quick && <div className="viewer__header">
         <span className="viewer__filename">{curFilename}</span>
         <div className="viewer__mode-btns">

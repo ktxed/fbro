@@ -18,6 +18,7 @@ mod settings;
 pub(crate) mod sharing;
 mod tabs;
 mod terminal;
+mod themes;
 mod viewer;
 
 use serde_json::Value;
@@ -85,6 +86,7 @@ pub async fn dispatch(name: &str, scope: &Value, args: &Value, ctx: &mut IntentC
     }
     match name {
         "SetCommandBindings" | "ResetCommandBindings" | "ResetAllCommandBindings" => command_bindings::handle(name, args, ctx).await,
+        "CreateColorScheme" | "UpdateColorScheme" | "DeleteColorScheme" => themes::handle(name, args, ctx).await,
         "PublishNotification" | "ClearNotifications" => notifications::handle(name, args, ctx).await,
         "EjectSource" => eject::handle(args, ctx).await,
         "RefreshPanels"
@@ -222,6 +224,9 @@ fn should_record_command(name: &str) -> bool {
     matches!(
         name,
         "SetCommandBindings" | "ResetCommandBindings" | "ResetAllCommandBindings" | "ClearIconCache"
+            | "CreateColorScheme"
+            | "UpdateColorScheme"
+            | "DeleteColorScheme"
             | "ReorderPanelTab"
             | "GitCreateBranch"
             | "GitCheckoutRemoteBranch"

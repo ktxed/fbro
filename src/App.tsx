@@ -6,6 +6,7 @@ import { JobsBar } from "./components/JobsBar";
 import { Toolbar } from "./components/Toolbar";
 import { applyZoom } from "./utils/zoom";
 import { resolveColorScheme } from "./theme/colorSchemes";
+import { CustomSchemeStyles } from "./components/CustomSchemeStyles";
 import { ModalStackProvider } from "./components/ModalStack";
 import { useNotificationBridge } from "./notifications/service";
 
@@ -18,7 +19,7 @@ export function App() {
   const [state, dispatch] = useAppReducer();
   const clientRef = useRef<WsClient | null>(null);
   const [jobsViewOpen, setJobsViewOpen] = useState(false);
-  const colorScheme = resolveColorScheme(state.settings.general.activeColorScheme);
+  const colorScheme = resolveColorScheme(state.settings.general.activeColorScheme, state.settings.general.colorSchemes);
 
   useEffect(() => { applyZoom(state.fontSize); }, [state.fontSize]);
 
@@ -88,8 +89,10 @@ export function App() {
           className="app"
           data-ready={state.connected && Object.keys(state.commands).length > 0}
           data-color-scheme={colorScheme.id}
+          data-color-scheme-base={colorScheme.base}
           style={{ colorScheme: colorScheme.mode }}
         >
+          <CustomSchemeStyles catalog={state.settings.general.colorSchemes} />
           {client && <Layout client={client} jobsViewOpen={jobsViewOpen} onCloseJobsView={() => setJobsViewOpen(false)} onOpenJobsView={() => setJobsViewOpen(true)} />}
           {client && <JobsBar client={client} onOpenJobsView={() => setJobsViewOpen(true)} />}
           {client && <Toolbar client={client} onOpenJobsView={() => setJobsViewOpen(true)} />}

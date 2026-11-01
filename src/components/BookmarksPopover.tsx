@@ -7,8 +7,8 @@ import {
   useFloating,
 } from "@floating-ui/react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { useAppDispatch, useAppState } from "../store";
-import { resolveColorScheme } from "../theme/colorSchemes";
+import { useAppDispatch } from "../store";
+import { useColorScheme } from "../theme/useColorScheme";
 import type { BookmarkEntry } from "../ws/types";
 import type { WsClient } from "../ws/client";
 import { rovingIndexForKey } from "./modalKeyboard";
@@ -30,7 +30,6 @@ export function BookmarksPopover({
   bookmarks,
   client,
 }: BookmarksPopoverProps) {
-  const state = useAppState();
   const dispatch = useAppDispatch();
   const popoverRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
@@ -39,7 +38,7 @@ export function BookmarksPopover({
   // Position zero is the current-folder action; bookmarks occupy positions 1…N.
   const [navigationIndex, setNavigationIndex] = useState(0);
   const [listMaxHeight, setListMaxHeight] = useState<number>();
-  const colorScheme = resolveColorScheme(state.settings.general.activeColorScheme);
+  const colorScheme = useColorScheme();
 
   const close = () => dispatch({ type: "CLOSE_BOOKMARKS" });
 
@@ -165,6 +164,7 @@ export function BookmarksPopover({
     <FloatingPortal>
       <div
         data-color-scheme={colorScheme.id}
+        data-color-scheme-base={colorScheme.base}
         ref={setPopoverRef}
         style={{ ...floatingStyles, colorScheme: colorScheme.mode }}
         className="bookmarks-popover"

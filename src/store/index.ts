@@ -1,6 +1,7 @@
 import { applyCommandsUpdate } from "../commands/bindings";
 import { createContext, useContext, useReducer, type Dispatch } from "react";
 import { isSearchSourceId } from "../utils/sourceId";
+import { EMPTY_COLOR_SCHEME_CATALOG } from "../theme/colorSchemes";
 import { applySlotUpdate } from "./slots";
 import { disposeCachedTerminal } from "../components/PanelTerminal";
 import { applyNotificationPatch, applyNotificationSnapshot, createNotificationState, expireNotificationToast, type NotificationState } from "../notifications/state";
@@ -269,7 +270,7 @@ export interface PendingSearch {
   searchParams: SearchParams | null;
 }
 
-export type SettingsTab = "general" | "display" | "bros" | "sharing" | "keyboard";
+export type SettingsTab = "general" | "display" | "colorScheme" | "bros" | "sharing" | "keyboard";
 
 export interface PendingAttributes {
   panelId: string;
@@ -281,6 +282,9 @@ export interface PendingAttributes {
 
 export interface PendingSettings {
   activeTab: SettingsTab;
+  /** The Color Scheme tab exists only for a Settings session opened from the
+   *  Display tab's Customize button; closing Settings drops it. */
+  showColorSchemeEditor: boolean;
 }
 
 export interface AppState {
@@ -443,7 +447,7 @@ const initialState: AppState = {
   globalSelections: [],
   fontSize: 13,
   settings: {
-    general: { showHiddenDefault: false, showButtonBar: true, osNotificationsEnabled: true, supportsOsNotifications: false, supportsOsNotificationSettings: false, osNotificationPlatform: "none", rememberWindowState: true, preserveAttributes: true, autoResumeCopies: true, ludicrousMode: false, enableHeic2any: false, maxImageSizeMb: 512, savePanelViewMode: false, rememberSortPerLocation: false, locationSettingsCount: 0, iconCacheDir: "", iconCacheRevision: 0, supportsManagedThumbnails: false, enableVideoThumbnails: true, thumbnailMaxImageSizeMb: 100, thumbnailVideoFrameSkip: 5, streamThumbnails: true, sessionPath: "", bookmarksPath: "", thumbnailCacheDir: "", thumbnailCacheItemCount: 0, thumbnailCacheSizeBytes: 0, persistPanelTabs: true, procTreeMode: false, colorScheme: "fbro-dark", followSystemColorScheme: false, activeColorScheme: "fbro-dark", systemColorScheme: null, sevenzipExtractor: "auto", sevenzipCustomPath: "", sevenzipResolvedPath: "", fedupDefaultIgnorePatterns: ".git\n.idea\n.vscode\n.venv\nnode_modules\n__MACOSX\n._*\n.DS_Store\nartifacts/e2e\ndist/assets\ntarget/debug\ntarget/release\ntarget/bundle\n.m2", compareMaxFileSizeMb: 10, compareDifferMode: "internal", compareExternalCommand: "", quickTerminalEditor: "nano", zshEmacsKeymap: false },
+    general: { showHiddenDefault: false, showButtonBar: true, osNotificationsEnabled: true, supportsOsNotifications: false, supportsOsNotificationSettings: false, osNotificationPlatform: "none", rememberWindowState: true, preserveAttributes: true, autoResumeCopies: true, ludicrousMode: false, enableHeic2any: false, maxImageSizeMb: 512, savePanelViewMode: false, rememberSortPerLocation: false, locationSettingsCount: 0, iconCacheDir: "", iconCacheRevision: 0, supportsManagedThumbnails: false, enableVideoThumbnails: true, thumbnailMaxImageSizeMb: 100, thumbnailVideoFrameSkip: 5, streamThumbnails: true, sessionPath: "", bookmarksPath: "", thumbnailCacheDir: "", thumbnailCacheItemCount: 0, thumbnailCacheSizeBytes: 0, persistPanelTabs: true, procTreeMode: false, colorScheme: "fbro-dark", followSystemColorScheme: false, activeColorScheme: "fbro-dark", colorSchemes: EMPTY_COLOR_SCHEME_CATALOG, systemColorScheme: null, sevenzipExtractor: "auto", sevenzipCustomPath: "", sevenzipResolvedPath: "", fedupDefaultIgnorePatterns: ".git\n.idea\n.vscode\n.venv\nnode_modules\n__MACOSX\n._*\n.DS_Store\nartifacts/e2e\ndist/assets\ntarget/debug\ntarget/release\ntarget/bundle\n.m2", compareMaxFileSizeMb: 10, compareDifferMode: "internal", compareExternalCommand: "", quickTerminalEditor: "nano", zshEmacsKeymap: false },
     modalSizes: {},
   },
 };
@@ -519,7 +523,7 @@ export type AppAction =
   | { type: "CLOSE_BOOKMARKS" }
   | { type: "OPEN_ATTRIBUTES"; attributes: PendingAttributes }
   | { type: "CLOSE_ATTRIBUTES" }
-  | { type: "OPEN_SETTINGS"; tab: SettingsTab }
+  | { type: "OPEN_SETTINGS"; tab: SettingsTab; showColorSchemeEditor?: boolean }
   | { type: "CLOSE_SETTINGS" }
   | { type: "SET_SHARED_FOLDER_INPUT"; path: string }
   | { type: "SUBMIT_SHARED_FOLDER"; requestId: string }
@@ -1713,6 +1717,8 @@ function reducer(state: AppState, action: AppAction): AppState {
         case "ClearIconCacheFailed":
         case "OpenOsNotificationSettingsOk":
         case "OpenOsNotificationSettingsFailed":
+        case "ColorSchemeSaved":
+        case "ColorSchemeFailed":
           return state; // Settings consumes the correlated operation reply.
         case "CacheStatusReady":
           return { ...state, cacheStatus: { prefetchCache: (msg as CacheStatusReadyMessage).prefetchCache } };
@@ -1740,7 +1746,7 @@ function reducer(state: AppState, action: AppAction): AppState {
         case "PairingRequested":
           return {
             ...state,
-            pendingSettings: { activeTab: "sharing" },
+            pendingSettings: { activeTab: "sharing", showColorSchemeEditor: state.pendingSettings?.showColorSchemeEditor ?? false },
             pendingPairing: {
               handshakeId: msg.handshakeId,
               code: msg.code,
@@ -1869,7 +1875,14 @@ function reducer(state: AppState, action: AppAction): AppState {
     case "CLOSE_ATTRIBUTES":
       return { ...state, pendingAttributes: null };
     case "OPEN_SETTINGS":
-      return { ...state, pendingSettings: { activeTab: action.tab }, pendingContextMenu: null };
+      return {
+        ...state,
+        pendingSettings: {
+          activeTab: action.tab,
+          showColorSchemeEditor: action.showColorSchemeEditor ?? state.pendingSettings?.showColorSchemeEditor ?? false,
+        },
+        pendingContextMenu: null,
+      };
     case "CLOSE_SETTINGS":
       return { ...state, pendingSettings: null };
     case "SET_SHARED_FOLDER_INPUT":

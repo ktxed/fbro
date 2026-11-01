@@ -1,10 +1,11 @@
 import { useRef, type ReactNode } from "react";
-import { IconSettings, IconDeviceDesktop, IconRobot, IconShare, IconKeyboard } from "@tabler/icons-react";
+import { IconSettings, IconDeviceDesktop, IconPalette, IconRobot, IconShare, IconKeyboard } from "@tabler/icons-react";
 import { useAppDispatch, useAppState } from "../store";
 import type { SettingsTab } from "../store";
 import { SettingsKeyboardTab } from "./SettingsKeyboardTab";
 import { SettingsGeneralTab } from "./SettingsGeneralTab";
 import { SettingsDisplayTab } from "./SettingsDisplayTab";
+import { SettingsColorSchemeTab } from "./SettingsColorSchemeTab";
 import { SettingsBrosTab } from "./SettingsBrosTab";
 import { SettingsSharingTab } from "./SettingsSharingTab";
 import type { WsClient } from "../ws/client";
@@ -15,6 +16,7 @@ import { rovingIndexForKey } from "./modalKeyboard";
 const TABS: { id: SettingsTab; label: string; icon: ReactNode }[] = [
   { id: "general", label: "General", icon: <IconSettings size={16} aria-hidden="true" /> },
   { id: "display", label: "Display", icon: <IconDeviceDesktop size={16} aria-hidden="true" /> },
+  { id: "colorScheme", label: "Color Scheme", icon: <IconPalette size={16} aria-hidden="true" /> },
   { id: "bros", label: "Bros", icon: <IconRobot size={16} aria-hidden="true" /> },
   { id: "sharing", label: "Sharing", icon: <IconShare size={16} aria-hidden="true" /> },
   { id: "keyboard", label: "Shortcuts", icon: <IconKeyboard size={16} aria-hidden="true" /> },
@@ -28,6 +30,10 @@ export function SettingsModal({ client }: SettingsModalProps) {
   const state = useAppState();
   const dispatch = useAppDispatch();
   const activeTab = state.pendingSettings?.activeTab ?? "general";
+  // Color Scheme exists only in a Settings session opened from Display → Customize.
+  const tabs = state.pendingSettings?.showColorSchemeEditor
+    ? TABS
+    : TABS.filter((tab) => tab.id !== "colorScheme");
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const unansweredPairing = state.pendingPairing?.localDecision === null;
 
@@ -77,7 +83,7 @@ export function SettingsModal({ client }: SettingsModalProps) {
         <div className="modal__header">Settings</div>
         <div className="settings-modal__layout">
           <div className="settings-modal__sidebar" role="tablist" aria-label="Settings tabs" aria-orientation="vertical">
-            {TABS.map((tab, i) => (
+            {tabs.map((tab, i) => (
               <button
                 key={tab.id}
                 ref={(node) => { tabRefs.current[i] = node; }}
@@ -91,11 +97,11 @@ export function SettingsModal({ client }: SettingsModalProps) {
                 className={`settings-modal__tab${activeTab === tab.id ? " settings-modal__tab--active" : ""}`}
                 onClick={() => openTab(tab.id)}
                 onKeyDown={(e) => {
-                  const idx = TABS.findIndex((t) => t.id === tab.id);
-                  const nextIndex = rovingIndexForKey(e.key, idx, TABS.length, "vertical");
+                  const idx = tabs.findIndex((t) => t.id === tab.id);
+                  const nextIndex = rovingIndexForKey(e.key, idx, tabs.length, "vertical");
                   if (nextIndex === null) return;
                   e.preventDefault();
-                  openTab(TABS[nextIndex].id);
+                  openTab(tabs[nextIndex].id);
                   tabRefs.current[nextIndex]?.focus();
                 }}
               >
@@ -115,6 +121,9 @@ export function SettingsModal({ client }: SettingsModalProps) {
             )}
             {activeTab === "display" && (
               <SettingsDisplayTab general={state.settings.general} client={client} />
+            )}
+            {activeTab === "colorScheme" && (
+              <SettingsColorSchemeTab general={state.settings.general} client={client} />
             )}
             {activeTab === "keyboard" && <SettingsKeyboardTab client={client} />}
             {activeTab === "bros" && <SettingsBrosTab client={client} />}

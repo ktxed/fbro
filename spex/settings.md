@@ -136,6 +136,82 @@ manual choice but is disabled (and leaves the Tab order); the hint reads
 enabled and the hint reads "System appearance unavailable; using <label>.".
 The checkbox keeps focus while the backend confirms a change.
 
+## Custom color schemes
+
+Users can create their own schemes from any scheme as a template and edit them
+in **Settings → Color Scheme**. That tab exists only in a Settings session that
+was opened with **Customize…** in Display → Color Scheme (`OPEN_SETTINGS` with
+`showColorSchemeEditor`, stored in `pendingSettings`). `app.settings`, the
+command palette, and the Bros shortcut never show it; closing Settings drops it.
+
+**Files.** One TOML file per scheme in `<config_dir>/themes/<slug>.toml`
+(`crate::config::config_dir()`, so `~/.config/fbro/themes/` on Linux). The id is
+`custom:<slug>`; the file stem must match `[a-z0-9][a-z0-9_-]*`.
+
+```toml
+version = 1
+name = "Midnight"
+description = "Based on fbro Dark"
+mode = "dark"          # dark | light: native controls, mermaid, window background
+base = "fbro-dark"     # built-in that supplies any token missing below
+
+[colors]               # CSS token names without "--"
+bg = "#0d0d0d"
+bg-selected = "rgba(220, 170, 20, 0.30)"
+
+[terminal]             # omitted keys come from the base
+background = "#1e1e1e"
+foreground = "#dddddd"
+cursor = "#d6e8ff"
+selection_background = "#2d228a"
+```
+
+New schemes are written complete (every token in `src/theme/tokens.ts`, copied
+from the rendered template); a hand-written file may omit tokens, which then
+cascade from `base` through `data-color-scheme-base` in `styles.css`.
+
+**Validation (backend, `themes.rs`).** Token names match `[a-z][a-z0-9-]*`; values
+are `#rgb[a]`, `#rrggbb[aa]`, `rgb()` or `rgba()` only, so a theme can never inject
+CSS into the generated stylesheet. `mode` is `dark`/`light`, `base` a built-in.
+A file that fails to parse or validate is listed in `colorSchemes.errors` with
+its message, cannot be selected, and is never rewritten. Unknown color keys in a
+valid file are preserved by updates.
+
+**Projection.** `general.colorSchemes = { dir, items, errors }` is read-only; it is
+in the snapshot, every settings patch, and the viewer lightweight patch, and is
+rejected by `SetGeneralOption`. Each item carries `id, name, description, mode,
+base, colors` and a terminal palette already resolved against the base.
+`activeColorScheme` may be a built-in id or a loaded `custom:<slug>`. A
+`colorScheme` that names a custom scheme whose file is missing or invalid renders
+as `fbro-dark`; the preference is kept, so restoring the file restores the scheme.
+Following the system still maps to the built-ins. `SetGeneralOption colorScheme`
+accepts `custom:<slug>` only while that scheme is loaded.
+
+**Import.** A watcher on the themes folder (`notify`, debounced 300 ms) reloads
+the catalog and broadcasts it, so copying a `.toml` file in imports it and editing
+one restyles open windows. The editor's own writes reload to an identical catalog
+and publish nothing. **Open themes folder** navigates the focused panel there.
+
+**Intents** (`ws/intents/themes.rs`, serialized with settings writes; see
+[proto.md](proto.md)): `CreateColorScheme`, `UpdateColorScheme`,
+`DeleteColorScheme`. Deleting the manual scheme resets `colorScheme` to the
+deleted scheme's base.
+
+**Editor.** Left: filter box, a one-tab-stop listbox of tokens grouped as Surfaces,
+Panel rows & cursor, File types, Borders & accent, Status & feedback, Toasts and
+Terminal (arrows/Home/End), and a pane for the selected token with a swatch
+picker (`react-colorful` with alpha) and a text field; Enter on a row moves focus
+into the field, Escape returns it to the row. Right: a live preview of a
+miniature fbro drawn with the draft colors; clicking an element selects its token
+and the selected token's elements are outlined. Edits apply to the preview
+immediately and save after 300 ms (live-apply, no Save button); when the edited
+scheme is active the whole app and open viewers update from the backend patch.
+Invalid values are shown but never sent. **Duplicate…** snapshots every token
+from the rendered scheme (`getComputedStyle`) into a new file and is the only
+way to start from a built-in, which is read-only. **Revert** restores the values
+from when the scheme was selected; **Delete…** confirms inline. Escape closes the
+open prompt, then returns from the editor pane to the list, then closes Settings.
+
 ## macOS file icon cache
 
 Settings → Display shows a File icons section only when the read-only backend
@@ -172,7 +248,7 @@ Supported keys:
 | `osNotificationsEnabled` | `bool` | `true` | Deliver selected operation notifications through the OS while no native fbro window is focused. Completion and cancellation require at least 30 seconds of execution; failures, pairing requests, transfer starts, and connection changes bypass that cutoff. The General settings control is capability-gated. See [notifications.md](notifications.md). |
 | `rememberSortPerLocation` | `bool` | `false` | Remember and share sorting for each local filesystem location and for the Journal source. |
 | `enableHeic2any` | `bool` | `false` | Enable local browser conversion of HEIC/HEIF previews in the embedded and detached viewers on Windows (including Windows 10) and Linux. The control is hidden on macOS, which retains native decoding. Existing image caps apply. Changes update open viewers through backend patches; conversion is preview-only and does not write files. |
-| `colorScheme` | `string` | `"fbro-dark"` | Manual built-in scheme: `fbro-dark` or `daylight`. Other values return `BAD_SETTING`. Preserved while following the system, so unfollowing restores it. |
+| `colorScheme` | `string` | `"fbro-dark"` | Manual scheme: `fbro-dark`, `daylight`, or a loaded `custom:<slug>` ([Custom color schemes](#custom-color-schemes)). Other values return `BAD_SETTING`. Preserved while following the system, so unfollowing restores it. |
 | `followSystemColorScheme` | `bool` | `false` | Match the OS light/dark preference: dark → `fbro-dark`, light → `daylight`. Applies live, to all clients. While the preference is unavailable the manual `colorScheme` applies. See [System appearance](#system-appearance). |
 | `zshEmacsKeymap` | `bool` | `false` | On macOS, start new interactive zsh terminals with `-o emacs`. The control is hidden and the setting has no effect on other platforms. Other shells and Quick Edit commands are unaffected. Existing terminal sessions keep their current keymap. |
 | `fedupDefaultIgnorePatterns` | `string` | `.git`, `.idea`, `.vscode`, `.venv`, `node_modules`, `__MACOSX`, `._*`, `.DS_Store`, `artifacts/e2e`, `dist/assets`, `target/debug`, `target/release`, `target/bundle`, `.m2` | Newline/comma separated wildcard name/path patterns Fedup Bro can use to skip files and folders before scanning. |
@@ -294,6 +370,12 @@ visible journal.
 | `src/store/index.ts` | `settings` slice, `pendingSettings`, `OPEN_SETTINGS`/`CLOSE_SETTINGS` |
 | `src/components/SettingsModal.tsx` | Modal shell — tab sidebar + content area |
 | `src/components/SettingsGeneralTab.tsx` | General tab content |
+| `src-tauri/src/themes.rs` | Custom scheme files: model, validation, load/save/delete, folder watcher |
+| `src-tauri/src/ws/intents/themes.rs` | `CreateColorScheme` / `UpdateColorScheme` / `DeleteColorScheme` |
+| `src-tauri/src/ws/appearance.rs` | Active-scheme projection, catalog publish/reload, folder watcher task |
+| `src/theme/colorSchemes.ts`, `tokens.ts` | Scheme resolution; registry of editable color tokens |
+| `src/components/SettingsColorSchemeTab.tsx`, `ColorSchemePreview.tsx` | Color Scheme editor and live preview |
+| `src/components/CustomSchemeStyles.tsx` | Injects `[data-color-scheme="custom:…"]` token rules |
 
 ## Adding a new tab
 

@@ -1025,6 +1025,27 @@ include `general.osNotificationsEnabled` and read-only
 `SetGeneralOption { key: "osNotificationsEnabled", value: boolean }`.
 See [notifications.md](./notifications.md).
 
+## Color scheme mutations
+
+Custom schemes live in `<config_dir>/themes/*.toml`; see
+[settings.md](settings.md#custom-color-schemes). Intents carry a `requestId`:
+
+- `CreateColorScheme { requestId, name, description?, mode, base, colors, terminal }`
+  writes a new file (slug from `name`, made unique) and replies
+  `ColorSchemeSaved { requestId, id }` with `id = custom:<slug>`.
+- `UpdateColorScheme { requestId, id, name?, description?, mode?, colors, terminal }`
+  merges the given colors (`terminal` keys: `background`, `foreground`, `cursor`,
+  `selectionBackground`) into the existing file and replies `ColorSchemeSaved`.
+- `DeleteColorScheme { requestId, id }` removes the file; if it was the manual
+  `colorScheme`, that resets to the scheme's base. Replies `ColorSchemeSaved`.
+
+Failures reply `ColorSchemeFailed { requestId, code, message }` with
+`BAD_COLOR_SCHEME` (validation, unknown id) or `THEME_IO`. The catalog patch
+(`StatePatch settings`, `general.colorSchemes`, plus `colorScheme` and
+`activeColorScheme`) is published before the reply but may arrive on another
+channel, so clients that select a just-created scheme wait for it to appear in the
+catalog. All three intents are recorded in the command journal.
+
 ## Command binding mutations
 
 `StateSnapshot.domains.commands` contains the full effective registry, including
