@@ -196,6 +196,9 @@ editor tab next to the current tab; it also works from inside an editor tab.
 `file.edit_builtin` (context menu and command palette, no default binding)
 opens the cursor file in an editor tab; `notes.open` (command palette, or the
 Scratch source-bar entry) opens the notes folder. New File stays on Shift+F4.
+Edit (`file.edit`, F4; macOS `4`) on a file inside the notes folder opens it
+in an editor tab too; elsewhere, or when the editor refuses the file (binary,
+over 2 MiB), Edit still launches the external editor.
 See [Tabs](tabs.md) §5a.
 
 **Ownership.** While the editor has focus it receives every key. Its root

@@ -51,6 +51,8 @@ Notes sit on a separate layer behind the `NoteStore` trait
 - return a local folder to browse (`browse_location`), created on demand;
 - create an empty note without overwriting anything and return its `note_id`
   plus the local file the built-in editor opens (`create_note`);
+- say whether a path is one of its notes (`contains`), so Edit (F4) opens notes
+  in the built-in editor;
 - remove a note it created that was never written to (`discard_empty_note`).
 
 The default `FolderNoteStore` keeps notes as plain `.md` files in the folder

@@ -81,6 +81,15 @@ impl NoteStore for FolderNoteStore {
         Err(NoteError::Io("Too many notes with the same name.".into()))
     }
 
+    fn contains(&self, path: &Path) -> bool {
+        // Canonical on both sides: symlinked config folders and `..` must not
+        // decide membership.
+        match (std::fs::canonicalize(&self.root), std::fs::canonicalize(path)) {
+            (Ok(root), Ok(path)) => path != root && path.starts_with(&root),
+            _ => false,
+        }
+    }
+
     fn discard_empty_note(&self, note_id: &str, expected_path: &Path) -> Result<(), NoteError> {
         let path = self
             .path_for(note_id)
@@ -192,6 +201,22 @@ mod tests {
         assert_eq!(other.note_id, note.note_id);
         assert!(new_store.discard_empty_note(&note.note_id, &note.local_path).is_err());
         assert!(other.local_path.exists());
+    }
+
+    #[test]
+    fn contains_only_files_inside_the_notes_folder() {
+        let dir = TempDir::new();
+        let store = store(&dir);
+        let note = store.create_note(&NewNoteRequest::default()).unwrap();
+        assert!(store.contains(&note.local_path));
+        std::fs::create_dir_all(dir.0.join("scratch/sub")).unwrap();
+        std::fs::write(dir.0.join("scratch/sub/deep.md"), "").unwrap();
+        assert!(store.contains(&dir.0.join("scratch/sub/deep.md")));
+        assert!(!store.contains(&dir.0.join("scratch")));
+        std::fs::write(dir.0.join("outside.md"), "").unwrap();
+        assert!(!store.contains(&dir.0.join("outside.md")));
+        assert!(!store.contains(&dir.0.join("scratch/../outside.md")));
+        assert!(!store.contains(&dir.0.join("scratch/missing.md")));
     }
 
     #[test]

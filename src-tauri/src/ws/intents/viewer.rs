@@ -150,6 +150,8 @@ impl ViewFileArgs {
 struct EditFileArgs {
     path: String,
     filename: String,
+    /// The listing that asked; lets notes open in a built-in editor tab next to it.
+    panel_id: Option<String>,
 }
 
 impl EditFileArgs {
@@ -157,6 +159,7 @@ impl EditFileArgs {
         Self {
             path: arg_str(args, "path").unwrap_or("").to_string(),
             filename: arg_str(args, "filename").unwrap_or("").to_string(),
+            panel_id: arg_str(args, "panelId").filter(|id| !id.is_empty()).map(str::to_string),
         }
     }
 }
@@ -581,6 +584,19 @@ async fn view_file(args: &Value, ctx: &mut IntentContext<'_>) {
 async fn edit_file(args: &Value, ctx: &mut IntentContext<'_>) {
     let parsed = EditFileArgs::from_args(args);
     let full_path = format!("{}/{}", parsed.path.trim_end_matches('/'), parsed.filename);
+
+    // Notes open in the built-in editor; anything it refuses (binary, too
+    // large) and every other file goes to the external editor as before.
+    if let Some(panel_id) = parsed.panel_id.as_deref() {
+        let store = ctx.state.lock().await.note_store.clone();
+        let candidate = std::path::PathBuf::from(&full_path);
+        let is_note = tokio::task::spawn_blocking(move || store.contains(&candidate))
+            .await
+            .unwrap_or(false);
+        if is_note && super::editor::open_editor_tab(ctx, panel_id, &full_path, None).await.is_ok() {
+            return;
+        }
+    }
 
     let result = {
         let state_guard = ctx.state.lock().await;

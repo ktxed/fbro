@@ -356,6 +356,18 @@ async function runNotesFlow(browser, observer, returnDirectory) {
     throw new Error("Closing an existing note must not delete it");
   }
 
+  // In the notes folder, Edit (F4) opens the note in an editor tab instead of
+  // the external editor.
+  await clickEntry(browser, "left", "existing-note.md");
+  await chord(browser, [], KEY.f4);
+  await waitFor(() => {
+    const id = editorPanelId(observer);
+    return id && observer.state.panels[id]?.editor?.fileName === "existing-note.md" && observer.state.focus === id;
+  }, { timeout: 10_000, label: "F4 on a note opens the built-in editor" });
+  await expectEditorFocus(browser, "editor focus after F4 on a note");
+  await chord(browser, [KEY.ctrl], "w");
+  await waitFor(() => !editorPanelId(observer), { timeout: 10_000, label: "F4-opened note closes" });
+
   await runNotesFolderSettingFlow(browser, observer);
 
   observer.sendIntent("NavigatePanelTo", undefined, { panelId: "left", path: returnDirectory });

@@ -58,6 +58,9 @@ pub(crate) trait NoteStore: Send + Sync {
     fn browse_location(&self) -> Result<PathBuf, NoteError>;
     /// Create an empty note and return its id and the local file to edit.
     fn create_note(&self, request: &NewNoteRequest) -> Result<NoteRef, NoteError>;
+    /// Whether `path` is one of this store's notes (anywhere under its folder).
+    /// Lets Edit (F4) open notes in the built-in editor.
+    fn contains(&self, path: &std::path::Path) -> bool;
     /// Remove a note this store created that was never written to. The caller
     /// has already checked it is empty and unchanged; stores check again, and
     /// refuse unless `note_id` still names `expected_path` (the store's

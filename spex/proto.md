@@ -452,6 +452,11 @@ Unsolicited:
   frontend saves every editor tab and sends `Quit { editorsFlushed: true }`.
   A second quit request within 3 s proceeds without asking again.
 
+`EditFile { path, filename, panelId? }` (F4) opens a file inside the notes
+folder (`NoteStore::contains`) as an editor tab next to `panelId`, exactly like
+`OpenEditorTab`; without `panelId`, outside the notes folder, or when the editor
+refuses the file, it launches the external editor as before.
+
 ### 7.4 Note intents
 
 Notes are kept by a `NoteStore` (today `FolderNoteStore`, a `scratch` folder in

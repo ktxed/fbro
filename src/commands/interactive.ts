@@ -451,6 +451,7 @@ function openViewerIntent(client: WsClient, panel: PanelState, intentName: "View
     });
   } else {
     client.sendIntent("EditFile", undefined, {
+      panelId: panel.panelId,
       path: panel.path,
       filename: entry.name,
     });
