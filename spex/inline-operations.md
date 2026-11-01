@@ -63,6 +63,10 @@ Context-menu-only operations use the same model: Open With and platform reveal
 accept exactly one item. Open With also accepts path-backed search-result
 files and directories, using their exact `sourcePath`; platform reveal retains
 its mounted-local-filesystem eligibility. Adding to a global selection accepts one or more.
+Set Permissions… accepts one or more entries on a writable mounted local
+filesystem whose source advertises `SetPermissions` (Linux and macOS; never
+Windows). It opens the existing permissions dialog for the whole target,
+prefilled with the mode of the row the menu was opened on.
 Copying names or full paths accepts one or more and uses newline-separated
 values with plural menu labels for a selection.
 

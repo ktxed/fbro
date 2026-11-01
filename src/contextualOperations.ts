@@ -20,6 +20,7 @@ export type ContextualOperationId =
   | "file.copy"
   | "file.move"
   | "file.rename"
+  | "file.set_permissions"
   | "file.delete"
   | "clipboard.names"
   | "clipboard.paths";
@@ -60,6 +61,7 @@ export const OPERATION_CARDINALITY: Record<ContextualOperationId, OperationCardi
   "file.copy": { min: 1 },
   "file.move": { min: 1 },
   "file.rename": { min: 1, max: 1 },
+  "file.set_permissions": { min: 1 },
   "file.delete": { min: 1 },
   "clipboard.names": { min: 1 },
   "clipboard.paths": { min: 1 },
@@ -201,6 +203,9 @@ export function contextualOperationAvailable(
       return !panel.shadowSource && supports.includes("MoveSelection");
     case "file.rename":
       return (isLocalFilesystem && supports.includes("Rename")) || isGlobalRoot;
+    case "file.set_permissions":
+      // Advertised by the backend only for local filesystems on Linux and macOS.
+      return isLocalFilesystem && !source.capabilities.readOnly && supports.includes("SetPermissions");
     case "file.delete":
       return (!panel.shadowSource && supports.includes("DeleteSelection")) || isGlobal;
     case "clipboard.names":

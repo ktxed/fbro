@@ -92,6 +92,7 @@ Currently defined:
 | `MoveSelection`       | Entries can be moved within the driver. |
 | `DeleteSelection`     | Entries can be deleted. |
 | `InspectItem`         | Driver provides per-entry metadata beyond `list()`. |
+| `SetPermissions`      | Entries accept a Unix permission mode (`SetPermissions` intent). Advertised by local filesystem volumes on Unix (Linux, macOS) only. |
 | `InternalNavigation`  | Opening a `directory` entry stays in the same driver (intra-driver tree node) instead of handing off to the local FS driver. Set by archive drivers and procs-hierarchical. |
 
 The flag list is open-ended; new drivers add new flags as needed and gate UI surfaces on their presence.

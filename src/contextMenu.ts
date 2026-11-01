@@ -26,6 +26,7 @@ export interface ContextMenuOptions {
   canCopy?: boolean;
   canMove?: boolean;
   canRename?: boolean;
+  canSetPermissions?: boolean;
   canDelete?: boolean;
   canCopyFullPath?: boolean;
   targetCount?: number;
@@ -109,6 +110,7 @@ export function buildContextMenuItems(
     ...(options.canCopy ? [commandItem("file.copy", isShadow ? "Extract" : "Copy", commands)] : []),
     ...(options.canMove ? [commandItem("file.move", "Move", commands)] : []),
     ...(options.canRename ? [commandItem("file.rename", "Rename", commands)] : []),
+    ...(options.canSetPermissions ? [commandItem("file.set_permissions", "Set Permissions…", commands)] : []),
     ...(options.canDelete ? [commandItem("file.delete", "Delete", commands)] : []),
     { id: "separator.clipboard", kind: "separator" },
     { id: "clipboard.names", kind: "clipboard", label: isMultiple ? "Copy names" : "Copy name", clipboardText: options.clipboardNames ?? name },

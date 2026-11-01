@@ -172,6 +172,32 @@ fn sanitize_share_id_part(value: &str) -> String {
     out.trim_matches('-').chars().take(32).collect()
 }
 
+/// Capability flags advertised by mounted local filesystem volumes.
+/// `SetPermissions` is Unix-only (Linux, macOS): `LocalFsDriver::set_permissions`
+/// rejects the call elsewhere, so Windows never offers the action.
+fn local_filesystem_supports() -> Vec<String> {
+    let mut supports: Vec<String> = [
+        "ListEntries",
+        "OpenFolder",
+        "CopySelection",
+        "MoveSelection",
+        "DeleteSelection",
+        "InspectItem",
+        "Rename",
+        "Edit",
+        "Touch",
+        "NewFolder",
+        "OpenShell",
+    ]
+    .into_iter()
+    .map(String::from)
+    .collect();
+    if cfg!(unix) {
+        supports.push("SetPermissions".to_string());
+    }
+    supports
+}
+
 fn source_contains_path(source_root: &str, path: &str) -> bool {
     let source_root = Path::new(source_root);
     let path = Path::new(path);
@@ -744,19 +770,7 @@ impl AppState {
                 .unwrap_or_else(|| home.clone())
         };
 
-        let supports = vec![
-            "ListEntries".to_string(),
-            "OpenFolder".to_string(),
-            "CopySelection".to_string(),
-            "MoveSelection".to_string(),
-            "DeleteSelection".to_string(),
-            "InspectItem".to_string(),
-            "Rename".to_string(),
-            "Edit".to_string(),
-            "Touch".to_string(),
-            "NewFolder".to_string(),
-            "OpenShell".to_string(),
-        ];
+        let supports = local_filesystem_supports();
 
         // Detect volumes from platform; fall back to a single root volume if empty.
         let mut vols = platform.list_volumes();
@@ -1088,19 +1102,7 @@ impl AppState {
     /// Rebuild sources and drivers from a new volume list.
     /// Returns IDs of sources that were removed.
     pub fn rebuild_sources(&mut self, volumes: Vec<crate::platform::VolumeInfo>) -> Vec<String> {
-        let supports = vec![
-            "ListEntries".to_string(),
-            "OpenFolder".to_string(),
-            "CopySelection".to_string(),
-            "MoveSelection".to_string(),
-            "DeleteSelection".to_string(),
-            "InspectItem".to_string(),
-            "Rename".to_string(),
-            "Edit".to_string(),
-            "Touch".to_string(),
-            "NewFolder".to_string(),
-            "OpenShell".to_string(),
-        ];
+        let supports = local_filesystem_supports();
 
         #[cfg(unix)]
         let is_spy = std::env::var("FBRO_SPY").is_ok();
@@ -1455,6 +1457,16 @@ mod tests {
     use super::{fallback_source_id_for_home_candidates, AppState};
     use crate::platform::{EjectInfo, Platform, VolumeInfo};
     use std::sync::Arc;
+
+    #[test]
+    fn local_filesystem_advertises_set_permissions_only_on_unix() {
+        let supports = super::local_filesystem_supports();
+        assert_eq!(
+            supports.iter().any(|cap| cap == "SetPermissions"),
+            cfg!(unix)
+        );
+        assert!(supports.iter().any(|cap| cap == "Rename"));
+    }
 
     #[test]
     fn journal_sort_restores_only_when_location_memory_is_enabled_and_does_not_use_root_sort() {

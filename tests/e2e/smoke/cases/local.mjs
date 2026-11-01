@@ -248,7 +248,7 @@ export async function runLocalFlow(browser, observer) {
   await observer.waitForSort("left", "name", "asc");
   observer.assertFileEntryOrder("left", ["aardvark.txt", "baby.txt", "zebra.txt"]);
   await verifySelectedFolderInlineNavigation(browser, observer, sortDir, "aardvark.txt");
-  await verifyContextualSelectionOperations(browser, observer, sortFiles);
+  await verifyContextualSelectionOperations(browser, observer, sortFiles, hostSortDir);
 
   await clickSortHeader(browser, "left", "name");
   await observer.waitForSort("left", "name", "desc");
@@ -1078,7 +1078,7 @@ async function verifySelectedFolderInlineNavigation(browser, observer, sortDir, 
   await observer.waitForEntry("left", "selected-folder", "directory");
 }
 
-async function verifyContextualSelectionOperations(browser, observer, [first, second, third]) {
+async function verifyContextualSelectionOperations(browser, observer, [first, second, third], hostSortDir) {
   const inlineIds = async (name) => browser.execute((name) => {
     const escaped = CSS.escape(name);
     return [...document.querySelectorAll(`[data-testid="panel-left"] [data-entry-name="${escaped}"] [data-inline-operation]`)]
@@ -1116,7 +1116,7 @@ async function verifyContextualSelectionOperations(browser, observer, [first, se
   });
   await openPanelContextMenu(browser, "left");
   const pairLabels = await menuLabels();
-  for (const expected of ["Compare", "Pass to Bro…", "Copy", "Move", "Delete", "Copy names", "Copy full paths"]) {
+  for (const expected of ["Compare", "Pass to Bro…", "Copy", "Move", "Set Permissions…", "Delete", "Copy names", "Copy full paths"]) {
     if (!pairLabels.includes(expected)) throw new Error(`two-item context menu lacks ${expected}: ${JSON.stringify(pairLabels)}`);
   }
   for (const excluded of ["Rename", "Open With…"]) {
@@ -1155,11 +1155,33 @@ async function verifyContextualSelectionOperations(browser, observer, [first, se
   if (!cursorLabels.includes("Rename") || !cursorLabels.includes("Copy name") || cursorLabels.includes("Copy names")) {
     throw new Error(`unselected cursor did not win contextual targeting: ${JSON.stringify(cursorLabels)}`);
   }
-  await browser.keys("Escape");
+  await verifyContextMenuSetPermissions(browser, third, hostSortDir);
   const cleanupButton = await browser.$('[data-testid="panel-left"] .panel__selection-clear');
   await cleanupButton.waitForClickable({ timeout: 10_000 });
   await cleanupButton.click();
   await waitFor(async () => (await selectedNames()).length === 0, { timeout: 10_000, label: "contextual selection cleanup" });
+}
+
+async function verifyContextMenuSetPermissions(browser, name, hostSortDir) {
+  // Expects the context menu to be open on the unselected cursor row `name`.
+  const hostFile = path.join(hostSortDir, name);
+  const originalMode = fs.statSync(hostFile).mode & 0o777;
+  const item = await browser.$('.context-menu [data-contextual-operation="file.set_permissions"]');
+  await item.waitForClickable({ timeout: 10_000 });
+  await item.click();
+  const dialog = '[data-modal-id="attributes"]';
+  await (await browser.$(dialog)).waitForDisplayed({ timeout: 10_000 });
+  const summary = await (await browser.$(`${dialog} .modal__summary`)).getText();
+  if (!summary.includes(name)) throw new Error(`permissions dialog does not target the cursor row: ${summary}`);
+  await setTextInputValue(browser, `${dialog} .attrs-octal__input`, "600");
+  await clickCommand(browser, "file.set_permissions.confirm");
+  await waitFor(() => (fs.statSync(hostFile).mode & 0o777) === 0o600, { timeout: 10_000, label: "context-menu permissions applied" });
+  await (await browser.$(dialog)).waitForDisplayed({ timeout: 10_000, reverse: true });
+  await waitFor(async () => browser.execute(() => document.activeElement?.closest('[data-testid="panel-left"]') !== null), {
+    timeout: 10_000,
+    label: "focus returns to panel after context-menu permissions",
+  });
+  fs.chmodSync(hostFile, originalMode);
 }
 
 async function verifyLiveDateSortCursorAnchor(browser, observer, hostSortDir, nowSec) {

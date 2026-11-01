@@ -147,6 +147,8 @@ export interface ContextActionTarget {
   name: string;
   kind: string;
   size?: number;
+  /** Mode string of the row the action started from, e.g. "rwxr-xr-x". */
+  permissions?: string;
   scope?: "entry" | "selection";
   entries?: FileOpFile[];
 }
@@ -389,6 +391,20 @@ export function executeTargetedCommand(
       return openFileOpForEntries(context.state, context.dispatch, target.panelId, files, "delete");
     case "file.rename":
       return openRenameForTarget(context.dispatch, target);
+    case "file.set_permissions": {
+      const source = context.state.sources[context.state.panels[target.panelId]?.sourceId ?? ""];
+      if (!source?.supports.includes("SetPermissions")) return false;
+      context.dispatch({
+        type: "OPEN_ATTRIBUTES",
+        attributes: {
+          panelId: target.panelId,
+          paths: files.map((entry) => entry.sourcePath ?? `${target.dirPath}/${entry.name}`),
+          names: files.map((entry) => entry.name),
+          currentMode: target.permissions ?? "rwxrwxrwx",
+        },
+      });
+      return true;
+    }
     default:
       return false;
   }
@@ -618,7 +634,7 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
       });
       return true;
     case "file.set_permissions":
-      if (!focused) return false;
+      if (!focused || !sourceCapability("SetPermissions")) return false;
       if (focused.panel.shadowSource) return false;
       const attrsSource = state.sources[focused.panel.sourceId];
       if (!attrsSource || attrsSource.kind !== "filesystem") return false;
