@@ -959,12 +959,17 @@ body {
   text-overflow: ellipsis;
 }
 
+/* The current-folder action is the first stop of the same roving selection the
+ * list uses, so it is marked by state (like `__item--selected`), not by
+ * `:focus-visible`: programmatic focus after a mouse interaction (e.g. clicking
+ * a dialog tab) does not match `:focus-visible`, which left the popover looking
+ * unfocused. */
 .bookmarks-popover__add-btn:hover,
-.bookmarks-popover__add-btn:focus-visible {
-  background: var(--bg-focused);
+.bookmarks-popover__add-btn--selected {
+  background: var(--bg-cursor);
 }
 
-.bookmarks-popover__add-btn:focus-visible {
+.bookmarks-popover__add-btn--selected {
   outline: 1px solid var(--border-focus);
   outline-offset: -1px;
 }

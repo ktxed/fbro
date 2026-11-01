@@ -575,6 +575,10 @@ export async function verifyBookmarksKeyboardNavigation(browser, observer, aSrc,
   if (await selectedBookmarkPath() !== null) {
     throw new Error("bookmark list highlights an entry instead of initially focusing the current-folder action");
   }
+  // The action's highlight is state-based (not :focus-visible), so it also shows after mouse interaction.
+  if (await browser.$(currentBookmarkToggle).getAttribute("data-selected") !== "true") {
+    throw new Error("bookmark current-folder action is focused but not marked selected");
+  }
 
   await browser.keys("ArrowUp");
   await waitFor(async () => await browser.$(bookmarkList).isFocused()

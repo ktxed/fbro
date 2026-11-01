@@ -178,8 +178,9 @@ export function BookmarksPopover({
           {isBookmarked ? (
             <button
               ref={addButtonRef}
-              className="bookmarks-popover__add-btn bookmarks-popover__add-btn--added"
+              className={`bookmarks-popover__add-btn bookmarks-popover__add-btn--added${navigationIndex === 0 ? " bookmarks-popover__add-btn--selected" : ""}`}
               data-testid="bookmark-current-toggle"
+              data-selected={navigationIndex === 0 ? "true" : "false"}
               onFocus={() => setNavigationIndex(0)}
               onClick={handleRemoveCurrent}
               title="Remove current folder from bookmarks"
@@ -189,8 +190,9 @@ export function BookmarksPopover({
           ) : (
             <button
               ref={addButtonRef}
-              className="bookmarks-popover__add-btn"
+              className={`bookmarks-popover__add-btn${navigationIndex === 0 ? " bookmarks-popover__add-btn--selected" : ""}`}
               data-testid="bookmark-current-toggle"
+              data-selected={navigationIndex === 0 ? "true" : "false"}
               onFocus={() => setNavigationIndex(0)}
               onClick={handleAdd}
               title="Bookmark current folder"
