@@ -87,6 +87,10 @@ pub struct GeneralSettings {
     /// settings intent handler; the default preserves the pre-existing look.
     #[serde(default = "default_color_scheme")]
     pub color_scheme: String,
+    /// When true and the OS reports a light/dark preference, the active scheme
+    /// follows it; `color_scheme` stays the preserved manual choice.
+    #[serde(default)]
+    pub follow_system_color_scheme: bool,
     /// How to extract .7z archives. `Auto` looks for `7z` / `7zz` / `7za` on
     /// PATH and falls back to the in-process Rust extractor if none is
     /// installed. `Custom` invokes whatever the user set in
@@ -229,8 +233,32 @@ fn default_thumb_video_frame_skip() -> u32 {
     5
 }
 
+pub const COLOR_SCHEME_DARK: &str = "fbro-dark";
+pub const COLOR_SCHEME_LIGHT: &str = "daylight";
+
 fn default_color_scheme() -> String {
-    "fbro-dark".to_string()
+    COLOR_SCHEME_DARK.to_string()
+}
+
+pub fn is_known_color_scheme(id: &str) -> bool {
+    id == COLOR_SCHEME_DARK || id == COLOR_SCHEME_LIGHT
+}
+
+/// The built-in scheme every client renders. Following the system only takes
+/// effect while the OS preference is known; otherwise the manual choice
+/// applies. Unknown manual ids fall back to dark, like the frontend resolver.
+pub fn resolve_active_color_scheme(
+    follow_system: bool,
+    manual: &str,
+    system: Option<crate::platform::SystemColorScheme>,
+) -> &'static str {
+    use crate::platform::SystemColorScheme;
+    match (follow_system, system) {
+        (true, Some(SystemColorScheme::Dark)) => COLOR_SCHEME_DARK,
+        (true, Some(SystemColorScheme::Light)) => COLOR_SCHEME_LIGHT,
+        _ if manual == COLOR_SCHEME_LIGHT => COLOR_SCHEME_LIGHT,
+        _ => COLOR_SCHEME_DARK,
+    }
 }
 
 fn default_compare_max_file_size_mb() -> u64 {
@@ -299,6 +327,7 @@ impl Default for GeneralSettings {
             persist_panel_tabs: true,
             proc_tree_mode: false,
             color_scheme: default_color_scheme(),
+            follow_system_color_scheme: false,
             sevenzip_extractor: SevenzipExtractorMode::default(),
             sevenzip_custom_path: String::new(),
             fedup_default_ignore_patterns: default_fedup_ignore_patterns(),
@@ -344,6 +373,62 @@ pub(crate) fn save_to_path(settings: &Settings, path: &std::path::Path) -> std::
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::platform::SystemColorScheme;
+
+    #[test]
+    fn follow_system_color_scheme_defaults_off_for_existing_settings() {
+        let mut encoded = serde_json::to_value(Settings::default()).unwrap();
+        encoded["general"]
+            .as_object_mut()
+            .unwrap()
+            .remove("follow_system_color_scheme");
+        let decoded: Settings = serde_json::from_value(encoded).unwrap();
+        assert!(!decoded.general.follow_system_color_scheme);
+    }
+
+    #[test]
+    fn follow_system_color_scheme_survives_settings_roundtrip() {
+        for follow in [false, true] {
+            let mut settings = Settings::default();
+            settings.general.follow_system_color_scheme = follow;
+            settings.general.color_scheme = COLOR_SCHEME_LIGHT.to_string();
+            let saved = serde_json::to_string(&settings).unwrap();
+            let reloaded: Settings = serde_json::from_str(&saved).unwrap();
+            assert_eq!(reloaded.general.follow_system_color_scheme, follow);
+            assert_eq!(reloaded.general.color_scheme, COLOR_SCHEME_LIGHT);
+        }
+    }
+
+    #[test]
+    fn active_color_scheme_resolution() {
+        let dark = Some(SystemColorScheme::Dark);
+        let light = Some(SystemColorScheme::Light);
+        let cases = [
+            (true, COLOR_SCHEME_DARK, light, COLOR_SCHEME_LIGHT),
+            (true, COLOR_SCHEME_LIGHT, dark, COLOR_SCHEME_DARK),
+            (true, COLOR_SCHEME_LIGHT, None, COLOR_SCHEME_LIGHT),
+            (true, COLOR_SCHEME_DARK, None, COLOR_SCHEME_DARK),
+            (false, COLOR_SCHEME_DARK, light, COLOR_SCHEME_DARK),
+            (false, COLOR_SCHEME_LIGHT, dark, COLOR_SCHEME_LIGHT),
+            (false, "mystery", None, COLOR_SCHEME_DARK),
+            (true, "mystery", light, COLOR_SCHEME_LIGHT),
+        ];
+        for (follow, manual, system, expected) in cases {
+            assert_eq!(
+                resolve_active_color_scheme(follow, manual, system),
+                expected,
+                "follow={follow} manual={manual} system={system:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn known_color_schemes() {
+        assert!(is_known_color_scheme(COLOR_SCHEME_DARK));
+        assert!(is_known_color_scheme(COLOR_SCHEME_LIGHT));
+        assert!(!is_known_color_scheme("system"));
+        assert!(!is_known_color_scheme(""));
+    }
 
     #[test]
     fn button_bar_is_visible_for_existing_settings_files() {

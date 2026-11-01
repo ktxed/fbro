@@ -27,7 +27,7 @@ export function InputHistoryDropdown({
 }: InputHistoryDropdownProps) {
   const state = useAppState();
   const popoverRef = useRef<HTMLDivElement>(null);
-  const colorScheme = resolveColorScheme(state.settings.general.colorScheme);
+  const colorScheme = resolveColorScheme(state.settings.general.activeColorScheme);
 
   const { refs, floatingStyles } = useFloating({
     open: true,

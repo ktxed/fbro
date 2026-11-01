@@ -50,6 +50,15 @@ pub async fn start(
         .lock()
         .await
         .reconcile_initial_volumes(initial_volumes);
+    // Resolve the OS appearance before the first snapshot so following the
+    // system never flashes the manual scheme first.
+    let appearance_rx = crate::platform::create_appearance_watcher().await;
+    let initial_system_color_scheme = *appearance_rx.borrow();
+    state.lock().await.system_color_scheme = initial_system_color_scheme;
+    tokio::spawn(crate::ws::appearance::run_appearance_updates(
+        Arc::clone(&state),
+        appearance_rx,
+    ));
     let (cli_open_notify_tx, _) = broadcast::channel::<()>(16);
 
     loop {
@@ -209,11 +218,12 @@ async fn handle_connection(
     } else {
         // Non-GUI clients (viewers) don't get the full snapshot but still need
         // display settings so they render consistently with the main window.
-        let (font_size, color_scheme, enable_heic2any) = {
+        let (font_size, color_scheme, active_color_scheme, enable_heic2any) = {
             let state_guard = state.lock().await;
             (
                 state_guard.font_size,
                 state_guard.settings.general.color_scheme.clone(),
+                state_guard.active_color_scheme(),
                 state_guard.settings.general.enable_heic2any,
             )
         };
@@ -228,6 +238,7 @@ async fn handle_connection(
                     "fontSize": font_size,
                     "general": {
                         "colorScheme": color_scheme,
+                        "activeColorScheme": active_color_scheme,
                         "enableHeic2any": enable_heic2any,
                     },
                 }),

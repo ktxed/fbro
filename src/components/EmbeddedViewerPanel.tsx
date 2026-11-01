@@ -40,7 +40,7 @@ export function EmbeddedViewerPanel({ ref, panelId, sourcePanelId, state, client
   }, [focusReturnRef]);
   const sourcePanel = state.panels[sourcePanelId];
   const focused = state.focus === panelId;
-  const { ludicrousMode, maxImageSizeMb, enableHeic2any, colorScheme } = state.settings.general;
+  const { ludicrousMode, maxImageSizeMb, enableHeic2any, activeColorScheme: colorScheme } = state.settings.general;
   const imageLimit = ludicrousMode ? maxImageSizeMb * 1024 * 1024 : IMAGE_DIRECT_LIMIT;
   const file = target.kind === "file" ? target.file : null;
   useImperativeHandle(ref, () => ({

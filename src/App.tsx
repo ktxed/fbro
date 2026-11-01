@@ -18,7 +18,7 @@ export function App() {
   const [state, dispatch] = useAppReducer();
   const clientRef = useRef<WsClient | null>(null);
   const [jobsViewOpen, setJobsViewOpen] = useState(false);
-  const colorScheme = resolveColorScheme(state.settings.general.colorScheme);
+  const colorScheme = resolveColorScheme(state.settings.general.activeColorScheme);
 
   useEffect(() => { applyZoom(state.fontSize); }, [state.fontSize]);
 

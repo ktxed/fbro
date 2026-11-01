@@ -19,7 +19,7 @@ export class FbroObserver {
       jobs: {},
       shareConfig: { enabled: false, allowIpv6: false, sharedSourceIds: [], sharedRoots: [], shareSuggestions: [], pairedPeers: [] },
       discoveredPeers: [],
-      settings: { general: { colorScheme: "fbro-dark" } },
+      settings: { general: { colorScheme: "fbro-dark", followSystemColorScheme: false, activeColorScheme: "fbro-dark", systemColorScheme: null } },
       bookmarks: [],
       globalSelections: [],
       notifications: { version: -1, entries: [] },

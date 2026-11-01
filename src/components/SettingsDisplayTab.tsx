@@ -120,7 +120,6 @@ export function SettingsDisplayTab({ general, client }: SettingsDisplayTabProps)
     client.sendIntent("ClearThumbnailCache");
   };
 
-  const activeScheme = resolveColorScheme(general.colorScheme);
   const buttonBarSection = (
     <div className="settings-tab__section">
       <h3 className="settings-tab__section-title">Button bar</h3>
@@ -176,15 +175,34 @@ export function SettingsDisplayTab({ general, client }: SettingsDisplayTabProps)
       </label>
     </div>
   );
+  const manualScheme = resolveColorScheme(general.colorScheme);
+  const followingSystem = general.followSystemColorScheme && general.systemColorScheme !== null;
+  const colorSchemeHint = followingSystem
+    ? `Following system: ${resolveColorScheme(general.activeColorScheme).label}`
+    : general.followSystemColorScheme
+      ? `System appearance unavailable; using ${manualScheme.label}.`
+      : manualScheme.description;
   const colorSchemeSection = (
     <div className="settings-tab__section">
       <h3 className="settings-tab__section-title">Color Scheme</h3>
+      <label className="settings-tab__option">
+        <input
+          type="checkbox"
+          data-testid="follow-system-color-scheme"
+          checked={general.followSystemColorScheme}
+          aria-describedby="color-scheme-hint"
+          onChange={(e) => send("followSystemColorScheme", e.target.checked)}
+        />
+        <span>Match system appearance</span>
+      </label>
       <label className="settings-tab__option">
         <span className="settings-tab__select-label">Scheme</span>
         <select
           className="settings-tab__select"
           data-testid="color-scheme-select"
-          value={activeScheme.id}
+          value={manualScheme.id}
+          disabled={followingSystem}
+          aria-describedby="color-scheme-hint"
           onChange={(e) => send("colorScheme", e.target.value)}
         >
           {COLOR_SCHEMES.map((scheme) => (
@@ -194,7 +212,9 @@ export function SettingsDisplayTab({ general, client }: SettingsDisplayTabProps)
           ))}
         </select>
       </label>
-      <p className="settings-tab__hint">{activeScheme.description}</p>
+      <p className="settings-tab__hint" id="color-scheme-hint" data-testid="color-scheme-hint">
+        {colorSchemeHint}
+      </p>
     </div>
   );
 

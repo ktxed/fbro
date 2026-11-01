@@ -30,7 +30,7 @@ export function ContextMenu({ client, menu }: ContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
   const returnFocusRef = useFocusReturn(menu.panelId);
   const [highlightedIndex, setHighlightedIndex] = useState(0);
-  const colorScheme = resolveColorScheme(state.settings.general.colorScheme);
+  const colorScheme = resolveColorScheme(state.settings.general.activeColorScheme);
 
   const items = useMemo(
     () => {

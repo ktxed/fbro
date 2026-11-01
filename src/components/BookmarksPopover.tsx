@@ -39,7 +39,7 @@ export function BookmarksPopover({
   // Position zero is the current-folder action; bookmarks occupy positions 1…N.
   const [navigationIndex, setNavigationIndex] = useState(0);
   const [listMaxHeight, setListMaxHeight] = useState<number>();
-  const colorScheme = resolveColorScheme(state.settings.general.colorScheme);
+  const colorScheme = resolveColorScheme(state.settings.general.activeColorScheme);
 
   const close = () => dispatch({ type: "CLOSE_BOOKMARKS" });
 

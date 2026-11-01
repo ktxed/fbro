@@ -10,13 +10,13 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::time::Duration;
 use windows::core::{Interface, PCWSTR, GUID};
-use windows::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_SUCCESS, PROPERTYKEY, RPC_E_CHANGED_MODE};
+use windows::Win32::Foundation::{PROPERTYKEY, RPC_E_CHANGED_MODE};
 use windows::Win32::System::Com::{
     CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize, IPersistFile,
     CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, STGM_READ,
 };
 use windows::Win32::System::Com::StructuredStorage::{PropVariantClear, PropVariantToStringAlloc, PROPVARIANT};
-use windows::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_DWORD};
+use super::registry::wide;
 use windows::Win32::System::Variant::{VT_BSTR, VT_EMPTY, VT_LPWSTR};
 use windows::Win32::UI::Shell::{IShellLinkW, ShellLink};
 use windows::Win32::UI::Shell::PropertiesSystem::IPropertyStore;
@@ -262,28 +262,8 @@ fn prop_string(mut variant: PROPVARIANT) -> Result<String, String> {
 }
 
 fn query_dword(subkey: &str, value: &str) -> Result<Option<u32>, String> {
-    let subkey = wide(subkey);
-    let value = wide(value);
-    let mut data = 0u32;
-    let mut size = std::mem::size_of::<u32>() as u32;
-    let status = unsafe {
-        RegGetValueW(
-            HKEY_CURRENT_USER,
-            PCWSTR(subkey.as_ptr()),
-            PCWSTR(value.as_ptr()),
-            RRF_RT_REG_DWORD,
-            None,
-            Some((&mut data as *mut u32).cast()),
-            Some(&mut size),
-        )
-    };
-    if status == ERROR_SUCCESS {
-        Ok(Some(data))
-    } else if status == ERROR_FILE_NOT_FOUND {
-        Ok(None)
-    } else {
-        Err(format!("Cannot read Windows notification setting ({})", status.0))
-    }
+    super::registry::query_hkcu_dword(subkey, value)
+        .map_err(|code| format!("Cannot read Windows notification setting ({code})"))
 }
 
 struct ComInit {
@@ -309,10 +289,6 @@ impl Drop for ComInit {
             unsafe { CoUninitialize() };
         }
     }
-}
-
-fn wide(value: &str) -> Vec<u16> {
-    value.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
 fn wide_path(path: &Path) -> Result<Vec<u16>, String> {

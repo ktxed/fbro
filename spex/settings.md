@@ -111,6 +111,31 @@ and packaged runs; the disabled control never claims delivery is available in de
 }
 ```
 
+## System appearance
+
+Settings → Display → Color Scheme has a **Match system appearance** checkbox
+above the **Scheme** select. Its writable preference, `followSystemColorScheme`,
+persists as `general.follow_system_color_scheme`; older settings files default
+to false. The backend detects the OS preference through the platform layer
+([platform.md](platform.md) §4.1) and projects two read-only fields:
+
+| Field | Values | Meaning |
+|---|---|---|
+| `general.systemColorScheme` | `"dark"`, `"light"`, `null` | Detected OS preference; `null` while unavailable (no portal/session bus, unsupported platform) |
+| `general.activeColorScheme` | `"fbro-dark"`, `"daylight"` | Scheme every client renders: the OS-mapped scheme when following and detection is available, otherwise `colorScheme` |
+
+Both appear in the snapshot, every settings patch, and the viewer lightweight
+patch, are not persisted, and are rejected by `SetGeneralOption`. An OS change
+broadcasts `{ systemColorScheme, activeColorScheme }` to GUI and viewer clients,
+serialized with other settings writes. New viewer and diff windows take their
+native background and `colorScheme` URL parameter from the active scheme.
+
+While following with detection available, the Scheme select shows the preserved
+manual choice but is disabled (and leaves the Tab order); the hint reads
+"Following system: <label>". If detection is unavailable, the select stays
+enabled and the hint reads "System appearance unavailable; using <label>.".
+The checkbox keeps focus while the backend confirms a change.
+
 ## macOS file icon cache
 
 Settings → Display shows a File icons section only when the read-only backend
@@ -147,6 +172,8 @@ Supported keys:
 | `osNotificationsEnabled` | `bool` | `true` | Deliver selected operation notifications through the OS while no native fbro window is focused. Completion and cancellation require at least 30 seconds of execution; failures, pairing requests, transfer starts, and connection changes bypass that cutoff. The General settings control is capability-gated. See [notifications.md](notifications.md). |
 | `rememberSortPerLocation` | `bool` | `false` | Remember and share sorting for each local filesystem location and for the Journal source. |
 | `enableHeic2any` | `bool` | `false` | Enable local browser conversion of HEIC/HEIF previews in the embedded and detached viewers on Windows (including Windows 10) and Linux. The control is hidden on macOS, which retains native decoding. Existing image caps apply. Changes update open viewers through backend patches; conversion is preview-only and does not write files. |
+| `colorScheme` | `string` | `"fbro-dark"` | Manual built-in scheme: `fbro-dark` or `daylight`. Other values return `BAD_SETTING`. Preserved while following the system, so unfollowing restores it. |
+| `followSystemColorScheme` | `bool` | `false` | Match the OS light/dark preference: dark → `fbro-dark`, light → `daylight`. Applies live, to all clients. While the preference is unavailable the manual `colorScheme` applies. See [System appearance](#system-appearance). |
 | `zshEmacsKeymap` | `bool` | `false` | On macOS, start new interactive zsh terminals with `-o emacs`. The control is hidden and the setting has no effect on other platforms. Other shells and Quick Edit commands are unaffected. Existing terminal sessions keep their current keymap. |
 | `fedupDefaultIgnorePatterns` | `string` | `.git`, `.idea`, `.vscode`, `.venv`, `node_modules`, `__MACOSX`, `._*`, `.DS_Store`, `artifacts/e2e`, `dist/assets`, `target/debug`, `target/release`, `target/bundle`, `.m2` | Newline/comma separated wildcard name/path patterns Fedup Bro can use to skip files and folders before scanning. |
 

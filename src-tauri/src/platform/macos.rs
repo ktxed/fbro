@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::collections::HashMap;
 
+pub(super) mod appearance;
 mod icon_cache;
 mod notifications;
 

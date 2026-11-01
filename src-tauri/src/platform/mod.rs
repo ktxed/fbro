@@ -1,3 +1,4 @@
+pub mod appearance;
 #[cfg(target_os = "linux")]
 pub mod linux;
 #[cfg(target_os = "macos")]
@@ -7,6 +8,7 @@ mod shell_command;
 #[cfg(target_os = "windows")]
 pub mod windows;
 
+pub use appearance::{SystemColorScheme, SystemColorSchemeRx};
 use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -495,6 +497,25 @@ pub async fn create_volume_watcher(platform: Arc<dyn Platform>) -> Arc<dyn Volum
     }
     #[cfg(not(target_os = "linux"))]
     Arc::new(FallbackVolumeWatcher::new(platform))
+}
+
+// ── System appearance ───────────────────────────────────────────────────────
+
+/// Start watching the OS light/dark preference. The initial read finishes
+/// (bounded by a short timeout) before this returns; the receiver then
+/// observes live changes. `None` means the preference is unavailable — the
+/// default on platforms without a watcher, or when the OS source is missing.
+pub async fn create_appearance_watcher() -> SystemColorSchemeRx {
+    let (tx, rx) = tokio::sync::watch::channel(None);
+    #[cfg(target_os = "linux")]
+    linux::appearance::start(tx).await;
+    #[cfg(target_os = "macos")]
+    macos::appearance::start(tx).await;
+    #[cfg(target_os = "windows")]
+    windows::appearance::start(tx).await;
+    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+    drop(tx);
+    rx
 }
 
 #[cfg(test)]

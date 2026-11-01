@@ -117,6 +117,7 @@ FBRO_E2E_REMOTE_ONLY=1 GDK_BACKEND=wayland npm run e2e:smoke:local_debug
 | `FBRO_E2E_TABS_ONLY=1` | Mouse tab reordering, overflow scrolling, terminal ownership, cancellation, active-tab/focus preservation, and tab click/close behavior |
 | `FBRO_E2E_BOOKMARKS_ONLY=1` | Current-folder initial focus, cyclic Up/Down navigation, Home/End, keyboard creation/removal, focus, and list sizing |
 | `FBRO_E2E_BUTTON_BAR_ONLY=1` | Persistent button bar visibility, Settings and command palette, hidden-bar shortcuts, focus, both themes, and invalid values |
+| `FBRO_E2E_COLOR_SCHEME_ONLY=1` | Match system appearance: keyboard toggle, backend-confirmed state in two clients, disabled manual select, unavailable-detection fallback, read-only key rejection, reload, and restoring the manual scheme |
 | `FBRO_E2E_PANEL_SELECTION_ONLY=1` | Space selection, folder sizes, Shift+Space targeting, mask selection, and keyboard ownership in list/grid views |
 | `FBRO_E2E_SELECTION_MASK_ONLY=1` | Select/Deselect Files masks, defaults, keyboard/focus ownership, and full windowed-list matching |
 | `FBRO_E2E_NOTIFICATIONS_ONLY=1` | Notification publication, FIFO toasts, history, clear, keyboard focus, and reload |
@@ -152,6 +153,7 @@ coverage reference.
 | Diff viewer | `diff.mjs` | Up/Down scroll an entirely new file in split and unified views; split panes stay synchronized |
 | Local files and UI | `local.mjs` | Create, copy, overwrite, rename, delete, sort, filtering, empty-folder suggestions, settings, bookmarks, Bros, clipboard feedback, grid navigation, and symlink routes |
 | Bottom button bar | `button-bar.mjs` | Keyboard toggle in Settings → Display, palette recovery while hidden, backend-confirmed state shared between clients, frontend reload with the bar hidden, reclaimed layout space in both themes, file shortcuts and zoom while hidden, modal guards, opener restoration, and invalid-setting rejection. Rust settings tests cover older-file defaults and persistence round-trips. |
+| Color scheme / system appearance | `color-scheme.mjs` | Keyboard toggle of **Match system appearance** in Settings → Display with focus kept on the checkbox, backend-confirmed state shared between clients, the manual select disabled and skipped by Tab while following, the unavailable-detection hint and manual fallback (Docker backends have no session bus), rejection of the read-only `activeColorScheme` / `systemColorScheme` keys and non-boolean values, frontend reload, unchecking restores the preserved manual scheme, and opener restoration. Rust tests cover resolution, older-file defaults, persistence, portal/registry/defaults value mapping, and live patches to GUI and viewer clients. |
 | File icons | `file-icons.mjs` (called by the local flow) | Exact extension keys, case normalization, and successfully loaded panel icons for HTML, PNG, JPEG, JSON, and TOML. Backend capability gates the cache control; on macOS keyboard clearing increments the icon revision and preserves button focus. Disk reuse, corruption recovery, and clearing are covered by `platform::macos::icon_cache::tests`. Native macOS PNG lookup is also covered by `platform::tests::native_extension_icons_are_png`; visually check both color schemes on macOS. |
 | Panel selection and sizes | `panel-selection.mjs` (called by the local flow) | Space selects folders/files in list and grid views, calculates unknown sizes, reuses known/zero sizes, preserves cursor/focus, ignores held-key repeats, and respects modal/input/native controls; Shift+Space sizes selected/all folders without changing selection; Copy targets a selected folder despite a file cursor |
 | Panel tabs | `tabs.mjs` | Real mouse reordering in both directions and themes, backend authority before drop, inactive-tab and other-panel focus preservation, sub-threshold clicks, Escape/outside/pointer-cancel/blur/modal/concurrent-close cancellation, focused terminal identity/PTY preservation, overflowing edge auto-scroll, frontend reload, close button, middle click and empty-strip double click. Rust tests cover invalid/stale/cross-slot/no-op requests, slot versions, and listing session order/active-index serialization with terminal exclusion. |
@@ -211,6 +213,21 @@ continues accepting deliveries. This fixture does not contact the user's desktop
 notification service. Fake worker tests exercise activity epochs and suppression
 of pending deliveries. The worker queue and retained native handles are each
 bounded at 128; native service calls have a three-second timeout.
+
+The Linux system-appearance watcher has an ignored fixture with a fake XDG
+desktop portal on a private session bus:
+
+```bash
+dbus-run-session -- env FBRO_APPEARANCE_TEST_BUS=1 cargo test --manifest-path src-tauri/Cargo.toml --locked linux_appearance_private_bus_reads_and_follows_setting_changed -- --ignored --nocapture
+```
+
+It checks the initial `ReadOne` value, a live `SettingChanged` update, that
+unrelated keys are ignored, and that a missing portal reports the preference as
+unavailable. It never contacts the user's real portal. Live switching on real
+desktops (GNOME, KDE, COSMIC), macOS (Light/Dark/Auto), and Windows 10/11 app
+mode is validated manually: the main window, an open viewer and diff window,
+the terminal, Mermaid previews, and popovers must all switch, and unchecking
+must restore the manual scheme.
 
 ### Native OS notification validation
 

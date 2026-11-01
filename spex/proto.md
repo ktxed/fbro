@@ -77,6 +77,17 @@ of false for older settings files. See [settings.md](./settings.md).
 Viewer clients also receive this field in their initial lightweight settings
 patch; they do not receive a full state snapshot.
 
+Color scheme fields: `general.colorScheme` is the persisted manual choice and
+`general.followSystemColorScheme` the writable follow-system preference.
+`general.activeColorScheme` (`"fbro-dark"` / `"daylight"`) and
+`general.systemColorScheme` (`"dark"` / `"light"` / `null`) are read-only
+backend projections; `SetGeneralOption` rejects them as unknown keys. Every
+renderer — the main window, popovers, terminals, and viewer/diff windows —
+reads only `activeColorScheme`. Viewer clients receive it in their initial
+lightweight settings patch and in later settings patches, including the
+`{ systemColorScheme, activeColorScheme }` patch broadcast when the OS
+preference changes. See [settings.md](./settings.md#system-appearance).
+
 This protocol defines communication between a **Backend (BE)** and one or more **Frontends (FE)** for an n-panel file manager.
 
 ### Core principles

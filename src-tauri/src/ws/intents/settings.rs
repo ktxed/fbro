@@ -333,22 +333,12 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
                 }
                 proc_tree_mode_changed = Some(v);
             }
-            "colorScheme" => {
-                let Some(v) = value.as_str() else {
+            "colorScheme" | "followSystemColorScheme" => {
+                let result = apply_appearance_option(&mut state_guard.settings.general, key, value);
+                if let Some(Err(msg)) = result {
                     drop(state_guard);
-                    bad_setting(ctx.tx, "colorScheme must be a string").await;
+                    bad_setting(ctx.tx, &msg).await;
                     return;
-                };
-                match v {
-                    "fbro-dark" | "daylight" => {
-                        state_guard.settings.general.color_scheme = v.to_string();
-                    }
-                    _ => {
-                        let msg = format!("Unknown color scheme: {v}");
-                        drop(state_guard);
-                        bad_setting(ctx.tx, &msg).await;
-                        return;
-                    }
                 }
             }
             "savePanelViewMode" => {
@@ -600,11 +590,12 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
         }
     }
 
-    let (general, location_settings_count) = {
+    let (general, location_settings_count, appearance) = {
         let state_guard = ctx.state.lock().await;
         (
             state_guard.settings.general.clone(),
             state_guard.location_settings.len(),
+            crate::ws::appearance::appearance_patch_fields(&state_guard),
         )
     };
 
@@ -640,6 +631,9 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
                 "persistPanelTabs": general.persist_panel_tabs,
                 "procTreeMode": general.proc_tree_mode,
                 "colorScheme": general.color_scheme,
+                "followSystemColorScheme": appearance.follow_system_color_scheme,
+                "activeColorScheme": appearance.active_color_scheme,
+                "systemColorScheme": appearance.system_color_scheme,
                 "sevenzipExtractor": general.sevenzip_extractor.as_str(),
                 "sevenzipCustomPath": general.sevenzip_custom_path,
                 "sevenzipResolvedPath": sevenzip_resolved,
@@ -659,6 +653,34 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
         let _ = sender.send(patch.clone()).await;
     }
     let _ = ctx.tx.send(patch).await;
+}
+
+/// Writable appearance keys. `None` means `key` is not an appearance key;
+/// the read-only `activeColorScheme` / `systemColorScheme` projections are
+/// deliberately not handled, so they are rejected as unknown keys.
+fn apply_appearance_option(
+    general: &mut crate::state::settings::GeneralSettings,
+    key: &str,
+    value: &Value,
+) -> Option<Result<(), String>> {
+    match key {
+        "colorScheme" => Some(match value.as_str() {
+            Some(id) if crate::state::settings::is_known_color_scheme(id) => {
+                general.color_scheme = id.to_string();
+                Ok(())
+            }
+            Some(id) => Err(format!("Unknown color scheme: {id}")),
+            None => Err("colorScheme must be a string".to_string()),
+        }),
+        "followSystemColorScheme" => Some(match value.as_bool() {
+            Some(follow) => {
+                general.follow_system_color_scheme = follow;
+                Ok(())
+            }
+            None => Err("followSystemColorScheme must be a boolean".to_string()),
+        }),
+        _ => None,
+    }
 }
 
 async fn expire_location_sorts_if_needed(ctx: &mut IntentContext<'_>) -> Result<(), String> {
@@ -851,4 +873,51 @@ async fn clear_icon_cache(args: &Value, ctx: &mut IntentContext<'_>) {
         },
     };
     let _ = ctx.tx.send(reply).await;
+}
+
+#[cfg(test)]
+mod appearance_option_tests {
+    use super::apply_appearance_option;
+    use crate::state::settings::GeneralSettings;
+    use serde_json::json;
+
+    #[test]
+    fn follow_system_color_scheme_requires_a_boolean() {
+        let mut general = GeneralSettings::default();
+        assert_eq!(
+            apply_appearance_option(&mut general, "followSystemColorScheme", &json!(true)),
+            Some(Ok(()))
+        );
+        assert!(general.follow_system_color_scheme);
+        assert!(matches!(
+            apply_appearance_option(&mut general, "followSystemColorScheme", &json!("yes")),
+            Some(Err(_))
+        ));
+        assert!(general.follow_system_color_scheme);
+    }
+
+    #[test]
+    fn color_scheme_accepts_only_builtin_ids() {
+        let mut general = GeneralSettings::default();
+        assert_eq!(
+            apply_appearance_option(&mut general, "colorScheme", &json!("daylight")),
+            Some(Ok(()))
+        );
+        assert_eq!(general.color_scheme, "daylight");
+        for bad in [json!("system"), json!(1)] {
+            assert!(matches!(
+                apply_appearance_option(&mut general, "colorScheme", &bad),
+                Some(Err(_))
+            ));
+        }
+        assert_eq!(general.color_scheme, "daylight");
+    }
+
+    #[test]
+    fn read_only_projections_are_not_writable() {
+        let mut general = GeneralSettings::default();
+        for key in ["activeColorScheme", "systemColorScheme"] {
+            assert_eq!(apply_appearance_option(&mut general, key, &json!("daylight")), None);
+        }
+    }
 }

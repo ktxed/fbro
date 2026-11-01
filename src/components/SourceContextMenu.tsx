@@ -12,7 +12,7 @@ export function SourceContextMenu({ menu }: { menu: PendingSourceMenu }) {
   const [highlighted, setHighlighted] = useState(0);
   const menuRef = useRef<HTMLDivElement>(null);
   const returnFocusRef = useFocusReturn();
-  const colorScheme = resolveColorScheme(state.settings.general.colorScheme);
+  const colorScheme = resolveColorScheme(state.settings.general.activeColorScheme);
   const items: Array<{ action: EjectAction; label: string }> = source?.eject
     ? [
         { action: "unmount-volume", label: "Unmount volume…" },

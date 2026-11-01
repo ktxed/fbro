@@ -551,6 +551,9 @@ pub struct AppState {
     pub command_revision: u64,
     pub settings_mutation: std::sync::Arc<tokio::sync::Mutex<()>>,
     pub settings: settings::Settings,
+    /// Latest OS light/dark preference from the platform appearance watcher;
+    /// `None` while unavailable. Not persisted.
+    pub system_color_scheme: Option<crate::platform::SystemColorScheme>,
     /// Per-local-directory preferences loaded from the shared SQLite store.
     pub location_settings: location_settings::LocationSettingsMap,
     pub child_processes: HashMap<u32, ChildProcessEntry>,
@@ -640,6 +643,15 @@ pub struct GitCompareNavigation {
 }
 
 impl AppState {
+    /// The built-in color scheme every client renders right now.
+    pub fn active_color_scheme(&self) -> &'static str {
+        settings::resolve_active_color_scheme(
+            self.settings.general.follow_system_color_scheme,
+            &self.settings.general.color_scheme,
+            self.system_color_scheme,
+        )
+    }
+
     pub fn path_on_ejecting_drive(&self, path: &str) -> bool {
         if path.is_empty() { return false; }
         self.sources.iter().any(|(id, source)| {
@@ -1055,6 +1067,7 @@ impl AppState {
             command_revision: 0,
             settings_mutation: std::sync::Arc::new(tokio::sync::Mutex::new(())),
             settings: loaded_settings,
+            system_color_scheme: None,
             location_settings,
             child_processes: HashMap::new(),
             pty_manager: Arc::new(crate::terminal::PtyManager::new()),

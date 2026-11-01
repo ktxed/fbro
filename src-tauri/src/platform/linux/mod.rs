@@ -1,3 +1,4 @@
+pub mod appearance;
 pub mod thumbnail;
 mod notifications;
 pub mod udisks2;

@@ -661,7 +661,7 @@ export function FileViewer({ ref, path: initPath, sourceId: initSourceId, filena
           const snapshot = msg as StateSnapshotMessage;
           const fontSize = snapshot.domains.fontSize;
           if (fontSize !== undefined) { currentFontSizeRef.current = fontSize; applyZoom(fontSize); }
-          setColorSchemeId(resolveColorScheme(snapshot.domains.settings?.general.colorScheme).id);
+          setColorSchemeId(resolveColorScheme(snapshot.domains.settings?.general.activeColorScheme).id);
           applyHeicSetting(snapshot.domains.settings?.general.enableHeic2any ?? false);
         }
         if (msg.type === "StatePatch") {
@@ -672,10 +672,10 @@ export function FileViewer({ ref, path: initPath, sourceId: initSourceId, filena
             applyZoom(fontSize);
           }
           if (patch.domain === "settings") {
-            const general = patch.patch.general as { colorScheme?: string; enableHeic2any?: boolean } | undefined;
+            const general = patch.patch.general as { activeColorScheme?: string; enableHeic2any?: boolean } | undefined;
             if (general?.enableHeic2any !== undefined) applyHeicSetting(general.enableHeic2any);
-            if (general?.colorScheme !== undefined) {
-              setColorSchemeId(resolveColorScheme(general.colorScheme).id);
+            if (general?.activeColorScheme !== undefined) {
+              setColorSchemeId(resolveColorScheme(general.activeColorScheme).id);
             }
           }
         }

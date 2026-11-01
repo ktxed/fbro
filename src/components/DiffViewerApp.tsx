@@ -100,7 +100,7 @@ export function DiffViewerApp({ requestId, windowLabel, initialColorScheme }: Di
             currentFontSizeRef.current = fontSize;
             applyZoom(fontSize);
           }
-          setColorSchemeId(resolveColorScheme(snapshot.domains.settings?.general.colorScheme).id);
+          setColorSchemeId(resolveColorScheme(snapshot.domains.settings?.general.activeColorScheme).id);
         }
         if (msg.type === "StatePatch") {
           const patch = msg as StatePatchMessage;
@@ -110,9 +110,9 @@ export function DiffViewerApp({ requestId, windowLabel, initialColorScheme }: Di
             applyZoom(fontSize);
           }
           if (patch.domain === "settings") {
-            const general = patch.patch.general as { colorScheme?: string } | undefined;
-            if (general?.colorScheme !== undefined) {
-              setColorSchemeId(resolveColorScheme(general.colorScheme).id);
+            const general = patch.patch.general as { activeColorScheme?: string } | undefined;
+            if (general?.activeColorScheme !== undefined) {
+              setColorSchemeId(resolveColorScheme(general.activeColorScheme).id);
             }
           }
         }

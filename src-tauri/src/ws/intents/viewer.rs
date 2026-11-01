@@ -451,11 +451,8 @@ async fn view_file(args: &Value, ctx: &mut IntentContext<'_>) {
     let (is_local, driver, file_server_port, image_cap_bytes, color_scheme, viewer_bg) = {
         let state_guard = ctx.state.lock().await;
         let driver = state_guard.drivers.get(&effective_source_id).cloned();
-        let color_scheme = state_guard.settings.general.color_scheme.clone();
-        let viewer_bg = match color_scheme.as_str() {
-            "daylight" => tauri::webview::Color(244, 246, 248, 255),
-            _ => tauri::webview::Color(13, 13, 13, 255),
-        };
+        let color_scheme = state_guard.active_color_scheme().to_string();
+        let viewer_bg = crate::ws::appearance::window_background(&color_scheme);
         (
             driver
                 .as_ref()

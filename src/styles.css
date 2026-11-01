@@ -5883,6 +5883,11 @@ body {
   border-color: var(--accent);
 }
 
+.settings-tab__select:disabled {
+  opacity: .55;
+  cursor: default;
+}
+
 .settings-tab__path-row {
   display: flex;
   align-items: baseline;

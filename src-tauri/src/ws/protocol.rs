@@ -733,6 +733,12 @@ pub struct GeneralSettingsSchema {
     pub persist_panel_tabs: bool,
     pub proc_tree_mode: bool,
     pub color_scheme: String,
+    pub follow_system_color_scheme: bool,
+    /// Read-only: the built-in scheme clients render (resolved by the backend).
+    pub active_color_scheme: String,
+    /// Read-only: OS light/dark preference ("dark" / "light"), `null` while
+    /// unavailable. Never skipped so clients can tell "unavailable" apart.
+    pub system_color_scheme: Option<String>,
     pub sevenzip_extractor: String,
     pub sevenzip_custom_path: String,
     /// Effective binary picked given the current mode + custom path. Empty

@@ -9,7 +9,9 @@ use std::process::Command;
 use std::ptr;
 use std::slice;
 
+pub(super) mod appearance;
 mod notifications;
+mod registry;
 
 pub struct WindowsPlatform;
 

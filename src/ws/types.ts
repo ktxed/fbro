@@ -782,7 +782,13 @@ export interface GeneralSettings {
   thumbnailCacheSizeBytes: number;
   persistPanelTabs: boolean;
   procTreeMode: boolean;
+  /** Persisted manual scheme choice; only the Settings UI reads it. */
   colorScheme: string;
+  followSystemColorScheme: boolean;
+  /** Read-only: the scheme to render, resolved by the backend. */
+  activeColorScheme: string;
+  /** Read-only: OS light/dark preference; null while unavailable. */
+  systemColorScheme: "dark" | "light" | null;
   /** "auto" | "custom" | "internal" */
   sevenzipExtractor: string;
   sevenzipCustomPath: string;

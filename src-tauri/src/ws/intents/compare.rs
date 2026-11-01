@@ -130,11 +130,8 @@ async fn launch_compare_targets(
 ) -> Result<(), String> {
     let (mode, external_command, max_file_size_mb, color_scheme, viewer_bg) = {
         let state_guard = ctx.state.lock().await;
-        let color_scheme = state_guard.settings.general.color_scheme.clone();
-        let viewer_bg = match color_scheme.as_str() {
-            "daylight" => tauri::webview::Color(244, 246, 248, 255),
-            _ => tauri::webview::Color(13, 13, 13, 255),
-        };
+        let color_scheme = state_guard.active_color_scheme().to_string();
+        let viewer_bg = crate::ws::appearance::window_background(&color_scheme);
         (
             state_guard.settings.general.compare_differ_mode,
             state_guard
@@ -173,11 +170,8 @@ async fn launch_git_diff(
 ) -> Result<(), String> {
     let (max_bytes, color_scheme, viewer_bg) = {
         let state_guard = ctx.state.lock().await;
-        let color_scheme = state_guard.settings.general.color_scheme.clone();
-        let viewer_bg = match color_scheme.as_str() {
-            "daylight" => tauri::webview::Color(244, 246, 248, 255),
-            _ => tauri::webview::Color(13, 13, 13, 255),
-        };
+        let color_scheme = state_guard.active_color_scheme().to_string();
+        let viewer_bg = crate::ws::appearance::window_background(&color_scheme);
         (
             state_guard.settings.general.compare_max_file_size_mb.saturating_mul(1024 * 1024),
             color_scheme,

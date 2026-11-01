@@ -1,3 +1,4 @@
+pub(crate) mod appearance;
 pub mod commands;
 pub(crate) mod command_bindings;
 pub mod intents;

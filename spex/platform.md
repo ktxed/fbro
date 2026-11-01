@@ -310,6 +310,30 @@ table, excludes disk images, identifies external physical media with
 corresponding whole disk. Windows returns unsupported. No path is passed
 through a shell and neither platform forces an unmount.
 
+### 4.1 System appearance watcher
+
+`create_appearance_watcher()` (in `platform/mod.rs`) returns a
+`tokio::sync::watch::Receiver<Option<SystemColorScheme>>` holding the OS
+light/dark preference (`Dark` / `Light`; `None` means unavailable). The initial
+read completes before it returns, so the first snapshot already uses the
+system scheme. Pure value mappings live in `platform/appearance.rs` and are
+unit-tested on every host.
+
+| OS | Source | Live updates | Mapping |
+|---|---|---|---|
+| Linux | XDG desktop portal `org.freedesktop.portal.Settings` `ReadOne` (falls back to the deprecated `Read`), namespace `org.freedesktop.appearance`, key `color-scheme`, over zbus with a 1 s timeout | `SettingChanged` signal filtered by namespace and key | 1 → Dark; 0 (no preference, GNOME's default) or 2 → Light; others → unavailable |
+| Windows | `HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize` `AppsUseLightTheme` | `RegNotifyChangeKeyValue` on a dedicated thread; publishes only real changes | 0 → Dark; non-zero or missing → Light |
+| macOS | `NSUserDefaults` `AppleInterfaceStyle` | `AppleInterfaceThemeChangedNotification` on `NSDistributedNotificationCenter`, registered on the main queue; re-read after 300 ms to absorb settle lag | "Dark" → Dark; missing → Light |
+
+A missing session bus, portal, or registry key logs once
+(`[appearance] …`) and leaves the preference unavailable; settings then use the
+manual scheme. Detection deliberately does not use Tauri's window theme
+(`Window::theme()` / `ThemeChanged`): that would tie it to a window and to
+`main.rs`, block on D-Bus on Linux, and stop reporting the OS value once fbro
+sets a native window theme. `ws/appearance.rs` consumes the receiver
+(`run_appearance_updates`) and broadcasts settings patches; see
+[settings.md](./settings.md#system-appearance).
+
 ---
 
 ## 5. Wiring
@@ -321,6 +345,8 @@ let thumb_pool = ThumbPool::start(platform.clone(), 8);
 let state = AppState::new_default(platform.clone(), thumb_pool, ...);
 // later, inside the ws server task:
 let volume_watcher = create_volume_watcher(platform).await;
+let appearance_rx = create_appearance_watcher().await;   // seeds AppState.system_color_scheme
+tokio::spawn(ws::appearance::run_appearance_updates(state.clone(), appearance_rx));
 ```
 
 The watcher immediately reconciles the synchronous startup inventory before
@@ -349,7 +375,8 @@ Non-exhaustive — grows as new intents are added.
 | `ws/intents/bro.rs` | `write_text_clipboard` |
 | `thumb_pool.rs` | `get_thumbnail` (worker threads) |
 | `platform::resolve_icon` | `find_icon` (icon-serving HTTP route) |
-| `ws/server.rs` startup | `create_volume_watcher` |
+| `ws/server.rs` startup | `create_volume_watcher`, `create_appearance_watcher` |
+| `ws/appearance.rs` | `SystemColorScheme` updates → settings patches |
 
 ---
 

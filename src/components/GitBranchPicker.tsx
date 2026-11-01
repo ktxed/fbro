@@ -34,7 +34,7 @@ export const GitBranchPicker = forwardRef<HTMLButtonElement, GitBranchPickerProp
   const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const selectionPendingRef = useRef(false);
   const listId = useId();
-  const colorScheme = resolveColorScheme(useAppState().settings.general.colorScheme);
+  const colorScheme = resolveColorScheme(useAppState().settings.general.activeColorScheme);
   const choices = useMemo<GitBranchChoice[]>(() => [
     ...branches.map(name => ({ name, kind: "local" as const, refName: `refs/heads/${name}` })),
     ...remoteBranches.map(branch => ({ ...branch, kind: "remote" as const })),

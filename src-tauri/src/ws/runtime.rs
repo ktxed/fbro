@@ -181,6 +181,11 @@ pub(crate) fn build_state_snapshot(
                     persist_panel_tabs: state.settings.general.persist_panel_tabs,
                     proc_tree_mode: state.settings.general.proc_tree_mode,
                     color_scheme: state.settings.general.color_scheme.clone(),
+                    follow_system_color_scheme: state.settings.general.follow_system_color_scheme,
+                    active_color_scheme: state.active_color_scheme().to_string(),
+                    system_color_scheme: state
+                        .system_color_scheme
+                        .map(|scheme| scheme.as_str().to_string()),
                     sevenzip_extractor: state
                         .settings
                         .general
@@ -1837,6 +1842,93 @@ mod patch_tests {
         assert!(matches!(panel.status, PanelStatus::Error(_)));
         assert_eq!(panel.selection, vec![2]);
         assert_eq!(panel.version, 5);
+    }
+
+    fn general_patch(message: ServerMessage) -> serde_json::Value {
+        let ServerMessage::StatePatch { domain, patch, .. } = message else {
+            panic!("expected StatePatch");
+        };
+        assert_eq!(domain, "settings");
+        patch["general"].clone()
+    }
+
+    #[tokio::test]
+    async fn system_color_scheme_change_broadcasts_active_scheme_to_gui_and_viewers() {
+        use crate::platform::SystemColorScheme;
+        let state = test_state();
+        let (gui_tx, mut gui_rx) = mpsc::channel(8);
+        let (viewer_tx, mut viewer_rx) = mpsc::channel(8);
+        {
+            let mut guard = state.lock().await;
+            guard.settings.general.follow_system_color_scheme = true;
+            guard.settings.general.color_scheme = "fbro-dark".into();
+            guard.system_color_scheme = None;
+            guard.gui_senders.push(gui_tx);
+            guard.viewer_senders.push(viewer_tx);
+        }
+
+        crate::ws::appearance::apply_system_color_scheme(&state, Some(SystemColorScheme::Light)).await;
+        for rx in [&mut gui_rx, &mut viewer_rx] {
+            let general = general_patch(rx.try_recv().unwrap());
+            assert_eq!(general["systemColorScheme"], "light");
+            assert_eq!(general["activeColorScheme"], "daylight");
+        }
+
+        // An unchanged preference publishes nothing.
+        crate::ws::appearance::apply_system_color_scheme(&state, Some(SystemColorScheme::Light)).await;
+        assert!(gui_rx.try_recv().is_err());
+        assert!(viewer_rx.try_recv().is_err());
+
+        // Losing detection falls back to the manual scheme.
+        crate::ws::appearance::apply_system_color_scheme(&state, None).await;
+        let general = general_patch(gui_rx.try_recv().unwrap());
+        assert!(general["systemColorScheme"].is_null());
+        assert_eq!(general["activeColorScheme"], "fbro-dark");
+    }
+
+    #[tokio::test]
+    async fn system_color_scheme_is_ignored_while_not_following() {
+        use crate::platform::SystemColorScheme;
+        let state = test_state();
+        let (gui_tx, mut gui_rx) = mpsc::channel(8);
+        {
+            let mut guard = state.lock().await;
+            guard.settings.general.follow_system_color_scheme = false;
+            guard.settings.general.color_scheme = "daylight".into();
+            guard.system_color_scheme = None;
+            guard.gui_senders.push(gui_tx);
+        }
+        crate::ws::appearance::apply_system_color_scheme(&state, Some(SystemColorScheme::Dark)).await;
+        let general = general_patch(gui_rx.try_recv().unwrap());
+        assert_eq!(general["systemColorScheme"], "dark");
+        assert_eq!(general["activeColorScheme"], "daylight");
+    }
+
+
+    #[tokio::test]
+    async fn snapshot_projects_color_scheme_fields() {
+        use crate::platform::SystemColorScheme;
+        let state = test_state();
+        let mut guard = state.lock().await;
+        guard.settings.general.follow_system_color_scheme = true;
+        guard.settings.general.color_scheme = "daylight".into();
+        guard.system_color_scheme = Some(SystemColorScheme::Dark);
+        let ServerMessage::StateSnapshot { domains, .. } = build_state_snapshot(&guard, vec![]) else {
+            panic!("expected StateSnapshot");
+        };
+        let general = serde_json::to_value(domains).unwrap()["settings"]["general"].clone();
+        assert_eq!(general["colorScheme"], "daylight");
+        assert_eq!(general["followSystemColorScheme"], true);
+        assert_eq!(general["activeColorScheme"], "fbro-dark");
+        assert_eq!(general["systemColorScheme"], "dark");
+
+        guard.system_color_scheme = None;
+        let ServerMessage::StateSnapshot { domains, .. } = build_state_snapshot(&guard, vec![]) else {
+            panic!("expected StateSnapshot");
+        };
+        let general = serde_json::to_value(domains).unwrap()["settings"]["general"].clone();
+        assert!(general["systemColorScheme"].is_null());
+        assert_eq!(general["activeColorScheme"], "daylight");
     }
 }
 
