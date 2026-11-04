@@ -415,6 +415,20 @@ function VolumeHeader({ sources, panel, onNavigateToSource, onMountSource, clien
     return () => window.removeEventListener("resize", onResize);
   }, [sources, expandedRemoteIds, updateRemoteOverflow]);
 
+  // Keep the active source visible when it changes (Ctrl+Tab, navigation, ...).
+  useLayoutEffect(() => {
+    const el = listRef.current;
+    if (!el) return;
+    const node = Array.from(el.querySelectorAll<HTMLElement>("[data-source-id]"))
+      .find((n) => n.dataset.sourceId === panel.sourceId);
+    if (!node) return;
+    const box = el.getBoundingClientRect();
+    const rect = node.getBoundingClientRect();
+    if (rect.left < box.left) el.scrollLeft -= box.left - rect.left;
+    else if (rect.right > box.right) el.scrollLeft += rect.right - box.right;
+    updateArrows();
+  }, [panel.sourceId, sources]);
+
   const scroll = (dir: number) => {
     listRef.current?.scrollBy({ left: dir * 80, behavior: "smooth" });
   };

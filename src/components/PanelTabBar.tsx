@@ -91,6 +91,20 @@ export function PanelTabBar({ slot, panels, sources, client, blocked }: Props) {
     };
   }, [slot.tabPanelIds.length]);
 
+  // Keep the active tab visible when it changes (tab shortcuts, new tab, ...).
+  useEffect(() => {
+    const el = listRef.current;
+    if (!el) return;
+    const tab = Array.from(el.querySelectorAll<HTMLElement>("[data-tab-panel-id]"))
+      .find((t) => t.dataset.tabPanelId === slot.activePanelId);
+    if (!tab) return;
+    const box = el.getBoundingClientRect();
+    const rect = tab.getBoundingClientRect();
+    if (rect.left < box.left) el.scrollLeft -= box.left - rect.left;
+    else if (rect.right > box.right) el.scrollLeft += rect.right - box.right;
+    updateArrows();
+  }, [slot.activePanelId, slot.tabPanelIds.length]);
+
   const scroll = (dir: number) => {
     listRef.current?.scrollBy({ left: dir * 80, behavior: "smooth" });
   };
