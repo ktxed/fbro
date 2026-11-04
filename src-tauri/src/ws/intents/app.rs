@@ -8,7 +8,30 @@ pub(crate) async fn handle(name: &str, args: &Value, ctx: &mut IntentContext<'_>
         "Quit" => quit(args, ctx).await,
         "ConfirmQuit" => confirm_quit(ctx).await,
         "SetFontSize" => set_font_size(args, ctx).await,
+        "OpenUserGuide" => open_user_guide(ctx).await,
         _ => {}
+    }
+}
+
+/// The published user guide. The intent takes no URL, so a client can't make
+/// the backend open an arbitrary link through it.
+const USER_GUIDE_URL: &str = "https://ktxed.github.io/fbro/";
+
+async fn open_user_guide(ctx: &mut IntentContext<'_>) {
+    let platform = {
+        let state = ctx.state.lock().await;
+        std::sync::Arc::clone(&state.platform)
+    };
+    if let Err(message) = platform.open_url(USER_GUIDE_URL) {
+        let _ = ctx
+            .send_feedback(ServerMessage::Error {
+                timestamp: now(),
+                code: "USER_GUIDE_OPEN_FAILED".into(),
+                message,
+                recoverable: true,
+                extra: None,
+            })
+            .await;
     }
 }
 

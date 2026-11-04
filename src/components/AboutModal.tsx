@@ -122,6 +122,15 @@ export function AboutModal({ client }: { client: WsClient }) {
           >
             {copied ? "Copied" : "Copy build info"}
           </CopyButton>
+          <button
+            className="modal__btn"
+            type="button"
+            data-testid="about-user-guide"
+            title="Open the user guide in your browser"
+            onClick={() => client.sendIntent("OpenUserGuide")}
+          >
+            User guide
+          </button>
           <button ref={closeRef} className="modal__btn modal__btn--primary" type="button" onClick={close}>
             Close
           </button>

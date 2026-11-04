@@ -974,6 +974,12 @@ async function verifyAboutModal(browser) {
   if (!["Clean", "Dirty", "Unknown"].includes(dirty)) throw new Error(`invalid About dirty state: ${dirty}`);
   if (Number.isNaN(Date.parse(builtAt))) throw new Error(`invalid About build timestamp: ${builtAt}`);
 
+  // User guide opens the published site in the system browser; here the
+  // container has none, so the dialog must simply stay open and keep focus.
+  await browser.$('[data-testid="about-user-guide"]').click();
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  if (!(await about.isDisplayed())) throw new Error("User guide closed the About dialog");
+
   await browser.keys("Escape");
   await about.waitForDisplayed({ timeout: 10_000, reverse: true });
   await waitFor(async () => browser.execute(() => document.activeElement?.getAttribute("data-testid") === "panel-left"), {
