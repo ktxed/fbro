@@ -1,0 +1,71 @@
+---
+title: fbro
+description: Keeping it old school with 2 folders side by side, all from the keyboard. A dual-pane file manager for Linux, macOS and Windows.
+template: splash
+hero:
+  tagline: 'Keeping it <a href="https://youtu.be/t_yc4i8f6xU" target="_blank" rel="noopener">old school</a> with 2 folders side by side, all from the keyboard. A dual-pane file manager for Linux, macOS and Windows.'
+  image:
+    # Served from public/ so Astro keeps the aspect ratio (it squares hero `file` images).
+    html: <img class="fbro-hero-shot" src="/fbro/screenshot.webp" width="1400" height="910" alt="fbro on macOS, with a thumbnail grid in the left panel and a git repository in the right panel" />
+  actions:
+    - text: Download
+      link: https://github.com/ktxed/fbro/releases/latest
+      icon: external
+      variant: primary
+    - text: Get started
+      link: get-started/install/
+      icon: right-arrow
+      variant: secondary
+---
+
+import { Card, CardGrid } from "@astrojs/starlight/components";
+import Shortcut from "../../components/Shortcut.astro";
+
+<div class="fbro-video">
+  <iframe
+    src="https://www.youtube-nocookie.com/embed/y4Jxfumu_NA"
+    title="Meet fbro: a keyboard-first, cross-platform two-panel file browser"
+    loading="lazy"
+    allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+    referrerpolicy="strict-origin-when-cross-origin"
+    allowfullscreen
+  ></iframe>
+</div>
+
+<CardGrid>
+  <Card title="Two panels, one keyboard" icon="seti:folder">
+    Browse two locations side by side and copy, move or compare between them.
+    Every action has a shortcut, and <Shortcut id="app.cheat_sheet" /> lists them.
+    [Read more](using/navigation/)
+  </Card>
+  <Card title="Git, terminal and editor" icon="seti:git">
+    See git status in the listing, open a terminal tab, edit text in an editor
+    tab, and keep scratch notes.
+    [Read more](git/repositories/)
+  </Card>
+  <Card title="bros" icon="puzzle">
+    Pass files to a bro (<Shortcut id="panel.pass_to_bro" />) to pack, extract,
+    hash, find duplicates, or sync with another machine.
+    [Read more](bros/overview/)
+  </Card>
+  <Card title="Remote fbro" icon="laptop">
+    Pair two fbro instances and browse or transfer files between them over SFTP.
+    [Read more](remote/pairing/)
+  </Card>
+  <Card title="Jobs you can interrupt" icon="rocket">
+    Copy, move and delete run as background jobs. You can pause, skip or
+    cancel them, and fbro asks what to do about each conflict.
+    [Read more](files/jobs/)
+  </Card>
+  <Card title="Archives and search as folders" icon="magnifier">
+    Open zip and 7z archives as if they were folders. Search results open in a
+    panel and work like any other listing.
+    [Read more](bros/archives/)
+  </Card>
+</CardGrid>
+
+:::caution[Early software]
+fbro is in early development and has been tested most on Linux and macOS.
+Expect rough edges, and please
+[report what you find](https://github.com/ktxed/fbro/issues).
+:::

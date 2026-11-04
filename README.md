@@ -10,6 +10,8 @@
 
 **fbro** is a dual-pane orthodox file manager for power users.
 
+**User guide:** <https://ktxed.github.io/fbro/>
+
 Built with [Tauri](https://tauri.app/) (Rust backend + React frontend). The backend owns state; the UI talks over WebSocket via intents and jobs.
 
 > Status: early. Primarily tested on Linux and macOS.
@@ -37,6 +39,8 @@ npm run tauri dev
 ```bash
 npm run tauri build
 ```
+
+User guide site (Astro Starlight, in [`site/`](site/)): `npm --prefix site install`, then `npm run site:dev`.
 
 Smoke tests: see [TESTING.md](TESTING.md). Releases: see [RELEASING.md](RELEASING.md).
 

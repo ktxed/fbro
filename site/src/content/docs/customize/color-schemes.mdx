@@ -1,0 +1,76 @@
+---
+title: Color schemes
+description: Choose a color scheme, follow the system's light or dark mode, and create your own.
+---
+
+import Shortcut from "../../../components/Shortcut.astro";
+import Screenshot from "../../../components/Screenshot.astro";
+
+## Choose a scheme
+
+Open **Settings → Display** (<Shortcut id="app.settings" />) and pick one under
+**Color Scheme → Scheme**. fbro comes with:
+
+- **fbro Dark** and **fbro Light**;
+- bundled schemes: Matrix, Magenta, Windows XP, IntelliJ Dark and Light, CDE
+  Motif, and Solarized Dark and Light.
+
+The scheme applies to every fbro window, including the viewer, the diff window
+and the terminal.
+
+### Follow the system
+
+Turn on **Match system appearance** to switch between fbro Dark and fbro Light
+whenever your system changes between dark and light mode. While it's on, the
+**Scheme** list is disabled. If fbro can't detect your system's setting, it says
+so and keeps using the scheme you picked.
+
+## Create your own
+
+1. In **Settings → Display**, choose **Customize…**. This opens the **Color
+   Scheme** tab.
+2. Choose a scheme to start from and choose **Duplicate…**. Give the copy a
+   **Name**. The built-in and bundled schemes can't be edited directly, so every
+   custom scheme starts as a copy.
+3. Edit the colors. **Filter colors…** finds a color by name, and the preview
+   shows the result as you go. Set **Mode** to **Dark** or **Light** so native
+   controls and diagrams match.
+4. Choose **Use this scheme** to switch to it.
+
+Changes save automatically. **Revert** undoes unsaved edits, and **Delete…**
+removes a custom scheme.
+
+<Screenshot name="color-scheme-editor" alt="The color scheme editor with a duplicated scheme named Midnight, its name and mode fields, and a live preview" />
+
+## Scheme files
+
+Each custom scheme is a TOML file in the `themes` folder of fbro's
+[data folder](../../get-started/first-launch/#where-fbro-keeps-its-data), for
+example `~/.config/fbro/themes/midnight.toml`. **Open themes folder** opens it in
+the active panel.
+
+fbro watches this folder:
+
+- copy a `.toml` file in to import a scheme someone shared with you;
+- edit a file in your text editor and open windows restyle immediately.
+
+A file with a mistake shows under **Could not load:** with the reason, and is
+left untouched.
+
+```toml
+version = 1
+name = "Midnight"
+description = "Based on fbro Dark"
+mode = "dark"          # dark or light
+base = "fbro-dark"     # fills in any color not listed below
+
+[colors]               # color names, without the leading "--"
+bg = "#0d0d0d"
+bg-selected = "rgba(220, 170, 20, 0.30)"
+
+[terminal]
+background = "#1e1e1e"
+foreground = "#dddddd"
+```
+
+Colors can be `#rgb`, `#rrggbb` (with optional alpha), `rgb()` or `rgba()`.

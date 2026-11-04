@@ -1,0 +1,58 @@
+---
+title: Terminal
+description: Run a shell inside fbro, next to your listing or in its own tab, or open your system terminal.
+---
+
+import Shortcut from "../../../components/Shortcut.astro";
+import Screenshot from "../../../components/Screenshot.astro";
+
+fbro has a terminal built in, and can also open your system's terminal app.
+
+| | Keys |
+|---|---|
+| Terminal inside the panel | <Shortcut id="panel.toggle_embedded_terminal" /> |
+| Your system terminal, in the current folder | <Shortcut id="app.open_terminal" /> |
+
+## The embedded terminal
+
+<Shortcut id="panel.toggle_embedded_terminal" /> opens a terminal in the lower
+half of the active panel, starting in the panel's folder. The listing stays
+visible above it.
+
+- While the terminal has focus, it gets your keys, so you can type commands
+  normally.
+- <kbd>Escape</kbd> moves focus back to the listing; the terminal keeps running.
+  Press <Shortcut id="panel.toggle_embedded_terminal" /> to focus it again.
+- To close it, use its **Close terminal** button or exit the shell.
+- The terminal's buttons maximize it to fill the window, move it into its own
+  tab, or close it. When it's maximized, <kbd>Escape</kbd> restores it first.
+
+Because <kbd>Escape</kbd> belongs to fbro, press <kbd>Ctrl</kbd>+<kbd>[</kbd> to
+send Escape to a program running in the terminal, such as Vim.
+
+<Screenshot name="terminal" alt="The embedded terminal in the lower half of a panel, after running ls -la" />
+
+## Terminal tabs
+
+**Promote terminal to its own tab** moves a running terminal into a tab of its own
+in the same panel, keeping the session and its scrollback. It then behaves like
+any [tab](../../using/tabs/). When the shell exits, its tab closes.
+
+Terminal tabs aren't restored when fbro restarts.
+
+## Which shell
+
+| Platform | Shell |
+|---|---|
+| Linux, macOS | Your login shell (`$SHELL`), or `/bin/bash` |
+| Windows | `%COMSPEC%`, usually `cmd.exe` |
+
+On zsh, **Use Emacs keys in new zsh terminal sessions** in **Settings → General**
+(<Shortcut id="app.settings" />) turns on Emacs-style line editing.
+
+## Your system terminal
+
+<Shortcut id="app.open_terminal" /> (**Shell** on the button bar) opens your
+system's terminal app in the current folder. On Linux, fbro looks for common
+terminals such as GNOME Terminal, Kitty, Alacritty, Tilix, Xfce Terminal and
+xterm.

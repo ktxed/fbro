@@ -1,0 +1,64 @@
+---
+title: Compare files
+description: Compare two text files side by side or as a unified diff.
+---
+
+import Shortcut from "../../../components/Shortcut.astro";
+import Screenshot from "../../../components/Screenshot.astro";
+
+**Compare** shows the differences between two text files. It has no default key:
+run it from the [command palette](../../using/command-palette/)
+(<Shortcut id="app.command_palette" />), the context menu
+(<Shortcut id="panel.context_menu" />) or the row's
+[inline choices](../../files/inline-choices/).
+
+## Choose the two files
+
+Any of these works:
+
+- Select two files in the same panel.
+- Select one file and put the cursor on another.
+- Select one file in each panel.
+
+The files must be UTF-8 text and no larger than **Maximum text file size
+(MiB):** in **Settings → Display**.
+
+## The diff window
+
+The diff opens in its own window.
+
+| Key | Action |
+|---|---|
+| <kbd>S</kbd> or <kbd>1</kbd> | Side-by-side view |
+| <kbd>U</kbd> or <kbd>2</kbd> | Unified view |
+| <kbd>N</kbd> / <kbd>P</kbd> | Next / previous change |
+| <kbd>Down</kbd> / <kbd>Up</kbd> | Next / previous change (scroll one line when there's only one change) |
+| <kbd>Left</kbd> / <kbd>Right</kbd> | Scroll sideways |
+| <kbd>PageUp</kbd> / <kbd>PageDown</kbd>, <kbd>Home</kbd> / <kbd>End</kbd> | Scroll |
+| <kbd>W</kbd> | Word wrap on or off |
+| <kbd>M</kbd> | Maximize or restore the window |
+| <kbd>C</kbd> or <kbd>Escape</kbd> | Close |
+
+In side-by-side view, both sides scroll together.
+
+<Screenshot name="diff-window" alt="The diff window comparing two versions of CHANGELOG.md side by side, with changed rows highlighted" />
+
+## Git diffs
+
+For a changed file in a git repository, **View Git diff** (in the inline
+choices and the context menu) opens the same window with the committed version
+on one side and your working copy on the other. When you open it from the list
+of changed files, <kbd>J</kbd> and <kbd>K</kbd> move to the next and previous
+changed file.
+
+## Use your own diff tool
+
+**Settings → Display → Differ** chooses what Compare opens:
+
+- **Internal**, fbro's own diff window (the default);
+- **External**, the program in **External differ executable:**;
+- **Auto**, which tries the external program first and falls back to the internal
+  window if it can't be started.
+
+External tools only work for files on a local disk; others always use the
+internal window.

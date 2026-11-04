@@ -1,0 +1,56 @@
+---
+title: Sorting & filtering
+description: Sort a listing, narrow it down with a filter, and show or hide hidden files.
+---
+
+import Shortcut from "../../../components/Shortcut.astro";
+import Screenshot from "../../../components/Screenshot.astro";
+
+## Sort the listing
+
+Press <Shortcut id="panel.sort.open" /> to open the sort selector:
+
+- <kbd>Left</kbd> and <kbd>Right</kbd> choose the column: **Kind**, **Name**,
+  **Size** or **Date**.
+- <kbd>Up</kbd> and <kbd>Down</kbd> switch between ascending and descending order.
+- <kbd>Enter</kbd> applies the sort and <kbd>Escape</kbd> cancels.
+
+You can also click a column header in list view.
+
+<Screenshot name="sort-selector" alt="The sort selector open over a listing, with Date chosen and descending order" />
+
+### Remember sorting per location
+
+By default each panel keeps its own sort order. Turn on **Remember sorting per
+location** in **Settings → General** (<Shortcut id="app.settings" />) to have
+fbro remember the sort order of each folder separately, in every panel and tab
+and across restarts.
+
+## Filter the listing
+
+Press <Shortcut id="panel.filter.open" /> and start typing. The listing narrows
+to matching names as you type.
+
+- Text without `*` matches anywhere in the name: `report` finds
+  `2026-report-final.pdf`.
+- Text with `*` must match the whole name: `*.pdf` shows only PDFs.
+- Separate alternatives with `|`: `*.jpg|*.png`.
+- Matching ignores case.
+
+While the filter field is open, <kbd>Up</kbd>, <kbd>Down</kbd> and the other
+listing keys still move the cursor. Press <kbd>Enter</kbd> to keep the filter and
+go back to the listing, or <kbd>Escape</kbd> to clear it.
+
+The footer shows the active filter as `/pattern/`. Press
+<Shortcut id="panel.filter.open" /> again to change it.
+
+<Screenshot name="filter" alt="A listing narrowed by the filter text md, with the filter field open and /md/ shown in the footer" />
+
+## Hidden files
+
+<Shortcut id="panel.toggle_hidden" /> shows or hides hidden files (names
+starting with a dot) in the active panel. While they're hidden, the footer
+shows an **H** badge; click it to show them.
+
+To show hidden files in every new panel, turn on **Show hidden files by
+default** in **Settings → General**.

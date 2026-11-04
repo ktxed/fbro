@@ -1,0 +1,51 @@
+---
+// Every registry command with its default bindings, grouped by category, with
+// one tab per platform. Tabs share a syncKey so the choice sticks across pages.
+import { Tabs, TabItem } from "@astrojs/starlight/components";
+import { CATEGORY_ORDER, PLATFORMS, commandsFor, modeNote } from "../data/commands";
+import Keys from "./Keys.astro";
+
+const groups = (platform: (typeof PLATFORMS)[number]["id"]) => {
+  const byCategory = new Map<string, ReturnType<typeof commandsFor>>();
+  for (const command of commandsFor(platform)) {
+    const list = byCategory.get(command.category) ?? [];
+    list.push(command);
+    byCategory.set(command.category, list);
+  }
+  const rank = (c: string) => (CATEGORY_ORDER.indexOf(c) + 1 || 99);
+  return [...byCategory.entries()].sort(([a], [b]) => rank(a) - rank(b));
+};
+---
+<Tabs syncKey="platform">
+  {PLATFORMS.map((platform) => (
+    <TabItem label={platform.label}>
+      {groups(platform.id).map(([category, commands]) => (
+        <>
+          <h3>{category}</h3>
+          <table class="fbro-shortcut-table">
+            <thead>
+              <tr><th>Command</th><th>Default shortcut</th></tr>
+            </thead>
+            <tbody>
+              {commands.map((command) => (
+                <tr data-command-id={command.id}>
+                  <td>{command.title}</td>
+                  <td>
+                    {command.bindings.length === 0 && <span class="fbro-muted">Command palette / menu</span>}
+                    {command.bindings.map((binding, i) => (
+                      <>
+                        {i > 0 && <span class="fbro-muted"> or </span>}
+                        <Keys binding={binding} platform={platform.id} />
+                        {modeNote(binding) && <span class="fbro-muted"> ({modeNote(binding)})</span>}
+                      </>
+                    ))}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      ))}
+    </TabItem>
+  ))}
+</Tabs>

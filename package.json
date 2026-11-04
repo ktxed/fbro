@@ -25,7 +25,10 @@
     "test:tabs": "node --test --test-isolation=none tests/tabs.test.mjs",
     "test:keyboard-shortcuts": "node --test --test-isolation=none tests/keyboard-shortcuts.test.mjs",
     "test:modal-keyboard": "node --test --test-isolation=none tests/modal-keyboard.test.mjs",
-    "showcase": "node tools/showcase/index.mjs"
+    "showcase": "node tools/showcase/index.mjs",
+    "site:dev": "npm --prefix site run dev",
+    "site:build": "npm --prefix site run build",
+    "docs:screens": "FBRO_E2E_LOCAL=1 FBRO_E2E_COMPOSE_FILES=docker-compose.e2e.host.yml node tests/e2e/docs/index.mjs"
   },
   "dependencies": {
     "@codemirror/commands": "^6.11.1",

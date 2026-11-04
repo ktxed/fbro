@@ -1,0 +1,92 @@
+---
+title: FAQ
+description: Common questions about installing and using fbro.
+---
+
+import Shortcut from "../../../components/Shortcut.astro";
+
+## Installing
+
+### The Linux packages don't start on Ubuntu 22.04.
+
+They're built on Ubuntu 24.04 and need its glibc and FFmpeg. Use Ubuntu 24.04
+or newer (or an equally recent distribution), or
+[build from source](../../get-started/install/#build-from-source).
+
+### macOS says fbro "can't be opened".
+
+The app isn't notarized yet. Right-click it in Applications, choose **Open**,
+and confirm. You only need to do this once. See
+[Install → macOS](../../get-started/install/).
+
+If macOS still refuses, for example with "fbro is damaged and can't be opened",
+remove the quarantine flag that the download added. In Terminal:
+
+```sh
+xattr -cr /Applications/fbro.app
+```
+
+Then open fbro again. This only clears the flag on fbro; it doesn't change any
+system setting.
+
+### Windows SmartScreen blocks the installer.
+
+The builds aren't code-signed yet. Choose **More info**, then **Run anyway**.
+
+### Is there an Intel Mac build?
+
+No. The macOS release is for Apple silicon only.
+
+### How do I update?
+
+Download the new release and install it over the old one. There is no
+automatic updater yet. Your settings are kept.
+
+## Using fbro
+
+### My Mac keyboard has no F-keys. How do I copy?
+
+On macOS, the digit keys stand in for F-keys: **5** copies, **6** moves,
+**8** deletes, and so on. The button bar at the bottom shows them.
+
+### Where's the menu bar?
+
+fbro has none. Use the command palette (<Shortcut id="app.command_palette" />),
+the context menu (<Shortcut id="panel.context_menu" />) and the cheat sheet
+(<Shortcut id="app.cheat_sheet" />).
+
+### How do I show hidden files?
+
+Press <Shortcut id="panel.toggle_hidden" />. The footer shows an **H** badge
+while hidden files are hidden.
+
+### Can I change a shortcut?
+
+Yes. Open **Settings → Shortcuts** (<Shortcut id="app.settings" />), find the
+command, and record a new key. The
+[shortcut reference](../../reference/keyboard-shortcuts/) lists the defaults.
+
+### I pressed Escape and my copy disappeared.
+
+It's still running. Escape sends a running job to the background and never
+cancels it. Press <Shortcut id="app.open_jobs" /> to bring it back.
+
+### Can I use fbro with a mouse?
+
+Yes. Clicks, double-clicks, context menus and drag and drop all work. fbro is
+designed for the keyboard first, though, so every feature also has a keyboard
+path.
+
+### Where are my settings stored?
+
+In `~/.config/fbro` on Linux and macOS (or `$XDG_CONFIG_HOME/fbro` if that's
+set), and in `%USERPROFILE%\.config\fbro` on Windows. To start over, quit fbro
+and move that folder somewhere else.
+
+## Getting help
+
+### I found a bug.
+
+Please [open an issue](https://github.com/ktxed/fbro/issues) with your OS and
+fbro version (shown in **About fbro**, from the command palette; its **User guide** button opens this guide), the steps to
+reproduce it, and a screenshot if it's visual.

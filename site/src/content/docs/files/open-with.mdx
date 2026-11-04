@@ -1,0 +1,41 @@
+---
+title: Open files in other apps
+description: Open files with their default app or choose another one.
+---
+
+import Shortcut from "../../../components/Shortcut.astro";
+
+## Open with the default app
+
+<Shortcut id="panel.open" /> on a file opens it with the app your system uses for
+that type, just like double-clicking it in your desktop's file manager.
+
+Some files open inside fbro instead:
+
+- zip and 7z archives open as folders;
+- files on a paired remote fbro, and Journal entries, open in fbro's
+  [viewer](../../viewing/viewer/).
+
+To look at a file without leaving fbro, use View (<Shortcut id="file.view" />).
+
+## Choose another app
+
+1. Put the cursor on the file or folder.
+2. Open the context menu (<Shortcut id="panel.context_menu" />) and choose
+   **Open With…**.
+3. Pick an app from the list and press <kbd>Enter</kbd>.
+
+The list shows the apps your system has registered for that type of file, plus
+any fbro detected itself.
+
+## Show in your file manager
+
+The context menu's first item reveals the item in your system's file manager. It
+is called **Open containing folder** on Linux, **Open in Finder** on macOS and
+**Show in Explorer** on Windows.
+
+## Edit with your editor
+
+Edit (<Shortcut id="file.edit" />) opens a file in your text editor. See
+[Editing](../../viewing/editor/) for how fbro picks the editor and what happens
+when it can't find one.

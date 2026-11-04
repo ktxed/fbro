@@ -1,0 +1,76 @@
+---
+title: Viewer
+description: Read text, code, Markdown, images, video, audio, PDF and binary files in fbro's viewer window.
+---
+
+import Shortcut from "../../../components/Shortcut.astro";
+import Screenshot from "../../../components/Screenshot.astro";
+
+<Shortcut id="file.view" /> opens the cursor file in a separate **viewer** window.
+It picks a renderer from the file type, and you can switch to another.
+
+<Screenshot name="viewer-markdown" alt="The viewer showing a rendered Markdown file with a Mermaid flowchart" />
+
+## What it shows
+
+| File | Shown as |
+|---|---|
+| Text and code | Text, with optional word wrap and DOS (CP437) decoding |
+| Markdown (`.md`, `.markdown`, `.mdown`) | Rendered document, including Mermaid diagrams; or plain text |
+| Images (`png`, `jpg`, `gif`, `webp`, `svg`, `bmp`, `ico`, `avif`) | Image you can zoom and pan |
+| HEIC / HEIF | Image on macOS; elsewhere, see [Settings](#settings) below |
+| Video (`mp4`, `webm`, `ogv`, `mkv`, `mov`) and MP3 audio | Player |
+| PDF | Pages |
+| Anything else that isn't text | Hex |
+
+Very large files open quickly too: text is loaded in pieces as you scroll.
+
+## Viewer keys
+
+These keys work inside the viewer window. Letters follow the key's position, so
+they also work with non-Latin layouts.
+
+| Key | Action |
+|---|---|
+| <kbd>1</kbd> | Text |
+| <kbd>2</kbd> | Image or media |
+| <kbd>3</kbd> | Hex |
+| <kbd>4</kbd> | Rendered Markdown (Markdown files) |
+| <kbd>W</kbd> | Word wrap on or off (text) |
+| <kbd>S</kbd> | DOS / CP437 decoding on or off (text) |
+| <kbd>F</kbd> | Find. <kbd>Enter</kbd> / <kbd>Shift</kbd>+<kbd>Enter</kbd> go to the next / previous match |
+| <kbd>J</kbd> / <kbd>K</kbd> | Next / previous file in the folder |
+| <kbd>E</kbd> or <kbd>F4</kbd> | Edit the file (local files) |
+| <kbd>M</kbd> | Maximize or restore the window |
+| <kbd>Space</kbd> | Play or pause video and audio |
+| <kbd>Left</kbd> / <kbd>Right</kbd> | Scroll sideways; in video and audio, seek 5 seconds |
+| <kbd>Ctrl</kbd>+<kbd>A</kbd> (macOS: <kbd>Cmd</kbd>+<kbd>A</kbd>) | Select all text (smaller files) |
+| <kbd>Escape</kbd> | Close find, then close the viewer |
+
+Arrow keys, <kbd>PageUp</kbd>, <kbd>PageDown</kbd>, <kbd>Home</kbd> and
+<kbd>End</kbd> scroll as usual, including in PDFs.
+
+When the viewer closes, focus returns to the panel you opened it from.
+
+## Mermaid diagrams
+
+In rendered Markdown, hover a diagram for its toolbar: zoom out, zoom in, fit and
+expand. <kbd>Ctrl</kbd>/<kbd>Cmd</kbd>+wheel zooms a diagram in place.
+
+**Expand** shows the diagram over the whole viewer. There, <kbd>+</kbd> and
+<kbd>-</kbd> zoom, <kbd>0</kbd> fits it to the window, the arrow keys and
+dragging pan, and <kbd>Escape</kbd> returns to the document.
+
+## Settings
+
+In **Settings → General** (<Shortcut id="app.settings" />):
+
+- **Preview HEIC/HEIF images with HEIC2ANY** shows HEIC photos on Linux and
+  Windows.
+- **Ludicrous mode (load very large images in the viewer)** opens images that
+  are normally too big to load.
+
+## Without a separate window
+
+To preview files right next to the listing as you move the cursor, use
+[Quick preview](../quick-preview/) instead.

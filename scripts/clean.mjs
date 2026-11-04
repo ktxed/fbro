@@ -3,7 +3,12 @@ import { rmSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-export const jsOutputDirs = ["dist", path.join("node_modules", ".vite")];
+export const jsOutputDirs = [
+  "dist",
+  path.join("node_modules", ".vite"),
+  path.join("site", "dist"),
+  path.join("site", ".astro"),
+];
 
 export const cargoManifests = [
   path.join("src-tauri", "Cargo.toml"),

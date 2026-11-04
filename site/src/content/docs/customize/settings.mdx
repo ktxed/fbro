@@ -1,0 +1,58 @@
+---
+title: Settings
+description: A tour of fbro's settings, tab by tab.
+---
+
+import Shortcut from "../../../components/Shortcut.astro";
+import Screenshot from "../../../components/Screenshot.astro";
+
+Open **Settings** with <Shortcut id="app.settings" />. Changes apply straight
+away and are saved by fbro itself, so they follow you across restarts and into
+every window.
+
+## General
+
+| Section | Settings |
+|---|---|
+| **Notifications** | **Show background OS notifications**. See [Notifications](../notifications/). |
+| **Shell command** | Install the `fbro` launcher so you can run `fbro .` or `fbro ~/my_folder` from a terminal (Linux and macOS). |
+| **Files** | **Show hidden files by default**, **Remember window position and size**, **Save panel listing mode (list / grid) per panel across sessions**, **Remember sorting per location**, **Restore all panel tabs across sessions**, **Fedup default ignore patterns** |
+| **Terminal** | **Quick terminal editor** (Nano or Vim), **Use Emacs keys in new zsh terminal sessions** |
+| **Process panel** | **Process tree view (navigate into a process to see its children)** |
+| **File Operations** | **Preserve file timestamps and permissions when copying**, **Auto-retry interrupted copies**, **7-Zip extractor** |
+| **Notes** | **Notes folder** for [scratch notes](../../viewing/editor/#scratch-notes) |
+| **Data files** | Where fbro keeps its session and bookmarks |
+| **Viewer** | **Preview HEIC/HEIF images with HEIC2ANY**, **Ludicrous mode (load very large images in the viewer)**, **Max image size (MiB):** |
+
+<Screenshot name="settings-general" alt="The General tab of Settings, showing the Files options" />
+
+## Display
+
+| Section | Settings |
+|---|---|
+| **Color Scheme** | **Scheme**, **Match system appearance**, and **Customize…**. See [Color schemes](../color-schemes/). |
+| **Button bar** | **Show bottom button bar** |
+| **Compare** | **Maximum text file size (MiB):**, **Differ**, **External differ executable:**. See [Compare](../../viewing/compare/#use-your-own-diff-tool). |
+| **Thumbnails** | **Stream thumbnails to paired fbro clients**; on Linux also video thumbnails, size limits and the thumbnail cache. See [Views](../../using/views/#thumbnails). |
+| **File icons** | On macOS, file type icons are cached on disk for faster launches. |
+
+## Bros
+
+Lists the **Available bros** that fbro found on this machine. See
+[What is a bro?](../../bros/overview/).
+
+## Sharing
+
+Remote access, pairing and shared folders. See
+[Pairing two machines](../../remote/pairing/).
+
+## Shortcuts
+
+Every command with its key bindings, which you can change. See
+[Change a shortcut](../../using/command-palette/#change-a-shortcut).
+
+## Where settings are stored
+
+Settings live in fbro's
+[data folder](../../get-started/first-launch/#where-fbro-keeps-its-data), mainly
+in `settings.json`. Quit fbro before editing or copying files there by hand.

@@ -1,7 +1,25 @@
 use crate::ws::protocol::{InteractiveCommandSchema, KeyBindingSchema, KeyStrokeSchema};
 
-fn is_macos() -> bool {
-    cfg!(target_os = "macos")
+/// Platform whose default bindings the registry describes. The running app
+/// always uses [`CommandPlatform::current`]; the others exist so the user-guide
+/// site can publish every platform's defaults from one build.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CommandPlatform {
+    Linux,
+    MacOs,
+    Windows,
+}
+
+impl CommandPlatform {
+    pub(crate) fn current() -> Self {
+        if cfg!(target_os = "macos") {
+            Self::MacOs
+        } else if cfg!(target_os = "windows") {
+            Self::Windows
+        } else {
+            Self::Linux
+        }
+    }
 }
 
 fn keybinding(key: &str) -> KeyBindingSchema {
@@ -27,16 +45,16 @@ fn keybinding_with_modifiers(
     }
 }
 
-fn toolbar_binding(function_key: &str, mac_key: &str) -> KeyBindingSchema {
-    if is_macos() {
+fn toolbar_binding(mac: bool, function_key: &str, mac_key: &str) -> KeyBindingSchema {
+    if mac {
         keybinding(mac_key)
     } else {
         keybinding(function_key)
     }
 }
 
-fn mod_binding(key: &str, shift: bool) -> KeyBindingSchema {
-    if is_macos() {
+fn mod_binding(mac: bool, key: &str, shift: bool) -> KeyBindingSchema {
+    if mac {
         keybinding_with_modifiers(key, shift, false, false, true)
     } else {
         keybinding_with_modifiers(key, shift, true, false, false)
@@ -72,12 +90,19 @@ fn command(
 }
 
 pub(crate) fn build_interactive_commands() -> Vec<InteractiveCommandSchema> {
+    build_interactive_commands_for(CommandPlatform::current())
+}
+
+pub(crate) fn build_interactive_commands_for(
+    platform: CommandPlatform,
+) -> Vec<InteractiveCommandSchema> {
+    let mac = platform == CommandPlatform::MacOs;
     let mut commands = vec![
         command(
             "app.command_palette",
             "App",
             "Open Command Palette",
-            vec![mod_binding("p", true)],
+            vec![mod_binding(mac, "p", true)],
             None,
         ),
         // `?` is the conventional help key; an unshifted symbol binding also
@@ -101,7 +126,7 @@ pub(crate) fn build_interactive_commands() -> Vec<InteractiveCommandSchema> {
             "app.search",
             "App",
             "Search",
-            vec![mod_binding("f", false)],
+            vec![mod_binding(mac, "f", false)],
             None,
         ),
         command(
@@ -143,14 +168,14 @@ pub(crate) fn build_interactive_commands() -> Vec<InteractiveCommandSchema> {
             "file.rename",
             "File",
             "Rename",
-            vec![toolbar_binding("F2", "2")],
+            vec![toolbar_binding(mac, "F2", "2")],
             None,
         ),
         command(
             "panel.pass_to_bro",
             "File",
             "Pass to Bro",
-            vec![toolbar_binding("F1", "1")],
+            vec![toolbar_binding(mac, "F1", "1")],
             Some("ListBros"),
         ),
         command(
@@ -164,14 +189,14 @@ pub(crate) fn build_interactive_commands() -> Vec<InteractiveCommandSchema> {
             "file.view",
             "File",
             "View",
-            vec![toolbar_binding("F3", "3")],
+            vec![toolbar_binding(mac, "F3", "3")],
             None,
         ),
         command(
             "panel.viewer.embed",
             "View",
             "Toggle Embedded Viewer",
-            vec![if is_macos() {
+            vec![if mac {
                 keybinding_with_modifiers("3", false, false, false, true) // Cmd+3 (F-keys need `fn` on Mac)
             } else {
                 keybinding_with_modifiers("F3", false, true, false, false) // Ctrl+F3
@@ -182,14 +207,14 @@ pub(crate) fn build_interactive_commands() -> Vec<InteractiveCommandSchema> {
             "file.edit",
             "File",
             "Edit",
-            vec![toolbar_binding("F4", "4")],
+            vec![toolbar_binding(mac, "F4", "4")],
             None,
         ),
         command(
             "file.touch",
             "File",
             "New File",
-            vec![if is_macos() {
+            vec![if mac {
                 keybinding_with_modifiers("4", true, false, false, false) // Shift+4
             } else {
                 keybinding_with_modifiers("F4", true, false, false, false) // Shift+F4
@@ -200,31 +225,31 @@ pub(crate) fn build_interactive_commands() -> Vec<InteractiveCommandSchema> {
             "file.copy",
             "File Operation",
             "Copy",
-            vec![toolbar_binding("F5", "5")],
+            vec![toolbar_binding(mac, "F5", "5")],
             None,
         ),
         command(
             "file.copy_external",
             "File Operation",
             "Copy To Host Clipboard",
-            vec![mod_binding("c", false)],
+            vec![mod_binding(mac, "c", false)],
             Some("WriteExternalClipboard"),
         ),
         command(
             "file.move",
             "File Operation",
             "Move",
-            vec![toolbar_binding("F6", "6")],
+            vec![toolbar_binding(mac, "F6", "6")],
             None,
         ),
         command(
             "file.cut_external",
             "File Operation",
             "Cut To Host Clipboard",
-            if is_macos() {
+            if mac {
                 vec![]
             } else {
-                vec![mod_binding("x", false)]
+                vec![mod_binding(mac, "x", false)]
             },
             Some("WriteExternalClipboard"),
         ),
@@ -232,14 +257,14 @@ pub(crate) fn build_interactive_commands() -> Vec<InteractiveCommandSchema> {
             "file.paste_external",
             "File Operation",
             "Paste External Clipboard",
-            vec![mod_binding("v", false)],
+            vec![mod_binding(mac, "v", false)],
             Some("PasteExternalClipboard"),
         ),
         command(
             "file.paste_external_move",
             "File Operation",
             "Paste External Clipboard As Move",
-            if is_macos() {
+            if mac {
                 vec![keybinding_with_modifiers("v", false, false, true, true)]
             } else {
                 vec![]
@@ -250,14 +275,14 @@ pub(crate) fn build_interactive_commands() -> Vec<InteractiveCommandSchema> {
             "file.mkdir",
             "File",
             "Create Directory",
-            vec![toolbar_binding("F7", "7")],
+            vec![toolbar_binding(mac, "F7", "7")],
             None,
         ),
         command(
             "file.delete",
             "File Operation",
             "Delete",
-            vec![toolbar_binding("F8", "8")],
+            vec![toolbar_binding(mac, "F8", "8")],
             None,
         ),
         command(
@@ -271,14 +296,14 @@ pub(crate) fn build_interactive_commands() -> Vec<InteractiveCommandSchema> {
             "app.open_terminal",
             "App",
             "Open Terminal",
-            vec![toolbar_binding("F9", "9")],
+            vec![toolbar_binding(mac, "F9", "9")],
             Some("OpenTerminal"),
         ),
         command(
             "app.quit",
             "App",
             "Quit",
-            vec![toolbar_binding("F10", "0")],
+            vec![toolbar_binding(mac, "F10", "0")],
             Some("Quit"),
         ),
         command(
@@ -383,21 +408,21 @@ pub(crate) fn build_interactive_commands() -> Vec<InteractiveCommandSchema> {
             "panel.selection.select_all",
             "Selection",
             "Select All",
-            vec![mod_binding("a", false)],
+            vec![mod_binding(mac, "a", false)],
             Some("SelectAll"),
         ),
         command(
             "panel.selection.clear",
             "Selection",
             "Clear Selection",
-            vec![mod_binding("a", true)],
+            vec![mod_binding(mac, "a", true)],
             Some("ClearSelection"),
         ),
         command(
             "panel.selection.invert",
             "Selection",
             "Invert Selection",
-            vec![mod_binding("i", false)],
+            vec![mod_binding(mac, "i", false)],
             Some("InvertSelection"),
         ),
         command(
@@ -486,7 +511,7 @@ pub(crate) fn build_interactive_commands() -> Vec<InteractiveCommandSchema> {
             "panel.navigate_to_path",
             "Navigation",
             "Go To Path",
-            vec![mod_binding("g", false)],
+            vec![mod_binding(mac, "g", false)],
             None,
         ),
         command(
@@ -594,14 +619,14 @@ pub(crate) fn build_interactive_commands() -> Vec<InteractiveCommandSchema> {
             "panel.bookmarks.open",
             "Panel",
             "Bookmarks…",
-            vec![mod_binding("d", false)],
+            vec![mod_binding(mac, "d", false)],
             None,
         ),
         command(
             "panel.bookmarks.browse",
             "Panel",
             "Browse Bookmarks",
-            vec![mod_binding("d", true)],
+            vec![mod_binding(mac, "d", true)],
             None,
         ),
         command(
@@ -611,9 +636,9 @@ pub(crate) fn build_interactive_commands() -> Vec<InteractiveCommandSchema> {
             vec![keybinding_with_modifiers(
                 ",",
                 false,
-                !is_macos(),
+                !mac,
                 false,
-                is_macos(),
+                mac,
             )],
             None,
         ),
@@ -628,14 +653,14 @@ pub(crate) fn build_interactive_commands() -> Vec<InteractiveCommandSchema> {
             "panel.tab.new",
             "Panel",
             "New Tab",
-            vec![mod_binding("t", false)],
+            vec![mod_binding(mac, "t", false)],
             None,
         ),
         command(
             "panel.tab.close",
             "Panel",
             "Close Tab",
-            vec![mod_binding("w", false)],
+            vec![mod_binding(mac, "w", false)],
             None,
         ),
         command(
@@ -657,7 +682,7 @@ pub(crate) fn build_interactive_commands() -> Vec<InteractiveCommandSchema> {
         "file.quick_edit",
         "File",
         "Quick Edit",
-        vec![if is_macos() {
+        vec![if mac {
             keybinding_with_modifiers("4", false, false, false, true)
         } else {
             keybinding_with_modifiers("F4", false, true, false, false)
@@ -672,7 +697,7 @@ pub(crate) fn build_interactive_commands() -> Vec<InteractiveCommandSchema> {
         "notes.new",
         "Notes",
         "New Note",
-        vec![if is_macos() {
+        vec![if mac {
             keybinding_with_modifiers("4", false, false, true, true)
         } else {
             keybinding_with_modifiers("F4", true, true, false, false)
@@ -680,7 +705,7 @@ pub(crate) fn build_interactive_commands() -> Vec<InteractiveCommandSchema> {
         Some("CreateNote"),
     ));
     commands.push(command("notes.open", "Notes", "Open Notes", vec![], Some("OpenNotes")));
-    if !cfg!(target_os = "windows") {
+    if platform != CommandPlatform::Windows {
         commands.push(command(
             "app.eject_source",
             "App",
@@ -694,7 +719,78 @@ pub(crate) fn build_interactive_commands() -> Vec<InteractiveCommandSchema> {
 
 #[cfg(test)]
 mod tests {
-    use super::build_interactive_commands;
+    use super::{build_interactive_commands, build_interactive_commands_for, CommandPlatform};
+
+    /// Default bindings for every platform, as published by the user-guide
+    /// site (`site/src/data/commands.json`).
+    fn site_commands_json() -> String {
+        let platform = |platform| {
+            build_interactive_commands_for(platform)
+                .into_iter()
+                .map(|c| {
+                    serde_json::json!({
+                        "id": c.id,
+                        "category": c.category,
+                        "title": c.title,
+                        "bindings": c.default_bindings,
+                    })
+                })
+                .collect::<Vec<_>>()
+        };
+        let data = serde_json::json!({
+            "generatedBy": "cargo test site_command_data_is_current (src-tauri/src/ws/commands.rs)",
+            "platforms": {
+                "linux": platform(CommandPlatform::Linux),
+                "macos": platform(CommandPlatform::MacOs),
+                "windows": platform(CommandPlatform::Windows),
+            },
+        });
+        serde_json::to_string_pretty(&data).unwrap() + "\n"
+    }
+
+    /// The site's keyboard reference reads a committed copy of the registry so
+    /// the Pages build needs no Rust toolchain. Regenerate it with
+    /// `FBRO_UPDATE_SITE_DATA=1 cargo test site_command_data_is_current`.
+    #[test]
+    fn site_command_data_is_current() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../site/src/data/commands.json");
+        let expected = site_commands_json();
+        if std::env::var_os("FBRO_UPDATE_SITE_DATA").is_some() {
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, &expected).unwrap();
+            return;
+        }
+        let actual = std::fs::read_to_string(&path).unwrap_or_default();
+        assert!(
+            actual == expected,
+            "{} is stale; run FBRO_UPDATE_SITE_DATA=1 cargo test site_command_data_is_current",
+            path.display()
+        );
+    }
+
+    #[test]
+    fn platform_variants_differ_only_where_expected() {
+        let find = |platform, id: &str| {
+            build_interactive_commands_for(platform)
+                .into_iter()
+                .find(|c| c.id == id)
+                .unwrap_or_else(|| panic!("{id}"))
+        };
+        let linux = find(CommandPlatform::Linux, "file.copy");
+        assert_eq!(linux.bindings[0].strokes[0].key, "F5");
+        let mac = find(CommandPlatform::MacOs, "file.copy");
+        assert_eq!(mac.bindings[0].strokes[0].key, "5");
+        let palette = find(CommandPlatform::MacOs, "app.command_palette");
+        assert!(palette.bindings[0].strokes[0].meta);
+        let has_eject = |platform| {
+            build_interactive_commands_for(platform)
+                .iter()
+                .any(|c| c.id == "app.eject_source")
+        };
+        assert!(has_eject(CommandPlatform::Linux));
+        assert!(!has_eject(CommandPlatform::Windows));
+    }
 
     #[test]
     fn about_is_available_without_reserving_a_shortcut() {

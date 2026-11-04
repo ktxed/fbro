@@ -1,0 +1,60 @@
+---
+title: Archives
+description: Browse archives as folders, pack files into zip, 7z or tar, and extract archives.
+---
+
+import Shortcut from "../../../components/Shortcut.astro";
+
+## Browse an archive
+
+zip and 7z archives open like folders: press <Shortcut id="panel.open" /> on one,
+or choose **Browse archive** in its inline choices. You can view files inside
+and copy them out with <Shortcut id="file.copy" />, which the context menu calls
+**Extract** here. Going up from the archive's top level returns to the folder
+that contains it.
+
+## Pack files into an archive
+
+1. Select what to pack. Open the folder where the archive should go in the
+   other panel.
+2. Press <Shortcut id="panel.pass_to_bro" /> and choose **zip**, **7z** or **tar**.
+3. Check the options and choose **Launch**.
+
+| Option | zip | 7z | tar |
+|---|---|---|---|
+| **Archive path**, prefilled with the other panel's folder | ✓ | ✓ | ✓ |
+| **Compression level** 0–9 (default 6) | ✓ | ✓ | |
+| **Password** | ✓ | ✓ | |
+
+zip and 7z are built into fbro. tar uses the `tar` program on your system, which
+Linux, macOS and Windows 10 or later all include, and writes an uncompressed
+`.tar`.
+
+The archive is named after the item you packed, or gets a default name when you
+pack several.
+
+## Extract an archive
+
+1. Put the cursor on the archive, and open the destination in the other panel.
+2. Press <Shortcut id="panel.pass_to_bro" /> and choose **unzip**, **un7z** or
+   **untar**.
+3. **Extract to** starts as a new folder named after the archive, inside the
+   other panel's folder. Change it if you like, add the **Password** for an
+   encrypted archive, and choose **Launch**.
+
+| Archive | Extracted by |
+|---|---|
+| `.zip` | fbro |
+| `.7z` | fbro |
+| `.tar`, `.tar.gz`, `.tgz` | your system's `tar` |
+
+## 7-Zip settings
+
+**Settings → General → 7-Zip extractor** decides how fbro reads 7z archives:
+
+- **Auto-detect on PATH (recommended)** uses an installed `7z`, `7zz` or `7za`
+  and falls back to fbro's own extractor;
+- **Custom path** uses the program you point it to;
+- **Internal (pure Rust, no native dependency)** always uses fbro's own.
+
+On macOS, `brew install sevenzip` installs 7-Zip.

@@ -1,0 +1,73 @@
+---
+title: Orthodox file managers 101
+description: The two-panel way of working, for people coming from Finder or Explorer.
+---
+
+import Shortcut from "../../../components/Shortcut.astro";
+
+fbro is an [**orthodox** file manager](https://en.wikipedia.org/wiki/Orthodox_file_manager).
+The name comes from the 1980s tradition of
+[Norton Commander](https://en.wikipedia.org/wiki/Norton_Commander), continued by
+[Midnight Commander](https://en.wikipedia.org/wiki/Midnight_Commander),
+[Total Commander](https://en.wikipedia.org/wiki/Total_Commander),
+[Double Commander](https://en.wikipedia.org/wiki/Double_Commander) and
+[Far Manager](https://en.wikipedia.org/wiki/Far_Manager). If you've only used
+Finder, Explorer or Nautilus, a few ideas work differently.
+
+:::tip[Kicking it old school 😎]
+Two panels, function keys and a cursor you drive from the keyboard have been
+working since the days of floppy disks. fbro keeps that layout and adds
+background jobs, git, archives as folders and a command palette.
+
+#okboomer
+:::
+
+## Two panels are source and destination
+
+You don't drag files from one window to another. Open the files you want to
+work on in one panel and the place you want them to go in the other. Then:
+
+- **Copy** (<Shortcut id="file.copy" />) copies the selection *to the other
+  panel's folder*.
+- **Move** (<Shortcut id="file.move" />) moves it there.
+- **Sync** (<Shortcut id="panel.path.sync" />) opens the active panel's folder
+  in the other panel too, which helps when you want to copy within the same
+  tree.
+
+<Shortcut id="panel.focus.switch" /> switches between the panels. Keep that key
+under your thumb.
+
+## The cursor is not the selection
+
+The **cursor** is the single highlighted row you move with the arrow keys. The
+**selection** is a set of marked items that stays put while you move the cursor:
+
+- <Shortcut id="panel.selection.toggle_or_size" /> marks or unmarks the cursor
+  item. For a folder, it also calculates the folder's size.
+- <Shortcut id="panel.selection.extend_down" /> extends the selection as you
+  move.
+- <Shortcut id="panel.selection.select_by_mask" /> selects every file that
+  matches a pattern such as `*.jpg`, and <Shortcut id="panel.selection.deselect_by_mask" /> deselects them.
+- With the mouse, hold the **right** button and drag over rows to select
+  several files in one sweep. Start on an already selected row to deselect
+  instead. Total Commander and Double Commander work this way too, so it will
+  feel familiar if you come from there. See [Selection](../../using/selection/)
+  for the details.
+
+An operation acts on the selection. If nothing is selected, it acts on the item
+under the cursor.
+
+## Function keys are verbs
+
+The bottom button bar maps keys to the verbs you use most: rename, view, edit,
+copy, move, new folder, delete. On macOS the digit keys stand in for F-keys.
+You don't have to memorize anything: the bar is always visible, the
+[command palette](../tour/#find-anything-with-the-command-palette) finds
+everything else, and <Shortcut id="app.cheat_sheet" /> lists every shortcut.
+
+## Everything is a listing
+
+Many things that other file managers show in their own windows open in an
+ordinary panel in fbro: the contents of zip and 7z archives, search results,
+running processes, bookmarks, history and the activity journal. You navigate
+them with the same keys, and most operations work on them too.

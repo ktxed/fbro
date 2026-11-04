@@ -1,0 +1,43 @@
+---
+title: Clipboard & drag and drop
+description: Exchange files with other apps through the clipboard and drag and drop.
+---
+
+import Shortcut from "../../../components/Shortcut.astro";
+
+Between fbro's own panels, [Copy and Move](../operations/) are the quickest way.
+The clipboard and drag and drop are for exchanging files with **other apps**:
+your desktop's file manager, a mail client, a browser upload field.
+
+## Copy and paste files
+
+| Action | Keys |
+|---|---|
+| Put the selected files on the clipboard | <Shortcut id="file.copy_external" /> |
+| Cut them, so pasting moves them | <Shortcut id="file.cut_external" /> |
+| Paste files into the current folder | <Shortcut id="file.paste_external" /> |
+| Paste them as a move | <Shortcut id="file.paste_external_move" /> |
+
+macOS has no "cut" for files, as in Finder: copy them, then paste as a move.
+On Linux and Windows, cut and paste instead.
+
+Pasting opens the usual Copy or Move dialog with the current folder as the
+destination, so you can check the options before anything happens.
+
+Files you copied in another file manager paste into fbro the same way.
+
+## Copy names and paths as text
+
+To copy names or paths as text instead of files, open the
+[context menu](../../using/command-palette/#context-menu)
+(<Shortcut id="panel.context_menu" />) and choose **Copy name** or **Copy full
+path**. With several items selected, they become **Copy names** and **Copy full
+paths** and put one entry per line on the clipboard.
+
+## Drag and drop
+
+- **Between panels:** drag items onto the other panel, or onto a folder in it.
+  Dropping copies; hold <kbd>Shift</kbd> to move instead. The Copy or Move dialog
+  opens before anything changes.
+- **To other apps:** drag items out of the fbro window and drop them in another
+  app, such as your desktop, a file manager or a browser.

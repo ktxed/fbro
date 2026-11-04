@@ -154,7 +154,7 @@ coverage reference.
 | Area | Case files | Main checks |
 | --- | --- | --- |
 | Diff viewer | `diff.mjs` | Up/Down scroll an entirely new file in split and unified views; split panes stay synchronized |
-| Local files and UI | `local.mjs` | Create, copy, overwrite, rename, delete, context-menu Set Permissions, sort, filtering, empty-folder suggestions, settings, bookmarks, Bros, clipboard feedback, About, the keyboard cheat sheet (first palette entry, `?` toggle, no button-bar duplicates, inert panel, focus return), grid navigation, and symlink routes |
+| Local files and UI | `local.mjs` | Create, copy, overwrite, rename, delete, context-menu Set Permissions, sort, filtering, empty-folder suggestions, settings, bookmarks, Bros, clipboard feedback, About (including the User guide button leaving the dialog open), the keyboard cheat sheet (first palette entry, `?` toggle, no button-bar duplicates, inert panel, focus return), grid navigation, and symlink routes |
 | Bottom button bar | `button-bar.mjs` | Keyboard toggle in Settings → Display, palette recovery while hidden, backend-confirmed state shared between clients, frontend reload with the bar hidden, reclaimed layout space in both themes, file shortcuts and zoom while hidden, modal guards, opener restoration, and invalid-setting rejection. Rust settings tests cover older-file defaults and persistence round-trips. |
 | Color scheme editor | `color-scheme-editor.mjs` | Color Scheme tab hidden in a normal Settings session and revealed only by Display → Customize…, built-ins read-only, the bundled schemes listed and refusing edits, Duplicate prompt (Escape restores its opener), backend-written scheme selected and editable, Use this scheme restyles the app, debounced token edit changes the app's computed `--bg`, invalid colors are never sent, preview click selects its token, Escape unwinds editor pane before Settings, inline Delete falls back to the base scheme, and the tab is gone after closing Settings. Rust tests in `themes.rs`, `ws/intents/settings.rs` and `ws/runtime.rs` cover validation/injection, slugs and traversal, partial files inheriting from the base, broken files, window background, and live catalog patches. |
 | Color scheme / system appearance | `color-scheme.mjs` | Keyboard toggle of **Match system appearance** in Settings → Display with focus kept on the checkbox, backend-confirmed state shared between clients, the manual select disabled and skipped by Tab while following, the unavailable-detection hint and manual fallback (Docker backends have no session bus), rejection of the read-only `activeColorScheme` / `systemColorScheme` keys and non-boolean values, frontend reload, unchecking restores the preserved manual scheme, and opener restoration. Rust tests cover resolution, older-file defaults, persistence, portal/registry/defaults value mapping, and live patches to GUI and viewer clients. |
@@ -419,6 +419,31 @@ cargo test --manifest-path src-tauri/Cargo.toml --locked patch_tests
 | `thumb_pool` | Deduplication, visibility priority, cooldown/wakeup, concurrency, stale epochs, and navigation cleanup |
 | `managed_thumbnails_are_linux_only` | Managed-thumbnail capability on the compiled host platform |
 | `heic_preview_is_opt_in` | Older settings defaulting to off and enabled-setting serialization |
+
+## User guide screenshots
+
+The guide's screenshots (`site/src/assets/screens/*.webp`) come from the real
+app, using the smoke harness's Docker backend and `tauri-driver`. Each scene in
+`tests/e2e/docs/scenes.mjs` stages one view on a demo fixture with fixed
+timestamps (`tests/e2e/docs/fixture.mjs`) and captures it in the dark scheme.
+
+```bash
+npm --prefix site install        # provides sharp for the WebP conversion
+npm run tauri -- build --no-bundle
+GDK_BACKEND=wayland npm run docs:screens                   # every scene
+GDK_BACKEND=wayland npm run docs:screens -- copy-dialog    # selected scenes
+```
+
+Regenerate the affected scenes after a visible UI change and review the images
+before committing them. Pages show a scene with
+`<Screenshot name="copy-dialog" alt="…" />`; the site build fails if the image
+is missing. Captures are Linux-only, so key hints read F5, Ctrl+…. The runner
+hides the container's bind mounts from the source bar, since a real machine
+doesn't have them. The remote scenes (`pairing`, `sharing-settings`,
+`remote-browse`, `sync-results`) also start the second instance and pair it with
+the first. Whichever remote scene runs first pairs them; only `pairing`
+captures that step, so list it first. A failed scene leaves
+`artifacts/e2e/screenshots/docs-failure.png`.
 
 ## Failure diagnostics
 

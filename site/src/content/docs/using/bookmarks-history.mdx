@@ -1,0 +1,38 @@
+---
+title: Bookmarks & history
+description: Save favourite folders and get back to recent ones.
+---
+
+import Shortcut from "../../../components/Shortcut.astro";
+import Screenshot from "../../../components/Screenshot.astro";
+
+## Bookmarks
+
+Press <Shortcut id="panel.bookmarks.open" />, or click **★** in the path bar,
+to open the **Bookmarks** popover.
+
+- The first entry bookmarks the current folder, or removes it if it's already
+  bookmarked. The **★** is highlighted when the current folder is a bookmark.
+- Move through the list with <kbd>Up</kbd> and <kbd>Down</kbd>, and press
+  <kbd>Enter</kbd> to go to a bookmark.
+- Each bookmark has a **Remove bookmark** button.
+- <kbd>Escape</kbd> closes the popover.
+
+<Screenshot name="bookmarks" alt="The Bookmarks popover listing the current folder and two bookmarked folders" />
+
+### Browse bookmarks as a listing
+
+<Shortcut id="panel.bookmarks.browse" /> opens your bookmarks in the panel itself,
+as a list you can move through with the usual keys. Open an entry to go to that
+folder.
+
+## History
+
+Each panel remembers the folders it has visited.
+
+- <Shortcut id="panel.history.back" /> and <Shortcut id="panel.history.forward" /> step
+  back and forward.
+- <Shortcut id="panel.history.open" /> opens **Navigation History**, a list of
+  recent folders with the newest first. Choose one with <kbd>Up</kbd> and
+  <kbd>Down</kbd> and press <kbd>Enter</kbd> to go there, or <kbd>Escape</kbd>
+  to close the list.

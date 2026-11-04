@@ -1,0 +1,96 @@
+---
+title: First launch
+description: What is on the fbro screen and what each part does.
+---
+
+import Shortcut from "../../../components/Shortcut.astro";
+import Screenshot from "../../../components/Screenshot.astro";
+
+<Screenshot
+  name="first-launch"
+  alt="The fbro window: a project folder in the left panel with two files selected, a backup folder in the right panel, and the button bar along the bottom. Numbers 1 to 5 mark the path bar, source bar, listing, footer and button bar."
+  callouts={[
+    { n: 1, x: 30, y: 2.6 },
+    { n: 2, x: 30, y: 6.8 },
+    { n: 3, x: 45, y: 60 },
+    { n: 4, x: 50, y: 93.3 },
+    { n: 5, x: 50, y: 97.6 },
+  ]}
+/>
+
+The fbro window has two **panels** side by side, with a **button bar** along
+the bottom. One panel is *active* at a time: it has the highlighted border, and
+it receives your keys. <Shortcut id="panel.focus.switch" /> switches to the
+other panel.
+
+## A panel, top to bottom
+
+**Tab bar.** It appears above the path bar once a panel has a second tab. Each panel can hold several tabs. A tab is a folder listing, a
+terminal or an editor. <Shortcut id="panel.tab.new" /> opens a tab and
+<Shortcut id="panel.tab.close" /> closes it.
+
+**① Path bar.** The current folder as clickable breadcrumbs. Inside a git
+repository it also shows the current branch; click it, or press
+<Shortcut id="panel.git.actions" />, for git actions. On the right are quick
+buttons: new tab (**+**), source root (**/**), home folder (**~**) and
+bookmarks (**★**).
+
+**② Source bar.** Everything the panel can browse: your volumes and disks, plus
+virtual sources such as Processes and the activity Journal. A paired
+[remote fbro](https://github.com/ktxed/fbro/blob/development/spex/remote-fbro.md)
+appears here too. Press <Shortcut id="panel.source.next" /> to move to the next source.
+
+**③ Listing.** The files themselves, as a list or as a thumbnail grid
+(<Shortcut id="panel.toggle_view_mode" />). The highlighted row is the
+**cursor**. **Selected** items are tinted; most operations act on the selection,
+or on the cursor item when nothing is selected.
+
+**④ Footer.** Item count and total size, the selection summary, the active filter,
+an **H** badge while hidden files are hidden (<Shortcut id="panel.toggle_hidden" /> shows them),
+and the free space on the volume.
+
+## The button bar
+
+**⑤** The bottom row lists the most common operations together with their keys. On
+Linux and Windows these are the classic function keys F2 to F10. On macOS they
+are the plain digit keys **2** to **0**, because Mac keyboards need **fn** for
+F-keys.
+
+| Button | Linux / Windows | macOS |
+|---|---|---|
+| Rename | F2 | 2 |
+| View | F3 | 3 |
+| Edit | F4 | 4 |
+| Copy | F5 | 5 |
+| Move | F6 | 6 |
+| MkDir | F7 | 7 |
+| Delete | F8 | 8 |
+| Shell | F9 | 9 |
+| Quit | F10 | 0 |
+
+**F1** (macOS: **1**) is not on the bar, but it is the key you'll want next: it
+opens **Pass to Bro**, the menu of extra tools for the current selection.
+
+## The jobs bar
+
+When a copy, move, delete or search is running, a jobs bar appears above the
+button bar with its progress. <Shortcut id="app.open_jobs" /> opens the Jobs
+dialog, where you can pause, skip or cancel. Pressing Escape in a running job's
+dialog sends the job to the background; it never cancels it.
+
+## Two keys to remember
+
+- <Shortcut id="app.command_palette" /> opens the **command palette**. Type
+  part of any command's name to run it. The palette also shows each command's
+  shortcut.
+- <Shortcut id="app.cheat_sheet" /> opens the **keyboard cheat sheet**.
+
+## Where fbro keeps its data
+
+Settings, bookmarks, the session (open tabs and folders), custom color schemes
+and scratch notes live in one folder:
+
+| Platform | Folder |
+|---|---|
+| Linux, macOS | `$XDG_CONFIG_HOME/fbro`, or `~/.config/fbro` |
+| Windows | `%USERPROFILE%\.config\fbro` |

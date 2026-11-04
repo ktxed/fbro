@@ -1,0 +1,82 @@
+---
+title: Selection
+description: Mark files to act on, select by pattern, and keep named selections across folders.
+---
+
+import Shortcut from "../../../components/Shortcut.astro";
+import Screenshot from "../../../components/Screenshot.astro";
+
+Most operations act on the **selection**: the set of marked items in the active
+panel. When nothing is selected, they act on the item under the cursor. The
+panel footer shows how many items are selected and their total size.
+
+## Mark items one by one
+
+- <Shortcut id="panel.selection.toggle_or_size" /> marks or unmarks the cursor
+  item without moving the cursor.
+- <Shortcut id="panel.selection.extend_up" /> and <Shortcut id="panel.selection.extend_down" /> select
+  while you move. <Shortcut id="panel.selection.extend_first" /> and
+  <Shortcut id="panel.selection.extend_last" /> extend the selection to the ends
+  of the list.
+- With the mouse, click moves the cursor and Shift-click selects everything
+  from the cursor to the clicked item. Dragging with the **right** button over
+  rows selects them, or deselects them if you start on a selected row. A right
+  click without dragging opens the context menu.
+
+## Select all, none, or the opposite
+
+| Action | Keys |
+|---|---|
+| Select all | <Shortcut id="panel.selection.select_all" /> |
+| Clear the selection | <Shortcut id="panel.selection.clear" /> |
+| Invert the selection | <Shortcut id="panel.selection.invert" /> |
+
+## Select files by pattern
+
+Press <Shortcut id="panel.selection.select_by_mask" /> to open **Select Files**,
+or <Shortcut id="panel.selection.deselect_by_mask" /> to open **Deselect Files**.
+The field starts with the cursor file's extension, such as `*.txt`.
+
+<Screenshot name="select-files" alt="The Select Files dialog over a folder of photos, with the mask *.jpg" />
+
+- `*` matches any text and `?` matches one character. Matching is
+  case-insensitive and covers the whole file name.
+- Separate several patterns with spaces: `*.jpg *.png`.
+- `*.*` matches every file, including files without an extension.
+- Patterns match files only, never folders. Hidden files and files outside the
+  current [filter](../sorting-filtering/#filter-the-listing) are left alone.
+
+Selecting adds to the existing selection and deselecting removes from it, so you
+can combine several patterns.
+
+## Folder sizes
+
+Folders don't show a size until it's calculated:
+
+- Marking a folder with <Shortcut id="panel.selection.toggle_or_size" /> also
+  starts calculating its size.
+- <Shortcut id="panel.selection.calculate_sizes" /> calculates the size of every
+  selected folder, or every folder in the listing when nothing is selected.
+  Press it again to stop calculations that are still running.
+
+Calculations run in the background and show up in [Jobs](../../files/jobs/).
+They work on local folders and inside zip and 7z archives.
+
+## Global selections
+
+A **global selection** is a named list of files and folders that you collect
+from anywhere, across folders and panels. It's useful for gathering scattered
+files before you copy them, pass them to a bro, or look for duplicates in them.
+
+To add items:
+
+1. Select the files or folders, or put the cursor on one.
+2. Open the context menu (<Shortcut id="panel.context_menu" />) and choose
+   **To global selection**.
+3. Pick an existing selection, or choose **Create new selection** and give it a
+   name.
+
+Your global selections appear as the **Global Selections** source in the
+source bar. Inside, each selection is a folder listing the items it refers to.
+Deleting there only removes the reference from the selection, never the actual
+file.

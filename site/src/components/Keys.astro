@@ -1,0 +1,21 @@
+---
+// One key binding as key caps: <kbd>Ctrl</kbd>+<kbd>P</kbd>.
+import { strokeKeys, type KeyBinding, type Platform } from "../data/commands";
+
+interface Props {
+  binding: KeyBinding;
+  platform: Platform;
+}
+
+const { binding, platform } = Astro.props;
+---
+<span class="fbro-keys">
+  {binding.strokes.map((stroke, s) => (
+    <>
+      {s > 0 && ", "}
+      {strokeKeys(stroke, platform).map((key, k) => (
+        <>{k > 0 && "+"}<kbd>{key}</kbd></>
+      ))}
+    </>
+  ))}
+</span>

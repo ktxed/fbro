@@ -1,0 +1,50 @@
+---
+title: Notifications
+description: Short confirmations, the notification history, and system notifications.
+---
+
+import Shortcut from "../../../components/Shortcut.astro";
+
+## Toasts
+
+fbro confirms things briefly at the bottom of the window, for example "Copied
+full path" or a finished job. Each toast shows for a couple of seconds, and
+several queue up one after another. Toasts never take focus, so you can keep
+typing.
+
+## Notification history
+
+Missed one? Open **Jobs** (<Shortcut id="app.open_jobs" />) and switch to the
+**Notifications** tab. It lists recent notifications, newest first, with their
+severity, full text and time.
+
+- Use the arrow keys, <kbd>Home</kbd> and <kbd>End</kbd> to move through the list.
+- **Clear history** empties it.
+- <kbd>Escape</kbd> or <Shortcut id="app.open_jobs" /> closes the dialog.
+
+The history is kept in memory only and starts empty each time fbro starts. For a
+permanent record of remote activity, see the
+[Journal](../../using/sources/#journal).
+
+## System notifications
+
+With **Show background OS notifications** in **Settings → General**
+(<Shortcut id="app.settings" />), fbro also sends notifications to your desktop
+while none of its windows has focus:
+
+| Event | Notifies |
+|---|---|
+| A copy, search, Fedup scan or hash check finishes or is cancelled | If it ran for at least 30 seconds |
+| A paired machine starts copying from you | Straight away |
+| That transfer finishes or is cancelled | If it ran for at least 30 seconds |
+| A paired machine connects or disconnects | Straight away |
+| Another machine asks to pair | Straight away; you still confirm in fbro |
+
+| Platform | Notes |
+|---|---|
+| Linux | Uses your desktop's notification service. |
+| macOS | macOS asks for permission the first time. If you said no, allow fbro in **System Settings → Notifications**. **Open notification settings** in fbro takes you there. |
+| Windows | Uses Windows notifications. **Open notification settings** opens the Windows notification settings. |
+
+**About OS notifications** next to the setting explains what's sent and why it
+might not appear.

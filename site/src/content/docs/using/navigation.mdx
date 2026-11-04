@@ -1,0 +1,68 @@
+---
+title: Navigation
+description: Move the cursor, open folders, jump to paths, and go back and forward.
+---
+
+import Shortcut from "../../../components/Shortcut.astro";
+
+Every panel has a **cursor**, the highlighted row. Navigation keys act on the
+active panel. <Shortcut id="panel.focus.switch" /> makes the other panel active.
+
+## Move the cursor
+
+| Action | Keys |
+|---|---|
+| Up / down one item | <Shortcut id="panel.cursor.up" /> / <Shortcut id="panel.cursor.down" /> |
+| One screen up / down | <Shortcut id="panel.cursor.page_up" /> / <Shortcut id="panel.cursor.page_down" /> |
+| First / last item | <Shortcut id="panel.cursor.first" /> / <Shortcut id="panel.cursor.last" /> |
+
+In [grid view](../views/), <kbd>Left</kbd> and <kbd>Right</kbd> also move
+between cards.
+
+## Open and leave folders
+
+- <Shortcut id="panel.open" /> opens the folder or file under the cursor. In
+  list view, <kbd>Right</kbd> opens it too.
+- <Shortcut id="panel.navigate_up" /> goes to the parent folder (in list view,
+  <kbd>Left</kbd> does the same). The cursor lands on the folder you came from.
+- An archive opens like a folder; going up from its top level brings you back to
+  the folder that contains it.
+
+When you open a link to a folder, fbro shows the folder the link points to.
+Going up from there takes you back to where the link was, with the link
+selected, rather than to the target's real parent.
+
+## Jump somewhere
+
+| Go to… | Keys |
+|---|---|
+| Your home folder | <Shortcut id="panel.navigate_home" /> |
+| The top of the current source (for example `/` or `C:\`) | <Shortcut id="panel.navigate_source_root" /> |
+| A path you type | <Shortcut id="panel.navigate_to_path" /> |
+| The next / previous source in the source bar | <Shortcut id="panel.source.next" /> / <Shortcut id="panel.source.previous" /> |
+
+**Go To Path** starts with the current path selected, so you can type over it.
+Press <kbd>Alt</kbd>+<kbd>Down</kbd> (macOS: <kbd>Option</kbd>+<kbd>Down</kbd>)
+in the field to pick from paths you entered before.
+
+The **/** and **~** buttons at the end of the path bar do the same as the
+source-root and home keys, and every breadcrumb in the path is clickable.
+
+## Show the same folder in both panels
+
+<Shortcut id="panel.path.sync" /> opens the active panel's folder in the other
+panel. This helps when you want to copy or compare files within one folder tree.
+
+## Back and forward
+
+Each panel remembers where it has been, like a browser tab.
+
+- <Shortcut id="panel.history.back" /> and <Shortcut id="panel.history.forward" /> step
+  through that history.
+- <Shortcut id="panel.history.open" /> lists recent folders to choose from. See
+  [Bookmarks & history](../bookmarks-history/).
+
+## Refresh
+
+fbro watches the folders you have open and updates them by itself. If a listing
+looks stale (for example on a network share), press <Shortcut id="panel.refresh" />.

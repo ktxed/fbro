@@ -1,0 +1,72 @@
+---
+title: Sources
+description: Disks, removable drives, processes, the journal and other places a panel can browse.
+---
+
+import Shortcut from "../../../components/Shortcut.astro";
+
+A **source** is anything a panel can browse. The **source bar**, the row
+under the path bar, lists the sources you can switch to. Click one, or press
+<Shortcut id="panel.source.next" /> and <Shortcut id="panel.source.previous" /> to
+cycle through them.
+
+## Disks and volumes
+
+Your disks and mounted volumes are sources. fbro notices when you plug in or
+mount a drive and adds it to the source bar, and removes it again when it goes
+away.
+
+### Eject a removable drive
+
+On Linux and macOS, run **Eject Removable Source** from the
+[command palette](../command-palette/). Choose the drive, then either:
+
+- **Unmount selected volume**, or
+- **Eject entire drive**, which unmounts every volume on it. Tabs that were
+  showing those volumes go back to your home folder.
+
+This command isn't available on Windows. Use Windows' own **Safely Remove
+Hardware** instead.
+
+## Processes
+
+The **Processes** source lists running processes. Open a process to see the
+processes it started. View a process (<Shortcut id="file.view" />) to see its
+details, such as CPU and memory use.
+
+To end a process, put the cursor on it, press <Shortcut id="panel.pass_to_bro" />
+and choose **Kill (SIGKILL)**. This ends it immediately, without giving it a
+chance to clean up.
+
+**Process tree view** in **Settings → General** switches between a tree of
+parent and child processes and a flat list.
+
+## Journal
+
+The **Journal** is a read-only log of what happened in fbro: the commands you
+ran and their results, such as git actions, plus remote activity like transfers
+to and from a paired fbro, connections and pairing. Each event is a file; view
+it (<Shortcut id="file.view" />) to read the details. The journal is kept on
+disk, so it survives restarts, and clearing notifications doesn't remove it.
+
+## Global Selections
+
+Appears once you've created a [global selection](../selection/#global-selections).
+Each named selection is a folder that lists the files and folders you added to it.
+
+## Scratch
+
+**Scratch** opens the folder where fbro keeps your notes. See
+[Scratch notes](../../viewing/editor/#scratch-notes).
+
+## Temporary sources
+
+Some sources appear only while you're in them, and aren't shown in the source
+bar:
+
+- **Archives.** Open a zip or 7z file to browse it like a folder. Going up from
+  its top level returns you to the folder that contains the archive.
+- **Search results.** A [search](../../get-started/tour/#search) shows its results
+  in a panel. You can view, copy or delete them like files in any folder.
+- **Bookmarks** and **History** opened as listings. See
+  [Bookmarks & history](../bookmarks-history/).

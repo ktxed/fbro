@@ -1,0 +1,62 @@
+---
+title: Browse & copy
+description: Browse a paired fbro, view its files with thumbnails, and copy files with resumable, verified transfers.
+---
+
+import Shortcut from "../../../components/Shortcut.astro";
+import Screenshot from "../../../components/Screenshot.astro";
+
+Once you've [paired](../pairing/) and connected, each folder the other machine
+shares appears in your source bar. Open it in a panel like any other source.
+
+## Browse and view
+
+- Navigation, sorting, filtering and selection work as usual.
+- <Shortcut id="file.view" />, and <Shortcut id="panel.open" /> on a file, open it
+  in fbro's [viewer](../../viewing/viewer/).
+- [Grid view](../../using/views/#list-and-grid-view) shows real thumbnails. The
+  other machine makes them and sends only the small images, never the whole
+  files. It can turn this off with **Stream thumbnails to paired fbro clients**
+  in **Settings → Display**.
+
+Remote sources are read-only: you can't delete, rename or create anything on the
+other machine.
+
+<Screenshot name="remote-browse" alt="A paired machine's photos in grid view with thumbnails, in the left panel" />
+
+## Copy files to this machine
+
+Open a local folder in the other panel and use Copy (<Shortcut id="file.copy" />)
+as usual. Remote copies add two safeguards.
+
+### Resume
+
+If a copy is interrupted (the network drops, or you cancel and keep the partial
+files), copy again to the same place. fbro offers **Resume partial files** in
+the Copy dialog, or **Resume** when it meets each partial file, and continues
+from where it stopped instead of starting over.
+
+When you cancel a remote copy, fbro asks whether to keep or delete the partly
+copied files. A copy that was already resumed always keeps them, so it can be
+resumed again.
+
+To have fbro retry interrupted copies by itself, turn on **Auto-retry
+interrupted copies** in **Settings → General**.
+
+### Verification
+
+Every remote copy is verified. fbro compares three BLAKE3 checksums of each
+file: one the other machine computes from the file on disk, one it computes while
+sending it, and one of the file written here. All three must match.
+
+If they don't, **Action if verification fails** in the Copy dialog decides what
+happens: **Fail** the job, or **Ask** you whether to retry, skip or abort. Tick
+**Save BLAKE3 digest file** to keep the checksum next to each copied file as a
+[`.b3` file](../../bros/hashes/).
+
+## See who is copying from you
+
+In **Jobs** (<Shortcut id="app.open_jobs" />), **Outgoing Transfers** lists the
+files a paired machine is copying from you, with their progress. The
+[Journal](../../using/sources/#journal) keeps a permanent record of transfers,
+connections and pairings.

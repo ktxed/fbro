@@ -1,0 +1,181 @@
+/* Starlight theme tuned to fbro's own colour schemes (src/styles.css):
+   dark follows fbro-dark, light follows daylight. This file is unlayered, so
+   it beats Starlight's layered theme regardless of specificity: every
+   override must be scoped to one theme. */
+:root[data-theme="dark"] {
+  --sl-color-accent-low: #16213e;
+  --sl-color-accent: #4a7cbf;
+  --sl-color-accent-high: #a9c4ea;
+  --sl-color-black: #0d0d0d;
+  --sl-color-gray-6: #1a1a2e;
+  --sl-color-gray-5: #2a2a4a;
+}
+
+:root[data-theme="light"] {
+  --sl-color-accent-low: #d7e4f6;
+  --sl-color-accent: #2f62a8;
+  --sl-color-accent-high: #1a3a5c;
+}
+
+.fbro-keys kbd,
+.sl-markdown-content kbd {
+  font-family: var(--sl-font-mono);
+  font-size: 0.85em;
+  padding: 0.05em 0.4em;
+  border: 1px solid var(--sl-color-gray-5);
+  border-bottom-width: 2px;
+  border-radius: 0.3em;
+  background: var(--sl-color-gray-6);
+  color: var(--sl-color-white);
+  white-space: nowrap;
+}
+
+.fbro-muted,
+.fbro-shortcut__alt {
+  color: var(--sl-color-gray-3);
+}
+
+.fbro-shortcut-table {
+  width: 100%;
+}
+
+.fbro-shortcut-table td:first-child {
+  width: 55%;
+}
+
+/* Show the whole app screenshot in the splash hero instead of a square crop. */
+.hero > .hero-html {
+  width: 100%;
+  max-width: 44rem;
+}
+
+.fbro-hero-shot {
+  width: 100%;
+  height: auto;
+}
+
+@media (min-width: 50rem) {
+  .hero {
+    grid-template-columns: 5fr 6fr;
+  }
+}
+
+.fbro-screenshot img {
+  border: 1px solid var(--sl-color-gray-5);
+  border-radius: 0.4rem;
+}
+
+.fbro-screenshot figcaption {
+  color: var(--sl-color-gray-3);
+  font-size: var(--sl-text-sm);
+  margin-top: 0.4rem;
+}
+
+/* Numbered callouts over a screenshot; positions are percentages of the image. */
+.fbro-screenshot__frame {
+  position: relative;
+}
+
+.fbro-screenshot__frame a {
+  display: block;
+}
+
+.fbro-screenshot__frame img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.fbro-callout {
+  align-items: center;
+  background: var(--sl-color-accent);
+  border: 2px solid var(--sl-color-white);
+  border-radius: 50%;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 60%);
+  color: var(--sl-color-black);
+  display: flex;
+  font-size: 0.8rem;
+  font-weight: 700;
+  height: 1.5rem;
+  justify-content: center;
+  pointer-events: none;
+  position: absolute;
+  transform: translate(-50%, -50%);
+  width: 1.5rem;
+}
+
+/* Responsive 16:9 embed for the home page showcase video. */
+.fbro-video {
+  aspect-ratio: 16 / 9;
+  border: 1px solid var(--sl-color-gray-5);
+  border-radius: 0.4rem;
+  margin-bottom: 2rem;
+  overflow: hidden;
+}
+
+.fbro-video iframe {
+  border: 0;
+  height: 100%;
+  width: 100%;
+}
+
+/* Home page feature cards: the whole card is the "Read more" link. The link's
+   box is stretched over the card, so the keyboard focus ring covers the card too. */
+.card-grid .card {
+  position: relative;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.card-grid .card:hover {
+  background-color: var(--sl-color-gray-6);
+  border-color: var(--sl-color-accent);
+}
+
+.card-grid .card a::after {
+  content: "";
+  inset: 0;
+  position: absolute;
+}
+
+.card-grid .card a:focus-visible {
+  outline: none;
+}
+
+.card-grid .card:has(a:focus-visible) {
+  outline: 2px solid var(--sl-color-accent-high);
+  outline-offset: 2px;
+}
+
+/* The bros card uses the robot icon that marks Pass to Bro in the app (Tabler's
+   "robot"), which Starlight's built-in icon set lacks. The built-in icon is
+   hidden and the glyph is drawn as a mask so it takes the card's icon color. */
+.card-grid .card:has(a[href="bros/overview/"]) .title .icon {
+  display: none;
+}
+
+.card-grid .card:has(a[href="bros/overview/"]) .title::before {
+  background-color: currentColor;
+  content: "";
+  flex-shrink: 0;
+  height: 1.333em;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'  %3E%3Cpath stroke='none' d='M0 0h24v24H0z' fill='none' /%3E%3Cpath d='M6 6a2 2 0 0 1 2 -2h8a2 2 0 0 1 2 2v4a2 2 0 0 1 -2 2h-8a2 2 0 0 1 -2 -2l0 -4' /%3E%3Cpath d='M12 2v2' /%3E%3Cpath d='M9 12v9' /%3E%3Cpath d='M15 12v9' /%3E%3Cpath d='M5 16l4 -2' /%3E%3Cpath d='M15 14l4 2' /%3E%3Cpath d='M9 18h6' /%3E%3Cpath d='M10 8v.01' /%3E%3Cpath d='M14 8v.01' /%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'  %3E%3Cpath stroke='none' d='M0 0h24v24H0z' fill='none' /%3E%3Cpath d='M6 6a2 2 0 0 1 2 -2h8a2 2 0 0 1 2 2v4a2 2 0 0 1 -2 2h-8a2 2 0 0 1 -2 -2l0 -4' /%3E%3Cpath d='M12 2v2' /%3E%3Cpath d='M9 12v9' /%3E%3Cpath d='M15 12v9' /%3E%3Cpath d='M5 16l4 -2' /%3E%3Cpath d='M15 14l4 2' /%3E%3Cpath d='M9 18h6' /%3E%3Cpath d='M10 8v.01' /%3E%3Cpath d='M14 8v.01' /%3E%3C/svg%3E") center / contain no-repeat;
+  width: 1.333em;
+}
+
+/* Home page hero: the large logo stands in for the "fbro" title text. The h1
+   keeps its text for screen readers, search engines and the page title. */
+.hero h1[data-page-title] {
+  font-size: 0;
+  line-height: 0;
+}
+
+.hero h1[data-page-title]::before {
+  aspect-ratio: 1;
+  background: url("/fbro/logo-large.png") center / contain no-repeat;
+  border-radius: 0.9rem;
+  content: "";
+  display: block;
+  /* Served from public/, so the base path is part of the URL like the hero screenshot. */
+  width: clamp(7rem, 22vw, 10rem);
+}

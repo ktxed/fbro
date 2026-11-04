@@ -1,0 +1,83 @@
+---
+title: Command palette & shortcuts
+description: Run any command by name, look up keys, use the context menu, and rebind shortcuts.
+---
+
+import Shortcut from "../../../components/Shortcut.astro";
+import Screenshot from "../../../components/Screenshot.astro";
+
+## Command palette
+
+Press <Shortcut id="app.command_palette" /> and type part of a command's name.
+The palette lists matching commands with their shortcuts. Use <kbd>Up</kbd> and
+<kbd>Down</kbd> to choose and <kbd>Enter</kbd> to run.
+
+Commands that have no default key are easiest to reach from here, for example:
+
+- **Compare**
+- **Toggle Button Bar**
+- **Install fbro Shell Command**
+- **Eject Removable Source** (Linux and macOS)
+- **About fbro**
+
+<Screenshot name="command-palette" alt="The command palette with grid typed, showing the Toggle Grid View command" />
+
+## Cheat sheet
+
+<Shortcut id="app.cheat_sheet" /> opens the **keyboard cheat sheet**, grouped into
+navigation, selection, panel, tabs, files and app commands. It shows your
+current bindings, including any you've changed. The keys on the bottom button
+bar aren't repeated there.
+
+For the defaults on every platform, see the
+[keyboard shortcuts](../../reference/keyboard-shortcuts/) reference.
+
+<Screenshot name="cheat-sheet" alt="The keyboard cheat sheet, grouped into Navigation, Selection, Panel and Tabs" />
+
+## Context menu
+
+<Shortcut id="panel.context_menu" /> opens the context menu for the cursor item, or
+for the whole selection when the cursor is on a selected item. The
+<kbd>ContextMenu</kbd> key and <kbd>Shift</kbd>+<kbd>F10</kbd> open it too, and so
+does a right click.
+
+Depending on the item and where it is, the menu offers:
+
+- **Open containing folder** (macOS: **Open in Finder**, Windows: **Show in
+  Explorer**)
+- **Edit in Editor Tab**, **Compare**, **View Git diff**
+- **Initialize Git repository…** for a folder
+- **Pass to Bro…**, **To global selection**, **Open With…**
+- **Copy**, **Move**, **Rename**, **Set Permissions…**, **Delete**
+- **Copy name** and **Copy full path** (**Copy names** and **Copy full paths**
+  for a selection)
+
+Items that don't apply are left out rather than greyed out.
+
+<Screenshot name="context-menu" alt="The context menu for a selection of two files, offering Compare, Pass to Bro, Copy, Move and Delete" />
+
+## Change a shortcut
+
+Open **Settings** (<Shortcut id="app.settings" />) and go to the **Shortcuts** tab.
+
+1. Find the command. The search box matches names, command IDs and shortcuts,
+   and the filters narrow the list to **All**, **Customized** or **Unassigned**
+   commands.
+2. Choose **Add shortcut**, or **Edit** or **Remove** an existing one. When
+   recording, press the key combination you want.
+3. Choose whether the binding applies in **Both views**, **List only** or
+   **Grid only**.
+
+If the new key is already used by another command, fbro tells you which one.
+Choose **Override** to move the key to your command, or **Abort** to keep things
+as they were. **Reset to defaults** brings back a command's default bindings,
+and **Reset all to defaults** does it for every command.
+
+A few keys can't be assigned: <kbd>Ctrl</kbd>/<kbd>Cmd</kbd> with
+<kbd>+</kbd>, <kbd>-</kbd>, <kbd>=</kbd> or <kbd>0</kbd> (zoom), and
+<kbd>ContextMenu</kbd> / <kbd>Shift</kbd>+<kbd>F10</kbd> (context menu).
+
+Letter and digit shortcuts follow the key's physical position, so they keep
+working with macOS Option and with non-Latin keyboard layouts.
+
+<Screenshot name="settings-shortcuts" alt="Settings, Shortcuts tab, searching for copy and showing the Copy command with its F5 binding" />

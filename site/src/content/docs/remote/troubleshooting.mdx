@@ -1,0 +1,47 @@
+---
+title: Troubleshooting remote fbro
+description: What to check when two fbro instances can't see or reach each other.
+---
+
+## The other machine doesn't appear under LAN discovery
+
+Discovery uses mDNS, which needs UDP port 5353. On Linux, a firewall that blocks
+it is the usual cause, often showing up as a Mac that can't see a Linux machine.
+
+```sh
+# UFW
+sudo ufw allow 5353/udp comment 'mDNS'
+
+# firewalld
+sudo firewall-cmd --permanent --add-service=mdns
+sudo firewall-cmd --reload
+```
+
+Also check that:
+
+- remote access is on, on **both** machines;
+- both are on the same network. mDNS usually doesn't cross VPNs, guest
+  networks or separate subnets;
+- TCP ports 7880 (pairing) and 7879 (browsing and copying) aren't blocked.
+
+Discovery refreshes on its own; the refresh button in **LAN discovery** asks
+again straight away.
+
+## Pair without discovery
+
+Use **Pair directly** in **Settings → Sharing** and enter the other machine's
+host name or IP address. The other machine must accept connections on TCP
+port 7880 for pairing and TCP 7879 for browsing and copying, so open both in its
+firewall if needed.
+
+## A paired peer shows as stale
+
+If discovery hasn't heard from a peer for a while, its entry is marked stale. If
+you're still connected, the session keeps working. Otherwise, try the retry
+button, which uses the peer's last known address even when discovery is quiet.
+
+## The connection drops
+
+fbro reconnects by itself, retrying more slowly over time up to every 30
+seconds. Copies that were interrupted can be
+[resumed](../browse-transfer/#resume).

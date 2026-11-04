@@ -1,0 +1,113 @@
+---
+title: Editing & notes
+description: Edit files in your editor, in a terminal, or in fbro's own editor tabs, and keep scratch notes.
+---
+
+import Shortcut from "../../../components/Shortcut.astro";
+import Screenshot from "../../../components/Screenshot.astro";
+
+fbro gives you three ways to edit a file:
+
+| | Keys | Opens |
+|---|---|---|
+| **Edit** | <Shortcut id="file.edit" /> | Your text editor app |
+| **Quick Edit** | <Shortcut id="file.quick_edit" /> | Nano or Vim in a terminal inside the panel |
+| **Edit in Editor Tab** | context menu or command palette | fbro's own editor, in a tab |
+
+## Edit in your editor
+
+<Shortcut id="file.edit" /> opens the cursor file in the first editor fbro finds,
+in this order: Visual Studio Code, VSCodium, Cursor, Zed, Sublime Text. If none
+is installed, fbro opens the file with your system's default app for that type.
+
+If that fails too, fbro shows **No editor available** with the file's path, so
+you can copy it and open it yourself.
+
+Files in your notes folder are the exception: Edit opens them in an
+[editor tab](#editor-tabs).
+
+## Quick Edit in a terminal
+
+<Shortcut id="file.quick_edit" /> opens the file in a terminal editor inside the
+panel, so you never leave fbro. Choose **Nano** or **Vim** under **Quick terminal
+editor** in **Settings → General** (<Shortcut id="app.settings" />). If your
+choice isn't installed, fbro tries the other one.
+
+:::tip[Escape in Vim]
+In fbro's terminal, <kbd>Escape</kbd> moves focus back to the listing instead of
+reaching the program. Press <kbd>Ctrl</kbd>+<kbd>[</kbd> to send Escape to Vim.
+:::
+
+## Editor tabs
+
+fbro has a built-in editor for small text files. Open the context menu
+(<Shortcut id="panel.context_menu" />) on a file and choose **Edit in Editor Tab**.
+The file opens in a new tab next to the current one.
+
+It works for UTF-8 text files of up to 2 MiB on a local disk. Opening a file that
+already has an editor tab switches to that tab.
+
+<Screenshot name="editor-tab" alt="A Markdown file open in an editor tab on the left, with its rendered preview on the right" />
+
+### Keys in an editor tab
+
+While the editor has focus, it gets every key, so letters and fbro's single-key
+shortcuts simply type text. Only these do something else:
+
+| Key | Action |
+|---|---|
+| <kbd>Escape</kbd> | Save and go back to the listing tab you came from. The editor tab stays open. |
+| <kbd>Ctrl</kbd>/<kbd>Cmd</kbd>+<kbd>S</kbd> | Save now |
+| <kbd>Ctrl</kbd>/<kbd>Cmd</kbd>+<kbd>W</kbd> | Save and close the tab |
+| <kbd>Ctrl</kbd>/<kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>M</kbd> | Full screen on or off |
+| <kbd>Ctrl</kbd>/<kbd>Cmd</kbd>+<kbd>F</kbd> | Find |
+| <Shortcut id="panel.viewer.embed" /> | Save and toggle [quick preview](../quick-preview/#preview-what-youre-editing) |
+| <Shortcut id="notes.new" /> | Save and start a new note |
+| <kbd>Tab</kbd> | Indent |
+
+On Linux and Windows, <Shortcut id="file.view" /> also saves and opens the file in the
+viewer.
+
+### Saving
+
+There's no need to save by hand: fbro saves about a second after you stop
+typing, and also when you leave the tab, switch windows or quit. The tab shows a
+dot while a save is pending and a warning icon if saving is paused or failed.
+
+The file keeps its line endings (LF or CRLF) and encoding mark.
+
+### When the file changes elsewhere
+
+If another program changes the file and you have no unsaved edits, the editor
+reloads it quietly. If you do have edits, autosave pauses and a bar explains why.
+Press <kbd>Ctrl</kbd>/<kbd>Cmd</kbd>+<kbd>S</kbd> or the bar's button to decide:
+
+- **Overwrite** (<kbd>O</kbd>) saves your version over the other one.
+- **Reload** (<kbd>R</kbd>) throws away your edits and loads the file.
+- **Keep both** (<kbd>K</kbd>) saves your version as a separate
+  `name (conflict <date time>).ext` file and loads the other one.
+
+If the file was deleted, **Save it again** (<kbd>S</kbd>) recreates it.
+
+### Quitting
+
+When you quit, fbro saves every editor tab first. If one can't be saved, it asks
+whether to close anyway.
+
+Editor tabs are restored the next time fbro starts.
+
+## Scratch notes
+
+Notes are quick Markdown files that fbro keeps for you.
+
+- <Shortcut id="notes.new" /> creates a note named after the current date and
+  time and opens it in an editor tab. It works from inside an editor tab too.
+- **Scratch** in the [source bar](../../using/sources/#scratch), or **Open Notes**
+  in the command palette, opens the notes folder.
+
+A new note you close without typing anything is removed again.
+
+Notes live in the `scratch` folder of fbro's
+[data folder](../../get-started/first-launch/#where-fbro-keeps-its-data). To keep
+them somewhere else, for example in a synced folder, set **Notes folder** in
+**Settings → General**.

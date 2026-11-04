@@ -49,6 +49,25 @@ keyboard, or modal behaviour **updates the matching spec in the same commit**.
 - E2E smoke (fast host run, see `TESTING.md`):
   `npm run tauri -- build --no-bundle && FBRO_E2E_COMPOSE_FILES=docker-compose.e2e.host.yml GDK_BACKEND=wayland npm run e2e:smoke:local`
 - Build-info: `npm run test:build-info`
+- User guide (`site/`, Astro Starlight, deployed to GitHub Pages by
+  `.github/workflows/pages.yml`): `npm --prefix site install`, then
+  `npm run site:dev` / `npm run site:build`
+
+## User guide (`site/`)
+
+- The guide is for users and describes behaviour, not internals. Link to
+  `spex/` for design detail rather than repeating it.
+- Write shortcuts as `<Shortcut id="command.id" />`, never as hard-coded key
+  labels. The component reads `site/src/data/commands.json`, a snapshot of the
+  `ws/commands.rs` registry for all three platforms. After changing a command
+  or a default binding, regenerate it with
+  `FBRO_UPDATE_SITE_DATA=1 cargo test --manifest-path src-tauri/Cargo.toml site_command_data_is_current`;
+  the test fails while the snapshot is stale.
+- A user-visible change updates the matching guide page in the same commit,
+  once the guide covers that area.
+- Screenshots are `<Screenshot name alt />`, captured from the real app by
+  `npm run docs:screens` (`tests/e2e/docs/`, see `TESTING.md`), dark scheme
+  only. Regenerate the affected scenes when their UI changes.
 
 ## Frontend rules
 
