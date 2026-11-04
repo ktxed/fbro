@@ -15,7 +15,7 @@ use crate::jobs::{
 };
 use crate::platform::{ExternalClipboardOp, ExternalClipboardPayload};
 use crate::state::{ShadowSource, Source};
-use crate::vfs::{search::SearchResultsDriver, VfsError};
+use crate::vfs::{search::SearchResultsDriver, VfsDriver, VfsError};
 use crate::ws::intents::{
     arg_bool, arg_str, arg_u64, is_global_selection_source, is_search_source,
 };
@@ -2561,6 +2561,13 @@ async fn make_dir(args: &Value, ctx: &mut IntentContext<'_>) {
     }
 }
 
+/// Creates an empty file exclusively: an existing file or directory is never
+/// truncated or replaced, it yields `VfsError::AlreadyExists`.
+fn create_empty_file(driver: &dyn VfsDriver, path: &str) -> Result<(), VfsError> {
+    // The writer is dropped immediately, leaving a zero-byte file.
+    driver.open_write_new(path).map(drop)
+}
+
 async fn touch_file(args: &Value, ctx: &mut IntentContext<'_>) {
     let parsed = TouchFileArgs::from_args(args);
 
@@ -2595,10 +2602,11 @@ async fn touch_file(args: &Value, ctx: &mut IntentContext<'_>) {
 
     if let Some(driver) = driver {
         let full_path_clone = full_path.clone();
-        let result = tokio::task::spawn_blocking(move || driver.open_write(&full_path_clone)).await;
+        let result =
+            tokio::task::spawn_blocking(move || create_empty_file(driver.as_ref(), &full_path_clone))
+                .await;
         match result {
-            Ok(Ok(_writer)) => {
-                // writer dropped here — file created as zero bytes
+            Ok(Ok(())) => {
                 crate::journal::record(
                     "mutation.entry.v1", None, None, None, Some("completed"),
                     serde_json::json!({ "kind": "touch", "destination": full_path, "undoEligible": false }),
@@ -2624,6 +2632,13 @@ async fn touch_file(args: &Value, ctx: &mut IntentContext<'_>) {
             }
             Ok(Err(VfsError::NotSupported(msg))) => {
                 let _ = send_error(ctx, "TOUCH_NOT_SUPPORTED", msg).await;
+            }
+            Ok(Err(VfsError::AlreadyExists(_))) => {
+                let message = format!(
+                    "A file or directory named \"{}\" already exists.",
+                    parsed.name
+                );
+                let _ = send_error(ctx, "TOUCH_FAILED", message).await;
             }
             Ok(Err(error)) => {
                 let _ = send_error(ctx, "TOUCH_FAILED", error.to_string()).await;
@@ -3422,5 +3437,57 @@ mod search_navigation_tests {
             search_result_destination(&LocalFsDriver, &path, "directory").unwrap(),
             (path, None)
         );
+    }
+}
+
+#[cfg(test)]
+mod touch_file_tests {
+    use super::create_empty_file;
+    use crate::vfs::local::LocalFsDriver;
+    use crate::vfs::VfsError;
+    use std::{fs, path::PathBuf};
+
+    struct TestDir(PathBuf);
+
+    impl TestDir {
+        fn new() -> Self {
+            let path = std::env::temp_dir().join(format!("fbro-touch-{}", uuid::Uuid::new_v4()));
+            fs::create_dir_all(&path).unwrap();
+            Self(path)
+        }
+    }
+
+    impl Drop for TestDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn creates_a_new_empty_file() {
+        let temp = TestDir::new();
+        let path = temp.0.join("new.txt");
+        create_empty_file(&LocalFsDriver, path.to_str().unwrap()).unwrap();
+        assert_eq!(fs::metadata(&path).unwrap().len(), 0);
+    }
+
+    #[test]
+    fn refuses_an_existing_file_and_keeps_its_contents() {
+        let temp = TestDir::new();
+        let path = temp.0.join("keep.txt");
+        fs::write(&path, "precious").unwrap();
+        let result = create_empty_file(&LocalFsDriver, path.to_str().unwrap());
+        assert!(matches!(result, Err(VfsError::AlreadyExists(_))));
+        assert_eq!(fs::read_to_string(&path).unwrap(), "precious");
+    }
+
+    #[test]
+    fn refuses_an_existing_directory() {
+        let temp = TestDir::new();
+        let path = temp.0.join("dir");
+        fs::create_dir(&path).unwrap();
+        let result = create_empty_file(&LocalFsDriver, path.to_str().unwrap());
+        assert!(matches!(result, Err(VfsError::AlreadyExists(_))));
+        assert!(path.is_dir());
     }
 }
