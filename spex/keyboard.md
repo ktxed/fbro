@@ -45,6 +45,16 @@ and sharing patches do not move focus. Covered Settings controls remain inert.
   retaining global shortcut handling and all existing input guards; only its
   visible buttons are omitted. Closing Settings or the palette restores its
   opener through the modal stack as usual.
+- **Keyboard Cheat Sheet** (`app.cheat_sheet`, default `?`) is the first
+  command-palette entry. It opens a `ModalLayer` (`cheat-sheet`) listing the
+  common registry shortcuts by section (navigation, selection, panel, tabs,
+  files, app) plus the fixed zoom keys, read from the live registry so
+  customized bindings show. Button-bar commands (`TOOLBAR_COMMAND_IDS`) and
+  plain arrow/page movement are omitted; unbound commands point to the palette.
+  macOS renders modifiers as ⌃ ⌥ ⇧ ⌘ icons in Apple order; other platforms spell
+  them out. The scrollable body takes initial focus, so arrows and Page keys
+  scroll it. Escape or the sheet's own binding closes it and focus returns to
+  the opener. A printable sheet binding typed in the panel filter stays text.
 - Each modal owns its feature-specific keys on its layer or descendants.
 - Single-item Copy confirmation uses `N` to focus and select the destination
   name for editing. The label displays the mnemonic; it does not intercept

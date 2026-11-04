@@ -10,7 +10,7 @@ import {
   IconArrowRight, IconArrowBarToUp, IconArrowBarToDown, IconChevronsUp,
   IconChevronsDown, IconChevronLeft, IconChevronRight, IconArrowsLeftRight,
   IconFolderOpen, IconCheckbox, IconCalculator, IconSelectAll, IconSquareOff,
-  IconCommand,
+  IconCommand, IconKeyboard,
 } from "@tabler/icons-react";
 
 import {
@@ -31,6 +31,7 @@ const fbroIcon = new URL("../../logo256.png", import.meta.url).href;
 // Icons are visual cues; related navigation and selection commands deliberately
 // reuse directional/action icons while their labels describe the exact action.
 const COMMAND_ICONS: Partial<Record<string, typeof IconSearch>> = {
+  "app.cheat_sheet": IconKeyboard,
   "app.search": IconSearch,
   "app.settings": IconSettings,
   "app.open_jobs": IconListDetails,

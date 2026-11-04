@@ -30,8 +30,12 @@ export const TOOLBAR_COMMAND_IDS = [
 ] as const;
 
 export const COMMAND_PALETTE_COMMAND_ID = "app.command_palette" as const;
+export const CHEAT_SHEET_COMMAND_ID = "app.cheat_sheet" as const;
 
+// Order matters: the command palette lists commands in this order, so the
+// cheat sheet comes first.
 export const GLOBAL_SHORTCUT_COMMAND_IDS = [
+  CHEAT_SHEET_COMMAND_ID,
   COMMAND_PALETTE_COMMAND_ID,
   "app.open_jobs",
   "app.search",
@@ -540,6 +544,9 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
       return true;
     case "app.about":
       dispatch({ type: "OPEN_ABOUT" });
+      return true;
+    case CHEAT_SHEET_COMMAND_ID:
+      dispatch({ type: "OPEN_CHEAT_SHEET" });
       return true;
     case "app.install_fbro_command":
       void invoke<{ path: string; command: string }>("install_fbro_command")

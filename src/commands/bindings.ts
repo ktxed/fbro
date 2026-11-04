@@ -74,3 +74,16 @@ export function zoomAction(event: KeyboardLikeEvent, mac = typeof navigator !== 
   if (key === "0") return 0;
   return null;
 }
+
+export type KeyToken =
+  | { kind: "modifier"; modifier: "ctrl" | "alt" | "shift" | "meta" }
+  | { kind: "key"; key: string };
+
+/** Split a stroke into display tokens. macOS uses Apple's ⌃⌥⇧⌘ order;
+ *  elsewhere the order matches `formatBinding`. */
+export function strokeTokens(stroke: KeyStroke, mac = typeof navigator !== "undefined" && navigator.platform.startsWith("Mac")): KeyToken[] {
+  const order: Array<"ctrl" | "alt" | "shift" | "meta"> = mac ? ["ctrl", "alt", "shift", "meta"] : ["meta", "ctrl", "alt", "shift"];
+  const tokens: KeyToken[] = order.filter(modifier => stroke[modifier]).map(modifier => ({ kind: "modifier", modifier }));
+  tokens.push({ kind: "key", key: stroke.key });
+  return tokens;
+}

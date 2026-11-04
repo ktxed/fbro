@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { backendPath, hostPath } from "../config.mjs";
+import { artifactsDir, backendPath, hostPath } from "../config.mjs";
 import {
   clickCommand,
   clickContextMenuItem,
@@ -31,6 +31,7 @@ export async function runLocalFlow(browser, observer) {
   await verifyFileIcons(browser, observer);
   await verifyColorSchemeSwitch(browser, observer);
   await verifyAboutModal(browser);
+  await verifyCheatSheet(browser);
   await verifyEjectPicker(browser);
   await verifyThumbnailQueue(browser, observer);
 
@@ -979,6 +980,50 @@ async function verifyAboutModal(browser) {
     timeout: 10_000,
     label: "panel focus after closing About",
   });
+}
+
+async function verifyCheatSheet(browser) {
+  const panelFocused = () => waitFor(async () => browser.execute(() => document.activeElement?.getAttribute("data-testid") === "panel-left"), {
+    timeout: 10_000,
+    label: "panel focus after closing the cheat sheet",
+  });
+  const sheet = await browser.$('[data-testid="cheat-sheet-modal"]');
+
+  // The cheat sheet is the first palette command; Enter on an empty query runs it.
+  await browser.execute(() => document.querySelector('[data-testid="panel-left"]')?.focus());
+  await pressWindowKey(browser, "p", { shift: true, meta: true });
+  await pressWindowKey(browser, "p", { shift: true, ctrl: true });
+  await (await browser.$(".command-palette__input")).waitForDisplayed({ timeout: 10_000 });
+  const first = await browser.execute(() => document.querySelector(".command-palette__item")?.getAttribute("data-command-id"));
+  if (first !== "app.cheat_sheet") throw new Error(`first palette command is ${first}, expected app.cheat_sheet`);
+  await browser.keys("Enter");
+  await sheet.waitForDisplayed({ timeout: 10_000 });
+  await expectModalFocus(browser, '[data-testid="cheat-sheet-body"]', "cheat sheet initial focus");
+  const content = await browser.execute(() => {
+    const body = document.querySelector('[data-testid="cheat-sheet-body"]');
+    return {
+      toolbarRows: ["file.copy", "file.move", "file.delete", "file.rename", "app.quit"]
+        .filter((id) => body?.querySelector(`[data-command-id="${id}"]`)),
+      selectAll: body?.querySelector('[data-command-id="panel.selection.select_all"] .key-combo')?.getAttribute("aria-label"),
+      about: !!body?.querySelector('[data-command-id="app.about"]'),
+    };
+  });
+  if (content.toolbarRows.length > 0) throw new Error(`cheat sheet repeats button-bar commands: ${content.toolbarRows}`);
+  if (!content.selectAll || !content.about) throw new Error(`cheat sheet content mismatch: ${JSON.stringify(content)}`);
+  // Covered layers stay inert: `j` would open Jobs from the panel.
+  await browser.keys("j");
+  if (await (await browser.$('[data-modal-id="jobs"]')).isExisting()) throw new Error("panel shortcut ran under the cheat sheet");
+  await browser.saveScreenshot(path.join(artifactsDir, "screenshots", "cheat-sheet.png"));
+  await browser.keys("Escape");
+  await sheet.waitForDisplayed({ timeout: 10_000, reverse: true });
+  await panelFocused();
+
+  // `?` opens the sheet from the panel and toggles it closed again.
+  await browser.keys("?");
+  await sheet.waitForDisplayed({ timeout: 10_000 });
+  await browser.keys("?");
+  await sheet.waitForDisplayed({ timeout: 10_000, reverse: true });
+  await panelFocused();
 }
 
 async function verifyEjectPicker(browser) {

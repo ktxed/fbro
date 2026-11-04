@@ -3835,6 +3835,119 @@ body {
 
 /* About modal */
 
+/* Keyboard cheat sheet */
+.cheat-sheet__body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  align-content: start;
+  gap: 14px 22px;
+  padding: 14px 16px;
+}
+
+/* The body only takes focus so arrows/Page keys scroll it; no focus ring. */
+.modal-layer .cheat-sheet__body:focus,
+.modal-layer .cheat-sheet__body:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+.cheat-sheet__section-title {
+  margin: 0 0 6px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+  color: var(--accent);
+  font-size: var(--font-size);
+  font-weight: 600;
+}
+
+.cheat-sheet__rows {
+  margin: 0;
+}
+
+.cheat-sheet__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 3px 0;
+}
+
+.cheat-sheet__label {
+  color: var(--text);
+  min-width: 0;
+}
+
+.cheat-sheet__keys {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  flex-shrink: 0;
+}
+
+.cheat-sheet__binding {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.cheat-sheet__separator,
+.cheat-sheet__palette-hint {
+  color: var(--text-dim);
+}
+
+.cheat-sheet__palette-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: calc(var(--font-size) - 1px);
+}
+
+.key-combo {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.key-combo__stroke {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.modal-layer .key-combo__key {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.7em;
+  height: 1.7em;
+  margin: 0;
+  padding: 0 5px;
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: var(--bg-elev);
+  color: var(--text);
+  font: inherit;
+  font-size: calc(var(--font-size) - 2px);
+  line-height: 1;
+  vertical-align: middle;
+}
+
+.modal-layer .key-combo__key--modifier {
+  color: var(--text-dim);
+}
+
+.modal-layer .key-combo--mac .key-combo__key--modifier {
+  padding: 0 3px;
+}
+
 .about-modal__body {
   display: flex;
   flex-direction: column;

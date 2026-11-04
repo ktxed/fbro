@@ -353,6 +353,7 @@ export interface AppState {
   sharedFolderInput: { path: string; requestId: string | null; error?: string };
   commandPaletteOpen: boolean;
   aboutOpen: boolean;
+  cheatSheetOpen: boolean;
   activeSortSelectorPanelId: string | null;
   /** mDNS-discovered fbro peers on the LAN. Updated via
    *  `StatePatch { domain: "discoveredPeers" }`. */
@@ -453,6 +454,7 @@ const initialState: AppState = {
   pendingSettings: null,
   commandPaletteOpen: false,
   aboutOpen: false,
+  cheatSheetOpen: false,
   activeSortSelectorPanelId: null,
   discoveredPeers: [],
   shareConfig: { enabled: false, allowIpv6: false, sharedSourceIds: [], sharedRoots: [], shareSuggestions: [], pairedPeers: [] },
@@ -542,6 +544,8 @@ export type AppAction =
   | { type: "OPEN_COMMAND_PALETTE" }
   | { type: "CLOSE_COMMAND_PALETTE" }
   | { type: "OPEN_ABOUT" }
+  | { type: "OPEN_CHEAT_SHEET" }
+  | { type: "CLOSE_CHEAT_SHEET" }
   | { type: "CLOSE_ABOUT" }
   | { type: "OPEN_SORT_SELECTOR"; panelId: string }
   | { type: "CLOSE_SORT_SELECTOR" }
@@ -2075,6 +2079,10 @@ function reducer(state: AppState, action: AppAction): AppState {
       return { ...state, aboutOpen: true, commandPaletteOpen: false };
     case "CLOSE_ABOUT":
       return { ...state, aboutOpen: false };
+    case "OPEN_CHEAT_SHEET":
+      return { ...state, cheatSheetOpen: true, commandPaletteOpen: false };
+    case "CLOSE_CHEAT_SHEET":
+      return { ...state, cheatSheetOpen: false };
     case "OPEN_SORT_SELECTOR":
       return { ...state, activeSortSelectorPanelId: action.panelId };
     case "CLOSE_SORT_SELECTOR":

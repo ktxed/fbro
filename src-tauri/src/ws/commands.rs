@@ -80,6 +80,15 @@ pub(crate) fn build_interactive_commands() -> Vec<InteractiveCommandSchema> {
             vec![mod_binding("p", true)],
             None,
         ),
+        // `?` is the conventional help key; an unshifted symbol binding also
+        // accepts the Shift-produced character on layouts where `?` needs Shift.
+        command(
+            "app.cheat_sheet",
+            "App",
+            "Keyboard Cheat Sheet",
+            vec![keybinding("?")],
+            None,
+        ),
         command("app.about", "App", "About fbro", vec![], None),
         command(
             "app.toggle_button_bar",
@@ -697,6 +706,24 @@ mod tests {
         assert_eq!(about.category, "App");
         assert_eq!(about.title, "About fbro");
         assert!(about.bindings.is_empty());
+    }
+
+    #[test]
+    fn cheat_sheet_binding_is_question_mark_and_not_shared() {
+        let commands = build_interactive_commands();
+        let sheet = commands.iter().find(|c| c.id == "app.cheat_sheet").expect("cheat sheet command");
+        assert_eq!(sheet.category, "App");
+        assert_eq!(sheet.bindings.len(), 1);
+        let stroke = &sheet.bindings[0].strokes[0];
+        assert_eq!(stroke.key, "?");
+        assert!(!stroke.shift && !stroke.ctrl && !stroke.alt && !stroke.meta);
+        for other in commands.iter().filter(|c| c.id != "app.cheat_sheet") {
+            assert!(
+                !other.bindings.iter().any(|b| b.strokes.iter().any(|s| s.key == "?")),
+                "{} shares the ? binding",
+                other.id
+            );
+        }
     }
 
     #[test]

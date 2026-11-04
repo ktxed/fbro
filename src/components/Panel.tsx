@@ -10,6 +10,7 @@ import {
   executeTargetedCommand,
   findMatchingCommand,
   GLOBAL_SHORTCUT_COMMAND_IDS,
+  CHEAT_SHEET_COMMAND_ID,
   PANEL_SHORTCUT_COMMAND_IDS,
 } from "../commands/interactive";
 import { useAppDispatch, useAppState } from "../store";
@@ -1739,6 +1740,13 @@ export function Panel({
     const maskCommand = findMatchingCommand(appState.commands,
       ["panel.selection.select_by_mask", "panel.selection.deselect_by_mask"], e.nativeEvent, panel.viewMode);
     if (maskCommand) {
+      e.stopPropagation();
+      return;
+    }
+    // A printable cheat-sheet binding (default `?`, a glob character) is
+    // typed into the filter; a Ctrl/Cmd binding still opens the sheet.
+    if (e.key.length === 1 && !e.ctrlKey && !e.metaKey
+      && findMatchingCommand(appState.commands, [CHEAT_SHEET_COMMAND_ID], e.nativeEvent, panel.viewMode)) {
       e.stopPropagation();
       return;
     }
