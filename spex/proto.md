@@ -717,6 +717,15 @@ Backend behavior:
 
 ---
 
+### 9.5 App intents
+
+* `Quit { editorsFlushed? }` / `ConfirmQuit` — see §7.3 and the quit flow.
+* `OpenUserGuide` — no arguments. The backend opens the published user guide
+  (`https://ktxed.github.io/fbro/`) in the system browser through
+  `Platform::open_url`. The URL is fixed in the backend. On failure it replies
+  `Error { code: "USER_GUIDE_OPEN_FAILED" }`. The About dialog's **User guide**
+  button sends it.
+
 ## 10. Panel Filtering
 
 Filtering is semantic and BE-owned.
