@@ -9,41 +9,16 @@ mentions it.
 
 | # | Issue | Kind | Severity |
 |---|---|---|---|
-| 1 | New File empties an existing file | Bug | High (data loss) |
-| 2 | Delete is permanent, with no trash | Missing feature | Medium |
-| 3 | Escape never reaches programs in the embedded terminal | Quirk | Medium |
-| 4 | `thumbnails.md` says grid view is Shift+G | Spec drift | Low |
-| 5 | Two registry commands are titled "Open Entry" | Quirk | Low |
-| 6 | AGENTS.md says remote fbro uses system ssh | Doc drift | Low |
-| 7 | `bro.md` §5.2 lists an outdated set of bros | Spec drift | Low |
+| 1 | Delete is permanent, with no trash | Missing feature | Medium |
+| 2 | Escape never reaches programs in the embedded terminal | Quirk | Medium |
+| 3 | `thumbnails.md` says grid view is Shift+G | Spec drift | Low |
+| 4 | Two registry commands are titled "Open Entry" | Quirk | Low |
+| 5 | AGENTS.md says remote fbro uses system ssh | Doc drift | Low |
+| 6 | `bro.md` §5.2 lists an outdated set of bros | Spec drift | Low |
 
 ---
 
-## 1. New File empties an existing file
-
-**Observed.** New File (`file.touch`, Shift+F4 / macOS Shift+4) with the name
-of a file that already exists in the folder replaces it with a 0-byte file,
-without asking.
-
-**Where.**
-- `src-tauri/src/ws/intents/jobs.rs:2564` `touch_file` calls
-  `driver.open_write(&full_path)` (line 2598) with no existence check.
-- `src-tauri/src/vfs/local.rs:291` `open_write` is `fs::File::create`, which
-  truncates.
-- `src/components/TouchModal.tsx` sends the name without checking the listing.
-
-Create Directory already does the right thing: `make_dir` checks
-`driver.exists` first (`jobs.rs:2518`) and reports a name conflict.
-
-**Possible fix.** Use `open_write_new` (`create_new(true)`, already on
-`VfsDriver`) in `touch_file`, and map `AlreadyExists` to the same name-conflict
-error that F7 shows. Add a Rust test with a temp dir, and a smoke case that
-checks the dialog shows the error and the file keeps its contents.
-
-**Guide.** `site/src/content/docs/files/operations.mdx` says only "creates an
-empty file"; it doesn't mention overwriting.
-
-## 2. Delete is permanent, with no trash
+## 1. Delete is permanent, with no trash
 
 **Observed.** Delete (F8 / macOS 8) removes files directly. Nothing in
 `src-tauri/src` or `src` uses the system trash or recycle bin.
@@ -66,7 +41,7 @@ options), so update both.
 **Guide.** `files/operations.mdx` has a "Delete is permanent" caution. Remove
 or reword it when trash lands.
 
-## 3. Escape never reaches programs in the embedded terminal
+## 2. Escape never reaches programs in the embedded terminal
 
 **Observed.** In the embedded terminal (and therefore in Quick Edit),
 Escape always returns focus to the listing, or un-maximizes the terminal. The
@@ -89,7 +64,7 @@ Ctrl+[ still sends ESC, which the guide recommends as a workaround.
 **Guide.** `viewing/editor.mdx` ("Escape in Vim" tip) and
 `viewing/terminal.mdx` describe the current behaviour.
 
-## 4. `thumbnails.md` says grid view is Shift+G
+## 3. `thumbnails.md` says grid view is Shift+G
 
 **Observed.** `spex/thumbnails.md:3` and `:67` describe the grid toggle as
 Shift+G. The registry binds `panel.toggle_view_mode` to plain `G`; Shift+G is
@@ -98,7 +73,7 @@ Shift+G. The registry binds `panel.toggle_view_mode` to plain `G`; Shift+G is
 **Fix.** Update the spec to say `G`, or better, name the command
 (`panel.toggle_view_mode`) instead of a key so it can't drift again.
 
-## 5. Two registry commands are titled "Open Entry"
+## 4. Two registry commands are titled "Open Entry"
 
 **Observed.** `panel.open` (Enter) and `panel.open_entry` (Right, list view)
 are both titled "Open Entry" in `src-tauri/src/ws/commands.rs:443` and `:450`.
@@ -109,7 +84,7 @@ Settings → Shortcuts and in the site's generated keyboard reference.
 "Drill Into Entry"), then regenerate the site data:
 `FBRO_UPDATE_SITE_DATA=1 cargo test --manifest-path src-tauri/Cargo.toml site_command_data_is_current`.
 
-## 6. AGENTS.md says remote fbro uses system ssh
+## 5. AGENTS.md says remote fbro uses system ssh
 
 **Observed.** `AGENTS.md:210` ("Prefer battle-tested OSS…") gives remote fbro as
 the example of choosing "SFTP over system ssh rather than a custom RPC". The
@@ -119,7 +94,7 @@ implementation embeds both ends: `russh` + `russh-sftp`, with no system `sshd`,
 **Fix.** Reword the example, for example "remote fbro became SFTP over an
 embedded SSH stack (russh) rather than a custom RPC".
 
-## 7. `bro.md` §5.2 lists an outdated set of bros
+## 6. `bro.md` §5.2 lists an outdated set of bros
 
 **Observed.** `spex/bro.md` §5.2 "v0 built-in discovery" lists mpv, VLC, Fedup,
 native `7z` and native `tar`, and says (lines 446 and 453) that `7z` "is an

@@ -16,6 +16,7 @@ import {
   openSortSelector,
   openPanelContextMenu,
   setTextInputValue,
+  pressPanelKey,
   pressWindowKey,
 } from "../browser.mjs";
 import { waitFor } from "../wait.mjs";
@@ -62,6 +63,7 @@ export async function runLocalFlow(browser, observer) {
 
   fs.writeFileSync(hostPath(path.posix.join(aSrc, "alpha/note.txt")), "renamed payload\n");
   fs.writeFileSync(hostPath(path.posix.join(aSrc, "alpha/remove.txt")), "delete me\n");
+  await verifyNewFileRefusesExisting(browser, hostPath(path.posix.join(aSrc, "alpha")));
 
   await verifyLocalSymlinkNavigation(browser, observer, aSrc);
 
@@ -360,6 +362,33 @@ export async function runLocalFlow(browser, observer) {
   await verifyGridLeftAtFirstItemNavigatesUp(browser, observer, aSrc);
   await runPanelSelectionFlow(browser, observer);
   await runSelectionMaskFlow(browser, observer);
+}
+
+// New File must never truncate an existing file or replace a directory.
+async function verifyNewFileRefusesExisting(browser, alphaHostDir) {
+  const notePath = path.join(alphaHostDir, "note.txt");
+  for (const name of ["note.txt", "nested"]) {
+    await pressPanelKey(browser, "left", "F4", { shift: true });
+    const input = await browser.$('[data-testid="touch-name-input"]');
+    await input.waitForDisplayed({ timeout: 10_000 });
+    await input.setValue(name);
+    await browser.keys("Enter");
+    const error = await browser.$('[data-testid="touch-dialog"] .modal__rename-error');
+    await error.waitForDisplayed({ timeout: 10_000 });
+    const text = await error.getText();
+    if (!text.includes("already exists")) throw new Error(`New File over "${name}" showed: ${text}`);
+    if (fs.readFileSync(notePath, "utf8") !== "renamed payload\n") {
+      throw new Error("New File truncated an existing file");
+    }
+    if (!fs.statSync(path.join(alphaHostDir, "nested")).isDirectory()) {
+      throw new Error("New File replaced an existing directory");
+    }
+    await browser.keys("Escape");
+    await waitFor(() => browser.execute(() =>
+      !document.querySelector('[data-testid="touch-dialog"]')
+        && document.activeElement === document.querySelector('[data-testid="panel-left"]')),
+    { timeout: 10_000, label: "New File error dialog closes and restores listing focus" });
+  }
 }
 
 async function verifyEmptyFolder(browser, observer) {
