@@ -650,7 +650,7 @@ body {
   max-width: 22ch;
 }
 
-.panel__tab:hover {
+.panel__tab:hover:not(.panel__tab--active) {
   color: var(--text);
   border-color: var(--border-strong);
   background: var(--bg-hover);
@@ -804,7 +804,7 @@ body {
   white-space: nowrap;
 }
 
-.panel__volume-btn:hover {
+.panel__volume-btn:hover:not(.panel__volume-btn--active) {
   color: var(--text);
   border-color: var(--border);
 }
@@ -833,7 +833,7 @@ body {
 .panel__volume-btn--virtual {
   color: var(--text-info);
 }
-.panel__volume-btn--virtual:hover {
+.panel__volume-btn--virtual:hover:not(.panel__volume-btn--active) {
   color: var(--text-info-strong);
 }
 .panel__volume-btn--virtual.panel__volume-btn--active {
@@ -895,7 +895,7 @@ body {
   cursor: pointer;
 }
 
-.panel__remote-volume:hover .panel__remote-volume-toggle {
+.panel__remote-volume:not(.panel__remote-volume--active):hover .panel__remote-volume-toggle {
   color: var(--text);
   border-color: var(--border);
 }
@@ -906,7 +906,7 @@ body {
   background: rgba(74, 124, 191, 0.15);
 }
 
-.panel__remote-volume-toggle:hover {
+.panel__remote-volume:not(.panel__remote-volume--active) .panel__remote-volume-toggle:hover {
   color: var(--text);
   background: var(--bg-focused);
 }
