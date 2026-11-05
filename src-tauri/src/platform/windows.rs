@@ -4,6 +4,7 @@ use super::{
 };
 use std::env;
 use std::ffi::c_void;
+use std::os::windows::process::CommandExt;
 use std::path::PathBuf;
 use std::process::Command;
 use std::ptr;
@@ -12,6 +13,16 @@ use std::slice;
 pub(super) mod appearance;
 mod notifications;
 mod registry;
+
+/// CREATE_NO_WINDOW — do not allocate a console for this child. This process is
+/// GUI-subsystem, so a console-subsystem child such as `cmd.exe` would
+/// otherwise flash its own window.
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+/// The shell APIs expect native separators, while fbro stores paths with `/`.
+fn shell_path(path: &str) -> String {
+    path.replace('/', "\\")
+}
 
 pub struct WindowsPlatform;
 
@@ -31,7 +42,7 @@ fn launch_with_shell(target: &str) -> Result<(), String> {
     if result > 32 {
         Ok(())
     } else {
-        Err(format!("Could not open the link (system error {result})."))
+        Err(format!("Could not open the target (system error {result})."))
     }
 }
 
@@ -149,7 +160,10 @@ impl Platform for WindowsPlatform {
     }
 
     fn open_file(&self, path: &str) {
-        let _ = Command::new("cmd").args(["/c", "start", "", path]).spawn();
+        // ShellExecuteW performs the same shell association lookup as
+        // `cmd /c start`, but without spawning a console-subsystem child that
+        // flashes a console window on this GUI-subsystem process.
+        let _ = launch_with_shell(&shell_path(path));
     }
 
     fn open_url(&self, url: &str) -> Result<(), String> {
@@ -170,9 +184,8 @@ impl Platform for WindowsPlatform {
     }
 
     fn reveal_in_file_manager(&self, path: &str, _kind: &str) {
-        let windows_path = path.replace('/', "\\");
         let _ = Command::new("explorer")
-            .arg(format!("/select,{windows_path}"))
+            .arg(format!("/select,{}", shell_path(path)))
             .spawn();
     }
 
@@ -210,7 +223,8 @@ impl Platform for WindowsPlatform {
     }
 
     fn open_in_editor(&self, path: &str) -> Result<String, String> {
-        // Try known editors in preference order before falling back to cmd /c start.
+        // Try known editors in preference order before falling back to the
+        // shell default handler.
         const PREFERRED: &[&[&str]] = &[
             &["code.cmd", "code.exe"],
             &["codium.cmd", "codium.exe"],
@@ -222,7 +236,10 @@ impl Platform for WindowsPlatform {
             if let Some(editor) = find_windows_executable(candidates) {
                 // .cmd files must be run via cmd.exe; .exe can be run directly.
                 let spawned = if editor.to_lowercase().ends_with(".cmd") {
-                    Command::new("cmd").args(["/c", &editor, path]).spawn()
+                    Command::new("cmd")
+                        .creation_flags(CREATE_NO_WINDOW)
+                        .args(["/c", &editor, path])
+                        .spawn()
                 } else {
                     Command::new(&editor).arg(path).spawn()
                 };
@@ -231,16 +248,8 @@ impl Platform for WindowsPlatform {
                 }
             }
         }
-        let output = Command::new("cmd")
-            .args(["/c", "start", "", path])
-            .output()
-            .map_err(|e| e.to_string())?;
-        if output.status.success() {
-            Ok(path.to_string())
-        } else {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            Err(stderr.trim().to_string())
-        }
+        // Same shell association lookup as `cmd /c start`, without a console.
+        launch_with_shell(&shell_path(path)).map(|()| path.to_string())
     }
 
     fn list_volumes(&self) -> Vec<VolumeInfo> {
@@ -1343,5 +1352,21 @@ mod tests {
     fn encode_clipboard_utf16_preserves_non_ascii_paths() {
         let path = "C:/Users/ktx/файл.txt";
         assert_eq!(decode_clipboard_utf16(&encode_clipboard_utf16(path)), path);
+    }
+
+    #[test]
+    fn shell_path_uses_native_separators() {
+        assert_eq!(
+            super::shell_path("C:/Users/ktx/report.pdf"),
+            "C:\\Users\\ktx\\report.pdf"
+        );
+        assert_eq!(
+            super::shell_path("//server/share/report.pdf"),
+            "\\\\server\\share\\report.pdf"
+        );
+        assert_eq!(
+            super::shell_path("C:\\Users\\ktx\\report.pdf"),
+            "C:\\Users\\ktx\\report.pdf"
+        );
     }
 }
