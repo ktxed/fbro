@@ -1,0 +1,51 @@
+---
+title: What is a bro?
+description: Pass files to a bro to pack, extract, hash, deduplicate, play or otherwise process them.
+---
+
+import Shortcut from "../../../components/Shortcut.astro";
+import Screenshot from "../../../components/Screenshot.astro";
+
+A **bro** (short for "browser processor") is a tool you hand files to. Some are
+built into fbro, such as zip, hashing and the duplicate finder. Others are
+programs fbro found on your system, such as `tar`, mpv or VLC.
+
+## Pass files to a bro
+
+1. Select the files or folders, or put the cursor on one.
+2. Press <Shortcut id="panel.pass_to_bro" />, or choose **Pass to Bro…** in the
+   context menu or the [inline choices](../../files/inline-choices/).
+3. **Pass To Bro…** lists the bros that can handle your selection, with the best
+   fits first and a short reason for each.
+4. Choose one with <kbd>Up</kbd> and <kbd>Down</kbd> and press <kbd>Enter</kbd>.
+   If it has options, such as an output path or a password, fill them in and
+   choose **Launch**.
+
+<kbd>Escape</kbd> closes the list. From the context menu, a bro acts only on the
+item you clicked, not on the whole selection.
+
+<Screenshot name="bro-list" alt="The Pass To Bro dialog for two selected folders, with archive bros ranked first" />
+
+## What runs where
+
+- Bros that produce something, such as an archive, hashes or a report, run as
+  [jobs](../../files/jobs/). You see their progress and can send them to the
+  background; their results stay available in Jobs.
+- Bros that open another program, such as a media player, just start it and
+  return you to fbro.
+
+## Built-in and discovered bros
+
+| Bro | What it does | Page |
+|---|---|---|
+| **zip**, **7z**, **tar** | Pack the selection into an archive | [Archives](../archives/) |
+| **unzip**, **un7z**, **untar** | Extract an archive | [Archives](../archives/) |
+| **Generate hashes**, **Check hashes** | Create and verify BLAKE3 checksums | [Hashes](../hashes/) |
+| **Fedup Bro** | Find duplicate files | [Duplicates](../duplicates/) |
+| **mpv**, **VLC** | Play media files as a playlist | [More bros](../more/) |
+| **Copy Paths** | Copy the selected paths as text | [More bros](../more/) |
+| **Kill (SIGKILL)** | End a process | [More bros](../more/) |
+| **Sync Bro** | Compare a local and a remote folder | [Remote fbro](../../remote/sync/) |
+
+To see every bro fbro found on this machine, open **Settings → Bros**
+(<Shortcut id="app.settings" />), which lists the **Available bros**.

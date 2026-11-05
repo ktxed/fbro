@@ -1,0 +1,64 @@
+---
+title: Duplicates (Fedup)
+description: Find duplicate files across folders with Fedup Bro.
+---
+
+import Shortcut from "../../../components/Shortcut.astro";
+import { Steps } from "@astrojs/starlight/components";
+import Screenshot from "../../../components/Screenshot.astro";
+
+**Fedup Bro** finds files with identical content, wherever they are and whatever
+they're called. It compares a full BLAKE3 hash of every candidate, so two files
+are only reported as duplicates when their contents are byte-for-byte the same.
+
+Fedup works on a [global selection](../../using/selection/#global-selections),
+so you can point it at several folders at once.
+
+## Find duplicates
+
+<Steps>
+
+1. Add the folders (or files) to scan to a global selection: select them, open
+   the context menu (<Shortcut id="panel.context_menu" />) and choose **To global
+   selection**.
+2. Open **Global Selections** in the source bar and put the cursor on your
+   selection.
+3. Press <Shortcut id="panel.pass_to_bro" /> and choose **Fedup Bro**.
+4. Optionally narrow the scan:
+   - **Include only**, for example `*.mp4, *.mkv`, to compare only those files;
+   - **Exclude**, for example `.git, node_modules, *.tmp`, to skip matching files
+     and folders.
+5. Choose **Launch**.
+
+</Steps>
+
+Empty files are ignored, and files that can't be read are listed as errors
+without stopping the scan.
+
+Fedup also skips a list of default patterns, such as `.git`, `node_modules`,
+`.venv`, `__MACOSX` and `._*`. Change that list in **Settings → General → Fedup
+default ignore patterns** (<Shortcut id="app.settings" />).
+
+## Read the results
+
+The results show the number of duplicate **Groups**, **Duplicate files**, the
+**Reclaimable** space, the files **Scanned** and any **Errors**. Each group
+lists one **keeper**, the oldest file, followed by its duplicates. Each path has
+a copy button.
+
+<Screenshot name="fedup-results" alt="Fedup Bro results: 2 duplicate groups, 2 duplicate files and the reclaimable space" />
+
+## Save a report or clean up
+
+Fedup never deletes anything itself. From the results you can:
+
+- **Save report…** writes `fbro-fedup-report.txt` in the first scanned folder.
+- **Generate delete dry-run** writes two files next to the report:
+  - `fbro-fedup-delete-manifest.txt`, a readable list of every group, keeper and
+    duplicate;
+  - `fbro-fedup-delete-dry-run.sh`, a script that removes the duplicates and never
+    the keepers.
+
+Run the script without arguments to print what it would delete. Only
+`./fbro-fedup-delete-dry-run.sh --apply` actually deletes. Read the manifest
+first.

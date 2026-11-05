@@ -1,0 +1,54 @@
+---
+title: Tabs
+description: Keep several folders, terminals and editors open in each panel.
+---
+
+import Shortcut from "../../../components/Shortcut.astro";
+
+Each panel can hold several tabs. A tab remembers its own folder, cursor,
+selection, sort order and view mode. The tab bar only appears once a panel has
+more than one tab.
+
+There are three kinds of tab:
+
+- **Listing tabs** show a folder, an archive, search results or any other
+  [source](../sources/).
+- **Terminal tabs** run a shell. See [Terminal](../../viewing/terminal/).
+- **Editor tabs** edit a text file inside fbro. See
+  [Editing](../../viewing/editor/).
+
+## Open, switch and close tabs
+
+| Action | Keys |
+|---|---|
+| New tab | <Shortcut id="panel.tab.new" /> |
+| Close tab | <Shortcut id="panel.tab.close" /> |
+| Next tab | <Shortcut id="panel.tab.next" /> |
+| Previous tab | <Shortcut id="panel.tab.prev" /> |
+
+A new tab opens on the same folder as the current tab when that's a folder on
+a local disk, and on your home folder otherwise. Next and previous wrap around
+at the ends.
+
+With the mouse:
+
+- Click a tab to switch to it.
+- Middle-click a tab, or click its **×**, to close it.
+- Double-click empty space in the tab bar, or click **+** in the path bar, to
+  open a new tab.
+- Drag a tab to reorder it within its panel. Press <kbd>Escape</kbd> during the
+  drag to cancel. Reordering is mouse-only.
+
+The last tab in a panel can't be closed. An editor tab is the exception: closing
+it turns it back into a listing of the file's folder.
+
+## Tabs across restarts
+
+fbro restores your tabs when it starts again:
+
+- Listing tabs come back with their folders, sort order and cursor position.
+- Editor tabs come back with their files.
+- Terminal tabs are not restored.
+
+To restore only the active tab in each panel, turn off **Restore all panel tabs
+across sessions** in **Settings → General** (<Shortcut id="app.settings" />).

@@ -472,7 +472,10 @@ hints and dispatch always read the current effective registry.
 
 Bindings contain an ordered `strokes` array plus `modes` (`list`, `grid`, or an
 empty array for both). V1 validates exactly one stroke. Editing retains its
-position; adding appends. Defaults remain platform-specific in `ws/commands.rs`.
+position; adding appends. Defaults remain platform-specific in `ws/commands.rs`
+(`build_interactive_commands_for(CommandPlatform)`); the user-guide site
+publishes them from the `site/src/data/commands.json` snapshot, which a
+`cargo test` keeps current.
 The top recorder modal explicitly captures the next supported non-modifier key,
 including Tab, Enter, and Escape, consumes its event, and then returns to normal
 modal navigation. The capture surface claims Tab through `data-modal-owns-tab`.

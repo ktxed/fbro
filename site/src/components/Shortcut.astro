@@ -1,0 +1,32 @@
+---
+// Inline default shortcut for a registry command, for prose:
+//   <Shortcut id="file.copy" />  →  F5 (macOS: 5)
+// Linux and Windows usually agree; any platform that differs is named.
+import { findCommand, type Platform } from "../data/commands";
+import Keys from "./Keys.astro";
+
+interface Props {
+  id: string;
+}
+
+const { id } = Astro.props;
+const signature = (p: Platform) => JSON.stringify(findCommand(p, id)?.bindings[0] ?? null);
+const linux = findCommand("linux", id);
+if (!linux) {
+  throw new Error(`<Shortcut>: unknown command id "${id}"`);
+}
+const primary = linux?.bindings[0];
+const extra = (["windows", "macos"] as Platform[]).filter((p) => signature(p) !== signature("linux"));
+const label = (p: Platform) => (p === "macos" ? "macOS" : "Windows");
+---
+<span class="fbro-shortcut" data-command-id={id}>
+  {primary ? <Keys binding={primary} platform="linux" /> : <em>no default</em>}
+  {extra.map((p) => {
+    const binding = findCommand(p, id)?.bindings[0];
+    return (
+      <span class="fbro-shortcut__alt">
+        {" "}({label(p)}: {binding ? <Keys binding={binding} platform={p} /> : "none"})
+      </span>
+    );
+  })}
+</span>

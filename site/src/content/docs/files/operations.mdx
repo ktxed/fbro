@@ -1,0 +1,126 @@
+---
+title: Copy, move, delete and more
+description: Copy and move between panels, rename, delete, create folders and files, set permissions and inspect items.
+---
+
+import Shortcut from "../../../components/Shortcut.astro";
+import Screenshot from "../../../components/Screenshot.astro";
+import { Steps } from "@astrojs/starlight/components";
+
+File operations act on the [selection](../../using/selection/) in the active
+panel, or on the cursor item when nothing is selected. Copy and move send items
+to the folder shown in the **other** panel.
+
+| Operation | Keys |
+|---|---|
+| Copy | <Shortcut id="file.copy" /> |
+| Move | <Shortcut id="file.move" /> |
+| Rename | <Shortcut id="file.rename" /> |
+| Delete | <Shortcut id="file.delete" /> |
+| Create folder | <Shortcut id="file.mkdir" /> |
+| New file | <Shortcut id="file.touch" /> |
+| Inspect item | <Shortcut id="file.info" /> |
+
+## Copy and move
+
+<Steps>
+
+1. In one panel, open the destination folder.
+2. Press <Shortcut id="panel.focus.switch" /> and select what to copy or move in
+   the other panel.
+3. Press <Shortcut id="file.copy" /> or <Shortcut id="file.move" />. The dialog
+   lists the items and the destination.
+4. Adjust the options if you need to, then press <kbd>Enter</kbd>.
+
+</Steps>
+
+The operation runs as a [job](../jobs/), so you can keep working while it runs.
+
+<Screenshot name="copy-dialog" alt="The Copy dialog for three selected files, with its options and the Copy, Background, Queue and Cancel buttons" />
+
+### Dialog options
+
+- **Action if file exists** decides what happens when a file with the same name
+  is already at the destination: **Ask** (the default), **Overwrite** or
+  **Skip**. When fbro sees partly copied files from an earlier attempt, it also
+  offers **Resume partial files**.
+- **Destination name** appears when you copy a single file or folder. Change it
+  to copy under a different name.
+- **Repeated filenames** appears when you copy several files out of search
+  results that share a name. **Exclude duplicates** copies only the first file
+  with each name; **Add random suffix** gives the later ones a suffix, such as
+  `README-049f.md`.
+- **Action if verification fails** and **Save BLAKE3 digest file** control the
+  integrity check fbro runs on [remote fbro](https://github.com/ktxed/fbro/blob/development/spex/remote-fbro.md)
+  transfers.
+- **Dry mode (generate bash script instead)** doesn't copy anything. It writes a
+  shell script with the commands the operation would run, so you can check or
+  run it yourself.
+- **Start paused when sent to background** queues the job without starting it.
+
+The buttons at the bottom:
+
+- The primary button (**Copy** or **Move**) starts the job and shows its progress.
+- **Background** starts it and closes the dialog straight away.
+- **Queue**, for copies between local folders, adds the job to the queue so it
+  runs after the copies already waiting. See [Jobs](../jobs/#the-queue).
+
+Letters underlined in the dialog are shortcuts for those options, for example
+<kbd>A</kbd> for **Action if file exists**.
+
+### Conflicts during a job
+
+With **Ask**, a job stops when it meets a file that already exists and shows
+**File already exists:** with the path. Choose what to do with that file. Turn
+on **Apply this choice to all conflicts** (<kbd>A</kbd>) to use the same answer
+for the rest of the job. <kbd>Enter</kbd> takes the highlighted choice and
+<kbd>S</kbd> skips the file.
+
+<Screenshot name="conflict-prompt" alt="The File already exists prompt of a copy job, with Resume, Overwrite, Skip and Cancel buttons" />
+
+### Copying out of archives and other sources
+
+Copy works from any source that can be read: archives, search results, a paired
+remote fbro. Inside an archive, the context menu calls it **Extract**.
+
+## Rename
+
+<Shortcut id="file.rename" /> renames the cursor item in place. Type the new name
+in **To:** and press <kbd>Enter</kbd>. A rename can't move the item to another
+folder; use Move for that.
+
+## Delete
+
+<Shortcut id="file.delete" /> asks for confirmation, then deletes the selected
+items.
+
+:::caution[Delete is permanent]
+fbro deletes files directly. They don't go to the system trash or recycle bin,
+so they can't be restored from there.
+:::
+
+Deleting in [Global Selections](../../using/sources/#global-selections) only
+removes the items from the selection; the files themselves stay where they are.
+
+## Create a folder or file
+
+- <Shortcut id="file.mkdir" /> opens **Create Directory**. You can type a nested
+  path such as `photos/2026/june` to create several levels at once. fbro refuses
+  a name that already exists.
+- <Shortcut id="file.touch" /> opens **New File** and creates an empty file in the
+  current folder.
+
+Both remember names you entered before; press <kbd>Alt</kbd>+<kbd>Down</kbd>
+(macOS: <kbd>Option</kbd>+<kbd>Down</kbd>) in the field to pick one.
+
+## Set permissions
+
+On Linux and macOS, open the context menu (<Shortcut id="panel.context_menu" />)
+and choose **Set Permissions…**. Tick **Read**, **Write** and **Execute** for
+the owner, group and others, or type the mode in **Octal:**. With several items
+selected, the change applies to all of them. Windows has no equivalent here.
+
+## Inspect an item
+
+<Shortcut id="file.info" /> shows the item's name, type, size, full path, created
+and modified dates, permissions and, for a link, its **Target**.

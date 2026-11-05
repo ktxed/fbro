@@ -1,0 +1,39 @@
+---
+title: Quick preview
+description: Preview the cursor file in the other panel as you move through a folder.
+---
+
+import Shortcut from "../../../components/Shortcut.astro";
+import Screenshot from "../../../components/Screenshot.astro";
+
+**Quick preview** turns the other panel into a live preview of the file under
+your cursor. Press <Shortcut id="panel.viewer.embed" /> to turn it on, and again
+to turn it off.
+
+## How it works
+
+- Focus stays in your listing. Move the cursor and the preview follows it.
+- It uses the same renderers as the [viewer](../viewer/) but picks one
+  automatically. Markdown shows as a rendered document.
+- In a video, <kbd>Space</kbd> in the listing plays and pauses it without leaving
+  the listing.
+- Press <kbd>Tab</kbd> to move into the preview, for example to scroll or zoom an
+  image. <kbd>Tab</kbd> and <kbd>Shift</kbd>+<kbd>Tab</kbd> move through its
+  controls and back to the listing.
+- In video and audio, <kbd>Space</kbd> plays and pauses, and <kbd>Left</kbd> /
+  <kbd>Right</kbd> seek five seconds.
+- <kbd>Escape</kbd> in the preview closes an expanded diagram first, then the
+  preview.
+
+Quick preview has no renderer buttons, find, word wrap or file navigation keys.
+For those, choose **Open viewer** in the preview's header or press
+<Shortcut id="file.view" />. The preview stays open alongside the viewer window.
+
+<Screenshot name="quick-preview" alt="A listing of photos on the left and a quick preview of the photo under the cursor on the right" />
+
+## Preview what you're editing
+
+When the active tab is an [editor tab](../editor/#editor-tabs), quick preview
+shows the file you're editing and refreshes every time it saves. For Markdown it
+scrolls to keep the line you're on in view, so you can write and watch the
+rendered result side by side. Focus stays in the editor.

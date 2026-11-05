@@ -25,6 +25,22 @@ jobs:
       - name: Scan git history for secrets
         run: gitleaks detect --source . --redact --no-banner --exit-code 1
 
+  site:
+    # The user guide in site/ builds without the app: it catches unknown
+    # <Shortcut id>s, missing screenshots and broken links on every pull request.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+      - run: npm ci
+        working-directory: site
+      - run: npm run build
+        working-directory: site
+
   test:
     runs-on: ubuntu-22.04
     steps:

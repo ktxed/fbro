@@ -1,0 +1,37 @@
+---
+title: Compare local and remote (Sync Bro)
+description: Check that a local folder and a folder on a paired fbro contain identical files.
+---
+
+import Shortcut from "../../../components/Shortcut.astro";
+import Screenshot from "../../../components/Screenshot.astro";
+
+**Sync Bro** checks whether a folder here and a folder on a
+[paired fbro](../pairing/) hold the same files with the same contents, for
+example to confirm that a backup or a large transfer landed correctly.
+
+## Run a comparison
+
+1. Open the local folder in one panel and the remote folder in the other.
+2. Press <Shortcut id="panel.pass_to_bro" /> and choose **Sync Bro**.
+3. Choose **Launch**.
+
+Both machines hash their own files at the same time, using all CPU cores. Only
+the lists of checksums travel over the network, never the files, so comparing
+even very large folders is fast.
+
+## Read the results
+
+| Result | Meaning |
+|---|---|
+| **Matched** | Same size and checksum on both sides |
+| **Differing** | Present on both sides, but different |
+| **Local-only** | Only in the local folder |
+| **Remote-only** | Only in the remote folder |
+| **Unverified** | Couldn't be compared because one side failed to read the file |
+| **Errors** | Files that couldn't be hashed |
+
+Nothing is written to disk unless you choose **Save report…**, which saves
+`fbro-sync-report.txt` in the local folder.
+
+<Screenshot name="sync-results" alt="Sync Bro results: 9 matched, 1 differing, with the differing file named" />

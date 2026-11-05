@@ -1,0 +1,32 @@
+---
+title: Keyboard shortcuts
+description: Every fbro command and its default key binding on Linux, Windows and macOS.
+tableOfContents: false
+---
+
+import ShortcutTable from "../../../components/ShortcutTable.astro";
+import Shortcut from "../../../components/Shortcut.astro";
+
+This page lists the **default** bindings for every command. It is generated
+from fbro's command registry, so it always matches the current release. To see
+your own bindings, including any you've changed, press
+<Shortcut id="app.cheat_sheet" /> in fbro, or open **Settings → Shortcuts**
+(<Shortcut id="app.settings" />) to rebind keys.
+
+Commands listed with *Command palette / menu* have no default key. Run them
+from the command palette (<Shortcut id="app.command_palette" />) or the context
+menu (<Shortcut id="panel.context_menu" />), or give them a key in Settings.
+
+Letter shortcuts follow the key's physical position, so they keep working with
+macOS Option and with non-Latin keyboard layouts.
+
+<ShortcutTable />
+
+## Also built in
+
+These keys are fixed and don't appear in the registry:
+
+| Action | Keys |
+|---|---|
+| Zoom in / out / reset | <kbd>Ctrl</kbd>+<kbd>+</kbd> / <kbd>Ctrl</kbd>+<kbd>-</kbd> / <kbd>Ctrl</kbd>+<kbd>0</kbd> (macOS: <kbd>Cmd</kbd>) |
+| Close a dialog, or send a running job to the background | <kbd>Escape</kbd> |

@@ -1,0 +1,48 @@
+---
+title: Hashes
+description: Create BLAKE3 checksum files and verify files against them.
+---
+
+import Shortcut from "../../../components/Shortcut.astro";
+import Screenshot from "../../../components/Screenshot.astro";
+
+fbro can write a **BLAKE3** checksum next to each file and later check that the
+file still matches it, for example after copying to a backup disk. The checksum
+for `photo.jpg` is stored in `photo.jpg.b3`.
+
+Both bros work on the files in the current folder of a local disk. They don't
+go into subfolders.
+
+## Generate hashes
+
+1. Select the files.
+2. Press <Shortcut id="panel.pass_to_bro" /> and choose **Generate hashes**.
+3. Turn on **Overwrite existing** to replace `.b3` files that already exist;
+   otherwise those files are skipped. Choose **Launch**.
+
+The results list each file as created, replaced, skipped or failed. Folders,
+links and `.b3` files in the selection are ignored. **Close** (or
+<kbd>Enter</kbd> / <kbd>Escape</kbd>) hides the results while the job carries on.
+
+<Screenshot name="hash-results" alt="The Generate hashes results listing each photo as Created" />
+
+## Check hashes
+
+1. Select the `.b3` files. Selecting a whole folder's contents with
+   <Shortcut id="panel.selection.select_all" /> is fine: only `.b3` files with a
+   matching file next to them are checked.
+2. Press <Shortcut id="panel.pass_to_bro" />. **Check hashes** is offered first
+   whenever the selection contains a `.b3` file.
+3. Turn on **Save result** to write a report, then choose **Launch**.
+
+Each pair is shown as matched, mismatched or failed, with a summary at the
+end. A mismatch doesn't stop the check.
+
+With **Save result**, fbro writes `fbro-hash-check-<time>.txt` in the folder,
+with the counts, paths, checksums and any errors.
+
+## The `.b3` format
+
+A `.b3` file holds one line, `<64 hex digits>  <file name>`, the same layout as
+`b3sum`, so you can verify fbro's checksums with other tools and the other way
+round. A file containing only the 64 hex digits is accepted too.

@@ -1,0 +1,35 @@
+---
+title: More bros
+description: Play media in mpv or VLC, copy paths, and kill processes.
+---
+
+import Shortcut from "../../../components/Shortcut.astro";
+
+## Play media in mpv or VLC
+
+Select videos or music files, press <Shortcut id="panel.pass_to_bro" /> and choose
+**mpv** or **VLC**. fbro passes them to the player as a playlist, so selecting
+hundreds of files works too. Media bros are listed first when your selection is
+mostly media.
+
+fbro finds the players here:
+
+| Platform | Looks for |
+|---|---|
+| Linux | `mpv` and `vlc` on your `PATH`, plus the Flatpak apps `io.mpv.Mpv` and `org.videolan.VLC` |
+| macOS | mpv on your `PATH` or as an app |
+| Windows | `mpv` and `vlc` on your `PATH` and in their usual install folders |
+
+When both a normal and a Flatpak install exist, both are listed.
+
+## Copy Paths
+
+**Copy Paths** copies the full paths of the selected items to the clipboard as
+text, one per line. The context menu's **Copy full path** does the same for a
+single item.
+
+## Kill a process
+
+In the [Processes](../../using/sources/#processes) source, put the cursor on a
+process, press <Shortcut id="panel.pass_to_bro" /> and choose **Kill (SIGKILL)**.
+The process ends immediately and gets no chance to save its work.

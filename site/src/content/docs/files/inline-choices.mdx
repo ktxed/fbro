@@ -1,0 +1,52 @@
+---
+title: Inline choices
+description: The small toolbar on the cursor row with the most useful actions for that item.
+---
+
+import Shortcut from "../../../components/Shortcut.astro";
+import { Steps } from "@astrojs/starlight/components";
+import Screenshot from "../../../components/Screenshot.astro";
+
+In list view, the cursor row shows a small toolbar of icons on the right: the
+**inline choices** for that item. They give you one-key access to the actions
+that make sense right there, without opening a menu or changing the selection.
+
+## Use them from the keyboard
+
+<Steps>
+
+1. Put the cursor on a file.
+2. Press <kbd>Right</kbd> to move into the toolbar. The cursor stays where it is.
+3. Use <kbd>Left</kbd> and <kbd>Right</kbd> to choose an action, and
+   <kbd>Enter</kbd> or <kbd>Space</kbd> to run it.
+
+</Steps>
+
+<kbd>Escape</kbd>, <kbd>Up</kbd> or <kbd>Down</kbd>, or <kbd>Left</kbd> on the first
+choice, returns to the listing. After an action finishes, focus goes back to the
+row you started from.
+
+A single folder has no toolbar, because <kbd>Right</kbd> opens it. When the
+cursor is on a selection of several items, the toolbar acts on all of them and
+shows how many are selected.
+
+<Screenshot name="inline-choices" alt="A zip archive under the cursor with the inline choices toolbar beside its name" />
+
+## What's offered
+
+Only actions that apply are shown, in this order:
+
+| Choice | When |
+|---|---|
+| **Browse archive** | The item is a zip or 7z archive. |
+| **Jump to location** | A search result: opens the folder that contains it, with the cursor on it. |
+| **View Git diff**, **Stage** / **Unstage**, **Rollback** | A single changed file in a git repository. Rollback asks you to confirm in place. |
+| **Preview** | An image: hover or focus shows a thumbnail, and running it opens the viewer. |
+| **Compare** | Two selected files, or a selected file and the cursor file. See [Compare](../../viewing/compare/). |
+| **Pass to Bro** | The item or selection can be handed to a bro. |
+| **Copy**, **Move**, **Delete** | The source allows it. These open the usual dialogs. |
+| **Rename** | A single item on a local disk. |
+
+More actions, such as **Open With…** and **Set Permissions…**, are in the
+[context menu](../../using/command-palette/#context-menu)
+(<Shortcut id="panel.context_menu" />).

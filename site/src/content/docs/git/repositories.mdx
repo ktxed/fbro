@@ -1,0 +1,100 @@
+---
+title: Git
+description: See git status in the listing, stage and commit, switch branches, pull, push, and browse the log.
+---
+
+import Shortcut from "../../../components/Shortcut.astro";
+import Screenshot from "../../../components/Screenshot.astro";
+
+fbro recognises git repositories on your local disks and shows their state
+right in the listing. Everyday git work happens in the **Git Repository**
+dialog, without leaving the file manager.
+
+## Status in the listing
+
+Inside a repository:
+
+- The path bar shows the current **branch**. A warning icon next to it means
+  there are staged changes.
+- Changed files carry a marker: **M** modified, **D** deleted, **?** untracked,
+  **!** conflicted, and **●** for other changes such as staged new files.
+  Hover the marker for details.
+- On a changed file, the [inline choices](../../files/inline-choices/) offer
+  **View Git diff**, **Stage** or **Unstage**, and **Rollback**. Rollback
+  discards your changes to the file, so it asks you to confirm in place first.
+
+<Screenshot name="git-listing" alt="A repository folder with the branch in the path bar and status markers next to changed files" />
+
+## The Git Repository dialog
+
+Press <Shortcut id="panel.git.actions" /> anywhere in a repository, or click the
+branch in the path bar.
+
+### Toolbar
+
+| Key | Action |
+|---|---|
+| <kbd>B</kbd> | Branch picker: type to filter local and remote branches, <kbd>Enter</kbd> to switch |
+| <kbd>N</kbd> | **New branch…**: enter a **Branch name** and choose **Create & switch** |
+| <kbd>L</kbd> | **Pull**, when the branch is behind and nothing is staged; shows how many commits are incoming |
+| <kbd>P</kbd> | **Push**; shows how many commits are outgoing |
+| <kbd>U</kbd> | **Set upstream**: push a branch that has no upstream yet to `origin` |
+| <kbd>F</kbd> | **Fetch**: update remote branch information |
+| <kbd>R</kbd> | **Refresh**: fetch and refresh the status |
+
+Picking a remote branch creates a local branch that tracks it, or switches to the
+one that already exists.
+
+If a push is rejected, fbro offers to retry it as a force push: either one that
+overwrites the remote branch, or a safer one that refuses to overwrite remote
+changes you haven't fetched.
+
+### Changes
+
+The **Changes** tab lists changed files. Move with <kbd>J</kbd> / <kbd>K</kbd> or
+the arrow keys:
+
+- <kbd>S</kbd> stages or unstages the file;
+- <kbd>V</kbd> views its diff.
+
+To commit, stage what you want, type a **Commit message** and choose **Commit
+staged** (<kbd>C</kbd>).
+
+<Screenshot name="git-changes" alt="The Git Repository dialog on the Changes tab, with a modified, a staged and an untracked file and a commit message typed in" />
+
+### Log
+
+The **Log** tab lists commits, newest first. Expand a commit to see the files it
+changed.
+
+- <kbd>J</kbd> / <kbd>K</kbd> or the arrow keys move through commits and files.
+- <kbd>Y</kbd> copies the commit's full hash.
+- <kbd>V</kbd> views a file's diff in that commit.
+- <kbd>C</kbd> copies a reference to the file as it was in that commit. Paste it
+  into any folder (<Shortcut id="file.paste_external" />) to get a copy of that
+  version.
+- <kbd>Space</kbd> on the last row loads more commits.
+
+<kbd>Escape</kbd> closes the dialog. If a git command is still running, it carries
+on in the background.
+
+<Screenshot name="git-log" alt="The Log tab with the newest commit expanded to show the two files it changed" />
+
+## Diffs
+
+Diffs open in the [diff window](../../viewing/compare/#the-diff-window). From the
+list of changes, <kbd>J</kbd> and <kbd>K</kbd> in the diff window move to the next
+and previous changed file.
+
+## Start a repository
+
+To turn a folder into a git repository, open the context menu on it
+(<Shortcut id="panel.context_menu" />) and choose **Initialize Git repository…**,
+or run the same command from the command palette for the current folder. Enter
+the initial branch name and press <kbd>Enter</kbd>.
+
+:::note
+fbro uses the `git` program installed on your system, with your usual git
+configuration and credentials. Git features are available for folders on local
+disks only.
+:::

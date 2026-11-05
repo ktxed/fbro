@@ -1,0 +1,30 @@
+---
+// A guide screenshot captured by `npm run docs:screens`
+// (tests/e2e/docs/scenes.mjs): <Screenshot name="copy-dialog" alt="…" />.
+import type { ImageMetadata } from "astro";
+import { Image } from "astro:assets";
+
+interface Props {
+  name: string;
+  alt: string;
+  caption?: string;
+  /** Numbered markers over the picture; x and y are percentages of its width and height. */
+  callouts?: { n: number; x: number; y: number }[];
+}
+
+const { name, alt, caption, callouts = [] } = Astro.props;
+const screens = import.meta.glob<{ default: ImageMetadata }>("../assets/screens/*.webp", { eager: true });
+const image = screens[`../assets/screens/${name}.webp`]?.default;
+if (!image) throw new Error(`<Screenshot>: no site/src/assets/screens/${name}.webp; run npm run docs:screens -- ${name}`);
+---
+<figure class="fbro-screenshot">
+  <div class="fbro-screenshot__frame">
+    <a href={image.src} title="Open full size">
+      <Image src={image} alt={alt} widths={[640, image.width]} sizes="(max-width: 50rem) 100vw, 46rem" />
+    </a>
+    {callouts.map(({ n, x, y }) => (
+      <span class="fbro-callout" style={`left:${x}%;top:${y}%`} aria-hidden="true">{n}</span>
+    ))}
+  </div>
+  {caption && <figcaption>{caption}</figcaption>}
+</figure>

@@ -1,0 +1,3636 @@
+{
+  "generatedBy": "cargo test site_command_data_is_current (src-tauri/src/ws/commands.rs)",
+  "platforms": {
+    "linux": [
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "ctrl": true,
+                "key": "p",
+                "shift": true
+              }
+            ]
+          }
+        ],
+        "category": "App",
+        "id": "app.command_palette",
+        "title": "Open Command Palette"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "?"
+              }
+            ]
+          }
+        ],
+        "category": "App",
+        "id": "app.cheat_sheet",
+        "title": "Keyboard Cheat Sheet"
+      },
+      {
+        "bindings": [],
+        "category": "App",
+        "id": "app.about",
+        "title": "About fbro"
+      },
+      {
+        "bindings": [],
+        "category": "App",
+        "id": "app.toggle_button_bar",
+        "title": "Toggle Button Bar"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "ctrl": true,
+                "key": "f"
+              }
+            ]
+          }
+        ],
+        "category": "App",
+        "id": "app.search",
+        "title": "Search"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "j"
+              }
+            ]
+          }
+        ],
+        "category": "App",
+        "id": "app.open_jobs",
+        "title": "Open Jobs"
+      },
+      {
+        "bindings": [],
+        "category": "App",
+        "id": "app.install_fbro_command",
+        "title": "Install fbro Shell Command"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "/"
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.navigate_source_root",
+        "title": "Go To Source Root"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [
+              "list"
+            ],
+            "strokes": [
+              {
+                "key": "r"
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.refresh",
+        "title": "Refresh"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "i"
+              }
+            ]
+          }
+        ],
+        "category": "File",
+        "id": "file.info",
+        "title": "Inspect Item"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "F2"
+              }
+            ]
+          }
+        ],
+        "category": "File",
+        "id": "file.rename",
+        "title": "Rename"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "F1"
+              }
+            ]
+          }
+        ],
+        "category": "File",
+        "id": "panel.pass_to_bro",
+        "title": "Pass to Bro"
+      },
+      {
+        "bindings": [],
+        "category": "File",
+        "id": "file.compare",
+        "title": "Compare"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "F3"
+              }
+            ]
+          }
+        ],
+        "category": "File",
+        "id": "file.view",
+        "title": "View"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "ctrl": true,
+                "key": "F3"
+              }
+            ]
+          }
+        ],
+        "category": "View",
+        "id": "panel.viewer.embed",
+        "title": "Toggle Embedded Viewer"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "F4"
+              }
+            ]
+          }
+        ],
+        "category": "File",
+        "id": "file.edit",
+        "title": "Edit"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "F4",
+                "shift": true
+              }
+            ]
+          }
+        ],
+        "category": "File",
+        "id": "file.touch",
+        "title": "New File"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "F5"
+              }
+            ]
+          }
+        ],
+        "category": "File Operation",
+        "id": "file.copy",
+        "title": "Copy"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "ctrl": true,
+                "key": "c"
+              }
+            ]
+          }
+        ],
+        "category": "File Operation",
+        "id": "file.copy_external",
+        "title": "Copy To Host Clipboard"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "F6"
+              }
+            ]
+          }
+        ],
+        "category": "File Operation",
+        "id": "file.move",
+        "title": "Move"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "ctrl": true,
+                "key": "x"
+              }
+            ]
+          }
+        ],
+        "category": "File Operation",
+        "id": "file.cut_external",
+        "title": "Cut To Host Clipboard"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "ctrl": true,
+                "key": "v"
+              }
+            ]
+          }
+        ],
+        "category": "File Operation",
+        "id": "file.paste_external",
+        "title": "Paste External Clipboard"
+      },
+      {
+        "bindings": [],
+        "category": "File Operation",
+        "id": "file.paste_external_move",
+        "title": "Paste External Clipboard As Move"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "F7"
+              }
+            ]
+          }
+        ],
+        "category": "File",
+        "id": "file.mkdir",
+        "title": "Create Directory"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "F8"
+              }
+            ]
+          }
+        ],
+        "category": "File Operation",
+        "id": "file.delete",
+        "title": "Delete"
+      },
+      {
+        "bindings": [],
+        "category": "File",
+        "id": "file.set_permissions",
+        "title": "Set Permissions…"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "F9"
+              }
+            ]
+          }
+        ],
+        "category": "App",
+        "id": "app.open_terminal",
+        "title": "Open Terminal"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "F10"
+              }
+            ]
+          }
+        ],
+        "category": "App",
+        "id": "app.quit",
+        "title": "Quit"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "ArrowUp"
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.cursor.up",
+        "title": "Move Cursor Up"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "ArrowDown"
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.cursor.down",
+        "title": "Move Cursor Down"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "Home"
+              }
+            ]
+          },
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "ArrowUp",
+                "meta": true
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.cursor.first",
+        "title": "Move Cursor To First Entry"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "End"
+              }
+            ]
+          },
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "ArrowDown",
+                "meta": true
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.cursor.last",
+        "title": "Move Cursor To Last Entry"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "ArrowUp",
+                "shift": true
+              }
+            ]
+          }
+        ],
+        "category": "Selection",
+        "id": "panel.selection.extend_up",
+        "title": "Extend Selection Up"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "ArrowDown",
+                "shift": true
+              }
+            ]
+          }
+        ],
+        "category": "Selection",
+        "id": "panel.selection.extend_down",
+        "title": "Extend Selection Down"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "Home",
+                "shift": true
+              }
+            ]
+          }
+        ],
+        "category": "Selection",
+        "id": "panel.selection.extend_first",
+        "title": "Extend Selection To First Entry"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "End",
+                "shift": true
+              }
+            ]
+          }
+        ],
+        "category": "Selection",
+        "id": "panel.selection.extend_last",
+        "title": "Extend Selection To Last Entry"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": " "
+              }
+            ]
+          }
+        ],
+        "category": "Selection",
+        "id": "panel.selection.toggle_or_size",
+        "title": "Toggle Selection and Calculate Folder Size"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": " ",
+                "shift": true
+              }
+            ]
+          }
+        ],
+        "category": "Selection",
+        "id": "panel.selection.calculate_sizes",
+        "title": "Toggle Selected Directory Sizes"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "+"
+              }
+            ]
+          }
+        ],
+        "category": "Selection",
+        "id": "panel.selection.select_by_mask",
+        "title": "Select Files"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "-"
+              }
+            ]
+          }
+        ],
+        "category": "Selection",
+        "id": "panel.selection.deselect_by_mask",
+        "title": "Deselect Files"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "ctrl": true,
+                "key": "a"
+              }
+            ]
+          }
+        ],
+        "category": "Selection",
+        "id": "panel.selection.select_all",
+        "title": "Select All"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "ctrl": true,
+                "key": "a",
+                "shift": true
+              }
+            ]
+          }
+        ],
+        "category": "Selection",
+        "id": "panel.selection.clear",
+        "title": "Clear Selection"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "ctrl": true,
+                "key": "i"
+              }
+            ]
+          }
+        ],
+        "category": "Selection",
+        "id": "panel.selection.invert",
+        "title": "Invert Selection"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "PageUp"
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.cursor.page_up",
+        "title": "Page Up"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "PageDown"
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.cursor.page_down",
+        "title": "Page Down"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "Enter"
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.open",
+        "title": "Open Entry"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [
+              "list"
+            ],
+            "strokes": [
+              {
+                "key": "ArrowRight"
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.open_entry",
+        "title": "Open Entry"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "Backspace"
+              }
+            ]
+          },
+          {
+            "modes": [
+              "list"
+            ],
+            "strokes": [
+              {
+                "key": "ArrowLeft"
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.navigate_up",
+        "title": "Go Up"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [
+              "grid"
+            ],
+            "strokes": [
+              {
+                "key": "ArrowLeft"
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.cursor.left",
+        "title": "Cursor Left"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [
+              "grid"
+            ],
+            "strokes": [
+              {
+                "key": "ArrowRight"
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.cursor.right",
+        "title": "Cursor Right"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [
+              "grid"
+            ],
+            "strokes": [
+              {
+                "key": "ArrowLeft",
+                "shift": true
+              }
+            ]
+          }
+        ],
+        "category": "Selection",
+        "id": "panel.selection.extend_left",
+        "title": "Extend Selection Left"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [
+              "grid"
+            ],
+            "strokes": [
+              {
+                "key": "ArrowRight",
+                "shift": true
+              }
+            ]
+          }
+        ],
+        "category": "Selection",
+        "id": "panel.selection.extend_right",
+        "title": "Extend Selection Right"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "~"
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.navigate_home",
+        "title": "Go Home"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "ctrl": true,
+                "key": "g"
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.navigate_to_path",
+        "title": "Go To Path"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "h"
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.history.open",
+        "title": "Browse History"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "["
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.history.back",
+        "title": "Go Back"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "]"
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.history.forward",
+        "title": "Go Forward"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "Tab"
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.focus.switch",
+        "title": "Switch Focus"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "ctrl": true,
+                "key": "Tab"
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.source.next",
+        "title": "Next Source"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "Tab",
+                "shift": true
+              }
+            ]
+          },
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "ctrl": true,
+                "key": "Tab",
+                "shift": true
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.source.previous",
+        "title": "Previous Source"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "f"
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.filter.open",
+        "title": "Open Filter"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "s"
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.path.sync",
+        "title": "Sync Other Panel To This Path"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "c"
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.context_menu",
+        "title": "Open Context Menu"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "."
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.toggle_hidden",
+        "title": "Toggle Hidden Files"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "g"
+              }
+            ]
+          }
+        ],
+        "category": "Panel",
+        "id": "panel.toggle_view_mode",
+        "title": "Toggle Grid View"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "s",
+                "shift": true
+              }
+            ]
+          }
+        ],
+        "category": "Panel",
+        "id": "panel.sort.open",
+        "title": "Sort Panel"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "g",
+                "shift": true
+              }
+            ]
+          }
+        ],
+        "category": "Panel",
+        "id": "panel.git.actions",
+        "title": "Git Repository…"
+      },
+      {
+        "bindings": [],
+        "category": "Git",
+        "id": "git.init",
+        "title": "Initialize Git repository…"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "ctrl": true,
+                "key": "d"
+              }
+            ]
+          }
+        ],
+        "category": "Panel",
+        "id": "panel.bookmarks.open",
+        "title": "Bookmarks…"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "ctrl": true,
+                "key": "d",
+                "shift": true
+              }
+            ]
+          }
+        ],
+        "category": "Panel",
+        "id": "panel.bookmarks.browse",
+        "title": "Browse Bookmarks"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "ctrl": true,
+                "key": ","
+              }
+            ]
+          }
+        ],
+        "category": "App",
+        "id": "app.settings",
+        "title": "Settings…"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "t"
+              }
+            ]
+          }
+        ],
+        "category": "Panel",
+        "id": "panel.toggle_embedded_terminal",
+        "title": "Toggle Embedded Terminal"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "ctrl": true,
+                "key": "t"
+              }
+            ]
+          }
+        ],
+        "category": "Panel",
+        "id": "panel.tab.new",
+        "title": "New Tab"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "ctrl": true,
+                "key": "w"
+              }
+            ]
+          }
+        ],
+        "category": "Panel",
+        "id": "panel.tab.close",
+        "title": "Close Tab"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "j",
+                "shift": true
+              }
+            ]
+          }
+        ],
+        "category": "Panel",
+        "id": "panel.tab.next",
+        "title": "Next Tab"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "k",
+                "shift": true
+              }
+            ]
+          }
+        ],
+        "category": "Panel",
+        "id": "panel.tab.prev",
+        "title": "Previous Tab"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "ctrl": true,
+                "key": "F4"
+              }
+            ]
+          }
+        ],
+        "category": "File",
+        "id": "file.quick_edit",
+        "title": "Quick Edit"
+      },
+      {
+        "bindings": [],
+        "category": "File",
+        "id": "file.edit_builtin",
+        "title": "Edit in Editor Tab"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "ctrl": true,
+                "key": "F4",
+                "shift": true
+              }
+            ]
+          }
+        ],
+        "category": "Notes",
+        "id": "notes.new",
+        "title": "New Note"
+      },
+      {
+        "bindings": [],
+        "category": "Notes",
+        "id": "notes.open",
+        "title": "Open Notes"
+      },
+      {
+        "bindings": [],
+        "category": "App",
+        "id": "app.eject_source",
+        "title": "Eject Removable Source"
+      }
+    ],
+    "macos": [
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "p",
+                "meta": true,
+                "shift": true
+              }
+            ]
+          }
+        ],
+        "category": "App",
+        "id": "app.command_palette",
+        "title": "Open Command Palette"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "?"
+              }
+            ]
+          }
+        ],
+        "category": "App",
+        "id": "app.cheat_sheet",
+        "title": "Keyboard Cheat Sheet"
+      },
+      {
+        "bindings": [],
+        "category": "App",
+        "id": "app.about",
+        "title": "About fbro"
+      },
+      {
+        "bindings": [],
+        "category": "App",
+        "id": "app.toggle_button_bar",
+        "title": "Toggle Button Bar"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "f",
+                "meta": true
+              }
+            ]
+          }
+        ],
+        "category": "App",
+        "id": "app.search",
+        "title": "Search"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "j"
+              }
+            ]
+          }
+        ],
+        "category": "App",
+        "id": "app.open_jobs",
+        "title": "Open Jobs"
+      },
+      {
+        "bindings": [],
+        "category": "App",
+        "id": "app.install_fbro_command",
+        "title": "Install fbro Shell Command"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "/"
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.navigate_source_root",
+        "title": "Go To Source Root"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [
+              "list"
+            ],
+            "strokes": [
+              {
+                "key": "r"
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.refresh",
+        "title": "Refresh"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "i"
+              }
+            ]
+          }
+        ],
+        "category": "File",
+        "id": "file.info",
+        "title": "Inspect Item"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "2"
+              }
+            ]
+          }
+        ],
+        "category": "File",
+        "id": "file.rename",
+        "title": "Rename"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "1"
+              }
+            ]
+          }
+        ],
+        "category": "File",
+        "id": "panel.pass_to_bro",
+        "title": "Pass to Bro"
+      },
+      {
+        "bindings": [],
+        "category": "File",
+        "id": "file.compare",
+        "title": "Compare"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "3"
+              }
+            ]
+          }
+        ],
+        "category": "File",
+        "id": "file.view",
+        "title": "View"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "3",
+                "meta": true
+              }
+            ]
+          }
+        ],
+        "category": "View",
+        "id": "panel.viewer.embed",
+        "title": "Toggle Embedded Viewer"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "4"
+              }
+            ]
+          }
+        ],
+        "category": "File",
+        "id": "file.edit",
+        "title": "Edit"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "4",
+                "shift": true
+              }
+            ]
+          }
+        ],
+        "category": "File",
+        "id": "file.touch",
+        "title": "New File"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "5"
+              }
+            ]
+          }
+        ],
+        "category": "File Operation",
+        "id": "file.copy",
+        "title": "Copy"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "c",
+                "meta": true
+              }
+            ]
+          }
+        ],
+        "category": "File Operation",
+        "id": "file.copy_external",
+        "title": "Copy To Host Clipboard"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "6"
+              }
+            ]
+          }
+        ],
+        "category": "File Operation",
+        "id": "file.move",
+        "title": "Move"
+      },
+      {
+        "bindings": [],
+        "category": "File Operation",
+        "id": "file.cut_external",
+        "title": "Cut To Host Clipboard"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "v",
+                "meta": true
+              }
+            ]
+          }
+        ],
+        "category": "File Operation",
+        "id": "file.paste_external",
+        "title": "Paste External Clipboard"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "alt": true,
+                "key": "v",
+                "meta": true
+              }
+            ]
+          }
+        ],
+        "category": "File Operation",
+        "id": "file.paste_external_move",
+        "title": "Paste External Clipboard As Move"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "7"
+              }
+            ]
+          }
+        ],
+        "category": "File",
+        "id": "file.mkdir",
+        "title": "Create Directory"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "8"
+              }
+            ]
+          }
+        ],
+        "category": "File Operation",
+        "id": "file.delete",
+        "title": "Delete"
+      },
+      {
+        "bindings": [],
+        "category": "File",
+        "id": "file.set_permissions",
+        "title": "Set Permissions…"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "9"
+              }
+            ]
+          }
+        ],
+        "category": "App",
+        "id": "app.open_terminal",
+        "title": "Open Terminal"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "0"
+              }
+            ]
+          }
+        ],
+        "category": "App",
+        "id": "app.quit",
+        "title": "Quit"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "ArrowUp"
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.cursor.up",
+        "title": "Move Cursor Up"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "ArrowDown"
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.cursor.down",
+        "title": "Move Cursor Down"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "Home"
+              }
+            ]
+          },
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "ArrowUp",
+                "meta": true
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.cursor.first",
+        "title": "Move Cursor To First Entry"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "End"
+              }
+            ]
+          },
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "ArrowDown",
+                "meta": true
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.cursor.last",
+        "title": "Move Cursor To Last Entry"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "ArrowUp",
+                "shift": true
+              }
+            ]
+          }
+        ],
+        "category": "Selection",
+        "id": "panel.selection.extend_up",
+        "title": "Extend Selection Up"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "ArrowDown",
+                "shift": true
+              }
+            ]
+          }
+        ],
+        "category": "Selection",
+        "id": "panel.selection.extend_down",
+        "title": "Extend Selection Down"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "Home",
+                "shift": true
+              }
+            ]
+          }
+        ],
+        "category": "Selection",
+        "id": "panel.selection.extend_first",
+        "title": "Extend Selection To First Entry"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "End",
+                "shift": true
+              }
+            ]
+          }
+        ],
+        "category": "Selection",
+        "id": "panel.selection.extend_last",
+        "title": "Extend Selection To Last Entry"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": " "
+              }
+            ]
+          }
+        ],
+        "category": "Selection",
+        "id": "panel.selection.toggle_or_size",
+        "title": "Toggle Selection and Calculate Folder Size"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": " ",
+                "shift": true
+              }
+            ]
+          }
+        ],
+        "category": "Selection",
+        "id": "panel.selection.calculate_sizes",
+        "title": "Toggle Selected Directory Sizes"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "+"
+              }
+            ]
+          }
+        ],
+        "category": "Selection",
+        "id": "panel.selection.select_by_mask",
+        "title": "Select Files"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "-"
+              }
+            ]
+          }
+        ],
+        "category": "Selection",
+        "id": "panel.selection.deselect_by_mask",
+        "title": "Deselect Files"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "a",
+                "meta": true
+              }
+            ]
+          }
+        ],
+        "category": "Selection",
+        "id": "panel.selection.select_all",
+        "title": "Select All"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "a",
+                "meta": true,
+                "shift": true
+              }
+            ]
+          }
+        ],
+        "category": "Selection",
+        "id": "panel.selection.clear",
+        "title": "Clear Selection"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "i",
+                "meta": true
+              }
+            ]
+          }
+        ],
+        "category": "Selection",
+        "id": "panel.selection.invert",
+        "title": "Invert Selection"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "PageUp"
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.cursor.page_up",
+        "title": "Page Up"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "PageDown"
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.cursor.page_down",
+        "title": "Page Down"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "Enter"
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.open",
+        "title": "Open Entry"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [
+              "list"
+            ],
+            "strokes": [
+              {
+                "key": "ArrowRight"
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.open_entry",
+        "title": "Open Entry"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "Backspace"
+              }
+            ]
+          },
+          {
+            "modes": [
+              "list"
+            ],
+            "strokes": [
+              {
+                "key": "ArrowLeft"
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.navigate_up",
+        "title": "Go Up"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [
+              "grid"
+            ],
+            "strokes": [
+              {
+                "key": "ArrowLeft"
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.cursor.left",
+        "title": "Cursor Left"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [
+              "grid"
+            ],
+            "strokes": [
+              {
+                "key": "ArrowRight"
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.cursor.right",
+        "title": "Cursor Right"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [
+              "grid"
+            ],
+            "strokes": [
+              {
+                "key": "ArrowLeft",
+                "shift": true
+              }
+            ]
+          }
+        ],
+        "category": "Selection",
+        "id": "panel.selection.extend_left",
+        "title": "Extend Selection Left"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [
+              "grid"
+            ],
+            "strokes": [
+              {
+                "key": "ArrowRight",
+                "shift": true
+              }
+            ]
+          }
+        ],
+        "category": "Selection",
+        "id": "panel.selection.extend_right",
+        "title": "Extend Selection Right"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "~"
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.navigate_home",
+        "title": "Go Home"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "g",
+                "meta": true
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.navigate_to_path",
+        "title": "Go To Path"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "h"
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.history.open",
+        "title": "Browse History"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "["
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.history.back",
+        "title": "Go Back"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "]"
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.history.forward",
+        "title": "Go Forward"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "Tab"
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.focus.switch",
+        "title": "Switch Focus"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "ctrl": true,
+                "key": "Tab"
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.source.next",
+        "title": "Next Source"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "Tab",
+                "shift": true
+              }
+            ]
+          },
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "ctrl": true,
+                "key": "Tab",
+                "shift": true
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.source.previous",
+        "title": "Previous Source"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "f"
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.filter.open",
+        "title": "Open Filter"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "s"
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.path.sync",
+        "title": "Sync Other Panel To This Path"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "c"
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.context_menu",
+        "title": "Open Context Menu"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "."
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.toggle_hidden",
+        "title": "Toggle Hidden Files"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "g"
+              }
+            ]
+          }
+        ],
+        "category": "Panel",
+        "id": "panel.toggle_view_mode",
+        "title": "Toggle Grid View"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "s",
+                "shift": true
+              }
+            ]
+          }
+        ],
+        "category": "Panel",
+        "id": "panel.sort.open",
+        "title": "Sort Panel"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "g",
+                "shift": true
+              }
+            ]
+          }
+        ],
+        "category": "Panel",
+        "id": "panel.git.actions",
+        "title": "Git Repository…"
+      },
+      {
+        "bindings": [],
+        "category": "Git",
+        "id": "git.init",
+        "title": "Initialize Git repository…"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "d",
+                "meta": true
+              }
+            ]
+          }
+        ],
+        "category": "Panel",
+        "id": "panel.bookmarks.open",
+        "title": "Bookmarks…"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "d",
+                "meta": true,
+                "shift": true
+              }
+            ]
+          }
+        ],
+        "category": "Panel",
+        "id": "panel.bookmarks.browse",
+        "title": "Browse Bookmarks"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": ",",
+                "meta": true
+              }
+            ]
+          }
+        ],
+        "category": "App",
+        "id": "app.settings",
+        "title": "Settings…"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "t"
+              }
+            ]
+          }
+        ],
+        "category": "Panel",
+        "id": "panel.toggle_embedded_terminal",
+        "title": "Toggle Embedded Terminal"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "t",
+                "meta": true
+              }
+            ]
+          }
+        ],
+        "category": "Panel",
+        "id": "panel.tab.new",
+        "title": "New Tab"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "w",
+                "meta": true
+              }
+            ]
+          }
+        ],
+        "category": "Panel",
+        "id": "panel.tab.close",
+        "title": "Close Tab"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "j",
+                "shift": true
+              }
+            ]
+          }
+        ],
+        "category": "Panel",
+        "id": "panel.tab.next",
+        "title": "Next Tab"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "k",
+                "shift": true
+              }
+            ]
+          }
+        ],
+        "category": "Panel",
+        "id": "panel.tab.prev",
+        "title": "Previous Tab"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "4",
+                "meta": true
+              }
+            ]
+          }
+        ],
+        "category": "File",
+        "id": "file.quick_edit",
+        "title": "Quick Edit"
+      },
+      {
+        "bindings": [],
+        "category": "File",
+        "id": "file.edit_builtin",
+        "title": "Edit in Editor Tab"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "alt": true,
+                "key": "4",
+                "meta": true
+              }
+            ]
+          }
+        ],
+        "category": "Notes",
+        "id": "notes.new",
+        "title": "New Note"
+      },
+      {
+        "bindings": [],
+        "category": "Notes",
+        "id": "notes.open",
+        "title": "Open Notes"
+      },
+      {
+        "bindings": [],
+        "category": "App",
+        "id": "app.eject_source",
+        "title": "Eject Removable Source"
+      }
+    ],
+    "windows": [
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "ctrl": true,
+                "key": "p",
+                "shift": true
+              }
+            ]
+          }
+        ],
+        "category": "App",
+        "id": "app.command_palette",
+        "title": "Open Command Palette"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "?"
+              }
+            ]
+          }
+        ],
+        "category": "App",
+        "id": "app.cheat_sheet",
+        "title": "Keyboard Cheat Sheet"
+      },
+      {
+        "bindings": [],
+        "category": "App",
+        "id": "app.about",
+        "title": "About fbro"
+      },
+      {
+        "bindings": [],
+        "category": "App",
+        "id": "app.toggle_button_bar",
+        "title": "Toggle Button Bar"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "ctrl": true,
+                "key": "f"
+              }
+            ]
+          }
+        ],
+        "category": "App",
+        "id": "app.search",
+        "title": "Search"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "j"
+              }
+            ]
+          }
+        ],
+        "category": "App",
+        "id": "app.open_jobs",
+        "title": "Open Jobs"
+      },
+      {
+        "bindings": [],
+        "category": "App",
+        "id": "app.install_fbro_command",
+        "title": "Install fbro Shell Command"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "/"
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.navigate_source_root",
+        "title": "Go To Source Root"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [
+              "list"
+            ],
+            "strokes": [
+              {
+                "key": "r"
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.refresh",
+        "title": "Refresh"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "i"
+              }
+            ]
+          }
+        ],
+        "category": "File",
+        "id": "file.info",
+        "title": "Inspect Item"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "F2"
+              }
+            ]
+          }
+        ],
+        "category": "File",
+        "id": "file.rename",
+        "title": "Rename"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "F1"
+              }
+            ]
+          }
+        ],
+        "category": "File",
+        "id": "panel.pass_to_bro",
+        "title": "Pass to Bro"
+      },
+      {
+        "bindings": [],
+        "category": "File",
+        "id": "file.compare",
+        "title": "Compare"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "F3"
+              }
+            ]
+          }
+        ],
+        "category": "File",
+        "id": "file.view",
+        "title": "View"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "ctrl": true,
+                "key": "F3"
+              }
+            ]
+          }
+        ],
+        "category": "View",
+        "id": "panel.viewer.embed",
+        "title": "Toggle Embedded Viewer"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "F4"
+              }
+            ]
+          }
+        ],
+        "category": "File",
+        "id": "file.edit",
+        "title": "Edit"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "F4",
+                "shift": true
+              }
+            ]
+          }
+        ],
+        "category": "File",
+        "id": "file.touch",
+        "title": "New File"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "F5"
+              }
+            ]
+          }
+        ],
+        "category": "File Operation",
+        "id": "file.copy",
+        "title": "Copy"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "ctrl": true,
+                "key": "c"
+              }
+            ]
+          }
+        ],
+        "category": "File Operation",
+        "id": "file.copy_external",
+        "title": "Copy To Host Clipboard"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "F6"
+              }
+            ]
+          }
+        ],
+        "category": "File Operation",
+        "id": "file.move",
+        "title": "Move"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "ctrl": true,
+                "key": "x"
+              }
+            ]
+          }
+        ],
+        "category": "File Operation",
+        "id": "file.cut_external",
+        "title": "Cut To Host Clipboard"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "ctrl": true,
+                "key": "v"
+              }
+            ]
+          }
+        ],
+        "category": "File Operation",
+        "id": "file.paste_external",
+        "title": "Paste External Clipboard"
+      },
+      {
+        "bindings": [],
+        "category": "File Operation",
+        "id": "file.paste_external_move",
+        "title": "Paste External Clipboard As Move"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "F7"
+              }
+            ]
+          }
+        ],
+        "category": "File",
+        "id": "file.mkdir",
+        "title": "Create Directory"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "F8"
+              }
+            ]
+          }
+        ],
+        "category": "File Operation",
+        "id": "file.delete",
+        "title": "Delete"
+      },
+      {
+        "bindings": [],
+        "category": "File",
+        "id": "file.set_permissions",
+        "title": "Set Permissions…"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "F9"
+              }
+            ]
+          }
+        ],
+        "category": "App",
+        "id": "app.open_terminal",
+        "title": "Open Terminal"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "F10"
+              }
+            ]
+          }
+        ],
+        "category": "App",
+        "id": "app.quit",
+        "title": "Quit"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "ArrowUp"
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.cursor.up",
+        "title": "Move Cursor Up"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "ArrowDown"
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.cursor.down",
+        "title": "Move Cursor Down"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "Home"
+              }
+            ]
+          },
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "ArrowUp",
+                "meta": true
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.cursor.first",
+        "title": "Move Cursor To First Entry"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "End"
+              }
+            ]
+          },
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "ArrowDown",
+                "meta": true
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.cursor.last",
+        "title": "Move Cursor To Last Entry"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "ArrowUp",
+                "shift": true
+              }
+            ]
+          }
+        ],
+        "category": "Selection",
+        "id": "panel.selection.extend_up",
+        "title": "Extend Selection Up"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "ArrowDown",
+                "shift": true
+              }
+            ]
+          }
+        ],
+        "category": "Selection",
+        "id": "panel.selection.extend_down",
+        "title": "Extend Selection Down"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "Home",
+                "shift": true
+              }
+            ]
+          }
+        ],
+        "category": "Selection",
+        "id": "panel.selection.extend_first",
+        "title": "Extend Selection To First Entry"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "End",
+                "shift": true
+              }
+            ]
+          }
+        ],
+        "category": "Selection",
+        "id": "panel.selection.extend_last",
+        "title": "Extend Selection To Last Entry"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": " "
+              }
+            ]
+          }
+        ],
+        "category": "Selection",
+        "id": "panel.selection.toggle_or_size",
+        "title": "Toggle Selection and Calculate Folder Size"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": " ",
+                "shift": true
+              }
+            ]
+          }
+        ],
+        "category": "Selection",
+        "id": "panel.selection.calculate_sizes",
+        "title": "Toggle Selected Directory Sizes"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "+"
+              }
+            ]
+          }
+        ],
+        "category": "Selection",
+        "id": "panel.selection.select_by_mask",
+        "title": "Select Files"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "-"
+              }
+            ]
+          }
+        ],
+        "category": "Selection",
+        "id": "panel.selection.deselect_by_mask",
+        "title": "Deselect Files"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "ctrl": true,
+                "key": "a"
+              }
+            ]
+          }
+        ],
+        "category": "Selection",
+        "id": "panel.selection.select_all",
+        "title": "Select All"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "ctrl": true,
+                "key": "a",
+                "shift": true
+              }
+            ]
+          }
+        ],
+        "category": "Selection",
+        "id": "panel.selection.clear",
+        "title": "Clear Selection"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "ctrl": true,
+                "key": "i"
+              }
+            ]
+          }
+        ],
+        "category": "Selection",
+        "id": "panel.selection.invert",
+        "title": "Invert Selection"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "PageUp"
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.cursor.page_up",
+        "title": "Page Up"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "PageDown"
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.cursor.page_down",
+        "title": "Page Down"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "Enter"
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.open",
+        "title": "Open Entry"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [
+              "list"
+            ],
+            "strokes": [
+              {
+                "key": "ArrowRight"
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.open_entry",
+        "title": "Open Entry"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "Backspace"
+              }
+            ]
+          },
+          {
+            "modes": [
+              "list"
+            ],
+            "strokes": [
+              {
+                "key": "ArrowLeft"
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.navigate_up",
+        "title": "Go Up"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [
+              "grid"
+            ],
+            "strokes": [
+              {
+                "key": "ArrowLeft"
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.cursor.left",
+        "title": "Cursor Left"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [
+              "grid"
+            ],
+            "strokes": [
+              {
+                "key": "ArrowRight"
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.cursor.right",
+        "title": "Cursor Right"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [
+              "grid"
+            ],
+            "strokes": [
+              {
+                "key": "ArrowLeft",
+                "shift": true
+              }
+            ]
+          }
+        ],
+        "category": "Selection",
+        "id": "panel.selection.extend_left",
+        "title": "Extend Selection Left"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [
+              "grid"
+            ],
+            "strokes": [
+              {
+                "key": "ArrowRight",
+                "shift": true
+              }
+            ]
+          }
+        ],
+        "category": "Selection",
+        "id": "panel.selection.extend_right",
+        "title": "Extend Selection Right"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "~"
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.navigate_home",
+        "title": "Go Home"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "ctrl": true,
+                "key": "g"
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.navigate_to_path",
+        "title": "Go To Path"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "h"
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.history.open",
+        "title": "Browse History"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "["
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.history.back",
+        "title": "Go Back"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "]"
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.history.forward",
+        "title": "Go Forward"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "Tab"
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.focus.switch",
+        "title": "Switch Focus"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "ctrl": true,
+                "key": "Tab"
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.source.next",
+        "title": "Next Source"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "Tab",
+                "shift": true
+              }
+            ]
+          },
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "ctrl": true,
+                "key": "Tab",
+                "shift": true
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.source.previous",
+        "title": "Previous Source"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "f"
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.filter.open",
+        "title": "Open Filter"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "s"
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.path.sync",
+        "title": "Sync Other Panel To This Path"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "c"
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.context_menu",
+        "title": "Open Context Menu"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "."
+              }
+            ]
+          }
+        ],
+        "category": "Navigation",
+        "id": "panel.toggle_hidden",
+        "title": "Toggle Hidden Files"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "g"
+              }
+            ]
+          }
+        ],
+        "category": "Panel",
+        "id": "panel.toggle_view_mode",
+        "title": "Toggle Grid View"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "s",
+                "shift": true
+              }
+            ]
+          }
+        ],
+        "category": "Panel",
+        "id": "panel.sort.open",
+        "title": "Sort Panel"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "g",
+                "shift": true
+              }
+            ]
+          }
+        ],
+        "category": "Panel",
+        "id": "panel.git.actions",
+        "title": "Git Repository…"
+      },
+      {
+        "bindings": [],
+        "category": "Git",
+        "id": "git.init",
+        "title": "Initialize Git repository…"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "ctrl": true,
+                "key": "d"
+              }
+            ]
+          }
+        ],
+        "category": "Panel",
+        "id": "panel.bookmarks.open",
+        "title": "Bookmarks…"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "ctrl": true,
+                "key": "d",
+                "shift": true
+              }
+            ]
+          }
+        ],
+        "category": "Panel",
+        "id": "panel.bookmarks.browse",
+        "title": "Browse Bookmarks"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "ctrl": true,
+                "key": ","
+              }
+            ]
+          }
+        ],
+        "category": "App",
+        "id": "app.settings",
+        "title": "Settings…"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "t"
+              }
+            ]
+          }
+        ],
+        "category": "Panel",
+        "id": "panel.toggle_embedded_terminal",
+        "title": "Toggle Embedded Terminal"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "ctrl": true,
+                "key": "t"
+              }
+            ]
+          }
+        ],
+        "category": "Panel",
+        "id": "panel.tab.new",
+        "title": "New Tab"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "ctrl": true,
+                "key": "w"
+              }
+            ]
+          }
+        ],
+        "category": "Panel",
+        "id": "panel.tab.close",
+        "title": "Close Tab"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "j",
+                "shift": true
+              }
+            ]
+          }
+        ],
+        "category": "Panel",
+        "id": "panel.tab.next",
+        "title": "Next Tab"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "k",
+                "shift": true
+              }
+            ]
+          }
+        ],
+        "category": "Panel",
+        "id": "panel.tab.prev",
+        "title": "Previous Tab"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "ctrl": true,
+                "key": "F4"
+              }
+            ]
+          }
+        ],
+        "category": "File",
+        "id": "file.quick_edit",
+        "title": "Quick Edit"
+      },
+      {
+        "bindings": [],
+        "category": "File",
+        "id": "file.edit_builtin",
+        "title": "Edit in Editor Tab"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "ctrl": true,
+                "key": "F4",
+                "shift": true
+              }
+            ]
+          }
+        ],
+        "category": "Notes",
+        "id": "notes.new",
+        "title": "New Note"
+      },
+      {
+        "bindings": [],
+        "category": "Notes",
+        "id": "notes.open",
+        "title": "Open Notes"
+      }
+    ]
+  }
+}

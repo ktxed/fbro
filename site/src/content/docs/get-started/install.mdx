@@ -1,0 +1,105 @@
+---
+title: Install
+description: Download and install fbro on Linux, macOS or Windows.
+---
+
+import { Tabs, TabItem, Steps } from "@astrojs/starlight/components";
+
+Installers for each release are attached to the
+[GitHub Releases page](https://github.com/ktxed/fbro/releases/latest). There is
+no in-app updater yet, so install a new version the same way you installed the
+first one.
+
+<Tabs syncKey="platform">
+<TabItem label="Linux">
+
+fbro ships as an **AppImage**, a **.deb** and an **.rpm**. All three are built
+on Ubuntu 24.04 and need glibc and FFmpeg from that generation or newer, so
+they **do not start on Ubuntu 22.04** or distributions of the same age.
+
+**AppImage** (any distribution):
+
+```sh
+chmod +x fbro_*.AppImage
+./fbro_*.AppImage
+```
+
+The AppImage bundles the GStreamer plugins it needs to play video.
+
+**Debian / Ubuntu:**
+
+```sh
+sudo apt install ./fbro_*.deb
+```
+
+**Fedora / openSUSE:**
+
+```sh
+sudo dnf install ./fbro-*.rpm
+```
+
+</TabItem>
+<TabItem label="Windows">
+
+Download either the **setup .exe** (NSIS installer) or the **.msi**, then run
+it.
+
+The builds are not code-signed yet, so Microsoft Defender SmartScreen may block
+the installer. Choose **More info**, then **Run anyway**.
+
+fbro uses Microsoft Edge WebView2, which Windows 10 and 11 already include.
+
+</TabItem>
+<TabItem label="macOS">
+
+Download the **.dmg** and drag fbro to Applications. Only Apple silicon Macs are
+supported; there is no Intel build.
+
+The app is ad hoc signed but not notarized, so Gatekeeper blocks a normal
+double-click the first time:
+
+<Steps>
+
+1. In Finder, open **Applications**.
+2. Right-click (or Control-click) **fbro** and choose **Open**.
+3. Confirm **Open** in the dialog. Later launches work normally.
+4. If macOS still refuses, for example with "fbro is damaged and can't be
+   opened", clear the quarantine flag the download added. In Terminal:
+
+   ```sh
+   xattr -cr /Applications/fbro.app
+   ```
+
+   Then open fbro again. See also the
+   [FAQ](../../help/faq/#macos-says-fbro-cant-be-opened).
+
+</Steps>
+
+</TabItem>
+</Tabs>
+
+## The `fbro` shell command
+
+On Linux and macOS, fbro can install a small `fbro` launcher in `~/.local/bin`.
+Run **Install fbro Shell Command** from the command palette, then:
+
+```sh
+fbro              # start fbro
+fbro ~/Downloads  # open a folder in a new tab, starting fbro if needed
+```
+
+Make sure `~/.local/bin` is on your `PATH`.
+
+## Build from source
+
+You need Node.js 22.19 or newer, stable Rust, and the
+[Tauri 2 prerequisites](https://v2.tauri.app/start/prerequisites/) for your OS.
+
+```sh
+git clone https://github.com/ktxed/fbro.git
+cd fbro
+npm install
+npm run tauri build
+```
+
+The installers end up in `src-tauri/target/release/bundle/`.

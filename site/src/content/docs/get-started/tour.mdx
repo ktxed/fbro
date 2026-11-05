@@ -1,0 +1,96 @@
+---
+title: 5-minute tour
+description: Navigate, select, copy, view and search in fbro, using only the keyboard.
+---
+
+import Shortcut from "../../../components/Shortcut.astro";
+import { Steps } from "@astrojs/starlight/components";
+
+This tour covers the core workflow. Shortcuts are shown for Linux, with
+Windows or macOS added in parentheses where they differ. You can rebind any of
+them in **Settings → Shortcuts** (<Shortcut id="app.settings" />).
+
+## Move around
+
+<Steps>
+
+1. Use <kbd>Up</kbd> and <kbd>Down</kbd> to move the cursor. <kbd>PageUp</kbd>
+   and <kbd>PageDown</kbd> jump a screen at a time, and <Shortcut id="panel.cursor.first" />
+   or <Shortcut id="panel.cursor.last" /> go to the ends of the list.
+2. Press <Shortcut id="panel.open" /> to open a folder. <Shortcut id="panel.navigate_up" />
+   goes to the parent folder, and you land with the cursor on the folder you
+   just left.
+3. Press <Shortcut id="panel.navigate_home" /> to go to your home folder, or
+   <Shortcut id="panel.navigate_to_path" /> to type a path.
+4. Press <Shortcut id="panel.history.back" /> and <Shortcut id="panel.history.forward" /> to go
+   back and forward, like in a browser.
+
+</Steps>
+
+To find a file in a long folder, press <Shortcut id="panel.filter.open" /> and
+start typing. The listing narrows to matching names.
+
+## Select and copy
+
+<Steps>
+
+1. In the left panel, open a folder with a few files in it.
+2. Press <Shortcut id="panel.focus.switch" /> to switch to the right panel,
+   and open the folder where the copies should go.
+3. Press <Shortcut id="panel.focus.switch" /> again to return to the left panel.
+4. Mark two or three files with <Shortcut id="panel.selection.toggle_or_size" />.
+5. Press <Shortcut id="file.copy" />. The dialog shows the destination (the
+   other panel's folder). Press <kbd>Enter</kbd> to start.
+
+</Steps>
+
+The copy runs as a job. **Action if file exists** in the dialog decides what
+happens when a file is already at the destination. With the default, **Ask**,
+fbro stops at each conflict and lets you overwrite or skip that file, or apply
+the same choice to all remaining conflicts. Press
+<Shortcut id="app.open_jobs" /> to see every running job.
+
+Move (<Shortcut id="file.move" />), delete (<Shortcut id="file.delete" />),
+rename (<Shortcut id="file.rename" />) and new folder (<Shortcut id="file.mkdir" />)
+work the same way.
+
+## Look inside files
+
+- <Shortcut id="file.view" /> opens the cursor file in the viewer window. It
+  handles text, hex, Markdown, Mermaid diagrams, images, audio, video and PDF.
+- <Shortcut id="panel.viewer.embed" /> turns the *other* panel into a live
+  preview that follows your cursor as you move it. Press it again to close the
+  preview.
+- <Shortcut id="file.edit" /> opens the file in your editor.
+  <Shortcut id="file.quick_edit" /> edits it in a terminal tab instead.
+- <Shortcut id="file.info" /> shows details such as size, dates, permissions
+  and link target.
+
+## Search
+
+Press <Shortcut id="app.search" /> to search below the current folder by name
+or content. Results arrive as the search runs and open in a panel, where you
+can view, copy or delete them like files in any folder.
+
+## Pass to Bro
+
+Press <Shortcut id="panel.pass_to_bro" /> on a selection to see the **bros**
+that can handle it. A bro is a tool for extra work on files: pack or extract
+archives, generate or check hashes, find duplicates, or open media in a player
+with a playlist. fbro lists the most likely bros for your selection first.
+
+## Find anything with the command palette
+
+Press <Shortcut id="app.command_palette" /> and type part of a command's name,
+for example *hidden* or *grid*. The palette runs the command and shows its
+shortcut, so you learn the shortcut as you go. Some commands, such as
+**Compare** or **Install fbro Shell Command**, have no default key and are
+easiest to reach from here.
+
+## Next steps
+
+- Browse every default key on the [keyboard shortcuts](../../reference/keyboard-shortcuts/) page.
+- Press <Shortcut id="app.cheat_sheet" /> in fbro for the same list, with your
+  own bindings.
+- Open **Settings** (<Shortcut id="app.settings" />) to choose a color scheme,
+  rebind keys and configure bros.
