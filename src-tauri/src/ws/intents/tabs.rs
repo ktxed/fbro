@@ -92,17 +92,11 @@ fn panel_create_payload(p: &Panel, supports_thumbs: bool) -> Value {
     })
 }
 
-/// Allocate a new panel id within a slot. Suffixed with an epoch counter so
-/// rapid creates don't collide. Slot id stays as the panel id "prefix".
+/// Allocate a new panel id for a slot. The implementation lives in `state` so
+/// that session restore allocates the same way and neither path ever reissues a
+/// closed tab's id; see [`crate::state::alloc_panel_id`].
 pub(super) fn alloc_panel_id(slot_id: &str, existing: &HashSet<String>) -> String {
-    let mut n = 1u64;
-    loop {
-        let candidate = format!("{slot_id}-tab-{n}");
-        if !existing.contains(&candidate) {
-            return candidate;
-        }
-        n += 1;
-    }
+    crate::state::alloc_panel_id(slot_id, existing)
 }
 
 fn can_clone_active_tab(
@@ -396,9 +390,9 @@ async fn close_tab(args: &Value, ctx: &mut IntentContext<'_>) {
         None => None,
     };
 
-    // Resolve the slot and decide who the new active will be. Abort if this
-    // is the slot's only tab.
-    let (slot_id, new_active, terminal_session, closed_editor) = {
+    // Resolve the slot and check the close is allowed: the slot's last tab is a
+    // no-op, except for an editor tab, which converts to a listing instead.
+    let (slot_id, terminal_session, closed_editor) = {
         let state_guard = ctx.state.lock().await;
         let Some(panel) = state_guard.panels.get(&panel_id) else {
             return;
@@ -415,17 +409,10 @@ async fn close_tab(args: &Value, ctx: &mut IntentContext<'_>) {
             }
             return; // last tab — no-op
         }
-        let idx = match slot.tab_panel_ids.iter().position(|id| id == &panel_id) {
-            Some(i) => i,
-            None => return,
-        };
-        // Activate the left neighbor when possible; else the right one.
-        let new_active = if idx > 0 {
-            slot.tab_panel_ids[idx - 1].clone()
-        } else {
-            slot.tab_panel_ids[idx + 1].clone()
-        };
-        (slot_id, new_active, panel.terminal_session, panel.editor.clone())
+        if !slot.tab_panel_ids.iter().any(|id| id == &panel_id) {
+            return;
+        }
+        (slot_id, panel.terminal_session, panel.editor.clone())
     };
 
     // If the tab has a PTY, kill it.
@@ -439,19 +426,23 @@ async fn close_tab(args: &Value, ctx: &mut IntentContext<'_>) {
         handle.abort();
     }
 
-    let focus_followed = {
+    let (focus_followed, shown) = {
         let mut state_guard = ctx.state.lock().await;
         let prev_focus = state_guard.focus.clone();
-        if let Some(slot) = state_guard.slots.get_mut(&slot_id) {
-            slot.tab_panel_ids.retain(|id| id != &panel_id);
-            slot.active_panel_id = new_active.clone();
-        }
+        // Removal decides the shown tab: it only changes when the closed tab
+        // was the shown one.
+        let shown = state_guard
+            .slots
+            .get_mut(&slot_id)
+            .and_then(|slot| slot.close_tab_and_reseat(&panel_id));
         state_guard.panels.remove(&panel_id);
         if prev_focus == panel_id {
-            state_guard.focus = new_active.clone();
-            true
+            if let Some(shown) = &shown {
+                state_guard.focus = shown.clone();
+            }
+            (true, shown)
         } else {
-            false
+            (false, None)
         }
     };
 
@@ -460,7 +451,7 @@ async fn close_tab(args: &Value, ctx: &mut IntentContext<'_>) {
         &slot_id,
         None,
         if focus_followed {
-            Some(&new_active)
+            shown.as_deref()
         } else {
             None
         },

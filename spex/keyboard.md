@@ -84,7 +84,15 @@ and sharing patches do not move focus. Covered Settings controls remain inert.
   tab and closes the widget, but never when another control — a row's own `×`
   button — is the native activation target. Delete or Ctrl/Cmd+W closes the
   highlighted tab (an editor tab flushes first) and leaves the list open;
-  Escape closes it and changes nothing. Focus is captured from the opener —
+  Escape closes it and changes nothing. A row's `×` is roved to, not
+  reached by Tab: Right moves focus from the field onto the highlighted
+  row's close button (while a caret is still inside the query the caret
+  moves instead), Right again walks that button along the visible rows
+  and wraps it with the highlight; Left returns focus to the field. Enter
+  or Space activates it. The arrows keep following the
+  highlight while a button holds focus, typing hands writing back to
+  the field, and when a row closes its close-button focus moves to the
+  surviving row beside it. Focus is captured from the opener —
   listing, filter input, terminal, or editor — with `useFocusReturn`, and handed
   back on Escape, an outside click, Tab out, and unmount. After a switch the
   newly active tab takes focus through its normal activation path; when the

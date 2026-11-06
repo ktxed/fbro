@@ -93,7 +93,9 @@ stateDiagram-v2
 ### 3.2 New tab (`panel.tab.new`)
 
 1. If the active panel is a local filesystem listing, clone its `source_id`, `path`, and backend symlink return context; otherwise use the local source containing the user's Home directory and start at Home.
-2. Allocate a new panel id; insert it after the active tab in `tab_panel_ids`.
+2. Allocate a new panel id — `{slot}-tab-{n}`, never reissued within a run, so a
+   closed tab's id cannot be mistaken for a new tab's by either side — and
+   insert it after the active tab in `tab_panel_ids`.
 3. Set `active_panel_id` to the new panel id; update `focus`.
 4. Emit targeted patches: `panel-upsert` (create:true), `slot`, `layout`, `focus`.
 
@@ -109,7 +111,11 @@ stateDiagram-v2
    turns into a listing of its file's folder (`tabKind: "listing"`,
    `editor: null` patch, then a normal navigation).
 2. Remove the panel id from `tab_panel_ids`; remove the `Panel` record.
-3. Activate the tab to the left (or the new first tab if the closed tab was leftmost).
+3. Reseat only when the closed tab **was** the active tab: activate its left
+   neighbour, or the new first tab when it was leftmost. Closing a tab that is
+   not the active one leaves `active_panel_id` untouched — the visible tab must
+   not change, and several tabs on the same folder make such a swap read as the
+   visible tab being replaced by a look-alike.
 4. Emit: `slot` patch + `layout` patch + `focus` patch + `panel-remove` patch.
 5. An editor tab first waits for any save in flight, and afterwards discards
    an untouched new note (§5a.4).
@@ -220,7 +226,10 @@ On unmount the DOM element is detached but the `Terminal` instance is kept. On r
 When the shell exits naturally (user typed `exit` or the process died):
 
 1. The wait-for-exit thread checks `tab_kind == Terminal`.
-2. If the slot has more than one tab → remove the terminal tab and activate the left neighbor (same logic as `panel.tab.close`).
+2. If the slot has more than one tab → remove the terminal tab with the same
+   reseat rule as `panel.tab.close` (§3.4 step 3): the left neighbour takes over
+   only when the closed terminal tab was the active one, so a shell exiting in a
+   background tab leaves the visible tab alone.
 3. If it's the only tab → clear `terminal_session` and keep the panel (it reverts to an empty listing).
 4. Emit `TerminalClosed` + the appropriate `slot` / `layout` / `focus` patches.
 
@@ -415,7 +424,7 @@ graph TD
     Panel --> PanelTabList["PanelTabList\n(searchable tab list)"]
     PanelTabBar -- count button (overflow only) --> PanelTabList
     PanelTabList -- Enter / row click --> switch
-    PanelTabList -- Delete / × --> close
+    PanelTabList -- Delete / Ctrl-Cmd-W / × roved by Right --> close
 ```
 
 ### 7.4 Tab list widget
@@ -457,12 +466,24 @@ stays inert while the list is open. Switching and closing reuse
 - **Actions:** Enter or a row click activates and closes; `Delete`,
   `Ctrl/Cmd+W` or `×` closes the highlighted row through the shared close path
   (an editor tab flushes first) and keeps the list open; Escape and an outside
-  click change nothing. Keys and focus are specified in
-  [Keyboard](keyboard.md) §2.
-- **Auto-close:** the panel loses focus, a modal opens, the slot drops to one
-  tab, or the panel unmounts — mirroring the sort selector.
+  click change nothing. The `×` is roved to, never Tab-reached: `Right` moves
+  focus from the field onto the highlighted row's `×` (a caret still inside the
+  query moves instead), `Right` again walks it along the visible rows with the
+  highlight, `Left` hands focus back to the field, and Enter or Space activates
+  the focused `×`. Arrows keep following the highlight while an `×` is armed,
+  and closing a row moves the `×` focus to the surviving row beside it. A row that is not the slot's shown tab never changes which tab the
+   slot shows (§3.4), so closing one keeps the list, the highlight, and the
+   armed `×` where they are. Keys
+  and focus are specified in [Keyboard](keyboard.md) §2.
+- **Auto-close:** the panel loses focus, a modal or context menu opens, the
+  slot drops to one tab, or the panel unmounts — mirroring the sort selector,
+  except that this guard asks the live layer stack what is on screen: the
+  command palette removes its own layer in the very commit that opens the list,
+  so a guard reading the render's stale "modal open" value dismisses the list
+  the instant it appears.
 - **`data-testid`s:** `panel-tabs-count-<slotId>`, `panel-tab-list`,
-  `panel-tab-list-input`, `panel-tab-list-row-<panelId>`.
+  `panel-tab-list-input`, `panel-tab-list-row-<panelId>`; each row's × carries
+  `data-tab-list-close="<panelId>"`, which is also how roving focus locates it.
 
 ---
 
