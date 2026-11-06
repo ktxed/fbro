@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { pressPanelKey, setTextInputValue } from "../browser.mjs";
+import { pressPanelKey, pressWindowKey, setTextInputValue } from "../browser.mjs";
 import { sleep, waitFor } from "../wait.mjs";
 
 const SLOT = "left";
@@ -230,6 +230,23 @@ export async function runTabListFlow(browser, observer) {
     await browser.$(countButton).click();
     await browser.$(widget).waitForExist({ reverse: true });
     await waitFor(() => focusIsOpener(browser), { label: "the count button leaves the listing focused" });
+
+    // The command palette opens the same list. It removes its own layer in the
+    // commit that opens the list, which is exactly where an auto-close guard
+    // reading a stale "modal open" value used to dismiss it again.
+    await pressWindowKey(browser, "p", chord);
+    await browser.$('[data-modal-id="command-palette"] input').waitForExist();
+    await type(browser, "tab list");
+    await browser.keys("Enter");
+    await browser.$(input).waitForExist();
+    assert.equal(await browser.execute((rows) => document.querySelectorAll(rows).length, rows),
+      tabs.length - 1, "the palette opens the focused slot's list");
+    await waitFor(() => browser.execute((selector) =>
+      document.activeElement === document.querySelector(selector), input),
+    { label: "the palette-opened list focuses its own search field" });
+    await browser.keys("Escape");
+    await browser.$(widget).waitForExist({ reverse: true });
+    await waitFor(() => focusIsOpener(browser), { label: "the palette-opened list restores the opener" });
   } finally {
     await browser.keys("Escape");
     for (const panelId of created) observer.sendIntent("panel.tab.close", undefined, { panelId });

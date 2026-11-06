@@ -1339,8 +1339,14 @@ export function Panel({
   // sends SwitchFocus — keeps its list.
   useEffect(() => {
     if (!tabListOpen) return;
+    // `modalActive` is what this render saw. Opening the list from the command
+    // palette closes the palette in the very same commit, so that prop is still
+    // true here and would dismiss the list the instant it appeared. Ask the live
+    // layer stack instead, the way `focusReturn.ts` does; a modal or context
+    // menu opened later changes `modalActive` and re-runs this guard.
+    const layerAbovePanel = !!document.querySelector("[data-modal-id], .context-menu");
     const panelHoldsFocus = focusDivRef.current?.contains(document.activeElement) ?? false;
-    if (modalActive || (!isFocused && !panelHoldsFocus)) {
+    if (layerAbovePanel || (!isFocused && !panelHoldsFocus)) {
       dispatch({ type: "CLOSE_TAB_LIST" });
     }
   }, [dispatch, isFocused, modalActive, tabListOpen]);
