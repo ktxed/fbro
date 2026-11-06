@@ -355,6 +355,9 @@ export interface AppState {
   aboutOpen: boolean;
   cheatSheetOpen: boolean;
   activeSortSelectorPanelId: string | null;
+  /** Panel hosting the searchable tab list; ephemeral UI state like the sort
+   *  selector, so it lives in the store and never in `localStorage`. */
+  activeTabListPanelId: string | null;
   /** mDNS-discovered fbro peers on the LAN. Updated via
    *  `StatePatch { domain: "discoveredPeers" }`. */
   discoveredPeers: DiscoveredPeer[];
@@ -456,6 +459,7 @@ const initialState: AppState = {
   aboutOpen: false,
   cheatSheetOpen: false,
   activeSortSelectorPanelId: null,
+  activeTabListPanelId: null,
   discoveredPeers: [],
   shareConfig: { enabled: false, allowIpv6: false, sharedSourceIds: [], sharedRoots: [], shareSuggestions: [], pairedPeers: [] },
   sharedFolderInput: { path: "", requestId: null },
@@ -549,6 +553,8 @@ export type AppAction =
   | { type: "CLOSE_ABOUT" }
   | { type: "OPEN_SORT_SELECTOR"; panelId: string }
   | { type: "CLOSE_SORT_SELECTOR" }
+  | { type: "OPEN_TAB_LIST"; panelId: string }
+  | { type: "CLOSE_TAB_LIST" }
   | NotificationRequestAction
   | { type: "EXPIRE_NOTIFICATION_TOAST"; id: string }
   | { type: "CLOSE_INPUT" }
@@ -2087,6 +2093,10 @@ function reducer(state: AppState, action: AppAction): AppState {
       return { ...state, activeSortSelectorPanelId: action.panelId };
     case "CLOSE_SORT_SELECTOR":
       return { ...state, activeSortSelectorPanelId: null };
+    case "OPEN_TAB_LIST":
+      return { ...state, activeTabListPanelId: action.panelId };
+    case "CLOSE_TAB_LIST":
+      return { ...state, activeTabListPanelId: null };
     case "REQUEST_NOTIFICATION":
       return { ...state, notificationRequests: [...state.notificationRequests, action.request], notificationPublishError: null };
     case "EXPIRE_NOTIFICATION_TOAST":

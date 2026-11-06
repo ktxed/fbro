@@ -1,47 +1,14 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
-import { IconAlertTriangle, IconChevronLeft, IconChevronRight, IconPencil, IconTerminal2, IconX } from "@tabler/icons-react";
-import { editorStatus, editorStatusVersion, flushEditor, subscribeEditorStatus } from "../editor/sessions";
+import { IconAlertTriangle, IconChevronDown, IconChevronLeft, IconChevronRight, IconPencil, IconTerminal2, IconX } from "@tabler/icons-react";
+import { editorStatus, editorStatusVersion, subscribeEditorStatus } from "../editor/sessions";
 import type { PanelSlot, PanelState, Source } from "../ws/types";
 import type { WsClient } from "../ws/client";
-import { isSearchSourceId } from "../utils/sourceId";
+import { useAppDispatch, useAppState } from "../store";
+import { formatPrimaryBinding } from "../commands/interactive";
 import { useTabReorder } from "../hooks/useTabReorder";
+import { requestCloseTab, sourceTabTitle, tabTitle } from "./tabTitles";
 
 const MAX_TAB_CHARS = 18;
-
-function sourceTabTitle(
-  panel: PanelState,
-  sources: Record<string, Source>,
-): string | undefined {
-  if (isSearchSourceId(panel.sourceId)) return panel.sourceId;
-  if (panel.sourceId === "procs" || panel.sourceId === "journal") {
-    return sources[panel.sourceId]?.name ?? panel.sourceId;
-  }
-  return undefined;
-}
-
-function tabTitle(
-  panel: PanelState | undefined,
-  sources: Record<string, Source>,
-): string {
-  if (!panel) return "…";
-  if (panel.tabTitle) return panel.tabTitle;
-  if (panel.editor) return panel.editor.fileName;
-  if (panel.tabKind === "terminal") {
-    const base = basename(panel.path) || "~";
-    return base;
-  }
-  const sourceTitle = sourceTabTitle(panel, sources);
-  if (sourceTitle) return sourceTitle;
-  return basename(panel.path) || "/";
-}
-
-function basename(path: string): string {
-  if (!path) return "";
-  const normalized = path.replace(/\\/g, "/").replace(/\/+$/, "");
-  if (!normalized) return "/";
-  const i = normalized.lastIndexOf("/");
-  return i < 0 ? normalized : normalized.slice(i + 1);
-}
 
 interface Props {
   slot: PanelSlot;
@@ -52,6 +19,8 @@ interface Props {
 }
 
 export function PanelTabBar({ slot, panels, sources, client, blocked }: Props) {
+  const dispatch = useAppDispatch();
+  const { commands, activeTabListPanelId } = useAppState();
   const drag = useTabReorder(slot, client, blocked);
   const { listRef } = drag;
   const [canLeft, setCanLeft] = useState(false);
@@ -109,6 +78,10 @@ export function PanelTabBar({ slot, panels, sources, client, blocked }: Props) {
     listRef.current?.scrollBy({ left: dir * 80, behavior: "smooth" });
   };
 
+  const count = slot.tabPanelIds.length;
+  const tabListKey = formatPrimaryBinding(commands["panel.tab.list"]);
+  const tabListOpen = activeTabListPanelId === slot.activePanelId;
+
   const switchTo = (panelId: string) => {
     if (panelId === slot.activePanelId) return;
     client.sendIntent("panel.tab.switch", undefined, {
@@ -117,13 +90,7 @@ export function PanelTabBar({ slot, panels, sources, client, blocked }: Props) {
     });
   };
 
-  const closeTab = (panelId: string) => {
-    if (slot.tabPanelIds.length <= 1) return;
-    const editor = panels[panelId]?.editor;
-    // An editor tab saves before it closes.
-    if (editor) void flushEditor(editor.sessionId).then(() => client.sendIntent("panel.tab.close", undefined, { panelId }));
-    else client.sendIntent("panel.tab.close", undefined, { panelId });
-  };
+  const closeTab = (panelId: string) => requestCloseTab(slot, panels, client, panelId);
 
   const newTabFromActive = () => {
     client.sendIntent("panel.tab.new", undefined, {
@@ -251,6 +218,26 @@ export function PanelTabBar({ slot, panels, sources, client, blocked }: Props) {
       >
         <IconChevronRight size={14} />
       </button>
+      {canLeft || canRight ? (
+        <button
+          className="panel__tabs-count"
+          type="button"
+          disabled={blocked}
+          tabIndex={-1}
+          data-testid={`panel-tabs-count-${slot.slotId}`}
+          data-tab-list-count="true"
+          title={[`Show all ${count} tabs`, tabListKey].filter(Boolean).join(" · ")}
+          aria-label={`Show all ${count} tabs`}
+          aria-keyshortcuts={tabListKey || undefined}
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => dispatch(tabListOpen
+            ? { type: "CLOSE_TAB_LIST" }
+            : { type: "OPEN_TAB_LIST", panelId: slot.activePanelId })}
+        >
+          <span className="panel__tabs-count-number">{count}</span>
+          <IconChevronDown size={12} aria-hidden="true" />
+        </button>
+      ) : null}
     </div>
   );
 }

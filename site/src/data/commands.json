@@ -1212,6 +1212,23 @@
             "strokes": [
               {
                 "ctrl": true,
+                "key": "l",
+                "shift": true
+              }
+            ]
+          }
+        ],
+        "category": "Panel",
+        "id": "panel.tab.list",
+        "title": "Tab List…"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "ctrl": true,
                 "key": "F4"
               }
             ]
@@ -2468,6 +2485,23 @@
             "modes": [],
             "strokes": [
               {
+                "key": "l",
+                "meta": true,
+                "shift": true
+              }
+            ]
+          }
+        ],
+        "category": "Panel",
+        "id": "panel.tab.list",
+        "title": "Tab List…"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
                 "key": "4",
                 "meta": true
               }
@@ -3717,6 +3751,23 @@
         "category": "Panel",
         "id": "panel.tab.prev",
         "title": "Previous Tab"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "ctrl": true,
+                "key": "l",
+                "shift": true
+              }
+            ]
+          }
+        ],
+        "category": "Panel",
+        "id": "panel.tab.list",
+        "title": "Tab List…"
       },
       {
         "bindings": [

@@ -10,7 +10,7 @@ import {
   IconArrowRight, IconArrowBarToUp, IconArrowBarToDown, IconChevronsUp,
   IconChevronsDown, IconChevronLeft, IconChevronRight, IconArrowsLeftRight,
   IconFolderOpen, IconCheckbox, IconCalculator, IconSelectAll, IconSquareOff,
-  IconCommand, IconKeyboard, IconMaximize, IconExternalLink,
+  IconCommand, IconKeyboard, IconMaximize, IconExternalLink, IconListSearch,
 } from "@tabler/icons-react";
 
 import {
@@ -109,6 +109,7 @@ const COMMAND_ICONS: Partial<Record<string, typeof IconSearch>> = {
   "panel.source.previous": IconChevronLeft,
   "panel.tab.next": IconChevronRight,
   "panel.tab.prev": IconChevronLeft,
+  "panel.tab.list": IconListSearch,
 };
 
 interface CommandPaletteModalProps {

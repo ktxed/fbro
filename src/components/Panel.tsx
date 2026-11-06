@@ -28,6 +28,7 @@ const SOURCE_ICONS: Record<string, React.ComponentType<{ size?: number }>> = {
 };
 import { BookmarksPopover } from "./BookmarksPopover";
 import { PanelTabBar } from "./PanelTabBar";
+import { PanelTabList } from "./PanelTabList";
 import { PanelTerminal } from "./PanelTerminal";
 import { PanelEditor } from "./PanelEditor";
 import { EntryThumb } from "./EntryThumb";
@@ -1037,6 +1038,7 @@ export function Panel({
   const filterDebounceRef = useRef<number>(0);
   const shouldFocusFilterRef = useRef(false);
   const sortSelectorOpen = appState.activeSortSelectorPanelId === panelId;
+  const tabListOpen = appState.activeTabListPanelId === panelId;
   const sortSelectorOpenRef = useRef(sortSelectorOpen);
   const [sortDraft, setSortDraft] = useState<PanelState["sort"]>(panel.sort);
 
@@ -1326,6 +1328,38 @@ export function Panel({
     return () => {
       if (sortSelectorOpenRef.current) {
         dispatch({ type: "CLOSE_SORT_SELECTOR" });
+      }
+    };
+  }, [dispatch]);
+
+  // The tab list mirrors the sort selector's auto-close rules: it never
+  // outlives the panel focus, a modal, the multi-tab condition, or the panel.
+  // A panel that does not have backend focus yet but already holds DOM focus —
+  // opened from the count button of an unfocused panel, whose listing then
+  // sends SwitchFocus — keeps its list.
+  useEffect(() => {
+    if (!tabListOpen) return;
+    const panelHoldsFocus = focusDivRef.current?.contains(document.activeElement) ?? false;
+    if (modalActive || (!isFocused && !panelHoldsFocus)) {
+      dispatch({ type: "CLOSE_TAB_LIST" });
+    }
+  }, [dispatch, isFocused, modalActive, tabListOpen]);
+
+  useEffect(() => {
+    if (!tabListOpen) return;
+    const slot = appState.slots[panel.slotId];
+    if (!slot || slot.tabPanelIds.length <= 1) dispatch({ type: "CLOSE_TAB_LIST" });
+  }, [appState.slots, dispatch, panel.slotId, tabListOpen]);
+
+  const tabListOpenRef = useRef(tabListOpen);
+  useEffect(() => {
+    tabListOpenRef.current = tabListOpen;
+  }, [tabListOpen]);
+
+  useEffect(() => {
+    return () => {
+      if (tabListOpenRef.current) {
+        dispatch({ type: "CLOSE_TAB_LIST" });
       }
     };
   }, [dispatch]);
@@ -1655,6 +1689,13 @@ export function Panel({
     }
     if (sortSelectorOpen) {
       handleSortSelectorKeyDown(e);
+      return;
+    }
+    if (tabListOpen) {
+      // The tab list owns the keyboard. Its own handler stops propagation, so
+      // a key reaching here came from outside it: swallow it rather than run
+      // a panel shortcut over the open list.
+      e.preventDefault();
       return;
     }
     const unmodified = !e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey;
@@ -2527,6 +2568,23 @@ export function Panel({
         );
         if (!anyTabbed) return null;
         return <PanelTabBar slot={slot} panels={appState.panels} sources={appState.sources} client={client} blocked={modalActive} />;
+      })()}
+
+      {tabListOpen && (() => {
+        // Anchored at the panel root, before the kind-specific body, so the
+        // list also opens over a terminal or editor tab reached through the
+        // count button or the palette.
+        const slot = appState.slots[panel.slotId];
+        if (!slot) return null;
+        return (
+          <PanelTabList
+            panelId={panelId}
+            slot={slot}
+            panels={appState.panels}
+            sources={appState.sources}
+            client={client}
+          />
+        );
       })()}
 
       {panel.tabKind === "editor" && panel.editor ? (
