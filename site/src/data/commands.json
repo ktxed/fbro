@@ -1104,6 +1104,50 @@
             "strokes": [
               {
                 "ctrl": true,
+                "key": "m",
+                "shift": true
+              }
+            ]
+          }
+        ],
+        "category": "Panel",
+        "id": "panel.terminal.maximize",
+        "title": "Maximize Terminal"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "ctrl": true,
+                "key": "t",
+                "shift": true
+              }
+            ]
+          },
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "ctrl": true,
+                "key": "Enter",
+                "shift": true
+              }
+            ]
+          }
+        ],
+        "category": "Panel",
+        "id": "panel.terminal.promote",
+        "title": "Promote Terminal to Tab"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "ctrl": true,
                 "key": "t"
               }
             ]
@@ -2316,6 +2360,50 @@
             "modes": [],
             "strokes": [
               {
+                "key": "m",
+                "meta": true,
+                "shift": true
+              }
+            ]
+          }
+        ],
+        "category": "Panel",
+        "id": "panel.terminal.maximize",
+        "title": "Maximize Terminal"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "t",
+                "meta": true,
+                "shift": true
+              }
+            ]
+          },
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "key": "Enter",
+                "meta": true,
+                "shift": true
+              }
+            ]
+          }
+        ],
+        "category": "Panel",
+        "id": "panel.terminal.promote",
+        "title": "Promote Terminal to Tab"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
                 "key": "t",
                 "meta": true
               }
@@ -3521,6 +3609,50 @@
         "category": "Panel",
         "id": "panel.toggle_embedded_terminal",
         "title": "Toggle Embedded Terminal"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "ctrl": true,
+                "key": "m",
+                "shift": true
+              }
+            ]
+          }
+        ],
+        "category": "Panel",
+        "id": "panel.terminal.maximize",
+        "title": "Maximize Terminal"
+      },
+      {
+        "bindings": [
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "ctrl": true,
+                "key": "t",
+                "shift": true
+              }
+            ]
+          },
+          {
+            "modes": [],
+            "strokes": [
+              {
+                "ctrl": true,
+                "key": "Enter",
+                "shift": true
+              }
+            ]
+          }
+        ],
+        "category": "Panel",
+        "id": "panel.terminal.promote",
+        "title": "Promote Terminal to Tab"
       },
       {
         "bindings": [

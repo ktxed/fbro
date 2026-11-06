@@ -2546,6 +2546,7 @@ export function Panel({
           client={client}
           panelId={panelId}
           sessionId={panel.terminalSessionId}
+          commands={appState.commands}
           fontSize={appState.fontSize}
           solo
           maximized={appState.maximizedTerminalPanelId === panelId}
@@ -2798,6 +2799,7 @@ export function Panel({
           client={client}
           panelId={panelId}
           sessionId={panel.terminalSessionId}
+          commands={appState.commands}
           fontSize={appState.fontSize}
           maximized={appState.maximizedTerminalPanelId === panelId}
           onToggleMaximize={() => dispatch({

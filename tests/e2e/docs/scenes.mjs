@@ -4,7 +4,7 @@
 import fs from "node:fs";
 import { execFileSync } from "node:child_process";
 import { composeFiles, hostPath } from "../smoke/config.mjs";
-import { clickContextMenuItem, clickEntry, clickSource, goToPanelPath, pressPanelKey, setTextInputValue, waitForMainWindow } from "../smoke/browser.mjs";
+import { clickContextMenuItem, clickEntry, clickSource, goToPanelPath, pressPanelKey, setTextInputValue, terminalToolbarBox, waitForMainWindow } from "../smoke/browser.mjs";
 import { sleep, waitFor } from "../smoke/wait.mjs";
 import { demo } from "./fixture.mjs";
 import { shot } from "./shot.mjs";
@@ -282,8 +282,18 @@ export const scenes = {
     await sleep(1500);
     await browser.keys(["l", "s", " ", "-", "l", "a", "Enter"]);
     await sleep(1500);
-    await shot(browser, "terminal");
-    await browser.execute(() => document.querySelector('[data-testid="terminal-toolbar"] button:last-of-type')?.click());
+    // The action toolbar fades out once the pointer leaves its corner, and
+    // settle() parks the pointer before every capture, so park it just inside
+    // the toolbar's approach region instead of the usual window corner: the
+    // guide picture then shows the buttons beside the output, and the pointer
+    // stays there for the close click below.
+    const toolbarBox = await terminalToolbarBox(browser, '[data-testid="panel-left"]');
+    await shot(browser, "terminal", {
+      pointerAt: { x: toolbarBox.left - 20, y: toolbarBox.top + 10 },
+    });
+    const close = await browser.$(".panel-terminal__close");
+    await close.waitForClickable({ timeout: 5_000 });
+    await close.click();
     await waitFor(() => browser.execute(() => !document.querySelector(".xterm")), { label: "terminal closed" });
   },
 

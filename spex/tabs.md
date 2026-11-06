@@ -398,7 +398,7 @@ const anyTabbed = Object.values(appState.slots).some(s => s.tabPanelIds.length >
 
 ### 7.2 Terminal tab layout
 
-A terminal tab fills the full panel area. The `panel-terminal--solo` CSS modifier is applied when `tabKind === "terminal"` to override the 50 % height used in embedded split-view mode.
+A terminal tab fills the full panel area. The `panel-terminal--solo` CSS modifier is applied when `tabKind === "terminal"` to override the 50 % height used in embedded split-view mode. Its floating action toolbar follows the same reveal rule as the embedded split (shown on open and on pointer approach to the panel's top-right corner, hidden otherwise; maximized, the corner is the window's), so the buttons never cover terminal output in any shape.
 
 ### 7.3 Component hierarchy
 

@@ -107,6 +107,8 @@ export const PANEL_SHORTCUT_COMMAND_IDS = [
   "panel.bookmarks.open",
   "panel.bookmarks.browse",
   "panel.toggle_embedded_terminal",
+  "panel.terminal.maximize",
+  "panel.terminal.promote",
   "panel.tab.new",
   "panel.tab.close",
   "panel.tab.next",
@@ -1019,6 +1021,24 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
       } else {
         client.sendIntent("OpenPanelTerminal", focused.panelId, { cols: 80, rows: 24 });
       }
+      return true;
+    }
+    case "panel.terminal.maximize": {
+      // Only a panel that actually hosts a terminal can maximize one; on an
+      // editor panel this chord belongs to the editor's own full-screen toggle.
+      if (!focused || focused.panel.terminalSessionId === undefined) return false;
+      dispatch({
+        type: "SET_MAXIMIZED_TERMINAL",
+        panelId: state.maximizedTerminalPanelId === focused.panelId ? null : focused.panelId,
+      });
+      return true;
+    }
+    case "panel.terminal.promote": {
+      // Only the embedded split-view terminal can move into a tab of its own; a
+      // terminal that already owns a tab has nothing to promote.
+      if (!focused || focused.panel.terminalSessionId === undefined) return false;
+      if (focused.panel.tabKind === "terminal") return false;
+      client.sendIntent("panel.terminal.promote", undefined, { panelId: focused.panelId });
       return true;
     }
     default:

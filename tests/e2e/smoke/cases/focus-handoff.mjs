@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { backendPath, hostPath } from "../config.mjs";
-import { clickEntry, goToPanelPath } from "../browser.mjs";
+import { clickEntry, goToPanelPath, revealTerminalToolbar } from "../browser.mjs";
 import { waitFor } from "../wait.mjs";
 import { expectModalFocus } from "./modal-focus.mjs";
 import { waitForToast } from "./notifications.mjs";
@@ -221,7 +221,12 @@ export async function runFocusHandoffFlow(browser, observer) {
     if (!toolbarBackground || (alpha !== undefined && Number(alpha) < 1)) {
       throw new Error(`Terminal toolbar background is not opaque: ${toolbarBackground}`);
     }
-    await (await browser.$(`${panelSelector} .panel-terminal__close`)).click();
+    // The toolbar fades out after its reveal window, so approach the corner
+    // before the mouse path to × becomes interactable.
+    await revealTerminalToolbar(browser, panelSelector);
+    const terminalClose = await browser.$(`${panelSelector} .panel-terminal__close`);
+    await terminalClose.waitForClickable({ timeout: 10_000 });
+    await terminalClose.click();
     await waitFor(() => {
       observer.sendIntent("RequestStateSnapshot");
       return observer.state.panels.left.terminalSessionId === undefined;
