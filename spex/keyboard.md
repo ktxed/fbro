@@ -80,6 +80,14 @@ and sharing patches do not move focus. Covered Settings controls remain inert.
   `zshEmacsKeymap` setting is enabled; it passes `-o emacs` at launch. The
   setting is hidden and has no effect on other platforms. It does not inject
   text into the PTY or change a running session.
+- `panel.terminal.maximize` (Ctrl/Cmd+Shift+M) and `panel.terminal.promote`
+  (Ctrl/Cmd+Shift+T, second binding Ctrl/Cmd+Shift+Enter) are the only registry
+  chords a focused terminal hands back to fbro. The terminal's action toolbar
+  fades out of pointer reach, so these commands keep maximize and promote
+  keyboard-reachable; they are matched with modified-key strokes inside xterm's
+  custom key handler, before the Escape branch, and the keydown is not passed on
+  to the PTY. Every other key, including plain Ctrl+M (a real carriage return),
+  stays the shell's. From the listing the same chords run as panel commands.
 - Tab and Shift+Tab cycle among enabled, visible controls in the top modal,
   except inside a list marked `data-modal-owns-tab` (Pass to Bro), where they
   move the selection like ArrowDown/ArrowUp (`modal-stack.md` §4).

@@ -10,7 +10,7 @@ import {
   IconArrowRight, IconArrowBarToUp, IconArrowBarToDown, IconChevronsUp,
   IconChevronsDown, IconChevronLeft, IconChevronRight, IconArrowsLeftRight,
   IconFolderOpen, IconCheckbox, IconCalculator, IconSelectAll, IconSquareOff,
-  IconCommand, IconKeyboard,
+  IconCommand, IconKeyboard, IconMaximize, IconExternalLink,
 } from "@tabler/icons-react";
 
 import {
@@ -72,6 +72,8 @@ const COMMAND_ICONS: Partial<Record<string, typeof IconSearch>> = {
   "panel.bookmarks.open": IconBookmark,
   "panel.bookmarks.browse": IconBookmarks,
   "panel.toggle_embedded_terminal": IconTerminal,
+  "panel.terminal.maximize": IconMaximize,
+  "panel.terminal.promote": IconExternalLink,
   "panel.tab.new": IconPlus,
   "panel.tab.close": IconX,
   "panel.pass_to_bro": IconRobot,

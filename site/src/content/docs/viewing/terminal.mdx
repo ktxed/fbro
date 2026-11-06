@@ -12,6 +12,8 @@ fbro has a terminal built in, and can also open your system's terminal app.
 |---|---|
 | Terminal inside the panel | <Shortcut id="panel.toggle_embedded_terminal" /> |
 | Your system terminal, in the current folder | <Shortcut id="app.open_terminal" /> |
+| Fill the window with the terminal | <Shortcut id="panel.terminal.maximize" /> |
+| Move the terminal into its own tab | <Shortcut id="panel.terminal.promote" /> |
 
 ## The embedded terminal
 
@@ -24,8 +26,13 @@ visible above it.
 - <kbd>Escape</kbd> moves focus back to the listing; the terminal keeps running.
   Press <Shortcut id="panel.toggle_embedded_terminal" /> to focus it again.
 - To close it, use its **Close terminal** button or exit the shell.
-- The terminal's buttons maximize it to fill the window, move it into its own
-  tab, or close it. When it's maximized, <kbd>Escape</kbd> restores it first.
+- Its buttons maximize the terminal, move it into its own tab, or close it. They
+  appear briefly when the terminal opens, and again when you bring the pointer
+  into the terminal's top-right corner, so they never hide output while you work.
+  The same two actions have shortcuts, so you never need the buttons:
+  <Shortcut id="panel.terminal.maximize" /> fills the window with the terminal
+  and <kbd>Escape</kbd> restores it; <Shortcut id="panel.terminal.promote" />
+  moves it into a tab of its own.
 
 Because <kbd>Escape</kbd> belongs to fbro, press <kbd>Ctrl</kbd>+<kbd>[</kbd> to
 send Escape to a program running in the terminal, such as Vim.
@@ -34,7 +41,8 @@ send Escape to a program running in the terminal, such as Vim.
 
 ## Terminal tabs
 
-**Promote terminal to its own tab** moves a running terminal into a tab of its own
+**Promote terminal to its own tab** (<Shortcut id="panel.terminal.promote" />)
+moves a running terminal into a tab of its own
 in the same panel, keeping the session and its scrollback. It then behaves like
 any [tab](../../using/tabs/). When the shell exits, its tab closes.
 

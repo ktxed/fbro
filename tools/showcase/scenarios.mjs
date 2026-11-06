@@ -225,11 +225,13 @@ export class Scene {
       await i.type("mc"); await i.key("Enter");
     }, 2500);
     await this.step("Expand the terminal to fill the app", async () => {
-      await i.button("Maximize terminal");
+      // The action toolbar fades out when the pointer is not near the corner, so
+      // the keyboard path is the one to show: the reveal re-arms on maximize.
+      await i.command("panel.terminal.maximize");
       await i.find({ label: "Restore terminal", role: "AXButton" });
     }, 2000);
     await this.step("Promote the live terminal to its own tab", async () => {
-      await i.button("Promote terminal to its own tab");
+      await i.command("panel.terminal.promote");
       await o.wait("terminal promoted with the same live session", state => {
         terminalPanelId = state.slots.left.activePanelId;
         const terminal = state.panels[terminalPanelId];

@@ -6817,7 +6817,11 @@ body {
 
 /* Floating actions over the terminal. The toolbar is opaque (terminal
    background plus a border) so text under it never hides the buttons; the
-   chip colours sit on top of it. */
+   chip colours sit on top of it.
+   Base state is faded out: `visibility` (not just opacity) takes the buttons
+   out of the tab order and the accessibility tree and lets terminal text
+   underneath be selectable. PanelTerminal reveals it on open, on maximize, on
+   pointer approach, and CSS keeps it up while a button has focus. */
 .panel-terminal__toolbar {
   position: absolute;
   top: 2px;
@@ -6830,6 +6834,26 @@ body {
   border: 1px solid var(--border);
   border-radius: 4px;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35); /* fixed: neutral lift in every scheme */
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 200ms ease, visibility 0s linear 200ms;
+}
+
+.panel-terminal__toolbar--revealed,
+.panel-terminal__toolbar:focus-within {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transition: opacity 150ms ease, visibility 0s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .panel-terminal__toolbar,
+  .panel-terminal__toolbar--revealed,
+  .panel-terminal__toolbar:focus-within {
+    transition: none;
+  }
 }
 
 .panel-terminal__close,

@@ -18,10 +18,11 @@ function loadSharp() {
   }
 }
 
-export async function settle(browser) {
-  // Park the pointer on the window's top-left corner so no row shows hover.
+export async function settle(browser, { pointerAt = { x: 1, y: 1 } } = {}) {
+  // Park the pointer where the scene wants it kept during the capture: by
+  // default the window's top-left corner, so no row shows hover.
   await browser.performActions([{ type: "pointer", id: "mouse", parameters: { pointerType: "mouse" },
-    actions: [{ type: "pointerMove", duration: 0, x: 1, y: 1 }] }]);
+    actions: [{ type: "pointerMove", duration: 0, origin: "viewport", x: pointerAt.x, y: pointerAt.y }] }]);
   await browser.releaseActions();
   // Queued toasts follow each other, so require a quiet second, not one empty frame.
   await waitFor(async () => {
@@ -44,8 +45,8 @@ export async function settle(browser) {
   await sleep(600);
 }
 
-export async function shot(browser, name) {
-  await settle(browser);
+export async function shot(browser, name, options = {}) {
+  await settle(browser, options);
   const png = Buffer.from(await browser.takeScreenshot(), "base64");
   fs.mkdirSync(screensDir, { recursive: true });
   const out = path.join(screensDir, `${name}.webp`);

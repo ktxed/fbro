@@ -71,6 +71,8 @@ const SECTIONS: CheatSheetSection[] = [
       { label: "Refresh", commandIds: ["panel.refresh"] },
       { label: "Embedded viewer", commandIds: ["panel.viewer.embed"] },
       { label: "Embedded terminal", commandIds: ["panel.toggle_embedded_terminal"] },
+      { label: "Maximize / restore terminal", commandIds: ["panel.terminal.maximize"] },
+      { label: "Promote terminal to a tab", commandIds: ["panel.terminal.promote"] },
       { label: "Bookmarks", commandIds: ["panel.bookmarks.open"] },
       { label: "Browse bookmarks", commandIds: ["panel.bookmarks.browse"] },
     ],

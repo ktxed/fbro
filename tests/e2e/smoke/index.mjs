@@ -34,6 +34,7 @@ import { runLocalFlow, runSymlinkNavigationFlow, verifyBookmarksKeyboardNavigati
 import { runPanelSelectionFlow } from "./cases/panel-selection.mjs";
 import { runSelectionMaskFlow } from "./cases/selection-mask.mjs";
 import { runFocusHandoffFlow } from "./cases/focus-handoff.mjs";
+import { runTerminalToolbarFlow } from "./cases/terminal-toolbar.mjs";
 import { runNotificationsFlow } from "./cases/notifications.mjs";
 import { runViewerFlow } from "./cases/viewer.mjs";
 import { runDiffFlow } from "./cases/diff.mjs";
@@ -100,6 +101,11 @@ async function main() {
 
     if (process.env.FBRO_E2E_TABS_ONLY === "1") {
       await runTabsFlow(browserA, observerA);
+      return;
+    }
+
+    if (process.env.FBRO_E2E_TERMINAL_TOOLBAR_ONLY === "1") {
+      await runTerminalToolbarFlow(browserA, observerA);
       return;
     }
 
@@ -189,6 +195,7 @@ async function main() {
     await runColorSchemeEditorFlow(browserA, observerA);
     await runFocusHandoffFlow(browserA, observerA);
     if (process.env.FBRO_E2E_FOCUS_ONLY === "1") return;
+    await runTerminalToolbarFlow(browserA, observerA);
     await runLocalFlow(browserA, observerA);
     await runTabsFlow(browserA, observerA);
     await runDiffFlow(browserA, observerA);

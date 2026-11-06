@@ -233,6 +233,49 @@ export async function doubleClickEntry(browser, panelId, name) {
   await el.doubleClick();
 }
 
+/** Park the real mouse pointer at a viewport point with an explicit W3C pointer
+ *  action. `element.moveTo()` and `element.click()` refuse a target the CSS fade
+ *  has made non-interactable, so hovering has to come from a real pointer move. */
+export async function movePointerTo(browser, x, y) {
+  await browser.performActions([{
+    type: "pointer",
+    id: "hover-mouse",
+    parameters: { pointerType: "mouse" },
+    actions: [{ type: "pointerMove", duration: 0, origin: "viewport", x, y }],
+  }]);
+  await browser.releaseActions();
+  return { x, y };
+}
+
+/** Viewport box of a terminal panel's floating action toolbar, plus its centre.
+ *  The box is measurable while the toolbar is faded out because only opacity and
+ *  visibility change, so tests can aim at a corner they cannot see. */
+export async function terminalToolbarBox(browser, panelSelector = "") {
+  const scope = panelSelector.trim();
+  const box = await browser.execute((selector) => {
+    const toolbar = document.querySelector(`${selector} [data-testid="terminal-toolbar"]`.trim());
+    if (!toolbar) return null;
+    const rect = toolbar.getBoundingClientRect();
+    return {
+      left: Math.round(rect.left),
+      top: Math.round(rect.top),
+      right: Math.round(rect.right),
+      bottom: Math.round(rect.bottom),
+      x: Math.round(rect.left + rect.width / 2),
+      y: Math.round(rect.top + rect.height / 2),
+    };
+  }, scope);
+  if (!box) throw new Error(`missing terminal toolbar under "${scope || "(root)"}"`);
+  return box;
+}
+
+/** Reveal a terminal panel's floating action toolbar by parking the mouse
+ *  pointer at its centre, and return where the pointer ended up. */
+export async function revealTerminalToolbar(browser, panelSelector = "") {
+  const box = await terminalToolbarBox(browser, panelSelector);
+  return movePointerTo(browser, box.x, box.y);
+}
+
 export async function setTextInputValue(browser, selector, value) {
   const input = await browser.$(selector);
   await input.waitForDisplayed({ timeout: 10_000 });

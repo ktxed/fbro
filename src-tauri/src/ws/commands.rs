@@ -649,6 +649,28 @@ pub(crate) fn build_interactive_commands_for(
             vec![keybinding("t")],
             None,
         ),
+        // The embedded terminal owns the keyboard, so maximizing and promoting
+        // it must be registry commands, not just its hover toolbar (§2 of
+        // keyboard.md releases exactly these two chords to the registry).
+        // Ctrl/Cmd+Shift+M is the same "fill the window" chord the editor tab
+        // uses; the terminal command no-ops on an editor panel.
+        command(
+            "panel.terminal.maximize",
+            "Panel",
+            "Maximize Terminal",
+            vec![mod_binding(mac, "m", true)],
+            None,
+        ),
+        // Ctrl/Cmd+Shift+T is free: `panel.tab.new` keeps the unshifted chord.
+        // Ctrl/Cmd+Shift+Enter is the fallback for shells that swallow the
+        // primary chord; `panel.open` keeps plain Enter.
+        command(
+            "panel.terminal.promote",
+            "Panel",
+            "Promote Terminal to Tab",
+            vec![mod_binding(mac, "t", true), mod_binding(mac, "Enter", true)],
+            None,
+        ),
         command(
             "panel.tab.new",
             "Panel",
