@@ -699,6 +699,16 @@ pub(crate) fn build_interactive_commands_for(
             vec![keybinding_with_modifiers("k", true, false, false, false)],
             None,
         ),
+        // The searchable tab list opens over an overflowing strip. Ctrl/Cmd+Shift+T
+        // belongs to `panel.terminal.promote` and Ctrl/Cmd+Shift+A to Clear
+        // Selection; Ctrl/Cmd+Shift+L has no OS-level meaning on any platform.
+        command(
+            "panel.tab.list",
+            "Panel",
+            "Tab List…",
+            vec![mod_binding(mac, "l", true)],
+            None,
+        ),
     ];
     commands.push(command(
         "file.quick_edit",
@@ -859,5 +869,35 @@ mod tests {
         }
         assert!(find("file.edit_builtin").bindings.is_empty());
         assert!(find("notes.open").bindings.is_empty());
+    }
+
+    /// `panel.tab.list` holds Ctrl/Cmd+Shift+L on every platform without
+    /// sharing it with another command.
+    #[test]
+    fn tab_list_binding_is_not_shared() {
+        let strokes = |c: &super::InteractiveCommandSchema| {
+            c.bindings.iter().map(|b| serde_json::to_string(&b.strokes).unwrap()).collect::<Vec<_>>()
+        };
+        for platform in [CommandPlatform::Linux, CommandPlatform::MacOs, CommandPlatform::Windows] {
+            let commands = build_interactive_commands_for(platform);
+            let find = |id: &str| commands.iter().find(|c| c.id == id).unwrap_or_else(|| panic!("{id}"));
+            let list = find("panel.tab.list");
+            assert_eq!(list.category, "Panel");
+            assert_eq!(list.title, "Tab List…");
+            let own = strokes(&list);
+            assert_eq!(own.len(), 1);
+            let stroke = &list.bindings[0].strokes[0];
+            assert_eq!(stroke.key, "l");
+            assert!(stroke.shift);
+            assert_eq!(stroke.ctrl, platform != CommandPlatform::MacOs);
+            assert_eq!(stroke.meta, platform == CommandPlatform::MacOs);
+            for other in commands.iter().filter(|c| c.id != "panel.tab.list") {
+                assert!(
+                    !strokes(other).iter().any(|s| own.contains(s)),
+                    "{} shares the Tab List binding",
+                    other.id
+                );
+            }
+        }
     }
 }

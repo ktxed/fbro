@@ -362,6 +362,7 @@ These bindings are **panel-scoped**: they fire only when a panel listing has foc
 | `panel.tab.close` | Ctrl/Cmd+W | Close active tab; no-op on last tab |
 | `panel.tab.next` | Shift+J | Activate next tab (wraps) |
 | `panel.tab.prev` | Shift+K | Activate previous tab (wraps) |
+| `panel.tab.list` | Ctrl/Cmd+Shift+L | Open the searchable tab list for the panel's slot; no-op while that slot has fewer than two tabs |
 | `notes.new` | Ctrl+Shift+F4 (macOS Cmd+Alt+4) | Create a note and open it in an editor tab |
 | `file.edit_builtin` | — (context menu, palette) | Open the cursor file in an editor tab |
 
@@ -411,11 +412,59 @@ graph TD
     PanelTabBar --> TabChip["TabChip ×N"]
     TabChip -- left-click --> switch["panel.tab.switch"]
     TabChip -- middle-click/× --> close["panel.tab.close"]
+    Panel --> PanelTabList["PanelTabList\n(searchable tab list)"]
+    PanelTabBar -- count button (overflow only) --> PanelTabList
+    PanelTabList -- Enter / row click --> switch
+    PanelTabList -- Delete / × --> close
 ```
 
----
+### 7.4 Tab list widget
 
-## 8. Persistence
+`PanelTabList` is a searchable vertical list of one slot's tabs, opened by
+`panel.tab.list` or by the count button in the strip — the answer to an
+overflowing strip. It is ephemeral frontend UI state
+(`activeTabListPanelId`, like `activeSortSelectorPanelId`), **not** a
+`ModalLayer`: the panel keeps input ownership, and the panel's own key handler
+stays inert while the list is open. Switching and closing reuse
+`panel.tab.switch` and `panel.tab.close`; there is no new intent.
+
+- **Scope:** the tabs of the slot whose panel opened it, and only when that
+  slot has at least two tabs.
+- **Count button:** `PanelTabBar` renders it after the right scroll arrow, and
+  only while the strip overflows (`canLeft || canRight`). Its label is the live
+  tab count; it toggles the list, and like the arrows it is `tabIndex={-1}`
+  with `onMouseDown` preventDefault, so clicking it leaves the existing focus
+  owner until the widget takes it. Because Ctrl/Cmd+Shift+L belongs to a
+  focused PTY or CodeMirror, the button (and the palette) is how a terminal or
+  editor tab reaches the list.
+- **Layout:** an overlay inside the panel in the style of
+  `.panel__sort-selector` (`--bg-panel`, `--border-focus`, `--shadow-modal`,
+  z-index 20) that unlike the sort selector accepts pointer events. A
+  zero-height in-flow wrapper anchors it just under the tab strip, so it reads
+  as dropping from the strip without displacing the panel body. Width is
+  `min(420px, calc(100% - 32px))`; the list scrolls at
+  `min(45vh, 22rem)`.
+- **Rows,** in tab-strip order: kind icon (`IconTerminal2` / `IconPencil`;
+  listing tabs have none), the bold tab title with matched characters marked,
+  then the detail — editor file path, folder path, or source name — dimmed and
+  trimmed at the **front** so the recognisable tail stays visible, then editor
+  status markers, then a close `×` hidden when only one tab would remain. The
+  slot's active tab carries an accent left border; the keyboard-highlighted row
+  uses `--bg-cursor` with a focus outline.
+- **Search:** case-insensitive over title and detail — contiguous substring
+  first, then a fuzzy subsequence. The highlight resets to the first match on
+  every query change; an empty result reads "No matching tabs".
+- **Actions:** Enter or a row click activates and closes; `Delete`,
+  `Ctrl/Cmd+W` or `×` closes the highlighted row through the shared close path
+  (an editor tab flushes first) and keeps the list open; Escape and an outside
+  click change nothing. Keys and focus are specified in
+  [Keyboard](keyboard.md) §2.
+- **Auto-close:** the panel loses focus, a modal opens, the slot drops to one
+  tab, or the panel unmounts — mirroring the sort selector.
+- **`data-testid`s:** `panel-tabs-count-<slotId>`, `panel-tab-list`,
+  `panel-tab-list-input`, `panel-tab-list-row-<panelId>`.
+
+---
 
 ### 8.1 Session schema
 

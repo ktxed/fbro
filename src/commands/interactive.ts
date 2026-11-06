@@ -113,6 +113,7 @@ export const PANEL_SHORTCUT_COMMAND_IDS = [
   "panel.tab.close",
   "panel.tab.next",
   "panel.tab.prev",
+  "panel.tab.list",
   "file.touch",
   "file.quick_edit",
   "file.edit_builtin",
@@ -1010,6 +1011,15 @@ export function executeCommand(commandId: string, context: ExecuteCommandContext
         slotId: slot.slotId,
         panelId: nextId,
       });
+      return true;
+    }
+    case "panel.tab.list": {
+      // Frontend-only: the widget reuses panel.tab.switch / panel.tab.close.
+      // A slot with a single tab has nothing to list, so the command is a no-op.
+      if (!focused) return false;
+      const slot = state.slots[focused.panel.slotId];
+      if (!slot || slot.tabPanelIds.length <= 1) return false;
+      dispatch({ type: "OPEN_TAB_LIST", panelId: focused.panelId });
       return true;
     }
     case "panel.toggle_embedded_terminal": {

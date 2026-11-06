@@ -735,6 +735,220 @@ body {
   opacity: 1 !important;
 }
 
+/* Tab-count button: rendered only while the strip overflows, and the entry
+ * point to the searchable tab list when keys belong to a terminal or editor. */
+.panel__tabs-count {
+  appearance: none;
+  font: inherit;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin: 0 5px 0 3px;
+  padding: 2px 5px;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text-dim);
+  font-family: var(--font);
+  font-size: calc(var(--font-size) - 1px);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.panel__tabs-count:not(:disabled):hover {
+  background: var(--bg-hover);
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+.panel__tabs-count:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.panel__tabs-count-number {
+  min-width: 2ch;
+  text-align: right;
+}
+
+/* Searchable tab list. It borrows the sort selector's overlay look, but takes
+ * pointer events and anchors just under the tab strip: the zero-height anchor
+ * is an in-flow flex item, so the absolute overlay drops from the strip
+ * without displacing the panel body. */
+.panel__tab-list-anchor {
+  position: relative;
+  height: 0;
+  flex-shrink: 0;
+  z-index: 20;
+}
+
+.panel__tab-list {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  transform: translateX(-50%);
+  width: min(420px, calc(100% - 32px));
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-focus);
+  border-radius: 4px;
+  box-shadow: var(--shadow-modal);
+}
+
+.panel__tab-list-search {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  padding: 0 5px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+}
+
+.panel__tab-list-search:focus-within {
+  border-color: var(--border-focus);
+}
+
+.panel__tab-list-search-icon {
+  flex-shrink: 0;
+  color: var(--text-dim);
+}
+
+.panel__tab-list-input {
+  appearance: none;
+  font: inherit;
+  flex: 1;
+  min-width: 0;
+  padding: 3px 0;
+  background: none;
+  border: none;
+  border-radius: 0;
+  color: var(--text);
+  font-family: var(--font);
+  font-size: var(--font-size);
+  outline: none;
+}
+
+.panel__tab-list-rows {
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  /* Keep wheel scrolling inside the list; the listing behind must not move. */
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+  max-height: min(45vh, 22rem);
+}
+
+.panel__tab-list-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 3px 5px 3px 4px;
+  border-left: 2px solid transparent;
+  border-radius: 2px;
+  color: var(--text-dim);
+  font-size: calc(var(--font-size) - 1px);
+  cursor: pointer;
+}
+
+.panel__tab-list-row:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+/* The slot's active tab keeps an accent edge, so the highlighted row stays
+ * distinguishable from it. */
+.panel__tab-list-row--active {
+  border-left-color: var(--accent);
+  color: var(--text);
+}
+
+.panel__tab-list-row--selected {
+  background: var(--bg-cursor);
+  outline: 1px solid var(--border-focus);
+  outline-offset: -1px;
+  color: var(--text);
+}
+
+.panel__tab-list-row--selected .panel__tab-list-detail {
+  color: var(--text);
+  opacity: 0.72;
+}
+
+.panel__tab-list-icon {
+  flex-shrink: 0;
+}
+
+.panel__tab-list-title {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+  font-weight: 700;
+}
+
+.panel__tab-list-match {
+  color: var(--text-highlight);
+}
+
+.panel__tab-list-detail {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-dim);
+}
+
+/* Editor save state, placed before the fixed close button so it never shifts. */
+.panel__tab-list-dot {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-dim);
+}
+
+.panel__tab-list-warning {
+  flex-shrink: 0;
+  color: var(--text-warning);
+}
+
+.panel__tab-list-close {
+  appearance: none;
+  font: inherit;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  padding: 1px;
+  background: none;
+  border: none;
+  border-radius: 2px;
+  color: var(--text-dim);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.panel__tab-list-close:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+.panel__tab-list-empty {
+  padding: 6px;
+  color: var(--text-dim);
+  font-size: calc(var(--font-size) - 1px);
+}
+
 .panel__volumes {
   display: flex;
   flex-direction: row;

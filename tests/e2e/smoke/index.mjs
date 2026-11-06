@@ -43,6 +43,7 @@ import { runButtonBarFlow } from "./cases/button-bar.mjs";
 import { runColorSchemeFlow } from "./cases/color-scheme.mjs";
 import { runColorSchemeEditorFlow } from "./cases/color-scheme-editor.mjs";
 import { runTabsFlow } from "./cases/tabs.mjs";
+import { runTabListFlow } from "./cases/tab-list.mjs";
 import { runQuickEditFlow } from "./cases/quick-edit.mjs";
 import { runEditorTabFlow } from "./cases/editor-tab.mjs";
 import { runJournalSortFlow } from "./cases/journal-sort.mjs";
@@ -101,6 +102,11 @@ async function main() {
 
     if (process.env.FBRO_E2E_TABS_ONLY === "1") {
       await runTabsFlow(browserA, observerA);
+      return;
+    }
+
+    if (process.env.FBRO_E2E_TAB_LIST_ONLY === "1") {
+      await runTabListFlow(browserA, observerA);
       return;
     }
 
@@ -198,6 +204,7 @@ async function main() {
     await runTerminalToolbarFlow(browserA, observerA);
     await runLocalFlow(browserA, observerA);
     await runTabsFlow(browserA, observerA);
+    await runTabListFlow(browserA, observerA);
     await runDiffFlow(browserA, observerA);
     await runViewerFlow(browserA, observerA);
     await runHeicFlow(browserA, observerA);

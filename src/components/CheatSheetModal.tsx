@@ -83,6 +83,7 @@ const SECTIONS: CheatSheetSection[] = [
       { label: "New tab", commandIds: ["panel.tab.new"] },
       { label: "Close tab", commandIds: ["panel.tab.close"] },
       { label: "Next / previous tab", commandIds: ["panel.tab.next", "panel.tab.prev"] },
+      { label: "All tabs…", commandIds: ["panel.tab.list"] },
     ],
   },
   {

@@ -73,6 +73,22 @@ and sharing patches do not move focus. Covered Settings controls remain inert.
   focused current-folder button natively. Escape closes the
   popover; while it is open the underlying panel and global commands are held
   back.
+- The **tab list** (`panel.tab.list`, Ctrl/Cmd+Shift+L, or the tab strip's count
+  button; `tabs.md` §7.4) is a transient overlay like the bookmark popover: it
+  owns the keyboard while open. Its root handler stops propagation, and the
+  panel handler swallows anything that still reaches it, so panel and global
+  shortcuts stay inert and printable keys go to the search field. Up/Down move
+  the highlighted row with wrap, Home/End jump to the ends, PageUp/PageDown move
+  by a visible page, and each move keeps the row in view. The search field is
+  the only Tab stop; Tab out closes the list. Enter activates the highlighted
+  tab and closes the widget, but never when another control — a row's own `×`
+  button — is the native activation target. Delete or Ctrl/Cmd+W closes the
+  highlighted tab (an editor tab flushes first) and leaves the list open;
+  Escape closes it and changes nothing. Focus is captured from the opener —
+  listing, filter input, terminal, or editor — with `useFocusReturn`, and handed
+  back on Escape, an outside click, Tab out, and unmount. After a switch the
+  newly active tab takes focus through its normal activation path; when the
+  opener's tab was closed from the list, focus falls back to the active listing.
 - Built-in editor tabs own their keys (§3a); nothing typed there reaches
   panel or global shortcuts.
 - Embedded terminal keys go to the PTY for the shell to interpret. On macOS,
@@ -88,6 +104,9 @@ and sharing patches do not move focus. Covered Settings controls remain inert.
   custom key handler, before the Escape branch, and the keydown is not passed on
   to the PTY. Every other key, including plain Ctrl+M (a real carriage return),
   stays the shell's. From the listing the same chords run as panel commands.
+  `panel.tab.list` (Ctrl/Cmd+Shift+L) is deliberately **not** among them in v1:
+  from a focused terminal the tab list is reached through the strip's count
+  button or the command palette. Releasing it would extend this list.
 - Tab and Shift+Tab cycle among enabled, visible controls in the top modal,
   except inside a list marked `data-modal-owns-tab` (Pass to Bro), where they
   move the selection like ArrowDown/ArrowUp (`modal-stack.md` §4).
@@ -236,7 +255,10 @@ and letter commands type text. Only these leave the editor:
 | Tab | Indents (CodeMirror `indentWithTab`); Escape is the way out, per CodeMirror's guidance for Tab-capturing editors |
 
 CodeMirror's find panel uses Ctrl/Cmd+F, Enter, Ctrl/Cmd+G; its F3 binding is
-removed because F3 belongs to the viewer.
+removed because F3 belongs to the viewer. Its `searchKeymap` keeps
+Ctrl/Cmd+Shift+L (select all matches): `panel.tab.list` is not released inside
+an editor tab in v1, so an editor tab reaches the tab list through the strip's
+count button or the command palette.
 
 The capture-phase window/document listeners (`ModalStack`, input history and
 its dropdown, `ContextMenu`, tab-reorder drag) act only when their own layer is

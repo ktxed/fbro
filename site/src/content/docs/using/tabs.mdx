@@ -42,6 +42,28 @@ With the mouse:
 The last tab in a panel can't be closed. An editor tab is the exception: closing
 it turns it back into a listing of the file's folder.
 
+## Find a tab in a long strip
+
+Once the tabs no longer fit, the strip shows a button with the tab **count** at
+its right end. Click it, or press <Shortcut id="panel.tab.list" />, to open a
+searchable list of that panel's tabs:
+
+| In the list | Keys |
+|---|---|
+| Filter by name or path | type |
+| Move through the list | <kbd>↑</kbd> / <kbd>↓</kbd>, <kbd>Home</kbd> / <kbd>End</kbd>, <kbd>PgUp</kbd> / <kbd>PgDn</kbd> |
+| Switch to the highlighted tab | <kbd>Enter</kbd>, or click the row |
+| Close the highlighted tab | <kbd>Delete</kbd> or <kbd>Ctrl</kbd>/<kbd>Cmd</kbd>+<kbd>W</kbd>, or click its **×** |
+| Close the list, changing nothing | <kbd>Escape</kbd>, or click outside |
+
+Matching letters are marked in the tab name, and each row also shows the folder
+or file it points at. Closing an editor tab saves it first, exactly like closing
+it from the strip. The list appears only in a panel with two or more tabs.
+
+Inside a terminal or editor tab, <Shortcut id="panel.tab.list" /> belongs to the
+shell or the editor, so use the count button or the
+[command palette](../command-palette/) there.
+
 ## Tabs across restarts
 
 fbro restores your tabs when it starts again:
