@@ -943,6 +943,14 @@ body {
   background: var(--bg-hover);
 }
 
+/* Right roves the highlight onto this button, so it needs a ring that shows
+ * for programmatic focus too, not only :focus-visible. */
+.panel__tab-list-close:focus {
+  outline: 1px solid var(--border-focus);
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
 .panel__tab-list-empty {
   padding: 6px;
   color: var(--text-dim);

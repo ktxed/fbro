@@ -42,6 +42,10 @@ With the mouse:
 The last tab in a panel can't be closed. An editor tab is the exception: closing
 it turns it back into a listing of the file's folder.
 
+Closing a tab you are **not** looking at leaves the visible tab alone — useful
+when several tabs show the same folder. Closing the tab you are looking at moves
+the panel to the tab on its left, or to the new first tab when it was leftmost.
+
 ## Find a tab in a long strip
 
 Once the tabs no longer fit, the strip shows a button with the tab **count** at
@@ -54,11 +58,15 @@ searchable list of that panel's tabs:
 | Move through the list | <kbd>↑</kbd> / <kbd>↓</kbd>, <kbd>Home</kbd> / <kbd>End</kbd>, <kbd>PgUp</kbd> / <kbd>PgDn</kbd> |
 | Switch to the highlighted tab | <kbd>Enter</kbd>, or click the row |
 | Close the highlighted tab | <kbd>Delete</kbd> or <kbd>Ctrl</kbd>/<kbd>Cmd</kbd>+<kbd>W</kbd>, or click its **×** |
+| Reach a row's **×** by keyboard | <kbd>→</kbd>, then <kbd>Enter</kbd> or <kbd>Space</kbd> closes that tab; <kbd>→</kbd> again walks the **×** down the list |
+| Hand the focus back to the search field | <kbd>←</kbd> |
 | Close the list, changing nothing | <kbd>Escape</kbd>, or click outside |
 
 Matching letters are marked in the tab name, and each row also shows the folder
 or file it points at. Closing an editor tab saves it first, exactly like closing
-it from the strip. The list appears only in a panel with two or more tabs.
+it from the strip; closing a tab that way leaves the list open, and focus moves
+to the **×** of the row beside it. Typing always returns to the search field.
+The list appears only in a panel with two or more tabs.
 
 Inside a terminal or editor tab, <Shortcut id="panel.tab.list" /> belongs to the
 shell or the editor, so use the count button or the

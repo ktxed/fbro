@@ -58,6 +58,12 @@ export function matchRuns(text: string, query: string): MatchRun[] | null {
   return runs;
 }
 
+/** The panel id of the row whose × holds focus, or null when no × does. */
+function closeButtonFocusId(target: EventTarget | null): string | null {
+  const panelId = target instanceof HTMLElement ? target.dataset.tabListClose : undefined;
+  return panelId ?? null;
+}
+
 interface TabRow {
   panelId: string;
   kind: TabKind;
@@ -81,9 +87,10 @@ interface Props {
 /**
  * Searchable vertical tab list for one slot, in the style of the sort
  * selector: an overlay inside the panel, dropping from the tab strip. Enter
- * switches to the highlighted tab, Delete closes it, Escape changes nothing.
- * It is not a `ModalLayer`: the panel keeps input ownership, and the panel
- * handler stays inert while the list is open.
+ * switches to the highlighted tab, Delete closes it, Right arms that row's ×
+ * and Left lets go of it again, Escape changes nothing. It is not a
+ * `ModalLayer`: the panel keeps input ownership, and the panel handler stays
+ * inert while the list is open.
  */
 export function PanelTabList({ panelId, slot, panels, sources, client }: Props) {
   const dispatch = useAppDispatch();
@@ -146,12 +153,31 @@ export function PanelTabList({ panelId, slot, panels, sources, client }: Props) 
     close();
   }, [client, close, slot.activePanelId, slot.slotId]);
 
+  /** The × of one row, found by row id rather than by index so focus can be
+   *  moved before the closing row's element is gone. */
+  const focusCloseButton = useCallback((tabPanelId: string | undefined) => {
+    if (!tabPanelId) return false;
+    const button = Array.from(
+      listRef.current?.querySelectorAll<HTMLElement>("[data-tab-list-close]") ?? [],
+    ).find((element) => element.dataset.tabListClose === tabPanelId);
+    if (!button) return false;
+    button.focus({ preventScroll: true });
+    return true;
+  }, []);
+
   const closeRow = useCallback((tabPanelId: string) => {
+    // An × reached by keyboard must not leave focus on the row that is about
+    // to disappear: hand it to the visible row beside it.
+    const armed = closeButtonFocusId(document.activeElement) === tabPanelId;
+    const index = rows.findIndex((row) => row.panelId === tabPanelId);
+    const neighbour = index < 0 ? null
+      : index + 1 < rows.length ? rows[index + 1] : rows[index - 1];
     // Editor tabs flush first; the last tab of the slot is refused.
     requestCloseTab(slot, panels, client, tabPanelId);
     // The backend patch lands later; clamp now so no row looks half-selected.
     setHighlight((current) => Math.min(current, Math.max(0, slot.tabPanelIds.length - 2)));
-  }, [client, panels, slot]);
+    if (armed) focusCloseButton(neighbour?.panelId);
+  }, [client, focusCloseButton, panels, rows, slot]);
 
   const pageRows = useCallback(() => {
     const list = listRef.current;
@@ -180,11 +206,60 @@ export function PanelTabList({ panelId, slot, panels, sources, client }: Props) 
       return;
     }
 
+    // Which row's × holds focus, if any. The list keeps one Tab stop, so the
+    // button is reached by roving with Right/Left, never by Tab.
+    const armedOn = closeButtonFocusId(event.target);
+
+    if (event.key === "ArrowRight") {
+      if (rows.length === 0) return;
+      if (armedOn !== null) {
+        // Already on an ×: Right walks it down the visible rows.
+        event.preventDefault();
+        const next = (highlight + 1) % rows.length;
+        setHighlight(next);
+        focusCloseButton(rows[next].panelId);
+        return;
+      }
+      const field = inputRef.current;
+      // A caret still inside the query belongs to the field.
+      if (field && field.selectionStart !== null && field.selectionStart < field.value.length) return;
+      event.preventDefault();
+      focusCloseButton(rows[highlight]?.panelId);
+      return;
+    }
+
+    if (event.key === "ArrowLeft") {
+      if (armedOn === null) return;
+      event.preventDefault();
+      const field = inputRef.current;
+      if (field) {
+        field.focus({ preventScroll: true });
+        field.setSelectionRange(field.value.length, field.value.length);
+      }
+      return;
+    }
+
+    if (
+      armedOn !== null && event.key.length === 1 && event.key !== " "
+      && !event.ctrlKey && !event.altKey && !event.metaKey
+    ) {
+      // Typing continues while an × is armed: the field stays the writer, and
+      // Space is left to the focused button, which activates on it.
+      const field = inputRef.current;
+      if (!field) return;
+      event.preventDefault();
+      field.focus({ preventScroll: true });
+      setQuery((current) => current + event.key);
+      return;
+    }
+
     if (event.key === "PageUp" || event.key === "PageDown") {
       if (rows.length === 0) return;
       event.preventDefault();
       const delta = (event.key === "PageDown" ? 1 : -1) * pageRows();
-      setHighlight((current) => Math.min(rows.length - 1, Math.max(0, current + delta)));
+      const next = Math.min(rows.length - 1, Math.max(0, highlight + delta));
+      setHighlight(next);
+      if (armedOn !== null) focusCloseButton(rows[next].panelId);
       return;
     }
 
@@ -192,6 +267,8 @@ export function PanelTabList({ panelId, slot, panels, sources, client }: Props) 
     if (next !== null) {
       event.preventDefault();
       setHighlight(next);
+      // An armed × follows the highlight, so the row it acts on stays obvious.
+      if (armedOn !== null) focusCloseButton(rows[next].panelId);
       return;
     }
 
@@ -209,7 +286,7 @@ export function PanelTabList({ panelId, slot, panels, sources, client }: Props) 
       event.preventDefault();
       activate(row.panelId);
     }
-  }, [activate, close, closeRow, highlight, pageRows, rows]);
+  }, [activate, close, closeRow, focusCloseButton, highlight, pageRows, rows]);
 
   // Capture the opener on DOM mount and hand focus back on every close path:
   // Escape, outside click, Tab out, a switched or closed tab, unmount.
@@ -328,6 +405,7 @@ export function PanelTabList({ panelId, slot, panels, sources, client }: Props) 
                     className="panel__tab-list-close"
                     type="button"
                     tabIndex={-1}
+                    data-tab-list-close={row.panelId}
                     title="Close tab"
                     aria-label={`Close ${row.title} tab`}
                     onMouseDown={(event) => event.preventDefault()}

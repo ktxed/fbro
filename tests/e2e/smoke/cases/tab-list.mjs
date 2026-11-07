@@ -54,6 +54,10 @@ const highlighted = (browser) => browser.execute((rows) => {
   return selected ? selected.dataset.testid.replace("panel-tab-list-row-", "") : null;
 }, rows);
 
+/** The row whose × button currently holds focus, or null. */
+const armedOn = (browser) => browser.execute(() =>
+  document.activeElement?.dataset.tabListClose ?? null);
+
 const renderedRows = (browser) => browser.execute((rows) => Array.from(
   document.querySelectorAll(rows), (element) => element.dataset.testid.replace("panel-tab-list-row-", ""),
 ), rows);
@@ -192,18 +196,50 @@ export async function runTabListFlow(browser, observer) {
     await browser.$(widget).waitForExist({ reverse: true });
     await waitFor(() => focusIsOpener(browser), { label: "Escape restores the opener" });
 
-    // Delete closes the highlighted row and keeps the list open.
-    await openWithChord(await activeTab(observer));
+    // A row's × is keyboard-only in the Tab sense and roved to with Right:
+    // Left hands focus back to the field, Right arms the × again, Enter
+    // activates it, the list stays open, and focus lands on a live row's ×.
+    const liveNow = await activeTab(observer);
+    const doomed = created.slice(2).find((panelId) => panelId !== liveNow);
+    assert.ok(doomed, "a fixture tab that is not the active one can be closed from the list");
+    await openWithChord(liveNow);
     await browser.$(input).waitForExist();
     await highlightRow(browser, created[1]);
-    await browser.keys("Delete");
+    await browser.keys("ArrowRight");
+    await waitFor(async () => (await armedOn(browser)) === created[1],
+      { label: "Right moves focus onto that row's close button" });
+    await browser.keys("ArrowLeft");
+    await waitFor(() => browser.execute((selector) =>
+      document.activeElement === document.querySelector(selector), input),
+    { label: "Left hands focus back to the search field" });
+    assert.equal(await highlighted(browser), created[1], "Left leaves the highlight alone");
+    await browser.keys("ArrowRight");
+    await waitFor(async () => (await armedOn(browser)) === created[1],
+      { label: "Right arms the highlighted row again" });
+    await browser.keys("Enter");
     await waitFor(async () => !(await snapshot(observer)).tabPanelIds.includes(created[1]),
-      { label: "Delete closes the highlighted tab" });
+      { label: "Enter on the close button closes that tab" });
     assert.equal(await exists(browser, widget), true, "the list survives closing a row");
+    // created[1] is never the shown tab here: the filter dropped it, so the
+    // Enter switch above landed on one of the other rows.
+    assert.equal(await activeTab(observer), liveNow,
+      "closing a tab that is not the shown one leaves the shown tab alone");
+    const armedAfter = await armedOn(browser);
+    assert.ok(armedAfter && armedAfter !== created[1],
+      `focus moves to another row's close button, got ${armedAfter}`);
     assert.equal(await browser.execute((rows) => document.querySelectorAll(rows).length, rows),
       tabs.length - 1, "the closed row leaves the list");
-    assert.equal(await (await browser.$(countButton)).getText(), String(tabs.length - 1),
-      "the count updates after a close");
+
+    // Arrows keep roving while an × is armed, and Delete closes the highlight.
+    await highlightRow(browser, doomed);
+    assert.equal(await armedOn(browser), doomed, "the armed close button follows the highlight");
+    await browser.keys("Delete");
+    await waitFor(async () => !(await snapshot(observer)).tabPanelIds.includes(doomed),
+      { label: "Delete closes the highlighted tab" });
+    assert.equal(await browser.execute((rows) => document.querySelectorAll(rows).length, rows),
+      tabs.length - 2, "the second closed row leaves the list too");
+    assert.equal(await (await browser.$(countButton)).getText(), String(tabs.length - 2),
+      "the count updates after each close");
     await browser.keys("Escape");
     await browser.$(widget).waitForExist({ reverse: true });
 
@@ -240,13 +276,29 @@ export async function runTabListFlow(browser, observer) {
     await browser.keys("Enter");
     await browser.$(input).waitForExist();
     assert.equal(await browser.execute((rows) => document.querySelectorAll(rows).length, rows),
-      tabs.length - 1, "the palette opens the focused slot's list");
+      tabs.length - 2, "the palette opens the focused slot's list");
     await waitFor(() => browser.execute((selector) =>
       document.activeElement === document.querySelector(selector), input),
     { label: "the palette-opened list focuses its own search field" });
     await browser.keys("Escape");
     await browser.$(widget).waitForExist({ reverse: true });
     await waitFor(() => focusIsOpener(browser), { label: "the palette-opened list restores the opener" });
+    // Closing the tab the slot is showing is the one case that reseats it: the
+    // slot takes the tab on its left, and the list goes with the panel it was
+    // hosted in.
+    const shown = await activeTab(observer);
+    const shownIds = (await snapshot(observer)).tabPanelIds;
+    const shownIndex = shownIds.indexOf(shown);
+    const reseated = shownIndex > 0 ? shownIds[shownIndex - 1] : shownIds[shownIndex + 1];
+    assert.ok(reseated, "the fixture slot has a tab to reseat onto");
+    await openWithChord(shown);
+    await browser.$(input).waitForExist();
+    await highlightRow(browser, shown);
+    await browser.keys("Delete");
+    await waitFor(async () => (await snapshot(observer)).activePanelId === reseated,
+      { label: "closing the shown tab moves the slot to its left neighbour" });
+    await browser.$(widget).waitForExist({ reverse: true });
+    assert.equal(await exists(browser, rowOf(shown)), false, "the closed tab's row goes with the list");
   } finally {
     await browser.keys("Escape");
     for (const panelId of created) observer.sendIntent("panel.tab.close", undefined, { panelId });
@@ -263,6 +315,6 @@ export async function runTabListFlow(browser, observer) {
       await sleep(400);
       assert.equal(await exists(browser, widget), false, "a single tab has nothing to list");
     }
-    console.log("PASS tab list: count button, registry chord, inert panel keys, filter and marks, arrows, Enter switch, Delete close, Escape and outside-click focus return");
+    console.log("PASS tab list: count button, registry chord, inert panel keys, filter and marks, arrows, Enter switch, Escape and outside-click focus return, palette open, Right/Left roving to a row's close button, Enter and Delete close, closing a background row keeps the shown tab, closing the shown row reseats the slot left");
   }
 }

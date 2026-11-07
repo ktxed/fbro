@@ -290,26 +290,18 @@ impl PtyManager {
                     .unwrap_or(false);
 
                 if is_terminal_tab {
-                    // Locate the slot and activate the left neighbor.
+                    // Locate the slot and drop the tab; the slot keeps its
+                    // shown tab unless the terminal tab was the shown one.
                     let slot_id = s.panels.get(&owner).map(|p| p.slot_id.clone());
                     if let Some(slot_id) = slot_id {
                         if let Some(slot) = s.slots.get_mut(&slot_id) {
                             if slot.tab_panel_ids.len() > 1 {
-                                let idx = slot
-                                    .tab_panel_ids
-                                    .iter()
-                                    .position(|id| id == &owner)
-                                    .unwrap_or(0);
-                                let new_active = if idx > 0 {
-                                    slot.tab_panel_ids[idx - 1].clone()
-                                } else {
-                                    slot.tab_panel_ids[idx + 1].clone()
-                                };
-                                slot.tab_panel_ids.retain(|id| id != &owner);
-                                slot.active_panel_id = new_active.clone();
+                                let shown = slot.close_tab_and_reseat(&owner);
                                 slot.version += 1;
                                 if s.focus == owner {
-                                    s.focus = new_active;
+                                    if let Some(shown) = shown {
+                                        s.focus = shown;
+                                    }
                                 }
                                 s.panels.remove(&owner);
                                 (true, 0u64, s.gui_senders.clone())

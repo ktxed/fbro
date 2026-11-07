@@ -451,6 +451,47 @@ impl PanelSlot {
         self.version += 1;
         self.clone()
     }
+
+    /// Drop one tab from the slot. The slot keeps showing whatever it shows
+    /// now: another tab is only chosen when the closed tab *was* the shown one,
+    /// picking its left neighbour, or the new first tab when it was leftmost.
+    /// Closing a tab that is not shown must not change the tab the user is
+    /// looking at — with duplicate folders that reads as the visible tab being
+    /// swapped out for a look-alike. Returns the id shown afterwards, or `None`
+    /// when this slot never held the tab. Leaves `version` alone; callers bump
+    /// it when they emit the slot patch.
+    pub fn close_tab_and_reseat(&mut self, panel_id: &str) -> Option<String> {
+        let index = self.tab_panel_ids.iter().position(|id| id == panel_id)?;
+        let was_active = self.active_panel_id == panel_id;
+        self.tab_panel_ids.remove(index);
+        if was_active {
+            let next = if index == 0 { 0 } else { index - 1 };
+            if let Some(next_id) = self.tab_panel_ids.get(next) {
+                self.active_panel_id = next_id.clone();
+            }
+        }
+        Some(self.active_panel_id.clone())
+    }
+}
+
+/// Panel ids are `{slot}-tab-{n}`. The number climbs for the life of the
+/// process, so the id of a closed tab is never handed to a later tab: per-panel
+/// state on either side of the socket — scan handles, watchers, size jobs, the
+/// frontend's React keys and per-panel widget state — cannot be mistaken for a
+/// new tab's. The number is opaque: nothing parses it, and a restored session
+/// starts from a fresh watermark without ever colliding with a live tab's id.
+static PANEL_ID_WATERMARK: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// A panel id for `slot_id` that no live panel holds and that this process has
+/// never handed out before.
+pub fn alloc_panel_id(slot_id: &str, live: &HashSet<String>) -> String {
+    loop {
+        let number = PANEL_ID_WATERMARK.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+        let candidate = format!("{slot_id}-tab-{number}");
+        if !live.contains(&candidate) {
+            return candidate;
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -1420,14 +1461,8 @@ pub fn restore_tabs_from_session(
             }
 
             // Allocate a panel id within the slot.
-            let mut n = 1u64;
-            let new_panel_id = loop {
-                let candidate = format!("{}-tab-{}", slot.slot_id, n);
-                if !state.panels.contains_key(&candidate) {
-                    break candidate;
-                }
-                n += 1;
-            };
+            let live_ids: HashSet<String> = state.panels.keys().cloned().collect();
+            let new_panel_id = alloc_panel_id(&slot.slot_id, &live_ids);
 
             let new_panel = Panel {
                 panel_id: new_panel_id.clone(),
@@ -1550,9 +1585,69 @@ pub fn collect_visible_thumb_paths(state: &AppState) -> std::collections::HashSe
 
 #[cfg(test)]
 mod tests {
-    use super::{fallback_source_id_for_home_candidates, AppState};
+    use super::{alloc_panel_id, fallback_source_id_for_home_candidates, AppState, PanelSlot};
     use crate::platform::{EjectInfo, Platform, VolumeInfo};
+    use std::collections::HashSet;
     use std::sync::Arc;
+
+    fn slot_with_tabs(tabs: &[&str], active: &str) -> PanelSlot {
+        PanelSlot {
+            slot_id: "left".into(),
+            tab_panel_ids: tabs.iter().map(|id| (*id).to_string()).collect(),
+            active_panel_id: active.into(),
+            version: 0,
+        }
+    }
+
+    #[test]
+    fn closing_a_tab_that_is_not_shown_leaves_the_shown_tab_alone() {
+        let mut slot = slot_with_tabs(&["a", "b", "c"], "a");
+        assert_eq!(slot.close_tab_and_reseat("c").as_deref(), Some("a"));
+        assert_eq!(slot.tab_panel_ids, ["a", "b"]);
+        assert_eq!(slot.active_panel_id, "a");
+        assert_eq!(slot.close_tab_and_reseat("b").as_deref(), Some("a"));
+        assert_eq!(slot.tab_panel_ids, ["a"]);
+        assert_eq!(slot.active_panel_id, "a");
+    }
+
+    #[test]
+    fn closing_the_shown_tab_reseats_to_the_left_neighbour() {
+        let mut slot = slot_with_tabs(&["a", "b", "c"], "b");
+        assert_eq!(slot.close_tab_and_reseat("b").as_deref(), Some("a"));
+        assert_eq!(slot.tab_panel_ids, ["a", "c"]);
+        // A leftmost shown tab falls back to the new first tab.
+        let mut slot = slot_with_tabs(&["a", "b", "c"], "a");
+        assert_eq!(slot.close_tab_and_reseat("a").as_deref(), Some("b"));
+        assert_eq!(slot.active_panel_id, "b");
+        // A rightmost shown tab still gets a left neighbour.
+        let mut slot = slot_with_tabs(&["a", "b", "c"], "c");
+        assert_eq!(slot.close_tab_and_reseat("c").as_deref(), Some("b"));
+        assert_eq!(slot.active_panel_id, "b");
+    }
+
+    #[test]
+    fn closing_a_tab_this_slot_never_held_changes_nothing() {
+        let mut slot = slot_with_tabs(&["a", "b"], "a");
+        assert_eq!(slot.close_tab_and_reseat("zz"), None);
+        assert_eq!(slot.tab_panel_ids, ["a", "b"]);
+        assert_eq!(slot.active_panel_id, "a");
+    }
+
+    #[test]
+    fn generated_panel_ids_are_unique_and_never_reused_after_a_close() {
+        let mut live: HashSet<String> = HashSet::new();
+        let first = alloc_panel_id("left", &live);
+        let second = alloc_panel_id("left", &live);
+        assert_ne!(first, second, "rapid creates get distinct ids");
+        live.insert(first.clone());
+        live.insert(second.clone());
+        // Closing a tab frees its id; the allocator must still not hand it out.
+        live.remove(&first);
+        assert_ne!(alloc_panel_id("left", &live), first, "a closed tab's id stays retired");
+        // The slot id remains the prefix, so ids read as tab-of-slot pairs.
+        assert!(first.starts_with("left-tab-"), "{first}");
+        assert!(alloc_panel_id("right", &live).starts_with("right-tab-"));
+    }
 
     #[test]
     fn local_filesystem_advertises_set_permissions_only_on_unix() {
