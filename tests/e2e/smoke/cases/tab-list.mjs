@@ -36,6 +36,9 @@ const focusedIs = (browser, panelId) => browser.execute((selector) =>
   document.activeElement?.closest(selector) !== null, panelBox(panelId));
 const focusIsOpener = (browser) => browser.execute(() =>
   document.activeElement?.dataset.tabListOpener === "true");
+/** Whether the list's search field is the focused element. */
+const fieldFocused = (browser) => browser.execute((selector) =>
+  document.activeElement === document.querySelector(selector), input);
 
 /** Park focus on the slot's current listing and mark it as the expected opener. */
 async function markOpener(browser, observer) {
@@ -196,9 +199,9 @@ export async function runTabListFlow(browser, observer) {
     await browser.$(widget).waitForExist({ reverse: true });
     await waitFor(() => focusIsOpener(browser), { label: "Escape restores the opener" });
 
-    // A row's × is keyboard-only in the Tab sense and roved to with Right:
+    // A row's × is keyboard-only in the Tab sense and reached with Right:
     // Left hands focus back to the field, Right arms the × again, Enter
-    // activates it, the list stays open, and focus lands on a live row's ×.
+    // activates it, the list stays open, and focus goes back to the field.
     const liveNow = await activeTab(observer);
     const doomed = created.slice(2).find((panelId) => panelId !== liveNow);
     assert.ok(doomed, "a fixture tab that is not the active one can be closed from the list");
@@ -209,9 +212,8 @@ export async function runTabListFlow(browser, observer) {
     await waitFor(async () => (await armedOn(browser)) === created[1],
       { label: "Right moves focus onto that row's close button" });
     await browser.keys("ArrowLeft");
-    await waitFor(() => browser.execute((selector) =>
-      document.activeElement === document.querySelector(selector), input),
-    { label: "Left hands focus back to the search field" });
+    await waitFor(() => fieldFocused(browser),
+      { label: "Left hands focus back to the search field" });
     assert.equal(await highlighted(browser), created[1], "Left leaves the highlight alone");
     await browser.keys("ArrowRight");
     await waitFor(async () => (await armedOn(browser)) === created[1],
@@ -224,15 +226,37 @@ export async function runTabListFlow(browser, observer) {
     // Enter switch above landed on one of the other rows.
     assert.equal(await activeTab(observer), liveNow,
       "closing a tab that is not the shown one leaves the shown tab alone");
-    const armedAfter = await armedOn(browser);
-    assert.ok(armedAfter && armedAfter !== created[1],
-      `focus moves to another row's close button, got ${armedAfter}`);
+    // The armed × of the closed row is gone, and no other row's × replaces it:
+    // the field takes focus back.
+    await waitFor(() => fieldFocused(browser),
+      { label: "closing a row hands focus back to the search field" });
+    assert.equal(await armedOn(browser), null, "no close button keeps focus after its row closed");
     assert.equal(await browser.execute((rows) => document.querySelectorAll(rows).length, rows),
       tabs.length - 1, "the closed row leaves the list");
 
-    // Arrows keep roving while an × is armed, and Delete closes the highlight.
+    // An × never follows the cursor: Right arms the highlighted row's ×, a
+    // second Right leaves it alone, and the next list arrow moves the highlight
+    // and hands focus back to the field. Delete then closes the highlighted row.
     await highlightRow(browser, doomed);
-    assert.equal(await armedOn(browser), doomed, "the armed close button follows the highlight");
+    await browser.keys("ArrowRight");
+    await waitFor(async () => (await armedOn(browser)) === doomed,
+      { label: "Right arms the highlighted row" });
+    await browser.keys("ArrowRight");
+    assert.equal(await armedOn(browser), doomed, "a second Right does not move the close button");
+    assert.equal(await highlighted(browser), doomed, "a second Right leaves the highlight alone");
+    await browser.keys("ArrowDown");
+    await waitFor(() => fieldFocused(browser),
+      { label: "ArrowDown hands focus back to the search field" });
+    assert.equal(await armedOn(browser), null, "ArrowDown leaves the close button unfocused");
+    const stepped = await highlighted(browser);
+    assert.notEqual(stepped, doomed, "ArrowDown moves the highlight off the armed row");
+    await browser.keys("ArrowRight");
+    await waitFor(async () => (await armedOn(browser)) === stepped,
+      { label: "Right arms the newly highlighted row" });
+    // Home and the walk to a closable row release that × as well.
+    await highlightRow(browser, doomed);
+    assert.equal(await armedOn(browser), null, "the arrows give the close button back for good");
+    assert.equal(await fieldFocused(browser), true, "and leave the search field focused");
     await browser.keys("Delete");
     await waitFor(async () => !(await snapshot(observer)).tabPanelIds.includes(doomed),
       { label: "Delete closes the highlighted tab" });
@@ -315,6 +339,6 @@ export async function runTabListFlow(browser, observer) {
       await sleep(400);
       assert.equal(await exists(browser, widget), false, "a single tab has nothing to list");
     }
-    console.log("PASS tab list: count button, registry chord, inert panel keys, filter and marks, arrows, Enter switch, Escape and outside-click focus return, palette open, Right/Left roving to a row's close button, Enter and Delete close, closing a background row keeps the shown tab, closing the shown row reseats the slot left");
+    console.log("PASS tab list: count button, registry chord, inert panel keys, filter and marks, arrows, Enter switch, Escape and outside-click focus return, palette open, Right arms a row's close button and Left hands it back, list arrows and a close return focus to the field, Enter and Delete close, closing a background row keeps the shown tab, closing the shown row reseats the slot left");
   }
 }

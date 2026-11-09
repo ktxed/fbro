@@ -87,8 +87,9 @@ interface Props {
 /**
  * Searchable vertical tab list for one slot, in the style of the sort
  * selector: an overlay inside the panel, dropping from the tab strip. Enter
- * switches to the highlighted tab, Delete closes it, Right arms that row's ×
- * and Left lets go of it again, Escape changes nothing. It is not a
+ * switches to the highlighted tab, Delete closes it, Right arms that row's ×;
+ * Left, a list arrow, or the close itself hands focus back to the search
+ * field. Escape changes nothing. It is not a
  * `ModalLayer`: the panel keeps input ownership, and the panel handler stays
  * inert while the list is open.
  */
@@ -153,8 +154,8 @@ export function PanelTabList({ panelId, slot, panels, sources, client }: Props) 
     close();
   }, [client, close, slot.activePanelId, slot.slotId]);
 
-  /** The × of one row, found by row id rather than by index so focus can be
-   *  moved before the closing row's element is gone. */
+  /** The × of one row, found by row id rather than by position, so a filtered
+   *  list still arms the right one. */
   const focusCloseButton = useCallback((tabPanelId: string | undefined) => {
     if (!tabPanelId) return false;
     const button = Array.from(
@@ -165,19 +166,26 @@ export function PanelTabList({ panelId, slot, panels, sources, client }: Props) 
     return true;
   }, []);
 
+  /** The search field is the widget's one Tab stop and the element that
+   *  announces the highlighted row, so it is where focus goes whenever an
+   *  armed × has to let go: a list arrow, Left, or a closed row. */
+  const releaseToField = useCallback(() => {
+    const field = inputRef.current;
+    if (!field) return;
+    field.focus({ preventScroll: true });
+    field.setSelectionRange(field.value.length, field.value.length);
+  }, []);
+
   const closeRow = useCallback((tabPanelId: string) => {
     // An × reached by keyboard must not leave focus on the row that is about
-    // to disappear: hand it to the visible row beside it.
+    // to disappear, and no other row's × replaces it: the field takes it back.
     const armed = closeButtonFocusId(document.activeElement) === tabPanelId;
-    const index = rows.findIndex((row) => row.panelId === tabPanelId);
-    const neighbour = index < 0 ? null
-      : index + 1 < rows.length ? rows[index + 1] : rows[index - 1];
     // Editor tabs flush first; the last tab of the slot is refused.
     requestCloseTab(slot, panels, client, tabPanelId);
     // The backend patch lands later; clamp now so no row looks half-selected.
     setHighlight((current) => Math.min(current, Math.max(0, slot.tabPanelIds.length - 2)));
-    if (armed) focusCloseButton(neighbour?.panelId);
-  }, [client, focusCloseButton, panels, rows, slot]);
+    if (armed) releaseToField();
+  }, [client, releaseToField, panels, slot]);
 
   const pageRows = useCallback(() => {
     const list = listRef.current;
@@ -207,17 +215,16 @@ export function PanelTabList({ panelId, slot, panels, sources, client }: Props) 
     }
 
     // Which row's × holds focus, if any. The list keeps one Tab stop, so the
-    // button is reached by roving with Right/Left, never by Tab.
+    // button is taken with Right and given back by Left, by a list arrow, or
+    // by the close itself — never by Tab.
     const armedOn = closeButtonFocusId(event.target);
 
     if (event.key === "ArrowRight") {
       if (rows.length === 0) return;
       if (armedOn !== null) {
-        // Already on an ×: Right walks it down the visible rows.
+        // Already on an ×: Right stays put. Reaching another row's × means
+        // moving the cursor first, which hands this × back to the field.
         event.preventDefault();
-        const next = (highlight + 1) % rows.length;
-        setHighlight(next);
-        focusCloseButton(rows[next].panelId);
         return;
       }
       const field = inputRef.current;
@@ -231,11 +238,7 @@ export function PanelTabList({ panelId, slot, panels, sources, client }: Props) 
     if (event.key === "ArrowLeft") {
       if (armedOn === null) return;
       event.preventDefault();
-      const field = inputRef.current;
-      if (field) {
-        field.focus({ preventScroll: true });
-        field.setSelectionRange(field.value.length, field.value.length);
-      }
+      releaseToField();
       return;
     }
 
@@ -248,7 +251,7 @@ export function PanelTabList({ panelId, slot, panels, sources, client }: Props) 
       const field = inputRef.current;
       if (!field) return;
       event.preventDefault();
-      field.focus({ preventScroll: true });
+      releaseToField();
       setQuery((current) => current + event.key);
       return;
     }
@@ -259,7 +262,8 @@ export function PanelTabList({ panelId, slot, panels, sources, client }: Props) 
       const delta = (event.key === "PageDown" ? 1 : -1) * pageRows();
       const next = Math.min(rows.length - 1, Math.max(0, highlight + delta));
       setHighlight(next);
-      if (armedOn !== null) focusCloseButton(rows[next].panelId);
+      // A page move is list navigation, so an armed × lets go.
+      if (armedOn !== null) releaseToField();
       return;
     }
 
@@ -267,8 +271,9 @@ export function PanelTabList({ panelId, slot, panels, sources, client }: Props) 
     if (next !== null) {
       event.preventDefault();
       setHighlight(next);
-      // An armed × follows the highlight, so the row it acts on stays obvious.
-      if (armedOn !== null) focusCloseButton(rows[next].panelId);
+      // The cursor moves, the × does not follow it: focus goes back to the
+      // field, which is what announces the highlighted row.
+      if (armedOn !== null) releaseToField();
       return;
     }
 
@@ -286,7 +291,7 @@ export function PanelTabList({ panelId, slot, panels, sources, client }: Props) 
       event.preventDefault();
       activate(row.panelId);
     }
-  }, [activate, close, closeRow, focusCloseButton, highlight, pageRows, rows]);
+  }, [activate, close, closeRow, focusCloseButton, highlight, pageRows, releaseToField, rows]);
 
   // Capture the opener on DOM mount and hand focus back on every close path:
   // Escape, outside click, Tab out, a switched or closed tab, unmount.

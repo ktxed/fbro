@@ -424,7 +424,7 @@ graph TD
     Panel --> PanelTabList["PanelTabList\n(searchable tab list)"]
     PanelTabBar -- count button (overflow only) --> PanelTabList
     PanelTabList -- Enter / row click --> switch
-    PanelTabList -- Delete / Ctrl-Cmd-W / × roved by Right --> close
+    PanelTabList -- Delete / Ctrl-Cmd-W / × armed by Right --> close
 ```
 
 ### 7.4 Tab list widget
@@ -466,14 +466,18 @@ stays inert while the list is open. Switching and closing reuse
 - **Actions:** Enter or a row click activates and closes; `Delete`,
   `Ctrl/Cmd+W` or `×` closes the highlighted row through the shared close path
   (an editor tab flushes first) and keeps the list open; Escape and an outside
-  click change nothing. The `×` is roved to, never Tab-reached: `Right` moves
-  focus from the field onto the highlighted row's `×` (a caret still inside the
-  query moves instead), `Right` again walks it along the visible rows with the
-  highlight, `Left` hands focus back to the field, and Enter or Space activates
-  the focused `×`. Arrows keep following the highlight while an `×` is armed,
-  and closing a row moves the `×` focus to the surviving row beside it. A row that is not the slot's shown tab never changes which tab the
-   slot shows (§3.4), so closing one keeps the list, the highlight, and the
-   armed `×` where they are. Keys
+  click change nothing. The `×` is reached by keyboard, never by Tab: `Right`
+  moves focus from the field onto the highlighted row's `×` (a caret still
+  inside the query moves instead), `Left` hands focus back to the field, and
+  Enter or Space activates the focused `×`. A second `Right` does nothing: a `×`
+  never walks the rows on its own, so another row means moving the cursor first
+  and pressing `Right` again. Every list arrow — `Up`/`Down`/`Home`/`End`/
+  `PageUp`/`PageDown` — moves the highlight and hands focus back to the field,
+  the widget's only Tab stop and the element that announces the highlighted row,
+  so a `×` never follows the cursor; typing does the same. Closing a row hands
+  focus back to the field too, never to another row's `×`. A row that is not the
+  slot's shown tab never changes which tab the slot shows (§3.4), so closing one
+  keeps the list and the highlight where they are. Keys
   and focus are specified in [Keyboard](keyboard.md) §2.
 - **Auto-close:** the panel loses focus, a modal or context menu opens, the
   slot drops to one tab, or the panel unmounts — mirroring the sort selector,
@@ -483,7 +487,8 @@ stays inert while the list is open. Switching and closing reuse
   the instant it appears.
 - **`data-testid`s:** `panel-tabs-count-<slotId>`, `panel-tab-list`,
   `panel-tab-list-input`, `panel-tab-list-row-<panelId>`; each row's × carries
-  `data-tab-list-close="<panelId>"`, which is also how roving focus locates it.
+  `data-tab-list-close="<panelId>"`, which is also how `Right` locates the
+  button to focus it.
 
 ---
 
