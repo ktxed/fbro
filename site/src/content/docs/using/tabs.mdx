@@ -58,14 +58,15 @@ searchable list of that panel's tabs:
 | Move through the list | <kbd>↑</kbd> / <kbd>↓</kbd>, <kbd>Home</kbd> / <kbd>End</kbd>, <kbd>PgUp</kbd> / <kbd>PgDn</kbd> |
 | Switch to the highlighted tab | <kbd>Enter</kbd>, or click the row |
 | Close the highlighted tab | <kbd>Delete</kbd> or <kbd>Ctrl</kbd>/<kbd>Cmd</kbd>+<kbd>W</kbd>, or click its **×** |
-| Reach a row's **×** by keyboard | <kbd>→</kbd>, then <kbd>Enter</kbd> or <kbd>Space</kbd> closes that tab; <kbd>→</kbd> again walks the **×** down the list |
-| Hand the focus back to the search field | <kbd>←</kbd> |
+| Reach a row's **×** by keyboard | <kbd>→</kbd>, then <kbd>Enter</kbd> or <kbd>Space</kbd> closes that tab |
+| Hand the focus back to the search field | <kbd>←</kbd>, or any <kbd>↑</kbd> / <kbd>↓</kbd> / <kbd>Home</kbd> / <kbd>End</kbd> / <kbd>PgUp</kbd> / <kbd>PgDn</kbd> |
 | Close the list, changing nothing | <kbd>Escape</kbd>, or click outside |
 
 Matching letters are marked in the tab name, and each row also shows the folder
 or file it points at. Closing an editor tab saves it first, exactly like closing
-it from the strip; closing a tab that way leaves the list open, and focus moves
-to the **×** of the row beside it. Typing always returns to the search field.
+it from the strip; closing a tab that way leaves the list open, and focus goes
+back to the search field. So does the next arrow key, so the **×** only ever
+sits on the row you stopped at. Typing always returns to the search field.
 The list appears only in a panel with two or more tabs.
 
 Inside a terminal or editor tab, <Shortcut id="panel.tab.list" /> belongs to the
