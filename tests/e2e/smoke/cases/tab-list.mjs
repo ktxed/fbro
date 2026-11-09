@@ -1,14 +1,24 @@
 import assert from "node:assert/strict";
-import { pressPanelKey, pressWindowKey, setTextInputValue } from "../browser.mjs";
+import { pressPanelKey, pressWindowKey, reloadBrowserApp, setTextInputValue } from "../browser.mjs";
 import { sleep, waitFor } from "../wait.mjs";
 
 const SLOT = "left";
+/** Ceiling for the fixture tabs needed to overflow a very wide tab strip. */
+const MAX_TAB_FIXTURES = 24;
 const countButton = `[data-testid="panel-tabs-count-${SLOT}"]`;
 const widget = '[data-testid="panel-tab-list"]';
 const input = '[data-testid="panel-tab-list-input"]';
 const rows = `${widget} [data-testid^="panel-tab-list-row-"]`;
 const rowOf = (panelId) => `[data-testid="panel-tab-list-row-${panelId}"]`;
 const panelBox = (panelId) => `[data-testid="panel-${panelId}"]`;
+const tabsBar = `[data-testid="panel-tabs-${SLOT}"]`;
+
+/** Whether the strip has room for every tab: with room, the count button is
+ *  legitimately absent rather than missing. */
+const stripFits = (browser) => browser.execute((bar) => {
+  const el = document.querySelector(`${bar} .panel__tabs-list`);
+  return !!el && el.scrollWidth <= el.clientWidth + 1;
+}, tabsBar);
 
 const parentOf = (path) => {
   const trimmed = path.replace(/\/+$/, "");
@@ -40,6 +50,21 @@ const focusIsOpener = (browser) => browser.execute(() =>
 const fieldFocused = (browser) => browser.execute((selector) =>
   document.activeElement === document.querySelector(selector), input);
 
+/** Wait for the backend to consider `panelId` the focused panel. A focus
+ *  change the frontend asked for is answered on the frontend's own WebSocket
+ *  connection, so no `focus` patch ever reaches this observer: the value has
+ *  to be pulled back with a snapshot. */
+async function waitFocused(observer, panelId) {
+  let requestedAt = 0;
+  await waitFor(async () => {
+    if (Date.now() - requestedAt > 500) {
+      requestedAt = Date.now();
+      await snapshot(observer);
+    }
+    return observer.state.focus === panelId;
+  }, { label: `panel ${panelId} active` });
+}
+
 /** Park focus on the slot's current listing and mark it as the expected opener. */
 async function markOpener(browser, observer) {
   const panelId = await activeTab(observer);
@@ -48,7 +73,7 @@ async function markOpener(browser, observer) {
     panel.focus();
     panel.dataset.tabListOpener = "true";
   }, panelBox(panelId));
-  await waitFor(() => observer.state.focus === panelId, { label: `panel ${panelId} active` });
+  await waitFocused(observer, panelId);
   return panelId;
 }
 
@@ -64,6 +89,36 @@ const armedOn = (browser) => browser.execute(() =>
 const renderedRows = (browser) => browser.execute((rows) => Array.from(
   document.querySelectorAll(rows), (element) => element.dataset.testid.replace("panel-tab-list-row-", ""),
 ), rows);
+
+/** What each rendered row actually shows, so a filter mismatch names its cause. */
+const rowTexts = (browser) => browser.execute((rows) => Array.from(
+  document.querySelectorAll(rows), (element) => ({
+    id: element.dataset.testid.replace("panel-tab-list-row-", ""),
+    title: element.querySelector(".panel__tab-list-title")?.textContent ?? "",
+    detail: element.querySelector(".panel__tab-list-detail")?.textContent ?? "",
+  }),
+), rows);
+
+/** The widget's own keep rule: the query survives as a substring or as a
+ *  subsequence of the lowercased title or detail. */
+const containsSubsequence = (text, needle) => {
+  const hay = text.toLowerCase();
+  let at = 0;
+  for (const character of hay) {
+    if (character === needle[at]) at++;
+    if (at === needle.length) return true;
+  }
+  return false;
+};
+
+const expectedRowsFor = (rows, needle) => rows
+  .filter(({ title, detail }) =>
+    containsSubsequence(title, needle) || containsSubsequence(detail, needle))
+  .map(({ id }) => id);
+
+/** The filter state as the field and the list show it, for assertion messages. */
+const filterState = async (browser) => `field ${JSON.stringify(await (await browser.$(input)).getValue())}, `
+  + `rows ${JSON.stringify(await rowTexts(browser))}`;
 
 /** Type one character at a time, like the shortcut case does, so the host
  *  keyboard layout cannot turn a letter into something else. */
@@ -115,22 +170,41 @@ export async function runTabListFlow(browser, observer) {
     await pressPanelKey(browser, panelId, "l", chord);
   };
 
+  // The count button exists only while the strip overflows. The resize at the
+  // start of the case may be ignored — a tiling compositor keeps the window as
+  // wide as it likes — so the fixtures also grow until the strip runs out of
+  // room at whatever width the window has.
+  const overflowStrip = async () => {
+    while (!(await exists(browser, countButton)) && created.length < MAX_TAB_FIXTURES) await create();
+    await sleep(250);
+    return exists(browser, countButton);
+  };
+
   try {
-    // A narrow strip plus enough tabs to overflow it: the only state in which
-    // the count button exists.
+    // A strip that overflows: the only state in which the count button exists.
     await browser.setWindowSize(800, 800);
     if (originalIds.length <= 3) {
       assert.equal(await exists(browser, countButton), false, "no count button while the strip fits");
     }
     for (let index = 0; index < 8; index++) await create();
+    const width = await browser.execute(() => window.innerWidth);
+    assert.ok(await overflowStrip(),
+      `${created.length} tabs did not overflow a ${width}px-wide strip, so the window never got `
+      + "narrow enough for this case to exercise an overflowing strip");
     const tabs = [...(await snapshot(observer)).tabPanelIds];
-    await browser.$(countButton).waitForExist();
     assert.equal(await (await browser.$(countButton)).getText(), String(tabs.length),
       "the count button shows the live tab count");
 
     // Distinct titles, so a filter query selects one tab rather than eight clones.
     await goTo(created[0], parentOf(leftPath));
     await goTo(created[1], parentOf(parentOf(leftPath)));
+    // Both navigations arrived over the observer's connection. The patch that
+    // carries a panel's new path is answered to the initiating sender only
+    // (navigate_to hands the scan that connection's sender, and scan.rs posts
+    // the path-carrying start patch to it), so the app still believes both tabs
+    // sit in the folder they were cloned from and names their rows by it. Pull
+    // an authoritative snapshot before any row text is read or filtered.
+    await reloadBrowserApp(browser, "fbro-a");
 
     // A slot with a single tab has nothing to list: the chord opens nothing.
     if (otherSlotId && observer.state.slots[otherSlotId].tabPanelIds.length === 1) {
@@ -154,8 +228,13 @@ export async function runTabListFlow(browser, observer) {
     true, "the active tab's row is marked");
 
     // Panel and global shortcuts stay inert while the field owns the keys.
+    const rowsBeforeLetters = await rowTexts(browser);
     await type(browser, "sjr");
     assert.equal(await (await browser.$(input)).getValue(), "sjr", "letters type, they do not run commands");
+    // The letters have to reach the list's own state, not only the field, so
+    // compare the rendered rows with what the same keep rule selects in Node.
+    assert.deepEqual(await renderedRows(browser), expectedRowsFor(rowsBeforeLetters, "sjr"),
+      `typed letters filter the list (${await filterState(browser)})`);
     assert.equal(await exists(browser, '[data-testid="panel-sort-selector"]'), false, "no sort selector over the list");
     assert.equal(await exists(browser, '[data-modal-id="jobs"]'), false, "no Jobs modal over the list");
     assert.equal(await exists(browser, ".context-menu"), false, "no context menu over the list");
@@ -169,10 +248,12 @@ export async function runTabListFlow(browser, observer) {
     await setTextInputValue(browser, input, query);
     const filtered = await renderedRows(browser);
     assert.ok(filtered.every((panelId) => tabs.includes(panelId)), "filtered rows are tabs of this slot");
-    assert.ok(filtered.includes(created[0]), `the tab titled ${query} matches its title`);
-    assert.ok(!filtered.includes(created[1]), `the folder above does not match ${query}`);
+    assert.ok(filtered.includes(created[0]),
+      `the tab titled ${query} matches its title (${await filterState(browser)})`);
+    assert.ok(!filtered.includes(created[1]),
+      `the folder above does not match ${query} (${await filterState(browser)})`);
     assert.ok(filtered.length > 0 && filtered.length < tabs.length,
-      `the filter narrows ${tabs.length} tabs to ${filtered.length}`);
+      `the filter narrows ${tabs.length} tabs to ${filtered.length} (${await filterState(browser)})`);
     assert.equal(await browser.execute(() => !!document.querySelector(".panel__tab-list-match")), true,
       "matched characters are marked in the tab name");
     assert.equal(await exists(browser, ".panel__tab-list-empty"), false, "matches leave no empty message");
@@ -262,8 +343,17 @@ export async function runTabListFlow(browser, observer) {
       { label: "Delete closes the highlighted tab" });
     assert.equal(await browser.execute((rows) => document.querySelectorAll(rows).length, rows),
       tabs.length - 2, "the second closed row leaves the list too");
-    assert.equal(await (await browser.$(countButton)).getText(), String(tabs.length - 2),
-      "the count updates after each close");
+    // Closing rows shrinks the strip, so the count either follows the tab count
+    // or the button is gone because the surviving tabs fit again — never both
+    // wrong: it may only disappear together with the overflow.
+    const countLabel = await exists(browser, countButton)
+      ? await (await browser.$(countButton)).getText()
+      : null;
+    if (countLabel === null) {
+      assert.ok(await stripFits(browser), "the count button disappeared while the strip overflowed");
+    } else {
+      assert.equal(countLabel, String(tabs.length - 2), "the count updates after each close");
+    }
     await browser.keys("Escape");
     await browser.$(widget).waitForExist({ reverse: true });
 
@@ -280,7 +370,12 @@ export async function runTabListFlow(browser, observer) {
     await waitFor(async () => (await snapshot(observer)) && observer.state.focus === opener,
       { label: "the left panel is active again" });
 
-    // The count button toggles the list and leaves the listing focused.
+    // The count button toggles the list and leaves the listing focused. The
+    // closes above can leave the strip fitting again, so ask for the overflow
+    // back rather than clicking a button the strip is entitled to hide — and do
+    // it before marking the opener, because a new tab becomes the shown one.
+    assert.ok(await overflowStrip(),
+      "fixtures added after the closes still did not overflow the tab strip");
     await markOpener(browser, observer);
     await browser.$(countButton).click();
     await browser.$(input).waitForExist();
@@ -299,8 +394,13 @@ export async function runTabListFlow(browser, observer) {
     await type(browser, "tab list");
     await browser.keys("Enter");
     await browser.$(input).waitForExist();
+    // The list the palette opens holds the slot's tabs as they are now: the
+    // fixture count has moved since the snapshot this case filtered against.
+    const listedForPalette = (await snapshot(observer)).tabPanelIds;
     assert.equal(await browser.execute((rows) => document.querySelectorAll(rows).length, rows),
-      tabs.length - 2, "the palette opens the focused slot's list");
+      listedForPalette.length, "the palette opens the focused slot's list");
+    assert.deepEqual(await renderedRows(browser), listedForPalette,
+      "the palette's list holds the live tabs of the focused slot");
     await waitFor(() => browser.execute((selector) =>
       document.activeElement === document.querySelector(selector), input),
     { label: "the palette-opened list focuses its own search field" });
