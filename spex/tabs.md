@@ -406,6 +406,14 @@ const anyTabbed = Object.values(appState.slots).some(s => s.tabPanelIds.length >
 // PanelTabBar rendered above PathBreadcrumbs only when anyTabbed === true
 ```
 
+`PanelTabBar` keeps the active chip fully visible whenever the shown tab changes
+(tab shortcuts, a new tab, a jump from the tab list), when the tab list closes,
+and when the strip is resized. The reveal scrolls the least amount that clears
+the 14 px edge fade, so the last chips of an overflowing strip are not left
+flush against the masked right edge with their caption and close button half
+faded out. It is measured again after the count button appears, since that
+button narrows the strip after the first reveal.
+
 ### 7.2 Terminal tab layout
 
 A terminal tab fills the full panel area. The `panel-terminal--solo` CSS modifier is applied when `tabKind === "terminal"` to override the 50 % height used in embedded split-view mode. Its floating action toolbar follows the same reveal rule as the embedded split (shown on open and on pointer approach to the panel's top-right corner, hidden otherwise; maximized, the corner is the window's), so the buttons never cover terminal output in any shape.

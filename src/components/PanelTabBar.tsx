@@ -1,4 +1,4 @@
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useLayoutEffect, useState, useSyncExternalStore } from "react";
 import { IconAlertTriangle, IconChevronDown, IconChevronLeft, IconChevronRight, IconPencil, IconTerminal2, IconX } from "@tabler/icons-react";
 import { editorStatus, editorStatusVersion, subscribeEditorStatus } from "../editor/sessions";
 import type { PanelSlot, PanelState, Source } from "../ws/types";
@@ -9,6 +9,9 @@ import { useTabReorder } from "../hooks/useTabReorder";
 import { requestCloseTab, sourceTabTitle, tabTitle } from "./tabTitles";
 
 const MAX_TAB_CHARS = 18;
+/** Width of the strip's edge fade, matching the mask in `styles.css`. A chip
+ *  under it reads as clipped, so revealing a tab has to clear it. */
+const STRIP_FADE_PX = 14;
 
 interface Props {
   slot: PanelSlot;
@@ -34,10 +37,34 @@ export function PanelTabBar({ slot, panels, sources, client, blocked }: Props) {
     setCanRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 1);
   };
 
-  useEffect(() => {
+  const count = slot.tabPanelIds.length;
+  const tabListKey = formatPrimaryBinding(commands["panel.tab.list"]);
+  const tabListOpen = activeTabListPanelId === slot.activePanelId;
+
+  // Keep the active tab fully visible when it changes (tab shortcuts, a jump
+  // from the tab list, new tab, ...), and whenever the strip itself is resized.
+  // Clearing the edge fade is what makes the last chips of an overflowing
+  // strip readable instead of half faded out. The observer matters because the
+  // count button only appears after the first arrow update narrows the strip:
+  // without a second pass the reveal would be measured against the wider strip
+  // and leave the chip behind the new edge.
+  useLayoutEffect(() => {
     const el = listRef.current;
-    const id = requestAnimationFrame(updateArrows);
-    if (!el) return () => cancelAnimationFrame(id);
+    if (!el) return;
+    const reveal = () => {
+      const tab = Array.from(el.querySelectorAll<HTMLElement>("[data-tab-panel-id]"))
+        .find((t) => t.dataset.tabPanelId === slot.activePanelId);
+      if (tab) {
+        const box = el.getBoundingClientRect();
+        const rect = tab.getBoundingClientRect();
+        const left = box.left + STRIP_FADE_PX;
+        const right = box.right - STRIP_FADE_PX;
+        if (rect.left < left) el.scrollLeft -= left - rect.left;
+        else if (rect.right > right) el.scrollLeft += rect.right - right;
+      }
+      updateArrows();
+    };
+    reveal();
     const onWheel = (event: WheelEvent) => {
       if (el.scrollWidth <= el.clientWidth) return;
       event.preventDefault();
@@ -51,36 +78,17 @@ export function PanelTabBar({ slot, panels, sources, client, blocked }: Props) {
       }
     };
     el.addEventListener("wheel", onWheel, { passive: false });
-    const observer = new ResizeObserver(updateArrows);
+    const observer = new ResizeObserver(reveal);
     observer.observe(el);
     return () => {
-      cancelAnimationFrame(id);
       el.removeEventListener("wheel", onWheel);
       observer.disconnect();
     };
-  }, [slot.tabPanelIds.length]);
-
-  // Keep the active tab visible when it changes (tab shortcuts, new tab, ...).
-  useEffect(() => {
-    const el = listRef.current;
-    if (!el) return;
-    const tab = Array.from(el.querySelectorAll<HTMLElement>("[data-tab-panel-id]"))
-      .find((t) => t.dataset.tabPanelId === slot.activePanelId);
-    if (!tab) return;
-    const box = el.getBoundingClientRect();
-    const rect = tab.getBoundingClientRect();
-    if (rect.left < box.left) el.scrollLeft -= box.left - rect.left;
-    else if (rect.right > box.right) el.scrollLeft += rect.right - box.right;
-    updateArrows();
-  }, [slot.activePanelId, slot.tabPanelIds.length]);
+  }, [slot.activePanelId, slot.tabPanelIds.length, tabListOpen]);
 
   const scroll = (dir: number) => {
     listRef.current?.scrollBy({ left: dir * 80, behavior: "smooth" });
   };
-
-  const count = slot.tabPanelIds.length;
-  const tabListKey = formatPrimaryBinding(commands["panel.tab.list"]);
-  const tabListOpen = activeTabListPanelId === slot.activePanelId;
 
   const switchTo = (panelId: string) => {
     if (panelId === slot.activePanelId) return;

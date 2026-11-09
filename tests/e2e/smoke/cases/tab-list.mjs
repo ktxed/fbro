@@ -90,6 +90,34 @@ const renderedRows = (browser) => browser.execute((rows) => Array.from(
   document.querySelectorAll(rows), (element) => element.dataset.testid.replace("panel-tab-list-row-", ""),
 ), rows);
 
+/** Whether the shown chip lies wholly inside the strip's un-faded area, so its
+ *  caption and close button are readable rather than half masked out. Throws
+ *  with the measured geometry otherwise, so a timeout names the cause. */
+const activeTabFullyVisible = (browser) => browser.execute((bar) => {
+  const list = document.querySelector(`${bar} .panel__tabs-list`);
+  const active = list?.querySelector(".panel__tab--active");
+  if (!list || !active) return false;
+  const box = list.getBoundingClientRect();
+  const rect = active.getBoundingClientRect();
+  const fade = 14;
+  const left = list.classList.contains("panel__tabs-list--fade-left") ? box.left + fade : box.left;
+  const right = list.classList.contains("panel__tabs-list--fade-right") ? box.right - fade : box.right;
+  const ok = rect.left >= left - 1 && rect.right <= right + 1;
+  if (!ok) throw new Error(JSON.stringify({
+    id: active.dataset.tabPanelId,
+    box: { left: box.left, right: box.right, width: box.width },
+    rect: { left: rect.left, right: rect.right, width: rect.width },
+    left,
+    right,
+    scrollLeft: list.scrollLeft,
+    scrollWidth: list.scrollWidth,
+    clientWidth: list.clientWidth,
+    fadeLeft: list.classList.contains("panel__tabs-list--fade-left"),
+    fadeRight: list.classList.contains("panel__tabs-list--fade-right"),
+  }));
+  return true;
+}, tabsBar);
+
 /** What each rendered row actually shows, so a filter mismatch names its cause. */
 const rowTexts = (browser) => browser.execute((rows) => Array.from(
   document.querySelectorAll(rows), (element) => ({
@@ -272,6 +300,29 @@ export async function runTabListFlow(browser, observer) {
     // The newly active tab owns focus now; its predecessor closed with its tab.
     await waitFor(() => focusedIs(browser, target), { label: "the newly active tab takes focus" });
 
+    // Jumping to a tab near the end of the strip must leave its chip fully
+    // readable: the reveal clears the edge fade instead of parking the chip
+    // flush against the masked right edge. Show the first tab first when the
+    // last one is already shown, so the jump has to scroll right.
+    const stripOrder = (await snapshot(observer)).tabPanelIds;
+    const lastTab = stripOrder[stripOrder.length - 1];
+    if (await activeTab(observer) === lastTab) {
+      observer.sendIntent("panel.tab.switch", undefined, { slotId: SLOT, panelId: stripOrder[0] });
+      await waitFor(async () => (await snapshot(observer)).activePanelId === stripOrder[0],
+        { label: "the first tab is shown before the last-tab jump" });
+    }
+    await markOpener(browser, observer);
+    await openWithChord(await activeTab(observer));
+    await browser.$(input).waitForExist();
+    await browser.keys("End");
+    assert.equal(await highlighted(browser), lastTab, "End highlights the strip's last tab");
+    await browser.keys("Enter");
+    await waitFor(async () => (await snapshot(observer)).activePanelId === lastTab,
+      { label: "Enter jumps to the strip's last tab" });
+    await browser.$(widget).waitForExist({ reverse: true });
+    await waitFor(() => activeTabFullyVisible(browser),
+      { label: "the jumped-to last tab is fully visible in the strip" });
+
     // Escape closes the list and restores the exact opener.
     await markOpener(browser, observer);
     await openWithChord(await activeTab(observer));
@@ -439,6 +490,6 @@ export async function runTabListFlow(browser, observer) {
       await sleep(400);
       assert.equal(await exists(browser, widget), false, "a single tab has nothing to list");
     }
-    console.log("PASS tab list: count button, registry chord, inert panel keys, filter and marks, arrows, Enter switch, Escape and outside-click focus return, palette open, Right arms a row's close button and Left hands it back, list arrows and a close return focus to the field, Enter and Delete close, closing a background row keeps the shown tab, closing the shown row reseats the slot left");
+    console.log("PASS tab list: count button, registry chord, inert panel keys, filter and marks, arrows, Enter switch, last-tab jump stays fully visible, Escape and outside-click focus return, palette open, Right arms a row's close button and Left hands it back, list arrows and a close return focus to the field, Enter and Delete close, closing a background row keeps the shown tab, closing the shown row reseats the slot left");
   }
 }
