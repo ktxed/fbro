@@ -353,6 +353,10 @@ body {
   display: flex;
   flex-direction: column;
   background: var(--bg-panel);
+  /* CodeMirror's find panel (`.cm-panels`) carries z-index 300 for its own
+     sticky layout; keep that inside the editor so it never rises above
+     dialogs (z-index 100). */
+  isolation: isolate;
 }
 
 /* Full screen, like a maximized terminal, but below dialogs (z-index 100)

@@ -55,16 +55,48 @@ const theme = EditorView.theme({
   ".cm-placeholder": { color: "var(--text-muted)" },
   ".cm-panels": { backgroundColor: "var(--bg-elev)", color: "var(--text)", borderColor: "var(--border)" },
   ".cm-panels.cm-panels-top": { borderBottom: "1px solid var(--border)" },
-  ".cm-panel.cm-search input, .cm-panel.cm-search button": {
+  // The find panel mirrors `.modal__btn` and the app's text inputs. CodeMirror's
+  // base theme paints `.cm-button` with a light/dark gradient image, so the
+  // `background` shorthand is needed to clear it.
+  ".cm-panel.cm-search .cm-textfield": {
     appearance: "none",
     font: "inherit",
     color: "var(--text)",
-    backgroundColor: "var(--bg-input)",
+    background: "var(--bg-input)",
     border: "1px solid var(--border)",
     borderRadius: "3px",
+    padding: "3px 8px",
+    outline: "none",
   },
-  ".cm-panel.cm-search label": { color: "var(--text)" },
-  ".cm-panel.cm-search [name=close]": { color: "var(--text-muted)", backgroundColor: "transparent", border: "none" },
+  ".cm-panel.cm-search .cm-textfield:focus": { borderColor: "var(--border-focus)" },
+  ".cm-panel.cm-search .cm-button": {
+    appearance: "none",
+    font: "inherit",
+    color: "var(--text-dim)",
+    background: "var(--bg-footer)",
+    border: "1px solid var(--border)",
+    borderRadius: "3px",
+    padding: "3px 12px",
+    cursor: "pointer",
+  },
+  ".cm-panel.cm-search .cm-button:hover, .cm-panel.cm-search .cm-button:focus-visible": {
+    background: "var(--bg-focused)",
+    color: "var(--text)",
+    borderColor: "var(--border-focus)",
+    outline: "none",
+  },
+  ".cm-panel.cm-search .cm-button:active": { background: "var(--bg-focused)" },
+  ".cm-panel.cm-search label": { color: "var(--text-dim)", fontSize: "inherit", cursor: "pointer" },
+  ".cm-panel.cm-search input[type=checkbox]": { accentColor: "var(--accent)", margin: "0 4px 0 0", verticalAlign: "middle" },
+  ".cm-panel.cm-search [name=close]": {
+    appearance: "none",
+    font: "inherit",
+    color: "var(--text-muted)",
+    background: "transparent",
+    border: "none",
+    cursor: "pointer",
+  },
+  ".cm-panel.cm-search [name=close]:hover": { color: "var(--text)" },
 });
 
 const markdownHighlight = HighlightStyle.define([
