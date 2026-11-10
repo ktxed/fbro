@@ -77,7 +77,9 @@ export async function runButtonBarFlow(browser, observer) {
         && await browser.execute((previous) =>
           getComputedStyle(document.documentElement).getPropertyValue("--font-size") !== previous, fontSize),
       { label: "zoom still works with hidden button bar" });
-      await pressWindowKey(browser, "+", modifier);
+      // Restore directly: a second key press can race the first patch, since
+      // the zoom handler steps from the store's fontSize.
+      observer.sendIntent("SetFontSize", undefined, { value: parseFloat(fontSize) });
       await waitFor(() => browser.execute((previous) =>
         getComputedStyle(document.documentElement).getPropertyValue("--font-size") === previous, fontSize),
       { label: "restore zoom after hidden button bar check" });
