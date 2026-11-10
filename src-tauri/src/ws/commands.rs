@@ -546,17 +546,17 @@ pub(crate) fn build_interactive_commands_for(
             "panel.source.next",
             "Navigation",
             "Next Source",
-            vec![keybinding_with_modifiers("Tab", false, true, false, false)],
+            vec![keybinding_with_modifiers("Tab", true, false, false, false)],
             None,
         ),
+        // Ctrl+Tab / Ctrl+Shift+Tab cycle tabs, so Previous Source has no
+        // default key until multi-stroke chords exist; with few sources, Next
+        // Source wraps around. See spex/plans/2026-11-11-tab-keys-from-editor.md.
         command(
             "panel.source.previous",
             "Navigation",
             "Previous Source",
-            vec![
-                keybinding_with_modifiers("Tab", true, false, false, false),
-                keybinding_with_modifiers("Tab", true, true, false, false),
-            ],
+            vec![],
             None,
         ),
         command(
@@ -685,18 +685,21 @@ pub(crate) fn build_interactive_commands_for(
             vec![mod_binding(mac, "w", false)],
             None,
         ),
+        // Tab cycling carries Ctrl so a built-in editor tab can release it
+        // (PanelEditor passes only modified keys or F-keys; Shift+J would type).
+        // Literal Ctrl on macOS too: Cmd+Tab is the OS app switcher.
         command(
             "panel.tab.next",
             "Panel",
             "Next Tab",
-            vec![keybinding_with_modifiers("j", true, false, false, false)],
+            vec![keybinding_with_modifiers("Tab", false, true, false, false)],
             None,
         ),
         command(
             "panel.tab.prev",
             "Panel",
             "Previous Tab",
-            vec![keybinding_with_modifiers("k", true, false, false, false)],
+            vec![keybinding_with_modifiers("Tab", true, true, false, false)],
             None,
         ),
         // The searchable tab list opens over an overflowing strip. Ctrl/Cmd+Shift+T
@@ -898,6 +901,45 @@ mod tests {
                     other.id
                 );
             }
+        }
+    }
+
+    /// Tab cycling is Ctrl+Tab / Ctrl+Shift+Tab on every platform (literal Ctrl,
+    /// never Cmd) so the editor tab can release it, and no other command shares it.
+    #[test]
+    fn tab_cycle_bindings_are_ctrl_tab() {
+        let strokes = |c: &super::InteractiveCommandSchema| {
+            c.bindings.iter().map(|b| serde_json::to_string(&b.strokes).unwrap()).collect::<Vec<_>>()
+        };
+        for platform in [CommandPlatform::Linux, CommandPlatform::MacOs, CommandPlatform::Windows] {
+            let commands = build_interactive_commands_for(platform);
+            let find = |id: &str| commands.iter().find(|c| c.id == id).unwrap_or_else(|| panic!("{id}"));
+            for (id, shift) in [("panel.tab.next", false), ("panel.tab.prev", true)] {
+                let command = find(id);
+                assert_eq!(command.bindings.len(), 1, "{id}");
+                let stroke = &command.bindings[0].strokes[0];
+                assert_eq!(stroke.key, "Tab", "{id}");
+                assert!(stroke.ctrl && !stroke.meta && !stroke.alt, "{id}");
+                assert_eq!(stroke.shift, shift, "{id}");
+                let own = strokes(command);
+                for other in commands.iter().filter(|c| c.id != id) {
+                    assert!(!strokes(other).iter().any(|s| own.contains(s)), "{} shares {id}", other.id);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn source_next_is_shift_tab_and_previous_is_unbound() {
+        for platform in [CommandPlatform::Linux, CommandPlatform::MacOs, CommandPlatform::Windows] {
+            let commands = build_interactive_commands_for(platform);
+            let find = |id: &str| commands.iter().find(|c| c.id == id).unwrap_or_else(|| panic!("{id}"));
+            let next = find("panel.source.next");
+            assert_eq!(next.bindings.len(), 1);
+            let stroke = &next.bindings[0].strokes[0];
+            assert_eq!(stroke.key, "Tab");
+            assert!(stroke.shift && !stroke.ctrl && !stroke.meta && !stroke.alt);
+            assert!(find("panel.source.previous").bindings.is_empty());
         }
     }
 }

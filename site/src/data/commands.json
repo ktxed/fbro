@@ -884,8 +884,8 @@
             "modes": [],
             "strokes": [
               {
-                "ctrl": true,
-                "key": "Tab"
+                "key": "Tab",
+                "shift": true
               }
             ]
           }
@@ -895,27 +895,7 @@
         "title": "Next Source"
       },
       {
-        "bindings": [
-          {
-            "modes": [],
-            "strokes": [
-              {
-                "key": "Tab",
-                "shift": true
-              }
-            ]
-          },
-          {
-            "modes": [],
-            "strokes": [
-              {
-                "ctrl": true,
-                "key": "Tab",
-                "shift": true
-              }
-            ]
-          }
-        ],
+        "bindings": [],
         "category": "Navigation",
         "id": "panel.source.previous",
         "title": "Previous Source"
@@ -1179,8 +1159,8 @@
             "modes": [],
             "strokes": [
               {
-                "key": "j",
-                "shift": true
+                "ctrl": true,
+                "key": "Tab"
               }
             ]
           }
@@ -1195,7 +1175,8 @@
             "modes": [],
             "strokes": [
               {
-                "key": "k",
+                "ctrl": true,
+                "key": "Tab",
                 "shift": true
               }
             ]
@@ -2158,8 +2139,8 @@
             "modes": [],
             "strokes": [
               {
-                "ctrl": true,
-                "key": "Tab"
+                "key": "Tab",
+                "shift": true
               }
             ]
           }
@@ -2169,27 +2150,7 @@
         "title": "Next Source"
       },
       {
-        "bindings": [
-          {
-            "modes": [],
-            "strokes": [
-              {
-                "key": "Tab",
-                "shift": true
-              }
-            ]
-          },
-          {
-            "modes": [],
-            "strokes": [
-              {
-                "ctrl": true,
-                "key": "Tab",
-                "shift": true
-              }
-            ]
-          }
-        ],
+        "bindings": [],
         "category": "Navigation",
         "id": "panel.source.previous",
         "title": "Previous Source"
@@ -2453,8 +2414,8 @@
             "modes": [],
             "strokes": [
               {
-                "key": "j",
-                "shift": true
+                "ctrl": true,
+                "key": "Tab"
               }
             ]
           }
@@ -2469,7 +2430,8 @@
             "modes": [],
             "strokes": [
               {
-                "key": "k",
+                "ctrl": true,
+                "key": "Tab",
                 "shift": true
               }
             ]
@@ -3431,8 +3393,8 @@
             "modes": [],
             "strokes": [
               {
-                "ctrl": true,
-                "key": "Tab"
+                "key": "Tab",
+                "shift": true
               }
             ]
           }
@@ -3442,27 +3404,7 @@
         "title": "Next Source"
       },
       {
-        "bindings": [
-          {
-            "modes": [],
-            "strokes": [
-              {
-                "key": "Tab",
-                "shift": true
-              }
-            ]
-          },
-          {
-            "modes": [],
-            "strokes": [
-              {
-                "ctrl": true,
-                "key": "Tab",
-                "shift": true
-              }
-            ]
-          }
-        ],
+        "bindings": [],
         "category": "Navigation",
         "id": "panel.source.previous",
         "title": "Previous Source"
@@ -3726,8 +3668,8 @@
             "modes": [],
             "strokes": [
               {
-                "key": "j",
-                "shift": true
+                "ctrl": true,
+                "key": "Tab"
               }
             ]
           }
@@ -3742,7 +3684,8 @@
             "modes": [],
             "strokes": [
               {
-                "key": "k",
+                "ctrl": true,
+                "key": "Tab",
                 "shift": true
               }
             ]

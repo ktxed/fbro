@@ -250,8 +250,8 @@ See [Tabs](tabs.md) §5a.
 
 **Ownership.** While the editor has focus it receives every key. Its root
 stops propagation, `Panel` ignores keys from `.panel-editor`, and the Toolbar
-skips editable targets, so panel-scoped bindings such as Shift+S, Shift+J/K,
-and letter commands type text. Only these leave the editor:
+skips editable targets, so panel-scoped bindings such as Shift+S and letter
+commands type text. Only these leave the editor:
 
 | Key | Action |
 |---|---|
@@ -262,7 +262,9 @@ and letter commands type text. Only these leave the editor:
 | `file.view` binding (F3) | Save, then open the separate viewer on the file. Only bindings with a modifier or an F-key pass through: macOS binds `file.view` to plain `3`, which types. |
 | `panel.viewer.embed` binding (Ctrl+F3, macOS Cmd+3) | Save, then toggle quick preview |
 | `notes.new` binding (Ctrl+Shift+F4, macOS Cmd+Alt+4) | Save, then create another note in a tab after this one |
-| Tab | Indents (CodeMirror `indentWithTab`); Escape is the way out, per CodeMirror's guidance for Tab-capturing editors |
+| `panel.tab.next` / `panel.tab.prev` (Ctrl+Tab / Ctrl+Shift+Tab, literal Ctrl on macOS too) | Save, then activate the next/previous tab in the slot (wraps) |
+| `app.command_palette` (Ctrl/Cmd+Shift+P) | Open the command palette; closing it returns focus to the editor |
+| Tab / Shift+Tab | Indent / un-indent (CodeMirror `indentWithTab`), so Next Source (Shift+Tab) is unavailable in an editor tab; Escape is the way out, per CodeMirror's guidance for Tab-capturing editors |
 
 CodeMirror's find panel uses Ctrl/Cmd+F, Enter, Ctrl/Cmd+G; its F3 binding is
 removed because F3 belongs to the viewer. Its `searchKeymap` keeps
@@ -360,7 +362,7 @@ In the diff viewer, Up/Down jump between change blocks when there are multiple
 blocks. With zero or one block (including an entirely new or deleted file),
 Up/Down scroll by one line instead. Split panes scroll together. P/N always
 select the previous/next change block; Home/End and PageUp/PageDown scroll.
-Shift+J/Shift+K select the next/previous panel tab.
+Ctrl+Tab/Ctrl+Shift+Tab select the next/previous panel tab.
 
 ---
 
@@ -538,7 +540,8 @@ import/export remain deferred.
 
 History navigation symbols `[` and `]` retain their logical identity even when
 WebKit reports a physical digit code. Other events in dispatch and recording
-canonicalize `KeyA`–`KeyZ` and `Digit0`–`Digit9` to physical letters/digits. This resolves key/code ambiguity to
+canonicalize `KeyA`–`KeyZ` and `Digit0`–`Digit9` to physical letters/digits, and
+the `Tab` code to `Tab` (WebKitGTK reports Ctrl+Shift+Tab as `Unidentified`). This resolves key/code ambiguity to
 one stroke on remapped and non-Latin layouts, including Option-produced keys.
 Symbols from other physical codes (for example `Equal`, `Backquote`, or numpad
 symbols) use the produced symbol; an unshifted symbol binding also accepts

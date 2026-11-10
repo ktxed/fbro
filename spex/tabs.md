@@ -369,15 +369,17 @@ These bindings are **panel-scoped**: they fire only when a panel listing has foc
 |---|---|---|
 | `panel.tab.new` | Ctrl/Cmd+T | New tab (clone active local listing; otherwise open Home) |
 | `panel.tab.close` | Ctrl/Cmd+W | Close active tab; no-op on last tab |
-| `panel.tab.next` | Shift+J | Activate next tab (wraps) |
-| `panel.tab.prev` | Shift+K | Activate previous tab (wraps) |
+| `panel.tab.next` | Ctrl+Tab (literal Ctrl on macOS too) | Activate next tab (wraps) |
+| `panel.tab.prev` | Ctrl+Shift+Tab | Activate previous tab (wraps) |
 | `panel.tab.list` | Ctrl/Cmd+Shift+L | Open the searchable tab list for the panel's slot; no-op while that slot has fewer than two tabs |
 | `notes.new` | Ctrl+Shift+F4 (macOS Cmd+Alt+4) | Create a note and open it in an editor tab |
 | `file.edit_builtin` | — (context menu, palette) | Open the cursor file in an editor tab |
 
-Inside an editor tab these panel-scoped bindings type text; Escape returns to
-the origin tab and Ctrl/Cmd+W closes the editor tab (see
-[Keyboard](keyboard.md) §3a).
+Inside an editor tab panel-scoped letter bindings type text; Escape returns to
+the origin tab, Ctrl/Cmd+W closes the editor tab, and Ctrl+Tab /
+Ctrl+Shift+Tab still cycle tabs (see [Keyboard](keyboard.md) §3a). Tab cycling
+carries Ctrl so the editor can release it; it took Next/Previous Source's old
+keys, so Next Source moved to Shift+Tab and Previous Source has no default key.
 
 Middle-click on a tab chip also closes it. Double-clicking on **empty space** in the tab bar uses the same New Tab behavior as Ctrl/Cmd+T: clone the active local filesystem listing, or open Home when the active tab is virtual, remote, or terminal.
 

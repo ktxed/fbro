@@ -416,7 +416,7 @@ function VolumeHeader({ sources, panel, onNavigateToSource, onMountSource, clien
     return () => window.removeEventListener("resize", onResize);
   }, [sources, expandedRemoteIds, updateRemoteOverflow]);
 
-  // Keep the active source visible when it changes (Ctrl+Tab, navigation, ...).
+  // Keep the active source visible when it changes (Next Source, navigation, …).
   useLayoutEffect(() => {
     const el = listRef.current;
     if (!el) return;
@@ -2604,6 +2604,16 @@ export function Panel({
           blocked={modalActive}
           previewing={!!appState.embeddedViewer && appState.embeddedViewer.sourceSlotId === panel.slotId}
           maximized={appState.maximizedEditorPanelId === panelId}
+          onRunCommand={(commandId) => executeCommand(commandId, {
+            state: appState,
+            dispatch,
+            client,
+            panelId,
+            panel,
+            sources,
+            otherPanelId,
+            onOpenCommandPalette: () => dispatch({ type: "OPEN_COMMAND_PALETTE" }),
+          })}
         />
       ) : panel.tabKind === "terminal" && panel.terminalSessionId !== undefined ? (
         <PanelTerminal

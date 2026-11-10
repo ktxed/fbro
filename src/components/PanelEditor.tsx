@@ -78,6 +78,9 @@ function passThrough(command: InteractiveCommand | undefined, event: KeyboardEve
   });
 }
 
+/** Registry commands the editor hands to the app unchanged. */
+const RELEASED_COMMAND_IDS = ["panel.tab.next", "panel.tab.prev", "app.command_palette"] as const;
+
 interface PanelEditorProps {
   panelId: string;
   panel: PanelState & { editor: EditorTabInfo };
@@ -91,10 +94,13 @@ interface PanelEditorProps {
   previewing: boolean;
   /** This editor fills the window. */
   maximized: boolean;
+  /** Run a registry command released by the editor (tab cycling, palette)
+   *  with this tab as the focused panel. */
+  onRunCommand: (commandId: string) => void;
 }
 
 /** Built-in editor tab: CodeMirror over a backend editor session. */
-export function PanelEditor({ panelId, panel, client, dispatch, commands, focused, blocked, previewing, maximized }: PanelEditorProps) {
+export function PanelEditor({ panelId, panel, client, dispatch, commands, focused, blocked, previewing, maximized, onRunCommand }: PanelEditorProps) {
   const { sessionId, fileName, filePath } = panel.editor;
   const hostRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<import("../editor/codemirror").EditorView | null>(null);
@@ -291,6 +297,15 @@ export function PanelEditor({ panelId, panel, client, dispatch, commands, focuse
       const requestId = crypto.randomUUID();
       dispatch({ type: "SET_PENDING_NOTE", note: { requestId } });
       client.sendIntent("CreateNote", undefined, { panelId, requestId });
+    } else {
+      // Tab cycling and the palette: Ctrl+Tab, Ctrl+Shift+Tab and
+      // Ctrl/Cmd+Shift+P mean nothing to CodeMirror. Leaving the tab saves
+      // on unmount; flushing first just starts the save sooner.
+      const released = RELEASED_COMMAND_IDS.find((id) => passThrough(commands[id], event));
+      if (!released) return;
+      event.preventDefault();
+      if (released !== "app.command_palette") void flushEditor(sessionId);
+      onRunCommand(released);
     }
   };
 

@@ -12,6 +12,7 @@ const KEY = {
   end: "",
   f3: "",
   f4: "",
+  tab: "",
 };
 
 /** Real key actions: CodeMirror ignores synthetic keydown events for text. */
@@ -155,6 +156,44 @@ export async function runEditorTabFlow(browser, observer) {
   await waitFor(() => !fs.readFileSync(hostFile, "utf8").includes("autosavedS"), {
     timeout: 10_000, label: "undo after a tab switch, then autosave",
   });
+
+  // Shift+J types text (it no longer cycles tabs); Ctrl+Tab / Ctrl+Shift+Tab
+  // leave the editor and cycle tabs, saving first; Ctrl+Shift+P opens the
+  // palette and Escape hands focus back to CodeMirror.
+  await chord(browser, [KEY.shift], "j");
+  await waitFor(async () => (await editorText(browser)).includes("J"), {
+    timeout: 10_000, label: "Shift+J types in the editor",
+  });
+  if (observer.state.slots.left?.activePanelId !== editorId) throw new Error("Shift+J switched tabs from the editor");
+  const tabIds = observer.state.slots.left.tabPanelIds;
+  const editorIndex = tabIds.indexOf(editorId);
+  const nextTabId = tabIds[(editorIndex + 1) % tabIds.length];
+  await chord(browser, [KEY.ctrl], KEY.tab);
+  await waitFor(() => observer.state.slots.left?.activePanelId === nextTabId
+    && observer.state.focus === nextTabId,
+  { timeout: 10_000, label: "Ctrl+Tab from the editor activates the next tab" });
+  // The backend switches first; DOM focus follows once the listing mounts.
+  if (observer.state.panels[nextTabId]?.tabKind === "editor") {
+    await expectEditorFocus(browser, "editor focus after Ctrl+Tab");
+  } else {
+    await expectListingFocus(browser, nextTabId, null, "listing focus after Ctrl+Tab from the editor");
+  }
+  await waitFor(() => fs.readFileSync(hostFile, "utf8").includes("J"), {
+    timeout: 10_000, label: "leaving the editor with Ctrl+Tab saves",
+  });
+  await chord(browser, [KEY.ctrl, KEY.shift], KEY.tab);
+  await waitFor(() => observer.state.slots.left?.activePanelId === editorId, {
+    timeout: 10_000, label: "Ctrl+Shift+Tab returns to the editor tab",
+  });
+  await expectEditorFocus(browser, "editor focus after Ctrl+Shift+Tab");
+  const beforePalette = await editorText(browser);
+  await chord(browser, [KEY.ctrl, KEY.shift], "p");
+  await waitFor(() => browser.execute(() =>
+    document.activeElement?.tagName === "INPUT" && !document.activeElement.closest(".panel-editor")),
+  { timeout: 10_000, label: "Ctrl+Shift+P opens the palette from the editor" });
+  await chord(browser, [], KEY.escape);
+  await expectEditorFocus(browser, "focus returns to the editor after the palette");
+  if (await editorText(browser) !== beforePalette) throw new Error("Ctrl+Shift+P typed into the editor");
 
   // A fully saved buffer follows external edits silently.
   await sleep(1_500);

@@ -34,6 +34,9 @@ function canonicalEventKey(event: KeyboardLikeEvent) {
   // WebKit can emit bracket characters with Digit8/Digit9 and no modifiers.
   // Preserve history navigation rather than interpreting those symbols as digits.
   if (event.key === "[" || event.key === "]") return event.key;
+  // WebKitGTK reports Ctrl+Shift+Tab (GDK's ISO_Left_Tab) as key
+  // "Unidentified"; the physical code still says Tab.
+  if (event.code === "Tab") return "Tab";
   if (/^Key[A-Z]$/.test(event.code)) return event.code.slice(3).toLowerCase();
   if (/^Digit[0-9]$/.test(event.code)) return event.code.slice(5);
   return normalizeKey(event.key);

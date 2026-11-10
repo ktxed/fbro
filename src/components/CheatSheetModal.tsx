@@ -46,7 +46,7 @@ const SECTIONS: CheatSheetSection[] = [
       { label: "Source root", commandIds: ["panel.navigate_source_root"] },
       { label: "Go to path", commandIds: ["panel.navigate_to_path"] },
       { label: "Sync other panel here", commandIds: ["panel.path.sync"] },
-      { label: "Next / previous source", commandIds: ["panel.source.next", "panel.source.previous"] },
+      { label: "Next source", commandIds: ["panel.source.next"] },
     ],
   },
   {
