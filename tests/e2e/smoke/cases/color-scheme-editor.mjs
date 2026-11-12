@@ -83,6 +83,14 @@ export async function runColorSchemeEditorFlow(browser, observer) {
     if (!customItem(name).colors["bg-panel"]) throw new Error("Duplicate did not copy the template colors");
     await waitFor(() => browser.$('[data-testid="color-editor-name"]').isExisting(), { label: "new scheme selected and editable" });
 
+    // The scheme list marks each scheme's kind: shipped ones are built-in.
+    const optionText = (id) => browser.execute((id) =>
+      document.querySelector(`[data-testid="color-editor-scheme-select"] option[value="${id}"]`)?.textContent ?? null, id);
+    for (const [id, expected] of [["fbro-dark", "fbro Dark (built-in)"], ["bundled:matrix", "Matrix (built-in)"], [createdId, `${name} (custom)`]]) {
+      const text = await optionText(id);
+      if (text !== expected) throw new Error(`Scheme option ${id} reads ${JSON.stringify(text)}, expected ${JSON.stringify(expected)}`);
+    }
+
     // Use it, then edit a color: the whole app restyles.
     await browser.$('[data-testid="color-editor-use"]').click();
     await waitFor(() => general().activeColorScheme === createdId, { timeout: 10_000, label: "custom scheme active" });
