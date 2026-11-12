@@ -4,7 +4,7 @@ import { IconArrowBackUp, IconCheck, IconCopy, IconFilter, IconFolderOpen, IconP
 import type { GeneralSettings } from "../ws/types";
 import type { WsClient } from "../ws/client";
 import { useAppDispatch, useAppState } from "../store";
-import { listColorSchemes, resolveColorScheme, type TerminalColors } from "../theme/colorSchemes";
+import { colorSchemeOptionLabel, listColorSchemes, resolveColorScheme, type TerminalColors } from "../theme/colorSchemes";
 import { formatColorLike, isValidColor, parseColor } from "../theme/colorValue";
 import {
   captureRenderedTokens,
@@ -386,7 +386,7 @@ export function SettingsColorSchemeTab({ general, client }: Props) {
               onChange={(e) => { flush(); setSelectedId(e.target.value); }}
             >
               {schemes.map((s) => (
-                <option key={s.id} value={s.id}>{s.custom ? `${s.label} (custom)` : s.bundled ? `${s.label} (bundled)` : s.label}</option>
+                <option key={s.id} value={s.id}>{colorSchemeOptionLabel(s)}</option>
               ))}
             </select>
           </label>

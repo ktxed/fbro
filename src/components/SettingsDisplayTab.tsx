@@ -3,7 +3,7 @@ import type { GeneralSettings } from "../ws/types";
 import type { WsClient } from "../ws/client";
 import { stepNumberInputOnWheel } from "../utils/numberInputWheel";
 import { useAppDispatch, useAppState } from "../store";
-import { listColorSchemes, resolveColorScheme } from "../theme/colorSchemes";
+import { colorSchemeOptionLabel, listColorSchemes, resolveColorScheme } from "../theme/colorSchemes";
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -208,7 +208,7 @@ export function SettingsDisplayTab({ general, client }: SettingsDisplayTabProps)
         >
           {listColorSchemes(general.colorSchemes).map((scheme) => (
             <option key={scheme.id} value={scheme.id}>
-              {scheme.label}
+              {colorSchemeOptionLabel(scheme)}
             </option>
           ))}
         </select>
