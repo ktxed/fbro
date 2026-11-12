@@ -209,8 +209,8 @@ and publish nothing. **Open themes folder** navigates the focused panel there.
 deleted scheme's base.
 
 **Editor.** Left: filter box, a one-tab-stop listbox of tokens grouped as Surfaces,
-Panel rows & cursor, File types, Borders & accent, Status & feedback, Toasts and
-Terminal (arrows/Home/End), and a pane for the selected token with a swatch
+Panel rows & cursor, File types, Borders & accent, Status & feedback, Toasts,
+Terminal and Code (the editor tab's `--syntax-*` colours; arrows/Home/End), and a pane for the selected token with a swatch
 picker (`react-colorful` with alpha) and a text field; Enter on a row moves focus
 into the field, Escape returns it to the row. Right: a live preview of a
 miniature fbro drawn with the draft colors; clicking an element selects its token

@@ -128,6 +128,16 @@ export function ColorSchemePreview({ values, mode, base, selectedToken, onSelect
 
       <div className="csp__toast" data-tokens={t("bg-toast", "border-toast", "text-toast")}>Copied full path</div>
 
+      <pre className="csp__code" data-tokens={t("bg-panel", "text")}>
+        <span data-tokens="syntax-comment">{"// Editor tab"}</span>{"\n"}
+        <span data-tokens="syntax-keyword">fn</span> <span data-tokens="syntax-function">size</span>
+        {"(p: &"}<span data-tokens="syntax-type">Path</span>{") -> "}<span data-tokens="syntax-type">u64</span>{" {\n  "}
+        {"p."}<span data-tokens="syntax-property">len</span>{" "}<span data-tokens="syntax-operator">+</span>{" "}
+        <span data-tokens="syntax-number">42</span>{" "}<span data-tokens="syntax-operator">*</span>{" "}
+        <span data-tokens="syntax-function">log</span>{"("}<span data-tokens="syntax-string">"done"</span>{")\n}  "}
+        <span data-tokens="syntax-tag">&lt;div&gt;</span>
+      </pre>
+
       <div className="csp__terminal-wrap" data-tokens="bg-terminal">
         <div
           className="csp__terminal"

@@ -3,7 +3,7 @@
  *  is a colour needs an entry here. Non-colour tokens (font, sizes,
  *  --shadow-modal) are deliberately excluded. */
 
-export type TokenGroupId = "surfaces" | "rows" | "files" | "borders" | "status" | "toasts" | "terminal";
+export type TokenGroupId = "surfaces" | "rows" | "files" | "borders" | "status" | "toasts" | "terminal" | "syntax";
 
 export interface TokenGroup {
   id: TokenGroupId;
@@ -18,6 +18,7 @@ export const TOKEN_GROUPS: TokenGroup[] = [
   { id: "status", label: "Status & feedback" },
   { id: "toasts", label: "Toasts" },
   { id: "terminal", label: "Terminal" },
+  { id: "syntax", label: "Code" },
 ];
 
 export interface ColorToken {
@@ -94,6 +95,16 @@ export const COLOR_TOKENS: ColorToken[] = [
   { name: "bg-terminal-chip-hover", group: "terminal", label: "Terminal chip (hover)", description: "Chip hover state" },
   { name: "text-terminal-chip", group: "terminal", label: "Terminal chip text", description: "Chip label" },
   { name: "text-terminal-chip-hover", group: "terminal", label: "Terminal chip text (hover)", description: "Chip label on hover" },
+  // Code (editor tab syntax highlighting)
+  { name: "syntax-keyword", group: "syntax", label: "Keyword", description: "Keywords such as fn, if, return, import" },
+  { name: "syntax-string", group: "syntax", label: "String", description: "String and character literals" },
+  { name: "syntax-number", group: "syntax", label: "Number & constant", description: "Numbers, booleans, null and constants" },
+  { name: "syntax-type", group: "syntax", label: "Type", description: "Type, class and namespace names" },
+  { name: "syntax-function", group: "syntax", label: "Function", description: "Function and macro names" },
+  { name: "syntax-property", group: "syntax", label: "Property", description: "Object properties and attributes" },
+  { name: "syntax-tag", group: "syntax", label: "Tag", description: "HTML and XML tag names" },
+  { name: "syntax-operator", group: "syntax", label: "Operator", description: "Operators, escapes and regular expressions" },
+  { name: "syntax-comment", group: "syntax", label: "Comment", description: "Comments" },
 ];
 
 export type TerminalKey = "background" | "foreground" | "cursor" | "selectionBackground";

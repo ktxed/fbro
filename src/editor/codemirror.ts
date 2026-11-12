@@ -11,8 +11,15 @@ import {
   type KeyBinding,
 } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
-import { HighlightStyle, bracketMatching, indentOnInput, syntaxHighlighting } from "@codemirror/language";
-import { markdown } from "@codemirror/lang-markdown";
+import {
+  HighlightStyle,
+  bracketMatching,
+  foldGutter,
+  foldKeymap,
+  indentOnInput,
+  syntaxHighlighting,
+} from "@codemirror/language";
+import { closeBrackets, closeBracketsKeymap } from "@codemirror/autocomplete";
 import { highlightSelectionMatches, search, searchKeymap } from "@codemirror/search";
 import { tags } from "@lezer/highlight";
 
@@ -53,6 +60,15 @@ const theme = EditorView.theme({
   ".cm-searchMatch": { backgroundColor: "var(--bg-selected)", outline: "1px solid var(--border)" },
   ".cm-searchMatch.cm-searchMatch-selected": { backgroundColor: "var(--bg-cursor-focused)" },
   ".cm-placeholder": { color: "var(--text-muted)" },
+  ".cm-gutters": { backgroundColor: "var(--bg-panel)", color: "var(--text-muted)", border: "none" },
+  ".cm-foldGutter .cm-gutterElement": { padding: "0 2px 0 6px", cursor: "pointer" },
+  ".cm-foldGutter .cm-gutterElement:hover": { color: "var(--text)" },
+  ".cm-foldPlaceholder": {
+    backgroundColor: "var(--bg-elev)",
+    border: "1px solid var(--border)",
+    color: "var(--text-dim)",
+    padding: "0 4px",
+  },
   ".cm-panels": { backgroundColor: "var(--bg-elev)", color: "var(--text)", borderColor: "var(--border)" },
   ".cm-panels.cm-panels-top": { borderBottom: "1px solid var(--border)" },
   // The find panel mirrors `.modal__btn` and the app's text inputs. CodeMirror's
@@ -99,16 +115,38 @@ const theme = EditorView.theme({
   ".cm-panel.cm-search [name=close]:hover": { color: "var(--text)" },
 });
 
-const markdownHighlight = HighlightStyle.define([
+// Markdown keeps the app's own tokens; code uses the `--syntax-*` tokens
+// (seeded from One Dark and GitHub Light). Plain identifiers and punctuation
+// stay `--text`.
+const codeHighlight = HighlightStyle.define([
   { tag: tags.heading, fontWeight: "bold", color: "var(--accent)" },
   { tag: tags.emphasis, fontStyle: "italic" },
   { tag: tags.strong, fontWeight: "bold" },
   { tag: tags.strikethrough, textDecoration: "line-through" },
   { tag: [tags.link, tags.url], color: "var(--text-link)", textDecoration: "underline" },
   { tag: [tags.monospace, tags.processingInstruction], color: "var(--text-info)" },
-  { tag: [tags.quote, tags.comment, tags.meta], color: "var(--text-muted)" },
+  { tag: tags.quote, color: "var(--text-muted)" },
   { tag: tags.list, color: "var(--accent)" },
+  { tag: [tags.comment, tags.meta], color: "var(--syntax-comment)" },
+  { tag: [tags.keyword, tags.modifier, tags.self, tags.operatorKeyword], color: "var(--syntax-keyword)" },
+  { tag: [tags.string, tags.character, tags.inserted, tags.special(tags.string)], color: "var(--syntax-string)" },
+  { tag: [tags.number, tags.bool, tags.atom, tags.null, tags.constant(tags.name), tags.standard(tags.name)], color: "var(--syntax-number)" },
+  { tag: [tags.typeName, tags.className, tags.namespace, tags.annotation], color: "var(--syntax-type)" },
+  {
+    tag: [tags.function(tags.variableName), tags.function(tags.propertyName), tags.macroName, tags.labelName],
+    color: "var(--syntax-function)",
+  },
+  { tag: [tags.propertyName, tags.attributeName], color: "var(--syntax-property)" },
+  { tag: [tags.tagName, tags.angleBracket], color: "var(--syntax-tag)" },
+  { tag: [tags.operator, tags.escape, tags.regexp, tags.special(tags.name)], color: "var(--syntax-operator)" },
+  { tag: [tags.invalid, tags.deleted], color: "var(--text-danger)" },
 ]);
+
+// CodeMirror's Fold All / Unfold All are Ctrl-Alt-[ / ]. On Windows, AltGr
+// arrives as Ctrl+Alt, and on German, Polish, … layouts AltGr types `[`; the
+// exact key name matches before CodeMirror's AltGr guard, so typing `[` would
+// fold the whole file. Fold and unfold at the cursor stay.
+const foldKeys = foldKeymap.filter((binding) => !binding.key?.startsWith("Ctrl-Alt-"));
 
 /** F3 belongs to the viewer in fbro; Mod-g still finds the next match. */
 const searchKeys = searchKeymap.filter((binding) => binding.key !== "F3");
@@ -122,7 +160,8 @@ function editorKeys(handlers: EditorHandlers): KeyBinding[] {
   ];
 }
 
-export function createEditorState(doc: string, handlers: EditorHandlers): EditorState {
+/** `language` comes from `loadLanguage` (`[]` for plain text). */
+export function createEditorState(doc: string, handlers: EditorHandlers, language: Extension): EditorState {
   const extensions: Extension[] = [
     highlightSpecialChars(),
     history(),
@@ -132,12 +171,14 @@ export function createEditorState(doc: string, handlers: EditorHandlers): Editor
     indentOnInput(),
     bracketMatching(),
     EditorView.lineWrapping,
-    markdown(),
-    syntaxHighlighting(markdownHighlight),
+    closeBrackets(),
+    foldGutter(),
+    language,
+    syntaxHighlighting(codeHighlight),
     search({ top: true }),
     placeholder("Empty"),
     theme,
-    keymap.of([...searchKeys, ...defaultKeymap, ...historyKeymap, indentWithTab]),
+    keymap.of([...closeBracketsKeymap, ...searchKeys, ...foldKeys, ...defaultKeymap, ...historyKeymap, indentWithTab]),
     // Lowest priority: the find panel's own Escape handling runs first.
     Prec.lowest(keymap.of(editorKeys(handlers))),
     EditorView.updateListener.of((update) => {
@@ -167,4 +208,5 @@ export function replaceFromDisk(view: EditorView, text: string): void {
   });
 }
 
+export { loadLanguage } from "./language";
 export type { EditorState, EditorView };

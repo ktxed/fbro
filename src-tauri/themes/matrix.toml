@@ -62,6 +62,16 @@ bg-terminal-chip = "rgba(0, 20, 6, 0.7)"
 bg-terminal-chip-hover = "rgba(0, 255, 65, 0.2)"
 text-terminal-chip = "#2bd95a"
 text-terminal-chip-hover = "#b6ffc8"
+# Editor syntax colours: shades of phosphor green.
+syntax-keyword = "#00ff41"
+syntax-string = "#b6ffc8"
+syntax-number = "#d4ff6a"
+syntax-type = "#5dff8f"
+syntax-function = "#8affa8"
+syntax-property = "#3ddc6a"
+syntax-tag = "#00ff41"
+syntax-operator = "#c8ffd0"
+syntax-comment = "#1f8f3c"
 
 [terminal]
 background = "#000000"

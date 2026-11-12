@@ -47,6 +47,14 @@ The file opens in a new tab next to the current one.
 It works for UTF-8 text files of up to 2 MiB on a local disk. Opening a file that
 already has an editor tab switches to that tab.
 
+Code is highlighted for common languages, among them Rust, Python, JavaScript
+and TypeScript, Go, C and C++, Java, shell scripts, JSON, YAML, TOML, HTML, CSS
+and SQL. The file name decides the language; a file without an extension, such
+as a script, is recognized by its `#!` line. Markdown notes highlight their
+fenced code blocks. Brackets and quotes close as you type, and the arrows in the
+left margin fold a block. The colors come from the
+[color scheme](../../customize/color-schemes/).
+
 <Screenshot name="editor-tab" alt="A Markdown file open in an editor tab on the left, with its rendered preview on the right" />
 
 ### Keys in an editor tab
@@ -66,6 +74,7 @@ shortcuts simply type text. Only these do something else:
 | <Shortcut id="panel.tab.next" /> / <Shortcut id="panel.tab.prev" /> | Save and switch to the next / previous tab |
 | <Shortcut id="app.command_palette" /> | Open the [command palette](../../using/command-palette/) |
 | <kbd>Tab</kbd> / <kbd>Shift</kbd>+<kbd>Tab</kbd> | Indent / unindent |
+| <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>[</kbd> / <kbd>]</kbd> (macOS <kbd>Cmd</kbd>+<kbd>Option</kbd>+<kbd>[</kbd> / <kbd>]</kbd>) | Fold / unfold the block at the cursor |
 
 On Linux and Windows, <Shortcut id="file.view" /> also saves and opens the file in the
 viewer.

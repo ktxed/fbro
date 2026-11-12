@@ -62,6 +62,16 @@ bg-terminal-chip = "rgba(174, 178, 195, 0.9)"
 bg-terminal-chip-hover = "rgba(0, 0, 0, 0.15)"
 text-terminal-chip = "#000000"
 text-terminal-chip-hover = "#000000"
+# Editor syntax colours: Motif-era dark inks.
+syntax-keyword = "#00008b"
+syntax-string = "#8b0000"
+syntax-number = "#8b008b"
+syntax-type = "#006400"
+syntax-function = "#00468c"
+syntax-property = "#5f3a00"
+syntax-tag = "#8b0000"
+syntax-operator = "#202040"
+syntax-comment = "#4e586b"
 
 [terminal]
 background = "#cbcedb"
