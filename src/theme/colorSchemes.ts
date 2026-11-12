@@ -107,6 +107,14 @@ export function listColorSchemes(catalog?: ColorSchemeCatalog): ColorScheme[] {
   return [...COLOR_SCHEMES, ...(catalog?.items ?? []).map(fromCustom)];
 }
 
+/** Option text for scheme lists. A native `<option>` holds only text, and the
+ *  closed select shows just the chosen option, so the kind is part of the
+ *  label: schemes shipped with fbro (built in or bundled) are read-only, custom
+ *  ones are the user's own files. */
+export function colorSchemeOptionLabel(scheme: ColorScheme): string {
+  return `${scheme.label} (${scheme.custom ? "custom" : "built-in"})`;
+}
+
 /** Unknown or unloaded ids fall back to fbro Dark, like the backend. */
 export function resolveColorScheme(id: string | undefined | null, catalog?: ColorSchemeCatalog): ColorScheme {
   const builtin = COLOR_SCHEMES.find((scheme) => scheme.id === id);

@@ -223,6 +223,11 @@ way to start from a built-in, which is read-only. **Revert** restores the values
 from when the scheme was selected; **Delete…** confirms inline. Escape closes the
 open prompt, then returns from the editor pane to the list, then closes Settings.
 
+Both Scheme selects (Display and the editor) label every option with its kind,
+`Name (built-in)` for built-in and bundled schemes and `Name (custom)` for user
+files (`colorSchemeOptionLabel`), because a closed native select shows only the
+chosen option's text.
+
 ## macOS file icon cache
 
 Settings → Display shows a File icons section only when the read-only backend
