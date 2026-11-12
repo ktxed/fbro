@@ -266,6 +266,16 @@ commands type text. Only these leave the editor:
 | `app.command_palette` (Ctrl/Cmd+Shift+P) | Open the command palette; closing it returns focus to the editor |
 | Tab / Shift+Tab | Indent / un-indent (CodeMirror `indentWithTab`), so Next Source (Shift+Tab) is unavailable in an editor tab; Escape is the way out, per CodeMirror's guidance for Tab-capturing editors |
 
+**Language keys.** Each file gets its language from `src/editor/language.ts`
+(`@codemirror/language-data` by file name, a small alias table, then the `#!`
+line). `closeBrackets` owns Backspace inside an empty pair. `foldKeymap` adds
+Ctrl+Shift+[ / ] (macOS Cmd+Alt+[ / ]) to fold and unfold at the cursor. Its
+Fold All / Unfold All bindings (Ctrl+Alt+[ / ]) are removed: on Windows, AltGr
+arrives as Ctrl+Alt and types `[` on German, Polish and similar layouts, and
+CodeMirror matches the exact `Ctrl-Alt-[` name before its AltGr guard, so typing
+`[` would fold the whole file. Markdown's list-continuing Enter applies only to
+Markdown files. None of these keys are registry commands or pass-through keys.
+
 CodeMirror's find panel uses Ctrl/Cmd+F, Enter, Ctrl/Cmd+G; its F3 binding is
 removed because F3 belongs to the viewer. Its `searchKeymap` keeps
 Ctrl/Cmd+Shift+L (select all matches): `panel.tab.list` is not released inside

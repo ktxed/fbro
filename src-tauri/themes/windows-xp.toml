@@ -62,6 +62,16 @@ bg-terminal-chip = "rgba(236, 233, 216, 0.85)"
 bg-terminal-chip-hover = "rgba(49, 106, 197, 0.35)"
 text-terminal-chip = "#000000"
 text-terminal-chip-hover = "#000000"
+# Editor syntax colours: Visual Studio classic colours.
+syntax-keyword = "#0000ff"
+syntax-string = "#a31515"
+syntax-number = "#098658"
+syntax-type = "#26809b"
+syntax-function = "#795e26"
+syntax-property = "#001080"
+syntax-tag = "#800000"
+syntax-operator = "#333333"
+syntax-comment = "#008000"
 
 [terminal]
 background = "#000000"
