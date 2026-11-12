@@ -67,6 +67,12 @@ function handlersFor(sessionId: number) {
   };
 }
 
+/** The first line, capped, for `#!` detection. */
+function firstLine(text: string) {
+  const end = text.indexOf("\n");
+  return (end === -1 ? text : text.slice(0, end)).replace(/^﻿/, "").slice(0, 256);
+}
+
 /** Registry bindings that may leave the editor: modified keys or F-keys only,
  *  never a plain printable key (macOS binds F3's command to plain "3"). */
 function passThrough(command: InteractiveCommand | undefined, event: KeyboardEvent) {
@@ -168,6 +174,8 @@ export function PanelEditor({ panelId, panel, client, dispatch, commands, focuse
   // Mount: reuse the cached state, or load the file from the backend.
   useEffect(() => {
     let disposed = false;
+    /** Text that arrived while the first load waits for its language. */
+    let pendingText: string | null = null;
     const session = ensureSession(sessionId, panelId);
     setLoadError(null);
     setReady(false);
@@ -196,9 +204,24 @@ export function PanelEditor({ panelId, panel, client, dispatch, commands, focuse
         unsubscribe();
         if (disposed) return;
         const view = viewRef.current;
-        if (view) cm.replaceFromDisk(view, message.text);
-        else mount(cm, cm.createEditorState(message.text, handlersFor(sessionId)));
-        markLoaded(sessionId);
+        if (view) {
+          cm.replaceFromDisk(view, message.text);
+          markLoaded(sessionId);
+          return;
+        }
+        // First load: the language (a lazy chunk) is ready before the view
+        // mounts, so the text never shows unhighlighted. A reload that lands
+        // meanwhile only replaces the text.
+        const loading = pendingText !== null;
+        pendingText = message.text;
+        if (loading) return;
+        void cm.loadLanguage(latest.current.panel.editor.fileName, firstLine(message.text)).then((language) => {
+          const text = pendingText ?? "";
+          pendingText = null;
+          if (disposed) return;
+          mount(cm, cm.createEditorState(text, handlersFor(sessionId), language));
+          markLoaded(sessionId);
+        });
       });
       const text = intent === "KeepBothEditorVersions" ? viewRef.current?.state.doc.toString() : undefined;
       client.sendIntent(intent, undefined, { panelId, requestId, ...(text === undefined ? {} : { text }) });

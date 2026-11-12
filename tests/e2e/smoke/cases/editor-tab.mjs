@@ -10,6 +10,7 @@ const KEY = {
   shift: "",
   escape: "",
   end: "",
+  home: "",
   f3: "",
   f4: "",
   tab: "",
@@ -321,7 +322,115 @@ export async function runEditorTabFlow(browser, observer) {
   await chord(browser, [KEY.ctrl], "w");
   await waitFor(() => !editorPanelId(observer), { timeout: 10_000, label: "palette-opened editor closes" });
 
+  await runHighlightingFlow(browser, observer, directory);
   await runNotesFlow(browser, observer, directory);
+}
+
+/** Computed style of the first token whose text is exactly `text`, and of the
+ *  plain editor text, so a test can tell highlighted from plain. */
+async function tokenStyle(browser, text) {
+  return browser.execute((text) => {
+    const content = document.querySelector(".panel-editor .cm-content");
+    if (!content) return null;
+    const span = Array.from(content.querySelectorAll(".cm-line span")).find((el) => el.textContent === text);
+    if (!span) return null;
+    const style = getComputedStyle(span);
+    return { color: style.color, fontWeight: style.fontWeight, plain: getComputedStyle(content).color };
+  }, text);
+}
+
+async function expectHighlighted(browser, text, label) {
+  await waitFor(async () => {
+    const style = await tokenStyle(browser, text);
+    return style && style.color !== style.plain;
+  }, { timeout: 10_000, label });
+}
+
+/** CodeMirror keys sent as the events a US keyboard produces: WebDriver maps
+ *  punctuation through the host layout. */
+async function sendEditorKey(browser, init) {
+  await browser.execute((init) => {
+    document.querySelector(".panel-editor .cm-content")?.dispatchEvent(new KeyboardEvent("keydown", {
+      bubbles: true, cancelable: true, ...init,
+    }));
+  }, init);
+}
+
+async function openInEditorTab(browser, observer, name) {
+  await clickEntry(browser, "left", name);
+  await openPanelContextMenu(browser, "left");
+  await clickContextMenuItem(browser, "Edit in Editor Tab");
+  await waitFor(() => {
+    const id = editorPanelId(observer);
+    return id && observer.state.focus === id;
+  }, { timeout: 10_000, label: `${name} opens in an editor tab` });
+  await expectEditorFocus(browser, `editor focus on ${name}`);
+}
+
+async function closeEditorTab(browser, observer, label) {
+  await chord(browser, [KEY.ctrl], "w");
+  await waitFor(() => !editorPanelId(observer), { timeout: 10_000, label });
+}
+
+async function runHighlightingFlow(browser, observer, directory) {
+  const files = {
+    "sample.rs": "// sample\nfn main() {\n    let s = \"hi\";\n    println!(\"{}\", s);\n}\n",
+    "script.py": "# not a heading\nx = 1\n",
+    tool: "#!/bin/sh\necho \"hi\"\n",
+  };
+  for (const [name, text] of Object.entries(files)) {
+    fs.writeFileSync(hostPath(path.posix.join(directory, name)), text);
+  }
+  await observer.waitForEntry("left", "tool", "file");
+
+  // Rust by file name: keywords, strings and comments are coloured.
+  await openInEditorTab(browser, observer, "sample.rs");
+  await expectHighlighted(browser, "fn", "Rust keyword highlighted");
+  await expectHighlighted(browser, "\"hi\"", "Rust string highlighted");
+  await expectHighlighted(browser, "// sample", "Rust comment highlighted");
+
+  // Fold and unfold the block at the cursor (line 2); the Ctrl+Alt Fold All
+  // binding is gone, because AltGr types `[` as Ctrl+Alt on Windows.
+  await chord(browser, [KEY.ctrl], KEY.home);
+  await browser.keys("ArrowDown");
+  const foldKey = { key: "{", code: "BracketLeft", keyCode: 219, ctrlKey: true, shiftKey: true };
+  const unfoldKey = { key: "}", code: "BracketRight", keyCode: 221, ctrlKey: true, shiftKey: true };
+  await sendEditorKey(browser, foldKey);
+  await waitFor(() => browser.execute(() => Boolean(document.querySelector(".panel-editor .cm-foldPlaceholder"))),
+    { timeout: 10_000, label: "Ctrl+Shift+[ folds the block" });
+  await sendEditorKey(browser, unfoldKey);
+  await waitFor(() => browser.execute(() => !document.querySelector(".panel-editor .cm-foldPlaceholder")),
+    { timeout: 10_000, label: "Ctrl+Shift+] unfolds the block" });
+  await sendEditorKey(browser, { key: "[", code: "BracketLeft", keyCode: 219, ctrlKey: true, altKey: true });
+  await sleep(300);
+  if (await browser.execute(() => Boolean(document.querySelector(".panel-editor .cm-foldPlaceholder")))) {
+    throw new Error("Ctrl+Alt+[ folded the file (Fold All must stay unbound)");
+  }
+
+  // Brackets close as you type; Backspace removes an empty pair.
+  await chord(browser, [KEY.ctrl], KEY.end);
+  await typeText(browser, "f(");
+  await waitFor(async () => (await editorText(browser)).endsWith("f()"), {
+    timeout: 10_000, label: "( inserts a closing )",
+  });
+  await browser.keys("Backspace");
+  await waitFor(async () => (await editorText(browser)).endsWith("f"), {
+    timeout: 10_000, label: "Backspace removes the empty pair",
+  });
+  await closeEditorTab(browser, observer, "Rust editor closes");
+
+  // Python is no longer parsed as Markdown: `#` is a comment, not a bold heading.
+  await openInEditorTab(browser, observer, "script.py");
+  await expectHighlighted(browser, "# not a heading", "Python comment highlighted");
+  const comment = await tokenStyle(browser, "# not a heading");
+  if (Number(comment.fontWeight) >= 600) throw new Error("Python comment rendered as a Markdown heading");
+  await closeEditorTab(browser, observer, "Python editor closes");
+
+  // No extension: the #! line picks Shell.
+  await openInEditorTab(browser, observer, "tool");
+  await expectHighlighted(browser, "\"hi\"", "shell string highlighted via #!");
+  await closeEditorTab(browser, observer, "shell editor closes");
+  await expectListingFocus(browser, "left", null, "listing focus after the highlighting flow");
 }
 
 async function runNotesFlow(browser, observer, returnDirectory) {

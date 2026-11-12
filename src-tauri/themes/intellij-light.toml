@@ -62,6 +62,16 @@ bg-terminal-chip = "rgba(255, 255, 255, 0.85)"
 bg-terminal-chip-hover = "rgba(0, 0, 0, 0.10)"
 text-terminal-chip = "#6c707e"
 text-terminal-chip-hover = "#000000"
+# Editor syntax colours: IntelliJ New UI Light editor colours.
+syntax-keyword = "#0033b3"
+syntax-string = "#067d17"
+syntax-number = "#1750eb"
+syntax-type = "#1b8084"
+syntax-function = "#00627a"
+syntax-property = "#871094"
+syntax-tag = "#0033b3"
+syntax-operator = "#080808"
+syntax-comment = "#757575"
 
 [terminal]
 background = "#ffffff"
