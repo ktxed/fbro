@@ -566,7 +566,8 @@ function VolumeHeader({ sources, panel, onNavigateToSource, onMountSource, clien
   };
 
   return (
-    <div className="panel__volumes">
+    // Sources without an app menu must not fall through to the WebView's native one.
+    <div className="panel__volumes" onContextMenu={(event) => event.preventDefault()}>
       <button className="panel__volumes-arrow" disabled={!canLeft} tabIndex={-1} onClick={() => scroll(-1)}><IconChevronLeft size={14} /></button>
       <div className="panel__volumes-list" ref={listRef} onScroll={updateArrows} onWheel={onWheel}>
         {visibleSources.flatMap(src => [renderSource(src), ...pinnedLocations
