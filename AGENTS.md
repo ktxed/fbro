@@ -137,6 +137,7 @@ keyboard, or modal behaviour **updates the matching spec in the same commit**.
   `[data-color-scheme]` blocks; a deliberately fixed colour (video letterbox,
   PDF paper) carries a comment. New tokens need a daylight value and an entry in `src/theme/tokens.ts` (the custom-scheme editor and Duplicate read it). Content rendered through `FloatingPortal` sets its own
   `data-color-scheme` (`resolveColorScheme`).
+- UI text is not selectable (`user-select: none` on `body`). Only inputs, the editor, diff code and viewer content opt back in with `user-select: text`; give any new content surface the same pair (`-webkit-` too).
 - Custom-styled controls need `appearance: none; font: inherit` and explicit
   colours, or Windows WebView2 paints native chrome.
 - Icons: `@tabler/icons-react` only; `aria-hidden` next to a text label;

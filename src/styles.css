@@ -175,6 +175,22 @@ body {
   font-family: var(--font);
   font-size: var(--font-size);
   line-height: var(--row-height);
+  /* UI text is never selectable: a stray drag, triple-click or Select All must
+     not paint chrome (tabs, breadcrumbs, labels). Content opts back in below;
+     copying paths and the like goes through CopyButton. */
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* Editable and content surfaces. WebKit needs the -webkit- form on inputs,
+   which otherwise inherit `none` and stop accepting a caret or selection. */
+input,
+textarea,
+[contenteditable]:not([contenteditable="false"]),
+.cm-editor,
+.diff-table__code {
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 /* ── Banner ──────────────────────────────────────────────────────────────── */
