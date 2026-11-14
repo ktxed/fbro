@@ -87,7 +87,14 @@ const theme = EditorView.theme({
     backgroundRepeat: "no-repeat",
   },
   ".cm-trailingSpace": { backgroundColor: "color-mix(in srgb, var(--text-danger) 30%, transparent)" },
-  ".cm-gutters": { backgroundColor: "var(--bg-panel)", color: "var(--text-muted)", border: "none" },
+  // The panel colour nudged toward the text colour: lighter on dark schemes,
+  // darker on light ones, so the gutter stands out in any scheme with no new token.
+  ".cm-gutters": {
+    backgroundColor: "color-mix(in srgb, var(--bg-panel), var(--text) 5%)",
+    color: "var(--text-muted)",
+    border: "none",
+    borderRight: "1px solid var(--border)",
+  },
   ".cm-foldGutter .cm-gutterElement": { padding: "0 2px 0 6px", cursor: "pointer" },
   ".cm-foldGutter .cm-gutterElement:hover": { color: "var(--text)" },
   ".cm-foldPlaceholder": {
