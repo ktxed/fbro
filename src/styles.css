@@ -2333,6 +2333,8 @@ body {
 .git-modal__changes { flex: 1; min-height: 0; overflow: auto; }
 .git-modal__change { display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 3px 3px 3px 16px; border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent); }
 .git-modal__change:hover { background: var(--bg-hover); }
+.git-modal__change--summary, .git-modal__change--summary:hover { color: var(--text-muted); font-style: italic; background: none; }
+.git-modal__change--summary code { font-style: normal; }
 .git-modal__change--active, .git-modal__change:focus { background: var(--bg-hover); outline: 1px solid var(--border-focus); outline-offset: -1px; }
 .git-modal__change--selected { background: color-mix(in srgb, var(--accent) 12%, var(--bg-panel)); }
 .git-modal__change input[type="checkbox"] { flex: 0 0 auto; margin: 0; accent-color: var(--accent); }

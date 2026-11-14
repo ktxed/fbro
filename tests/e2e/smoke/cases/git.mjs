@@ -502,6 +502,63 @@ export async function runGitFlow(browser, observer) {
     label: "Git refresh after navigating back to repository",
   });
   await runGitLogTabFlow(browser, observer, repo, hostRepo);
+  await runGitUntrackedSummaryFlow(browser, observer);
+}
+
+// The e2e backends run with FBRO_GIT_MAX_LISTED_UNTRACKED=50, so 51 untracked
+// files collapse into one summary line in the Changes tab.
+async function runGitUntrackedSummaryFlow(browser, observer) {
+  const repo = backendPath("a", "src", "git-untracked-summary-smoke");
+  const hostRepo = hostPath(repo);
+  const untrackedCount = 51;
+  fs.rmSync(hostRepo, { recursive: true, force: true });
+  fs.mkdirSync(hostRepo, { recursive: true });
+  git(hostRepo, ["init", "-q"]);
+  git(hostRepo, ["config", "user.email", "fbro-tests@example.invalid"]);
+  git(hostRepo, ["config", "user.name", "fbro tests"]);
+  fs.writeFileSync(path.join(hostRepo, "tracked.txt"), "before\n");
+  git(hostRepo, ["add", "tracked.txt"]);
+  git(hostRepo, ["commit", "-qm", "initial"]);
+  fs.writeFileSync(path.join(hostRepo, "tracked.txt"), "after\n");
+  fs.mkdirSync(path.join(hostRepo, "bulk", "deeper"), { recursive: true });
+  for (let index = 0; index < untrackedCount; index++) {
+    const folder = index % 2 === 0 ? "bulk" : path.join("bulk", "deeper");
+    fs.writeFileSync(path.join(hostRepo, folder, `file-${index}.txt`), "new\n");
+  }
+
+  await goToPanelPath(browser, observer, "left", repo);
+  await waitFor(() => {
+    const git = observer.state.panels.left?.git;
+    return observer.state.panels.left?.path === repo && git?.untrackedOmitted && git.untrackedCount === untrackedCount;
+  }, { timeout: 10_000, label: "Git status omits untracked files above the limit" });
+  const listed = observer.state.panels.left.git.changes.map(change => change.path);
+  if (JSON.stringify(listed) !== JSON.stringify(["tracked.txt"])) throw new Error(`Unexpected listed Git changes: ${JSON.stringify(listed)}`);
+  // Omitted files still decorate the panel.
+  await waitFor(async () => await panelGitStatus(browser, "bulk") === "●", { timeout: 10_000, label: "omitted untracked folder decoration" });
+
+  const gitButton = await browser.$('[data-testid="panel-left"] .panel__git-btn');
+  await gitButton.waitForClickable({ timeout: 10_000 });
+  await gitButton.click();
+  await (await browser.$(".git-modal")).waitForDisplayed({ timeout: 10_000 });
+  const summary = await browser.$('[data-testid="git-untracked-summary"]');
+  await summary.waitForDisplayed({ timeout: 10_000 });
+  // WebKit's getText drops the ellipsis-styled span, so read textContent.
+  const summaryText = await browser.execute(() => document.querySelector('[data-testid="git-untracked-summary"]')?.textContent ?? "");
+  if (!summaryText.includes(`${untrackedCount} untracked files`)) throw new Error(`Unexpected untracked summary: ${summaryText}`);
+  if (await summary.getAttribute("tabindex") !== null) throw new Error("Untracked summary must not be focusable");
+  const rows = await browser.$$('[data-testid="git-change-row"]');
+  if (rows.length !== 1) throw new Error(`Expected only the tracked change row, got ${rows.length}`);
+  const headerCount = await browser.execute(() => document.querySelector(".git-modal__section-title > span:last-child")?.textContent);
+  if (headerCount !== String(untrackedCount + 1)) throw new Error(`Changes header count should include omitted files, got ${headerCount}`);
+
+  // Keyboard navigation stays on real rows: End lands on the last change, not the summary.
+  await rows[0].click();
+  await browser.keys("End");
+  await waitFor(() => browser.execute(() => document.activeElement?.getAttribute("data-testid") === "git-change-row"), {
+    timeout: 5_000, label: "End keeps focus on the last real Git change row",
+  });
+  await browser.keys("Escape");
+  await (await browser.$(".git-modal")).waitForDisplayed({ timeout: 10_000, reverse: true });
 }
 
 async function runGitLogTabFlow(browser, observer, repo, hostRepo) {

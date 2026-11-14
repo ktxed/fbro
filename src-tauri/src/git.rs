@@ -53,6 +53,26 @@ pub struct GitRepoStatus {
     pub branches: Vec<String>,
     pub remote_branches: Vec<GitRemoteBranch>,
     pub changes: Vec<GitChange>,
+    /// True when untracked files exceed `MAX_LISTED_UNTRACKED` and were left out
+    /// of `changes`; `untracked_count` still holds the real total.
+    pub untracked_omitted: bool,
+    /// Untracked changes left out of `changes`. Kept for panel decorations only.
+    #[serde(skip)]
+    pub omitted_untracked: Vec<GitChange>,
+}
+
+/// Above this many untracked files the Changes tab shows a single summary row
+/// instead of one row per file. `FBRO_GIT_MAX_LISTED_UNTRACKED` overrides it so
+/// smoke tests can reach the summary with a small fixture.
+pub const MAX_LISTED_UNTRACKED: usize = 1000;
+
+fn max_listed_untracked() -> usize {
+    static LIMIT: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *LIMIT.get_or_init(|| {
+        std::env::var("FBRO_GIT_MAX_LISTED_UNTRACKED").ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(MAX_LISTED_UNTRACKED)
+    })
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -162,7 +182,8 @@ pub fn inspect(path: &str) -> Option<GitRepoStatus> {
     } else {
         branch
     };
-    let status = git(&root, &["status", "--porcelain=v1", "-z"]).ok()?;
+    // List every untracked file rather than collapsing new folders to `dir/`.
+    let status = git(&root, &["status", "--porcelain=v1", "-z", "--untracked-files=all"]).ok()?;
     let mut changes = Vec::new();
     let mut records = status.split(|b| *b == 0);
     while let Some(record) = records.next() {
@@ -179,6 +200,7 @@ pub fn inspect(path: &str) -> Option<GitRepoStatus> {
         changes.push(GitChange { path, old_path, index_status: index.to_string(), worktree_status: worktree.to_string() });
     }
     let (staged_count, modified_count, untracked_count, conflicted_count) = status_counts(&changes);
+    let (changes, omitted_untracked) = split_untracked(changes, max_listed_untracked());
     let upstream = git(&root, &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"])
         .ok()
         .and_then(|value| String::from_utf8(value).ok())
@@ -195,7 +217,14 @@ pub fn inspect(path: &str) -> Option<GitRepoStatus> {
     // fbro considers a work area dirty only when it contains staged changes.
     // Untracked and unstaged changes remain visible, but do not gate Git actions.
     let remote_branches = remote_branches(&root).unwrap_or_default();
-    Some(GitRepoStatus { root, branch, detached, clean: has_no_staged_changes(staged_count), staged_count, modified_count, untracked_count, conflicted_count, upstream, ahead_count, behind_count, branches, remote_branches, changes })
+    Some(GitRepoStatus { root, branch, detached, clean: has_no_staged_changes(staged_count), staged_count, modified_count, untracked_count, conflicted_count, upstream, ahead_count, behind_count, branches, remote_branches, untracked_omitted: !omitted_untracked.is_empty(), changes, omitted_untracked })
+}
+
+/// Moves untracked entries out of the listed changes when there are too many to list.
+fn split_untracked(changes: Vec<GitChange>, limit: usize) -> (Vec<GitChange>, Vec<GitChange>) {
+    let untracked = changes.iter().filter(|c| c.index_status == "?").count();
+    if untracked <= limit { return (changes, Vec::new()); }
+    changes.into_iter().partition(|c| c.index_status != "?")
 }
 
 fn has_no_staged_changes(staged_count: usize) -> bool {
@@ -214,12 +243,13 @@ pub fn decorate_entries(entries: &mut [EntrySchema], panel_path: &str, status: O
     let Some(status) = status else { return };
     let base = Path::new(panel_path).strip_prefix(&status.root).unwrap_or(Path::new(""));
     let prefix = base.to_string_lossy().trim_matches('/').to_string();
-    let changes: HashMap<&str, &GitChange> = status.changes.iter().map(|c| (c.path.as_str(), c)).collect();
+    let all_changes = || status.changes.iter().chain(&status.omitted_untracked);
+    let changes: HashMap<&str, &GitChange> = all_changes().map(|c| (c.path.as_str(), c)).collect();
     for entry in entries {
         let rel = if prefix.is_empty() { entry.name.clone() } else { format!("{prefix}/{}", entry.name) };
         let exact = changes.get(rel.as_str()).copied();
         let nested_prefix = format!("{rel}/");
-        let matching: Vec<&GitChange> = status.changes.iter().filter(|change| {
+        let matching: Vec<&GitChange> = all_changes().filter(|change| {
             change.path == rel || (entry.kind == "directory" && change.path.starts_with(&nested_prefix))
         }).collect();
         let nested = matching.iter().any(|change| change.path.starts_with(&nested_prefix));
@@ -1337,6 +1367,52 @@ mod tests {
             assert_eq!(super::inspect(root).unwrap().branch, "saved-detached-work");
             assert_eq!(super::git(root, &["rev-parse", "HEAD"]).unwrap(), head);
         });
+    }
+
+    #[test]
+    fn inspect_lists_files_inside_untracked_folders() {
+        with_test_repo(|repo| {
+            fs::create_dir_all(repo.join("new/nested")).unwrap();
+            fs::write(repo.join("new/a.txt"), "a\n").unwrap();
+            fs::write(repo.join("new/nested/b.txt"), "b\n").unwrap();
+            let status = super::inspect(repo.to_str().unwrap()).unwrap();
+            let mut paths: Vec<_> = status.changes.iter().map(|c| c.path.as_str()).collect();
+            paths.sort();
+            assert_eq!(paths, ["new/a.txt", "new/nested/b.txt"]);
+            assert_eq!(status.untracked_count, 2);
+        });
+    }
+
+    #[test]
+    fn inspect_summarizes_untracked_files_above_the_limit() {
+        with_test_repo(|repo| {
+            fs::create_dir(repo.join("big")).unwrap();
+            let limit = super::max_listed_untracked();
+            for i in 0..=limit {
+                fs::write(repo.join("big").join(format!("{i}.txt")), "x").unwrap();
+            }
+            let status = super::inspect(repo.to_str().unwrap()).unwrap();
+            assert!(status.untracked_omitted);
+            assert_eq!(status.untracked_count, limit + 1);
+            assert!(status.changes.iter().all(|c| c.index_status != "?"));
+            assert_eq!(status.omitted_untracked.len(), limit + 1);
+        });
+    }
+
+    #[test]
+    fn split_untracked_omits_untracked_only_above_the_limit() {
+        let entry = |path: String, index: &str, worktree: &str| GitChange { path, old_path: None, index_status: index.into(), worktree_status: worktree.into() };
+        let untracked = |n: usize| (0..n).map(|i| entry(format!("u{i}"), "?", "?"));
+        let tracked = entry("tracked.txt".into(), " ", "M");
+
+        let at_limit: Vec<_> = std::iter::once(tracked.clone()).chain(untracked(super::MAX_LISTED_UNTRACKED)).collect();
+        let (listed, omitted) = super::split_untracked(at_limit, super::MAX_LISTED_UNTRACKED);
+        assert_eq!((listed.len(), omitted.len()), (super::MAX_LISTED_UNTRACKED + 1, 0));
+
+        let over: Vec<_> = std::iter::once(tracked.clone()).chain(untracked(super::MAX_LISTED_UNTRACKED + 1)).collect();
+        let (listed, omitted) = super::split_untracked(over, super::MAX_LISTED_UNTRACKED);
+        assert_eq!(listed, vec![tracked]);
+        assert_eq!(omitted.len(), super::MAX_LISTED_UNTRACKED + 1);
     }
 
     #[test]

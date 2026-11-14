@@ -55,6 +55,8 @@ export interface GitRepoStatus {
   branches: string[];
   remoteBranches: GitRemoteBranch[];
   changes: GitChange[];
+  /** Untracked files exceeded the backend limit and are left out of `changes`; `untrackedCount` is the total. */
+  untrackedOmitted: boolean;
 }
 
 /** A ref decoration on a log entry (`git log` %D). */

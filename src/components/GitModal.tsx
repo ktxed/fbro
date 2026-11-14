@@ -31,8 +31,8 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
   const { pendingGitLog } = useAppState();
   const gitLog = pendingGitLog?.panelId === panelId ? pendingGitLog : null;
 
-  const hasChanges = git.changes.length > 0;
-  const [tab, setTab] = useState<GitTab>(() => git.changes.length > 0 ? "changes" : "log");
+  const hasChanges = git.changes.length > 0 || git.untrackedOmitted;
+  const [tab, setTab] = useState<GitTab>(() => hasChanges ? "changes" : "log");
   const activeTab: GitTab = hasChanges ? tab : "log";
   const [message, setMessage] = useState("");
   const staged = useMemo(() => git.changes.filter(c => c.indexStatus !== " " && c.indexStatus !== "?"), [git]);
@@ -801,7 +801,7 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
                 />
                 Select all
               </label>
-              <span>{git.changes.length}</span>
+              <span>{git.changes.length + (git.untrackedOmitted ? git.untrackedCount : 0)}</span>
             </div>
             {selectedChanges.length > 0 && (
               <div className="git-modal__selection-toolbar" aria-label={`${selectedChanges.length} selected Git changes`}>
@@ -911,6 +911,12 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
                   </div>
                 );
               })}
+              {git.untrackedOmitted && (
+                <div className="git-modal__change git-modal__change--summary" data-testid="git-untracked-summary">
+                  <code>??</code>
+                  <span>{git.untrackedCount.toLocaleString()} untracked files, too many to list</span>
+                </div>
+              )}
             </div>
             <div className="git-modal__commit">
               <label htmlFor="git-commit-message">Commit message <span>{staged.length} staged</span></label>

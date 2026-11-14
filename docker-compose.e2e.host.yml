@@ -8,6 +8,7 @@ services:
     environment:
       FBRO_WS_BIND: 0.0.0.0:7878
       FBRO_FILESERVER_BIND: 0.0.0.0:17881
+      FBRO_GIT_MAX_LISTED_UNTRACKED: "50"
       HOME: /state/a/home
       XDG_CONFIG_HOME: /state/a/config
     ports:
@@ -33,6 +34,7 @@ services:
     environment:
       FBRO_WS_BIND: 0.0.0.0:7878
       FBRO_FILESERVER_BIND: 0.0.0.0:27881
+      FBRO_GIT_MAX_LISTED_UNTRACKED: "50"
       HOME: /state/b/home
       XDG_CONFIG_HOME: /state/b/config
     ports:
