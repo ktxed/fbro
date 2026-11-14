@@ -60,8 +60,8 @@ export async function runGitFlow(browser, observer) {
     .map(button => ({ id: button.getAttribute("data-inline-operation"), label: button.getAttribute("data-tooltip-content") })));
   const inlineActionIds = inlineActions.map(action => action.id).join("|");
   const inlineActionLabels = inlineActions.map(action => action.label).join("|");
-  if (inlineActionIds !== "git.view-diff|git.stage|git.rollback|panel.pass-to-bro|file.copy|file.move|file.rename|file.delete"
-    || inlineActionLabels !== "View Git diff|Stage|Rollback|Pass to Bro|Copy|Move|Rename|Delete") {
+  if (inlineActionIds !== "git.view-diff|git.stage|git.rollback|file.edit_builtin|panel.pass-to-bro|file.copy|file.move|file.rename|file.delete"
+    || inlineActionLabels !== "View Git diff|Stage|Rollback|Edit|Pass to Bro|Copy|Move|Rename|Delete") {
     throw new Error(`Unexpected inline Git actions: ${JSON.stringify(inlineActions)}`);
   }
   await inlineStage.moveTo();

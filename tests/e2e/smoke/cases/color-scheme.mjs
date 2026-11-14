@@ -34,9 +34,9 @@ export async function runColorSchemeFlow(browser, observer) {
     await browser.$('[data-testid="settings-tab-general"]').waitForDisplayed();
     await browser.keys("ArrowDown");
     await browser.$(checkbox).waitForDisplayed();
-    // Display controls: button bar checkbox, then the follow-system checkbox.
-    await browser.keys("Tab");
-    await browser.keys("Tab");
+    // Display controls: button bar checkbox, the three editor checkboxes
+    // (wrap, line numbers, whitespace), then the follow-system checkbox.
+    for (let i = 0; i < 5; i += 1) await browser.keys("Tab");
     await expectFocus(checkbox, "Display Tab reaches the follow-system checkbox");
   };
   const expectRejected = async (key, value) => {

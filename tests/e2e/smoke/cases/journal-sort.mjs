@@ -21,7 +21,12 @@ async function navigate(browser, observer, panelId, sourceId, targetPath) {
   }
 }
 
+// Toggling "remember sort per location" is itself a journaled audit event
+// (JOURNALED_GENERAL_OPTIONS), so the smoke counts how many it has sent.
+let rememberToggles = 0;
+
 async function remember(observer, value) {
+  rememberToggles += 1;
   observer.sendIntent("SetGeneralOption", undefined, { key: "rememberSortPerLocation", value });
   await waitFor(() => observer.state.settings.general.rememberSortPerLocation === value,
     { label: `Journal remember sorting ${value}` });
@@ -133,6 +138,7 @@ export async function verifyJournalSort(browser, observer) {
     await navigate(browser, observer, "left", "journal");
     await expectOrder(browser, observer, "left", "name", "asc");
     const initialIds = entryIds(observer.state.panels.left);
+    const togglesAtBaseline = rememberToggles;
     assert.ok(initialIds.length >= 2, "Journal needs real earlier operation events");
     for (const by of ["name", "size", "date"]) {
       for (const order of ["desc", "asc"]) await setSort(browser, observer, "left", by, order);
@@ -179,8 +185,13 @@ export async function verifyJournalSort(browser, observer) {
     await reloadBrowserApp(browser, "Journal sorting");
     await expectOrder(browser, observer, createdTab, "date", "asc");
     await refresh(browser, observer, createdTab);
-    assert.deepEqual(entryIds(observer.state.panels[createdTab]), initialIds,
-      "ordinary sort changes must not add Journal events");
+    // Sort changes add nothing; only the setting toggles sent since the
+    // baseline may appear, and no earlier event may disappear.
+    const currentIds = entryIds(observer.state.panels[createdTab]);
+    assert.deepEqual(currentIds.filter((id) => initialIds.includes(id)), initialIds,
+      "earlier Journal events must be retained");
+    assert.equal(currentIds.length - initialIds.length, rememberToggles - togglesAtBaseline,
+      "ordinary sort changes must not add Journal events (only setting toggles are audited)");
 
     // Reset removes both remembered keys and adds real audit events. Their
     // arrival must preserve the current ascending order rather than prepend.

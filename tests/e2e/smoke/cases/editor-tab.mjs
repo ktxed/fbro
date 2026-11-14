@@ -592,6 +592,9 @@ async function runNotesFolderSettingFlow(browser, observer) {
   const customHost = hostPath(customBackend);
   fs.rmSync(customHost, { recursive: true, force: true });
 
+  // The editor tab closed just before this (backend-confirmed only); wait for
+  // the listing to own focus so the Settings chord is not sent mid-handoff.
+  await expectListingFocus(browser, "left", null, "listing focus before opening Settings");
   // Settings → General → Notes folder: relative paths are rejected inline.
   await chord(browser, [KEY.ctrl], ",");
   const input = await browser.$('[data-testid="settings-notes-folder"]');

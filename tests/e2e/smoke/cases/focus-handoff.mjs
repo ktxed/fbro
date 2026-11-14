@@ -122,6 +122,14 @@ export async function runFocusHandoffFlow(browser, observer) {
     await clickEntry(browser, "left", "a.txt");
     await browser.keys("ArrowRight");
     const inlineSelector = `${panelSelector} [data-entry-name="a.txt"] [data-inline-operation="panel.pass-to-bro"]`;
+    // Right Arrow enters the bar on its first choice (Edit for text files);
+    // step on until the Pass to Bro choice is focused.
+    for (let step = 0; step < 6; step += 1) {
+      const onOpener = await browser.execute((selector) =>
+        document.querySelector(selector) === document.activeElement, inlineSelector);
+      if (onOpener) break;
+      await browser.keys("ArrowRight");
+    }
     await expectFocus(browser, inlineSelector, "inline opener");
     await chord(browser, "\uE009", "d");
     await bookmarks.waitForDisplayed({ timeout: 5_000 });
