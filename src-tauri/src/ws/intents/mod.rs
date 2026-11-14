@@ -76,13 +76,13 @@ pub(crate) fn job_file_location(
 pub async fn dispatch(name: &str, scope: &Value, args: &Value, ctx: &mut IntentContext<'_>) {
     // The journal observes semantic commands, not frontend/backend chatter.
     // Its own source is explicitly excluded to prevent recursive audit events.
-    if should_record_command(name)
+    if should_record_intent(name, args)
         && args.get("sourceId").and_then(Value::as_str) != Some(crate::journal::SOURCE_ID)
     {
         crate::journal::record_command(
             name,
             scope,
-            args,
+            &journal_args(name, args),
             args.get("sourceId").and_then(Value::as_str),
         );
     }
@@ -256,12 +256,65 @@ fn should_record_command(name: &str) -> bool {
             | "EjectSource"
             | "OpenEditorTab"
             | "CreateNote"
+            | "LaunchOpenWithApp"
+            | "RevealInFileManager"
+            | "GenerateFedupDeleteDryRun"
+            | "SaveSyncReport"
+            | "SaveFedupReport"
+            | "StartPairing"
+            | "ConfirmPairing"
+            | "EnableSharing"
+            | "SetSharedTargets"
+            | "SetSharedSources"
+            | "SetSharingIpv6"
+            | "ClearCache"
+            | "ClearThumbnailCache"
+            | "AddBookmark"
+            | "RemoveBookmark"
+            | "CancelJob"
+            | "DeleteQueuedJob"
+            | "StartSearch"
     )
+}
+
+/// `SetGeneralOption` is journaled only for keys that change file-operation
+/// or persistence behaviour; theme, editor-view and thumbnail tuning keys are
+/// ordinary preferences and stay out (see settings.md).
+const JOURNALED_GENERAL_OPTIONS: &[&str] = &[
+    "rememberSortPerLocation",
+    "preserveAttributes",
+    "autoResumeCopies",
+    "ludicrousMode",
+    "osNotificationsEnabled",
+    "rememberWindowState",
+    "persistPanelTabs",
+];
+
+fn should_record_intent(name: &str, args: &Value) -> bool {
+    if name == "SetGeneralOption" {
+        return args
+            .get("key")
+            .and_then(Value::as_str)
+            .is_some_and(|key| JOURNALED_GENERAL_OPTIONS.contains(&key));
+    }
+    should_record_command(name)
+}
+
+/// Arguments as persisted in the journal. Report saves carry the whole job
+/// result (potentially huge file lists), so only the job id is kept.
+fn journal_args(name: &str, args: &Value) -> Value {
+    match name {
+        "SaveSyncReport" | "SaveFedupReport" => {
+            serde_json::json!({ "jobId": args.get("jobId").cloned().unwrap_or(Value::Null) })
+        }
+        _ => args.clone(),
+    }
 }
 
 #[cfg(test)]
 mod notification_journal_tests {
-    use super::should_record_command;
+    use super::{journal_args, should_record_command, should_record_intent};
+    use serde_json::json;
 
     #[test]
     fn notifications_housekeeping_does_not_persist_notification_payloads_in_the_journal() {
@@ -278,6 +331,33 @@ mod notification_journal_tests {
         for chatter in ["SaveEditorFile", "LoadEditorSession", "ReturnToOriginTab", "OpenNotes"] {
             assert!(!should_record_command(chatter), "{chatter}");
         }
+    }
+
+    #[test]
+    fn sharing_pairing_and_external_launches_are_journaled() {
+        for name in [
+            "LaunchOpenWithApp", "RevealInFileManager", "GenerateFedupDeleteDryRun",
+            "SaveSyncReport", "SaveFedupReport", "StartPairing", "ConfirmPairing",
+            "EnableSharing", "SetSharedTargets", "SetSharedSources", "SetSharingIpv6",
+            "ClearCache", "ClearThumbnailCache", "AddBookmark", "RemoveBookmark",
+            "CancelJob", "DeleteQueuedJob", "StartSearch",
+        ] {
+            assert!(should_record_command(name), "{name}");
+        }
+    }
+
+    #[test]
+    fn general_options_are_journaled_by_allow_list() {
+        assert!(should_record_intent("SetGeneralOption", &json!({ "key": "ludicrousMode", "value": true })));
+        assert!(!should_record_intent("SetGeneralOption", &json!({ "key": "editorWordWrap", "value": true })));
+        assert!(!should_record_intent("SetGeneralOption", &json!({ "value": true })));
+    }
+
+    #[test]
+    fn report_saves_drop_the_job_result_from_the_journal() {
+        let args = json!({ "jobId": "j1", "result": { "files": [1, 2, 3] } });
+        assert_eq!(journal_args("SaveSyncReport", &args), json!({ "jobId": "j1" }));
+        assert_eq!(journal_args("AddBookmark", &args), args);
     }
 }
 

@@ -29,6 +29,22 @@ the client; no preference, authorization state, notification history, or command
 journal is changed. The success reply acknowledges the launch request, not a
 permission grant. Settings consumes correlated replies and shows failures inline.
 
+### Command journal coverage
+
+Intents listed in `should_record_command` (`ws/intents/mod.rs`) are written to
+the journal as `intent.command.v1` at dispatch, before they run, so they record
+the request, not its outcome. Besides file mutations, this covers external
+launches (`OpenFile`, `LaunchOpenWithApp`, `RevealInFileManager`, `OpenTerminal`),
+report and script writes (`SaveSyncReport`, `SaveFedupReport`,
+`GenerateFedupDeleteDryRun`), sharing and pairing (`EnableSharing`,
+`SetShared*`, `SetSharingIpv6`, `StartPairing`, `ConfirmPairing`), cache
+clears, bookmarks, `CancelJob`, `DeleteQueuedJob` and `StartSearch`.
+`SetGeneralOption` is journaled only for the allow-listed keys in
+`JOURNALED_GENERAL_OPTIONS` (file-operation and persistence behaviour); view,
+editor and thumbnail preferences are not. Report saves persist only `jobId`,
+never the job result. Cursor, selection, sort, navigation, tab and viewer
+intents stay out.
+
 Settings snapshots and patches also expose `general.editorWordWrap`,
 `editorLineNumbers` and `editorShowWhitespace` (booleans). `SetGeneralOption`
 with one of those keys and a boolean persists it (`general.editor_word_wrap`,
