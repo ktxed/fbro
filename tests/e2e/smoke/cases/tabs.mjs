@@ -233,8 +233,19 @@ export async function runTabsFlow(browser, observer) {
     const listingFocused = (panelId) => browser.execute((id) =>
       !!document.activeElement?.closest(`[data-panel-id="${id}"]`), panelId);
     const tabMenu = '[data-testid="tab-context-menu"]';
+    // Like auxclick above: a WebDriver right click on WebKitWebDriver/Wayland
+    // leaves input state behind that drops Shift from later typed keys ("!"
+    // arrives as "1" in the editor flow), so dispatch the event directly.
+    const contextClick = (selector) => browser.execute((selector) => {
+      const el = document.querySelector(selector);
+      const r = el.getBoundingClientRect();
+      el.dispatchEvent(new MouseEvent("contextmenu", {
+        bubbles: true, cancelable: true, button: 2,
+        clientX: r.left + r.width / 2, clientY: r.top + r.height / 2,
+      }));
+    }, selector);
     const beforeDuplicate = [...(await snapshot(observer)).tabPanelIds];
-    await browser.$(chip(a)).click({ button: "right" });
+    await contextClick(chip(a));
     await browser.$(tabMenu).waitForExist();
     const menuLabels = await browser.execute((selector) => Array.from(
       document.querySelectorAll(`${selector} [role="menuitem"]`), (el) => el.textContent), tabMenu);
@@ -254,11 +265,11 @@ export async function runTabsFlow(browser, observer) {
     const afterDuplicate = observer.state.slots.left.tabPanelIds;
     assert.equal(afterDuplicate.indexOf(duplicate), afterDuplicate.indexOf(a) + 1, "duplicate sits right after its origin");
     assert.equal(observer.state.panels[duplicate].path, observer.state.panels[a].path);
-    await browser.$(chip(duplicate)).click({ button: "right" });
+    await contextClick(chip(duplicate));
     await browser.$('[data-testid="tab-menu-close"]').click();
     await expectOrder(beforeDuplicate);
     await waitFor(() => listingFocused(a), { label: "tab menu close returns focus to the listing" });
-    await browser.$(chip(a)).click({ button: "right" });
+    await contextClick(chip(a));
     await browser.$(tabMenu).waitForExist();
     await browser.keys("Escape");
     await browser.$(tabMenu).waitForExist({ reverse: true });
@@ -271,7 +282,7 @@ export async function runTabsFlow(browser, observer) {
     const startPath = observer.state.panels[a].path;
     const crumbCount = await browser.execute((selector) => document.querySelectorAll(selector).length, crumbs);
     assert.ok(crumbCount >= 2, `fixture path ${startPath} needs a parent breadcrumb`);
-    await browser.$(`[data-panel-id="${a}"] [data-testid="breadcrumb-${crumbCount - 1}"]`).click({ button: "right" });
+    await contextClick(`[data-panel-id="${a}"] [data-testid="breadcrumb-${crumbCount - 1}"]`);
     await browser.$(crumbMenu).waitForExist();
     assert.equal(await browser.$('[data-testid="breadcrumb-menu-navigate"]').isExisting(), false, "leaf has no Navigate to");
     await browser.$('[data-testid="breadcrumb-menu-copy-path"]').click();
@@ -280,7 +291,7 @@ export async function runTabsFlow(browser, observer) {
     await waitFor(() => listingFocused(a), { label: "breadcrumb menu returns focus to the listing" });
     const parentCrumb = `[data-panel-id="${a}"] [data-testid="breadcrumb-${crumbCount - 2}"]`;
     const parentPath = await browser.$(parentCrumb).getAttribute("title");
-    await browser.$(parentCrumb).click({ button: "right" });
+    await contextClick(parentCrumb);
     await browser.$('[data-testid="breadcrumb-menu-navigate"]').click();
     await waitFor(async () => (await snapshot(observer)) && observer.state.panels[a].path === parentPath,
       { label: "breadcrumb Navigate to" });
