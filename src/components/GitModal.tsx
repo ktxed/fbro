@@ -73,7 +73,7 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
   const canSetUpstream = !git.upstream && git.clean && !git.detached;
   const showForcePushOptions = activity?.action === "GitPush"
     && activity.status === "failed"
-    && /\brejected\b/i.test(activity.message);
+    && /\brejected\b|non-fast-forward|failed to push/i.test(activity.message);
   const pullDisabledMessage = !git.clean ? "Requires no staged changes" : !git.upstream ? "No upstream configured" : git.behindCount === 0 ? "Already up to date" : "Remote status unavailable — fetch first";
   const pushDisabledMessage = !git.upstream ? "No upstream configured — set an upstream first" : git.aheadCount === 0 ? "No outgoing commits" : "Remote status unavailable — fetch first";
   const actionInFlight = activity?.status === "running";
