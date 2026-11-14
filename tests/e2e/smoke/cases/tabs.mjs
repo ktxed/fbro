@@ -249,7 +249,12 @@ export async function runTabsFlow(browser, observer) {
     await browser.$(tabMenu).waitForExist();
     const menuLabels = await browser.execute((selector) => Array.from(
       document.querySelectorAll(`${selector} [role="menuitem"]`), (el) => el.textContent), tabMenu);
-    assert.deepEqual(menuLabels, ["Duplicate", "Close"]);
+    const aIndex = beforeDuplicate.indexOf(a);
+    assert.deepEqual(menuLabels, [
+      "Duplicate", "Close", "Close others",
+      ...(aIndex > 0 ? ["Close to the left"] : []),
+      ...(aIndex < beforeDuplicate.length - 1 ? ["Close to the right"] : []),
+    ]);
     // The menu owns input: a panel key underneath stays inert.
     const cursorBeforeMenuKey = observer.state.panels[a].cursor;
     await browser.keys("End");
@@ -275,6 +280,55 @@ export async function runTabsFlow(browser, observer) {
     await browser.$(tabMenu).waitForExist({ reverse: true });
     await waitFor(() => listingFocused(a), { label: "tab menu Escape returns focus to the listing" });
     await expectOrder(beforeDuplicate);
+
+    // Close to the left / right close exactly the tabs on that side of the
+    // right-clicked one, showing it first when the shown tab is among them.
+    // The fixture tabs are moved to the strip's edge so only they sit on the
+    // closing side; "Close others" would take the app's own tabs, so its
+    // resolution is left to the Rust tests.
+    const keep = await create();
+    const closeSide = async (side, closing) => {
+      observer.sendIntent("panel.tab.switch", undefined, { slotId: "left", panelId: closing[closing.length - 1] });
+      await waitFor(async () => (await snapshot(observer)).activePanelId === closing[closing.length - 1],
+        { label: `closing ${side} tab shown` });
+      await contextClick(chip(keep));
+      await browser.$(`[data-testid="tab-menu-close-${side}"]`).click();
+      await browser.$(tabMenu).waitForExist({ reverse: true });
+    };
+    const assertSideEntries = async (left, right) => {
+      await contextClick(chip(keep));
+      await browser.$(tabMenu).waitForExist();
+      assert.equal(await browser.$('[data-testid="tab-menu-close-left"]').isExisting(), left, "Close to the left offered");
+      assert.equal(await browser.$('[data-testid="tab-menu-close-right"]').isExisting(), right, "Close to the right offered");
+      await browser.keys("Escape");
+      await browser.$(tabMenu).waitForExist({ reverse: true });
+    };
+
+    const leftGone = [await create(), await create()];
+    for (const panelId of [...leftGone, keep]) {
+      observer.sendIntent("ReorderPanelTab", undefined, { slotId: "left", panelId, beforePanelId: beforeDuplicate[0] });
+    }
+    await expectOrder([...leftGone, keep, ...beforeDuplicate]);
+    await closeSide("left", leftGone);
+    await expectOrder([keep, ...beforeDuplicate]);
+    assert.equal(observer.state.slots.left.activePanelId, keep, "Close to the left shows the right-clicked tab");
+    await waitFor(() => listingFocused(keep), { label: "Close to the left returns focus to the listing" });
+    await assertSideEntries(false, true);
+
+    const rightGone = [await create(), await create()];
+    for (const panelId of [keep, ...rightGone]) {
+      observer.sendIntent("ReorderPanelTab", undefined, { slotId: "left", panelId, beforePanelId: null });
+    }
+    await expectOrder([...beforeDuplicate, keep, ...rightGone]);
+    await closeSide("right", rightGone);
+    await expectOrder([...beforeDuplicate, keep]);
+    assert.equal(observer.state.slots.left.activePanelId, keep, "Close to the right shows the right-clicked tab");
+    await waitFor(() => listingFocused(keep), { label: "Close to the right returns focus to the listing" });
+    await assertSideEntries(true, false);
+    observer.sendIntent("panel.tab.close", undefined, { panelId: keep });
+    await expectOrder(beforeDuplicate);
+    observer.sendIntent("panel.tab.switch", undefined, { slotId: "left", panelId: a });
+    await waitFor(async () => (await snapshot(observer)).activePanelId === a, { label: "menu fixture tab active again" });
 
     // Breadcrumb context menu: Copy path everywhere, Navigate to except on the leaf.
     const crumbs = `[data-panel-id="${a}"] [data-testid^="breadcrumb-"]`;

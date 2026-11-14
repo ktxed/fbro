@@ -79,3 +79,24 @@ export function requestCloseTab(
   if (editor) void flushEditor(editor.sessionId).then(() => client.sendIntent("panel.tab.close", undefined, { panelId }));
   else client.sendIntent("panel.tab.close", undefined, { panelId });
 }
+
+export type CloseTabsWhich = "others" | "left" | "right";
+
+/**
+ * Close the tabs around `panelId`: all others, or those on one side. The
+ * backend resolves which tabs that is; editor tabs that may close save first.
+ */
+export function requestCloseTabs(
+  slot: PanelSlot,
+  panels: Record<string, PanelState>,
+  client: WsClient,
+  panelId: string,
+  which: CloseTabsWhich,
+): void {
+  const editors = slot.tabPanelIds
+    .filter((id) => id !== panelId)
+    .map((id) => panels[id]?.editor)
+    .filter((editor) => !!editor);
+  void Promise.all(editors.map((editor) => flushEditor(editor.sessionId)))
+    .then(() => client.sendIntent("ClosePanelTabs", undefined, { panelId, which }));
+}

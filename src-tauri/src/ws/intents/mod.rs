@@ -198,7 +198,7 @@ pub async fn dispatch(name: &str, scope: &Value, args: &Value, ctx: &mut IntentC
         "OpenPanelTerminal" | "QuickEditFile" | "ResizeTerminal" | "ClosePanelTerminal" => {
             terminal::handle(name, scope, args, ctx).await
         }
-        "panel.tab.new" | "panel.tab.close" | "panel.tab.switch" | "panel.terminal.promote" | "ReorderPanelTab" => {
+        "panel.tab.new" | "panel.tab.close" | "ClosePanelTabs" | "panel.tab.switch" | "panel.terminal.promote" | "ReorderPanelTab" => {
             tabs::handle(name, scope, args, ctx).await
         }
         "OpenEditorTab"

@@ -1,5 +1,5 @@
 import { autoUpdate, flip, FloatingPortal, offset, shift, useFloating } from "@floating-ui/react";
-import { IconClipboardCopy, IconCopyPlus, IconFolderOpen, IconX, type Icon } from "@tabler/icons-react";
+import { IconArrowBarToLeft, IconArrowBarToRight, IconClipboardCopy, IconCopyPlus, IconFolderOpen, IconSquareX, IconX, type Icon } from "@tabler/icons-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useAppDispatch, useAppState, type AppState, type PendingChromeMenu } from "../store";
 import { useColorScheme } from "../theme/useColorScheme";
@@ -7,9 +7,9 @@ import { useFocusReturn } from "../hooks/useFocusReturn";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { handoffFocusToOpener } from "../utils/focusReturn";
 import type { WsClient } from "../ws/client";
-import { requestCloseTab } from "./tabTitles";
+import { requestCloseTab, requestCloseTabs } from "./tabTitles";
 
-type ChromeMenuAction = "duplicate" | "close" | "copy-path" | "navigate";
+type ChromeMenuAction = "duplicate" | "close" | "close-others" | "close-left" | "close-right" | "copy-path" | "navigate";
 
 interface ChromeMenuItem {
   action: ChromeMenuAction;
@@ -19,6 +19,9 @@ interface ChromeMenuItem {
 const ACTION_ICONS: Record<ChromeMenuAction, Icon> = {
   duplicate: IconCopyPlus,
   close: IconX,
+  "close-others": IconSquareX,
+  "close-left": IconArrowBarToLeft,
+  "close-right": IconArrowBarToRight,
   "copy-path": IconClipboardCopy,
   navigate: IconFolderOpen,
 };
@@ -39,10 +42,17 @@ function canDuplicateTab(state: AppState, panelId: string): boolean {
 function menuItems(state: AppState, menu: PendingChromeMenu): ChromeMenuItem[] {
   if (menu.kind === "tab") {
     const slot = state.slots[menu.slotId];
-    if (!slot?.tabPanelIds.includes(menu.tabPanelId)) return [];
+    const index = slot?.tabPanelIds.indexOf(menu.tabPanelId) ?? -1;
+    if (!slot || index < 0) return [];
+    const count = slot.tabPanelIds.length;
     return [
       ...(canDuplicateTab(state, menu.tabPanelId) ? [{ action: "duplicate" as const, label: "Duplicate" }] : []),
-      ...(slot.tabPanelIds.length > 1 ? [{ action: "close" as const, label: "Close" }] : []),
+      ...(count > 1 ? [
+        { action: "close" as const, label: "Close" },
+        { action: "close-others" as const, label: "Close others" },
+      ] : []),
+      ...(index > 0 ? [{ action: "close-left" as const, label: "Close to the left" }] : []),
+      ...(index < count - 1 ? [{ action: "close-right" as const, label: "Close to the right" }] : []),
     ];
   }
   return [
@@ -110,6 +120,9 @@ export function ChromeContextMenu({ client, menu }: { client: WsClient; menu: Pe
         });
       } else if (item.action === "close") {
         requestCloseTab(slot, state.panels, client, menu.tabPanelId);
+      } else if (item.action === "close-others" || item.action === "close-left" || item.action === "close-right") {
+        const which = item.action === "close-others" ? "others" : item.action === "close-left" ? "left" : "right";
+        requestCloseTabs(slot, state.panels, client, menu.tabPanelId, which);
       }
       return;
     }

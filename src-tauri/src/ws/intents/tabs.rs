@@ -12,6 +12,7 @@ pub(crate) async fn handle(name: &str, _scope: &Value, args: &Value, ctx: &mut I
     match name {
         "panel.tab.new" => new_tab(args, ctx).await,
         "panel.tab.close" => close_tab(args, ctx).await,
+        "ClosePanelTabs" => close_panel_tabs(args, ctx).await,
         "panel.tab.switch" => switch_tab(args, ctx).await,
         "ReorderPanelTab" => reorder_tab(args, ctx).await,
         "panel.terminal.promote" => promote_terminal(args, ctx).await,
@@ -404,10 +405,60 @@ async fn new_tab(args: &Value, ctx: &mut IntentContext<'_>) {
 }
 
 async fn close_tab(args: &Value, ctx: &mut IntentContext<'_>) {
-    let panel_id = match args.get("panelId").and_then(Value::as_str) {
-        Some(s) => s.to_string(),
-        None => return,
+    let Some(panel_id) = super::arg_str(args, "panelId") else {
+        return;
     };
+    close_tab_by_id(panel_id.to_string(), ctx).await;
+}
+
+/// The siblings of `panelId` that `ClosePanelTabs` closes, in strip order:
+/// every other tab (`which: "others"`), or those on its `"left"` / `"right"`.
+/// A tab outside the slot or an unknown `which` resolves to nothing.
+fn tabs_to_close(slot: &PanelSlot, panel_id: &str, which: &str) -> Option<Vec<String>> {
+    let index = slot.tab_panel_ids.iter().position(|id| id == panel_id)?;
+    let ids = &slot.tab_panel_ids;
+    let closing: Vec<String> = match which {
+        "others" => ids.iter().filter(|id| *id != panel_id).cloned().collect(),
+        "left" => ids[..index].to_vec(),
+        "right" => ids[index + 1..].to_vec(),
+        _ => return None,
+    };
+    Some(closing)
+}
+
+/// Close several tabs of one slot around the tab the menu was opened on. When
+/// the shown tab is among them, that tab is shown first, so the panel lands on
+/// the kept tab instead of walking through neighbours that are about to close.
+async fn close_panel_tabs(args: &Value, ctx: &mut IntentContext<'_>) {
+    let (Some(panel_id), Some(which)) = (super::arg_str(args, "panelId"), super::arg_str(args, "which")) else {
+        return;
+    };
+    let (slot_id, closing, active_closes) = {
+        let state = ctx.state.lock().await;
+        let Some(slot_id) = state.panels.get(panel_id).map(|panel| panel.slot_id.clone()) else {
+            return;
+        };
+        let Some(slot) = state.slots.get(&slot_id) else {
+            return;
+        };
+        let Some(closing) = tabs_to_close(slot, panel_id, which) else {
+            return;
+        };
+        let active_closes = closing.contains(&slot.active_panel_id);
+        (slot_id, closing, active_closes)
+    };
+    if closing.is_empty() {
+        return;
+    }
+    if active_closes {
+        switch_tab(&serde_json::json!({ "slotId": slot_id, "panelId": panel_id }), ctx).await;
+    }
+    for id in closing {
+        close_tab_by_id(id, ctx).await;
+    }
+}
+
+async fn close_tab_by_id(panel_id: String, ctx: &mut IntentContext<'_>) {
 
     // An editor tab finishes any in-flight save before it goes away.
     let editor_lock = {
@@ -982,6 +1033,21 @@ mod tests {
                 version: 0,
             }))
             .collect()
+    }
+
+    #[test]
+    fn tabs_to_close_resolves_siblings_by_side() {
+        let slots = slots();
+        let left = &slots["left"];
+        let ids = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(super::tabs_to_close(left, "b", "others"), Some(ids(&["a", "c", "d"])));
+        assert_eq!(super::tabs_to_close(left, "b", "left"), Some(ids(&["a"])));
+        assert_eq!(super::tabs_to_close(left, "b", "right"), Some(ids(&["c", "d"])));
+        assert_eq!(super::tabs_to_close(left, "a", "left"), Some(vec![]));
+        assert_eq!(super::tabs_to_close(left, "d", "right"), Some(vec![]));
+        assert_eq!(super::tabs_to_close(&slots["right"], "other", "others"), Some(vec![]));
+        assert_eq!(super::tabs_to_close(left, "other", "others"), None, "tab of another slot");
+        assert_eq!(super::tabs_to_close(left, "b", "middle"), None, "unknown side");
     }
 
     #[test]

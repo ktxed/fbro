@@ -444,6 +444,7 @@ baseline on `Welcome`, allowing counters to restart after a backend restart.
 |---|---|---|
 | `panel.tab.new` | `{ slotId, source: "clone", panelId? }` | Creates a new tab after the active tab and activates it; clones an active local filesystem listing, otherwise opens the user's Home directory. With `panelId` (a tab of `slotId`) it duplicates that tab instead, inserts after it, and is a no-op when that tab is not a local filesystem listing or not in the slot. |
 | `panel.tab.close` | `{ panelId }` | Closes the tab; activates the tab to its left. No-op when this is the slot's only tab. |
+| `ClosePanelTabs` | `{ panelId, which: "others" \| "left" \| "right" }` | Closes the other tabs of `panelId`'s slot, or those on one side; activates `panelId` first when the active tab is among them. See [tabs.md §3.4a](tabs.md). |
 | `panel.tab.switch` | `{ slotId, panelId }` | Activates `panelId` within `slotId`. |
 | `ReorderPanelTab` | `{ slotId, panelId, beforePanelId: string \| null }` | Moves a tab before a sibling in the same slot; explicit null appends. Valid changed requests broadcast only a slot patch with the order and unchanged active tab. Focus and panel state are preserved. Missing/malformed, stale, cross-slot and unchanged requests are no-ops. Recorded in the command journal; no new reply type. |
 | `panel.tab.rename` | `{ panelId, title }` | Sets `tabTitle` override (FUTURE — protocol only). |

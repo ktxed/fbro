@@ -123,6 +123,22 @@ stateDiagram-v2
 5. An editor tab first waits for any save in flight, and afterwards discards
    an untouched new note (§5a.4).
 
+### 3.4a Close several tabs (`ClosePanelTabs`)
+
+The tab context menu's **Close others**, **Close to the left** and **Close to
+the right** send `{ panelId, which: "others" | "left" | "right" }`.
+
+1. Resolve the tabs against the current backend order of `panelId`'s slot:
+   every sibling, or those before / after it. An unknown tab or `which`, or an
+   empty side, is a no-op.
+2. If the active tab is among them, activate `panelId` first (as
+   `panel.tab.switch`), so the panel lands on the kept tab instead of
+   reseating through neighbours that are about to close.
+3. Close each tab through the `panel.tab.close` path (§3.4), in strip order.
+   The frontend flushes the slot's other editor tabs before sending.
+
+Like `panel.tab.close`, it is not recorded in the command journal.
+
 ### 3.5 Terminal promotion (`panel.terminal.promote`)
 
 1. Read `source_panel.terminal_session = Some(sid)`.
@@ -173,6 +189,7 @@ Reordering is recorded in the command journal.
 |---|---|---|
 | `panel.tab.new` | `{ slotId, source: "clone", panelId? }` | New tab cloning active source + path, or duplicating tab `panelId`. |
 | `panel.tab.close` | `{ panelId }` | Close tab; no-op when it's the only tab. |
+| `ClosePanelTabs` | `{ panelId, which: "others" \| "left" \| "right" }` | Close the other tabs, or those left/right of `panelId` (§3.4a). |
 | `panel.tab.switch` | `{ slotId, panelId }` | Activate a tab. |
 | `ReorderPanelTab` | `{ slotId, panelId, beforePanelId: string \| null }` | Move before a sibling, or append when target is null. |
 | `panel.tab.rename` | `{ panelId, title }` | Override tab title (protocol only, no UI yet). |
@@ -434,9 +451,10 @@ graph TD
     PanelTabBar --> TabChip["TabChip ×N"]
     TabChip -- left-click --> switch["panel.tab.switch"]
     TabChip -- middle-click/× --> close["panel.tab.close"]
-    TabChip -- right-click --> ChromeContextMenu["ChromeContextMenu\nDuplicate / Close"]
+    TabChip -- right-click --> ChromeContextMenu["ChromeContextMenu\nDuplicate / Close / Close others / left / right"]
     ChromeContextMenu -- Duplicate --> new["panel.tab.new { panelId }"]
     ChromeContextMenu -- Close --> close
+    ChromeContextMenu -- Close others / to the left / to the right --> closeMany["ClosePanelTabs { panelId, which }"]
     Panel --> PanelTabList["PanelTabList\n(searchable tab list)"]
     PanelTabBar -- count button (overflow only) --> PanelTabList
     PanelTabList -- Enter / row click --> switch
