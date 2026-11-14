@@ -14,7 +14,7 @@ import { useAppDispatch, useAppState, type PendingContextMenu } from "../store";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { useFocusReturn } from "../hooks/useFocusReturn";
 import { handoffFocusToOpener } from "../utils/focusReturn";
-import { resolveColorScheme } from "../theme/colorSchemes";
+import { useColorScheme } from "../theme/useColorScheme";
 import { contextualOperationAvailable, resolveContextualTarget } from "../contextualOperations";
 import type { WsClient } from "../ws/client";
 
@@ -30,7 +30,7 @@ export function ContextMenu({ client, menu }: ContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
   const returnFocusRef = useFocusReturn(menu.panelId);
   const [highlightedIndex, setHighlightedIndex] = useState(0);
-  const colorScheme = resolveColorScheme(state.settings.general.activeColorScheme);
+  const colorScheme = useColorScheme();
 
   const items = useMemo(
     () => {
@@ -322,6 +322,7 @@ export function ContextMenu({ client, menu }: ContextMenuProps) {
       <div
         className="context-menu__overlay"
         data-color-scheme={colorScheme.id}
+        data-color-scheme-base={colorScheme.base}
         style={{ colorScheme: colorScheme.mode }}
         onMouseDown={close}
         onContextMenu={(e) => e.preventDefault()}
