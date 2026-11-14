@@ -3435,6 +3435,29 @@ body {
   flex-shrink: 0;
 }
 
+.context-menu__label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.context-menu__icon {
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+
+/* Keeps labels aligned if an item has no icon. */
+.context-menu__icon--blank {
+  width: 15px;
+  height: 15px;
+}
+
+.context-menu__item:hover .context-menu__icon,
+.context-menu__item--active .context-menu__icon {
+  color: var(--text);
+}
+
 .context-menu__separator {
   height: 1px;
   background: var(--border);

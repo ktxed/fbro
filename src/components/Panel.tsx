@@ -612,12 +612,16 @@ function buildBreadcrumbs(path: string): Array<{ label: string; path: string }> 
   return crumbs;
 }
 
-function PathBreadcrumbs({ panelId, path, client, shadowSource }: {
+type CrumbIntent = { name: string; scope?: string; args?: Record<string, unknown> };
+
+function PathBreadcrumbs({ panelId, path, client, shadowSource, blocked }: {
   panelId: string;
   path: string;
   client: WsClient;
   shadowSource?: import("../ws/types").ShadowSource;
+  blocked: boolean;
 }) {
+  const dispatch = useAppDispatch();
   const listRef = useRef<HTMLDivElement>(null);
 
   // When inside an archive, build breadcrumbs for the archive's host path first,
@@ -659,11 +663,36 @@ function PathBreadcrumbs({ panelId, path, client, shadowSource }: {
 
   const fullTitle = shadowSource ? `${shadowSource.archivePath} :: ${path || "/"}` : path;
 
+  /** What a click on crumb `index` does; null when it does nothing. */
+  const crumbIntent = (index: number): CrumbIntent | null => {
+    const crumb = allCrumbs[index];
+    const isArchiveSegment = index < archiveBoundary;
+    const isArchiveFile = index === archiveBoundary - 1;
+    const isLast = index === allCrumbs.length - 1;
+    if (isArchiveSegment && !isArchiveFile) {
+      // A host-path crumb while in an archive: navigate up and out.
+      return { name: "NavigateHome", scope: "focused-panel" };
+    }
+    if (isArchiveFile && !isLast) {
+      // The archive crumb while inside it: navigate to the archive root.
+      return { name: "NavigatePanelTo", scope: panelId, args: { panelId, path: "" } };
+    }
+    if (isArchiveFile) return null;
+    // Within the archive, or a plain listing.
+    return { name: "NavigatePanelTo", scope: panelId, args: { panelId, path: crumb.path } };
+  };
+
+  /** Inner archive crumbs are archive-relative; copy them under the archive. */
+  const crumbCopyPath = (index: number): string => {
+    const crumb = allCrumbs[index];
+    if (!shadowSource || index < archiveBoundary) return crumb.path;
+    return `${shadowSource.archivePath.replace(/[/\\]+$/, "")}/${crumb.path}`;
+  };
+
   return (
     <div className="panel__path" title={fullTitle}>
       <div className="panel__path-scroll" ref={listRef} onWheel={handleWheel}>
         {allCrumbs.map((crumb, index) => {
-          const isArchiveSegment = index < archiveBoundary;
           const isArchiveFile = index === archiveBoundary - 1;
           const isInner = shadowSource && index >= archiveBoundary;
           const isLast = index === allCrumbs.length - 1;
@@ -681,19 +710,26 @@ function PathBreadcrumbs({ panelId, path, client, shadowSource }: {
                 className={`panel__breadcrumb-btn${isLast ? " panel__breadcrumb-btn--active" : ""}${colorClass}`}
                 type="button"
                 tabIndex={-1}
+                data-testid={`breadcrumb-${index}`}
                 onClick={() => {
-                  if (isArchiveSegment && !isArchiveFile) {
-                    // Clicking a host-path crumb while in archive: navigate up and out.
-                    client.sendIntent("NavigateHome", "focused-panel");
-                  } else if (isArchiveFile && !isLast) {
-                    // Clicking the archive root crumb while inside: navigate to archive root.
-                    client.sendIntent("NavigatePanelTo", panelId, { panelId, path: "" });
-                  } else if (isInner || (shadowSource && isLast && index >= archiveBoundary)) {
-                    // Navigate within the archive.
-                    client.sendIntent("NavigatePanelTo", panelId, { panelId, path: crumb.path });
-                  } else if (!shadowSource) {
-                    client.sendIntent("NavigatePanelTo", panelId, { panelId, path: crumb.path });
-                  }
+                  const intent = crumbIntent(index);
+                  if (intent) client.sendIntent(intent.name, intent.scope, intent.args);
+                }}
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  if (blocked) return;
+                  const rect = event.currentTarget.getBoundingClientRect();
+                  const navigate = isLast ? null : crumbIntent(index);
+                  dispatch({ type: "OPEN_CHROME_MENU", menu: {
+                    kind: "breadcrumb",
+                    panelId,
+                    copyPath: crumbCopyPath(index),
+                    ...(navigate ? { navigate } : {}),
+                    anchorLeft: rect.left,
+                    anchorRight: rect.right,
+                    anchorTop: rect.top,
+                    anchorBottom: rect.bottom,
+                  } });
                 }}
                 title={crumb.path}
               >
@@ -2635,7 +2671,7 @@ export function Panel({
       ) : (
       <>
       <div className={`panel__header${gitHeaderState ? ` panel__header--git-${gitHeaderState}` : ""}`}>
-        <PathBreadcrumbs panelId={panelId} path={panel.path} client={client} shadowSource={panel.shadowSource} />
+        <PathBreadcrumbs panelId={panelId} path={panel.path} client={client} shadowSource={panel.shadowSource} blocked={modalActive} />
         {panel.git && <button className={`panel__git-btn panel__git-btn--${gitHeaderState}`} tabIndex={-1} data-tooltip-id={`git-chip-${panelId}`} data-tooltip-content={panel.git.clean ? `Git ${panel.git.branch}: no staged changes` : `Git ${panel.git.branch}: staged changes present — switching is allowed when Git can preserve them; pull remains disabled`} onClick={openGitRepository}><IconGitBranch size={16} /><span className="panel__git-btn-label">{panel.git.branch}</span>{!panel.git.clean && <IconAlertTriangle className="panel__git-btn-warning" size={13} />}</button>}
         <button
           className="panel__home-btn"

@@ -35,7 +35,7 @@ and sharing patches do not move focus. Covered Settings controls remain inert.
 
 - `ModalStackProvider` captures key and focus events and routes them to the top
   `ModalLayer`.
-- `Layout` passes `hasActiveModal || pendingContextMenu || pendingSourceMenu || bookmarksOpen` to panels as their
+- `Layout` passes `hasActiveModal || pendingContextMenu || pendingSourceMenu || pendingChromeMenu || bookmarksOpen` to panels as their
   modal guard. A guarded panel suppresses keyboard actions and focus intents.
 - `Toolbar` uses the same conditions to suppress modal-opening and file-command
   shortcuts. Zoom shortcuts remain global.
@@ -135,6 +135,10 @@ and sharing patches do not move focus. Covered Settings controls remain inert.
   palette or source context menu. Its native list control owns selection keys;
   Escape closes and restores focus. The source menu owns arrows, Enter, and
   Escape while open.
+- The panel-chrome menu (`ChromeContextMenu`, right-click on a tab chip or a
+  breadcrumb) is mouse-opened only — no binding yet. Once open it behaves like
+  the source menu: it owns arrows, Home/End, Enter, and Escape, and closing it
+  returns focus to the panel listing that held it.
 - Enter and ArrowRight on a local directory symlink open its resolved target
   as a panel location. F3 on a local file symlink views the target file; a
   broken symlink reports an error instead of opening a viewer.

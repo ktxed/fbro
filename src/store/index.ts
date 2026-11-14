@@ -178,6 +178,24 @@ export interface PendingContextMenu {
 
 export type EjectAction = "unmount-volume" | "eject-drive";
 
+/** Right-click menu on panel chrome: a tab chip or a breadcrumb segment. */
+export type PendingChromeMenu = {
+  panelId: string;
+  anchorLeft: number;
+  anchorRight: number;
+  anchorTop: number;
+  anchorBottom: number;
+} & (
+  | { kind: "tab"; slotId: string; tabPanelId: string }
+  | {
+      kind: "breadcrumb";
+      /** Path copied by "Copy path". */
+      copyPath: string;
+      /** Intent run by "Navigate to"; absent for the leaf segment. */
+      navigate?: { name: string; scope?: string; args?: Record<string, unknown> };
+    }
+);
+
 export interface PendingEject {
   sourceId: string | null;
   action: EjectAction | null;
@@ -338,6 +356,7 @@ export interface AppState {
   pendingDryRun: PendingDryRun | null;
   pendingContextMenu: PendingContextMenu | null;
   pendingSourceMenu: PendingSourceMenu | null;
+  pendingChromeMenu: PendingChromeMenu | null;
   pendingEject: PendingEject | null;
   pendingGlobalSelectionAdd: PendingGlobalSelectionAdd | null;
   pendingOpenWith: PendingOpenWith | null;
@@ -444,6 +463,7 @@ const initialState: AppState = {
   pendingDryRun: null,
   pendingContextMenu: null,
   pendingSourceMenu: null,
+  pendingChromeMenu: null,
   pendingEject: null,
   pendingGlobalSelectionAdd: null,
   pendingOpenWith: null,
@@ -525,6 +545,8 @@ export type AppAction =
   | { type: "CLOSE_CONTEXT_MENU" }
   | { type: "OPEN_SOURCE_MENU"; menu: PendingSourceMenu }
   | { type: "CLOSE_SOURCE_MENU" }
+  | { type: "OPEN_CHROME_MENU"; menu: PendingChromeMenu }
+  | { type: "CLOSE_CHROME_MENU" }
   | { type: "OPEN_EJECT"; eject: PendingEject }
   | { type: "CLOSE_EJECT" }
   | { type: "SUBMIT_EJECT"; requestId: string; sourceId: string; action: EjectAction }
@@ -1983,6 +2005,10 @@ function reducer(state: AppState, action: AppAction): AppState {
       return { ...state, pendingSourceMenu: action.menu, pendingContextMenu: null };
     case "CLOSE_SOURCE_MENU":
       return { ...state, pendingSourceMenu: null };
+    case "OPEN_CHROME_MENU":
+      return { ...state, pendingChromeMenu: action.menu, pendingContextMenu: null, pendingSourceMenu: null };
+    case "CLOSE_CHROME_MENU":
+      return { ...state, pendingChromeMenu: null };
     case "OPEN_EJECT":
       return { ...state, pendingEject: action.eject, pendingSourceMenu: null, commandPaletteOpen: false };
     case "CLOSE_EJECT":

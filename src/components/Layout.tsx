@@ -25,6 +25,7 @@ import { CheatSheetModal } from "./CheatSheetModal";
 import { AboutModal } from "./AboutModal";
 import { ContextMenu } from "./ContextMenu";
 import { SourceContextMenu } from "./SourceContextMenu";
+import { ChromeContextMenu } from "./ChromeContextMenu";
 import { EjectModal } from "./EjectModal";
 import { OpenWithModal } from "./OpenWithModal";
 import { BroModal } from "./BroModal";
@@ -438,7 +439,7 @@ export function Layout({ client, jobsViewOpen, onCloseJobsView, onOpenJobsView }
   }
 
   const activeJob = state.activeJobId ? state.jobs[state.activeJobId] ?? null : null;
-  const modalActive = hasActiveModal || state.pendingContextMenu !== null || state.pendingSourceMenu !== null || state.bookmarksOpen !== null;
+  const modalActive = hasActiveModal || state.pendingContextMenu !== null || state.pendingSourceMenu !== null || state.pendingChromeMenu !== null || state.bookmarksOpen !== null;
 
   const dragCursorClass = dragOutInProgress
     ? "layout--drag-out"
@@ -604,6 +605,7 @@ export function Layout({ client, jobsViewOpen, onCloseJobsView, onOpenJobsView }
         <ContextMenu client={client} menu={state.pendingContextMenu} />
       )}
       {state.pendingSourceMenu && <SourceContextMenu menu={state.pendingSourceMenu} />}
+      {state.pendingChromeMenu && <ChromeContextMenu client={client} menu={state.pendingChromeMenu} />}
       {state.pendingEject && <EjectModal client={client} />}
       {state.pendingGlobalSelectionAdd && (
         <GlobalSelectionModal client={client} add={state.pendingGlobalSelectionAdd} />

@@ -171,8 +171,9 @@ settings modal; its confirmation is rendered in that settings surface rather
 than as a second layer.
 
 The removable-source picker uses one `ModalLayer` and `ModalDialog`; its
-whole-drive warning is part of that dialog. The source-bar context menu is a
-transient overlay and blocks panel and toolbar keys until it closes.
+whole-drive warning is part of that dialog. The source-bar context menu and
+the panel-chrome menu (tabs, breadcrumbs) are transient overlays and block
+panel and toolbar keys until they close.
 
 When adding or converting a full-screen dialog:
 

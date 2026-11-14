@@ -215,6 +215,30 @@ pub(super) async fn broadcast_slot_change(
     }
 }
 
+/// The tab a new tab is seeded from and inserted after.
+#[derive(Debug, PartialEq)]
+struct NewTabOrigin {
+    panel_id: String,
+    /// Set for an explicit `panelId`: the new tab must be a copy of it.
+    duplicate: bool,
+}
+
+/// Resolve the origin tab of `panel.tab.new`: the requested `panelId` when it
+/// belongs to the slot, the active tab when none is given. A stale or foreign
+/// `panelId` resolves to nothing rather than quietly cloning another tab.
+fn new_tab_origin(slot: &PanelSlot, args: &Value) -> Option<NewTabOrigin> {
+    match args.get("panelId") {
+        None | Some(Value::Null) => Some(NewTabOrigin {
+            panel_id: slot.active_panel_id.clone(),
+            duplicate: false,
+        }),
+        Some(Value::String(id)) if slot.tab_panel_ids.iter().any(|tab| tab == id) => {
+            Some(NewTabOrigin { panel_id: id.clone(), duplicate: true })
+        }
+        Some(_) => None,
+    }
+}
+
 async fn new_tab(args: &Value, ctx: &mut IntentContext<'_>) {
     let slot_id = match args.get("slotId").and_then(Value::as_str) {
         Some(s) => s.to_string(),
@@ -222,13 +246,18 @@ async fn new_tab(args: &Value, ctx: &mut IntentContext<'_>) {
     };
     // Clone local filesystem listings. Virtual, remote, and terminal tabs do
     // not carry a safe filesystem context to duplicate, so they seed at Home.
+    // An explicit `panelId` duplicates that tab instead of the active one and
+    // never falls back to Home: a duplicate that is not a copy is a no-op.
     let (new_panel, driver, sort, filter, show_hidden, version) = {
         let mut state_guard = ctx.state.lock().await;
 
         let Some(slot) = state_guard.slots.get(&slot_id).cloned() else {
             return;
         };
-        let Some(source) = state_guard.panels.get(&slot.active_panel_id).cloned() else {
+        let Some(origin) = new_tab_origin(&slot, args) else {
+            return;
+        };
+        let Some(source) = state_guard.panels.get(&origin.panel_id).cloned() else {
             return;
         };
 
@@ -242,6 +271,10 @@ async fn new_tab(args: &Value, ctx: &mut IntentContext<'_>) {
             source.shadow_source.is_some(),
             active_driver.map(|item| item.is_local()).unwrap_or(false),
         );
+
+        if origin.duplicate && !clone_active {
+            return;
+        }
 
         let mut source_paths = source.source_paths.clone();
         let (new_source_id, new_path, git) = if clone_active {
@@ -320,13 +353,13 @@ async fn new_tab(args: &Value, ctx: &mut IntentContext<'_>) {
             .panels
             .insert(new_panel_id.clone(), new_panel.clone());
         if let Some(slot) = state_guard.slots.get_mut(&slot_id) {
-            let active_idx = slot
+            let origin_idx = slot
                 .tab_panel_ids
                 .iter()
-                .position(|id| id == &slot.active_panel_id)
+                .position(|id| id == &origin.panel_id)
                 .unwrap_or(slot.tab_panel_ids.len().saturating_sub(1));
             slot.tab_panel_ids
-                .insert(active_idx + 1, new_panel_id.clone());
+                .insert(origin_idx + 1, new_panel_id.clone());
             slot.active_panel_id = new_panel_id.clone();
         }
         // Move focus to the newly created tab.
@@ -995,6 +1028,36 @@ mod tests {
             assert_eq!(slots["left"].tab_panel_ids, ["a", "b", "c", "d"]);
             assert_eq!(slots["left"].active_panel_id, "b");
             assert_eq!(slots["right"].tab_panel_ids, ["other"]);
+        }
+    }
+
+    #[test]
+    fn new_tab_origin_defaults_to_active_and_honours_a_tab_of_the_slot() {
+        let slots = slots();
+        let left = &slots["left"];
+        for args in [json!({"slotId":"left"}), json!({"slotId":"left", "panelId":null})] {
+            assert_eq!(
+                super::new_tab_origin(left, &args),
+                Some(super::NewTabOrigin { panel_id: "b".into(), duplicate: false }),
+            );
+        }
+        for id in ["a", "b", "d"] {
+            assert_eq!(
+                super::new_tab_origin(left, &json!({"slotId":"left", "panelId":id})),
+                Some(super::NewTabOrigin { panel_id: id.into(), duplicate: true }),
+            );
+        }
+    }
+
+    #[test]
+    fn new_tab_origin_rejects_stale_foreign_and_malformed_tabs() {
+        let slots = slots();
+        for args in [
+            json!({"slotId":"left", "panelId":"gone"}),
+            json!({"slotId":"left", "panelId":"other"}),
+            json!({"slotId":"left", "panelId":1}),
+        ] {
+            assert_eq!(super::new_tab_origin(&slots["left"], &args), None, "{args}");
         }
     }
 

@@ -24,7 +24,8 @@ export type ContextualOperationId =
   | "file.set_permissions"
   | "file.delete"
   | "clipboard.names"
-  | "clipboard.paths";
+  | "clipboard.paths"
+  | "clipboard.folder";
 
 export interface OperationCardinality {
   min: number;
@@ -67,6 +68,7 @@ export const OPERATION_CARDINALITY: Record<ContextualOperationId, OperationCardi
   "file.delete": { min: 1 },
   "clipboard.names": { min: 1 },
   "clipboard.paths": { min: 1 },
+  "clipboard.folder": { min: 1 },
 };
 
 function entryAt(panel: PanelState, absIndex: number): VFSEntry | undefined {
@@ -218,5 +220,8 @@ export function contextualOperationAvailable(
       return true;
     case "clipboard.paths":
       return isLocalFilesystem || isGlobalInside;
+    case "clipboard.folder":
+      // The global selection has no folder of its own; its entries have.
+      return isLocalFilesystem;
   }
 }

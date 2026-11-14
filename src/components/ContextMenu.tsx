@@ -7,9 +7,14 @@ import {
   size,
   useFloating,
 } from "@floating-ui/react";
+import {
+  IconAppWindow, IconClipboardCopy, IconClipboardList, IconClipboardText, IconEdit,
+  IconFolderSearch, IconGitCompare, IconRobot, IconStack2, type Icon,
+} from "@tabler/icons-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { bindingMatches, executeTargetedCommand } from "../commands/interactive";
-import { buildContextMenuItems } from "../contextMenu";
+import { buildContextMenuItems, type ContextMenuItem } from "../contextMenu";
+import { COMMAND_ICONS } from "../commands/commandIcons";
 import { useAppDispatch, useAppState, type PendingContextMenu } from "../store";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { useFocusReturn } from "../hooks/useFocusReturn";
@@ -17,6 +22,23 @@ import { handoffFocusToOpener } from "../utils/focusReturn";
 import { useColorScheme } from "../theme/useColorScheme";
 import { contextualOperationAvailable, resolveContextualTarget } from "../contextualOperations";
 import type { WsClient } from "../ws/client";
+
+/** Items that are not registry commands, or whose palette icon doesn't fit. */
+const ITEM_ICONS: Partial<Record<string, Icon>> = {
+  "platform.reveal": IconFolderSearch,
+  "platform.open-with": IconAppWindow,
+  "panel.pass-to-bro": IconRobot,
+  "git.view-diff": IconGitCompare,
+  "selection.to-global": IconStack2,
+  "file.edit_builtin": IconEdit,
+  "clipboard.names": IconClipboardText,
+  "clipboard.paths": IconClipboardCopy,
+  "clipboard.folder": IconClipboardList,
+};
+
+function itemIcon(item: Exclude<ContextMenuItem, { kind: "separator" }>): Icon | undefined {
+  return ITEM_ICONS[item.id] ?? (item.commandId ? COMMAND_ICONS[item.commandId] : undefined);
+}
 
 interface ContextMenuProps {
   client: WsClient;
@@ -59,6 +81,8 @@ export function ContextMenu({ client, menu }: ContextMenuProps) {
           canSetPermissions: can("file.set_permissions"),
           canDelete: can("file.delete"),
           canCopyFullPath: can("clipboard.paths"),
+          canCopyFolderPath: can("clipboard.folder"),
+          folderPath: panel?.path,
           targetCount: target.count,
           clipboardNames: target.entries.map((entry) => entry.name).join("\n"),
           clipboardPaths: target.entries.map((entry) => entry.fullPath).join("\n"),
@@ -166,6 +190,10 @@ export function ContextMenu({ client, menu }: ContextMenuProps) {
     }
 
     if (item.kind === "clipboard" && item.clipboardText) {
+      if (item.id === "clipboard.folder") {
+        copyToClipboard(item.clipboardText, "folder path");
+        return;
+      }
       const noun = item.id === "clipboard.paths" ? "full path" : "name";
       copyToClipboard(item.clipboardText, target.count === 1 ? noun : `${target.count} ${noun}s`);
       return;
@@ -339,6 +367,7 @@ export function ContextMenu({ client, menu }: ContextMenuProps) {
             if (item.kind === "separator") {
               return <div key={item.id} className="context-menu__separator" />;
             }
+            const ItemIcon = itemIcon(item);
             return (
               <button
                 key={item.id}
@@ -349,7 +378,12 @@ export function ContextMenu({ client, menu }: ContextMenuProps) {
                 onMouseEnter={() => setHighlightedIndex(index)}
                 onClick={() => { void runItem(index); }}
               >
-                <span>{item.label}</span>
+                <span className="context-menu__label">
+                  {ItemIcon
+                    ? <ItemIcon className="context-menu__icon" size={15} aria-hidden="true" />
+                    : <span className="context-menu__icon context-menu__icon--blank" aria-hidden="true" />}
+                  {item.label}
+                </span>
                 <span className="context-menu__shortcut">{item.shortcut ?? ""}</span>
               </button>
             );

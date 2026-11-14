@@ -80,7 +80,7 @@ export function Toolbar({ client, onOpenJobsView }: { client: WsClient; onOpenJo
         return;
       }
 
-      const blockingModalActive = hasActiveModal || !!state.pendingContextMenu || !!state.pendingSourceMenu || !!state.bookmarksOpen;
+      const blockingModalActive = hasActiveModal || !!state.pendingContextMenu || !!state.pendingSourceMenu || !!state.pendingChromeMenu || !!state.bookmarksOpen;
       const paletteCommand = getCommand(state.commands, COMMAND_PALETTE_COMMAND_ID);
       if (!blockingModalActive && !isEditableTarget(e.target) && paletteCommand && paletteCommand.bindings.some((binding) => bindingMatches(e, binding, state.panels[state.focus]?.viewMode ?? "list"))) {
         e.preventDefault();

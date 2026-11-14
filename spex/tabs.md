@@ -93,9 +93,12 @@ stateDiagram-v2
 ### 3.2 New tab (`panel.tab.new`)
 
 1. If the active panel is a local filesystem listing, clone its `source_id`, `path`, and backend symlink return context; otherwise use the local source containing the user's Home directory and start at Home.
+   With an explicit `panelId` (the tab context menu's **Duplicate**) the origin
+   is that tab instead of the active one; it must belong to `slotId` and be a
+   local filesystem listing, or the intent is a no-op — never a Home tab.
 2. Allocate a new panel id — `{slot}-tab-{n}`, never reissued within a run, so a
    closed tab's id cannot be mistaken for a new tab's by either side — and
-   insert it after the active tab in `tab_panel_ids`.
+   insert it after the origin tab in `tab_panel_ids`.
 3. Set `active_panel_id` to the new panel id; update `focus`.
 4. Emit targeted patches: `panel-upsert` (create:true), `slot`, `layout`, `focus`.
 
@@ -168,7 +171,7 @@ Reordering is recorded in the command journal.
 
 | Intent | Payload | Description |
 |---|---|---|
-| `panel.tab.new` | `{ slotId, source: "clone" }` | New tab cloning active source + path. |
+| `panel.tab.new` | `{ slotId, source: "clone", panelId? }` | New tab cloning active source + path, or duplicating tab `panelId`. |
 | `panel.tab.close` | `{ panelId }` | Close tab; no-op when it's the only tab. |
 | `panel.tab.switch` | `{ slotId, panelId }` | Activate a tab. |
 | `ReorderPanelTab` | `{ slotId, panelId, beforePanelId: string \| null }` | Move before a sibling, or append when target is null. |
@@ -431,6 +434,9 @@ graph TD
     PanelTabBar --> TabChip["TabChip ×N"]
     TabChip -- left-click --> switch["panel.tab.switch"]
     TabChip -- middle-click/× --> close["panel.tab.close"]
+    TabChip -- right-click --> ChromeContextMenu["ChromeContextMenu\nDuplicate / Close"]
+    ChromeContextMenu -- Duplicate --> new["panel.tab.new { panelId }"]
+    ChromeContextMenu -- Close --> close
     Panel --> PanelTabList["PanelTabList\n(searchable tab list)"]
     PanelTabBar -- count button (overflow only) --> PanelTabList
     PanelTabList -- Enter / row click --> switch

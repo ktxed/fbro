@@ -225,6 +225,68 @@ export async function runTabsFlow(browser, observer) {
     await waitFor(async () => (await snapshot(observer)).tabPanelIds.length === prior.length + 1,
       { label: "empty strip double click creates tab" });
     created.push(observer.state.slots.left.tabPanelIds.find((id) => !prior.includes(id)));
+
+    // Tab context menu (mouse only): Duplicate copies the clicked tab right
+    // after it, Close closes it, Escape dismisses and keeps the listing focus.
+    observer.sendIntent("panel.tab.switch", undefined, { slotId: "left", panelId: a });
+    await waitFor(async () => (await snapshot(observer)).activePanelId === a, { label: "menu fixture tab active" });
+    const listingFocused = (panelId) => browser.execute((id) =>
+      !!document.activeElement?.closest(`[data-panel-id="${id}"]`), panelId);
+    const tabMenu = '[data-testid="tab-context-menu"]';
+    const beforeDuplicate = [...(await snapshot(observer)).tabPanelIds];
+    await browser.$(chip(a)).click({ button: "right" });
+    await browser.$(tabMenu).waitForExist();
+    const menuLabels = await browser.execute((selector) => Array.from(
+      document.querySelectorAll(`${selector} [role="menuitem"]`), (el) => el.textContent), tabMenu);
+    assert.deepEqual(menuLabels, ["Duplicate", "Close"]);
+    // The menu owns input: a panel key underneath stays inert.
+    const cursorBeforeMenuKey = observer.state.panels[a].cursor;
+    await browser.keys("End");
+    assert.equal((await snapshot(observer)) && observer.state.panels[a].cursor, cursorBeforeMenuKey);
+    await browser.$('[data-testid="tab-menu-duplicate"]').click();
+    await browser.$(tabMenu).waitForExist({ reverse: true });
+    let duplicate;
+    await waitFor(async () => {
+      duplicate = (await snapshot(observer)).tabPanelIds.find((id) => !beforeDuplicate.includes(id));
+      return duplicate;
+    }, { label: "duplicated tab" });
+    created.push(duplicate);
+    const afterDuplicate = observer.state.slots.left.tabPanelIds;
+    assert.equal(afterDuplicate.indexOf(duplicate), afterDuplicate.indexOf(a) + 1, "duplicate sits right after its origin");
+    assert.equal(observer.state.panels[duplicate].path, observer.state.panels[a].path);
+    await browser.$(chip(duplicate)).click({ button: "right" });
+    await browser.$('[data-testid="tab-menu-close"]').click();
+    await expectOrder(beforeDuplicate);
+    await waitFor(() => listingFocused(a), { label: "tab menu close returns focus to the listing" });
+    await browser.$(chip(a)).click({ button: "right" });
+    await browser.$(tabMenu).waitForExist();
+    await browser.keys("Escape");
+    await browser.$(tabMenu).waitForExist({ reverse: true });
+    await waitFor(() => listingFocused(a), { label: "tab menu Escape returns focus to the listing" });
+    await expectOrder(beforeDuplicate);
+
+    // Breadcrumb context menu: Copy path everywhere, Navigate to except on the leaf.
+    const crumbs = `[data-panel-id="${a}"] [data-testid^="breadcrumb-"]`;
+    const crumbMenu = '[data-testid="breadcrumb-context-menu"]';
+    const startPath = observer.state.panels[a].path;
+    const crumbCount = await browser.execute((selector) => document.querySelectorAll(selector).length, crumbs);
+    assert.ok(crumbCount >= 2, `fixture path ${startPath} needs a parent breadcrumb`);
+    await browser.$(`[data-panel-id="${a}"] [data-testid="breadcrumb-${crumbCount - 1}"]`).click({ button: "right" });
+    await browser.$(crumbMenu).waitForExist();
+    assert.equal(await browser.$('[data-testid="breadcrumb-menu-navigate"]').isExisting(), false, "leaf has no Navigate to");
+    await browser.$('[data-testid="breadcrumb-menu-copy-path"]').click();
+    await waitFor(() => observer.state.notifications.entries.some((entry) => /^(Copied|Couldn't copy) path/.test(entry.message)),
+      { label: "breadcrumb copy feedback" });
+    await waitFor(() => listingFocused(a), { label: "breadcrumb menu returns focus to the listing" });
+    const parentCrumb = `[data-panel-id="${a}"] [data-testid="breadcrumb-${crumbCount - 2}"]`;
+    const parentPath = await browser.$(parentCrumb).getAttribute("title");
+    await browser.$(parentCrumb).click({ button: "right" });
+    await browser.$('[data-testid="breadcrumb-menu-navigate"]').click();
+    await waitFor(async () => (await snapshot(observer)) && observer.state.panels[a].path === parentPath,
+      { label: "breadcrumb Navigate to" });
+    observer.sendIntent("NavigatePanelTo", a, { panelId: a, path: startPath });
+    await waitFor(async () => (await snapshot(observer)) && observer.state.panels[a].path === startPath,
+      { label: "breadcrumb fixture restored" });
   } finally {
     await browser.releaseActions();
     await browser.setWindowSize(1280, 800);

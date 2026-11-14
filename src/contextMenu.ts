@@ -30,6 +30,8 @@ export interface ContextMenuOptions {
   canSetPermissions?: boolean;
   canDelete?: boolean;
   canCopyFullPath?: boolean;
+  canCopyFolderPath?: boolean;
+  folderPath?: string;
   targetCount?: number;
   clipboardNames?: string;
   clipboardPaths?: string;
@@ -117,5 +119,6 @@ export function buildContextMenuItems(
     { id: "separator.clipboard", kind: "separator" },
     { id: "clipboard.names", kind: "clipboard", label: isMultiple ? "Copy names" : "Copy name", clipboardText: options.clipboardNames ?? name },
     ...(options.canCopyFullPath ? [{ id: "clipboard.paths", kind: "clipboard", label: isMultiple ? "Copy full paths" : "Copy full path", clipboardText: options.clipboardPaths ?? fullPath } as ContextMenuItem] : []),
+    ...(options.canCopyFolderPath && options.folderPath ? [{ id: "clipboard.folder", kind: "clipboard", label: "Copy folder path", clipboardText: options.folderPath } as ContextMenuItem] : []),
   ];
 }

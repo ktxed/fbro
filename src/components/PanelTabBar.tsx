@@ -172,7 +172,18 @@ export function PanelTabBar({ slot, panels, sources, client, blocked }: Props) {
               }}
               onContextMenu={(e) => {
                 e.preventDefault();
-                // Rename hook lands here in a future iteration.
+                if (blocked) return;
+                const rect = e.currentTarget.getBoundingClientRect();
+                dispatch({ type: "OPEN_CHROME_MENU", menu: {
+                  kind: "tab",
+                  panelId: slot.activePanelId,
+                  slotId: slot.slotId,
+                  tabPanelId: panelId,
+                  anchorLeft: e.clientX,
+                  anchorRight: e.clientX,
+                  anchorTop: rect.top,
+                  anchorBottom: rect.bottom,
+                } });
               }}
             >
               {panel?.tabKind === "terminal" && (
