@@ -7500,6 +7500,7 @@ body {
 .keyboard-settings__filter > .keyboard-settings__filter-icon { left: 10px; right: auto; width: 1em; height: 1em; }
 .keyboard-settings__search-row input, .keyboard-settings__search-row select { height: max(32px, calc(1.4em + 12px)); line-height: 1.4; }
 .keyboard-settings__help { margin: 0; color: var(--text-muted); font-size: 0.9em; }
+.keyboard-settings__button-bar-keys { display: flex; flex-direction: column; gap: 6px; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
 .keyboard-settings__commands { max-height: 220px; overflow-y: auto; border: 1px solid var(--border); }
 .keyboard-settings__command {
   appearance: none; font: inherit; color: var(--text); background: var(--bg);

@@ -16,7 +16,7 @@ type Editor = { commandId: string; index: number | null; binding: KeyBinding | n
 const contextLabel = (binding: KeyBinding) => !binding.modes?.length || binding.modes.length === 2 ? "Both views" : binding.modes[0] === "list" ? "List only" : "Grid only";
 
 export function SettingsKeyboardTab({ client }: { client: WsClient }) {
-  const { commands, commandRevision, connected } = useAppState();
+  const { commands, commandRevision, connected, settings: { general } } = useAppState();
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("all");
   const [selected, setSelected] = useState("");
@@ -87,6 +87,25 @@ export function SettingsKeyboardTab({ client }: { client: WsClient }) {
   };
 
   return <div className="keyboard-settings" data-testid="keyboard-settings">
+    {general.systemFunctionKeysStandard !== null && <div className="keyboard-settings__button-bar-keys" data-testid="keyboard-button-bar-keys-section">
+      <label className="settings-tab__option">
+        <span>Button bar keys</span>
+        <span className="shortcut-editor__select">
+          <select data-testid="keyboard-button-bar-keys" value={general.buttonBarKeys} disabled={!connected}
+            onChange={event => client.sendIntent("SetGeneralOption", undefined, { key: "buttonBarKeys", value: event.target.value })}>
+            <option value="numbers">Number keys 1–0</option>
+            <option value="function">Function keys F1–F10</option>
+          </select>
+          <IconChevronDown size={14} aria-hidden="true" />
+        </span>
+      </label>
+      <p className="keyboard-settings__help" data-testid="keyboard-button-bar-keys-hint">
+        {general.systemFunctionKeysStandard
+          ? "This Mac sends F1, F2, … without Fn, so function keys work directly."
+          : "This Mac uses F1, F2, … for brightness and media; function keys then need Fn. To change that, turn on “Use F1, F2, etc. keys as standard function keys” in System Settings → Keyboard → Keyboard Shortcuts → Function Keys."}
+        {" "}Customized shortcuts keep their keys.
+      </p>
+    </div>}
     <div className="keyboard-settings__search-row">
       <div className="keyboard-settings__search">
         <IconSearch size={16} aria-hidden="true" />

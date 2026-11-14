@@ -868,6 +868,12 @@ pub struct GeneralSettingsSchema {
     pub notes_folder: String,
     /// Read-only: the folder notes actually use.
     pub notes_folder_resolved: String,
+    /// macOS only: `"numbers"` or `"function"` button-bar defaults.
+    pub button_bar_keys: String,
+    pub function_keys_offer_answered: bool,
+    /// Read-only: macOS "use F1, F2, etc. as standard function keys";
+    /// `null` off macOS. Never skipped so clients can tell the cases apart.
+    pub system_function_keys_standard: Option<bool>,
 }
 
 #[derive(Serialize, Clone, Debug)]

@@ -32,6 +32,7 @@ import { InputModal } from "./InputModal";
 import { SearchModal } from "./SearchModal";
 import { SettingsModal } from "./SettingsModal";
 import { useModalStack } from "./ModalStack";
+import { FunctionKeysOffer } from "./FunctionKeysOffer";
 import { useAppDispatch, useAppState } from "../store";
 import { EmbeddedViewerPanel, type EmbeddedViewerHandle } from "./EmbeddedViewerPanel";
 import type { FileOpFile, FileOpType, PanelState, VFSEntry } from "../ws/types";
@@ -631,6 +632,7 @@ export function Layout({ client, jobsViewOpen, onCloseJobsView, onOpenJobsView }
       {state.pendingSettings && (
         <SettingsModal client={client} />
       )}
+      <FunctionKeysOffer client={client} />
       {activeToast && (
         <div className={`transient-hint transient-hint--${activeToast.level}`} data-testid="transient-hint"
           data-notification-id={activeToast.id} data-pending-count={state.notifications.toastQueue.length}

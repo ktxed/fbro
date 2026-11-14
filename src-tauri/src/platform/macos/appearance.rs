@@ -23,6 +23,14 @@ fn read() -> SystemColorScheme {
     macos_interface_style(style.map(|style| style.to_string()).as_deref())
 }
 
+/// Global `com.apple.keyboard.fnState` (System Settings → Keyboard → Keyboard
+/// Shortcuts → Function Keys → "Use F1, F2, etc. keys as standard function
+/// keys"). Absent means the factory default: media keys, F-keys need Fn.
+pub fn function_keys_standard() -> bool {
+    NSUserDefaults::standardUserDefaults()
+        .boolForKey(&NSString::from_str("com.apple.keyboard.fnState"))
+}
+
 pub async fn start(tx: watch::Sender<Option<SystemColorScheme>>) {
     tx.send_replace(Some(read()));
     let (changed_tx, mut changed_rx) = mpsc::unbounded_channel::<()>();
