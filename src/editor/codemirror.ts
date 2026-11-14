@@ -148,8 +148,10 @@ const codeHighlight = HighlightStyle.define([
 // fold the whole file. Fold and unfold at the cursor stay.
 const foldKeys = foldKeymap.filter((binding) => !binding.key?.startsWith("Ctrl-Alt-"));
 
-/** F3 belongs to the viewer in fbro; Mod-g still finds the next match. */
-const searchKeys = searchKeymap.filter((binding) => binding.key !== "F3");
+/** F3 belongs to the viewer in fbro; Mod-g still finds the next match.
+ *  Mod-Shift-l (Select All Occurrences) is fbro's Tab List (`panel.tab.list`);
+ *  Mod-d (select next match) stays for multi-cursor editing. */
+const searchKeys = searchKeymap.filter((binding) => binding.key !== "F3" && binding.key !== "Mod-Shift-l");
 
 function editorKeys(handlers: EditorHandlers): KeyBinding[] {
   return [

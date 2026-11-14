@@ -267,6 +267,7 @@ commands type text. Only these leave the editor:
 | `panel.viewer.embed` binding (Ctrl+F3, macOS Cmd+3) | Save, then toggle quick preview |
 | `notes.new` binding (Ctrl+Shift+F4, macOS Cmd+Alt+4) | Save, then create another note in a tab after this one |
 | `panel.tab.next` / `panel.tab.prev` (Ctrl+Tab / Ctrl+Shift+Tab, literal Ctrl on macOS too) | Save, then activate the next/previous tab in the slot (wraps) |
+| `panel.tab.list` (Ctrl/Cmd+Shift+L) | Open the tab list (CodeMirror's Select All Occurrences on that key is removed) |
 | `app.command_palette` (Ctrl/Cmd+Shift+P) | Open the command palette; closing it returns focus to the editor |
 | Tab / Shift+Tab | Indent / un-indent (CodeMirror `indentWithTab`), so Next Source (Shift+Tab) is unavailable in an editor tab; Escape is the way out, per CodeMirror's guidance for Tab-capturing editors |
 

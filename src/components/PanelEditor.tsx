@@ -85,7 +85,7 @@ function passThrough(command: InteractiveCommand | undefined, event: KeyboardEve
 }
 
 /** Registry commands the editor hands to the app unchanged. */
-const RELEASED_COMMAND_IDS = ["panel.tab.next", "panel.tab.prev", "app.command_palette"] as const;
+const RELEASED_COMMAND_IDS = ["panel.tab.next", "panel.tab.prev", "panel.tab.list", "app.command_palette"] as const;
 
 interface PanelEditorProps {
   panelId: string;
