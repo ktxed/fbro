@@ -45,10 +45,18 @@ const DEV_TEXT_EXTENSIONS = new Set([
   "c", "h", "cc", "cpp", "cxx", "hpp", "hh", "hxx", "cs", "m", "mm",
   "sh", "bash", "zsh", "fish", "ps1", "bat", "cmd",
   "sql", "graphql", "gql", "proto", "tf", "hcl", "gradle", "cmake", "mk", "lock", "diff", "patch",
+  // checksum files (`<digest>  <name>` lines), including the .b3 files fbro's hash bro writes
+  "b3", "b2", "blake2", "md5", "sha1", "sha224", "sha256", "sha384", "sha512", "sha3",
+  "md5sum", "sha1sum", "sha256sum", "sha512sum", "b3sum", "b2sum", "crc", "crc32", "sfv",
+  // SSH and PEM key material (OpenSSH, PuTTY)
+  "pub", "pem", "ppk", "key",
 ]);
 
 const DEV_TEXT_NAMES = new Set([
   "makefile", "dockerfile", "readme", "license", "changelog", "gemfile", "rakefile", "justfile", "cargo.lock",
+  "md5sums", "sha1sums", "sha256sums", "sha512sums", "b3sums", "b2sums", "checksums", "checksum", "hashes",
+  "id_rsa", "id_dsa", "id_ecdsa", "id_ecdsa_sk", "id_ed25519", "id_ed25519_sk",
+  "authorized_keys", "authorized_keys2", "known_hosts", "allowed_signers", "config", "ssh_config", "sshd_config",
 ]);
 
 /** True for source/config/text files worth offering "Edit" for (Enter would otherwise open an OS handler). */

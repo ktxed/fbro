@@ -55,7 +55,7 @@ the applicable general operations.
 | View Git diff, Stage / Unstage, Rollback | exactly 1 | Single changed Git file; rollback retains its in-place confirmation |
 | Preview | exactly 1 | Image file on a thumbnail-capable source; hover/focus shows the thumbnail and activation opens the viewer |
 | Compare | 1–2 | Exactly two selected files, or a single selected file that differs from the file under the cursor — the own panel's lone selection, otherwise the other panel's single selection (a cross-panel pair with one selection per panel) |
-| Edit | exactly 1 | First choice (after status-specific ones). Pencil icon. Only for local files whose name/extension is developer text (`isDeveloperTextPath`: `.yml`, `.ts`, `.rs`, `.md`, `.txt`, dotfiles, `Makefile`…), where Enter would otherwise open an OS handler; opens an editor tab. The context menu offers *Edit in Editor Tab* for any non-binary file |
+| Edit | exactly 1 | First choice (after status-specific ones). Pencil icon. Only for local files whose name/extension is developer text (`isDeveloperTextPath`: `.yml`, `.ts`, `.rs`, `.md`, `.txt`, checksum files such as `.b3`, `.md5`, `.sha256` and `SHA256SUMS`, SSH keys (`id_ed25519`, `.pub`, `.pem`, `authorized_keys`, `known_hosts`), dotfiles, `Makefile`…), where Enter would otherwise open an OS handler; opens an editor tab. The context menu offers *Edit in Editor Tab* for any non-binary file |
 | Pass to Bro | 1+ | Supported panel target; archive providers remain choices inside Bro |
 | Copy / Move / Delete | 1+ | Source advertises the corresponding capability; normal confirmation still applies |
 | Rename | exactly 1 | Cursor-text icon (also used by the context menu and toolbar). Mounted local filesystem advertises `Rename`, or global-selection root |
