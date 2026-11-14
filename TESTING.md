@@ -507,6 +507,15 @@ APIs. Check the affected platforms when changing these areas:
   opener restoration, both themes, and WebView controls. The smoke harness checks
   viewer-launch intents but cannot verify the backend's separate native viewer
   window or its OS focus handoff.
+- **macOS button-bar keys:** Manual only; Linux reports no
+  `systemFunctionKeysStandard`, so smoke never reaches the offer. On a Mac with
+  "Use F1, F2, etc. keys as standard function keys" on, the launch offer
+  appears with focus on **Use function keys** and returns focus to the panel;
+  accepting switches View/Copy/… to F3/F5 and the button bar labels; **Keep
+  number keys** is not asked again, Escape asks on the next launch; Settings →
+  Shortcuts → Button bar keys switches both ways. With the setting off, no
+  offer appears. Rust tests cover the registry defaults and customized-binding
+  precedence.
 - **Media:** Native audio output and codec support; the MP3 smoke case mocks
   playback. Check HEIC/HEIF decoding in both F3 and embedded preview, including
   macOS native decoding and optional conversion on Linux/Windows.
