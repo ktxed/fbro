@@ -1,3 +1,4 @@
+use crate::state::settings::ButtonBarKeys;
 use crate::ws::protocol::{InteractiveCommandSchema, KeyBindingSchema, KeyStrokeSchema};
 
 /// Platform whose default bindings the registry describes. The running app
@@ -45,8 +46,10 @@ fn keybinding_with_modifiers(
     }
 }
 
-fn toolbar_binding(mac: bool, function_key: &str, mac_key: &str) -> KeyBindingSchema {
-    if mac {
+/// Button-bar command binding: F-keys, except on macOS while the user keeps
+/// the number-key defaults (see `GeneralSettings::button_bar_keys`).
+fn toolbar_binding(number_keys: bool, function_key: &str, mac_key: &str) -> KeyBindingSchema {
+    if number_keys {
         keybinding(mac_key)
     } else {
         keybinding(function_key)
@@ -89,14 +92,19 @@ fn command(
     }
 }
 
-pub(crate) fn build_interactive_commands() -> Vec<InteractiveCommandSchema> {
-    build_interactive_commands_for(CommandPlatform::current())
+/// Defaults for the running platform. `button_bar_keys` only affects macOS.
+pub(crate) fn build_interactive_commands(
+    button_bar_keys: ButtonBarKeys,
+) -> Vec<InteractiveCommandSchema> {
+    build_interactive_commands_for(CommandPlatform::current(), button_bar_keys)
 }
 
 pub(crate) fn build_interactive_commands_for(
     platform: CommandPlatform,
+    button_bar_keys: ButtonBarKeys,
 ) -> Vec<InteractiveCommandSchema> {
     let mac = platform == CommandPlatform::MacOs;
+    let number_keys = mac && button_bar_keys == ButtonBarKeys::Numbers;
     let mut commands = vec![
         command(
             "app.command_palette",
@@ -168,14 +176,14 @@ pub(crate) fn build_interactive_commands_for(
             "file.rename",
             "File",
             "Rename",
-            vec![toolbar_binding(mac, "F2", "2")],
+            vec![toolbar_binding(number_keys, "F2", "2")],
             None,
         ),
         command(
             "panel.pass_to_bro",
             "File",
             "Pass to Bro",
-            vec![toolbar_binding(mac, "F1", "1")],
+            vec![toolbar_binding(number_keys, "F1", "1")],
             Some("ListBros"),
         ),
         command(
@@ -189,7 +197,7 @@ pub(crate) fn build_interactive_commands_for(
             "file.view",
             "File",
             "View",
-            vec![toolbar_binding(mac, "F3", "3")],
+            vec![toolbar_binding(number_keys, "F3", "3")],
             None,
         ),
         command(
@@ -207,7 +215,7 @@ pub(crate) fn build_interactive_commands_for(
             "file.edit",
             "File",
             "Edit",
-            vec![toolbar_binding(mac, "F4", "4")],
+            vec![toolbar_binding(number_keys, "F4", "4")],
             None,
         ),
         command(
@@ -225,7 +233,7 @@ pub(crate) fn build_interactive_commands_for(
             "file.copy",
             "File Operation",
             "Copy",
-            vec![toolbar_binding(mac, "F5", "5")],
+            vec![toolbar_binding(number_keys, "F5", "5")],
             None,
         ),
         command(
@@ -239,7 +247,7 @@ pub(crate) fn build_interactive_commands_for(
             "file.move",
             "File Operation",
             "Move",
-            vec![toolbar_binding(mac, "F6", "6")],
+            vec![toolbar_binding(number_keys, "F6", "6")],
             None,
         ),
         command(
@@ -275,14 +283,14 @@ pub(crate) fn build_interactive_commands_for(
             "file.mkdir",
             "File",
             "Create Directory",
-            vec![toolbar_binding(mac, "F7", "7")],
+            vec![toolbar_binding(number_keys, "F7", "7")],
             None,
         ),
         command(
             "file.delete",
             "File Operation",
             "Delete",
-            vec![toolbar_binding(mac, "F8", "8")],
+            vec![toolbar_binding(number_keys, "F8", "8")],
             None,
         ),
         command(
@@ -296,14 +304,14 @@ pub(crate) fn build_interactive_commands_for(
             "app.open_terminal",
             "App",
             "Open Terminal",
-            vec![toolbar_binding(mac, "F9", "9")],
+            vec![toolbar_binding(number_keys, "F9", "9")],
             Some("OpenTerminal"),
         ),
         command(
             "app.quit",
             "App",
             "Quit",
-            vec![toolbar_binding(mac, "F10", "0")],
+            vec![toolbar_binding(number_keys, "F10", "0")],
             Some("Quit"),
         ),
         command(
@@ -755,12 +763,13 @@ pub(crate) fn build_interactive_commands_for(
 #[cfg(test)]
 mod tests {
     use super::{build_interactive_commands, build_interactive_commands_for, CommandPlatform};
+    use crate::state::settings::ButtonBarKeys;
 
     /// Default bindings for every platform, as published by the user-guide
     /// site (`site/src/data/commands.json`).
     fn site_commands_json() -> String {
         let platform = |platform| {
-            build_interactive_commands_for(platform)
+            build_interactive_commands_for(platform, ButtonBarKeys::Numbers)
                 .into_iter()
                 .map(|c| {
                     serde_json::json!({
@@ -807,7 +816,7 @@ mod tests {
     #[test]
     fn platform_variants_differ_only_where_expected() {
         let find = |platform, id: &str| {
-            build_interactive_commands_for(platform)
+            build_interactive_commands_for(platform, ButtonBarKeys::Numbers)
                 .into_iter()
                 .find(|c| c.id == id)
                 .unwrap_or_else(|| panic!("{id}"))
@@ -819,7 +828,7 @@ mod tests {
         let palette = find(CommandPlatform::MacOs, "app.command_palette");
         assert!(palette.bindings[0].strokes[0].meta);
         let has_eject = |platform| {
-            build_interactive_commands_for(platform)
+            build_interactive_commands_for(platform, ButtonBarKeys::Numbers)
                 .iter()
                 .any(|c| c.id == "app.eject_source")
         };
@@ -827,9 +836,40 @@ mod tests {
         assert!(!has_eject(CommandPlatform::Windows));
     }
 
+    /// macOS button-bar commands default to F1–F10 once the user opts in;
+    /// other platforms always use F-keys and ignore the preference.
+    #[test]
+    fn mac_button_bar_keys_choose_function_keys() {
+        let key = |platform, keys, id: &str| {
+            build_interactive_commands_for(platform, keys)
+                .into_iter()
+                .find(|c| c.id == id)
+                .unwrap_or_else(|| panic!("{id}"))
+                .default_bindings[0]
+                .strokes[0]
+                .key
+                .clone()
+        };
+        for (id, f, digit) in [("file.view", "F3", "3"), ("file.copy", "F5", "5"), ("app.quit", "F10", "0")] {
+            assert_eq!(key(CommandPlatform::MacOs, ButtonBarKeys::Numbers, id), digit);
+            assert_eq!(key(CommandPlatform::MacOs, ButtonBarKeys::Function, id), f);
+            assert_eq!(key(CommandPlatform::Linux, ButtonBarKeys::Numbers, id), f);
+            assert_eq!(key(CommandPlatform::Windows, ButtonBarKeys::Function, id), f);
+        }
+        let digits = build_interactive_commands_for(CommandPlatform::MacOs, ButtonBarKeys::Function)
+            .into_iter()
+            .filter(|c| c.default_bindings.iter().any(|b| {
+                let s = &b.strokes[0];
+                s.key.len() == 1 && s.key.chars().all(|c| c.is_ascii_digit()) && !s.ctrl && !s.meta && !s.alt && !s.shift
+            }))
+            .map(|c| c.id)
+            .collect::<Vec<_>>();
+        assert!(digits.is_empty(), "plain digit defaults remain: {digits:?}");
+    }
+
     #[test]
     fn about_is_available_without_reserving_a_shortcut() {
-        let commands = build_interactive_commands();
+        let commands = build_interactive_commands(ButtonBarKeys::Numbers);
         let about = commands
             .iter()
             .find(|command| command.id == "app.about")
@@ -841,7 +881,7 @@ mod tests {
 
     #[test]
     fn cheat_sheet_binding_is_question_mark_and_not_shared() {
-        let commands = build_interactive_commands();
+        let commands = build_interactive_commands(ButtonBarKeys::Numbers);
         let sheet = commands.iter().find(|c| c.id == "app.cheat_sheet").expect("cheat sheet command");
         assert_eq!(sheet.category, "App");
         assert_eq!(sheet.bindings.len(), 1);
@@ -859,7 +899,7 @@ mod tests {
 
     #[test]
     fn new_note_binding_is_not_shared() {
-        let commands = build_interactive_commands();
+        let commands = build_interactive_commands(ButtonBarKeys::Numbers);
         let find = |id: &str| commands.iter().find(|c| c.id == id).unwrap_or_else(|| panic!("{id}"));
         let edit = find("notes.new");
         let stroke = |c: &super::InteractiveCommandSchema| {
@@ -882,7 +922,7 @@ mod tests {
             c.bindings.iter().map(|b| serde_json::to_string(&b.strokes).unwrap()).collect::<Vec<_>>()
         };
         for platform in [CommandPlatform::Linux, CommandPlatform::MacOs, CommandPlatform::Windows] {
-            let commands = build_interactive_commands_for(platform);
+            let commands = build_interactive_commands_for(platform, ButtonBarKeys::Numbers);
             let find = |id: &str| commands.iter().find(|c| c.id == id).unwrap_or_else(|| panic!("{id}"));
             let list = find("panel.tab.list");
             assert_eq!(list.category, "Panel");
@@ -912,7 +952,7 @@ mod tests {
             c.bindings.iter().map(|b| serde_json::to_string(&b.strokes).unwrap()).collect::<Vec<_>>()
         };
         for platform in [CommandPlatform::Linux, CommandPlatform::MacOs, CommandPlatform::Windows] {
-            let commands = build_interactive_commands_for(platform);
+            let commands = build_interactive_commands_for(platform, ButtonBarKeys::Numbers);
             let find = |id: &str| commands.iter().find(|c| c.id == id).unwrap_or_else(|| panic!("{id}"));
             for (id, shift) in [("panel.tab.next", false), ("panel.tab.prev", true)] {
                 let command = find(id);
@@ -932,7 +972,7 @@ mod tests {
     #[test]
     fn source_next_is_shift_tab_and_previous_is_unbound() {
         for platform in [CommandPlatform::Linux, CommandPlatform::MacOs, CommandPlatform::Windows] {
-            let commands = build_interactive_commands_for(platform);
+            let commands = build_interactive_commands_for(platform, ButtonBarKeys::Numbers);
             let find = |id: &str| commands.iter().find(|c| c.id == id).unwrap_or_else(|| panic!("{id}"));
             let next = find("panel.source.next");
             assert_eq!(next.bindings.len(), 1);

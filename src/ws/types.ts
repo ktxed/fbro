@@ -839,6 +839,12 @@ export interface GeneralSettings {
   notesFolder: string;
   /** Read-only: the folder notes actually use. */
   notesFolderResolved: string;
+  /** macOS only: default keys for the button-bar commands. */
+  buttonBarKeys: "numbers" | "function";
+  /** macOS only: the one-time offer to switch to function keys was answered. */
+  functionKeysOfferAnswered: boolean;
+  /** Read-only: macOS "use F1, F2, etc. as standard function keys"; null off macOS. */
+  systemFunctionKeysStandard: boolean | null;
 }
 
 export interface ModalSizePreference {

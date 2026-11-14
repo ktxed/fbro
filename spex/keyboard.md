@@ -535,6 +535,15 @@ within one command are invalid. A stale revision rejects even an Override;
 users must review and retry with the current registry. No dispatch or label
 changes until the complete candidate settings have been saved successfully.
 
+Defaults can change underneath a customization: macOS button-bar keys
+switch between 1–0 and F1–F10 (`general.buttonBarKeys`, see
+[settings.md](settings.md#button-bar-keys-on-macos)), and later versions may
+add defaults. The effective registry therefore drops, from uncustomized
+commands only, the view contexts of default bindings that overlap a customized
+binding. The explicit choice keeps the key; the affected command stays
+`customized: false` with fewer bindings than its defaults, and resetting it is
+reviewed as a conflict like any other edit.
+
 Viewer/dialog-local customization, multi-stroke dispatch, profiles, and
 import/export remain deferred.
 

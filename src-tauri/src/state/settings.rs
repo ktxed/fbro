@@ -127,6 +127,40 @@ pub struct GeneralSettings {
     /// `config_dir()/scratch`. Existing notes are not moved when it changes.
     #[serde(default)]
     pub notes_folder: String,
+    /// macOS only: default keys for the button-bar commands (View, Copy, …).
+    /// `Numbers` (1–0) suits keyboards without usable F-keys (Touch Bar);
+    /// `Function` (F1–F10) suits Macs set to use F-keys as standard keys.
+    #[serde(default)]
+    pub button_bar_keys: ButtonBarKeys,
+    /// macOS only: the user answered the one-time offer to switch to
+    /// function keys, so it is not shown again.
+    #[serde(default)]
+    pub function_keys_offer_answered: bool,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ButtonBarKeys {
+    #[default]
+    Numbers,
+    Function,
+}
+
+impl ButtonBarKeys {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Numbers => "numbers",
+            Self::Function => "function",
+        }
+    }
+
+    pub fn from_str(value: &str) -> Option<Self> {
+        match value {
+            "numbers" => Some(Self::Numbers),
+            "function" => Some(Self::Function),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -341,6 +375,8 @@ impl Default for GeneralSettings {
             quick_terminal_editor: QuickTerminalEditor::default(),
             zsh_emacs_keymap: false,
             notes_folder: String::new(),
+            button_bar_keys: ButtonBarKeys::default(),
+            function_keys_offer_answered: false,
         }
     }
 }

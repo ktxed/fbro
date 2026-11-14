@@ -235,6 +235,27 @@ The authoritative `general.iconCacheRevision` patch refreshes panel icon URLs;
 visible icons may immediately repopulate the cache. Neither field is persisted
 in settings.json or writable with `SetGeneralOption`.
 
+## Button-bar keys on macOS
+
+Mac keyboards send brightness/media actions from the F-row unless Fn is held,
+and Touch Bar Macs have no physical F-keys, so macOS defaults the button-bar
+commands to the number keys 1–0. `general.systemFunctionKeysStandard` is a
+read-only projection of the global `com.apple.keyboard.fnState` default ("Use
+F1, F2, etc. keys as standard function keys"): `true`/`false` on macOS, `null`
+elsewhere. It is read through the platform layer when the snapshot or a
+settings patch is built, so a system change shows up after reconnecting or the
+next settings change. It is neither persisted nor writable.
+
+When it is `true`, `buttonBarKeys` is `numbers` and `functionKeysOfferAnswered`
+is false, the GUI shows a one-time dialog (`function-keys-offer`). **Use
+function keys** (initial focus) sends `buttonBarKeys = function`; **Keep number
+keys** sends `functionKeysOfferAnswered = true`. Both buttons disable while the
+answer is pending and the dialog closes when the settings patch lands. Escape
+postpones the offer to the next launch without persisting anything.
+
+Settings → Shortcuts shows a **Button bar keys** select whenever the projection
+is non-null, with a hint describing the detected system setting.
+
 ## Intent: `SetGeneralOption`
 
 **Direction:** FE → BE
@@ -263,6 +284,8 @@ Supported keys:
 | `followSystemColorScheme` | `bool` | `false` | Match the OS light/dark preference: dark → `fbro-dark`, light → `daylight`. Applies live, to all clients. While the preference is unavailable the manual `colorScheme` applies. See [System appearance](#system-appearance). |
 | `zshEmacsKeymap` | `bool` | `false` | On macOS, start new interactive zsh terminals with `-o emacs`. The control is hidden and the setting has no effect on other platforms. Other shells and Quick Edit commands are unaffected. Existing terminal sessions keep their current keymap. |
 | `notesFolder` | `string` | `""` | Folder where notes live. Empty means the default `<config dir>/scratch`; otherwise an absolute path, with a leading `~` expanded to the home folder. A path to an existing non-folder, or a relative path, returns `BAD_SETTING`. The folder is created on first use. Changing it swaps the note store immediately (New Note and the Scratch source-bar entry use it); existing notes are not moved, and open editor tabs keep editing their files. The read-only `notesFolderResolved` reports the folder in use. Settings → General → Notes commits the field on Enter or blur, shows rejections inline, and offers **Use default folder**. |
+| `buttonBarKeys` | `string` | `"numbers"` | macOS only: default keys of the button-bar commands (Bro, Rename, View, Edit, Copy, Move, MkDir, Delete, Shell, Quit): `numbers` (1–0) or `function` (F1–F10). Other platforms always use F-keys and ignore it. Setting it also sets `functionKeysOfferAnswered`; a change rebuilds the registry defaults, bumps `commandRevision` and broadcasts a `commands` patch before the settings patch. See [Button-bar keys on macOS](#button-bar-keys-on-macos). |
+| `functionKeysOfferAnswered` | `bool` | `false` | macOS only: the one-time offer to switch to function keys was answered and is not shown again. |
 | `fedupDefaultIgnorePatterns` | `string` | `.git`, `.idea`, `.vscode`, `.venv`, `node_modules`, `__MACOSX`, `._*`, `.DS_Store`, `artifacts/e2e`, `dist/assets`, `target/debug`, `target/release`, `target/bundle`, `.m2` | Newline/comma separated wildcard name/path patterns Fedup Bro can use to skip files and folders before scanning. |
 
 Unknown key or type mismatch → `Error { code: "BAD_SETTING", recoverable: true }`.

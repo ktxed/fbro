@@ -181,6 +181,9 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
     // Track whether proc_tree_mode changed so we can reload the procs driver.
     let mut proc_tree_mode_changed: Option<bool> = None;
     let mut prepare_notifications = None;
+    // Button-bar keys change the default bindings of the command registry.
+    let mut commands_changed = false;
+    let mut commands_patch = None;
 
     let (gui_senders, viewer_senders) = {
         let mut state_guard = ctx.state.lock().await;
@@ -481,6 +484,31 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
                 };
                 state_guard.settings.general.zsh_emacs_keymap = v;
             }
+            "buttonBarKeys" => {
+                let Some(keys) = value
+                    .as_str()
+                    .and_then(crate::state::settings::ButtonBarKeys::from_str)
+                else {
+                    drop(state_guard);
+                    bad_setting(ctx.tx, "buttonBarKeys must be \"numbers\" or \"function\"").await;
+                    return;
+                };
+                let general = &mut state_guard.settings.general;
+                // Choosing either way answers the one-time macOS offer.
+                general.function_keys_offer_answered = true;
+                if general.button_bar_keys != keys {
+                    general.button_bar_keys = keys;
+                    commands_changed = true;
+                }
+            }
+            "functionKeysOfferAnswered" => {
+                let Some(v) = value.as_bool() else {
+                    drop(state_guard);
+                    bad_setting(ctx.tx, "functionKeysOfferAnswered must be a boolean").await;
+                    return;
+                };
+                state_guard.settings.general.function_keys_offer_answered = v;
+            }
             _ => {
                 let msg = format!("Unknown setting key: {key}");
                 drop(state_guard);
@@ -504,11 +532,33 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
             state_guard.settings.general.thumbnail_video_frame_skip,
         );
 
+        if commands_changed {
+            state_guard.command_revision += 1;
+            let revision = state_guard.command_revision;
+            commands_patch = Some(ServerMessage::StatePatch {
+                timestamp: now(),
+                domain: "commands".into(),
+                entity_id: None,
+                version: revision,
+                patch: serde_json::json!({
+                    "commands": crate::ws::command_bindings::effective_commands(&state_guard.settings),
+                    "commandRevision": revision,
+                }),
+            });
+        }
+
         (
             state_guard.gui_senders.clone(),
             state_guard.viewer_senders.clone(),
         )
     };
+
+    if let Some(patch) = commands_patch {
+        for sender in &gui_senders {
+            let _ = sender.send(patch.clone()).await;
+        }
+        let _ = ctx.tx.send(patch).await;
+    }
 
     if let Some(notifications) = prepare_notifications {
         if let Err(error) = ctx.app_handle.run_on_main_thread(move || {
@@ -612,13 +662,14 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
         }
     }
 
-    let (general, location_settings_count, appearance, color_schemes) = {
+    let (general, location_settings_count, appearance, color_schemes, function_keys_standard) = {
         let state_guard = ctx.state.lock().await;
         (
             state_guard.settings.general.clone(),
             state_guard.location_settings.len(),
             crate::ws::appearance::appearance_patch_fields(&state_guard),
             state_guard.color_schemes.to_wire(&crate::themes::themes_dir()),
+            state_guard.platform.function_keys_standard(),
         )
     };
 
@@ -671,6 +722,9 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
                 "notesFolderResolved": crate::vfs::local::normalize_path(
                     crate::notes::resolve_notes_folder(&general.notes_folder),
                 ),
+                "buttonBarKeys": general.button_bar_keys.as_str(),
+                "functionKeysOfferAnswered": general.function_keys_offer_answered,
+                "systemFunctionKeysStandard": function_keys_standard,
             }
         }),
     };

@@ -25,7 +25,8 @@ pub(crate) enum BindingError {
 }
 
 pub(crate) fn effective_commands(settings: &Settings) -> Vec<InteractiveCommandSchema> {
-    let mut commands = crate::ws::commands::build_interactive_commands();
+    let mut commands =
+        crate::ws::commands::build_interactive_commands(settings.general.button_bar_keys);
     for command in &mut commands {
         if let Some(bindings) = settings.command_bindings.get(&command.id) {
             if validate(bindings).is_ok() {
@@ -34,7 +35,43 @@ pub(crate) fn effective_commands(settings: &Settings) -> Vec<InteractiveCommandS
             }
         }
     }
+    yield_defaults_to_customized(&mut commands);
     commands
+}
+
+/// Saving a customization already removes the contexts it takes from other
+/// commands, but defaults can still change underneath it (switching macOS
+/// button-bar keys, or a new default in a later version). A customized
+/// binding was chosen explicitly, so it keeps the key: overlapping contexts
+/// are dropped from uncustomized commands' default bindings.
+fn yield_defaults_to_customized(commands: &mut [InteractiveCommandSchema]) {
+    let custom: Vec<KeyBindingSchema> = commands
+        .iter()
+        .filter(|command| command.customized)
+        .flat_map(|command| command.bindings.iter().cloned())
+        .collect();
+    if custom.is_empty() {
+        return;
+    }
+    for command in commands.iter_mut().filter(|command| !command.customized) {
+        command.bindings = command
+            .bindings
+            .iter()
+            .filter_map(|binding| {
+                let taken: Vec<String> =
+                    custom.iter().flat_map(|other| overlap(binding, other)).collect();
+                if taken.is_empty() {
+                    return Some(binding.clone());
+                }
+                let remaining: Vec<String> =
+                    modes(binding).into_iter().filter(|m| !taken.contains(m)).collect();
+                (!remaining.is_empty()).then(|| KeyBindingSchema {
+                    modes: remaining,
+                    ..binding.clone()
+                })
+            })
+            .collect();
+    }
 }
 
 fn normalize(key: &str) -> String {
@@ -218,6 +255,7 @@ pub(crate) fn candidate(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::settings::ButtonBarKeys;
     use crate::ws::commands::build_interactive_commands;
     fn settings() -> Settings {
         Settings::default()
@@ -251,6 +289,27 @@ mod tests {
         assert!(jobs.customized && jobs.bindings.is_empty());
         let default = commands.iter().find(|c| c.id == "file.view").unwrap();
         assert!(!default.customized && default.bindings == default.default_bindings);
+    }
+    #[test]
+    fn customized_bindings_keep_keys_that_defaults_later_claim() {
+        // Customized while number keys were the macOS default, then the
+        // defaults switch to F-keys (F5 is Copy on every platform there).
+        let mut s = settings();
+        s.command_bindings.insert("app.open_jobs".into(), vec![binding("F5", &["list"])]);
+        s.general.button_bar_keys = ButtonBarKeys::Function;
+        let commands = effective_commands(&s);
+        let find = |id: &str| commands.iter().find(|c| c.id == id).unwrap();
+        let copy = find("file.copy");
+        assert!(!copy.customized);
+        assert_eq!(copy.bindings.len(), 1);
+        assert_eq!(copy.bindings[0].strokes[0].key, "F5");
+        assert_eq!(copy.bindings[0].modes, vec!["grid"]);
+        assert_eq!(find("app.open_jobs").bindings[0].strokes[0].key, "F5");
+        // Resetting Copy to its default is reviewed as a conflict, like any edit.
+        assert!(matches!(
+            candidate(&s, Some("file.copy"), None, false),
+            Err(BindingError::Conflict(_))
+        ));
     }
     #[test]
     fn duplicate_modes_and_invalid_strokes_are_rejected() {
@@ -449,7 +508,7 @@ mod tests {
     }
     #[test]
     fn platform_defaults_are_preserved() {
-        let commands = build_interactive_commands();
+        let commands = build_interactive_commands(ButtonBarKeys::Numbers);
         let rename = commands.iter().find(|c| c.id == "file.rename").unwrap();
         assert_eq!(
             rename.bindings[0].strokes[0].key,
@@ -467,6 +526,6 @@ mod tests {
     }
     #[test]
     fn registry_defaults_remain_uncustomized() {
-        assert!(build_interactive_commands().iter().all(|c| !c.customized));
+        assert!(build_interactive_commands(ButtonBarKeys::Numbers).iter().all(|c| !c.customized));
     }
 }

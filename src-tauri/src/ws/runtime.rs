@@ -230,6 +230,9 @@ pub(crate) fn build_state_snapshot(
                     notes_folder_resolved: crate::vfs::local::normalize_path(
                         crate::notes::resolve_notes_folder(&state.settings.general.notes_folder),
                     ),
+                    button_bar_keys: state.settings.general.button_bar_keys.as_str().to_string(),
+                    function_keys_offer_answered: state.settings.general.function_keys_offer_answered,
+                    system_function_keys_standard: state.platform.function_keys_standard(),
                 },
                 modal_sizes: state
                     .settings

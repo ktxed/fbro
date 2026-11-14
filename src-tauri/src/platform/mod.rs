@@ -161,6 +161,13 @@ pub trait Platform: Send + Sync {
 
     /// Whether embedded zsh sessions may opt into Emacs line-editing bindings.
     /// This workaround is specific to macOS Option+Arrow word navigation.
+    /// macOS "Use F1, F2, etc. keys as standard function keys": `Some(true)`
+    /// when F-keys send F1… without Fn. `None` where the question does not
+    /// apply (button-bar keys are always F-keys off macOS).
+    fn function_keys_standard(&self) -> Option<bool> {
+        None
+    }
+
     fn supports_zsh_emacs_keymap(&self) -> bool {
         false
     }

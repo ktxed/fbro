@@ -134,6 +134,10 @@ impl Platform for MacOSPlatform {
         true
     }
 
+    fn function_keys_standard(&self) -> Option<bool> {
+        Some(appearance::function_keys_standard())
+    }
+
     fn probe_fbro_command(&self) -> Result<ShellCommandStatus, String> {
         super::shell_command::probe_fbro_command()
     }
