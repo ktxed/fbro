@@ -1,7 +1,17 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent } from "react";
-import { IconAlertTriangle, IconEye, IconMaximize, IconMinimize, IconX } from "@tabler/icons-react";
+import {
+  IconAlertTriangle,
+  IconEye,
+  IconKeyboard,
+  IconListNumbers,
+  IconMaximize,
+  IconMinimize,
+  IconPilcrow,
+  IconTextWrap,
+  IconX,
+} from "@tabler/icons-react";
 import type { Dispatch } from "react";
-import type { AppAction } from "../store";
+import { useAppState, type AppAction } from "../store";
 import type { WsClient } from "../ws/client";
 import type { EditorTabInfo, InteractiveCommand, PanelState } from "../ws/types";
 import { formatPrimaryBinding } from "../commands/interactive";
@@ -35,8 +45,25 @@ const SAVE_KEY_LABEL = formatBinding({ strokes: [{ key: "s", ctrl: !isMac, meta:
 /** Mod-Shift-m, also editor-local. */
 const MAXIMIZE_KEY_LABEL = formatBinding({ strokes: [{ key: "m", ctrl: !isMac, meta: isMac, shift: true }] });
 
+type EditorOptionKey = import("../editor/codemirror").EditorOptions;
+
+/** The `SetGeneralOption` key behind each editor option. */
+const OPTION_SETTING: Record<keyof EditorOptionKey, "editorWordWrap" | "editorLineNumbers" | "editorShowWhitespace"> = {
+  wordWrap: "editorWordWrap",
+  lineNumbers: "editorLineNumbers",
+  showWhitespace: "editorShowWhitespace",
+};
+
+/** Editor-local shortcuts, like Mod-s. */
+const WRAP_KEY_LABEL = formatBinding({ strokes: [{ key: "z", alt: true }] });
+const NUMBERS_KEY_LABEL = formatBinding({ strokes: [{ key: "n", alt: true }] });
+const WHITESPACE_KEY_LABEL = formatBinding({ strokes: [{ key: "w", alt: true }] });
+const HELP_KEY_LABEL = formatBinding({ strokes: [{ key: "F1" }] });
+
 interface EditorActions {
   escape: () => void;
+  toggleOption: (option: keyof EditorOptionKey) => void;
+  cheatSheet: () => void;
   toggleMaximize: () => void;
   save: () => void;
   close: () => void;
@@ -60,6 +87,8 @@ function handlersFor(sessionId: number) {
   return {
     onEscape: () => ACTIONS.get(sessionId)?.escape(),
     onSave: () => ACTIONS.get(sessionId)?.save(),
+    onToggleOption: (option: keyof EditorOptionKey) => ACTIONS.get(sessionId)?.toggleOption(option),
+    onCheatSheet: () => ACTIONS.get(sessionId)?.cheatSheet(),
     onClose: () => ACTIONS.get(sessionId)?.close(),
     onToggleMaximize: () => ACTIONS.get(sessionId)?.toggleMaximize(),
     onUserChange: () => noteUserChange(sessionId),
@@ -116,10 +145,16 @@ export function PanelEditor({ panelId, panel, client, dispatch, commands, focuse
   const loadRef = useRef<((intent: "ReloadEditorSession" | "KeepBothEditorVersions") => void) | null>(null);
   useSyncExternalStore(subscribeEditorStatus, editorStatusVersion);
   const status = editorStatus(sessionId);
+  const general = useAppState().settings.general;
+  const options: EditorOptionKey = {
+    wordWrap: general.editorWordWrap,
+    lineNumbers: general.editorLineNumbers,
+    showWhitespace: general.editorShowWhitespace,
+  };
 
   // Escape / Mod-s / Mod-w as seen by CodeMirror's keymap.
-  const latest = useRef({ panelId, panel, blocked, status, maximized });
-  latest.current = { panelId, panel, blocked, status, maximized };
+  const latest = useRef({ panelId, panel, blocked, status, maximized, options });
+  latest.current = { panelId, panel, blocked, status, maximized, options };
   useEffect(() => {
     const openConflict = () => {
       const problem = editorStatus(sessionId).problem;
@@ -131,6 +166,14 @@ export function PanelEditor({ panelId, panel, client, dispatch, commands, focuse
       toggleMaximize: () => {
         if (latest.current.blocked) return;
         dispatch({ type: "SET_MAXIMIZED_EDITOR", panelId: latest.current.maximized ? null : panelId });
+      },
+      toggleOption: (option) => {
+        if (latest.current.blocked) return;
+        client.sendIntent("SetGeneralOption", undefined, { key: OPTION_SETTING[option], value: !latest.current.options[option] });
+      },
+      cheatSheet: () => {
+        if (latest.current.blocked) return;
+        dispatch({ type: "OPEN_EDITOR_CHEAT_SHEET" });
       },
       escape: () => {
         if (latest.current.blocked) return;
@@ -166,6 +209,17 @@ export function PanelEditor({ panelId, panel, client, dispatch, commands, focuse
     });
     return () => { ACTIONS.delete(sessionId); };
   }, [client, dispatch, fileName, filePath, panelId, sessionId]);
+
+  // Settings changes (this tab's buttons, another tab, another client) and a
+  // cached state built under older settings both land here.
+  const { wordWrap, lineNumbers, showWhitespace } = options;
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!ready || !view) return;
+    void loadCodeMirror().then((cm) => {
+      if (viewRef.current === view) cm.applyEditorOptions(view, { wordWrap, lineNumbers, showWhitespace });
+    });
+  }, [ready, wordWrap, lineNumbers, showWhitespace]);
 
   useEffect(() => {
     setPreviewing(sessionId, previewing);
@@ -219,7 +273,7 @@ export function PanelEditor({ panelId, panel, client, dispatch, commands, focuse
           const text = pendingText ?? "";
           pendingText = null;
           if (disposed) return;
-          mount(cm, cm.createEditorState(text, handlersFor(sessionId), language));
+          mount(cm, cm.createEditorState(text, handlersFor(sessionId), language, latest.current.options));
           markLoaded(sessionId);
         });
       });
@@ -349,6 +403,61 @@ export function PanelEditor({ panelId, panel, client, dispatch, commands, focuse
         {status.pending && !status.problem && (
           <span className="panel-editor__state" data-testid="editor-saving">Saving…</span>
         )}
+        <button
+          type="button"
+          className="panel-editor__btn"
+          title={`Wrap long lines · ${WRAP_KEY_LABEL}`}
+          aria-label="Wrap long lines"
+          aria-keyshortcuts={WRAP_KEY_LABEL}
+          aria-pressed={options.wordWrap}
+          data-testid="editor-wrap"
+          tabIndex={-1}
+          disabled={blocked}
+          onClick={() => ACTIONS.get(sessionId)?.toggleOption("wordWrap")}
+        >
+          <IconTextWrap size={15} aria-hidden />
+        </button>
+        <button
+          type="button"
+          className="panel-editor__btn"
+          title={`Line numbers · ${NUMBERS_KEY_LABEL}`}
+          aria-label="Show line numbers"
+          aria-keyshortcuts={NUMBERS_KEY_LABEL}
+          aria-pressed={options.lineNumbers}
+          data-testid="editor-line-numbers"
+          tabIndex={-1}
+          disabled={blocked}
+          onClick={() => ACTIONS.get(sessionId)?.toggleOption("lineNumbers")}
+        >
+          <IconListNumbers size={15} aria-hidden />
+        </button>
+        <button
+          type="button"
+          className="panel-editor__btn"
+          title={`Show whitespace · ${WHITESPACE_KEY_LABEL}`}
+          aria-label="Show whitespace"
+          aria-keyshortcuts={WHITESPACE_KEY_LABEL}
+          aria-pressed={options.showWhitespace}
+          data-testid="editor-whitespace"
+          tabIndex={-1}
+          disabled={blocked}
+          onClick={() => ACTIONS.get(sessionId)?.toggleOption("showWhitespace")}
+        >
+          <IconPilcrow size={15} aria-hidden />
+        </button>
+        <button
+          type="button"
+          className="panel-editor__btn"
+          title={`Editor shortcuts · ${HELP_KEY_LABEL}`}
+          aria-label="Editor shortcuts"
+          aria-keyshortcuts={HELP_KEY_LABEL}
+          data-testid="editor-cheat-sheet"
+          tabIndex={-1}
+          disabled={blocked}
+          onClick={() => ACTIONS.get(sessionId)?.cheatSheet()}
+        >
+          <IconKeyboard size={15} aria-hidden />
+        </button>
         <button
           type="button"
           className="panel-editor__btn"

@@ -322,8 +322,72 @@ export async function runEditorTabFlow(browser, observer) {
   await chord(browser, [KEY.ctrl], "w");
   await waitFor(() => !editorPanelId(observer), { timeout: 10_000, label: "palette-opened editor closes" });
 
+  await runOptionsFlow(browser, observer, directory);
   await runHighlightingFlow(browser, observer, directory);
   await runNotesFlow(browser, observer, directory);
+}
+
+/** Wrap, line numbers and whitespace are global backend settings: the header
+ *  buttons and Alt-z / Alt-n / Alt-w flip them, and F1 opens the editor sheet. */
+async function runOptionsFlow(browser, observer, directory) {
+  const name = "options.txt";
+  fs.writeFileSync(hostPath(path.posix.join(directory, name)), "spaced  words\n\ttabbed\n");
+  await observer.waitForEntry("left", name, "file");
+  const general = () => observer.state.settings.general;
+  const before = { wrap: general().editorWordWrap, numbers: general().editorLineNumbers, whitespace: general().editorShowWhitespace };
+  const has = (selector) => browser.execute((selector) => Boolean(document.querySelector(selector)), selector);
+  const sendAlt = (key, code, keyCode) => sendEditorKey(browser, { key, code, keyCode, altKey: true });
+
+  await openInEditorTab(browser, observer, name);
+
+  // Defaults: wrapped, no gutter, no whitespace marks.
+  await waitFor(async () => (await has(".panel-editor .cm-lineWrapping")) === general().editorWordWrap
+    && (await has(".panel-editor .cm-lineNumbers")) === general().editorLineNumbers,
+  { timeout: 10_000, label: "editor renders the current settings" });
+
+  // Alt-z: wrap flips in the backend and in the view.
+  await sendAlt("z", "KeyZ", 90);
+  await waitFor(async () => general().editorWordWrap === !before.wrap
+    && (await has(".panel-editor .cm-lineWrapping")) === !before.wrap,
+  { timeout: 10_000, label: "Alt+Z toggles word wrap" });
+  await expectEditorFocus(browser, "editor focus after Alt+Z");
+
+  // The header button flips line numbers; the pressed state follows the setting.
+  await (await browser.$('[data-testid="editor-line-numbers"]')).click();
+  await waitFor(async () => general().editorLineNumbers === !before.numbers
+    && (await has(".panel-editor .cm-lineNumbers")) === !before.numbers
+    && (await browser.execute(() => document.querySelector('[data-testid="editor-line-numbers"]')?.getAttribute("aria-pressed")))
+      === String(!before.numbers),
+  { timeout: 10_000, label: "line numbers button toggles the gutter" });
+
+  // Alt-w: whitespace marks appear (and disappear again below).
+  await sendAlt("w", "KeyW", 87);
+  await waitFor(async () => general().editorShowWhitespace === !before.whitespace
+    && (await has(".panel-editor .cm-highlightSpace, .panel-editor .cm-highlightTab")) === !before.whitespace,
+  { timeout: 10_000, label: "Alt+W toggles whitespace marks" });
+
+  // F1 opens the editor sheet (not the app sheet); Escape closes it and the
+  // editor gets focus back.
+  await sendEditorKey(browser, { key: "F1", code: "F1", keyCode: 112 });
+  await waitFor(() => has('[data-testid="editor-cheat-sheet-modal"]'), { timeout: 10_000, label: "F1 opens the editor sheet" });
+  if (await has('[data-testid="cheat-sheet-modal"]')) throw new Error("F1 in the editor opened the app cheat sheet");
+  await browser.keys("Escape");
+  await waitFor(async () => !(await has('[data-testid="editor-cheat-sheet-modal"]')), { timeout: 10_000, label: "Escape closes the editor sheet" });
+  await expectEditorFocus(browser, "editor focus after the editor sheet");
+  await (await browser.$('[data-testid="editor-cheat-sheet"]')).click();
+  await waitFor(() => has('[data-testid="editor-cheat-sheet-modal"]'), { timeout: 10_000, label: "header button opens the editor sheet" });
+  await browser.keys("Escape");
+  await waitFor(async () => !(await has('[data-testid="editor-cheat-sheet-modal"]')), { timeout: 10_000, label: "editor sheet closes again" });
+  await expectEditorFocus(browser, "editor focus after reopening the sheet");
+
+  // Restore the settings for the flows that follow.
+  observer.sendIntent("SetGeneralOption", undefined, { key: "editorWordWrap", value: before.wrap });
+  observer.sendIntent("SetGeneralOption", undefined, { key: "editorLineNumbers", value: before.numbers });
+  observer.sendIntent("SetGeneralOption", undefined, { key: "editorShowWhitespace", value: before.whitespace });
+  await waitFor(() => general().editorWordWrap === before.wrap && general().editorLineNumbers === before.numbers
+    && general().editorShowWhitespace === before.whitespace,
+  { timeout: 10_000, label: "editor options restored" });
+  await closeEditorTab(browser, observer, "options editor closes");
 }
 
 /** Computed style of the first token whose text is exactly `text`, and of the

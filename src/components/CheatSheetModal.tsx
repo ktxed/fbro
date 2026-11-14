@@ -10,7 +10,7 @@ import { KeyCombo } from "./KeyCombo";
 import { ModalLayer } from "./ModalStack";
 import { ResizableModal } from "./ResizableModal";
 
-interface CheatSheetRow {
+export interface CheatSheetRow {
   label: string;
   /** Registry commands whose bindings make up this row. With several ids each
    *  contributes its primary binding; a single id shows up to two bindings. */
@@ -19,7 +19,7 @@ interface CheatSheetRow {
   fixed?: KeyBinding[];
 }
 
-interface CheatSheetSection {
+export interface CheatSheetSection {
   title: string;
   rows: CheatSheetRow[];
 }
@@ -116,11 +116,54 @@ const SECTIONS: CheatSheetSection[] = [
 
 const TOOLBAR_IDS = new Set<string>(TOOLBAR_COMMAND_IDS);
 
-function rowBindings(row: CheatSheetRow, commands: Record<string, InteractiveCommand>): KeyBinding[] {
+export function rowBindings(row: CheatSheetRow, commands: Record<string, InteractiveCommand>): KeyBinding[] {
   if (row.fixed) return row.fixed;
   const ids = (row.commandIds ?? []).filter((id) => !TOOLBAR_IDS.has(id));
   if (ids.length === 1) return commands[ids[0]]?.bindings.slice(0, 2) ?? [];
   return ids.flatMap((id) => commands[id]?.bindings.slice(0, 1) ?? []);
+}
+
+/** The section/row list shared by the app sheet and the editor sheet. */
+export function CheatSheetSections({ sections, commands, paletteBinding }: {
+  sections: CheatSheetSection[];
+  commands: Record<string, InteractiveCommand>;
+  /** Shown beside "Command palette" for rows without a shortcut. */
+  paletteBinding?: KeyBinding;
+}) {
+  return (
+    <>
+          {sections.map((section) => (
+            <section key={section.title} className="cheat-sheet__section" aria-label={section.title}>
+              <h3 className="cheat-sheet__section-title">{section.title}</h3>
+              <dl className="cheat-sheet__rows">
+                {section.rows.map((row) => {
+                  const bindings = rowBindings(row, commands);
+                  return (
+                    <div key={row.label} className="cheat-sheet__row" data-command-id={row.commandIds?.[0]}>
+                      <dt className="cheat-sheet__label">{row.label}</dt>
+                      <dd className="cheat-sheet__keys">
+                        {bindings.length > 0
+                          ? bindings.map((binding, index) => (
+                            <span key={index} className="cheat-sheet__binding">
+                              {index > 0 && <span className="cheat-sheet__separator" aria-hidden="true">/</span>}
+                              <KeyCombo binding={binding} />
+                            </span>
+                          ))
+                          : (
+                            <span className="cheat-sheet__palette-hint">
+                              Command palette
+                              {paletteBinding && <KeyCombo binding={paletteBinding} />}
+                            </span>
+                          )}
+                      </dd>
+                    </div>
+                  );
+                })}
+              </dl>
+            </section>
+          ))}
+    </>
+  );
 }
 
 export function CheatSheetModal({ client }: { client: WsClient }) {
@@ -167,36 +210,7 @@ export function CheatSheetModal({ client }: { client: WsClient }) {
           aria-label="Keyboard shortcuts"
           data-testid="cheat-sheet-body"
         >
-          {SECTIONS.map((section) => (
-            <section key={section.title} className="cheat-sheet__section" aria-label={section.title}>
-              <h3 className="cheat-sheet__section-title">{section.title}</h3>
-              <dl className="cheat-sheet__rows">
-                {section.rows.map((row) => {
-                  const bindings = rowBindings(row, state.commands);
-                  return (
-                    <div key={row.label} className="cheat-sheet__row" data-command-id={row.commandIds?.[0]}>
-                      <dt className="cheat-sheet__label">{row.label}</dt>
-                      <dd className="cheat-sheet__keys">
-                        {bindings.length > 0
-                          ? bindings.map((binding, index) => (
-                            <span key={index} className="cheat-sheet__binding">
-                              {index > 0 && <span className="cheat-sheet__separator" aria-hidden="true">/</span>}
-                              <KeyCombo binding={binding} />
-                            </span>
-                          ))
-                          : (
-                            <span className="cheat-sheet__palette-hint">
-                              Command palette
-                              {paletteCommand?.bindings[0] && <KeyCombo binding={paletteCommand.bindings[0]} />}
-                            </span>
-                          )}
-                      </dd>
-                    </div>
-                  );
-                })}
-              </dl>
-            </section>
-          ))}
+          <CheatSheetSections sections={SECTIONS} commands={state.commands} paletteBinding={paletteCommand?.bindings[0]} />
         </div>
         <div className="modal__actions">
           <button className="modal__btn modal__btn--primary" type="button" onClick={close} data-testid="cheat-sheet-close">

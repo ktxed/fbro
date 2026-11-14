@@ -432,6 +432,10 @@ body {
   background: var(--bg-hover);
 }
 
+.panel-editor__btn[aria-pressed="true"] {
+  color: var(--accent);
+}
+
 .panel-editor__bar {
   display: flex;
   align-items: center;

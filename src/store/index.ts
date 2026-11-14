@@ -373,6 +373,8 @@ export interface AppState {
   commandPaletteOpen: boolean;
   aboutOpen: boolean;
   cheatSheetOpen: boolean;
+  /** The built-in editor's own shortcut sheet (F1 inside an editor tab). */
+  editorCheatSheetOpen: boolean;
   activeSortSelectorPanelId: string | null;
   /** Panel hosting the searchable tab list; ephemeral UI state like the sort
    *  selector, so it lives in the store and never in `localStorage`. */
@@ -478,6 +480,7 @@ const initialState: AppState = {
   commandPaletteOpen: false,
   aboutOpen: false,
   cheatSheetOpen: false,
+  editorCheatSheetOpen: false,
   activeSortSelectorPanelId: null,
   activeTabListPanelId: null,
   discoveredPeers: [],
@@ -501,7 +504,7 @@ const initialState: AppState = {
   globalSelections: [],
   fontSize: 13,
   settings: {
-    general: { showHiddenDefault: false, showButtonBar: true, osNotificationsEnabled: true, supportsOsNotifications: false, supportsOsNotificationSettings: false, osNotificationPlatform: "none", rememberWindowState: true, preserveAttributes: true, autoResumeCopies: true, ludicrousMode: false, enableHeic2any: false, maxImageSizeMb: 512, savePanelViewMode: false, rememberSortPerLocation: false, locationSettingsCount: 0, iconCacheDir: "", iconCacheRevision: 0, supportsManagedThumbnails: false, enableVideoThumbnails: true, thumbnailMaxImageSizeMb: 100, thumbnailVideoFrameSkip: 5, streamThumbnails: true, sessionPath: "", bookmarksPath: "", thumbnailCacheDir: "", thumbnailCacheItemCount: 0, thumbnailCacheSizeBytes: 0, persistPanelTabs: true, procTreeMode: false, colorScheme: "fbro-dark", followSystemColorScheme: false, activeColorScheme: "fbro-dark", colorSchemes: EMPTY_COLOR_SCHEME_CATALOG, systemColorScheme: null, sevenzipExtractor: "auto", sevenzipCustomPath: "", sevenzipResolvedPath: "", fedupDefaultIgnorePatterns: ".git\n.idea\n.vscode\n.venv\nnode_modules\n__MACOSX\n._*\n.DS_Store\nartifacts/e2e\ndist/assets\ntarget/debug\ntarget/release\ntarget/bundle\n.m2", compareMaxFileSizeMb: 10, compareDifferMode: "internal", compareExternalCommand: "", quickTerminalEditor: "nano", zshEmacsKeymap: false, notesFolder: "", notesFolderResolved: "", buttonBarKeys: "numbers", functionKeysOfferAnswered: false, systemFunctionKeysStandard: null },
+    general: { showHiddenDefault: false, showButtonBar: true, osNotificationsEnabled: true, editorWordWrap: true, editorLineNumbers: false, editorShowWhitespace: false, supportsOsNotifications: false, supportsOsNotificationSettings: false, osNotificationPlatform: "none", rememberWindowState: true, preserveAttributes: true, autoResumeCopies: true, ludicrousMode: false, enableHeic2any: false, maxImageSizeMb: 512, savePanelViewMode: false, rememberSortPerLocation: false, locationSettingsCount: 0, iconCacheDir: "", iconCacheRevision: 0, supportsManagedThumbnails: false, enableVideoThumbnails: true, thumbnailMaxImageSizeMb: 100, thumbnailVideoFrameSkip: 5, streamThumbnails: true, sessionPath: "", bookmarksPath: "", thumbnailCacheDir: "", thumbnailCacheItemCount: 0, thumbnailCacheSizeBytes: 0, persistPanelTabs: true, procTreeMode: false, colorScheme: "fbro-dark", followSystemColorScheme: false, activeColorScheme: "fbro-dark", colorSchemes: EMPTY_COLOR_SCHEME_CATALOG, systemColorScheme: null, sevenzipExtractor: "auto", sevenzipCustomPath: "", sevenzipResolvedPath: "", fedupDefaultIgnorePatterns: ".git\n.idea\n.vscode\n.venv\nnode_modules\n__MACOSX\n._*\n.DS_Store\nartifacts/e2e\ndist/assets\ntarget/debug\ntarget/release\ntarget/bundle\n.m2", compareMaxFileSizeMb: 10, compareDifferMode: "internal", compareExternalCommand: "", quickTerminalEditor: "nano", zshEmacsKeymap: false, notesFolder: "", notesFolderResolved: "", buttonBarKeys: "numbers", functionKeysOfferAnswered: false, systemFunctionKeysStandard: null },
     modalSizes: {},
   },
 };
@@ -572,6 +575,8 @@ export type AppAction =
   | { type: "OPEN_ABOUT" }
   | { type: "OPEN_CHEAT_SHEET" }
   | { type: "CLOSE_CHEAT_SHEET" }
+  | { type: "OPEN_EDITOR_CHEAT_SHEET" }
+  | { type: "CLOSE_EDITOR_CHEAT_SHEET" }
   | { type: "CLOSE_ABOUT" }
   | { type: "OPEN_SORT_SELECTOR"; panelId: string }
   | { type: "CLOSE_SORT_SELECTOR" }
@@ -2115,6 +2120,10 @@ function reducer(state: AppState, action: AppAction): AppState {
       return { ...state, cheatSheetOpen: true, commandPaletteOpen: false };
     case "CLOSE_CHEAT_SHEET":
       return { ...state, cheatSheetOpen: false };
+    case "OPEN_EDITOR_CHEAT_SHEET":
+      return { ...state, editorCheatSheetOpen: true };
+    case "CLOSE_EDITOR_CHEAT_SHEET":
+      return { ...state, editorCheatSheetOpen: false };
     case "OPEN_SORT_SELECTOR":
       return { ...state, activeSortSelectorPanelId: action.panelId };
     case "CLOSE_SORT_SELECTOR":

@@ -29,6 +29,14 @@ the client; no preference, authorization state, notification history, or command
 journal is changed. The success reply acknowledges the launch request, not a
 permission grant. Settings consumes correlated replies and shows failures inline.
 
+Settings snapshots and patches also expose `general.editorWordWrap`,
+`editorLineNumbers` and `editorShowWhitespace` (booleans). `SetGeneralOption`
+with one of those keys and a boolean persists it (`general.editor_word_wrap`,
+`editor_line_numbers`, `editor_show_whitespace`; absent in older files means
+wrap on, the others off) and broadcasts the authoritative value; any other
+value type returns `BAD_SETTING`. The editor renders from the patch, with no
+optimistic toggle.
+
 Settings snapshots and settings-domain patches expose `general.showButtonBar`
 as a boolean. `SetGeneralOption { key: "showButtonBar", value: true | false }`
 updates and persists the application-wide bottom button bar visibility, then

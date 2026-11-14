@@ -784,6 +784,12 @@ export interface GeneralSettings {
   showHiddenDefault: boolean;
   showButtonBar: boolean;
   osNotificationsEnabled: boolean;
+  /** Built-in editor tabs: wrap long lines. */
+  editorWordWrap: boolean;
+  /** Built-in editor tabs: line-number gutter. */
+  editorLineNumbers: boolean;
+  /** Built-in editor tabs: draw tabs, spaces and trailing whitespace. */
+  editorShowWhitespace: boolean;
   /** Read-only backend capability; native delivery is introduced per platform. */
   supportsOsNotifications: boolean;
   supportsOsNotificationSettings: boolean;

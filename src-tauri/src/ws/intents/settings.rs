@@ -201,6 +201,30 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
                     prepare_notifications = Some(state_guard.notifications.clone());
                 }
             }
+            "editorWordWrap" => {
+                let Some(v) = value.as_bool() else {
+                    drop(state_guard);
+                    bad_setting(ctx.tx, "editorWordWrap must be a boolean").await;
+                    return;
+                };
+                state_guard.settings.general.editor_word_wrap = v;
+            }
+            "editorLineNumbers" => {
+                let Some(v) = value.as_bool() else {
+                    drop(state_guard);
+                    bad_setting(ctx.tx, "editorLineNumbers must be a boolean").await;
+                    return;
+                };
+                state_guard.settings.general.editor_line_numbers = v;
+            }
+            "editorShowWhitespace" => {
+                let Some(v) = value.as_bool() else {
+                    drop(state_guard);
+                    bad_setting(ctx.tx, "editorShowWhitespace must be a boolean").await;
+                    return;
+                };
+                state_guard.settings.general.editor_show_whitespace = v;
+            }
             "showButtonBar" => {
                 let Some(v) = value.as_bool() else {
                     drop(state_guard);
@@ -690,6 +714,9 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
                 "showHiddenDefault": general.show_hidden_default,
                 "showButtonBar": general.show_button_bar,
                 "osNotificationsEnabled": general.os_notifications_enabled,
+                "editorWordWrap": general.editor_word_wrap,
+                "editorLineNumbers": general.editor_line_numbers,
+                "editorShowWhitespace": general.editor_show_whitespace,
                 "rememberWindowState": general.remember_window_state,
                 "preserveAttributes": general.preserve_attributes,
                 "autoResumeCopies": general.auto_resume_copies,

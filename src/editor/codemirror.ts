@@ -1,11 +1,15 @@
 // CodeMirror 6 setup for built-in editor tabs. Imported lazily by
 // `PanelEditor`, so CodeMirror stays out of the startup bundle.
-import { EditorState, Prec, Transaction, type Extension } from "@codemirror/state";
+import { Compartment, EditorState, Prec, Transaction, type Extension } from "@codemirror/state";
 import {
   EditorView,
   drawSelection,
   highlightActiveLine,
+  highlightActiveLineGutter,
   highlightSpecialChars,
+  highlightTrailingWhitespace,
+  highlightWhitespace,
+  lineNumbers,
   keymap,
   placeholder,
   type KeyBinding,
@@ -23,11 +27,22 @@ import { closeBrackets, closeBracketsKeymap } from "@codemirror/autocomplete";
 import { highlightSelectionMatches, search, searchKeymap } from "@codemirror/search";
 import { tags } from "@lezer/highlight";
 
+/** The global editor settings (`general.editor*`) a view renders. */
+export interface EditorOptions {
+  wordWrap: boolean;
+  lineNumbers: boolean;
+  showWhitespace: boolean;
+}
+
 export interface EditorHandlers {
   /** Escape after CodeMirror's own layers (find panel) declined it. */
   onEscape: () => void;
   /** Mod-s. */
   onSave: () => void;
+  /** Alt-z, Alt-n, Alt-w: flip one global editor option. */
+  onToggleOption: (option: keyof EditorOptions) => void;
+  /** F1. */
+  onCheatSheet: () => void;
   /** Mod-w. */
   onClose: () => void;
   /** Mod-Shift-m: toggle filling the window. */
@@ -60,6 +75,18 @@ const theme = EditorView.theme({
   ".cm-searchMatch": { backgroundColor: "var(--bg-selected)", outline: "1px solid var(--border)" },
   ".cm-searchMatch.cm-searchMatch-selected": { backgroundColor: "var(--bg-cursor-focused)" },
   ".cm-placeholder": { color: "var(--text-muted)" },
+  ".cm-lineNumbers .cm-gutterElement": { padding: "0 8px 0 12px", minWidth: "3ch" },
+  ".cm-activeLineGutter": { backgroundColor: "var(--bg-hover)", color: "var(--text)" },
+  ".cm-highlightSpace": {
+    backgroundImage: "radial-gradient(circle at 50% 55%, var(--text-muted) 8%, transparent 12%)",
+  },
+  ".cm-highlightTab": {
+    backgroundImage: "linear-gradient(var(--text-muted), var(--text-muted))",
+    backgroundSize: "100% 1px",
+    backgroundPosition: "0 65%",
+    backgroundRepeat: "no-repeat",
+  },
+  ".cm-trailingSpace": { backgroundColor: "color-mix(in srgb, var(--text-danger) 30%, transparent)" },
   ".cm-gutters": { backgroundColor: "var(--bg-panel)", color: "var(--text-muted)", border: "none" },
   ".cm-foldGutter .cm-gutterElement": { padding: "0 2px 0 6px", cursor: "pointer" },
   ".cm-foldGutter .cm-gutterElement:hover": { color: "var(--text)" },
@@ -153,6 +180,44 @@ const foldKeys = foldKeymap.filter((binding) => !binding.key?.startsWith("Ctrl-A
  *  Mod-d (select next match) stays for multi-cursor editing. */
 const searchKeys = searchKeymap.filter((binding) => binding.key !== "F3" && binding.key !== "Mod-Shift-l");
 
+// Each option lives in its own compartment, so a settings change reconfigures
+// a live view without rebuilding its state (text and undo history stay).
+const wrapCompartment = new Compartment();
+const numbersCompartment = new Compartment();
+const whitespaceCompartment = new Compartment();
+
+// Stable instances, so `applyEditorOptions` can tell by identity whether a
+// compartment already holds the right extension.
+const OFF: Extension = [];
+const NUMBERS_ON: Extension = [lineNumbers(), highlightActiveLineGutter()];
+const WHITESPACE_ON: Extension = [highlightWhitespace(), highlightTrailingWhitespace()];
+const wrapExtension = (on: boolean): Extension => (on ? EditorView.lineWrapping : OFF);
+const numbersExtension = (on: boolean): Extension => (on ? NUMBERS_ON : OFF);
+const whitespaceExtension = (on: boolean): Extension => (on ? WHITESPACE_ON : OFF);
+
+/** Point a live view at the current settings; a no-op when nothing changed. */
+export function applyEditorOptions(view: EditorView, options: EditorOptions): void {
+  const state = view.state;
+  const effects = [
+    wrapCompartment.get(state) !== wrapExtension(options.wordWrap) && wrapCompartment.reconfigure(wrapExtension(options.wordWrap)),
+    numbersCompartment.get(state) !== numbersExtension(options.lineNumbers) && numbersCompartment.reconfigure(numbersExtension(options.lineNumbers)),
+    whitespaceCompartment.get(state) !== whitespaceExtension(options.showWhitespace) && whitespaceCompartment.reconfigure(whitespaceExtension(options.showWhitespace)),
+  ].filter((effect) => effect !== false);
+  if (effects.length > 0) view.dispatch({ effects });
+}
+
+/** Alt-z / Alt-n / Alt-w. Alt (Option on macOS) with a plain letter types a
+ *  character only on macOS, where CodeMirror matches the physical key. */
+function optionKeys(handlers: EditorHandlers): KeyBinding[] {
+  const toggle = (option: keyof EditorOptions) => () => { handlers.onToggleOption(option); return true; };
+  return [
+    { key: "Alt-z", preventDefault: true, run: toggle("wordWrap") },
+    { key: "Alt-n", preventDefault: true, run: toggle("lineNumbers") },
+    { key: "Alt-w", preventDefault: true, run: toggle("showWhitespace") },
+    { key: "F1", preventDefault: true, run: () => { handlers.onCheatSheet(); return true; } },
+  ];
+}
+
 function editorKeys(handlers: EditorHandlers): KeyBinding[] {
   return [
     { key: "Mod-s", preventDefault: true, run: () => { handlers.onSave(); return true; } },
@@ -163,7 +228,7 @@ function editorKeys(handlers: EditorHandlers): KeyBinding[] {
 }
 
 /** `language` comes from `loadLanguage` (`[]` for plain text). */
-export function createEditorState(doc: string, handlers: EditorHandlers, language: Extension): EditorState {
+export function createEditorState(doc: string, handlers: EditorHandlers, language: Extension, options: EditorOptions): EditorState {
   const extensions: Extension[] = [
     highlightSpecialChars(),
     history(),
@@ -172,7 +237,9 @@ export function createEditorState(doc: string, handlers: EditorHandlers, languag
     highlightSelectionMatches(),
     indentOnInput(),
     bracketMatching(),
-    EditorView.lineWrapping,
+    wrapCompartment.of(wrapExtension(options.wordWrap)),
+    numbersCompartment.of(numbersExtension(options.lineNumbers)),
+    whitespaceCompartment.of(whitespaceExtension(options.showWhitespace)),
     closeBrackets(),
     foldGutter(),
     language,
@@ -183,6 +250,7 @@ export function createEditorState(doc: string, handlers: EditorHandlers, languag
     keymap.of([...closeBracketsKeymap, ...searchKeys, ...foldKeys, ...defaultKeymap, ...historyKeymap, indentWithTab]),
     // Lowest priority: the find panel's own Escape handling runs first.
     Prec.lowest(keymap.of(editorKeys(handlers))),
+    keymap.of(optionKeys(handlers)),
     EditorView.updateListener.of((update) => {
       if (update.selectionSet || update.docChanged || update.focusChanged) handlers.onCursor(update.view);
       if (!update.docChanged) return;

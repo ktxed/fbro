@@ -814,6 +814,9 @@ pub struct GeneralSettingsSchema {
     pub show_hidden_default: bool,
     pub show_button_bar: bool,
     pub os_notifications_enabled: bool,
+    pub editor_word_wrap: bool,
+    pub editor_line_numbers: bool,
+    pub editor_show_whitespace: bool,
     pub supports_os_notifications: bool,
     pub supports_os_notification_settings: bool,
     /// `linux`, `macos`, `windows`, or `none`. Read-only; selects notification help copy.

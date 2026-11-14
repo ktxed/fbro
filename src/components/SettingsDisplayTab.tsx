@@ -136,6 +136,39 @@ export function SettingsDisplayTab({ general, client }: SettingsDisplayTabProps)
       <p className="settings-tab__hint">Keyboard shortcuts remain available when the bar is hidden.</p>
     </div>
   );
+  const editorSection = (
+    <div className="settings-tab__section">
+      <h3 className="settings-tab__section-title">Editor</h3>
+      <label className="settings-tab__option">
+        <input
+          type="checkbox"
+          data-testid="editor-word-wrap"
+          checked={general.editorWordWrap}
+          onChange={(e) => send("editorWordWrap", e.target.checked)}
+        />
+        <span>Wrap long lines</span>
+      </label>
+      <label className="settings-tab__option">
+        <input
+          type="checkbox"
+          data-testid="editor-line-numbers"
+          checked={general.editorLineNumbers}
+          onChange={(e) => send("editorLineNumbers", e.target.checked)}
+        />
+        <span>Show line numbers</span>
+      </label>
+      <label className="settings-tab__option">
+        <input
+          type="checkbox"
+          data-testid="editor-show-whitespace"
+          checked={general.editorShowWhitespace}
+          onChange={(e) => send("editorShowWhitespace", e.target.checked)}
+        />
+        <span>Show whitespace</span>
+      </label>
+      <p className="settings-tab__hint">Applies to every built-in editor tab. The editor header and its shortcuts toggle the same options.</p>
+    </div>
+  );
   const compareSection = (
     <div className="settings-tab__section">
       <h3 className="settings-tab__section-title">Compare</h3>
@@ -233,6 +266,7 @@ export function SettingsDisplayTab({ general, client }: SettingsDisplayTabProps)
     return (
       <div className="settings-tab">
         {buttonBarSection}
+        {editorSection}
         {colorSchemeSection}
         {iconCacheSection}
         {compareSection}
@@ -257,6 +291,7 @@ export function SettingsDisplayTab({ general, client }: SettingsDisplayTabProps)
   return (
     <div className="settings-tab">
       {buttonBarSection}
+      {editorSection}
       {colorSchemeSection}
         {iconCacheSection}
       {compareSection}

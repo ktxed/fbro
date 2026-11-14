@@ -269,7 +269,13 @@ commands type text. Only these leave the editor:
 | `panel.tab.next` / `panel.tab.prev` (Ctrl+Tab / Ctrl+Shift+Tab, literal Ctrl on macOS too) | Save, then activate the next/previous tab in the slot (wraps) |
 | `panel.tab.list` (Ctrl/Cmd+Shift+L) | Open the tab list (CodeMirror's Select All Occurrences on that key is removed) |
 | `app.command_palette` (Ctrl/Cmd+Shift+P) | Open the command palette; closing it returns focus to the editor |
+| Alt+Z / Alt+N / Alt+W (macOS Option) | Toggle word wrap / line numbers / whitespace marks. Editor-local; each sends `SetGeneralOption` (`editorWordWrap`, `editorLineNumbers`, `editorShowWhitespace`), so the setting is global and the view follows the backend patch. CodeMirror matches the physical key, so Option+letter works on macOS. None of the three is bound in CodeMirror's `defaultKeymap`; Alt+L (Select Line) is why line numbers use N. |
+| F1 | Open the editor shortcut sheet (`editor-cheat-sheet` modal), not the app's `?` sheet: `?` types in an editor, and F1 is only Pass to Bro on the listing. Escape or F1 closes it and focus returns to the editor. Its rows mix fixed editor and CodeMirror chords with live registry bindings (`file.view`, `panel.viewer.embed`, `notes.new`, tab cycling, the palette). |
 | Tab / Shift+Tab | Indent / un-indent (CodeMirror `indentWithTab`), so Next Source (Shift+Tab) is unavailable in an editor tab; Escape is the way out, per CodeMirror's guidance for Tab-capturing editors |
+
+**Header buttons.** Wrap, line numbers, whitespace (`aria-pressed`, `data-testid`
+`editor-wrap`, `editor-line-numbers`, `editor-whitespace`) and the shortcut sheet
+(`editor-cheat-sheet`) sit before maximize; like the others they are not tab stops.
 
 **Language keys.** Each file gets its language from `src/editor/language.ts`
 (`@codemirror/language-data` by file name, a small alias table, then the `#!`

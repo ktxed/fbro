@@ -281,6 +281,9 @@ Supported keys:
 | Key | Type | Default | Effect |
 |---|---|---|---|
 | `showHiddenDefault` | `bool` | `false` | Whether new panels start with hidden files visible. Changing this also applies immediately to all open panels. |
+| `editorWordWrap` | `bool` | `true` | Built-in editor tabs wrap long lines. Wrapping was always on before this setting, so older settings files keep it. Settings → Display → Editor, the editor header button and Alt+Z flip it. Applies to every editor tab and every GUI client. |
+| `editorLineNumbers` | `bool` | `false` | Built-in editor tabs show a line-number gutter (Alt+N, header button, Settings → Display → Editor). |
+| `editorShowWhitespace` | `bool` | `false` | Built-in editor tabs mark spaces, tabs and trailing whitespace (Alt+W, header button, Settings → Display → Editor). |
 | `showButtonBar` | `bool` | `true` | Show the classic bottom command bar. Settings → Display provides **Show bottom button bar**; the command palette provides **Toggle Button Bar** (`app.toggle_button_bar`, no default binding). Hiding the bar reclaims its space while preserving global shortcuts and zoom. The preference applies to all GUI clients connected to the backend. |
 | `osNotificationsEnabled` | `bool` | `true` | Deliver selected operation notifications through the OS while no native fbro window is focused. Completion and cancellation require at least 30 seconds of execution; failures, pairing requests, transfer starts, and connection changes bypass that cutoff. The General settings control is capability-gated. See [notifications.md](notifications.md). |
 | `rememberSortPerLocation` | `bool` | `false` | Remember and share sorting for each local filesystem location and for the Journal source. |

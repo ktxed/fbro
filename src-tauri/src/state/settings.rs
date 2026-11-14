@@ -36,6 +36,15 @@ pub struct GeneralSettings {
     /// Deliver selected operation feedback through the OS while fbro is inactive.
     #[serde(default = "default_true")]
     pub os_notifications_enabled: bool,
+    /// Built-in editor tabs wrap long lines.
+    #[serde(default = "default_true")]
+    pub editor_word_wrap: bool,
+    /// Built-in editor tabs show a line-number gutter.
+    #[serde(default)]
+    pub editor_line_numbers: bool,
+    /// Built-in editor tabs draw tabs, spaces and trailing whitespace.
+    #[serde(default)]
+    pub editor_show_whitespace: bool,
     pub remember_window_state: bool,
     #[serde(default = "default_true")]
     pub preserve_attributes: bool,
@@ -350,6 +359,9 @@ impl Default for GeneralSettings {
             show_hidden_default: false,
             show_button_bar: true,
             os_notifications_enabled: true,
+            editor_word_wrap: true,
+            editor_line_numbers: false,
+            editor_show_whitespace: false,
             remember_window_state: true,
             preserve_attributes: true,
             auto_resume_copies: true,
@@ -469,6 +481,20 @@ mod tests {
         assert!(is_known_color_scheme(COLOR_SCHEME_LIGHT));
         assert!(!is_known_color_scheme("system"));
         assert!(!is_known_color_scheme(""));
+    }
+
+    #[test]
+    fn editor_options_default_for_existing_settings_files() {
+        let mut encoded = serde_json::to_value(Settings::default()).unwrap();
+        let general = encoded["general"].as_object_mut().unwrap();
+        for key in ["editor_word_wrap", "editor_line_numbers", "editor_show_whitespace"] {
+            general.remove(key);
+        }
+        let decoded = serde_json::to_value(serde_json::from_value::<Settings>(encoded).unwrap()).unwrap();
+        // Wrapping was always on before it became a setting.
+        assert_eq!(decoded["general"]["editor_word_wrap"], true);
+        assert_eq!(decoded["general"]["editor_line_numbers"], false);
+        assert_eq!(decoded["general"]["editor_show_whitespace"], false);
     }
 
     #[test]

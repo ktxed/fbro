@@ -22,6 +22,7 @@ import { PanelHistoryModal } from "./PanelHistoryModal";
 import { JobsModal } from "./JobsModal";
 import { CommandPaletteModal } from "./CommandPaletteModal";
 import { CheatSheetModal } from "./CheatSheetModal";
+import { EditorCheatSheetModal } from "./EditorCheatSheetModal";
 import { AboutModal } from "./AboutModal";
 import { ContextMenu } from "./ContextMenu";
 import { SourceContextMenu } from "./SourceContextMenu";
@@ -627,6 +628,9 @@ export function Layout({ client, jobsViewOpen, onCloseJobsView, onOpenJobsView }
       )}
       {state.aboutOpen && (
         <AboutModal client={client} />
+      )}
+      {state.editorCheatSheetOpen && (
+        <EditorCheatSheetModal client={client} />
       )}
       {state.cheatSheetOpen && (
         <CheatSheetModal client={client} />
