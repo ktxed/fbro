@@ -15,7 +15,7 @@ import { zoomAction } from "../commands/bindings";
 import { isArchiveSourceId, isGlobalSelectionSourceId } from "../utils/sourceId";
 import { applyZoom, nextZoomSize, DEFAULT_FONT_SIZE } from "../utils/zoom";
 import {
-  IconPencil,
+  IconCursorText,
   IconEye,
   IconEdit,
   IconCopy,
@@ -40,7 +40,7 @@ function isEditableTarget(target: EventTarget | null) {
 }
 
 const TOOLBAR_ICONS: Record<(typeof TOOLBAR_COMMAND_IDS)[number], React.ReactNode> = {
-  "file.rename": <IconPencil size={16} />,
+  "file.rename": <IconCursorText size={16} />,
   "file.view": <IconEye size={16} />,
   "file.edit": <IconEdit size={16} />,
   "file.copy": <IconCopy size={16} />,

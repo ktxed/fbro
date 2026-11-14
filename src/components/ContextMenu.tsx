@@ -8,7 +8,7 @@ import {
   useFloating,
 } from "@floating-ui/react";
 import {
-  IconAppWindow, IconClipboardCopy, IconClipboardList, IconClipboardText, IconEdit,
+  IconAppWindow, IconClipboardCopy, IconClipboardList, IconClipboardText, IconPencil,
   IconFolderSearch, IconGitCompare, IconRobot, IconStack2, type Icon,
 } from "@tabler/icons-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -30,7 +30,7 @@ const ITEM_ICONS: Partial<Record<string, Icon>> = {
   "panel.pass-to-bro": IconRobot,
   "git.view-diff": IconGitCompare,
   "selection.to-global": IconStack2,
-  "file.edit_builtin": IconEdit,
+  "file.edit_builtin": IconPencil,
   "clipboard.names": IconClipboardText,
   "clipboard.paths": IconClipboardCopy,
   "clipboard.folder": IconClipboardList,

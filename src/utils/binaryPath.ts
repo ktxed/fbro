@@ -34,3 +34,27 @@ export function isLikelyBinaryPath(path: string): boolean {
   const ext = extensionOf(path);
   return ext !== "" && BINARY_EXTENSIONS.has(ext);
 }
+
+/** Extensions (and dotless names) a developer expects to edit in the built-in editor. */
+const DEV_TEXT_EXTENSIONS = new Set([
+  "txt", "md", "mdx", "markdown", "rst", "adoc", "log", "csv", "tsv",
+  "yml", "yaml", "json", "jsonc", "json5", "toml", "ini", "cfg", "conf", "env", "properties",
+  "xml", "html", "htm", "xhtml", "svg", "css", "scss", "sass", "less",
+  "ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs", "vue", "svelte", "astro",
+  "rs", "go", "py", "rb", "php", "java", "kt", "kts", "scala", "swift", "dart", "lua", "pl", "r",
+  "c", "h", "cc", "cpp", "cxx", "hpp", "hh", "hxx", "cs", "m", "mm",
+  "sh", "bash", "zsh", "fish", "ps1", "bat", "cmd",
+  "sql", "graphql", "gql", "proto", "tf", "hcl", "gradle", "cmake", "mk", "lock", "diff", "patch",
+]);
+
+const DEV_TEXT_NAMES = new Set([
+  "makefile", "dockerfile", "readme", "license", "changelog", "gemfile", "rakefile", "justfile", "cargo.lock",
+]);
+
+/** True for source/config/text files worth offering "Edit" for (Enter would otherwise open an OS handler). */
+export function isDeveloperTextPath(path: string): boolean {
+  const base = (path.split(/[/\\]/).pop() ?? path).toLowerCase();
+  if (DEV_TEXT_NAMES.has(base)) return true;
+  if (base.startsWith(".") && base.indexOf(".", 1) < 0) return true; // dotfiles: .gitignore, .bashrc
+  return DEV_TEXT_EXTENSIONS.has(extensionOf(base));
+}

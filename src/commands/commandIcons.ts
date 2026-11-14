@@ -3,7 +3,7 @@
 import {
   type Icon,
   IconSearch, IconSettings, IconListDetails, IconLayoutBottombar, IconTerminal2,
-  IconDeviceUsb, IconTerminal, IconLogout, IconInfoCircle, IconPencil, IconEye,
+  IconDeviceUsb, IconTerminal, IconLogout, IconInfoCircle, IconCursorText, IconEye,
   IconEdit, IconFilePlus, IconCopy, IconArrowsMove, IconCut, IconClipboard,
   IconFolderPlus, IconTrash, IconFiles, IconLock, IconHome, IconFolder, IconRefresh,
   IconHistory, IconFilter, IconArrowsExchange, IconDots, IconEyeOff, IconLayoutGrid,
@@ -28,7 +28,7 @@ export const COMMAND_ICONS: Partial<Record<string, Icon>> = {
   "app.open_terminal": IconTerminal,
   "app.quit": IconLogout,
   "file.info": IconInfoCircle,
-  "file.rename": IconPencil,
+  "file.rename": IconCursorText,
   "file.view": IconEye,
   "file.edit": IconEdit,
   "file.quick_edit": IconEdit,

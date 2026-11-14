@@ -14,7 +14,7 @@ import {
   PANEL_SHORTCUT_COMMAND_IDS,
 } from "../commands/interactive";
 import { useAppDispatch, useAppState } from "../store";
-import { IconChevronDown, IconChevronUp, IconChevronRight, IconChevronLeft, IconArrowUpRight, IconX, IconAlertTriangle, IconActivity, IconHistory, IconGitBranch, IconGitCompare, IconLock, IconMinus, IconNetwork, IconListCheck, IconPlus, IconRestore, IconCopy, IconPhoto, IconTrash, IconPencil, IconRobot, IconArrowsMove, IconFolderOpen, IconFolder, IconFile, IconNotes } from "@tabler/icons-react";
+import { IconChevronDown, IconChevronUp, IconChevronRight, IconChevronLeft, IconArrowUpRight, IconX, IconAlertTriangle, IconActivity, IconHistory, IconGitBranch, IconGitCompare, IconLock, IconMinus, IconNetwork, IconListCheck, IconPlus, IconRestore, IconCopy, IconPhoto, IconTrash, IconPencil, IconCursorText, IconRobot, IconArrowsMove, IconFolderOpen, IconFolder, IconFile, IconNotes } from "@tabler/icons-react";
 import { contextualEntryIsSelected, contextualOperationAvailable, resolveContextualTarget, type ContextualTarget } from "../contextualOperations";
 
 // Maps Source.iconName (BE-provided) to a Tabler icon component for rendering
@@ -32,7 +32,7 @@ import { PanelTabList } from "./PanelTabList";
 import { PanelTerminal } from "./PanelTerminal";
 import { PanelEditor } from "./PanelEditor";
 import { EntryThumb } from "./EntryThumb";
-import { isLikelyBinaryPath } from "../utils/binaryPath";
+import { isDeveloperTextPath, isLikelyBinaryPath } from "../utils/binaryPath";
 import { isArchiveSourceId, isGlobalSelectionSourceId, isSearchSourceId } from "../utils/sourceId";
 import { rovingIndexForKey } from "./modalKeyboard";
 import { GitModal } from "./GitModal";
@@ -1999,7 +1999,7 @@ export function Panel({
 
   const runContextualFileCommand = (
     target: ContextualTarget,
-    commandId: "panel.pass_to_bro" | "file.compare" | "file.copy" | "file.move" | "file.rename" | "file.delete",
+    commandId: "panel.pass_to_bro" | "file.compare" | "file.copy" | "file.move" | "file.rename" | "file.delete" | "file.edit_builtin",
   ) => {
     const { primary } = target;
     executeTargetedCommand(commandId, { state: appState, dispatch, client }, {
@@ -2022,6 +2022,14 @@ export function Panel({
     const previewThumbUrl = entry && available("file.preview") && isImagePreviewCandidate(entry) ? thumbUrlFor(entry, PREVIEW_THUMB_SIZE) : null;
     const previewUrl = previewThumbUrl ? `${previewThumbUrl}${previewThumbUrl.includes("?") ? "&" : "?"}foreground=1` : null;
     const operations: InlineOperationItem[] = [];
+    if (available("file.edit_builtin") && isDeveloperTextPath(target.primary.name)) operations.push({
+      id: "file.edit_builtin",
+      testId: "file-inline-edit",
+      label: "Edit",
+      ariaLabel: `Edit ${target.primary.name} in editor tab`,
+      icon: <IconPencil size={13} aria-hidden />,
+      run: () => runContextualFileCommand(target, "file.edit_builtin"),
+    });
     if (available("panel.browse-archive")) operations.push({
       id: "panel.browse-archive",
       testId: "file-inline-browse-archive",
@@ -2096,7 +2104,7 @@ export function Panel({
         testId: "file-inline-rename",
         label: "Rename",
         ariaLabel: `Rename ${target.primary.name}`,
-        icon: <IconPencil size={13} aria-hidden />,
+        icon: <IconCursorText size={13} aria-hidden />,
         run: () => runContextualFileCommand(target, "file.rename"),
       });
     if (available("file.delete")) operations.push({
