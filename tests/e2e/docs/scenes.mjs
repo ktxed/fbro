@@ -89,6 +89,34 @@ async function broOption(browser, broId) {
   await option.click();
 }
 
+/** Open `filename` from `dir` in an editor tab on the left. */
+async function openEditorOn(browser, observer, dir, filename) {
+  await navigate(browser, observer, "left", dir);
+  await focusPanel(browser, "left");
+  await clickEntry(browser, "left", filename);
+  await browser.keys("c");
+  await clickContextMenuItem(browser, "Edit in Editor Tab");
+  await waitFor(() => browser.execute(() => !!document.querySelector(".panel-editor .cm-content")),
+    { timeout: 20_000, label: `editor ${filename}` });
+}
+
+/** Close an editor tab and leave the left panel on the website listing. */
+async function finishEditor(browser, observer) {
+  await closeModals(browser);
+  if (await browser.execute(() => !!document.querySelector(".panel-editor"))) {
+    await browser.keys(["Control", "w"]);
+    await waitFor(() => browser.execute(() => !document.querySelector(".panel-editor")),
+      { timeout: 15_000, label: "editor closed" });
+  }
+  await navigate(browser, observer, "left", demo.website);
+}
+
+async function setLineNumbers(observer, value) {
+  observer.sendIntent("SetGeneralOption", undefined, { key: "editorLineNumbers", value });
+  await waitFor(() => observer.state.settings?.general?.editorLineNumbers === value,
+    { label: `line numbers ${value}` });
+}
+
 /** Default layout: website on the left, backup on the right, both in list view. */
 async function prepare(browser, observer) {
   await closeSettings(browser);
@@ -486,6 +514,102 @@ export const scenes = {
       observer.sendIntent("CloseCompareWindow", undefined, { requestId, label: `diff-${requestId}` });
       await browser.url(mainUrl);
       await waitForMainWindow(browser, "docs: back to main");
+    }
+  },
+
+  // viewing/editor — code with the line-number gutter and syntax colors
+  "editor-code": async (browser, observer) => {
+    await prepare(browser, observer);
+    const previous = observer.state.settings?.general?.editorLineNumbers === true;
+    await setLineNumbers(observer, true);
+    try {
+      await openEditorOn(browser, observer, `${demo.website}/src`, "app.js");
+      await waitFor(() => browser.execute(() => !!document.querySelector(".panel-editor .cm-lineNumbers")),
+        { label: "line number gutter" });
+      await shot(browser, "editor-code");
+    } finally {
+      if (!previous) await setLineNumbers(observer, false);
+      await finishEditor(browser, observer);
+    }
+  },
+
+  // viewing/editor — F1 sheet inside an editor tab
+  "editor-cheat-sheet": async (browser, observer) => {
+    await prepare(browser, observer);
+    try {
+      await openEditorOn(browser, observer, `${demo.website}/src`, "app.js");
+      await browser.$('[data-testid="editor-cheat-sheet"]').then((el) => el.click());
+      await browser.$('[data-testid="editor-cheat-sheet-body"]').then((el) => el.waitForDisplayed());
+      await shot(browser, "editor-cheat-sheet");
+    } finally {
+      await finishEditor(browser, observer);
+    }
+  },
+
+  // using/tabs — searchable list for one panel's tabs
+  "tab-list": async (browser, observer) => {
+    await prepare(browser, observer);
+    const slotId = "left";
+    const originalId = observer.state.slots[slotId].activePanelId;
+    const folders = [
+      demo.photos,
+      demo.backup,
+      demo.backupOctober,
+      demo.repo,
+      `${demo.website}/docs`,
+      `${demo.website}/src`,
+      `${demo.website}/assets`,
+    ];
+    try {
+      const created = [];
+      for (let i = 0; i < folders.length; i++) {
+        const before = new Set(observer.state.slots[slotId].tabPanelIds);
+        observer.sendIntent("panel.tab.new", undefined, { slotId });
+        let panelId;
+        await waitFor(() => {
+          panelId = observer.state.slots[slotId].tabPanelIds.find((id) => !before.has(id));
+          return !!panelId;
+        }, { timeout: 15_000, label: `listing tab ${i + 1}` });
+        created.push(panelId);
+        // The new tab is the one on screen. Go To Path updates that tab's
+        // name; a background NavigatePanelTo leaves the strip label behind.
+        await browser.$(`[data-testid="panel-${panelId}"]`).waitForDisplayed({ timeout: 10_000 });
+        await navigate(browser, observer, panelId, folders[i]);
+      }
+      const srcId = created[folders.indexOf(`${demo.website}/src`)];
+      observer.sendIntent("panel.tab.switch", undefined, { slotId, panelId: srcId });
+      await waitFor(() => observer.state.slots[slotId].activePanelId === srcId, { label: "src tab shown" });
+      await browser.$(`[data-testid="panel-${srcId}"]`).waitForDisplayed();
+      await clickEntry(browser, srcId, "app.js");
+      await browser.keys("c");
+      await clickContextMenuItem(browser, "Edit in Editor Tab");
+      await waitFor(() => observer.state.slots[slotId].tabPanelIds.some((id) =>
+        observer.state.panels[id]?.tabKind === "editor"), { timeout: 15_000, label: "editor tab in the strip" });
+      observer.sendIntent("panel.tab.switch", undefined, { slotId, panelId: originalId });
+      await waitFor(() => observer.state.slots[slotId].activePanelId === originalId, { label: "website tab shown" });
+      await browser.$(`[data-testid="panel-${originalId}"]`).waitForDisplayed();
+      await pressPanelKey(browser, originalId, "l", { ctrl: true, shift: true });
+      await browser.$('[data-testid="panel-tab-list"]').waitForDisplayed({ timeout: 10_000 });
+      await setTextInputValue(browser, '[data-testid="panel-tab-list-input"]', "website");
+      await waitFor(() => browser.execute(() => {
+        const titles = [...document.querySelectorAll(".panel__tab-list-title")].map((el) => el.textContent.trim());
+        return titles.includes("docs")
+          && titles.includes("app.js")
+          && titles.includes("website")
+          && titles.some((title) => title.includes("2026-10"))
+          && !titles.includes("photos")
+          && !titles.includes("backup")
+          && !titles.includes("garden-app")
+          && [...document.querySelectorAll(".panel__tab-list-match")].some((el) =>
+            el.textContent.toLowerCase().includes("website"));
+      }), { label: "tab search highlight" });
+      await shot(browser, "tab-list");
+    } finally {
+      await browser.keys("Escape");
+      observer.sendIntent("ClosePanelTabs", undefined, { panelId: originalId, which: "others" });
+      await waitFor(() => observer.state.slots[slotId].tabPanelIds.length === 1,
+        { timeout: 20_000, label: "extra tabs closed" });
+      await navigate(browser, observer, "left", demo.website);
     }
   },
 

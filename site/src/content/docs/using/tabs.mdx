@@ -4,6 +4,7 @@ description: Keep several folders, terminals and editors open in each panel.
 ---
 
 import Shortcut from "../../../components/Shortcut.astro";
+import Screenshot from "../../../components/Screenshot.astro";
 
 Each panel can hold several tabs. A tab remembers its own folder, cursor,
 selection, sort order and view mode. The tab bar only appears once a panel has
@@ -57,6 +58,8 @@ Once the tabs no longer fit, the strip shows a button with the tab **count** at
 its right end. Click it, or press <Shortcut id="panel.tab.list" />, to open a
 searchable list of that panel's tabs:
 
+<Screenshot name="tab-list" alt="The tab list under a full strip, with website typed so the matching tabs stay and those letters are marked" />
+
 | In the list | Keys |
 |---|---|
 | Filter by name or path | type |
@@ -74,9 +77,10 @@ back to the search field. So does the next arrow key, so the **×** only ever
 sits on the row you stopped at. Typing always returns to the search field.
 The list appears only in a panel with two or more tabs.
 
-Inside a terminal or editor tab, <Shortcut id="panel.tab.list" /> belongs to the
-shell or the editor, so use the count button or the
-[command palette](../command-palette/) there.
+Inside a terminal tab, <Shortcut id="panel.tab.list" /> belongs to the shell,
+so use the count button or the [command palette](../command-palette/) there.
+An editor tab hands that chord back to fbro. See
+[Keys in an editor tab](../../viewing/editor/#keys-in-an-editor-tab).
 
 ## Tabs across restarts
 

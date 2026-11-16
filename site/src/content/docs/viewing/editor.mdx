@@ -12,7 +12,7 @@ fbro gives you three ways to edit a file:
 |---|---|---|
 | **Edit** | <Shortcut id="file.edit" /> | Your text editor app |
 | **Quick Edit** | <Shortcut id="file.quick_edit" /> | Nano or Vim in a terminal inside the panel |
-| **Edit in Editor Tab** | context menu or command palette | fbro's own editor, in a tab |
+| **Edit in Editor Tab** | inline **Edit**, the context menu, or the command palette | fbro's own editor, in a tab |
 
 ## Edit in your editor
 
@@ -40,12 +40,15 @@ reaching the program. Press <kbd>Ctrl</kbd>+<kbd>[</kbd> to send Escape to Vim.
 
 ## Editor tabs
 
-fbro has a built-in editor for small text files. Open the context menu
-(<Shortcut id="panel.context_menu" />) on a file and choose **Edit in Editor Tab**.
-The file opens in a new tab next to the current one.
+fbro has a built-in editor for small text files. On a text file the first
+[inline choice](../../files/inline-choices/) is **Edit**, and it opens an editor
+tab. The context menu (<Shortcut id="panel.context_menu" />) calls the same
+action **Edit in Editor Tab**, and so does the command palette. The file opens
+in a new tab next to the current one.
 
-It works for UTF-8 text files of up to 2 MiB on a local disk. Opening a file that
-already has an editor tab switches to that tab.
+It works for UTF-8 text files of up to 2 MiB on a local disk, including source
+and config files, checksum files, SSH keys and dotfiles such as `.gitignore`.
+Opening a file that already has an editor tab switches to that tab.
 
 Code is highlighted for common languages, among them Rust, Python, JavaScript
 and TypeScript, Go, C and C++, Java, shell scripts, JSON, YAML, TOML, HTML, CSS
@@ -54,6 +57,8 @@ as a script, is recognized by its `#!` line. Markdown notes highlight their
 fenced code blocks. Brackets and quotes close as you type, and the arrows in the
 left margin fold a block. The colors come from the
 [color scheme](../../customize/color-schemes/).
+
+<Screenshot name="editor-code" alt="A JavaScript file in an editor tab, with syntax colors and a line-number gutter" />
 
 <Screenshot name="editor-tab" alt="A Markdown file open in an editor tab on the left, with its rendered preview on the right" />
 
@@ -76,6 +81,7 @@ shortcuts simply type text. Only these do something else:
 | <Shortcut id="panel.viewer.embed" /> | Save and toggle [quick preview](../quick-preview/#preview-what-youre-editing) |
 | <Shortcut id="notes.new" /> | Save and start a new note |
 | <Shortcut id="panel.tab.next" /> / <Shortcut id="panel.tab.prev" /> | Save and switch to the next / previous tab |
+| <Shortcut id="panel.tab.list" /> | Save and open the [tab list](../../using/tabs/#find-a-tab-in-a-long-strip) |
 | <Shortcut id="app.command_palette" /> | Open the [command palette](../../using/command-palette/) |
 | <kbd>Tab</kbd> / <kbd>Shift</kbd>+<kbd>Tab</kbd> | Indent / unindent |
 | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>[</kbd> / <kbd>]</kbd> (macOS <kbd>Cmd</kbd>+<kbd>Option</kbd>+<kbd>[</kbd> / <kbd>]</kbd>) | Fold / unfold the block at the cursor |
@@ -88,6 +94,8 @@ header. They are one setting for all editor tabs, also under **Editor** in
 **Settings → Display** (<Shortcut id="app.settings" />). <kbd>F1</kbd> opens a
 sheet of everything the editor understands, including editing keys such as move
 line, toggle comment and add cursor.
+
+<Screenshot name="editor-cheat-sheet" alt="The Editor Shortcuts sheet, with View, File and tabs, Find and Editing" />
 
 ### Saving
 

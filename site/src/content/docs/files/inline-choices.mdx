@@ -34,13 +34,14 @@ shows how many are selected.
 
 ## What's offered
 
-Only actions that apply are shown, in this order:
+Only actions that apply are shown. **Edit** is the first icon. On a changed file in a git repository the git actions come first, and **Edit** follows them. Otherwise the order is:
 
 | Choice | When |
 |---|---|
+| **Edit** | A single text file on a local disk that fbro opens in an [editor tab](../../viewing/editor/#editor-tabs). That includes source and config files, checksum files (`.b3`, `.sha256`, `SHA256SUMS`, …), SSH keys (`id_ed25519`, `.pub`, `.pem`, `authorized_keys`, `known_hosts`, …) and dotfiles such as `.gitignore`. The pencil is **Edit**; **Rename** has its own icon. |
 | **Browse archive** | The item is a zip or 7z archive. |
 | **Jump to location** | A search result: opens the folder that contains it, with the cursor on it. |
-| **View Git diff**, **Stage** / **Unstage**, **Rollback** | A single changed file in a git repository. Rollback asks you to confirm in place. |
+| **View Git diff**, **Stage** / **Unstage**, **Rollback** | A single changed file in a git repository. These lead the toolbar on that row. Rollback asks you to confirm in place. |
 | **Preview** | An image: hover or focus shows a thumbnail, and running it opens the viewer. |
 | **Compare** | Two selected files, or a selected file and the cursor file. See [Compare](../../viewing/compare/). |
 | **Pass to Bro** | The item or selection can be handed to a bro. |

@@ -19,8 +19,10 @@ away.
 
 ### Eject a removable drive
 
-On Linux and macOS, run **Eject Removable Source** from the
-[command palette](../command-palette/). Choose the drive, then either:
+On Linux and macOS, right-click a removable volume in the source bar, or run
+**Eject Removable Source** from the
+[command palette](../command-palette/). A right-click opens the dialog on that
+volume. Then either:
 
 - **Unmount selected volume**, or
 - **Eject entire drive**, which unmounts every volume on it. Tabs that were
@@ -44,9 +46,10 @@ parent and child processes and a flat list.
 
 ## Journal
 
-The **Journal** is a read-only log of what happened in fbro: the commands you
-ran and their results, such as git actions, plus remote activity like transfers
-to and from a paired fbro, connections and pairing. Each event is a file; view
+The **Journal** is a read-only log of what you did in fbro. It keeps file
+operations and git actions, searches, bookmarks, sharing and pairing, opening
+a file or a terminal outside fbro, clearing a cache, and cancelling a job.
+Remote transfers and connections are there too. Each event is a file; view
 it (<Shortcut id="file.view" />) to read the details. The journal is kept on
 disk, so it survives restarts, and clearing notifications doesn't remove it.
 
