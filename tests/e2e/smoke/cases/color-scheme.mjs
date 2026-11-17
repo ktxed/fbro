@@ -1,5 +1,5 @@
 import { FbroObserver } from "../observer.mjs";
-import { pressWindowKey, reloadBrowserApp, expectCheckboxSelected } from "../browser.mjs";
+import { pressWindowKey, reloadBrowserApp, expectCheckboxSelected, expectPanelListingFocus } from "../browser.mjs";
 import { waitFor } from "../wait.mjs";
 
 // Settings → Display → "Match system appearance". The backend resolves the
@@ -91,7 +91,7 @@ export async function runColorSchemeFlow(browser, observer) {
     if (general().followSystemColorScheme !== true) throw new Error("Rejected setting changed follow-system state");
 
     await browser.keys("Escape");
-    await expectFocus(panel, "closing Settings restores panel focus");
+    await expectPanelListingFocus(browser, "left", "closing Settings restores panel focus");
 
     // The preference comes back from the backend snapshot after a reload.
     await reloadBrowserApp(browser, "follow system color scheme");
@@ -108,7 +108,7 @@ export async function runColorSchemeFlow(browser, observer) {
     const value = await browser.execute((selector) => document.querySelector(selector)?.value, select);
     if (value !== "daylight") throw new Error(`Scheme select lost the manual choice: ${value}`);
     await browser.keys("Escape");
-    await expectFocus(panel, "closing Settings restores panel focus after unfollowing");
+    await expectPanelListingFocus(browser, "left", "closing Settings restores panel focus after unfollowing");
   } finally {
     if (await browser.$('[data-testid="settings-tab-general"]').isExisting()) await browser.keys("Escape");
     observer.sendIntent("SetGeneralOption", undefined, { key: "followSystemColorScheme", value: previousFollow ?? false });

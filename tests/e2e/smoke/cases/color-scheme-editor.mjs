@@ -1,4 +1,4 @@
-import { pressWindowKey, setTextInputValue } from "../browser.mjs";
+import { expectPanelListingFocus, pressWindowKey, setTextInputValue } from "../browser.mjs";
 import { waitFor } from "../wait.mjs";
 
 // Settings → Display → Customize… → Color Scheme editor. The tab exists only in
@@ -129,7 +129,7 @@ export async function runColorSchemeEditorFlow(browser, observer) {
 
     // Closing Settings drops the tab; a normal reopen does not show it.
     await closeSettings();
-    await expectFocus(panel, "closing Settings restores panel focus");
+    await expectPanelListingFocus(browser, "left", "closing Settings restores panel focus");
     await openSettings();
     if (await exists(tabSelector)) throw new Error("Color Scheme tab survived closing Settings");
     await closeSettings();

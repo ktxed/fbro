@@ -97,6 +97,18 @@ export async function expectCheckboxSelected(browser, selector, expected, label)
   return input;
 }
 
+// Listing focus is the panel itself, or its first suggestion button when the
+// folder is empty (Panel's `focusListing`). Earlier cases can leave the panel
+// in a folder they emptied, so "panel focus" must accept both.
+export function expectPanelListingFocus(browser, panelId, label, timeout = 5_000) {
+  return waitFor(() => browser.execute((id) => {
+    const panel = document.querySelector(`[data-testid="panel-${id}"]`);
+    const active = document.activeElement;
+    return !!panel && (active === panel
+      || (panel.contains(active) && active.matches(".panel__empty-actions button")));
+  }, panelId), { timeout, label });
+}
+
 export async function clickEntry(browser, panelId, name) {
   const selector = `[data-testid="panel-${panelId}"] [data-testid="panel-entry"][data-entry-name="${cssString(name)}"]`;
   const el = await waitFor(async () => {
