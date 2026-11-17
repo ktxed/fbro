@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { IconArrowBackUp, IconArrowDown, IconArrowUp, IconCopy, IconExternalLink, IconGitCompare, IconLoader2, IconMinus, IconPlus } from "@tabler/icons-react";
 import { useAppDispatch, useAppState } from "../store";
 import type { GitChange, GitLogRef, GitRepoStatus } from "../ws/types";
@@ -88,11 +88,23 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
     act(name, { ...args, activityId: id });
     return id;
   };
+  // The form's opener is disabled while the form is open, so focus can only
+  // return after the commit that closes it. A layout effect hands it back in
+  // that same commit; a deferred frame would leave focus on <body> and drop
+  // keys pressed in between (e.g. B right after Escape).
+  const branchFormReturnRef = useRef<HTMLButtonElement | null>(null);
   const closeBranchForm = () => {
     branchHistory.close();
+    branchFormReturnRef.current = (branchRemoteRef ? branchRef.current : null) ?? newBranchRef.current;
     setBranchFormOpen(false);
-    requestAnimationFrame(() => (branchRemoteRef ? branchRef : newBranchRef).current?.focus());
   };
+  useLayoutEffect(() => {
+    if (branchFormOpen || !branchFormReturnRef.current) return;
+    const target = branchFormReturnRef.current;
+    branchFormReturnRef.current = null;
+    if (target.isConnected) target.focus();
+    else newBranchRef.current?.focus();
+  }, [branchFormOpen]);
   const openBranchForm = () => {
     if (actionInFlightRef.current) return;
     if (branchFormOpen) { branchHistory.inputRef.current?.focus(); return; }
