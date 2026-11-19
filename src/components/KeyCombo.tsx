@@ -17,7 +17,7 @@ const MAC_MODIFIER_ICONS = {
   ctrl: IconChevronUp,
 } as const;
 
-const MODIFIER_LABELS = { meta: isMac ? "Cmd" : "Meta", ctrl: "Ctrl", alt: "Alt", shift: "Shift" } as const;
+const MODIFIER_LABELS = { meta: isMac ? "Cmd" : "Meta", ctrl: "Ctrl", alt: isMac ? "Option" : "Alt", shift: "Shift" } as const;
 
 const ARROW_ICONS: Record<string, typeof IconArrowUp> = {
   ArrowUp: IconArrowUp,

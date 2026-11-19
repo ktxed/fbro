@@ -9,7 +9,7 @@ export function formatBinding(binding: KeyBinding, mac = typeof navigator !== "u
     const parts: string[] = [];
     if (stroke.meta) parts.push(mac ? "Cmd" : "Meta");
     if (stroke.ctrl) parts.push("Ctrl");
-    if (stroke.alt) parts.push("Alt");
+    if (stroke.alt) parts.push(mac ? "Option" : "Alt");
     if (stroke.shift) parts.push("Shift");
     parts.push(labels[stroke.key] ?? (stroke.key.length === 1 ? stroke.key.toUpperCase() : stroke.key));
     return parts.join("+");

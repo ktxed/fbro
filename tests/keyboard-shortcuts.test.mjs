@@ -16,6 +16,9 @@ test('recorder captures control keys and physical letters without capturing modi
 test('formatting and matching retain modifiers, shifted symbols, physical fallbacks and view contexts', () => {
   assert.equal(formatBinding(binding('F8', {ctrl:true})), 'Ctrl+F8');
   assert.equal(formatBinding(binding(' ')), 'Space');
+  assert.equal(formatBinding(binding('z', {alt:true})), 'Alt+Z');
+  assert.equal(formatBinding(binding('z', {alt:true}), true), 'Option+Z');
+  assert.equal(formatBinding(binding('g', {alt:true, meta:true}), true), 'Cmd+Option+G');
   assert.equal(bindingMatches(event('ж', {code:'KeyR'}), binding('r')), true);
   assert.equal(bindingMatches(event('+', {shiftKey:true}), binding('+')), true);
   assert.equal(bindingMatches(event('!', {code:'Digit1',shiftKey:true}), binding('1', {shift:true})), true);

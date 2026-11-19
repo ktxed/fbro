@@ -39,7 +39,7 @@ export interface EditorHandlers {
   onEscape: () => void;
   /** Mod-s. */
   onSave: () => void;
-  /** Alt-z, Alt-n, Alt-w: flip one global editor option. */
+  /** Alt/Option+Z, +N, +W: flip one global editor option. */
   onToggleOption: (option: keyof EditorOptions) => void;
   /** F1. */
   onCheatSheet: () => void;
@@ -213,16 +213,34 @@ export function applyEditorOptions(view: EditorView, options: EditorOptions): vo
   if (effects.length > 0) view.dispatch({ effects });
 }
 
-/** Alt-z / Alt-n / Alt-w. Alt (Option on macOS) with a plain letter types a
- *  character only on macOS, where CodeMirror matches the physical key. */
-function optionKeys(handlers: EditorHandlers): KeyBinding[] {
-  const toggle = (option: keyof EditorOptions) => () => { handlers.onToggleOption(option); return true; };
-  return [
-    { key: "Alt-z", preventDefault: true, run: toggle("wordWrap") },
-    { key: "Alt-n", preventDefault: true, run: toggle("lineNumbers") },
-    { key: "Alt-w", preventDefault: true, run: toggle("showWhitespace") },
-    { key: "F1", preventDefault: true, run: () => { handlers.onCheatSheet(); return true; } },
-  ];
+/** Alt/Option+Z, +N, +W toggle one global editor option. Match the physical
+ *  key, not the typed character: on macOS Option+letter inserts Ω/˜/∑ and
+ *  CodeMirror intentionally skips its physical-key fallback for plain Option,
+ *  so a `key: "Alt-z"` binding would never run. A high-precedence DOM handler
+ *  also covers layouts where Alt+letter produces a symbol outside macOS. */
+const OPTION_KEYS: Record<string, keyof EditorOptions> = {
+  KeyZ: "wordWrap",
+  KeyN: "lineNumbers",
+  KeyW: "showWhitespace",
+};
+
+function optionKeys(handlers: EditorHandlers): Extension {
+  return Prec.high(EditorView.domEventHandlers({
+    keydown(event) {
+      // AltGr is Ctrl+Alt; Shift+Option types a symbol; repeats would thrash
+      // the setting, and IMEs report composition keys separately.
+      if (event.isComposing || event.repeat || !event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return false;
+      const option = OPTION_KEYS[event.code];
+      if (!option) return false;
+      handlers.onToggleOption(option);
+      return true;
+    },
+  }));
+}
+
+/** F1 opens the editor's own sheet, not the app's `?` sheet. */
+function helpKeys(handlers: EditorHandlers): KeyBinding[] {
+  return [{ key: "F1", preventDefault: true, run: () => { handlers.onCheatSheet(); return true; } }];
 }
 
 function editorKeys(handlers: EditorHandlers): KeyBinding[] {
@@ -257,7 +275,8 @@ export function createEditorState(doc: string, handlers: EditorHandlers, languag
     keymap.of([...closeBracketsKeymap, ...searchKeys, ...foldKeys, ...defaultKeymap, ...historyKeymap, indentWithTab]),
     // Lowest priority: the find panel's own Escape handling runs first.
     Prec.lowest(keymap.of(editorKeys(handlers))),
-    keymap.of(optionKeys(handlers)),
+    keymap.of(helpKeys(handlers)),
+    optionKeys(handlers),
     EditorView.updateListener.of((update) => {
       if (update.selectionSet || update.docChanged || update.focusChanged) handlers.onCursor(update.view);
       if (!update.docChanged) return;

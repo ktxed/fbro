@@ -345,6 +345,22 @@ async function runOptionsFlow(browser, observer, directory) {
     && (await has(".panel-editor .cm-lineNumbers")) === general().editorLineNumbers,
   { timeout: 10_000, label: "editor renders the current settings" });
 
+  // macOS Option+letter reports a symbol (Ω/˜/∑) with the same physical code.
+  // Matching must use the code, so the chord works even where Alt+letter types.
+  const optionCases = [
+    { symbol: "Ω", code: "KeyZ", keyCode: 90, setting: "editorWordWrap", initial: before.wrap },
+    { symbol: "˜", code: "KeyN", keyCode: 78, setting: "editorLineNumbers", initial: before.numbers },
+    { symbol: "∑", code: "KeyW", keyCode: 87, setting: "editorShowWhitespace", initial: before.whitespace },
+  ];
+  for (const { symbol, code, keyCode, setting, initial } of optionCases) {
+    await sendAlt(symbol, code, keyCode);
+    await waitFor(() => general()[setting] === !initial,
+      { timeout: 10_000, label: `Option+${code} toggles ${setting}` });
+    await sendAlt(symbol, code, keyCode);
+    await waitFor(() => general()[setting] === initial,
+      { timeout: 10_000, label: `Option+${code} toggles ${setting} back` });
+  }
+
   // Alt-z: wrap flips in the backend and in the view.
   await sendAlt("z", "KeyZ", 90);
   await waitFor(async () => general().editorWordWrap === !before.wrap
