@@ -18,19 +18,21 @@ hero:
       variant: secondary
 ---
 
-import { Card, CardGrid } from "@astrojs/starlight/components";
+import { Card, CardGrid, LinkButton } from "@astrojs/starlight/components";
 import Shortcut from "../../components/Shortcut.astro";
 
 <div class="fbro-video">
   <iframe
-    src="https://www.youtube-nocookie.com/embed/y4Jxfumu_NA"
-    title="Meet fbro: a keyboard-first, cross-platform two-panel file browser"
+    src="https://www.youtube-nocookie.com/embed/CEzxuKJgd-w"
+    title="fbro 0.0.8, a keyboard-first, cross-platform two-panel file browser"
     loading="lazy"
     allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
     referrerpolicy="strict-origin-when-cross-origin"
     allowfullscreen
   ></iframe>
 </div>
+
+<LinkButton href="https://youtu.be/CEzxuKJgd-w" icon="external" variant="primary" target="_blank" rel="noopener">Watch the showcase on YouTube</LinkButton>
 
 <CardGrid>
   <Card title="Two panels, one keyboard" icon="seti:folder">
