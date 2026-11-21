@@ -5,7 +5,7 @@ import { commitMessage, git, guardedChild, hashFile, repoRoot, showcaseZoomSteps
 import { assertDemoClone, assertPendingReadme, verifyDemoCommit } from "./fixtures.mjs";
 
 export const chapters = [
-  ["01-browse-filter", "Customize, browse, and filter", "Start with the demo photo grid, show quick preview on the right while selecting several photos, then open About through the command palette and continue with zoom, themes, list view, and filtering."],
+  ["01-browse-filter", "Customize, browse, and filter", "Start with the demo photo grid, show quick preview on the right while selecting several photos, then open About through the command palette, point at the user guide, and continue with zoom, themes, list view, and filtering."],
   ["02-collect-shortlist", "Collect a photo shortlist", "Create a destination folder, select six photos, copy, navigate into the result, and switch between grid and list."],
   ["03-remove-rejects", "Remove rejected photos", "Delete one copied photo in grid mode, return to list to delete two together, and preview the remaining thumbnails."],
   ["04-rename-keeper", "Rename the keepers", "Rename a photo in grid mode, return to list to rename its folder, then preview the renamed collection."],
@@ -15,6 +15,13 @@ export const chapters = [
   ["08-explore-git", "Explore fbro’s Git history", "Inspect status, history, and a historical diff. Maximize briefly for a single change; navigate and switch views only for multiple change blocks."],
   ["09-edit-review", "Edit and review documentation", "Edit README and review its diff, then run ls -al and mc in the embedded terminal, maximize and promote it to a tab, and return to files."],
   ["10-stage-commit", "Stage and commit", "Stage only README, commit, and inspect the new commit with a brief maximized diff."],
+  ["11-select-by-mask", "Select files by mask", "Select every JPEG with the default mask, then deselect the photo-* names and leave the remaining slide selected."],
+  ["12-keyboard", "Button bar, cheat sheet, and shortcuts", "Hide and restore the button bar, page the cheat sheet, open a shortcut without saving it, then switch the bar to function keys and view a photo with F3."],
+  ["13-color-schemes", "Bundled and custom color schemes", "Preview Matrix, duplicate it as Showcase, recolor the header, and apply that scheme to the photo grid."],
+  ["14-editor-tabs", "Editor tabs and notes", "Edit a checksum file, a script, and Markdown in editor tabs, toggle line numbers, whitespace, and wrapping, preview the note, and write a new note in the demo folder."],
+  ["15-panel-tabs", "Panel tabs", "Open a tab per folder, drag one in front of another, cycle with Ctrl+Tab, jump through the tab list, and close the others from the tab menu."],
+  ["16-permissions", "Set permissions", "Set a script to mode 755 from the octal field and confirm the listing and Info show rwxr-xr-x."],
+  ["17-job-files", "Job file list", "Copy two notes into Incoming, leave that folder, then jump from the finished job’s file list back to the source."],
 ].map(([id, title, description]) => ({ id, title, description }));
 
 export function selectChapters(value = "all") {
@@ -41,10 +48,37 @@ export function startingPaths(fixture, config) {
     "08-explore-git": repoRoot,
     "09-edit-review": fixture.clone,
     "10-stage-commit": fixture.clone,
+    "11-select-by-mask": fixture.workspace,
+    "12-keyboard": fixture.workspace,
+    "13-color-schemes": fixture.workspace,
+    "14-editor-tabs": fixture.workspace,
+    "15-panel-tabs": fixture.album,
+    "16-permissions": fixture.workspace,
+    "17-job-files": fixture.workspace,
   }[fixture.id];
-  const right = ["02-collect-shortlist", "04-rename-keeper"].includes(fixture.id) ? fixture.workspace
+  const ownWorkspace = ["02-collect-shortlist", "04-rename-keeper", "11-select-by-mask", "12-keyboard", "13-color-schemes", "14-editor-tabs", "16-permissions", "17-job-files"];
+  const right = fixture.id === "15-panel-tabs" ? fixture.album
+    : ownWorkspace.includes(fixture.id) ? fixture.workspace
     : ["09-edit-review", "10-stage-commit", "01-browse-filter"].includes(fixture.id) ? repoRoot : config.pics;
+  if (!left || !right) throw new Error(`No starting paths for ${fixture.id}`);
   return { left, right };
+}
+
+const DARK_SCHEME = "fbro Dark (built-in)";
+const LIGHT_SCHEME = "fbro Light (built-in)";
+const NUMBER_KEYS = "Number keys 1\u20130";
+const FUNCTION_KEYS = "Function keys F1\u2013F10";
+
+function commandKey(state, id) {
+  return state.commands?.find((item) => item.id === id)?.bindings?.[0]?.strokes?.[0]?.key;
+}
+
+function schemeItem(state, id) {
+  return state.settings?.general?.colorSchemes?.items?.find((item) => item.id === id);
+}
+
+function tabPaths(state, slot = "left") {
+  return (state.slots?.[slot]?.tabPanelIds ?? []).map((id) => state.panels[id]?.path ?? "");
 }
 
 export class Scene {
@@ -111,13 +145,17 @@ export class Scene {
     for (const name of names) assert.equal(fs.existsSync(path.join(this.fixture.shortlist, name)), false);
   }
 
-  async viewer(name) {
+  async viewer(name, { open = "command" } = {}) {
     await this.input.entry("left", name);
     const state = await this.input.inspect();
     if (state.windows.length !== 1 || state.windows[state.focusedWindow]?.title !== this.input.mainTitle) {
       throw new Error("Viewer opening requires the main listing; another window is already open");
     }
-    await this.input.command("file.view");
+    // The toolbar button's accessible name is its tooltip ("3 — View"), so the
+    // visible word is the inner static text. Clicking that word runs View
+    // without sending F3, which macOS may keep for Mission Control.
+    if (open === "button") await this.input.click({ label: "View", role: "AXStaticText" });
+    else await this.input.command("file.view");
     await until(`separate viewer for ${name}`, async () => (await this.input.inspect()).windows.length > 1, this.config.timeoutMs);
     await this.input.contain();
     await this.input.find({ label: "Text mode (1)", role: "AXButton" });
@@ -249,6 +287,79 @@ export class Scene {
       assert.equal(o.panel("left").tabKind, "listing");
     }, 1200);
   }
+
+  async focusSlot(slot = "left") {
+    await this.observer.refresh();
+    const activeId = this.observer.slot(slot).activePanelId;
+    if (this.observer.state.focus === activeId || this.observer.state.focus === slot) return;
+    await this.input.move(this.input.stage.x + this.input.stage.width * (slot === "left" ? 0.23 : 0.73), this.input.stage.y + this.input.stage.height * 0.55, true);
+    await this.observer.wait(`${slot} slot focused`, (state) => {
+      const current = state.slots?.[slot]?.activePanelId;
+      return state.focus === current || state.focus === slot;
+    });
+  }
+
+  async entryActive(name, slot = "left") {
+    await this.focusSlot(slot);
+    const panelId = this.observer.slot(slot).activePanelId;
+    const panel = this.observer.panel(panelId);
+    if (panel.tabKind !== "listing") throw new Error(`Active ${slot} tab is not a listing`);
+    await this.input.entry(panelId, name);
+  }
+
+  async goActive(destination, slot = "left") {
+    await this.focusSlot(slot);
+    if (this.observer.active(slot).tabKind !== "listing") throw new Error(`Active ${slot} tab is not a listing`);
+    await this.input.command("panel.navigate_to_path");
+    await this.input.find({ role: "AXTextField", focused: true });
+    await this.input.type(destination, true);
+    await this.input.key("Enter");
+    await this.observer.wait(`${slot} active tab at ${destination}`, () => {
+      const panel = this.observer.active(slot);
+      return panel.tabKind === "listing" && panel.path === destination && panel.status === "ready";
+    });
+    await sleep(200);
+  }
+
+  async openEditor(name, slot = "left") {
+    await this.entryActive(name, slot);
+    await this.input.click({ label: `Edit ${name} in editor tab`, role: "AXButton" }, { panel: slot });
+    await this.observer.wait(`editor tab for ${name}`, () => {
+      const active = this.observer.active(slot);
+      return active.tabKind === "editor" && String(active.editor?.filePath ?? "").endsWith(`/${name}`);
+    });
+    await this.input.find({ role: "AXTextArea|AXTextField", focused: true });
+  }
+
+  async leaveEditor(slot = "left") {
+    const origin = this.observer.active(slot).editor?.originPanelId;
+    await this.input.key("Escape");
+    await this.observer.wait("origin listing restored", () => {
+      const active = this.observer.active(slot);
+      const activeId = this.observer.slot(slot).activePanelId;
+      return active.tabKind === "listing" && (!origin || activeId === origin);
+    });
+  }
+
+  async clickEditor() {
+    await this.input.click({ role: "AXTextArea|AXTextField" });
+    await this.input.find({ role: "AXTextArea|AXTextField", focused: true });
+  }
+
+  async toggleEditor(label, field, expected) {
+    await this.input.button(label);
+    await this.observer.wait(`${label} ${expected}`, (state) => state.settings.general[field] === expected);
+  }
+
+  async choosePopup(label, downs) {
+    await this.input.click({ label, role: "AXPopUpButton|AXComboBox" });
+    for (let step = 0; step < downs; step++) await this.input.key("ArrowDown");
+    await this.input.key("Enter");
+  }
+
+  center(node) {
+    return { x: node.frame.x + node.frame.width / 2, y: node.frame.y + node.frame.height / 2 };
+  }
 }
 
 const flows = {
@@ -294,19 +405,24 @@ const flows = {
         await sleep(400);
       }
     }, 1200);
+    await s.step("Point at the user guide without opening it", async () => {
+      const guide = await i.find({ label: "User guide", role: "AXButton" });
+      const point = s.center(guide);
+      await i.move(point.x, point.y);
+    }, 1200);
     await s.step("Close About fbro", () => i.button("Close"));
     await s.step("Open Settings and Display", async () => {
       await i.command("app.settings");
       await i.button("Display");
-      await i.find({ label: "fbro Dark", role: "AXPopUpButton|AXComboBox" });
+      await i.find({ label: DARK_SCHEME, role: "AXPopUpButton|AXComboBox" });
     }, 1200);
     await s.step("Switch to the light theme", async () => {
-      await i.click({ label: "fbro Dark", role: "AXPopUpButton|AXComboBox" });
+      await i.click({ label: DARK_SCHEME, role: "AXPopUpButton|AXComboBox" });
       await i.key("ArrowDown"); await i.key("Enter");
       await o.wait("light theme", (state) => state.settings.general.colorScheme === "daylight");
     }, 2400);
     await s.step("Switch back to dark mode", async () => {
-      await i.click({ label: "fbro Light", role: "AXPopUpButton|AXComboBox" });
+      await i.click({ label: LIGHT_SCHEME, role: "AXPopUpButton|AXComboBox" });
       await i.key("ArrowUp"); await i.key("Enter");
       await o.wait("dark theme", (state) => state.settings.general.colorScheme === "fbro-dark");
     }, 1800);
@@ -553,6 +669,287 @@ const flows = {
     }, 600);
     await s.exploreDiff();
     await s.closeViewer(); await i.key("Escape");
+  },
+  async "11-select-by-mask"(s) {
+    const { input: i, observer: o, fixture: f } = s;
+    await s.step("Put the cursor on a JPEG so the mask starts at *.jpg", () => i.entry("left", "photo-a.jpg"));
+    await s.step("Select every JPEG with the default mask", async () => {
+      await i.command("panel.selection.select_by_mask");
+      await i.find({ label: "Select Files" });
+      await i.find({ label: "*.jpg", role: "AXTextField|AXComboBox" });
+      await i.button("Select");
+      await o.selection("left", f.maskPhotos);
+    }, 1400);
+    await s.step("Deselect the photo-* names and keep the slide", async () => {
+      await i.command("panel.selection.deselect_by_mask");
+      await i.find({ label: "Deselect Files" });
+      await i.find({ role: "AXTextField|AXComboBox", focused: true });
+      await i.type("photo-*.jpg", true);
+      await i.button("Deselect");
+      await o.selection("left", ["slide-c.jpg"]);
+    }, 1600);
+  },
+  async "12-keyboard"(s) {
+    const { input: i, observer: o } = s;
+    await s.step("Show the number-key button bar", async () => {
+      await o.wait("number-key View binding", (state) => state.settings.general.showButtonBar && commandKey(state, "file.view") === "3");
+      const key = await i.find({ label: "3", role: "AXStaticText" });
+      const point = s.center(key);
+      await i.move(point.x, point.y);
+      const view = await i.find({ label: "View", role: "AXStaticText|AXButton" });
+      const label = s.center(view);
+      await i.move(label.x, label.y);
+    }, 1400);
+    await s.step("Hide the button bar from Display settings", async () => {
+      await i.command("app.settings");
+      await i.button("Display");
+      await i.click({ label: "Show bottom button bar", role: "AXCheckBox|AXStaticText" });
+      await o.wait("button bar hidden", (state) => state.settings.general.showButtonBar === false);
+      await i.button("Close");
+      await until("button bar removed", async () => !(await i.find({ label: "View", role: "AXStaticText" }, { optional: true })), s.config.timeoutMs);
+    }, 1200);
+    await s.step("Restore the button bar from the command palette", async () => {
+      await i.command("app.toggle_button_bar");
+      await o.wait("button bar restored", (state) => state.settings.general.showButtonBar === true && commandKey(state, "file.view") === "3");
+      await i.find({ label: "View", role: "AXStaticText" });
+    }, 1400);
+    await s.step("Open the keyboard cheat sheet and page through it", async () => {
+      await i.command("app.cheat_sheet");
+      await i.find({ label: "Keyboard Cheat Sheet" });
+      await i.key("PageDown");
+    }, 1400);
+    await s.step("Open shortcut settings from the cheat sheet", async () => {
+      await i.button("Customize…");
+      await i.find({ label: "Search commands", role: "AXTextField|AXComboBox" });
+    }, 1000);
+    await s.step("Show Inspect Item’s shortcut without saving a change", async () => {
+      await i.click({ label: "Search commands", role: "AXTextField|AXComboBox" });
+      await i.type("Inspect Item");
+      await i.click({ label: "Inspect Item", prefix: true, role: "AXStaticText|AXButton" }, { aboveToolbar: true });
+      await i.button("Edit", { aboveToolbar: true });
+      await i.find({ label: "Edit shortcut" });
+      await i.button("Cancel", { aboveToolbar: true });
+    }, 1400);
+    await s.step("Switch the button bar from number keys to function keys", async () => {
+      if (o.state.settings?.general?.systemFunctionKeysStandard == null) throw new Error("Button bar key choice is only available when macOS reports the function-key setting");
+      await s.choosePopup(NUMBER_KEYS, 1);
+      await o.wait("function-key View binding", (state) => state.settings.general.buttonBarKeys === "function" && commandKey(state, "file.view") === "F3");
+      await i.find({ label: FUNCTION_KEYS, role: "AXPopUpButton|AXComboBox" });
+    }, 1400);
+    await s.step("Close settings and show F3 on the button bar", async () => {
+      await i.button("Close");
+      const key = await i.find({ label: "F3", role: "AXStaticText" });
+      const point = s.center(key);
+      await i.move(point.x, point.y);
+    }, 1000);
+    await s.step("View the photo with F3", async () => {
+      // A Mac that still maps F3 to Mission Control would take the key before
+      // fbro. The button already shows F3, so open the photo from that control.
+      const standard = o.state.settings?.general?.systemFunctionKeysStandard === true;
+      await s.viewer("view.jpg", { open: standard ? "command" : "button" });
+      await s.imageReady("view.jpg");
+    }, 1600);
+    await s.closeViewer();
+  },
+  async "13-color-schemes"(s) {
+    const { input: i, observer: o, fixture: f } = s;
+    await s.step("Open the color scheme editor", async () => {
+      await o.path("left", f.workspace);
+      await i.command("app.settings");
+      await i.button("Display");
+      await i.button("Customize…");
+      await i.find({ label: DARK_SCHEME, role: "AXPopUpButton|AXComboBox" });
+    }, 1200);
+    await s.step("Preview the bundled Matrix scheme", async () => {
+      // Built-ins, then bundled sources: Dark, Light, CDE Motif, IntelliJ Dark,
+      // IntelliJ Light, Magenta, Matrix. Six downs stays valid while that order does.
+      await s.choosePopup(DARK_SCHEME, 6);
+      await i.find({ label: "Matrix (built-in)", role: "AXPopUpButton|AXComboBox" });
+      await i.button("Use this scheme");
+      await o.wait("Matrix in use", (state) => state.settings.general.colorScheme === "bundled:matrix");
+    }, 1800);
+    await s.step("Duplicate Matrix as Showcase", async () => {
+      await i.button("Duplicate…");
+      await i.find({ role: "AXTextField|AXComboBox", focused: true });
+      await i.type("Showcase", true);
+      await i.button("Create");
+      await o.wait("Showcase scheme saved", (state) => schemeItem(state, "custom:showcase"));
+      await i.find({ label: "Showcase (custom)", role: "AXPopUpButton|AXComboBox" });
+    }, 1400);
+    await s.step("Recolor the header purple", async () => {
+      await i.click({ label: "Filter colors", role: "AXTextField|AXComboBox" });
+      await i.type("Header");
+      await i.click({ label: "Header", role: "AXStaticText" }, { aboveToolbar: true });
+      await i.click({ label: "Header value", role: "AXTextField|AXComboBox" });
+      await i.type("#6d28d9", true);
+      await o.wait("header color saved", (state) => schemeItem(state, "custom:showcase")?.colors?.["bg-header"]?.toLowerCase() === "#6d28d9");
+      await i.find({ label: "Saved" });
+    }, 1400);
+    await s.step("Use the Showcase scheme and close settings", async () => {
+      await i.button("Use this scheme");
+      await o.wait("Showcase scheme in use", (state) => state.settings.general.colorScheme === "custom:showcase");
+      await i.button("Close");
+    }, 800);
+    await s.step("Show the recolored panels as a photo grid", () => s.view("grid"), 2200);
+  },
+  async "14-editor-tabs"(s) {
+    const { input: i, observer: o, fixture: f } = s;
+    const script = path.join(f.workspace, "shortlist.js");
+    await s.step("Open the checksum file with its inline Edit button", () => s.openEditor("SHA256SUMS"), 1600);
+    await s.step("Return to the listing and keep the editor tab", () => s.leaveEditor(), 1000);
+    await s.step("Open the shortlist script in another editor tab", () => s.openEditor("shortlist.js"), 1200);
+    await s.step("Show line numbers and whitespace, then wrap the long line", async () => {
+      await s.toggleEditor("Show line numbers", "editorLineNumbers", true);
+      await s.toggleEditor("Show whitespace", "editorShowWhitespace", true);
+      await s.toggleEditor("Wrap long lines", "editorWordWrap", false);
+      await sleep(700);
+      await s.toggleEditor("Wrap long lines", "editorWordWrap", true);
+    }, 1400);
+    await s.step("Append a comment and save it", async () => {
+      await s.clickEditor();
+      await i.key("ArrowDown", ["cmd"]);
+      await i.type(`\n${f.editorMark}`);
+      await i.key("s", ["cmd"]);
+      await until("saved showcase comment", () => fs.readFileSync(script, "utf8").includes(f.editorMark), s.config.timeoutMs);
+    }, 1200);
+    await s.step("Open the editor shortcut sheet", async () => {
+      await i.button("Editor shortcuts");
+      await i.find({ label: "Editor Shortcuts" });
+    }, 1600);
+    await s.step("Close the shortcut sheet", () => i.button("Close"), 600);
+    await s.step("Return to the listing", () => s.leaveEditor(), 800);
+    await s.step("Preview the Markdown note beside the editor", async () => {
+      await s.openEditor("showcase.md");
+      await i.command("panel.viewer.embed");
+      await i.find({ label: "Showcase notes" }, { panel: "right" });
+    }, 1800);
+    await s.step("Close the preview and return to the listing", async () => {
+      await i.command("panel.viewer.embed");
+      await until("markdown preview closed", async () => !(await i.find({ label: "Showcase notes" }, { optional: true, panel: "right" })), s.config.timeoutMs);
+      await s.leaveEditor();
+    }, 800);
+    await s.step("Create a note in the demo folder and save a sentence", async () => {
+      await i.command("notes.new");
+      await o.wait("new note editor", () => {
+        const active = o.active("left");
+        return active.tabKind === "editor" && active.editor?.isNote === true;
+      });
+      await s.clickEditor();
+      await i.type(f.noteMark);
+      await i.key("s", ["cmd"]);
+      await until("saved demo note", () => fs.readdirSync(f.workspace).some((name) => name.endsWith(".md") && name !== "showcase.md" && fs.readFileSync(path.join(f.workspace, name), "utf8").includes(f.noteMark)), s.config.timeoutMs);
+    }, 1600);
+  },
+  async "15-panel-tabs"(s) {
+    const { input: i, observer: o, fixture: f } = s;
+    for (const name of f.folders) {
+      await s.step(`Open a tab for ${name}`, async () => {
+        await s.focusSlot("left");
+        const before = o.slot("left").activePanelId;
+        const count = o.slot("left").tabPanelIds.length;
+        await i.command("panel.tab.new");
+        await o.wait(`new tab after ${before}`, (state) => state.slots.left.tabPanelIds.length === count + 1 && state.slots.left.activePanelId !== before);
+        await s.goActive(path.join(f.album, name));
+      }, 900);
+    }
+    await s.step("Drag Charlie in front of Alpha", async () => {
+      // Short names stay within the tab label limit and on screen together,
+      // so the drag does not depend on the strip scrolling.
+      await o.wait("Delta tab active", () => o.active("left").path === path.join(f.album, "Delta"));
+      const from = await i.find({ label: "Charlie", role: "AXStaticText" }, { panel: "left" });
+      const to = await i.find({ label: "Alpha", role: "AXStaticText" }, { panel: "left" });
+      const start = s.center(from);
+      await i.drag(start.x, start.y, to.frame.x + to.frame.width * 0.25, to.frame.y + to.frame.height / 2);
+      await o.wait("Charlie before Alpha", (state) => {
+        const paths = tabPaths(state);
+        const charlie = paths.findIndex((item) => item.endsWith("/Charlie"));
+        const alpha = paths.findIndex((item) => item.endsWith("/Alpha"));
+        return charlie >= 0 && charlie === alpha - 1;
+      });
+    }, 1400);
+    await s.step("Cycle to the next tab with Ctrl+Tab", async () => {
+      const before = o.slot("left").activePanelId;
+      await i.command("panel.tab.next");
+      await o.wait("next tab active", (state) => state.slots.left.activePanelId !== before && state.panels[state.slots.left.activePanelId]?.path === f.album);
+    }, 1200);
+    await s.step("Jump to Bravo from the tab list", async () => {
+      await i.command("panel.tab.list");
+      await i.click({ label: "Search tabs", role: "AXTextField|AXComboBox" });
+      await i.type("Bravo");
+      await i.key("Enter");
+      await o.wait("Bravo tab active", () => o.active("left").path === path.join(f.album, "Bravo"));
+      await until("tab list closed", async () => !(await i.find({ label: "Search tabs" }, { optional: true })), s.config.timeoutMs);
+    }, 1200);
+    await s.step("Close the other tabs from Alpha’s menu", async () => {
+      await i.rightClick({ label: "Alpha", role: "AXStaticText" }, { panel: "left" });
+      await i.click({ label: "Close others", role: "AXMenuItem|AXButton|AXStaticText" });
+      await o.wait("only the Alpha tab remains", (state) => {
+        const paths = tabPaths(state);
+        return paths.length === 1 && paths[0] === path.join(f.album, "Alpha");
+      });
+    }, 1400);
+  },
+  async "16-permissions"(s) {
+    const { input: i, observer: o, fixture: f } = s;
+    const script = path.join(f.workspace, "present.sh");
+    await s.step("Open Set Permissions for the script", async () => {
+      await i.entry("left", "present.sh");
+      assert.equal(fs.statSync(script).mode & 0o777, 0o644);
+      await i.command("file.set_permissions");
+      await i.find({ label: "Set Permissions" });
+    }, 1000);
+    await s.step("Set the octal mode to 755 and apply it", async () => {
+      await i.click({ role: "AXTextField" });
+      await i.type("755", true);
+      await i.button("Apply");
+      await until("permissions dialog closed", async () => !(await i.find({ label: "Set Permissions" }, { optional: true })), s.config.timeoutMs);
+      await o.wait("listing shows rwxr-xr-x", () => o.panel("left").entries.find((entry) => entry.name === "present.sh")?.permissions === "rwxr-xr-x");
+      assert.equal(fs.statSync(script).mode & 0o777, 0o755);
+    }, 1200);
+    await s.step("Confirm the mode in Info", async () => {
+      await i.command("file.info");
+      await i.find({ label: "Permissions" });
+      await i.find({ label: "rwxr-xr-x" });
+    }, 1800);
+    await s.step("Close Info", () => i.key("Escape"));
+  },
+  async "17-job-files"(s) {
+    const { input: i, observer: o, fixture: f } = s;
+    await s.step("Create Incoming on the right and open it", async () => {
+      await i.focusPanel("right");
+      await o.path("right", f.workspace);
+      await i.command("file.mkdir");
+      await i.find({ label: "Name", role: "AXTextField" });
+      await i.type("Incoming");
+      await i.button("Create");
+      await o.wait("Incoming directory", () => o.panel("right").entries.some((entry) => entry.name === "Incoming"));
+      await i.entry("right", "Incoming");
+      await i.key("Enter");
+      await o.path("right", f.incoming);
+    }, 1000);
+    await s.step("Copy the two notes into Incoming", async () => {
+      await s.select(f.copied, "left");
+      await o.path("left", f.workspace);
+      await o.path("right", f.incoming);
+      for (const name of f.copied) assert.equal(fs.existsSync(path.join(f.incoming, name)), false);
+      await i.command("file.copy");
+      await i.find({ label: `Copy ${f.copied.length} items to ${f.incoming}` });
+      await s.operation("Copy", async () => { await o.selection("left", f.copied); await o.path("right", f.incoming); });
+      for (const name of f.copied) assert.equal(fs.existsSync(path.join(f.incoming, name)), true);
+    }, 1000);
+    await s.step("Leave the source folder so the jump is visible", () => i.go("left", f.incoming), 1000);
+    await s.step("Expand the finished copy and jump back to a source file", async () => {
+      await o.path("left", f.incoming);
+      assert.equal(o.state.focus, "left");
+      await i.command("app.open_jobs");
+      await i.find({ label: "Finished File Jobs" });
+      await i.button("Expand File List");
+      const row = await i.find({ label: "File 1 of 2:", prefix: true });
+      const point = s.center(row);
+      await i.move(point.x, point.y);
+      await i.button("Jump to location");
+      await o.wait("jumped back to the source folder", () => o.panel("left").path === f.workspace && o.panel("left").status === "ready" && o.state.focus === "left");
+    }, 1600);
   },
 };
 

@@ -62,8 +62,50 @@ export async function prepareFixture(id, context) {
   const demoRoot = guardedChild(config.pics, path.join(config.pics, "fbro-demo", runId));
   const workspace = guardedChild(demoRoot, path.join(demoRoot, id));
   const fixture = { id, workspace, revision, photos: [...config.photos], shortlist: path.join(workspace, "Shortlist") };
-  if (["02-collect-shortlist", "03-remove-rejects", "04-rename-keeper", "06-media-viewers", "07-compare-notes"].includes(id)) {
+  if (["02-collect-shortlist", "03-remove-rejects", "04-rename-keeper", "06-media-viewers", "07-compare-notes", "11-select-by-mask", "12-keyboard", "13-color-schemes", "14-editor-tabs", "15-panel-tabs", "16-permissions", "17-job-files"].includes(id)) {
     fs.mkdirSync(workspace, { recursive: true });
+  }
+  if (id === "11-select-by-mask") {
+    const photos = [[config.photos[0], "photo-a.jpg"], [config.photos[1], "photo-b.jpg"], [config.photos[2], "slide-c.jpg"]];
+    for (const [source, name] of photos) fs.copyFileSync(assetPath(config, source), guardedChild(workspace, path.join(workspace, name)), fs.constants.COPYFILE_EXCL);
+    fs.writeFileSync(path.join(workspace, "notes.txt"), "Notes that a JPEG mask must leave alone.\n");
+    fs.writeFileSync(path.join(workspace, "readme.md"), "A markdown file outside *.jpg.\n");
+    fixture.maskPhotos = photos.map(([, name]) => name);
+  }
+  if (id === "12-keyboard") {
+    fs.copyFileSync(assetPath(config, config.photos[0]), guardedChild(workspace, path.join(workspace, "view.jpg")), fs.constants.COPYFILE_EXCL);
+    fs.writeFileSync(path.join(workspace, "readme.txt"), "Button bar demo.\n");
+  }
+  if (id === "13-color-schemes") {
+    for (const name of fixture.photos) fs.copyFileSync(assetPath(config, name), guardedChild(workspace, path.join(workspace, name)), fs.constants.COPYFILE_EXCL);
+  }
+  if (id === "14-editor-tabs") {
+    fs.writeFileSync(path.join(workspace, "SHA256SUMS"), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  photo-a.jpg\nbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb  photo-b.jpg\n");
+    fs.writeFileSync(path.join(workspace, "shortlist.js"), "const keep = [\"photo-a.jpg\", \"photo-b.jpg\", \"slide-c.jpg\"];\nconst caption = \"A deliberately long caption line for the showcase editor so wrapping is obvious when the margin is narrow and trailing spaces stay visible.   \";\nexport function shortlist() {\n  return keep;\n}\n");
+    fs.writeFileSync(path.join(workspace, "showcase.md"), "# Showcase notes\n\nA short note rendered beside the editor.\n");
+    fixture.editorMark = "// Showcase edit";
+    fixture.noteMark = "Captured in fbro.";
+  }
+  if (id === "15-panel-tabs") {
+    fixture.album = guardedChild(workspace, path.join(workspace, "Album"));
+    fs.mkdirSync(fixture.album);
+    fixture.folders = ["Alpha", "Bravo", "Charlie", "Delta"];
+    for (const name of fixture.folders) {
+      const dir = guardedChild(fixture.album, path.join(fixture.album, name));
+      fs.mkdirSync(dir);
+      fs.writeFileSync(path.join(dir, "readme.txt"), `${name}\n`);
+    }
+  }
+  if (id === "16-permissions") {
+    const script = path.join(workspace, "present.sh");
+    fs.writeFileSync(script, "#!/bin/sh\necho showcase\n");
+    fs.chmodSync(script, 0o644);
+  }
+  if (id === "17-job-files") {
+    fs.writeFileSync(path.join(workspace, "keeper-notes.txt"), "Keep the cover photo with the shortlist.\n");
+    fs.writeFileSync(path.join(workspace, "cover-plan.txt"), "Rename the chosen photo before the presentation.\n");
+    fixture.incoming = path.join(workspace, "Incoming");
+    fixture.copied = ["keeper-notes.txt", "cover-plan.txt"];
   }
   if (["03-remove-rejects", "04-rename-keeper"].includes(id)) {
     fs.mkdirSync(fixture.shortlist);

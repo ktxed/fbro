@@ -111,13 +111,23 @@ export class MacInput {
     await nativeCall(this.binary, "contain", this.pid, ...["x", "y", "width", "height"].map((key) => this.stage[key]));
   }
 
-  async find(target, { optional = false, panel } = {}) {
+  assertStage(x, y) {
+    if (!Number.isFinite(x) || !Number.isFinite(y) || x < this.stage.x || y < this.stage.y || x >= this.stage.x + this.stage.width || y >= this.stage.y + this.stage.height) throw new Error("Pointer target is outside the filming stage");
+  }
+
+  coordinate(n) {
+    return n < 0 ? `=${Math.round(n)}` : String(Math.round(n));
+  }
+
+  async find(target, { optional = false, panel, aboveToolbar = false } = {}) {
     let result;
     await until(`accessible ${JSON.stringify(target)}`, async () => {
       const state = await this.inspect();
       const candidates = target.entryName ? entryTargets(state.nodes, target.entryName) : state.nodes;
+      const toolbarTop = this.stage.y + this.stage.height * 0.82;
       const nodes = candidates.filter((node) => node.window === state.focusedWindow && matchesNode(node, target)
         && (!panel || (panel === "left" ? node.frame.x < this.stage.x + this.stage.width / 2 : node.frame.x >= this.stage.x + this.stage.width / 2))
+        && (!aboveToolbar || node.frame.y + node.frame.height / 2 < toolbarTop)
         && node.frame.x >= this.stage.x && node.frame.y >= this.stage.y
         && node.frame.x + node.frame.width <= this.stage.x + this.stage.width + 1
         && node.frame.y + node.frame.height <= this.stage.y + this.stage.height + 1);
@@ -136,9 +146,29 @@ export class MacInput {
   }
 
   async move(x, y, click = false) {
-    if (!Number.isFinite(x) || !Number.isFinite(y) || x < this.stage.x || y < this.stage.y || x >= this.stage.x + this.stage.width || y >= this.stage.y + this.stage.height) throw new Error("Pointer target is outside the filming stage");
-    const coordinate = (n) => n < 0 ? `=${Math.round(n)}` : String(Math.round(n));
-    await this.events(["-e", "8", `m:${coordinate(x)},${coordinate(y)}`, ...(click ? ["w:120", "c:."] : [])]);
+    this.assertStage(x, y);
+    await this.events(["-e", "8", `m:${this.coordinate(x)},${this.coordinate(y)}`, ...(click ? ["w:120", "c:."] : [])]);
+  }
+
+  async rightClick(target, options = {}) {
+    const node = await this.find(target, options);
+    if (!node) throw new Error(`No right-click target: ${JSON.stringify(target)}`);
+    const x = node.frame.x + node.frame.width / 2;
+    const y = node.frame.y + node.frame.height / 2;
+    this.assertStage(x, y);
+    await this.events(["-e", "8", `m:${this.coordinate(x)},${this.coordinate(y)}`, "w:120", "rc:."]);
+  }
+
+  async drag(fromX, fromY, toX, toY) {
+    this.assertStage(fromX, fromY);
+    this.assertStage(toX, toY);
+    const stepX = fromX + Math.sign(toX - fromX || 1) * 12;
+    const stepY = fromY;
+    this.assertStage(stepX, stepY);
+    const point = (x, y) => `${this.coordinate(x)},${this.coordinate(y)}`;
+    // Pointer capture and the tab drag both need a real button-down move past
+    // the 6px threshold, not a click that jumps to the destination.
+    await this.events(["-e", "8", `m:${point(fromX, fromY)}`, "w:80", `dd:${point(fromX, fromY)}`, "w:100", `dm:${point(stepX, stepY)}`, "w:80", `dm:${point(toX, toY)}`, "w:120", `du:${point(toX, toY)}`]);
   }
 
   async click(target, options = {}) {
@@ -154,9 +184,20 @@ export class MacInput {
   }
 
   async key(key, modifiers = []) {
+    let physical = key;
+    const flags = [...modifiers];
+    // "+" and "?" are unshifted symbol bindings. The helper has the physical
+    // US keys, and Shift produces those characters, matching bindingMatches.
+    if (physical === "+" && !flags.includes("shift")) {
+      physical = "=";
+      flags.push("shift");
+    } else if (physical === "?" && !flags.includes("shift")) {
+      physical = "/";
+      flags.push("shift");
+    }
     await this.inspect();
-    this.trace("key", { key, modifiers });
-    await nativeCall(this.binary, "key", this.pid, key, ...modifiers);
+    this.trace("key", { key, physical, modifiers: flags });
+    await nativeCall(this.binary, "key", this.pid, physical, ...flags);
   }
 
   async type(text, replace = false) {
@@ -186,8 +227,10 @@ export class MacInput {
       await this.click({ label: `${command.title} ${command.category}` }, { anchor: `command.${id}` });
       return;
     }
-    const modifiers = [["ctrl", binding.ctrl], ["alt", binding.alt], ["cmd", binding.meta], ["shift", binding.shift]].filter(([, enabled]) => enabled).map(([key]) => key);
-    await this.key(binding.key, modifiers);
+    const stroke = binding.strokes?.[0] ?? binding;
+    if (!stroke?.key) throw new Error(`Command has no key stroke: ${id}`);
+    const modifiers = [["ctrl", stroke.ctrl], ["alt", stroke.alt], ["cmd", stroke.meta], ["shift", stroke.shift]].filter(([, enabled]) => enabled).map(([name]) => name);
+    await this.key(stroke.key, modifiers);
   }
 
   async focusPanel(id) {

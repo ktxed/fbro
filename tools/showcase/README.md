@@ -1,10 +1,10 @@
 # fbro macOS showcase
 
-Ten repeatable chapters drive the **real native fbro app** with a visible mouse
+Seventeen repeatable chapters drive the **real native fbro app** with a visible mouse
 pointer. Each chapter gets a fresh starting state, so a retake does not depend
 on earlier clips. Recordings are silent 1920×1080 H.264 MP4s at 30 fps, without
 captions or click highlights. Most chapters take 15–40 seconds; the extended
-Markdown and Git chapters take longer. Loading and action times determine the
+Markdown, Git, editor, and tab chapters take longer. Loading and action times determine the
 actual length.
 
 The opening chapter starts already in grid view with the entire configured
@@ -12,7 +12,7 @@ photos folder, without filtering or reducing it to six copied images.
 Cmd+3 opens quick preview on the right; clicking through three thumbnails shows
 each photo larger without leaving the grid. The first three JPEG/PNG entries
 in the listing are used for preview. It then closes preview, opens the
-command palette and About fbro, and zooms from the default 13px through three Cmd+Plus presses to 16px
+command palette and About fbro, points at the user guide without opening it, and zooms from the default 13px through three Cmd+Plus presses to 16px
 while About is visible. Every later chapter starts at 16px, including its viewer, comparison,
 and embedded editor, so cuts keep a consistent zoom level. Each isolated app
 session is seeded with this setting before recording starts.
@@ -99,7 +99,7 @@ directory and a separate loopback WebSocket port.
 
 | ID | Feature and scene |
 | --- | --- |
-| `01-browse-filter` | Entire photos folder in grid immediately → Cmd+3 quick preview on the right → select three photos → close preview → command palette → About → zoom → themes → list → filter → clear |
+| `01-browse-filter` | Entire photos folder in grid immediately → Cmd+3 quick preview on the right → select three photos → close preview → command palette → About → point at the user guide → zoom → built-in scheme labels → list → filter → clear |
 | `02-collect-shortlist` | Create Shortlist → select six originals → grid → copy → navigate into copied thumbnails → list |
 | `03-remove-rejects` | Delete one copied photo in grid → list → select/delete two together → remaining thumbnails |
 | `04-rename-keeper` | Choose cover photo → grid → rename to cover.jpg → list → rename Shortlist to Presentation → preview its grid |
@@ -109,6 +109,29 @@ directory and a separate loopback WebSocket port.
 | `08-explore-git` | Real checkout: Git status → log → expand commit → historical diff → maximize; navigate/switch views only for multiple changes |
 | `09-edit-review` | Independent clone: edit README → review diff → terminal → ls -al → mc → maximize → promote to tab → return to files |
 | `10-stage-commit` | Independent clone: stage README → message → commit → new history entry → maximize diff briefly |
+| `11-select-by-mask` | Default `*.jpg` mask selects three photos → deselect `photo-*.jpg` → `slide-c.jpg` stays selected |
+| `12-keyboard` | Number-key button bar → hide it → palette restores it → cheat sheet → shortcut editor without saving → F1–F10 keys → F3 views a photo |
+| `13-color-schemes` | Matrix built-in → duplicate as Showcase → purple header → use that scheme → photo grid |
+| `14-editor-tabs` | Inline Edit on a checksum file → script with line numbers, whitespace, and wrapping → editor shortcuts → Markdown preview → new note saved in the demo folder |
+| `15-panel-tabs` | One tab per folder → drag Charlie in front of Alpha → Ctrl+Tab → tab list jumps to Bravo → Close others leaves Alpha |
+| `16-permissions` | Set `present.sh` to octal 755 → listing and Info show `rwxr-xr-x` |
+| `17-job-files` | Copy two notes into Incoming → leave the source → expand the finished job → jump back to the source folder |
+
+Chapters 11–17 cover behaviour added since 0.0.5. Isolated sessions seed
+`function_keys_offer_answered`, so the one-time function-key offer never covers
+a take; chapter 12 switches the bar from number keys to function keys on camera.
+That switch needs the Shortcuts “Button bar keys” choice, which macOS shows when
+it can report the function-key setting. The photo is then opened with F3 when
+this Mac uses standard function keys, and from the F3 button otherwise, so
+Mission Control does not take the key. Chapter 13 writes the Showcase scheme
+only under the take’s config directory. Chapter 14 seeds `notes_folder` to the
+demo folder, so the new note is created there. The user guide button is pointed
+at and never clicked.
+
+These scenes are not filmed: OS notification banners (they require leaving the
+foreground, and the runner stops input when fbro does), matching the system
+appearance, Git remote checkout, and pairing or the command journal. Chapter 08
+stays read-only, and demo clones have no remotes.
 
 Chapter 08 inspects the checkout's current branch, history, and pending tooling
 changes. It performs no staging, branch switching, fetching, or committing.

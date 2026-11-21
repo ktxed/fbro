@@ -106,6 +106,17 @@ export class Observer {
     return panel;
   }
 
+  slot(id = "left") {
+    this.check();
+    const slot = this.state.slots?.[id];
+    if (!slot?.activePanelId) throw new Error(`Missing authoritative ${id} slot`);
+    return slot;
+  }
+
+  active(id = "left") {
+    return this.panel(this.slot(id).activePanelId);
+  }
+
   async path(id, expected) {
     return this.wait(`${id} panel at ${expected}`, () => this.panel(id).path === expected && this.panel(id).status === "ready");
   }

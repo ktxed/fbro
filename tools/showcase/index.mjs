@@ -50,15 +50,20 @@ async function stopChild(child) {
   clearTimeout(timer);
 }
 
-function seedSession(directory, paths, fontSize) {
+function seedSession(directory, paths, fontSize, notesFolder) {
   const configRoot = path.join(directory, "config");
   const appConfig = path.join(configRoot, "fbro");
   fs.mkdirSync(appConfig, { recursive: true });
   fs.writeFileSync(path.join(appConfig, "session.toml"), `font_size = ${fontSize}\n\n[panels.left]\npath = ${JSON.stringify(paths.left)}\n[panels.right]\npath = ${JSON.stringify(paths.right)}\n`);
-  fs.writeFileSync(path.join(appConfig, "settings.json"), JSON.stringify({ general: {
+  const general = {
     show_hidden_default: false, remember_window_state: false,
     quick_terminal_editor: "nano", compare_differ_mode: "internal", color_scheme: "fbro-dark",
-  } }));
+    // A fresh session on a Mac with standard function keys would otherwise
+    // stop on the one-time offer. Chapter 12 switches the bar on camera.
+    function_keys_offer_answered: true,
+  };
+  if (notesFolder) general.notes_folder = notesFolder;
+  fs.writeFileSync(path.join(appConfig, "settings.json"), JSON.stringify({ general }));
   // Avoid personal Nano keybindings/backup settings in the Quick Edit scene.
   const nanoConfig = path.join(configRoot, "nano");
   fs.mkdirSync(nanoConfig);
@@ -69,7 +74,7 @@ function seedSession(directory, paths, fontSize) {
 async function launch(directory, paths, config, binary) {
   fs.mkdirSync(directory, { recursive: true });
   const fontSize = config.initialFontSize ?? showcaseFontSize;
-  const configRoot = seedSession(directory, paths, fontSize);
+  const configRoot = seedSession(directory, paths, fontSize, config.notesFolder);
   const port = await freePort();
   const appLog = fs.openSync(path.join(directory, "app.log"), "wx");
   const child = spawn(config.app, [], { cwd: repoRoot, env: {
@@ -160,7 +165,8 @@ async function execute(config, selected, mode, binary) {
         const paths = startingPaths(fixture, config);
         const captureWorkingArea = true;
         const initialFontSize = chapter.id === "01-browse-filter" ? 13 : showcaseFontSize;
-        active = await launch(path.join(directory, `${chapter.id}-logs`), paths, { ...config, captureWorkingArea, initialFontSize }, binary);
+        const notesFolder = chapter.id === "14-editor-tabs" ? fixture.workspace : undefined;
+        active = await launch(path.join(directory, `${chapter.id}-logs`), paths, { ...config, captureWorkingArea, initialFontSize, notesFolder }, binary);
         if (interrupted) throw new Error("Run interrupted by user");
         if (chapter.id === "01-browse-filter") {
           fixture.previewPhotos = active.observer.panel("left").entries
