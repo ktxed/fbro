@@ -3,6 +3,7 @@
 import { Compartment, EditorState, Prec, Transaction, type Extension } from "@codemirror/state";
 import {
   EditorView,
+  ViewPlugin,
   drawSelection,
   highlightActiveLine,
   highlightActiveLineGutter,
@@ -13,6 +14,7 @@ import {
   keymap,
   placeholder,
   type KeyBinding,
+  type ViewUpdate,
 } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
 import {
@@ -41,6 +43,9 @@ export interface EditorHandlers {
   onSave: () => void;
   /** Alt/Option+Z, +N, +W: flip one global editor option. */
   onToggleOption: (option: keyof EditorOptions) => void;
+  /** A dead-key Option chord inserted text that was reverted. `count` is how
+   *  many `onUserChange` calls that insert already made. */
+  onRevertUserChange?: (count: number) => void;
   /** F1. */
   onCheatSheet: () => void;
   /** Mod-w. */
@@ -214,28 +219,95 @@ export function applyEditorOptions(view: EditorView, options: EditorOptions): vo
 }
 
 /** Alt/Option+Z, +N, +W toggle one global editor option. Match the physical
- *  key, not the typed character: on macOS Option+letter inserts Ω/˜/∑ and
- *  CodeMirror intentionally skips its physical-key fallback for plain Option,
- *  so a `key: "Alt-z"` binding would never run. A high-precedence DOM handler
- *  also covers layouts where Alt+letter produces a symbol outside macOS. */
+ *  key, the same way for all three: CodeMirror skips its own Option fallback,
+ *  and it drops keydowns while a composition is open. macOS Option+N is a
+ *  dead key, so "˜" is in the document before keydown (`key` is "Dead") and
+ *  a bubble handler never runs. Capture sees KeyN with the same `code` match
+ *  as KeyZ/KeyW, then reverts that composition so the next character is not
+ *  accented. Option+Z/W are ordinary keydowns; preventing them is enough.
+ *  Other Option dead keys (E, U, I) are left alone. */
 const OPTION_KEYS: Record<string, keyof EditorOptions> = {
   KeyZ: "wordWrap",
   KeyN: "lineNumbers",
   KeyW: "showWhitespace",
 };
 
+/** Shortest change that turns `current` back into `snapshot` (UTF-16 offsets). */
+function textRestore(snapshot: string, current: string): { from: number; to: number; insert: string } {
+  let start = 0;
+  const limit = Math.min(snapshot.length, current.length);
+  while (start < limit && snapshot.charCodeAt(start) === current.charCodeAt(start)) start++;
+  let snapEnd = snapshot.length;
+  let curEnd = current.length;
+  while (snapEnd > start && curEnd > start && snapshot.charCodeAt(snapEnd - 1) === current.charCodeAt(curEnd - 1)) {
+    snapEnd--;
+    curEnd--;
+  }
+  return { from: start, to: curEnd, insert: snapshot.slice(start, snapEnd) };
+}
+
 function optionKeys(handlers: EditorHandlers): Extension {
-  return Prec.high(EditorView.domEventHandlers({
-    keydown(event) {
-      // AltGr is Ctrl+Alt; Shift+Option types a symbol; repeats would thrash
-      // the setting, and IMEs report composition keys separately.
-      if (event.isComposing || event.repeat || !event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return false;
+  return ViewPlugin.define((view) => {
+    // Document as it was when this composition started, before WebKit
+    // inserted the dead-key character, and how many user edits that was.
+    let base: { text: string; anchor: number } | null = null;
+    let composed = 0;
+
+    const onCompositionStart = () => {
+      base = { text: view.state.doc.toString(), anchor: view.state.selection.main.anchor };
+      composed = 0;
+    };
+    const onCompositionEnd = () => {
+      base = null;
+      composed = 0;
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      // AltGr is Ctrl+Alt. Shift+Option types a different symbol. Repeats
+      // would thrash the setting. Anything else Option types is left alone.
+      if (event.repeat || !event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
       const option = OPTION_KEYS[event.code];
-      if (!option) return false;
+      if (!option) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const saved = base;
+      const count = composed;
+      if (event.isComposing && saved) {
+        const current = view.state.doc.toString();
+        if (current !== saved.text) {
+          view.dispatch({
+            changes: textRestore(saved.text, current),
+            selection: { anchor: Math.min(saved.anchor, saved.text.length) },
+            // The dead-key insert is already the top history event. Mapping
+            // this delete across it drops that event, so undo does not grow
+            // a blank step or bring the accent back. Remote so it does not
+            // count as another unsaved edit; the insert already did.
+            annotations: [Transaction.remote.of(true), Transaction.addToHistory.of(false)],
+          });
+          handlers.onRevertUserChange?.(count > 0 ? count : 1);
+        }
+        // Dropping focus here ends the composition. It is not a window blur,
+        // and focus comes straight back, so the next character is plain.
+        view.contentDOM.blur();
+        view.focus();
+      }
       handlers.onToggleOption(option);
-      return true;
-    },
-  }));
+    };
+
+    view.contentDOM.addEventListener("compositionstart", onCompositionStart, true);
+    view.contentDOM.addEventListener("compositionend", onCompositionEnd, true);
+    view.contentDOM.addEventListener("keydown", onKeyDown, true);
+    return {
+      update(update: ViewUpdate) {
+        if (!base || !update.docChanged) return;
+        if (update.transactions.some((tr) => tr.docChanged && !tr.annotation(Transaction.remote))) composed += 1;
+      },
+      destroy() {
+        view.contentDOM.removeEventListener("compositionstart", onCompositionStart, true);
+        view.contentDOM.removeEventListener("compositionend", onCompositionEnd, true);
+        view.contentDOM.removeEventListener("keydown", onKeyDown, true);
+      },
+    };
+  });
 }
 
 /** F1 opens the editor's own sheet, not the app's `?` sheet. */

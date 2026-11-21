@@ -345,8 +345,10 @@ async function runOptionsFlow(browser, observer, directory) {
     && (await has(".panel-editor .cm-lineNumbers")) === general().editorLineNumbers,
   { timeout: 10_000, label: "editor renders the current settings" });
 
-  // macOS Option+letter reports a symbol (Ω/˜/∑) with the same physical code.
-  // Matching must use the code, so the chord works even where Alt+letter types.
+  // Matching uses the physical code, not the character Option types.
+  // These synthetic keydowns are not composing. A real macOS Option+N is a
+  // dead key (`key` "Dead", composition before keydown) and dispatchEvent
+  // cannot reproduce it; Option+Z/W are ordinary keydowns (Ω/∑).
   const optionCases = [
     { symbol: "Ω", code: "KeyZ", keyCode: 90, setting: "editorWordWrap", initial: before.wrap },
     { symbol: "˜", code: "KeyN", keyCode: 78, setting: "editorLineNumbers", initial: before.numbers },

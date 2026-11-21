@@ -169,6 +169,19 @@ export function noteUserChange(sessionId: number) {
   notify();
 }
 
+/** The dead-key insert `noteUserChange` counted was reverted. `count` is that
+ *  many revisions, so a clean buffer does not autosave the character. */
+export function undoUserChange(sessionId: number, count: number) {
+  const session = sessions.get(sessionId);
+  if (!session || count <= 0) return;
+  session.revision = Math.max(0, session.revision - count);
+  if (!isDirty(session) && session.timer) {
+    clearTimeout(session.timer);
+    session.timer = null;
+  }
+  notify();
+}
+
 function schedule(session: Session) {
   if (session.timer) clearTimeout(session.timer);
   const delay = session.previewing ? AUTOSAVE_PREVIEW_DELAY_MS : AUTOSAVE_DELAY_MS;
