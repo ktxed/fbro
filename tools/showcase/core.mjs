@@ -93,7 +93,9 @@ export async function sourceBaseline(root = repoRoot) {
   return {
     head: await git(root, ["rev-parse", "HEAD"]),
     branch: await git(root, ["branch", "--show-current"]),
-    refs: await git(root, ["show-ref"]),
+    // Terminal checkpoint tools write refs/tuios during a take. Those are not
+    // edits to the checkout the recording is guarding.
+    refs: (await git(root, ["show-ref"])).split("\n").filter((line) => !line.includes(" refs/tuios/")).join("\n"),
     status: await git(root, ["status", "--porcelain=v1", "--untracked-files=all"]),
     diff: await git(root, ["diff", "--binary", "HEAD"]),
     index: hashFile(path.join(root, ".git/index")),

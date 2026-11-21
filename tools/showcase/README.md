@@ -201,7 +201,7 @@ in the metadata and logs.
   Accessibility snapshot on failure when the process remains available.
 
 Setup is performed before recording. The runner verifies the original
-checkout's HEAD, branch, refs, index, tracked diff, and untracked status, plus
+checkout's HEAD, branch, refs (other than `refs/tuios/` checkpoints), index, tracked diff, and untracked status, plus
 the hashes of the selected original media, after every run. Make unrelated
 edits outside the recording session so this check can detect unexpected changes.
 Demo folders and clones are retained; remove unwanted runs manually after
@@ -249,8 +249,9 @@ logs still need an explicit recording-relative clock for precise export.
 
 UI targets normally use Accessibility labels and bounds. Commands use the
 backend's registry bindings; actions are checked against backend snapshots and
-patches. Pointer movement uses cliclick. The native helper uses physical
-CGEvent keys for shortcut chords and Unicode events for text, preserving
+patches. Pointer movement and clicks use cliclick. Drags use the native
+helper, which holds the HID button down across small steps. The same helper
+uses physical CGEvent keys for shortcut chords and Unicode events for text, preserving
 Cmd/Ctrl/Option modifiers independently of typing. This also prevents shifted
 characters from triggering listing shortcuts while entering a filter.
 

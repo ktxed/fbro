@@ -151,10 +151,9 @@ export class Scene {
     if (state.windows.length !== 1 || state.windows[state.focusedWindow]?.title !== this.input.mainTitle) {
       throw new Error("Viewer opening requires the main listing; another window is already open");
     }
-    // The toolbar button's accessible name is its tooltip ("3 — View"), so the
-    // visible word is the inner static text. Clicking that word runs View
-    // without sending F3, which macOS may keep for Mission Control.
-    if (open === "button") await this.input.click({ label: "View", role: "AXStaticText" });
+    // The toolbar button's children collapse into one control named "F3 View".
+    // Clicking it runs View without sending F3, which macOS may keep for Mission Control.
+    if (open === "button") await this.input.click({ label: "F3 View", role: "AXButton" });
     else await this.input.command("file.view");
     await until(`separate viewer for ${name}`, async () => (await this.input.inspect()).windows.length > 1, this.config.timeoutMs);
     await this.input.contain();
@@ -263,10 +262,19 @@ export class Scene {
       await i.type("mc"); await i.key("Enter");
     }, 2500);
     await this.step("Expand the terminal to fill the app", async () => {
-      // The action toolbar fades out when the pointer is not near the corner, so
-      // the keyboard path is the one to show: the reveal re-arms on maximize.
+      // Maximize reveals the toolbar, then hides it after 2.5s. Hidden buttons
+      // use visibility:hidden, so they leave the accessibility tree, and a full
+      // scan is slower than that grace. Park the pointer on the top-right chip
+      // once the fixed layout has moved it under the title bar; hover keeps it up.
       await i.command("panel.terminal.maximize");
-      await i.find({ label: "Restore terminal", role: "AXButton" });
+      await sleep(400);
+      const x = i.stage.x + i.stage.width - 36;
+      const y = i.stage.y + 46;
+      await i.move(x, y);
+      await sleep(200);
+      await i.move(x, y);
+      // aria-pressed exposes the maximized control as a checkbox, not a button.
+      await i.find({ label: "Restore terminal", role: "AXButton|AXCheckBox" });
     }, 2000);
     await this.step("Promote the live terminal to its own tab", async () => {
       await i.command("panel.terminal.promote");
@@ -286,6 +294,17 @@ export class Scene {
       await o.path("left", directory);
       assert.equal(o.panel("left").tabKind, "listing");
     }, 1200);
+  }
+
+  async showToolbarKey(key) {
+    // WebKit exposes the key, icon, and label as one button, named "3 View"
+    // or "F3 View". The glyph sits left of the centered cluster.
+    const button = await this.input.find({ label: `${key} View`, role: "AXButton" });
+    const { x, y, width, height } = button.frame;
+    const midY = y + height / 2;
+    await this.input.move(x + width * 0.32, midY);
+    await sleep(200);
+    await this.input.move(x + width * 0.66, midY);
   }
 
   async focusSlot(slot = "left") {
@@ -693,12 +712,7 @@ const flows = {
     const { input: i, observer: o } = s;
     await s.step("Show the number-key button bar", async () => {
       await o.wait("number-key View binding", (state) => state.settings.general.showButtonBar && commandKey(state, "file.view") === "3");
-      const key = await i.find({ label: "3", role: "AXStaticText" });
-      const point = s.center(key);
-      await i.move(point.x, point.y);
-      const view = await i.find({ label: "View", role: "AXStaticText|AXButton" });
-      const label = s.center(view);
-      await i.move(label.x, label.y);
+      await s.showToolbarKey("3");
     }, 1400);
     await s.step("Hide the button bar from Display settings", async () => {
       await i.command("app.settings");
@@ -706,12 +720,12 @@ const flows = {
       await i.click({ label: "Show bottom button bar", role: "AXCheckBox|AXStaticText" });
       await o.wait("button bar hidden", (state) => state.settings.general.showButtonBar === false);
       await i.button("Close");
-      await until("button bar removed", async () => !(await i.find({ label: "View", role: "AXStaticText" }, { optional: true })), s.config.timeoutMs);
+      await until("button bar removed", async () => !(await i.find({ label: "3 View", role: "AXButton" }, { optional: true })), s.config.timeoutMs);
     }, 1200);
     await s.step("Restore the button bar from the command palette", async () => {
       await i.command("app.toggle_button_bar");
       await o.wait("button bar restored", (state) => state.settings.general.showButtonBar === true && commandKey(state, "file.view") === "3");
-      await i.find({ label: "View", role: "AXStaticText" });
+      await i.find({ label: "3 View", role: "AXButton" });
     }, 1400);
     await s.step("Open the keyboard cheat sheet and page through it", async () => {
       await i.command("app.cheat_sheet");
@@ -726,7 +740,8 @@ const flows = {
       await i.click({ label: "Search commands", role: "AXTextField|AXComboBox" });
       await i.type("Inspect Item");
       await i.click({ label: "Inspect Item", prefix: true, role: "AXStaticText|AXButton" }, { aboveToolbar: true });
-      await i.button("Edit", { aboveToolbar: true });
+      // The listing's inline Edit tooltip is also "Edit", and it is the smaller node.
+      await i.button("Edit", { aboveToolbar: true, titleOnly: true });
       await i.find({ label: "Edit shortcut" });
       await i.button("Cancel", { aboveToolbar: true });
     }, 1400);
@@ -738,9 +753,7 @@ const flows = {
     }, 1400);
     await s.step("Close settings and show F3 on the button bar", async () => {
       await i.button("Close");
-      const key = await i.find({ label: "F3", role: "AXStaticText" });
-      const point = s.center(key);
-      await i.move(point.x, point.y);
+      await s.showToolbarKey("F3");
     }, 1000);
     await s.step("View the photo with F3", async () => {
       // A Mac that still maps F3 to Mission Control would take the key before
@@ -779,14 +792,33 @@ const flows = {
     await s.step("Recolor the header purple", async () => {
       await i.click({ label: "Filter colors", role: "AXTextField|AXComboBox" });
       await i.type("Header");
-      await i.click({ label: "Header", role: "AXStaticText" }, { aboveToolbar: true });
-      await i.click({ label: "Header value", role: "AXTextField|AXComboBox" });
+      // The row's label and hex are one accessible name, "Header #04180a".
+      await i.click({ label: "Header", role: "AXStaticText", prefix: true }, { aboveToolbar: true });
+      // The hex field is below the window until focus scrolls the settings pane.
+      // The color picker has three sliders before that field.
+      let field;
+      for (let attempt = 0; attempt < 6 && !field; attempt++) {
+        await i.key("Tab");
+        await sleep(200);
+        field = await i.find({ label: "Header value", role: "AXTextField|AXComboBox", focused: true }, { optional: true });
+      }
+      if (!field) await i.find({ label: "Header value", role: "AXTextField|AXComboBox", focused: true });
       await i.type("#6d28d9", true);
       await o.wait("header color saved", (state) => schemeItem(state, "custom:showcase")?.colors?.["bg-header"]?.toLowerCase() === "#6d28d9");
       await i.find({ label: "Saved" });
     }, 1400);
     await s.step("Use the Showcase scheme and close settings", async () => {
-      await i.button("Use this scheme");
+      // The hex field scrolls this button above the pane. Its accessibility
+      // frame then sits on the right panel's path bar, so a click opens that
+      // folder instead. Shift+Tab brings the button back and keys activate it.
+      let use;
+      for (let attempt = 0; attempt < 16 && !use; attempt++) {
+        await i.key("Tab", ["shift"]);
+        await sleep(150);
+        use = await i.find({ label: "Use this scheme", role: "AXButton", focused: true }, { optional: true });
+      }
+      if (!use) await i.find({ label: "Use this scheme", role: "AXButton", focused: true });
+      await i.key("Enter");
       await o.wait("Showcase scheme in use", (state) => state.settings.general.colorScheme === "custom:showcase");
       await i.button("Close");
     }, 800);
@@ -942,7 +974,8 @@ const flows = {
       await o.path("left", f.incoming);
       assert.equal(o.state.focus, "left");
       await i.command("app.open_jobs");
-      await i.find({ label: "Finished File Jobs" });
+      // The section title is uppercased by CSS, and that is the accessible name.
+      await i.find({ label: "FINISHED FILE JOBS" });
       await i.button("Expand File List");
       const row = await i.find({ label: "File 1 of 2:", prefix: true });
       const point = s.center(row);

@@ -37,7 +37,9 @@ export function matchesNode(node, target) {
   if (target.role && !(new RegExp(target.role)).test(node.role)) return false;
   if (target.focused && !node.focused) return false;
   if (!node.enabled || !node.frame || node.frame.width <= 0 || node.frame.height <= 0) return false;
-  const values = [node.title, node.description, node.help, node.value, node.identifier].filter(Boolean);
+  // titleOnly ignores help and description. A row action's tooltip can be the
+  // same word as a dialog button ("Edit") while its title names the file.
+  const values = (target.titleOnly ? [node.title] : [node.title, node.description, node.help, node.value, node.identifier]).filter(Boolean);
   if (target.label === undefined) return true;
   return values.some((text) => target.prefix ? text.startsWith(target.label) : text === target.label);
 }
@@ -162,13 +164,10 @@ export class MacInput {
   async drag(fromX, fromY, toX, toY) {
     this.assertStage(fromX, fromY);
     this.assertStage(toX, toY);
-    const stepX = fromX + Math.sign(toX - fromX || 1) * 12;
-    const stepY = fromY;
-    this.assertStage(stepX, stepY);
-    const point = (x, y) => `${this.coordinate(x)},${this.coordinate(y)}`;
-    // Pointer capture and the tab drag both need a real button-down move past
-    // the 6px threshold, not a click that jumps to the destination.
-    await this.events(["-e", "8", `m:${point(fromX, fromY)}`, "w:80", `dd:${point(fromX, fromY)}`, "w:100", `dm:${point(stepX, stepY)}`, "w:80", `dm:${point(toX, toY)}`, "w:120", `du:${point(toX, toY)}`]);
+    await this.inspect();
+    // The tab gesture aborts when PointerEvent.buttons is 0. cliclick posts the
+    // whole drag from a null event source, so WebKit never sees the button held.
+    await nativeCall(this.binary, "drag", this.pid, Math.round(fromX), Math.round(fromY), Math.round(toX), Math.round(toY));
   }
 
   async click(target, options = {}) {
@@ -180,7 +179,7 @@ export class MacInput {
   }
 
   async button(label, options = {}) {
-    return this.click({ label, role: "AXButton|AXRadioButton|AXCheckBox", prefix: options.prefix ?? false }, options);
+    return this.click({ label, role: "AXButton|AXRadioButton|AXCheckBox", prefix: options.prefix ?? false, titleOnly: options.titleOnly ?? false }, options);
   }
 
   async key(key, modifiers = []) {

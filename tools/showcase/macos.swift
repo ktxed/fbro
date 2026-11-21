@@ -1,5 +1,7 @@
-// Native inspection and keyboard events. cliclick owns pointer events;
-// CGEvent preserves shortcut modifiers and types Unicode without shortcuts.
+// Native inspection, keyboard events, and button-held drags. cliclick owns
+// clicks and moves. CGEvent preserves shortcut modifiers and types Unicode
+// without shortcuts. Drags stay here because WebKit reads PointerEvent.buttons
+// from the live HID button state, which cliclick's null-source burst never holds.
 // Built into ignored artifacts by the Node runner, using the installed SDK.
 import Cocoa
 import ApplicationServices
@@ -106,6 +108,52 @@ do {
                 event.post(tap: .cghidEventTap)
                 usleep(20000)
             }
+            try emit(["ok": true])
+        } else if command == "drag" {
+            guard args.count == 6, let fromX = Double(args[2]), let fromY = Double(args[3]), let toX = Double(args[4]), let toY = Double(args[5]) else { throw Failure("drag requires PID fromX fromY toX toY") }
+            guard NSWorkspace.shared.frontmostApplication?.processIdentifier == pid else { throw Failure("Drag target is not the foreground fbro process") }
+            guard let source = CGEventSource(stateID: .hidSystemState) else { throw Failure("Could not create drag event source") }
+            source.localEventsSuppressionInterval = 0
+            let from = CGPoint(x: fromX, y: fromY)
+            let to = CGPoint(x: toX, y: toY)
+            var previous = from
+            var holding = false
+            func post(_ type: CGEventType, _ point: CGPoint) throws {
+                guard let event = CGEvent(mouseEventSource: source, mouseType: type, mouseCursorPosition: point, mouseButton: .left) else { throw Failure("Could not create drag event") }
+                event.setIntegerValueField(.mouseEventClickState, value: type == .mouseMoved ? 0 : 1)
+                event.setIntegerValueField(.mouseEventButtonNumber, value: 0)
+                event.setDoubleValueField(.mouseEventPressure, value: type == .leftMouseUp || type == .mouseMoved ? 0 : 1)
+                event.setIntegerValueField(.mouseEventDeltaX, value: Int64(point.x - previous.x))
+                event.setIntegerValueField(.mouseEventDeltaY, value: Int64(point.y - previous.y))
+                event.post(tap: .cghidEventTap)
+                previous = point
+            }
+            defer {
+                if holding {
+                    if let up = CGEvent(mouseEventSource: source, mouseType: .leftMouseUp, mouseCursorPosition: previous, mouseButton: .left) {
+                        up.post(tap: .cghidEventTap)
+                    }
+                }
+            }
+            try post(.mouseMoved, from)
+            usleep(60_000)
+            try post(.leftMouseDown, from)
+            holding = true
+            // Let the page handle pointerdown and capture while the button is still down.
+            usleep(150_000)
+            let dx = to.x - from.x
+            let dy = to.y - from.y
+            let distance = max(hypot(dx, dy), 1)
+            var travelled = 0.0
+            while travelled + 0.5 < distance {
+                travelled = min(distance, travelled + 8)
+                let t = travelled / distance
+                try post(.leftMouseDragged, CGPoint(x: from.x + dx * t, y: from.y + dy * t))
+                usleep(20_000)
+            }
+            usleep(80_000)
+            try post(.leftMouseUp, to)
+            holding = false
             try emit(["ok": true])
         } else if command == "activate" {
             app.activate(options: [.activateAllWindows])
