@@ -385,8 +385,8 @@ fn build_service_info(
     port: u16,
     txt: &[(String, String)],
 ) -> Result<ServiceInfo, String> {
-    let host = hostname_or_fallback(instance);
-    let host_name = format!("{}.local.", host);
+    let fp = txt.iter().find(|(k, _)| k == "fp").map(|(_, v)| v.as_str());
+    let host_name = mdns_host_name(fp, instance);
 
     let props: HashMap<String, String> = txt.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
 
@@ -400,42 +400,25 @@ fn build_service_info(
     Ok(info)
 }
 
-fn hostname_or_fallback(fallback: &str) -> String {
-    // Prefer the OS-reported hostname (uname / /etc/hostname / GetComputerName).
-    // Fall back through HOSTNAME / COMPUTERNAME env vars, then the caller's
-    // hint. A unique-per-host name matters here: mDNS instance names must
-    // not collide on a LAN or one peer's advertisement evicts the other.
-    if let Ok(name) = read_hostname() {
-        if !name.trim().is_empty() {
-            return name;
-        }
-    }
-    std::env::var("HOSTNAME")
-        .or_else(|_| std::env::var("COMPUTERNAME"))
-        .unwrap_or_else(|_| fallback.to_string())
-}
-
-fn read_hostname() -> std::io::Result<String> {
-    #[cfg(unix)]
-    {
-        // Read /proc/sys/kernel/hostname on Linux; /etc/hostname on most
-        // unices; fall back to `hostname` command output. /etc/hostname is
-        // present on macOS too but may not match the runtime name; try
-        // `uname -n` via libc as the canonical source.
-        let mut buf = [0u8; 256];
-        let rc = unsafe { libc::gethostname(buf.as_mut_ptr() as *mut _, buf.len()) };
-        if rc == 0 {
-            let cstr = unsafe { std::ffi::CStr::from_ptr(buf.as_ptr() as *const _) };
-            return Ok(cstr.to_string_lossy().into_owned());
-        }
-        Err(std::io::Error::last_os_error())
-    }
-    #[cfg(not(unix))]
-    {
-        Err(std::io::Error::new(
-            std::io::ErrorKind::Unsupported,
-            "hostname lookup not implemented on this platform",
-        ))
+/// The `.local.` host name our SRV record points at.
+///
+/// Deliberately *not* derived from the OS hostname: the system responder
+/// (mDNSResponder on macOS, Avahi on Linux, the Windows DNS client) owns
+/// `<hostname>.local.`, and a second responder publishing A/AAAA records
+/// for it makes both sides see a conflict and rename. A per-identity label
+/// never collides with the system name, and peers connect by address anyway.
+fn mdns_host_name(fp: Option<&str>, fallback: &str) -> String {
+    let source = fp.unwrap_or(fallback);
+    let label: String = source
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .take(12)
+        .collect::<String>()
+        .to_ascii_lowercase();
+    if label.is_empty() {
+        "fbro.local.".to_string()
+    } else {
+        format!("fbro-{label}.local.")
     }
 }
 
@@ -621,4 +604,26 @@ async fn snapshot_peers(state: &SharedState) -> Vec<DiscoveredPeerSchema> {
         .collect();
     out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mdns_host_name_is_per_identity_not_os_hostname() {
+        assert_eq!(
+            mdns_host_name(Some("SHA256:AbC+12/dEf34gh56"), "ktx-mac (macos, abc123)"),
+            "fbro-sha256abc12d.local."
+        );
+        assert_eq!(mdns_host_name(None, "box (linux)"), "fbro-boxlinux.local.");
+        assert_eq!(mdns_host_name(None, "()"), "fbro.local.");
+    }
+
+    #[test]
+    fn service_info_does_not_claim_system_hostname() {
+        let txt = vec![("fp".to_string(), "abcdef123456789".to_string())];
+        let info = build_service_info("host (macos, abcdef)", 7777, &txt).unwrap();
+        assert_eq!(info.get_hostname(), "fbro-abcdef123456.local.");
+    }
 }

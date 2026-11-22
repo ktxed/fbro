@@ -27,10 +27,16 @@ no system `sshd` and no external `ssh`/`sftp` binary.
   ends handshake; authentication is **Ed25519 public key** (no passwords).
   The client accepts only the paired raw Ed25519 host key and rejects SSH
   certificates. RSA support is disabled in the embedded SSH library.
-  Discovery uses `mdns-sd` 0.21.5 or newer in the 0.21 series, including its
-  macOS interface fixes: Apple P2P interfaces (`awdl`/`llw`) are excluded by
-  default, as are point-to-point interfaces such as VPN tunnels. This avoids
-  false hostname conflicts with Bonjour when advertising the host's name.
+  Discovery uses `mdns-sd` 0.22 or newer: Apple P2P interfaces (`awdl`/`llw`)
+  and point-to-point interfaces (VPN tunnels) are excluded by default, and
+  0.22 stops the endless hostname rename loop caused by the daemon's own
+  answers looping back during a probe (seen on macOS: the hostname kept
+  incrementing and the probe/announce traffic slowly degraded the network).
+  The SRV record points at a per-identity host name,
+  `fbro-<fingerprint prefix>.local.`, never one derived from the OS
+  hostname, which the system responder (mDNSResponder, Avahi, Windows) owns.
+  Peers connect by resolved address, so the host name is never shown or
+  dialled. The instance name still carries the human-readable hostname.
 - **Read-only by default:** a mounted remote source advertises `readOnly` and
   does not expose write capabilities (`DeleteSelection`, `NewFolder`, …).
 
