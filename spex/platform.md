@@ -180,6 +180,19 @@ delivery. An explicit `0` discards that delivery. Any other numeric value, or a
 value of the wrong type, is logged and not retried. `prepare_os_notifications()` stays a no-op because Windows
 does not prompt. Focus assist is left to the system.
 
+### 2.6 Single instance
+
+`single_instance_plugin()` returns a Tauri plugin that hands a later launch
+over to the running instance; `None` (the default) allows several instances.
+`ask_already_running()` asks, before Tauri starts, whether to show the running
+instance (`ShowRunning`, the default) or `Quit`; it is only called when the
+plugin is `Some`. The decision lives in `src-tauri/src/single_instance.rs`:
+another instance runs when the default WebSocket address is taken. A launch
+that hands over registers the plugin, which exits it after focusing the
+running window; if the running copy predates the plugin, the launch exits in
+app setup. Launches with `FBRO_WS_BIND` (smoke tests, docs screenshots,
+showcase) and frontend-only windows are never guarded.
+
 ---
 
 ## 3. Implementations
@@ -237,6 +250,12 @@ the viewer lazily loads `heic-to` and retries locally with its newer decoder.
 macOS keeps its native path even if the persisted setting is true.
 Native thumbnails use a separate OS pipeline and do not determine viewer format
 support.
+
+Single instance: the `.app` and `npm run tauri dev` share the bundle id and
+`~/.config/fbro`, so only one runs. The plugin is `tauri-plugin-single-instance`
+(Unix socket keyed by the bundle id). The prompt is an app-modal `NSAlert`
+("Show Running fbro" on Return, "Quit" on Escape), floated at the modal-panel
+level because a terminal-launched dev binary cannot take focus.
 
 ### 3.3 `WindowsPlatform`
 

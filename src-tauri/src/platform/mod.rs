@@ -123,8 +123,29 @@ pub struct ShellCommandRemoveResult {
     pub command: String,
 }
 
+/// What the user picked when launching while another fbro already runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AlreadyRunningChoice {
+    /// Bring the running fbro to the front, then exit.
+    ShowRunning,
+    /// Exit without touching the running fbro.
+    Quit,
+}
+
 /// Abstraction over platform-specific environment queries and services.
 pub trait Platform: Send + Sync {
+    /// Plugin that hands a later launch over to the running instance (see
+    /// `crate::single_instance`). `None`: several instances may run.
+    fn single_instance_plugin(&self) -> Option<tauri::plugin::TauriPlugin<tauri::Wry>> {
+        None
+    }
+
+    /// Ask, before Tauri starts, what to do when another fbro already runs.
+    /// Only called when `single_instance_plugin` is `Some`.
+    fn ask_already_running(&self) -> AlreadyRunningChoice {
+        AlreadyRunningChoice::ShowRunning
+    }
+
     /// Native background notification delivery capability, independent of permission.
     fn supports_os_notifications(&self) -> bool { false }
 

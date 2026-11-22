@@ -20,7 +20,7 @@ use crate::ws::runtime::{
     IntentContext,
 };
 
-const DEFAULT_WS_ADDR: &str = "127.0.0.1:7878";
+pub const DEFAULT_WS_ADDR: &str = "127.0.0.1:7878";
 const CHANNEL_CAP: usize = 512;
 
 pub async fn start(

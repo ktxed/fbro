@@ -18,6 +18,7 @@ mod notifications;
 mod persistence;
 mod platform;
 mod remote;
+mod single_instance;
 mod state;
 mod storage;
 mod terminal;
@@ -300,7 +301,17 @@ fn main() {
     let _ = gtk::init();
 
     let is_frontend_only = frontend_only();
+
     let platform = platform::create_platform();
+
+    // The .app and `npm run tauri dev` share the bundle id and config dir;
+    // a second copy asks the user, then hands over or quits.
+    let (single_instance_plugin, handing_over) =
+        match single_instance::check(&*platform, is_frontend_only) {
+            single_instance::Startup::Proceed { plugin } => (plugin, false),
+            single_instance::Startup::HandOver { plugin } => (Some(plugin), true),
+            single_instance::Startup::Quit => return,
+        };
     let viewer_prefetch = Arc::new(ViewerPrefetchQueue::new());
     let file_server_state: fileserver::SharedStateSlot = Arc::new(StdMutex::new(None));
     // 1024 entries × ~20 KB/PNG ≈ 20 MB resident cap. Comfortable for browsing
@@ -326,7 +337,14 @@ fn main() {
     let icon_cache: Arc<StdMutex<HashMap<String, (Vec<u8>, &'static str)>>> =
         Arc::new(StdMutex::new(HashMap::new()));
 
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default();
+    if let Some(plugin) = single_instance_plugin {
+        // Must be the first plugin: when another instance answers, it exits
+        // this process before anything else initialises.
+        builder = builder.plugin(plugin);
+    }
+
+    builder
         .plugin(
             tauri::plugin::Builder::<tauri::Wry>::new("navigation-policy")
                 .on_navigation(|_, url| allow_webview_navigation(url))
@@ -413,6 +431,16 @@ fn main() {
         .setup({
             let platform = platform.clone();
             move |app| {
+                // The single-instance plugin did not hand us over, yet another
+                // fbro owns the default WebSocket port: it predates the plugin.
+                // Exit rather than drive its backend from this window.
+                if handing_over {
+                    eprintln!(
+                        "[fbro] the running fbro does not support handover (older build); \
+                         bring it to the front yourself"
+                    );
+                    std::process::exit(1);
+                }
                 let app_handle = app.handle().clone();
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.set_icon(tauri::include_image!("icons/128x128.png"));

@@ -14,6 +14,7 @@ use std::collections::HashMap;
 pub(super) mod appearance;
 mod icon_cache;
 mod notifications;
+mod single_instance;
 
 pub struct MacOSPlatform;
 
@@ -73,6 +74,14 @@ extern "C" {
 }
 
 impl Platform for MacOSPlatform {
+    fn single_instance_plugin(&self) -> Option<tauri::plugin::TauriPlugin<tauri::Wry>> {
+        Some(single_instance::plugin())
+    }
+
+    fn ask_already_running(&self) -> super::AlreadyRunningChoice {
+        single_instance::ask_already_running()
+    }
+
     fn supports_os_notifications(&self) -> bool {
         notifications::supported()
     }
