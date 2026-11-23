@@ -21,6 +21,10 @@ pub(crate) async fn handle(name: &str, args: &Value, ctx: &mut IntentContext<'_>
         open_review_request(args, ctx).await;
         return;
     }
+    if name == "GitRevealPath" {
+        reveal_path(args, ctx).await;
+        return;
+    }
 
     let panel_id = args.get("panelId").and_then(Value::as_str).unwrap_or("").to_string();
     let activity_id = args
@@ -254,6 +258,17 @@ mod init_tests {
         assert_eq!(reply["suggestedBranchName"], "topic");
         assert!(reply.get("suggested_branch_name").is_none());
         assert!(reply.get("suggestedUrl").is_none());
+    }
+
+    #[test]
+    fn reveal_paths_stay_inside_the_repository() {
+        let root = std::path::PathBuf::from("/work/repo");
+        assert_eq!(repo_path("/work/repo", "src/main.rs"), Some(root.join("src").join("main.rs")));
+        assert_eq!(repo_path("/work/repo", "./docs/"), Some(root.join("docs")));
+        assert_eq!(repo_path("/work/repo", ""), None);
+        assert_eq!(repo_path("/work/repo", "../outside.txt"), None);
+        assert_eq!(repo_path("/work/repo", "src/../../outside.txt"), None);
+        assert_eq!(repo_path("/work/repo", "/etc/passwd"), None);
     }
 
     #[test]
@@ -592,6 +607,58 @@ fn normalize_repo_rel_path(path: &str) -> Result<String, String> {
         return Err("The requested Git path is invalid.".into());
     }
     Ok(path.replace('\\', "/"))
+}
+
+/// Joins a repository-relative Git path onto `root`, rejecting anything that
+/// could leave the repository (absolute paths, `..`, drive prefixes).
+fn repo_path(root: &str, relative: &str) -> Option<std::path::PathBuf> {
+    let relative = relative.trim_end_matches('/');
+    if relative.is_empty() {
+        return None;
+    }
+    let mut path = std::path::PathBuf::from(root);
+    for component in Path::new(relative).components() {
+        match component {
+            Component::Normal(part) => path.push(part),
+            Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => return None,
+        }
+    }
+    Some(path)
+}
+
+/// Navigates the modal's panel to a changed file in the working tree and
+/// places the cursor on it.
+async fn reveal_path(args: &Value, ctx: &mut IntentContext<'_>) {
+    let panel_id = super::arg_str(args, "panelId").unwrap_or("").to_string();
+    let relative = super::arg_str(args, "path").unwrap_or("").to_string();
+    let (_, repository) = panel_repo(&panel_id, ctx).await;
+    let Some((root, _)) = repository else {
+        send_error(ctx, "GIT_UNAVAILABLE", "No Git repository is available for this panel.").await;
+        return;
+    };
+    let Some(full_path) = repo_path(&root, &relative) else {
+        send_error(ctx, "NAVIGATE_FAILED", &format!("Not a path inside the repository: {relative}")).await;
+        return;
+    };
+    let probe = full_path.clone();
+    let kind = tokio::task::spawn_blocking(move || {
+        std::fs::symlink_metadata(&probe).ok().map(|meta| if meta.is_dir() { "directory" } else { "file" })
+    })
+    .await
+    .ok()
+    .flatten();
+    let Some(kind) = kind else {
+        send_error(ctx, "NAVIGATE_FAILED", &format!("{relative} is not in the working tree.")).await;
+        return;
+    };
+    super::jobs::navigate_panel_to_local_path(
+        panel_id,
+        full_path.to_string_lossy().into_owned(),
+        kind.to_string(),
+        ctx,
+    )
+    .await;
 }
 
 async fn panel_repo(panel_id: &str, ctx: &IntentContext<'_>) -> (Option<String>, Option<(String, bool)>) {

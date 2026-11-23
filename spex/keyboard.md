@@ -370,6 +370,10 @@ While it is open it owns the keyboard, and other viewer shortcuts are held back:
 `Ctrl`/`Cmd`+`=`/`-`/`0` keep adjusting the global font size.
 
 The Git changes/log lists use `J` to move down and `K` to move up.
+`Ctrl`+`ArrowDown` (`Cmd`+`ArrowDown` on macOS) on a Changes row or an expanded
+Log file row sends `GitRevealPath { panelId, path }` and closes the modal; the
+backend opens the file's folder in that panel with the cursor on the file, and
+focus returns to the listing. Deleted files have no jump action.
 In the Git log, Tab visits the active commit/file row itself and its enabled
 inline actions, then leaves the listing. Inactive rows and their actions are
 excluded from Tab order. Shift+Tab reverses that order; entering from before

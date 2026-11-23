@@ -253,6 +253,11 @@ export async function runGitFlow(browser, observer) {
     timeout: 10_000,
     label: "Staged Git deletion",
   });
+  const jumpButtons = await browser.execute(() => Object.fromEntries([...document.querySelectorAll('[data-testid="git-change-row"]')]
+    .map((row) => [row.querySelector("span[title]")?.getAttribute("title"), !!row.querySelector('[data-testid="git-jump-to-file"]')])));
+  if (jumpButtons["removed.txt"] || !jumpButtons["changed.txt"]) {
+    throw new Error(`Jump to file should be offered only for files in the working tree: ${JSON.stringify(jumpButtons)}`);
+  }
   const panelCursor = observer.state.panels.left?.cursor;
   await browser.keys("j");
   await waitFor(async () => (await browser.$('[data-testid="git-change-row"][data-change-index="1"]')).isFocused(), {
@@ -413,6 +418,24 @@ export async function runGitFlow(browser, observer) {
   await waitFor(() => browser.execute(() =>
     document.querySelector('[data-testid="panel-left"] .panel__git-btn') === document.activeElement),
   { timeout: 5_000, label: "Git modal restores exact repository button opener" });
+
+  // Ctrl+Down jumps to the active change: the modal closes and its panel opens
+  // the file's folder with the cursor on it and listing focus.
+  await clickEntry(browser, "left", "changed.txt");
+  await browser.keys(["Shift", "g"]);
+  await gitModal.waitForDisplayed({ timeout: 10_000 });
+  await waitFor(() => gitChangeCode(browser, "nested/inside.txt"), { timeout: 10_000, label: "nested Git change row" });
+  await browser.execute(() => [...document.querySelectorAll('[data-testid="git-change-row"]')]
+    .find((row) => row.querySelector('span[title="nested/inside.txt"]'))?.focus());
+  await browser.keys(["Control", "ArrowDown"]);
+  await gitModal.waitForExist({ reverse: true, timeout: 10_000 });
+  await observer.waitForPanelPath("left", backendPath("a", "src", "git-diff-smoke", "nested"));
+  await waitFor(() => browser.execute(() => {
+    const panel = document.querySelector('[data-testid="panel-left"]');
+    return panel?.querySelector(".panel__row--cursor")?.getAttribute("data-entry-name") === "inside.txt"
+      && panel.contains(document.activeElement);
+  }), { timeout: 10_000, label: "Git jump to file places the cursor and restores listing focus" });
+  await goToPanelPath(browser, observer, "left", repo);
 
   await clickEntry(browser, "left", "changed.txt");
   const inlineViewDiff = await browser.$('[data-entry-name="changed.txt"] [data-testid="git-inline-view-diff"]');

@@ -56,7 +56,9 @@ The **Changes** tab lists changed files. Move with <kbd>J</kbd> / <kbd>K</kbd> o
 the arrow keys:
 
 - <kbd>S</kbd> stages or unstages the file;
-- <kbd>V</kbd> views its diff.
+- <kbd>V</kbd> views its diff;
+- <kbd>Ctrl</kbd>+<kbd>↓</kbd> (<kbd>Cmd</kbd>+<kbd>↓</kbd> on macOS) jumps to the
+  file: the dialog closes and the panel opens its folder with the cursor on it.
 
 To commit, stage what you want, type a **Commit message** and choose **Commit
 staged** (<kbd>C</kbd>).
@@ -78,6 +80,8 @@ changed.
 - <kbd>C</kbd> copies a reference to the file as it was in that commit. Paste it
   into any folder (<Shortcut id="file.paste_external" />) to get a copy of that
   version.
+- <kbd>Ctrl</kbd>+<kbd>↓</kbd> (<kbd>Cmd</kbd>+<kbd>↓</kbd> on macOS) jumps to the
+  file in the working tree, if it still exists there.
 - <kbd>Space</kbd> on the last row loads more commits.
 
 <kbd>Escape</kbd> closes the dialog. If a git command is still running, it carries

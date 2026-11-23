@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { IconArrowBackUp, IconArrowDown, IconArrowUp, IconCopy, IconExternalLink, IconGitCompare, IconLoader2, IconMinus, IconPlus } from "@tabler/icons-react";
+import { IconArrowBackUp, IconArrowDown, IconArrowUp, IconCopy, IconExternalLink, IconFileArrowRight, IconGitCompare, IconLoader2, IconMinus, IconPlus } from "@tabler/icons-react";
 import { useAppDispatch, useAppState } from "../store";
 import type { GitChange, GitLogRef, GitRepoStatus } from "../ws/types";
 import type { WsClient } from "../ws/client";
@@ -13,6 +13,7 @@ import { useInputHistory } from "../hooks/useInputHistory";
 import { InputHistoryDropdown } from "./InputHistoryDropdown";
 import { shortcutLetter } from "./modalKeyboard";
 import { GitBranchPicker } from "./GitBranchPicker";
+import { isMac, modKey } from "../utils/platform";
 
 type GitTab = "changes" | "log";
 
@@ -23,6 +24,7 @@ type LogFocus =
   | { kind: "change"; commitIndex: number; changeIndex: number };
 
 const LOG_PAGE_SIZE = 100;
+const JUMP_TO_FILE_HINT = `${isMac ? "Cmd" : "Ctrl"}+Down`;
 const MESSAGE_PAGE_LINES = 8;
 
 export function GitModal({ panelId, git, client, activity, onActivityChange, onClose }: { panelId: string; git: GitRepoStatus; client: WsClient; activity: GitActivity | null; onActivityChange: (activity: GitActivity) => void; onClose: () => void }) {
@@ -371,6 +373,13 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
     onClose();
   }, [dispatch, onClose]);
 
+  // Show the file in this modal's panel: the backend opens its folder with the
+  // cursor on it, and closing returns focus to that listing.
+  const jumpToFile = (path: string) => {
+    act("GitRevealPath", { path });
+    handleClose();
+  };
+
   useEffect(() => {
     return () => {
       // React StrictMode replays effects without recreating refs. Reset this
@@ -467,6 +476,13 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
     }
   }, [allChangesSelected, selectedChanges.length]);
 
+  const activeLogChange = (focus: LogFocus): GitChange | undefined => {
+    if (focus.kind !== "change") return undefined;
+    const commit = logCommits[focus.commitIndex];
+    const show = commit ? gitLog?.commitShows[commit.hash] : undefined;
+    return show?.status === "ready" ? show.changes[focus.changeIndex] : undefined;
+  };
+
   const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
       if (event.defaultPrevented) return;
       if (event.key === "Escape") {
@@ -495,6 +511,13 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
         setSelectedPaths(new Set(git.changes.map(change => change.path)));
         selectionAnchorRef.current = git.changes.length > 0 ? 0 : null;
         setRollbackPaths(null);
+        return;
+      }
+      if (event.key === "ArrowDown" && modKey(event) && !event.altKey && !event.shiftKey) {
+        const path = jumpablePath(activeTab === "changes" ? git.changes[activeChangeIndex] : activeLogChange(logFocus));
+        event.preventDefault();
+        event.stopPropagation();
+        if (path) jumpToFile(path);
         return;
       }
       if (!hasShortcutModifier) {
@@ -622,9 +645,7 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
           }
           if (logFocus.kind === "change" && (letter === "v" || letter === "c")) {
             const commit = logCommits[logFocus.commitIndex];
-            const change = commit && gitLog?.commitShows[commit.hash]?.status === "ready"
-              ? gitLog.commitShows[commit.hash].changes[logFocus.changeIndex]
-              : undefined;
+            const change = activeLogChange(logFocus);
             if (commit && change) {
               if (letter === "v" && isLikelyBinaryPath(change.path)) return;
               event.preventDefault();
@@ -889,6 +910,19 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
                           <IconGitCompare size={15} aria-hidden />
                         </button>
                       )}
+                      {jumpablePath(change) && (
+                        <button
+                          className="git-modal__change-action git-modal__change-action--icon"
+                          data-testid="git-jump-to-file"
+                          title={`Jump to file (${JUMP_TO_FILE_HINT})`}
+                          aria-label="Jump to file"
+                          aria-keyshortcuts={isMac ? "Meta+ArrowDown" : "Control+ArrowDown"}
+                          onFocus={() => setActiveChangeIndex(index)}
+                          onClick={() => jumpToFile(change.path)}
+                        >
+                          <IconFileArrowRight size={15} aria-hidden />
+                        </button>
+                      )}
                       <button
                         className="git-modal__change-action git-modal__change-action--icon"
                         disabled={actionInFlight}
@@ -1107,6 +1141,21 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
                                     <IconCopy size={15} aria-hidden />
                                   </button>
                                 )}
+                                {jumpablePath(change) && (
+                                  <button
+                                    type="button"
+                                    className="git-modal__change-action git-modal__change-action--icon"
+                                    data-testid="git-log-jump-to-file"
+                                    tabIndex={changeActive ? 0 : -1}
+                                    title={`Jump to file (${JUMP_TO_FILE_HINT})`}
+                                    aria-label="Jump to file"
+                                    aria-keyshortcuts={isMac ? "Meta+ArrowDown" : "Control+ArrowDown"}
+                                    onFocus={() => setLogFocus({ kind: "change", commitIndex: index, changeIndex })}
+                                    onClick={() => jumpToFile(change.path)}
+                                  >
+                                    <IconFileArrowRight size={15} aria-hidden />
+                                  </button>
+                                )}
                               </div>
                             </div>
                           );
@@ -1202,6 +1251,12 @@ export function GitModal({ panelId, git, client, activity, onActivityChange, onC
 function commitMessageLines(message: string): string[] {
   const trimmed = message.trim();
   return trimmed ? trimmed.split("\n") : [];
+}
+
+/** Path to reveal in the working tree, or undefined when the change deleted it. */
+function jumpablePath(change: GitChange | undefined): string | undefined {
+  if (!change || change.indexStatus === "D" || change.worktreeStatus === "D") return undefined;
+  return change.path;
 }
 
 function isStaged(change: GitRepoStatus["changes"][number]) {

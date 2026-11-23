@@ -3093,7 +3093,7 @@ fn search_result_destination(
     kind: &str,
 ) -> Result<(String, Option<String>), String> {
     if !Path::new(full_path).is_absolute() || !driver.exists(full_path) {
-        return Err(format!("Search result is no longer available: {full_path}"));
+        return Err(format!("No longer available: {full_path}"));
     }
     if kind == "directory" {
         return Ok((full_path.to_string(), None));
@@ -3101,11 +3101,11 @@ fn search_result_destination(
     let parent = driver
         .parent_path(full_path)
         .filter(|path| driver.exists(path))
-        .ok_or_else(|| format!("Search result folder is no longer available: {full_path}"))?;
+        .ok_or_else(|| format!("Folder is no longer available: {full_path}"))?;
     let name = Path::new(full_path)
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
-        .ok_or_else(|| format!("Search result has no filename: {full_path}"))?;
+        .ok_or_else(|| format!("Path has no filename: {full_path}"))?;
     Ok((parent, Some(name)))
 }
 
@@ -3125,6 +3125,20 @@ async fn navigate_to_search_result(args: &Value, ctx: &mut IntentContext<'_>) {
         panel_id_arg
     };
 
+    navigate_panel_to_local_path(panel_id, full_path, kind, ctx).await;
+}
+
+/// Opens `full_path` (a local absolute path) in `panel_id`: directories are
+/// entered, files open their parent with the cursor on the file. Leaves any
+/// search shadow context of the panel and reports `NAVIGATE_FAILED` when the
+/// target is not on an available local source. Shared by search results and
+/// the Git modal's jump-to-file action.
+pub(crate) async fn navigate_panel_to_local_path(
+    panel_id: String,
+    full_path: String,
+    kind: String,
+    ctx: &mut IntentContext<'_>,
+) {
     let prepared = {
         let state = ctx.state.lock().await;
         let Some(panel) = state.panels.get(&panel_id) else {
@@ -3145,7 +3159,7 @@ async fn navigate_to_search_result(args: &Value, ctx: &mut IntentContext<'_>) {
         let _ = send_error(
             ctx,
             "NAVIGATE_FAILED",
-            format!("Search result is not on an available local source: {full_path}"),
+            format!("Not on an available local source: {full_path}"),
         )
         .await;
         return;
@@ -3156,7 +3170,7 @@ async fn navigate_to_search_result(args: &Value, ctx: &mut IntentContext<'_>) {
         search_result_destination(driver.as_ref(), &full_path, &kind)
     })
     .await
-    .unwrap_or_else(|error| Err(format!("Could not resolve search result: {error}")));
+    .unwrap_or_else(|error| Err(format!("Could not resolve path: {error}")));
     let (nav_path, cursor_hint) = match destination {
         Ok(destination) => destination,
         Err(message) => {
