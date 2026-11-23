@@ -100,6 +100,7 @@ impl ProgressReporter {
                 total_bytes_copied,
                 current_file_percent: percent(current_file_copied, current_file_total),
                 overall_percent: percent(total_bytes_copied, self.total_bytes_total),
+                skipped_files: 0,
             },
         );
     }
@@ -240,6 +241,7 @@ pub(crate) fn send_progress_sync(
         error: None,
         result_path: None,
         result_panel_id: None,
+        skipped: None,
     }) {
         eprintln!("[fbro] send_progress_sync({job_id}) try_send dropped: {e:?}");
     }

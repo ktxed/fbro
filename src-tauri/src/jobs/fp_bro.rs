@@ -44,6 +44,7 @@ pub async fn run_fp_bro(
             total_bytes_copied: 0,
             current_file_percent: None,
             overall_percent: None,
+            skipped_files: 0,
         },
     )
     .await;
@@ -192,6 +193,7 @@ async fn run_legacy_fp_bro(
                     total_bytes_copied: 0,
                     current_file_percent: None,
                     overall_percent: Some(100),
+                    skipped_files: 0,
                 },
             )
             .await;
@@ -277,6 +279,7 @@ async fn run_builtin_archive(
                     total_bytes_copied: summary.total_bytes_total,
                     current_file_percent: Some(100),
                     overall_percent: Some(100),
+                    skipped_files: 0,
                 },
             )
             .await;
@@ -316,6 +319,7 @@ async fn send_progress(
         error: None,
         result_path: None,
         result_panel_id: None,
+        skipped: None,
     })
     .await
     .map_err(|_| ())
@@ -339,6 +343,7 @@ async fn send_terminal(
         error,
         result_path,
         result_panel_id: None,
+        skipped: None,
     })
     .await
     .map_err(|_| ())

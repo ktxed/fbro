@@ -90,6 +90,7 @@ pub(crate) fn emit_preparing_progress(
             total_bytes_copied: 0,
             current_file_percent: None,
             overall_percent: None,
+            skipped_files: 0,
         },
     );
 }
@@ -156,6 +157,7 @@ pub(crate) fn emit_preparing_extract(
             total_bytes_copied: 0,
             current_file_percent: None,
             overall_percent: None,
+            skipped_files: 0,
         },
     );
 }

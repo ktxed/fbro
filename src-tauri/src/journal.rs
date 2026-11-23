@@ -280,14 +280,20 @@ pub fn record_mutation(job_id: &str, kind: &str, source: &str, destination: Opti
     );
 }
 
-pub fn record_operation_finished(job_id: &str, kind: &str, outcome: &str, error: Option<&str>) {
+pub fn record_operation_finished(
+    job_id: &str,
+    kind: &str,
+    outcome: &str,
+    error: Option<&str>,
+    skipped: usize,
+) {
     record(
         "operation.finished.v1",
         Some(job_id),
         Some(job_id),
         None,
         Some(outcome),
-        json!({ "kind": kind, "outcome": outcome, "error": error }),
+        json!({ "kind": kind, "outcome": outcome, "error": error, "skipped": skipped }),
     );
 }
 

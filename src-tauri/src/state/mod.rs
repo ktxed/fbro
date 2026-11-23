@@ -1934,6 +1934,7 @@ mod tests {
                 error: None,
                 result_path: None,
                 result_panel_id: None,
+                skipped: None,
             })
             .await
             .unwrap();
@@ -1976,6 +1977,7 @@ mod tests {
             error: None,
             result_path: None,
             result_panel_id: None,
+            skipped: None,
         };
         worker_tx.send(event("Progress")).await.unwrap();
         let delayed_progress = gui_rx.recv().await.unwrap();
@@ -2024,7 +2026,9 @@ mod tests {
             op_type: FileOpType::Copy,
             files: vec![],
             conflict_policy: crate::jobs::ConflictPolicy::Ask,
+            error_policy: crate::jobs::ErrorPolicy::Ask,
             apply_to_all_decision: None,
+            skipped: vec![],
         });
         let observed_registration = Arc::new(AtomicBool::new(false));
         let observed = observed_registration.clone();
@@ -2052,6 +2056,7 @@ mod tests {
                     error: None,
                     result_path: None,
                     result_panel_id: None,
+                    skipped: None,
                 };
                 crate::ws::server::apply_job_event_to_state(&producer_state, &mut message).await;
                 let _ = finished_tx.send(());
@@ -2094,7 +2099,10 @@ mod tests {
             let job = guard.job_store.jobs.get_mut("hash-job").unwrap();
             job.kind = JobKind::FileOp(FileOpJobMeta {
                 op_type: FileOpType::Copy, files: vec![],
-                conflict_policy: crate::jobs::ConflictPolicy::Ask, apply_to_all_decision: None,
+                conflict_policy: crate::jobs::ConflictPolicy::Ask,
+                error_policy: crate::jobs::ErrorPolicy::Ask,
+                apply_to_all_decision: None,
+                skipped: vec![],
             });
             job.notification.start_at(std::time::Instant::now() - std::time::Duration::from_secs(30));
             guard.notifications.clone()
@@ -2107,6 +2115,7 @@ mod tests {
             timestamp: 1, job_id: "hash-job".into(), event: "Completed".into(),
             files: None, progress: None, search_progress: None, decision: None,
             error: None, result_path: None, result_panel_id: None,
+            skipped: None,
         };
         worker.send(completed()).await.unwrap();
         tokio::time::timeout(std::time::Duration::from_secs(2), updates.recv()).await.unwrap().unwrap();

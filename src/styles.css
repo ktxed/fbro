@@ -3785,6 +3785,43 @@ textarea,
   color: var(--text-dim);
 }
 
+.modal__skipped {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+}
+
+.modal__skipped-list {
+  margin: 0;
+  padding: 4px 8px;
+  max-height: 120px;
+  overflow: auto;
+  list-style: none;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-panel);
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.modal__skipped-list li {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 3px 0;
+  font-size: calc(var(--font-size) - 1px);
+}
+
+.modal__skipped-path {
+  color: var(--text);
+  word-break: break-all;
+}
+
+.modal__skipped-reason {
+  color: var(--text-warning);
+}
+
 /* Sync Bro results */
 
 .modal__sync-results {

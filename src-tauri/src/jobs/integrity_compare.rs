@@ -248,6 +248,7 @@ pub async fn run_sync_bro(
             total_bytes_copied: 0,
             current_file_percent: None,
             overall_percent: None,
+            skipped_files: 0,
         },
     )
     .await;
@@ -292,6 +293,7 @@ pub async fn run_sync_bro(
             total_bytes_copied: 0,
             current_file_percent: Some(100),
             overall_percent: Some(100),
+            skipped_files: 0,
         },
     )
     .await;
@@ -858,6 +860,7 @@ async fn sync_bro_progress_aggregator(
                     combined.current_file_bytes_total,
                 ),
                 overall_percent: combined.overall_percent,
+                skipped_files: 0,
             },
         )
         .await;
@@ -1010,6 +1013,7 @@ async fn send_progress(
         error: None,
         result_path: None,
         result_panel_id: None,
+        skipped: None,
     })
     .await
     .map_err(|_| ())
@@ -1443,6 +1447,7 @@ async fn send_terminal(
         error,
         result_path,
         result_panel_id,
+        skipped: None,
     })
     .await
     .map_err(|_| ())

@@ -64,6 +64,42 @@ pub enum VerificationPolicy {
     Prompt,
 }
 
+/// What a file operation does when an item fails for a reason other than a
+/// conflict or verification mismatch. `Ask` prompts on every failure; `Skip`
+/// records the item and carries on without prompting.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ErrorPolicy {
+    Ask,
+    Skip,
+}
+
+/// An item a file operation did not transfer or delete. The backend keeps the
+/// most recent `MAX_SKIPPED_ITEMS` on the job; `FileOpProgress::skipped_files`
+/// holds the uncapped count.
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkippedItem {
+    pub path: String,
+    pub reason: String,
+    /// Operation name ("copy", "move", "delete") used to phrase the toast.
+    pub op_type: String,
+    /// True only for an explicit Skip choice (prompt or progress Skip button).
+    /// Skip-all and the Skip policy are silent.
+    pub notify: bool,
+}
+
+/// Upper bound for the per-job skipped list, on both sides of the protocol.
+pub const MAX_SKIPPED_ITEMS: usize = 1000;
+
+/// Append an item, retaining the most recent `MAX_SKIPPED_ITEMS` entries.
+pub fn push_skipped(list: &mut Vec<SkippedItem>, item: SkippedItem) {
+    if list.len() >= MAX_SKIPPED_ITEMS {
+        list.remove(0);
+    }
+    list.push(item);
+}
+
 #[derive(Clone, Debug)]
 pub struct DecisionResponse {
     pub decision: String,
@@ -110,6 +146,7 @@ pub struct FileOpProgress {
     pub current_file_percent: Option<u8>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub overall_percent: Option<u8>,
+    pub skipped_files: usize,
 }
 
 /// A pending conflict decision the job is waiting on.
@@ -181,7 +218,9 @@ pub struct FileOpJobMeta {
     pub op_type: FileOpType,
     pub files: Vec<FileOpEntry>,
     pub conflict_policy: ConflictPolicy,
+    pub error_policy: ErrorPolicy,
     pub apply_to_all_decision: Option<ConflictPolicy>,
+    pub skipped: Vec<SkippedItem>,
 }
 
 #[allow(dead_code)]
@@ -252,6 +291,7 @@ pub struct QueuedFileOpLaunch {
     pub files: Vec<FileOpEntry>,
     pub dest_path: Option<String>,
     pub conflict_policy: ConflictPolicy,
+    pub error_policy: ErrorPolicy,
     pub verification_policy: VerificationPolicy,
     pub save_digest_file: bool,
     pub src_driver: Arc<dyn VfsDriver>,

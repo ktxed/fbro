@@ -1303,6 +1303,7 @@ async fn launch_fp_bro(
                     total_bytes_copied: 0,
                     current_file_percent: None,
                     overall_percent: None,
+                    skipped_files: 0,
                 },
                 decision: None,
                 error: None,
@@ -1348,6 +1349,7 @@ async fn launch_fp_bro(
                 error: None,
                 result_path: None,
                 result_panel_id: None,
+                skipped: None,
             })
             .await;
         return Ok(());
@@ -1905,6 +1907,7 @@ pub(crate) async fn handle_fp_bro_job_decision(
                     error: None,
                     result_path: None,
                     result_panel_id: None,
+                    skipped: None,
                 })
                 .await;
         }
@@ -1921,6 +1924,7 @@ pub(crate) async fn handle_fp_bro_job_decision(
                     error: None,
                     result_path: None,
                     result_panel_id: None,
+                    skipped: None,
                 })
                 .await;
         }

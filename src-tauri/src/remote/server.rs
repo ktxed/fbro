@@ -190,6 +190,7 @@ fn progress_schema(progress: &FileOpProgress) -> FileOpProgressSchema {
             progress.current_file_bytes_total,
         ),
         overall_percent: percent(progress.total_bytes_copied, progress.total_bytes_total),
+        skipped_files: 0,
     }
 }
 
@@ -1254,6 +1255,7 @@ async fn emit_outgoing_progress(state: &SharedState, transfer: &mut OutgoingTran
         error: None,
         result_path: None,
         result_panel_id: None,
+        skipped: None,
     };
 
     let senders = {
@@ -1331,6 +1333,7 @@ async fn finish_outgoing_transfer_if_current(
         error: None,
         result_path: None,
         result_panel_id: None,
+        skipped: None,
     };
     for tx in senders {
         let _ = tx.try_send(msg.clone());
@@ -1449,6 +1452,7 @@ fn emit_remote_manifest_progress_sync(state: &SharedState, job_id: &str, progres
         error: None,
         result_path: None,
         result_panel_id: None,
+        skipped: None,
     };
     for tx in senders {
         let _ = tx.try_send(msg.clone());
@@ -1511,6 +1515,7 @@ fn emit_remote_manifest_terminal_sync(
         error,
         result_path: None,
         result_panel_id: None,
+        skipped: None,
     };
     for tx in senders {
         let _ = tx.try_send(msg.clone());
@@ -1573,6 +1578,7 @@ async fn emit_remote_manifest_terminal(
         error,
         result_path: None,
         result_panel_id: None,
+        skipped: None,
     };
     for tx in senders {
         let _ = tx.try_send(msg.clone());

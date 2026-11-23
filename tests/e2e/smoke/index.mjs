@@ -31,6 +31,7 @@ import { runGlobalSelectionFlow } from "./cases/global-selection.mjs";
 import { runGitFlow } from "./cases/git.mjs";
 import { runGitInitFlow } from "./cases/git-init.mjs";
 import { runLocalFlow, runSymlinkNavigationFlow, verifyBookmarksKeyboardNavigation } from "./cases/local.mjs";
+import { runFileOpErrorsFlow } from "./cases/file-op-errors.mjs";
 import { runPanelSelectionFlow } from "./cases/panel-selection.mjs";
 import { runSelectionMaskFlow } from "./cases/selection-mask.mjs";
 import { runFocusHandoffFlow } from "./cases/focus-handoff.mjs";
@@ -201,8 +202,13 @@ async function main() {
     await runColorSchemeEditorFlow(browserA, observerA);
     await runFocusHandoffFlow(browserA, observerA);
     if (process.env.FBRO_E2E_FOCUS_ONLY === "1") return;
+    if (process.env.FBRO_E2E_FILE_OP_ERRORS_ONLY === "1") {
+      await runFileOpErrorsFlow(browserA, observerA);
+      return;
+    }
     await runTerminalToolbarFlow(browserA, observerA);
     await runLocalFlow(browserA, observerA);
+    await runFileOpErrorsFlow(browserA, observerA);
     await runTabsFlow(browserA, observerA);
     await runTabListFlow(browserA, observerA);
     await runDiffFlow(browserA, observerA);

@@ -68,6 +68,7 @@ pub async fn run_check_hashes(
             error,
             result_path: None,
             result_panel_id: None,
+            skipped: None,
         })
         .await;
 }

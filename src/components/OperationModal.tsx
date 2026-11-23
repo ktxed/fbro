@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import type { WsClient } from "../ws/client";
-import type { PendingOp, Job, ConflictPolicy, VerificationPolicy, DuplicateNamePolicy, FileOpFile, SyncBroResult, FedupBroResult } from "../ws/types";
+import type { PendingOp, Job, ConflictPolicy, ErrorPolicy, VerificationPolicy, DuplicateNamePolicy, FileOpFile, SyncBroResult, FedupBroResult } from "../ws/types";
 import { useAppDispatch, useAppState } from "../store";
 import type { AppState, PendingDryRun } from "../store";
 import { isArchiveSourceId, isGlobalSelectionSourceId, isSearchSourceId } from "../utils/sourceId";
@@ -241,6 +241,7 @@ function decisionLabel(decision: string) {
   switch (decision) {
     case "copyRemote": return "Copy Remote Files";
     case "report": return "Generate Report";
+    case "skip-all": return "Skip all";
     default: return decision.charAt(0).toUpperCase() + decision.slice(1);
   }
 }
@@ -479,6 +480,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
   const dispatch = useAppDispatch();
   const copyToClipboard = useCopyToClipboard();
   const [conflictPolicy, setConflictPolicy] = useState<ConflictPolicy>("ask");
+  const [errorPolicy, setErrorPolicy] = useState<ErrorPolicy>("ask");
   const [verificationPolicy, setVerificationPolicy] = useState<VerificationPolicy>("fail");
   const [saveDigestFileState, setSaveDigestFileState] = useState({ pendingKey: "none", value: false });
   const [submitted, setSubmitted] = useState(false);
@@ -543,6 +545,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
     setSubmitted(false);
     setDryMode(false);
     setConflictPolicy(shouldDefaultResumeForPending(state, pending) ? "resume" : pending.conflictPolicy);
+    setErrorPolicy("ask");
     setDestName(supportsCopyDestName(pending) ? pending.files[0].name : "");
     setDuplicateNamePolicy("exclude");
   }, [pending]);
@@ -693,6 +696,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
         ...(showDestNameInput && destName !== pending.files[0].name ? { destName } : {}),
         ...(showDuplicateNamePolicy ? { duplicateNamePolicy } : {}),
         conflictPolicy: selectedConflictPolicy,
+        errorPolicy,
         verificationPolicy,
         saveDigestFile,
         background: background || enqueue,
@@ -889,6 +893,18 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
               </>
             )}
             <div className="modal__option">
+              <label htmlFor="file-error-policy">Action on error:</label>
+              <select
+                id="file-error-policy"
+                data-testid="file-error-policy"
+                value={errorPolicy}
+                onChange={(e) => setErrorPolicy(e.target.value as ErrorPolicy)}
+              >
+                <option value="ask">Ask</option>
+                <option value="skip">Skip</option>
+              </select>
+            </div>
+            <div className="modal__option">
               <label>
                 <input
                   type="checkbox"
@@ -968,6 +984,8 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
       : opLabel(activeJob.type);
     const decisionOptions = activeJob.decision?.options ?? [];
     const isVerificationDecision = activeJob.decision?.kind === "verification";
+    const isErrorDecision = activeJob.decision?.kind === "error";
+    const skipAllDecision = decisionOptions.find((opt) => opt === "skip-all");
     const primaryDecision = decisionOptions.includes("resume")
       ? "resume"
       : decisionOptions.includes("retry")
@@ -976,6 +994,8 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
       ? "overwrite"
       : decisionOptions[0];
     const skipDecision = decisionOptions.find((opt) => opt === "skip");
+    // The progress count is uncapped; the item list keeps the most recent entries.
+    const skippedCount = Math.max(p?.skippedFiles ?? 0, activeJob.skipped?.length ?? 0);
 
     const filePercent = p && p.currentFileBytesTotal > 0
       ? Math.round((p.currentFileBytesCopied / p.currentFileBytesTotal) * 100)
@@ -993,7 +1013,7 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
     const shouldConfirmCancel = (isQueued || isProgress)
       && (isRemoteCopy || (p?.currentFileBytesTotal ?? 0) > LARGE_CANCEL_THRESHOLD);
     const showSkipCurrentFile = activeJob.kind === "file-op"
-      && activeJob.type === "copy"
+      && (activeJob.type === "copy" || activeJob.type === "move")
       && !activeSourcePanel?.shadowSource;
     const canSkipCurrentFile = showSkipCurrentFile
       && isProgress
@@ -1111,6 +1131,11 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
           submitDecision(skipDecision);
           return;
         }
+        if (isLetterKey(e, "l") && skipAllDecision) {
+          e.preventDefault();
+          submitDecision(skipAllDecision);
+          return;
+        }
       }
       if (isQueued || isProgress) {
         if (confirmingCancel) {
@@ -1129,6 +1154,11 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
         if (isLetterKey(e, "r") && activeJob.supportsPause && activeJob.paused) {
           e.preventDefault();
           resumeJob();
+          return;
+        }
+        if (isLetterKey(e, "s") && canSkipCurrentFile) {
+          e.preventDefault();
+          skipCurrentFile();
           return;
         }
       }
@@ -1271,8 +1301,16 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
             {/* Decision required */}
             {isDecision && activeJob.decision && (
               <div className="modal__decision">
-                <p>{isVerificationDecision ? "Transfer verification failed:" : "File already exists:"}</p>
-                <p className="modal__conflict-path">{activeJob.decision.destination}</p>
+                <p>
+                  {isErrorDecision
+                    ? `Cannot ${activeJob.type === "copy" ? "copy" : activeJob.type === "move" ? "move" : "delete"} item:`
+                    : isVerificationDecision
+                      ? "Transfer verification failed:"
+                      : "File already exists:"}
+                </p>
+                <p className="modal__conflict-path">
+                  {isErrorDecision ? activeJob.decision.source : activeJob.decision.destination}
+                </p>
                 {activeJob.decision.message && (
                   <p className="modal__summary">{activeJob.decision.message}</p>
                 )}
@@ -1295,10 +1333,11 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
                       className={`modal__btn${opt === primaryDecision ? " modal__btn--primary" : ""}`}
                       data-command-id={`job.decision.${opt}`}
                       data-modal-initial-focus={opt === primaryDecision || undefined}
+                      aria-keyshortcuts={opt === skipDecision ? "S" : opt === skipAllDecision ? "L" : undefined}
                       onClick={() => submitDecision(opt)}
                     >
-                      {opt === primaryDecision
-                        ? decisionLabel(opt)
+                      {opt === skipAllDecision
+                        ? <MnemonicLabel text={decisionLabel(opt)} mnemonic="l" />
                         : opt === skipDecision
                           ? <MnemonicLabel text={decisionLabel(opt)} mnemonic="s" />
                           : decisionLabel(opt)}
@@ -1398,10 +1437,31 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
             {isTerminal && (
               <>
                 <p className="modal__terminal">
-                {activeJob.state === "Completed" && (isOutgoing ? "Outgoing transfer completed." : isFedupBro ? "Fedup Bro report completed." : isBroResult ? "Bro completed successfully." : "Operation completed successfully.")}
+                {activeJob.state === "Completed" && (isOutgoing ? "Outgoing transfer completed." : isFedupBro ? "Fedup Bro report completed." : isBroResult ? "Bro completed successfully." : skippedCount > 0 ? "Operation completed." : "Operation completed successfully.")}
                   {activeJob.state === "Cancelled" && (isOutgoing ? "Outgoing transfer was cancelled." : isBroResult ? "Bro job was cancelled." : "Operation was cancelled.")}
                   {activeJob.state === "Failed" && (isOutgoing ? `Outgoing transfer failed: ${activeJob.error ?? "unknown error"}` : isBroResult ? `Bro failed: ${activeJob.error ?? "unknown error"}` : `Operation failed: ${activeJob.error ?? "unknown error"}`)}
                 </p>
+                {skippedCount > 0 && (activeJob.skipped?.length ?? 0) > 0 && (
+                  <div className="modal__skipped">
+                    <p className="modal__terminal">
+                      {skippedCount} {skippedCount === 1 ? "item was" : "items were"} skipped.
+                      {skippedCount > activeJob.skipped!.length && ` Showing the last ${activeJob.skipped!.length}.`}
+                    </p>
+                    <ul className="modal__skipped-list" data-testid="skipped-items">
+                      {activeJob.skipped!.map((item, index) => (
+                        <li key={`${item.path}:${index}`} title={item.path}>
+                          <span className="modal__skipped-path">{item.path}</span>
+                          <span className="modal__skipped-reason">{item.reason}</span>
+                        </li>
+                      ))}
+                    </ul>
+                    <CopyButton
+                      text={activeJob.skipped!.map((item) => item.path).join("\n")}
+                      what="skipped paths"
+                      title="Copy skipped paths"
+                    />
+                  </div>
+                )}
                 {isSyncBro && activeJob.state === "Completed" && syncResult && (
                   <SyncBroResultsView result={syncResult} />
                 )}
@@ -1442,8 +1502,14 @@ export function OperationModal({ pending, activeJob, activeJobId, pendingDryRun,
                   </button>
                 ) : null}
                 {showSkipCurrentFile && (
-                  <button className="modal__btn" data-command-id="job.skip-current-file" onClick={skipCurrentFile} disabled={!canSkipCurrentFile}>
-                    Skip
+                  <button
+                    className="modal__btn"
+                    data-command-id="job.skip-current-file"
+                    aria-keyshortcuts="S"
+                    onClick={skipCurrentFile}
+                    disabled={!canSkipCurrentFile}
+                  >
+                    <MnemonicLabel text="Skip" mnemonic="s" />
                   </button>
                 )}
                 <button className="modal__btn" data-command-id="job.cancel" onClick={requestCancelJob}>

@@ -10,8 +10,8 @@ use crate::jobs::search::{
     run_search, MaskMode, SearchDepth, SearchParams, SearchResultStore, SizeOp, TimeOp,
 };
 use crate::jobs::{
-    AppJob, ConflictPolicy, DecisionResponse, FileOpEntry, FileOpJobMeta, FileOpType, JobKind,
-    JobState, QueuedFileOpLaunch, SearchJobMeta, VerificationPolicy,
+    AppJob, ConflictPolicy, DecisionResponse, ErrorPolicy, FileOpEntry, FileOpJobMeta, FileOpType,
+    JobKind, JobState, QueuedFileOpLaunch, SearchJobMeta, VerificationPolicy,
 };
 use crate::platform::{ExternalClipboardOp, ExternalClipboardPayload};
 use crate::state::{ShadowSource, Source};
@@ -73,6 +73,7 @@ struct StartFileOpArgs {
     duplicate_name_policy: String,
     op_type: String,
     conflict_policy: String,
+    error_policy: String,
     verification_policy: String,
     save_digest_file: bool,
     background: bool,
@@ -105,6 +106,7 @@ impl StartFileOpArgs {
             duplicate_name_policy: arg_str(args, "duplicateNamePolicy").unwrap_or("exclude").to_string(),
             op_type: arg_str(args, "opType").unwrap_or("copy").to_string(),
             conflict_policy: arg_str(args, "conflictPolicy").unwrap_or("ask").to_string(),
+            error_policy: arg_str(args, "errorPolicy").unwrap_or("ask").to_string(),
             verification_policy: arg_str(args, "verificationPolicy")
                 .unwrap_or("fail")
                 .to_string(),
@@ -743,6 +745,10 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
         "resume" => ConflictPolicy::Resume,
         _ => ConflictPolicy::Ask,
     };
+    let error_policy = match parsed.error_policy.as_str() {
+        "skip" => ErrorPolicy::Skip,
+        _ => ErrorPolicy::Ask,
+    };
     let verification_policy = match parsed.verification_policy.as_str() {
         "prompt" => VerificationPolicy::Prompt,
         _ => VerificationPolicy::Fail,
@@ -1185,6 +1191,7 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
                     files: files.clone(),
                     dest_path: dest_path.clone(),
                     conflict_policy: conflict_policy.clone(),
+                    error_policy: error_policy.clone(),
                     verification_policy: verification_policy.clone(),
                     save_digest_file: parsed.save_digest_file,
                     src_driver: Arc::clone(&src_driver),
@@ -1207,7 +1214,9 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
                         op_type,
                         files,
                         conflict_policy,
+                        error_policy,
                         apply_to_all_decision: None,
+                        skipped: Vec::new(),
                     }),
                     source_panel: parsed.source_panel.clone(),
                     dest_panel: parsed.dest_panel.clone(),
@@ -1225,6 +1234,7 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
                         total_bytes_copied: 0,
                         current_file_percent: None,
                         overall_percent: None,
+                        skipped_files: 0,
                     },
                     decision: None,
                     error: None,
@@ -1413,6 +1423,7 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
     let files_spawn = files.clone();
     let dest_path_spawn = dest_path.clone();
     let conflict_policy_spawn = conflict_policy.clone();
+    let error_policy_spawn = error_policy.clone();
     let verification_policy_spawn = verification_policy.clone();
     let save_digest_file_spawn = parsed.save_digest_file;
     let skip_current_file_spawn = Arc::clone(&skip_current_file);
@@ -1426,7 +1437,9 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
             op_type,
             files,
             conflict_policy,
+            error_policy: error_policy.clone(),
             apply_to_all_decision: None,
+            skipped: Vec::new(),
         }),
         source_panel: parsed.source_panel,
         dest_panel: parsed.dest_panel,
@@ -1490,6 +1503,7 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
                     files_spawn,
                     dest_path_spawn,
                     conflict_policy_spawn,
+                    error_policy_spawn,
                     crate::notifications::worker_feedback_sender(
                         state_for_patch.clone(),
                         tx_for_patch.clone(),
@@ -1540,6 +1554,7 @@ async fn start_file_op(args: &Value, ctx: &mut IntentContext<'_>) {
                 error: None,
                 result_path: None,
                 result_panel_id: None,
+                skipped: None,
             })
             .await;
     }
@@ -1711,6 +1726,7 @@ async fn cancel_job(args: &Value, ctx: &mut IntentContext<'_>) {
             error: None,
             result_path: None,
             result_panel_id: None,
+            skipped: None,
         };
         if broadcast_outgoing_cancel {
             let senders = ctx.state.lock().await.gui_senders.clone();
@@ -1739,7 +1755,7 @@ async fn skip_current_file(args: &Value, ctx: &mut IntentContext<'_>) {
     if !matches!(
         &job.kind,
         JobKind::FileOp(FileOpJobMeta {
-            op_type: FileOpType::Copy,
+            op_type: FileOpType::Copy | FileOpType::Move,
             ..
         })
     ) {
@@ -1775,6 +1791,7 @@ async fn pause_job(args: &Value, ctx: &mut IntentContext<'_>) {
             error: None,
             result_path: None,
             result_panel_id: None,
+            skipped: None,
         })
         .await;
 }
@@ -1806,6 +1823,7 @@ async fn resume_job(args: &Value, ctx: &mut IntentContext<'_>) {
             error: None,
             result_path: None,
             result_panel_id: None,
+            skipped: None,
         })
         .await;
 }
@@ -1841,6 +1859,7 @@ fn job_progress_schema(job: &AppJob) -> FileOpProgressSchema {
         total_bytes_copied: job.progress.total_bytes_copied,
         current_file_percent: job.progress.current_file_percent,
         overall_percent: job.progress.overall_percent,
+        skipped_files: job.progress.skipped_files,
     }
 }
 
@@ -1903,6 +1922,7 @@ async fn start_queued_file_op(
             launch.files,
             launch.dest_path,
             launch.conflict_policy,
+            launch.error_policy,
             crate::notifications::worker_feedback_sender(state_for_patch.clone(), tx_for_patch.clone()),
             launch.cancel_rx,
             launch.pause_rx,
@@ -1955,6 +1975,7 @@ async fn start_queued_file_op(
             error: None,
             result_path: None,
             result_panel_id: None,
+            skipped: None,
         })
         .await;
 
@@ -2088,6 +2109,7 @@ async fn delete_queued_job(args: &Value, ctx: &mut IntentContext<'_>) {
                 error: None,
                 result_path: None,
                 result_panel_id: None,
+                skipped: None,
             })
             .await;
         send_job_queue_patch(ctx.state, ctx.tx).await;

@@ -62,6 +62,7 @@ pub async fn run_generate_hashes(
             error,
             result_path: None,
             result_panel_id: None,
+            skipped: None,
         })
         .await;
 }

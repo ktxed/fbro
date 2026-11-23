@@ -44,6 +44,11 @@ The operation runs as a [job](../jobs/), so you can keep working while it runs.
   is already at the destination: **Ask** (the default), **Overwrite** or
   **Skip**. When fbro sees partly copied files from an earlier attempt, it also
   offers **Resume partial files**.
+- **Action on error** decides what happens when fbro can't read, write or delete
+  an item: **Ask** (the default) shows a prompt, while **Skip** silently skips
+  each failed item and carries on. This option appears for copy, move and
+  delete. A failed transfer check still follows **Action if verification
+  fails**.
 - **Destination name** appears when you copy a single file or folder. Change it
   to copy under a different name.
 - **Repeated filenames** appears when you copy several files out of search
@@ -77,6 +82,24 @@ for the rest of the job. <kbd>Enter</kbd> takes the highlighted choice and
 <kbd>S</kbd> skips the file.
 
 <Screenshot name="conflict-prompt" alt="The File already exists prompt of a copy job, with Resume, Overwrite, Skip and Cancel buttons" />
+
+### Errors during a job
+
+With **Action on error: Ask**, a job that can't read, write or delete an item
+shows **Cannot copy item:**, **Cannot move item:** or **Cannot delete item:**,
+followed by the path and the error. Choose **Retry** to try that item again,
+**Skip** (<kbd>S</kbd>) to record it and continue, **Skip all** (<kbd>L</kbd>) to
+skip later failures without asking again, or **Cancel** to stop the job. Retry is
+focused first. Validation errors, such as copying an item onto itself, stop the
+job without a prompt.
+
+While a copy or move is running, **Skip** (<kbd>S</kbd>) skips the current file.
+A moved item is never removed from its source unless it was transferred in
+full; if one child of a folder is skipped, the whole source folder stays where
+it is.
+
+When the job finishes, the terminal shows how many items were skipped with a
+scrollable list of paths and reasons. You can copy all skipped paths from there.
 
 ### Copying out of archives and other sources
 

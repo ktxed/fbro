@@ -689,6 +689,13 @@ location is available; clients must not interpret display or relative virtual
 paths as host paths. Serving-side transfer metadata describes only source files.
 Client-supplied locations do not override backend resolution.
 
+`StartFileOp` also accepts optional `args.errorPolicy: "ask" | "skip"`
+(default `"ask"`). It applies to Copy, Move and Delete. With `"skip"`, an error
+that would otherwise raise an error decision is skipped silently; validation
+errors such as placing an item onto itself remain fatal. A verification
+mismatch follows `verificationPolicy` alone: `"prompt"` still asks. Unknown values reject the
+operation with `START_FILE_OP_FAILED`.
+
 To reveal a job file, `NavigateToHistoryEntry` accepts `{ panelId, sourceId,
 path, cursorHint? }`, with `path = location.parentPath`. The optional explicit
 `cursorHint` takes precedence over the saved history cursor hint. Source
@@ -874,6 +881,27 @@ The query itself remains available on all platforms.
 
 Job enters `AwaitingDecision`.
 
+File-operation errors use `kind: "error"` with
+`options: ["retry", "skip", "skip-all", "cancel"]` and
+`supportsApplyToAll: false`. `message` carries the backend error text. A
+closed decision channel is treated as Cancel.
+
+```json
+{
+  "type": "JobEvent",
+  "jobId": "job-42",
+  "event": "DecisionRequired",
+  "decision": {
+    "kind": "error",
+    "source": "/src/broken.bin",
+    "destination": "/dst/broken.bin",
+    "message": "Read error on /src/broken.bin: ...",
+    "options": ["retry", "skip", "skip-all", "cancel"],
+    "supportsApplyToAll": false
+  }
+}
+```
+
 ---
 
 ### 12.2 Provide Decision (FE → BE)
@@ -889,6 +917,53 @@ Job enters `AwaitingDecision`.
   }
 }
 ```
+
+For an `error` decision, `"skip-all"` is passed through unchanged (it is not
+mapped to a conflict policy) and `applyToAll` is ignored. `"retry"` repeats the
+failed item; `"cancel"` cancels the job.
+
+---
+
+### 12.3 Skipped Items
+
+A skipped item produces a `FileSkipped` job event with an optional `skipped`
+payload:
+
+```json
+{
+  "type": "JobEvent",
+  "jobId": "job-42",
+  "event": "FileSkipped",
+  "error": "broken.bin",
+  "skipped": {
+    "path": "/src/broken.bin",
+    "reason": "Read error on /src/broken.bin: ...",
+    "opType": "copy",
+    "notify": true
+  }
+}
+```
+
+`notify` is true only for a Skip answered for that one item (error, conflict
+or verification prompt, or the progress Skip button). Skips caused by
+`"skip-all"`, Apply to all, `errorPolicy: "skip"` or `conflictPolicy: "skip"`
+are silent. `FileSkipped` and `DecisionRequired` are never dropped under
+backpressure; `Progress` samples may be.
+
+`FileOpProgress.skippedFiles` is the uncapped running count. The BE and FE each
+keep only the most recent 1000 items for the terminal summary, which states the
+full count and that the list is truncated. The list is not part of the
+connection snapshot, so a reconnecting client does not get it back. A completed
+Copy, Move or Delete with skips publishes a warning toast ending in
+`, N skipped`.
+
+A Skip removes the destination only if the job wrote to it. A destination the
+user chose to overwrite or resume is left untouched when the error happens
+before the first write; Retry restarts the file without deleting it first.
+
+Move never removes a source that was not fully transferred. A folder source is
+removed only when every child transferred and the source tree is empty; a
+skipped child leaves its parent subtree in place.
 
 ---
 

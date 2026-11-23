@@ -569,6 +569,7 @@ pub async fn run_search(
             error: None,
             result_path: None,
             result_panel_id: None,
+            skipped: None,
         })
         .await;
 }
@@ -794,6 +795,7 @@ async fn flush_batch(
             error: None,
             result_path: None,
             result_panel_id: None,
+            skipped: None,
         })
         .await;
 }

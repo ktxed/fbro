@@ -187,6 +187,7 @@ fn run_fedup_report_blocking(
             total_bytes_copied: 0,
             current_file_percent: None,
             overall_percent: None,
+            skipped_files: 0,
         },
     );
 
@@ -253,6 +254,7 @@ fn run_fedup_report_blocking(
                     } else {
                         None
                     },
+                    skipped_files: 0,
                 },
             );
 
@@ -279,6 +281,7 @@ fn run_fedup_report_blocking(
                         } else {
                             None
                         },
+                        skipped_files: 0,
                     },
                 );
             }) {
@@ -343,6 +346,7 @@ fn run_fedup_report_blocking(
                         } else {
                             None
                         },
+                        skipped_files: 0,
                     },
                 );
                 match hash_local_file_blake3(
@@ -374,6 +378,7 @@ fn run_fedup_report_blocking(
                                 } else {
                                     None
                                 },
+                                skipped_files: 0,
                             },
                         );
                     },
@@ -440,6 +445,7 @@ fn run_fedup_report_blocking(
             total_bytes_copied: reclaimable_bytes,
             current_file_percent: Some(100),
             overall_percent: Some(100),
+            skipped_files: 0,
         },
     );
 
@@ -735,6 +741,7 @@ fn send_progress_sync(
         error: None,
         result_path: None,
         result_panel_id: None,
+        skipped: None,
     });
 }
 
@@ -755,6 +762,7 @@ async fn send_terminal(
         error,
         result_path: None,
         result_panel_id: None,
+        skipped: None,
     })
     .await
     .map_err(|_| ())

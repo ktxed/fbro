@@ -1068,6 +1068,7 @@ async fn cancelled_job_ignores_late_lifecycle_events_in_backend_state() {
             error: None,
             result_path: None,
             result_panel_id: None,
+            skipped: None,
         };
         let accepted = crate::ws::server::apply_job_event_to_state(&state, &mut message).await;
         if matches!(event, "Completed" | "Failed") {

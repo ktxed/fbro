@@ -350,21 +350,21 @@ pub fn backend_feedback(message: &crate::ws::protocol::ServerMessage) -> Option<
             };
             (message.clone(), level)
         }
-        ServerMessage::JobEvent {
-            event,
-            error,
-            progress,
-            ..
-        } if event == "FileSkipped" => {
-            let file = error
-                .as_deref()
-                .or_else(|| {
-                    progress
-                        .as_ref()
-                        .and_then(|progress| progress.current_file.as_deref())
-                })
-                .unwrap_or("file");
-            (format!("Skipped copying file {file}"), Warning)
+        ServerMessage::JobEvent { event, skipped, .. } if event == "FileSkipped" => {
+            let Some(item) = skipped.as_ref().filter(|item| item.notify) else {
+                // Skip all and the Skip policy stay silent.
+                return None;
+            };
+            let name = std::path::Path::new(&item.path)
+                .file_name()
+                .map(|name| name.to_string_lossy().to_string())
+                .unwrap_or_else(|| item.path.clone());
+            let verb = match item.op_type.as_str() {
+                "move" => "moving",
+                "delete" => "deleting",
+                _ => "copying",
+            };
+            (format!("Skipped {verb} {name}"), Warning)
         }
         ServerMessage::HashCheckReportSaved { path, .. } => {
             (format!("Saved hash check report to {path}"), Info)

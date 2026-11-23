@@ -65,6 +65,8 @@ import type {
 // ─── State ───────────────────────────────────────────────────────────────────
 
 const MAX_HISTORY = 50;
+/** Keep in step with jobs::MAX_SKIPPED_ITEMS on the backend. */
+const MAX_SKIPPED_ITEMS = 1000;
 
 export interface HistoryEntry { path: string; sourceId: string; }
 export interface PanelHistoryState { entries: HistoryEntry[]; cursor: number; }
@@ -1169,6 +1171,7 @@ function applyJobStarted(state: AppState, msg: JobStartedMessage): AppState {
     progress: {
       totalFiles: job.totalFiles,
       completedFiles: 0,
+      skippedFiles: 0,
       statusText: undefined,
       currentFileBytesTotal: 0,
       currentFileBytesCopied: 0,
@@ -1245,15 +1248,23 @@ function applyJobEvent(state: AppState, msg: JobEventMessage): AppState {
     case "Resumed":
       updated = { ...job, files, paused: false };
       break;
-    case "FileSkipped":
+    case "FileSkipped": {
+      const skipped = msg.skipped
+        ? [...(job.skipped ?? []), msg.skipped].slice(-MAX_SKIPPED_ITEMS)
+        : job.skipped;
       updated = {
         ...job,
         files,
         state: "Running",
         paused: false,
         decision: undefined,
+        skipped,
+        progress: job.progress
+          ? { ...job.progress, skippedFiles: (job.progress.skippedFiles ?? 0) + (msg.skipped ? 1 : 0) }
+          : job.progress,
       };
       break;
+    }
     case "Completed":
       const completedProgress = job.progress
         ? {

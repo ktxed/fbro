@@ -395,6 +395,24 @@ The BE:
 * Maps these to JobDecision or Error messages
 * Decides whether retry, skip, or abort
 
+For file operations the mapping is:
+
+* `Cancelled` (driver or job cancel flag) aborts without prompting.
+* Other `VfsError` variants from copy, move source removal, recursive listing,
+  symlink creation, and recursive deletion are recoverable. With the default
+  `errorPolicy: "ask"`, the job emits an `error` decision
+  (`retry` / `skip` / `skip-all` / `cancel`). `retry` repeats only the failed
+  item; `skip` records it and continues; `skip-all` records later failures
+  without further prompts; `cancel` cancels the job.
+* `errorPolicy: "skip"` applies skip silently to every recoverable failure.
+* Validation failures (for example, copying an item onto itself) and protocol
+  misuse (copy/move without a destination driver) remain fatal job errors.
+
+A move removes a source file only after its transfer completes, and removes a
+source directory only when every child transferred and the directory is empty.
+Delete walks children through `read_dir_entries` and never follows a symlinked
+directory; unlinkable symlinks are removed as links.
+
 ---
 
 ## 8. Why this interface is correct

@@ -83,6 +83,10 @@ pub enum ServerMessage {
         result_path: Option<String>,
         #[serde(rename = "resultPanelId", skip_serializing_if = "Option::is_none")]
         result_panel_id: Option<String>,
+        /// Set on `FileSkipped` events so the client can rebuild the summary
+        /// and the notification service can phrase the toast.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        skipped: Option<crate::jobs::SkippedItem>,
     },
     JobStarted {
         timestamp: u64,
@@ -1239,6 +1243,7 @@ pub struct FileOpProgressSchema {
     pub current_file_percent: Option<u8>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub overall_percent: Option<u8>,
+    pub skipped_files: usize,
 }
 
 #[derive(Serialize, Clone, Debug)]

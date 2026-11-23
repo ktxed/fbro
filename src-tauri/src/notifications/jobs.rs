@@ -117,16 +117,26 @@ pub fn terminal_feedback(
             }
             "Hash generation".into()
         }
-        JobKind::FileOp(meta) if failed => match meta.op_type {
-            FileOpType::Move => "Move".into(),
-            FileOpType::Delete => "Delete".into(),
-            FileOpType::Copy => unreachable!(),
-        },
+        // Move and Delete report quietly on success, unless something was
+        // skipped: then the user needs to know the job was not complete.
+        JobKind::FileOp(meta) if failed || (event == "Completed" && job.progress.skipped_files > 0) => {
+            match meta.op_type {
+                FileOpType::Move => "Move".into(),
+                FileOpType::Delete => "Delete".into(),
+                FileOpType::Copy => unreachable!(),
+            }
+        }
         JobKind::FpBro(meta) if failed => meta.bro_name.clone(),
         JobKind::SyncBro(_) if failed => "Sync".into(),
         JobKind::RemoteManifest(_) if failed => "Remote hash calculation".into(),
         _ => return None,
     };
+    if event == "Completed" && matches!(job.kind, JobKind::FileOp(_)) {
+        let skipped = job.progress.skipped_files;
+        if skipped > 0 {
+            details = format!(", {skipped} skipped");
+        }
+    }
     if !job.notification.claim_terminal() {
         return None;
     }
@@ -137,9 +147,11 @@ pub fn terminal_feedback(
         _ if failed => "finished with errors",
         _ => "finished",
     };
+    let skipped_any =
+        matches!(job.kind, JobKind::FileOp(_)) && job.progress.skipped_files > 0;
     let level = if failed {
         NotificationLevel::Error
-    } else if event == "Cancelled" {
+    } else if event == "Cancelled" || skipped_any {
         NotificationLevel::Warning
     } else {
         NotificationLevel::Info
@@ -255,7 +267,9 @@ mod tests {
                 op_type: FileOpType::Copy,
                 files: vec![],
                 conflict_policy: crate::jobs::ConflictPolicy::Ask,
+                error_policy: crate::jobs::ErrorPolicy::Ask,
                 apply_to_all_decision: None,
+                skipped: vec![],
             }),
             source_panel: "left".into(),
             dest_panel: Some("right".into()),

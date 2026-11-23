@@ -171,10 +171,12 @@ function JobSummary({
   }
 
   if (job.kind === "file-op" || job.kind === "fp-bro" || job.kind === "remote-manifest") {
+    const skipped = job.progress?.skippedFiles ?? job.skipped?.length ?? 0;
     return (
       <div className="jobs-modal__summary">
         {canExpandFiles ? fileChip : <SummaryChip label="Files" value={String(completedFileCount(job))} />}
         <SummaryChip label="Size" value={formatBytes(completedBytes(job))} />
+        {skipped > 0 && <SummaryChip label="Skipped" value={String(skipped)} />}
       </div>
     );
   }

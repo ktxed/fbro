@@ -889,6 +889,7 @@ pub(crate) async fn apply_job_event_to_state(state: &SharedState, msg: &mut Serv
         search_progress: _,
         decision,
         error,
+        skipped,
         ..
     } = msg
     else {
@@ -962,6 +963,7 @@ pub(crate) async fn apply_job_event_to_state(state: &SharedState, msg: &mut Serv
                     job.progress.total_bytes_copied = progress.total_bytes_copied;
                     job.progress.current_file_percent = progress.current_file_percent;
                     job.progress.overall_percent = progress.overall_percent;
+                    job.progress.skipped_files = progress.skipped_files;
                 }
                 job.decision = None;
                 job.error = None;
@@ -991,6 +993,12 @@ pub(crate) async fn apply_job_event_to_state(state: &SharedState, msg: &mut Serv
                 job.paused = false;
                 job.decision = None;
                 job.error = None;
+                if let (crate::jobs::JobKind::FileOp(meta), Some(item)) = (&mut job.kind, skipped) {
+                    crate::jobs::push_skipped(&mut meta.skipped, item.clone());
+                    // The list is capped; the count is not. Progress events
+                    // carry the worker's own uncapped total as well.
+                    job.progress.skipped_files += 1;
+                }
             }
             "Completed" => {
                 job.state = JobState::Completed;

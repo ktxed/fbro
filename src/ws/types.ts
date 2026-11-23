@@ -328,6 +328,8 @@ export interface Job {
   resultPanelId?: string;
   files: FileOpFile[];
   progress?: FileOpProgress;
+  /** Items the backend could not transfer or delete, in arrival order. */
+  skipped?: SkippedItem[];
   decision?: DecisionRequest;
   error?: string;
   // Search-specific fields
@@ -429,9 +431,19 @@ export interface DirSizeTask {
   currentAction?: string;
 }
 
+export interface SkippedItem {
+  path: string;
+  reason: string;
+  /** "copy" | "move" | "delete", used to phrase notifications. */
+  opType: string;
+  /** True only for an explicit Skip choice; skip-all/Skip policy are silent. */
+  notify?: boolean;
+}
+
 export interface FileOpProgress {
   totalFiles: number;
   completedFiles: number;
+  skippedFiles: number;
   currentFile?: string;
   statusText?: string;
   currentFileBytesTotal: number;
@@ -443,7 +455,7 @@ export interface FileOpProgress {
 }
 
 export interface DecisionRequest {
-  kind?: "conflict" | "verification" | "bro-output" | string;
+  kind?: "conflict" | "error" | "verification" | "bro-output" | string;
   source: string;
   destination: string;
   message?: string;
@@ -564,6 +576,7 @@ export interface JobStart {
 
 export type FileOpType = "copy" | "move" | "delete";
 export type ConflictPolicy = "ask" | "skip" | "overwrite" | "resume";
+export type ErrorPolicy = "ask" | "skip";
 export type VerificationPolicy = "fail" | "prompt";
 
 export interface PendingOp {
@@ -967,6 +980,7 @@ export interface JobEventMessage {
   searchProgress?: SearchProgress;
   decision?: DecisionRequest;
   error?: string;
+  skipped?: SkippedItem;
   resultPath?: string;
   resultPanelId?: string;
 }

@@ -200,6 +200,7 @@ pub async fn run_extract_archive(
                     total_bytes_copied: total_bytes,
                     current_file_percent: Some(100),
                     overall_percent: percent(total_bytes, total_bytes).or(Some(100)),
+                    skipped_files: 0,
                 },
             );
             send_terminal(&tx, &job_id, "Completed", None, None).await;
@@ -326,6 +327,7 @@ async fn send_terminal(
             error,
             result_path,
             result_panel_id: None,
+            skipped: None,
         })
         .await;
 }

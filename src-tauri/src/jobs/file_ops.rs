@@ -8,7 +8,8 @@ use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, watch};
 
 use crate::jobs::{
-    ConflictPolicy, DecisionResponse, DecisionRx, FileOpEntry, FileOpType, VerificationPolicy,
+    ConflictPolicy, DecisionResponse, DecisionRx, ErrorPolicy, FileOpEntry,
+    FileOpType, SkippedItem, VerificationPolicy,
 };
 use crate::vfs::{VfsDriver, VfsTransferDigest};
 use crate::ws::protocol::{now, ConflictDecisionSchema, FileOpProgressSchema, ServerMessage};
@@ -84,6 +85,7 @@ pub async fn run_file_op(
     files: Vec<FileOpEntry>,
     dest_path: Option<String>,
     conflict_policy: ConflictPolicy,
+    error_policy: ErrorPolicy,
     tx: mpsc::Sender<ServerMessage>,
     cancel_rx: watch::Receiver<bool>,
     pause_rx: watch::Receiver<bool>,
@@ -105,46 +107,51 @@ pub async fn run_file_op(
     let job_id_clone = job_id.clone();
     let tx_clone = tx.clone();
     let result = tokio::task::spawn_blocking(move || {
-        let _ctx = FileOpDriverContext::new(&*src_driver, &job_id_clone);
-        run_file_op_blocking(
-            &job_id_clone,
-            &op_type,
-            &files,
-            dest_path.as_deref(),
-            &conflict_policy,
-            &tx_clone,
-            &cancel_rx,
-            &pause_rx,
-            &mut decision_rx,
-            &*src_driver,
-            dst_driver.as_deref(),
+        let _driver_ctx = FileOpDriverContext::new(&*src_driver, &job_id_clone);
+        let ctx = FileOpCtx {
+            job_id: &job_id_clone,
+            op_type: &op_type,
+            files: &files,
+            dest_path: dest_path.as_deref(),
+            tx: &tx_clone,
+            cancel_rx: &cancel_rx,
+            pause_rx: &pause_rx,
+            src_driver: &*src_driver,
+            dst_driver: dst_driver.as_deref(),
+            conflict_policy: &conflict_policy,
+            error_policy: &error_policy,
+            verification_policy: &verification_policy,
             preserve_attributes,
-            &verification_policy,
             save_digest_file,
             auto_resume_copies,
             skip_current_file,
             keep_partial_files_on_cancel,
-        )
+        };
+        let mut st = FileOpState::new(&mut decision_rx);
+        let result = run_file_op_blocking(&ctx, &mut st);
+        (result, st.skipped_count)
     })
     .await;
 
+    let (result, skipped_count) = result.unwrap_or((Err(CANCELLED_ERR.to_string()), 0));
     match result {
-        Ok(Ok(())) => {
-            if !remote { crate::journal::record_operation_finished(&job_id, op_name, "completed", None); }
+        Ok(()) => {
+            if !remote {
+                crate::journal::record_operation_finished(&job_id, op_name, "completed", None, skipped_count);
+            }
             let _ = tx_event(&tx, &job_id, "Completed", None, None, None).await;
         }
-        Ok(Err(err)) => {
-            if err == CANCELLED_ERR {
-                if !remote { crate::journal::record_operation_finished(&job_id, op_name, "cancelled", None); }
-                let _ = tx_event(&tx, &job_id, "Cancelled", None, None, None).await;
-            } else {
-                if !remote { crate::journal::record_operation_finished(&job_id, op_name, "failed", Some(&err)); }
-                let _ = tx_event(&tx, &job_id, "Failed", None, None, Some(err)).await;
+        Err(err) if err == CANCELLED_ERR => {
+            if !remote {
+                crate::journal::record_operation_finished(&job_id, op_name, "cancelled", None, skipped_count);
             }
-        }
-        Err(_) => {
-            if !remote { crate::journal::record_operation_finished(&job_id, op_name, "cancelled", None); }
             let _ = tx_event(&tx, &job_id, "Cancelled", None, None, None).await;
+        }
+        Err(err) => {
+            if !remote {
+                crate::journal::record_operation_finished(&job_id, op_name, "failed", Some(&err), skipped_count);
+            }
+            let _ = tx_event(&tx, &job_id, "Failed", None, None, Some(err)).await;
         }
     }
 }
@@ -188,346 +195,505 @@ fn wait_if_paused(pause_rx: &watch::Receiver<bool>, cancel_rx: &watch::Receiver<
     }
 }
 
-fn run_file_op_blocking(
-    job_id: &str,
-    op_type: &FileOpType,
-    files: &[FileOpEntry],
-    dest_path: Option<&str>,
-    conflict_policy: &ConflictPolicy,
-    tx: &mpsc::Sender<ServerMessage>,
-    cancel_rx: &watch::Receiver<bool>,
-    pause_rx: &watch::Receiver<bool>,
-    decision_rx: &mut DecisionRx,
-    src_driver: &dyn VfsDriver,
-    dst_driver: Option<&dyn VfsDriver>,
+/// Values that stay constant for the lifetime of one file operation bundle.
+struct FileOpCtx<'a> {
+    job_id: &'a str,
+    op_type: &'a FileOpType,
+    files: &'a [FileOpEntry],
+    dest_path: Option<&'a str>,
+    tx: &'a mpsc::Sender<ServerMessage>,
+    cancel_rx: &'a watch::Receiver<bool>,
+    pause_rx: &'a watch::Receiver<bool>,
+    src_driver: &'a dyn VfsDriver,
+    dst_driver: Option<&'a dyn VfsDriver>,
+    conflict_policy: &'a ConflictPolicy,
+    error_policy: &'a ErrorPolicy,
+    verification_policy: &'a VerificationPolicy,
     preserve_attributes: bool,
-    verification_policy: &VerificationPolicy,
     save_digest_file: bool,
     auto_resume_copies: bool,
     skip_current_file: Arc<AtomicBool>,
     keep_partial_files_on_cancel: Arc<AtomicBool>,
-) -> Result<(), String> {
-    // Totals grow as directories are discovered (no pre-scan — VFS may be remote)
-    let mut total_files = 0usize;
-    let mut total_bytes_total: u64 = 0;
-    // Count top-level non-directory entries upfront
-    for entry in files {
-        if entry.kind != "directory" {
-            total_files += 1;
-            total_bytes_total += entry.size.unwrap_or(0);
+}
+
+/// Decisions and counters that change while the operation runs.
+struct FileOpState<'a> {
+    decision_rx: &'a mut DecisionRx,
+    apply_to_all: Option<ConflictOutcome>,
+    skip_all_errors: bool,
+    total_files: usize,
+    completed_files: usize,
+    total_bytes_total: u64,
+    total_bytes_completed: u64,
+    /// Every skipped item, uncapped. The per-item list lives on the job.
+    skipped_count: usize,
+}
+
+impl<'a> FileOpState<'a> {
+    fn new(decision_rx: &'a mut DecisionRx) -> Self {
+        Self {
+            decision_rx,
+            apply_to_all: None,
+            skip_all_errors: false,
+            total_files: 0,
+            completed_files: 0,
+            total_bytes_total: 0,
+            total_bytes_completed: 0,
+            skipped_count: 0,
         }
     }
+}
 
-    let mut completed_files = 0usize;
-    let mut total_bytes_completed: u64 = 0;
-    let mut apply_to_all = apply_all_outcome(match conflict_policy {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ErrorOutcome {
+    Retry,
+    /// `notify` is true only for an explicit Skip choice; skip-all and the
+    /// Skip policy are silent.
+    Skip { notify: bool },
+    Cancel,
+}
+
+/// Run `op`, prompting on failure and repeating it when the user picks Retry.
+/// A skipped item is recorded and reported; `None` means "not transferred".
+fn attempt<T>(
+    ctx: &FileOpCtx<'_>,
+    st: &mut FileOpState<'_>,
+    src: &str,
+    dst: &str,
+    op: impl Fn() -> Result<T, String>,
+) -> Result<Option<T>, String> {
+    loop {
+        match op() {
+            Ok(value) => return Ok(Some(value)),
+            Err(err) => {
+                if err == CANCELLED_ERR || *ctx.cancel_rx.borrow() {
+                    return Err(CANCELLED_ERR.to_string());
+                }
+                match resolve_error(ctx, st, src, dst, &err) {
+                    ErrorOutcome::Retry => {
+                        if wait_if_paused(ctx.pause_rx, ctx.cancel_rx) {
+                            return Err(CANCELLED_ERR.to_string());
+                        }
+                        continue;
+                    }
+                    ErrorOutcome::Skip { notify } => {
+                        record_skip(ctx, st, src, err, notify);
+                        return Ok(None);
+                    }
+                    ErrorOutcome::Cancel => return Err(CANCELLED_ERR.to_string()),
+                }
+            }
+        }
+    }
+}
+
+fn resolve_error(
+    ctx: &FileOpCtx<'_>,
+    st: &mut FileOpState<'_>,
+    source: &str,
+    destination: &str,
+    message: &str,
+) -> ErrorOutcome {
+    if *ctx.error_policy == ErrorPolicy::Skip || st.skip_all_errors {
+        return ErrorOutcome::Skip { notify: false };
+    }
+    send_event_sync(
+        ctx.tx,
+        ctx.job_id,
+        "DecisionRequired",
+        None,
+        Some(ConflictDecisionSchema {
+            kind: Some("error".to_string()),
+            source: source.to_string(),
+            destination: destination.to_string(),
+            message: Some(message.to_string()),
+            options: vec![
+                "retry".to_string(),
+                "skip".to_string(),
+                "skip-all".to_string(),
+                "cancel".to_string(),
+            ],
+            supports_apply_to_all: false,
+        }),
+        None,
+        None,
+    );
+    match st.decision_rx.blocking_recv() {
+        Some(DecisionResponse { decision, .. }) => match decision.as_str() {
+            "retry" => ErrorOutcome::Retry,
+            "skip" => ErrorOutcome::Skip { notify: true },
+            "skip-all" => {
+                st.skip_all_errors = true;
+                ErrorOutcome::Skip { notify: false }
+            }
+            _ => ErrorOutcome::Cancel,
+        },
+        None => ErrorOutcome::Cancel,
+    }
+}
+
+/// Record a skipped item and notify the client. Callers update the progress
+/// counters so a skipped item advances the job like a transferred one.
+fn record_skip(
+    ctx: &FileOpCtx<'_>,
+    st: &mut FileOpState<'_>,
+    path: &str,
+    reason: impl Into<String>,
+    notify: bool,
+) {
+    let item = SkippedItem {
+        path: path.to_string(),
+        reason: reason.into(),
+        op_type: file_op_name(ctx.op_type).to_string(),
+        notify,
+    };
+    let file_name = Path::new(path)
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_else(|| path.to_string());
+    send_event_sync(
+        ctx.tx,
+        ctx.job_id,
+        "FileSkipped",
+        None,
+        None,
+        Some(file_name),
+        Some(item),
+    );
+    st.skipped_count += 1;
+}
+
+/// A conflict Skip is reported too. Only a Skip answered in the prompt for
+/// this one item notifies; the policy and Apply to all are silent, like
+/// Skip all for errors.
+fn record_conflict_skip(
+    ctx: &FileOpCtx<'_>,
+    st: &mut FileOpState<'_>,
+    src: &str,
+    dst: &str,
+) {
+    let notify = *ctx.conflict_policy == ConflictPolicy::Ask && st.apply_to_all.is_none();
+    record_skip(
+        ctx,
+        st,
+        src,
+        format!("Destination already exists: {dst}"),
+        notify,
+    );
+}
+
+/// Remove a source file after a complete transfer. Removal failures are
+/// skippable, but the source is never removed when its copy was skipped.
+fn remove_source_file(
+    ctx: &FileOpCtx<'_>,
+    st: &mut FileOpState<'_>,
+    src: &str,
+    dst: &str,
+) -> Result<bool, String> {
+    if *ctx.op_type != FileOpType::Move {
+        return Ok(true);
+    }
+    let src_driver = ctx.src_driver;
+    let removed = attempt(ctx, st, src, dst, || {
+        src_driver
+            .remove_file(src)
+            .map_err(|e| format!("Cannot remove source {src}: {e}"))
+    })?;
+    Ok(removed.is_some())
+}
+
+/// A source directory is removed only once every child transferred and the
+/// directory is empty. Skipped children leave the whole subtree in place.
+fn remove_source_dir(
+    ctx: &FileOpCtx<'_>,
+    st: &mut FileOpState<'_>,
+    src: &str,
+    dst: &str,
+    complete: bool,
+) -> Result<bool, String> {
+    if *ctx.op_type != FileOpType::Move || !complete {
+        return Ok(false);
+    }
+    let src_driver = ctx.src_driver;
+    let empty = match attempt(ctx, st, src, dst, || {
+        src_driver
+            .read_dir_entries(src)
+            .map(|entries| entries.is_empty())
+            .map_err(|e| format!("Cannot read source directory {src}: {e}"))
+    })? {
+        Some(empty) => empty,
+        None => return Ok(false),
+    };
+    if !empty {
+        return Ok(false);
+    }
+    let removed = attempt(ctx, st, src, dst, || {
+        src_driver
+            .remove_dir_all(src)
+            .map_err(|e| format!("Cannot remove source directory {src}: {e}"))
+    })?;
+    Ok(removed.is_some())
+}
+
+fn run_file_op_blocking(ctx: &FileOpCtx<'_>, st: &mut FileOpState<'_>) -> Result<(), String> {
+    // Totals grow as directories are discovered (no pre-scan — VFS may be remote)
+    for entry in ctx.files {
+        if entry.kind != "directory" {
+            st.total_files += 1;
+            st.total_bytes_total += entry.size.unwrap_or(0);
+        }
+    }
+    st.apply_to_all = apply_all_outcome(match ctx.conflict_policy {
         ConflictPolicy::Ask => None,
         other => Some(other),
     });
 
+    let src_driver = ctx.src_driver;
     // Independently registered volume aliases each have their own driver Arc,
     // even when both paths belong to the same local filesystem. Local drivers
     // can safely attempt rename across those aliases: the OS returns EXDEV and
     // LocalFsDriver falls back to copy + delete when they are truly on separate
     // filesystems. Non-local drivers still require identical driver identity.
-    let can_try_rename = dst_driver.is_some_and(|dst| {
+    let can_try_rename = ctx.dst_driver.is_some_and(|dst| {
         std::ptr::eq(src_driver, dst) || (src_driver.is_local() && dst.is_local())
     });
 
-    for entry in files {
-        if wait_if_paused(pause_rx, cancel_rx) {
+    for entry in ctx.files {
+        if wait_if_paused(ctx.pause_rx, ctx.cancel_rx) {
             return Err(CANCELLED_ERR.to_string());
         }
 
-        match op_type {
+        match ctx.op_type {
             FileOpType::Copy | FileOpType::Move => {
-                let dst_drv = dst_driver.ok_or("No destination driver for copy/move")?;
-                let dest_dir = dest_path.ok_or("No destination path for copy/move")?;
+                let dst_drv = ctx.dst_driver.ok_or("No destination driver for copy/move")?;
+                let dest_dir = ctx.dest_path.ok_or("No destination path for copy/move")?;
                 let src = &entry.source_path;
-                let dst_name = destination_name(entry);
-                let dst_str = dst_drv.resolve_child(dest_dir, dst_name);
+                let dst_str = dst_drv.resolve_child(dest_dir, destination_name(entry));
 
-                if (*op_type == FileOpType::Copy || entry.kind == "symlink") && same_resolved_path(src, &dst_str) {
+                if (*ctx.op_type == FileOpType::Copy || entry.kind == "symlink")
+                    && same_resolved_path(src, &dst_str)
+                {
                     return Err(format!("Cannot place {src} onto itself or its target"));
                 }
 
+                let copied;
                 // Try O(1) rename when the drivers can address the same local
-                // filesystem and the destination does not exist. Existing
-                // targets still use the conflict-aware copy+delete path.
-                if *op_type == FileOpType::Move && can_try_rename && !dst_drv.exists_no_follow(&dst_str) {
-                    match src_driver.try_rename(src, &dst_str) {
-                        Ok(true) => {
-                            // Rename succeeded — we can't know inner file count without
-                            // scanning, so just count as 1 item for rename
+                // filesystem and the destination does not exist. A failure is
+                // skippable, but an existing target uses the conflict-aware path.
+                if *ctx.op_type == FileOpType::Move
+                    && can_try_rename
+                    && !dst_drv.exists_no_follow(&dst_str)
+                {
+                    let renamed = attempt(ctx, st, src, &dst_str, || {
+                        src_driver
+                            .try_rename(src, &dst_str)
+                            .map_err(|e| format!("Rename failed for {src}: {e}"))
+                    })?;
+                    match renamed {
+                        // Cross-device: fall through to copy + delete.
+                        Some(false) => {}
+                        Some(true) | None => {
                             if entry.kind != "directory" {
-                                completed_files += 1;
-                                total_bytes_completed += entry.size.unwrap_or(0);
+                                st.completed_files += 1;
+                                st.total_bytes_completed += entry.size.unwrap_or(0);
                             }
-                            send_progress_sync(
-                                tx,
-                                job_id,
-                                total_files,
-                                completed_files,
-                                None,
-                                0,
-                                0,
-                                total_bytes_total,
-                                total_bytes_completed,
-                            );
-                            crate::journal::record_mutation(job_id, "move", src, Some(&dst_str));
+                            send_progress(ctx, st, None, 0, 0, None);
+                            // `None` is a skipped rename: the source stays put.
+                            if renamed.is_some() {
+                                crate::journal::record_mutation(ctx.job_id, "move", src, Some(&dst_str));
+                            }
                             continue;
-                        }
-                        Ok(false) => {
-                            // Cross-device — fall through to copy+delete
-                        }
-                        Err(e) => {
-                            return Err(format!("Rename failed for {src}: {e}"));
                         }
                     }
                 }
 
                 if entry.kind == "symlink" && src_driver.is_local() {
-                    let copied = copy_symlink(
-                        job_id, src, &dst_str, conflict_policy, tx, decision_rx,
-                        &mut apply_to_all, src_driver, dst_drv,
-                    )?;
-                    if !copied {
-                        completed_files += 1;
-                        send_progress_sync(tx, job_id, total_files, completed_files,
-                            None, 0, 0, total_bytes_total, total_bytes_completed);
-                        continue;
-                    }
-                    completed_files += 1;
-                    send_progress_sync(tx, job_id, total_files, completed_files,
-                        None, 0, 0, total_bytes_total, total_bytes_completed);
+                    copied = copy_symlink(ctx, st, src, &dst_str)?;
                 } else if entry.kind == "directory" {
-                    copy_dir_recursive(
-                        job_id,
-                        src,
-                        &dst_str,
-                        entry.mtime,
-                        conflict_policy,
-                        tx,
-                        cancel_rx,
-                        pause_rx,
-                        &mut total_files,
-                        &mut completed_files,
-                        &mut total_bytes_total,
-                        &mut total_bytes_completed,
-                        src_driver,
-                        dst_drv,
-                        decision_rx,
-                        &mut apply_to_all,
-                        preserve_attributes,
-                        verification_policy,
-                        save_digest_file,
-                        auto_resume_copies,
-                        Arc::clone(&skip_current_file),
-                        Arc::clone(&keep_partial_files_on_cancel),
-                    )?;
+                    copied = copy_dir_recursive(ctx, st, src, &dst_str, entry.mtime)?;
                 } else {
                     let mut resume_requested = false;
                     if dst_drv.exists_no_follow(&dst_str) {
                         let destination_is_link = dst_drv.read_link(&dst_str).is_ok();
-                        let resume_candidate = (!destination_is_link).then(|| resume_candidate(
-                            src, &dst_str, entry.size.unwrap_or(0), src_driver, dst_drv,
-                        )).flatten();
-                        match resolve_conflict(
-                            conflict_policy,
-                            src,
-                            &dst_str,
-                            resume_candidate.as_ref(),
-                            tx,
-                            job_id,
-                            decision_rx,
-                            &mut apply_to_all,
-                        )? {
+                        let candidate = (!destination_is_link).then(|| {
+                            resume_candidate(
+                                src,
+                                &dst_str,
+                                entry.size.unwrap_or(0),
+                                src_driver,
+                                dst_drv,
+                            )
+                        }).flatten();
+                        match resolve_conflict(ctx, st, src, &dst_str, candidate.as_ref())? {
                             ConflictOutcome::Overwrite => {
                                 if destination_is_link {
-                                    dst_drv.remove_file(&dst_str).map_err(|error| format!("Cannot replace destination link {dst_str}: {error}"))?;
+                                    let replaced = attempt(ctx, st, &dst_str, &dst_str, || {
+                                        dst_drv.remove_file(&dst_str).map_err(|error| {
+                                            format!("Cannot replace destination link {dst_str}: {error}")
+                                        })
+                                    })?;
+                                    if replaced.is_none() {
+                                        st.completed_files += 1;
+                                        st.total_bytes_completed += entry.size.unwrap_or(0);
+                                        send_progress(ctx, st, None, 0, 0, None);
+                                        continue;
+                                    }
                                 }
                             }
-                            ConflictOutcome::Resume => {
-                                resume_requested = true;
-                            }
+                            ConflictOutcome::Resume => resume_requested = true,
                             ConflictOutcome::Skip => {
-                                total_bytes_completed += entry.size.unwrap_or(0);
-                                completed_files += 1;
-                                send_progress_sync(
-                                    tx,
-                                    job_id,
-                                    total_files,
-                                    completed_files,
-                                    None,
-                                    0,
-                                    0,
-                                    total_bytes_total,
-                                    total_bytes_completed,
-                                );
+                                record_conflict_skip(ctx, st, src, &dst_str);
+                                st.completed_files += 1;
+                                st.total_bytes_completed += entry.size.unwrap_or(0);
+                                send_progress(ctx, st, None, 0, 0, None);
                                 continue;
                             }
-                            ConflictOutcome::Cancel => {
-                                return Err(CANCELLED_ERR.to_string());
-                            }
+                            ConflictOutcome::Cancel => return Err(CANCELLED_ERR.to_string()),
                         }
                     }
 
-                    let copied = copy_file_with_progress(
-                        job_id,
+                    copied = copy_file_with_progress(
+                        ctx,
+                        st,
                         src,
                         &dst_str,
                         entry.size.unwrap_or(0),
-                        tx,
-                        cancel_rx,
-                        pause_rx,
-                        total_files,
-                        completed_files,
-                        total_bytes_total,
-                        total_bytes_completed,
-                        src_driver,
-                        dst_drv,
-                        decision_rx,
-                        verification_policy,
-                        save_digest_file,
-                        auto_resume_copies,
-                        Arc::clone(&skip_current_file),
                         resume_requested,
-                        Arc::clone(&keep_partial_files_on_cancel),
                     )?;
-
-                    if copied && preserve_attributes && dst_drv.is_local() {
+                    if copied && ctx.preserve_attributes && dst_drv.is_local() {
                         apply_file_attrs(&dst_str, entry.mtime, entry.permissions.as_deref());
                     }
-
-                    total_bytes_completed += entry.size.unwrap_or(0);
-                    completed_files += 1;
-                    send_progress_sync(
-                        tx,
-                        job_id,
-                        total_files,
-                        completed_files,
-                        None,
-                        0,
-                        0,
-                        total_bytes_total,
-                        total_bytes_completed,
-                    );
                 }
 
-                // For move: remove source after successful copy
-                if *op_type == FileOpType::Move {
+                // A move never removes its source unless the transfer completed
+                // in full — a skipped child leaves the subtree in place.
+                let source_removed = if copied && *ctx.op_type == FileOpType::Move {
                     if entry.kind == "directory" {
-                        let _ = src_driver.remove_dir_all(src);
+                        remove_source_dir(ctx, st, src, &dst_str, true)?
                     } else {
-                        let _ = src_driver.remove_file(src);
+                        remove_source_file(ctx, st, src, &dst_str)?
                     }
+                } else {
+                    false
+                };
+                // A partial folder copy is still journaled; a move whose source
+                // stayed behind is recorded as the copy it actually was.
+                let partial_dir = !copied
+                    && entry.kind == "directory"
+                    && dst_drv.exists_no_follow(&dst_str);
+                if copied || partial_dir {
+                    let kind = if source_removed { "move" } else { "copy" };
+                    crate::journal::record_mutation(ctx.job_id, kind, src, Some(&dst_str));
                 }
-                crate::journal::record_mutation(
-                    job_id,
-                    match op_type { FileOpType::Copy => "copy", FileOpType::Move => "move", FileOpType::Delete => unreachable!() },
-                    src,
-                    Some(&dst_str),
-                );
-            }
 
+                if entry.kind != "directory" {
+                    st.completed_files += 1;
+                    st.total_bytes_completed += entry.size.unwrap_or(0);
+                }
+                send_progress(ctx, st, None, 0, 0, None);
+            }
             FileOpType::Delete => {
                 let src = &entry.source_path;
-
-                send_progress_sync(
-                    tx,
-                    job_id,
-                    total_files,
-                    completed_files,
-                    Some(entry.name.clone()),
-                    0,
-                    0,
-                    total_bytes_total,
-                    total_bytes_completed,
-                );
-
-                if entry.kind == "directory" {
-                    src_driver
-                        .remove_dir_all(src)
-                        .map_err(|e| format!("Failed to delete {src}: {e}"))?;
-                } else {
-                    src_driver
-                        .remove_file(src)
-                        .map_err(|e| format!("Failed to delete {src}: {e}"))?;
+                send_progress(ctx, st, Some(entry.name.clone()), 0, 0, None);
+                let removed = delete_tree(ctx, st, src, &entry.name, entry.kind == "directory")?;
+                if removed {
+                    crate::journal::record_mutation(ctx.job_id, "delete", src, None);
                 }
-
-                completed_files += 1;
-                crate::journal::record_mutation(job_id, "delete", src, None);
-                send_progress_sync(
-                    tx,
-                    job_id,
-                    total_files,
-                    completed_files,
-                    None,
-                    0,
-                    0,
-                    total_bytes_total,
-                    total_bytes_completed,
-                );
+                // Folder entries are not in `total_files`; their files are
+                // counted by `delete_tree` as they are discovered.
+                if entry.kind != "directory" {
+                    st.completed_files += 1;
+                }
+                send_progress(ctx, st, None, 0, 0, None);
             }
         }
     }
 
     Ok(())
 }
-
 fn destination_name(entry: &FileOpEntry) -> &str {
     entry.dest_name.as_deref().unwrap_or(&entry.name)
 }
 
 /// Recreate the link itself. The temporary link keeps an existing destination
 /// intact if link creation is denied (notably on Windows).
-fn copy_symlink(
-    job_id: &str,
-    src: &str,
-    dst: &str,
-    conflict_policy: &ConflictPolicy,
-    tx: &mpsc::Sender<ServerMessage>,
-    decision_rx: &mut DecisionRx,
-    apply_to_all: &mut Option<ConflictOutcome>,
-    src_driver: &dyn VfsDriver,
-    dst_driver: &dyn VfsDriver,
-) -> Result<bool, String> {
+fn copy_symlink(ctx: &FileOpCtx<'_>, st: &mut FileOpState<'_>, src: &str, dst: &str) -> Result<bool, String> {
+    let dst_driver = ctx
+        .dst_driver
+        .ok_or_else(|| "No destination driver for copy/move".to_string())?;
     if !dst_driver.is_local() {
-        return Err(format!("Cannot copy symbolic link to a destination that does not support links: {dst}"));
+        return Err(format!(
+            "Cannot copy symbolic link to a destination that does not support links: {dst}"
+        ));
     }
-    let link = src_driver.read_link(src).map_err(|error| format!("Cannot read symbolic link {src}: {error}"))?;
+    let src_driver = ctx.src_driver;
+    let link = match attempt(ctx, st, src, dst, || {
+        src_driver
+            .read_link(src)
+            .map_err(|error| format!("Cannot read symbolic link {src}: {error}"))
+    })? {
+        Some(link) => link,
+        None => return Ok(false),
+    };
+
     let exists = dst_driver.exists_no_follow(dst);
     if exists {
-        match resolve_conflict(conflict_policy, src, dst, None, tx, job_id, decision_rx, apply_to_all)? {
-            ConflictOutcome::Skip => return Ok(false),
+        match resolve_conflict(ctx, st, src, dst, None)? {
+            ConflictOutcome::Skip => {
+                record_conflict_skip(ctx, st, src, dst);
+                return Ok(false);
+            }
             ConflictOutcome::Cancel => return Err(CANCELLED_ERR.into()),
-            ConflictOutcome::Overwrite | ConflictOutcome::Resume => {},
+            ConflictOutcome::Overwrite | ConflictOutcome::Resume => {}
         }
     }
-    if let Some(parent) = dst_driver.parent_path(dst).filter(|parent| !parent.is_empty()) {
-        dst_driver.create_dir_all(&parent)
-            .map_err(|error| format!("Cannot create destination directory {parent}: {error}"))?;
-    }
+
     let temp = format!("{dst}.fbro-link-{}", uuid::Uuid::new_v4());
-    dst_driver.create_symlink(&link.target, &temp, link.is_dir)
-        .map_err(|error| format!("Cannot create symbolic link {dst}: {error}"))?;
-    if exists {
-        if let Err(error) = dst_driver.remove_file(dst) {
-            let _ = dst_driver.remove_file(&temp);
-            return Err(format!("Cannot replace destination {dst}: {error}"));
+    let backup = format!("{dst}.fbro-old-{}", uuid::Uuid::new_v4());
+    let result = attempt(ctx, st, src, dst, || {
+        // A previous attempt may have left a temporary link behind.
+        let _ = dst_driver.remove_file(&temp);
+        if let Some(parent) = dst_driver.parent_path(dst).filter(|p| !p.is_empty()) {
+            dst_driver
+                .create_dir_all(&parent)
+                .map_err(|error| format!("Cannot create destination directory {parent}: {error}"))?;
         }
+        dst_driver
+            .create_symlink(&link.target, &temp, link.is_dir)
+            .map_err(|error| format!("Cannot create symbolic link {dst}: {error}"))?;
+        // Re-check on every attempt: the destination is moved aside only while
+        // the new link is placed, and restored if that fails, so a retry or a
+        // skip never finds it missing.
+        let replacing = exists && dst_driver.exists_no_follow(dst);
+        if replacing {
+            if dst_driver.read_link(dst).is_err() && dst_driver.read_dir_entries(dst).is_ok() {
+                return Err(format!("Cannot replace folder {dst} with a symbolic link"));
+            }
+            match dst_driver.try_rename(dst, &backup) {
+                Ok(true) => {}
+                Ok(false) => return Err(format!("Cannot replace destination {dst}")),
+                Err(error) => return Err(format!("Cannot replace destination {dst}: {error}")),
+            }
+        }
+        let placed = match dst_driver.try_rename(&temp, dst) {
+            Ok(true) => Ok(()),
+            Ok(false) => Err(format!("Cannot place symbolic link at {dst}")),
+            Err(error) => Err(format!("Cannot place symbolic link at {dst}: {error}")),
+        };
+        if replacing {
+            if placed.is_ok() {
+                let _ = dst_driver.remove_file(&backup);
+            } else if !matches!(dst_driver.try_rename(&backup, dst), Ok(true)) {
+                eprintln!("[file_ops] could not restore {dst} from {backup}");
+            }
+        }
+        placed
+    })?;
+    if result.is_none() {
+        let _ = dst_driver.remove_file(&temp);
+        return Ok(false);
     }
-    match dst_driver.try_rename(&temp, dst) {
-        Ok(true) => Ok(true),
-        Ok(false) => {
-            let _ = dst_driver.remove_file(&temp);
-            Err(format!("Cannot place symbolic link at {dst}"))
-        }
-        Err(error) => {
-            let _ = dst_driver.remove_file(&temp);
-            Err(format!("Cannot place symbolic link at {dst}: {error}"))
-        }
-    }
+    Ok(true)
 }
 
 pub(crate) fn same_resolved_path(left: &str, right: &str) -> bool {
@@ -611,16 +777,13 @@ fn resume_candidate(
 }
 
 fn resolve_conflict(
-    policy: &ConflictPolicy,
+    ctx: &FileOpCtx<'_>,
+    st: &mut FileOpState<'_>,
     src: &str,
     dst: &str,
     resume_candidate: Option<&ResumeCandidate>,
-    tx: &mpsc::Sender<ServerMessage>,
-    job_id: &str,
-    decision_rx: &mut DecisionRx,
-    apply_to_all: &mut Option<ConflictOutcome>,
 ) -> Result<ConflictOutcome, String> {
-    match policy {
+    match ctx.conflict_policy {
         ConflictPolicy::Skip => Ok(ConflictOutcome::Skip),
         ConflictPolicy::Overwrite => Ok(ConflictOutcome::Overwrite),
         ConflictPolicy::Resume => {
@@ -631,7 +794,7 @@ fn resolve_conflict(
             }
         }
         ConflictPolicy::Ask => {
-            if let Some(outcome) = *apply_to_all {
+            if let Some(outcome) = st.apply_to_all {
                 if outcome == ConflictOutcome::Resume && resume_candidate.is_none() {
                     return Ok(ConflictOutcome::Overwrite);
                 }
@@ -652,8 +815,8 @@ fn resolve_conflict(
                 )
             });
             send_event_sync(
-                tx,
-                job_id,
+                ctx.tx,
+                ctx.job_id,
                 "DecisionRequired",
                 None,
                 Some(ConflictDecisionSchema {
@@ -665,9 +828,9 @@ fn resolve_conflict(
                     supports_apply_to_all: true,
                 }),
                 None,
+                None,
             );
-            let decision = decision_rx.blocking_recv();
-            match decision {
+            match st.decision_rx.blocking_recv() {
                 Some(DecisionResponse {
                     decision,
                     apply_to_all: true,
@@ -685,7 +848,7 @@ fn resolve_conflict(
                             | ConflictOutcome::Resume
                             | ConflictOutcome::Skip
                     ) {
-                        *apply_to_all = Some(outcome);
+                        st.apply_to_all = Some(outcome);
                     }
                     Ok(outcome)
                 }
@@ -705,151 +868,185 @@ fn resolve_conflict(
 // ─── File copy via VFS ──────────────────────────────────────────────────────
 
 fn copy_file_with_progress(
-    job_id: &str,
+    ctx: &FileOpCtx<'_>,
+    st: &mut FileOpState<'_>,
     src: &str,
     dst: &str,
     total_bytes: u64,
-    tx: &mpsc::Sender<ServerMessage>,
-    cancel_rx: &watch::Receiver<bool>,
-    pause_rx: &watch::Receiver<bool>,
-    total_files: usize,
-    completed_files: usize,
-    total_bytes_total: u64,
-    total_bytes_completed: u64,
-    src_driver: &dyn VfsDriver,
-    dst_driver: &dyn VfsDriver,
-    decision_rx: &mut DecisionRx,
-    verification_policy: &VerificationPolicy,
-    save_digest_file: bool,
-    auto_resume_copies: bool,
-    skip_current_file: Arc<AtomicBool>,
     resume_requested: bool,
-    keep_partial_files_on_cancel: Arc<AtomicBool>,
 ) -> Result<bool, String> {
     let src_name = Path::new(src)
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_default();
+    let dst_driver = ctx
+        .dst_driver
+        .ok_or_else(|| "No destination driver for copy/move".to_string())?;
 
-    let can_resume = src_driver.supports_read_at() && dst_driver.supports_write_at();
+    let can_resume = ctx.src_driver.supports_read_at() && dst_driver.supports_write_at();
     let mut resume_next_attempt = resume_requested;
     let mut resume_attempts = 0usize;
+    // Set once any attempt truncated `dst`: from then on its content is ours
+    // and a skip may remove it. Before that, `dst` is the user's file.
+    let mut dst_written = false;
     loop {
         match copy_file_once_with_progress(
-            job_id,
+            ctx,
+            st,
             src,
             dst,
             total_bytes,
-            tx,
-            cancel_rx,
-            pause_rx,
-            total_files,
-            completed_files,
-            total_bytes_total,
-            total_bytes_completed,
-            src_driver,
-            dst_driver,
             &src_name,
-            save_digest_file,
             resume_next_attempt,
-            Arc::clone(&skip_current_file),
-            Arc::clone(&keep_partial_files_on_cancel),
+            &mut dst_written,
         ) {
             Ok(()) => return Ok(true),
-            Err(CopyFileError::Skipped(file_name)) => {
-                skip_current_file.store(false, Ordering::SeqCst);
-                send_event_sync(tx, job_id, "FileSkipped", None, None, Some(file_name));
+            Err(CopyFileError::Skipped) => {
+                ctx.skip_current_file.store(false, Ordering::SeqCst);
+                record_skip(ctx, st, src, "Skipped by user", true);
                 return Ok(false);
             }
-            Err(CopyFileError::Fatal(e)) => return Err(e),
-            Err(CopyFileError::Recoverable(e)) => {
-                if *cancel_rx.borrow() {
+            Err(CopyFileError::Cancelled) => return Err(CANCELLED_ERR.to_string()),
+            Err(CopyFileError::Recoverable(err)) => {
+                if *ctx.cancel_rx.borrow() {
                     return Err(CANCELLED_ERR.to_string());
                 }
-                if !auto_resume_copies || !can_resume {
-                    return Err(e);
+                if ctx.auto_resume_copies && can_resume && resume_attempts < COPY_RESUME_MAX_ATTEMPTS {
+                    resume_attempts += 1;
+                    let partial = dst_driver.file_size(dst).unwrap_or(0).min(total_bytes);
+                    send_progress(
+                        ctx,
+                        st,
+                        Some(src_name.clone()),
+                        total_bytes,
+                        partial,
+                        Some(format!(
+                            "Resuming transfer after read error ({resume_attempts}/{COPY_RESUME_MAX_ATTEMPTS})"
+                        )),
+                    );
+                    resume_next_attempt = true;
+                    continue;
                 }
-                resume_attempts += 1;
-                if resume_attempts > COPY_RESUME_MAX_ATTEMPTS {
-                    return Err(e);
+                if !handle_copy_error(
+                    ctx,
+                    st,
+                    src,
+                    dst,
+                    &err,
+                    &mut resume_next_attempt,
+                    dst_written,
+                )? {
+                    return Ok(false);
                 }
-                let partial = dst_driver.file_size(dst).unwrap_or(0).min(total_bytes);
-                send_progress_sync_with_status(
-                    tx,
-                    job_id,
-                    total_files,
-                    completed_files,
-                    Some(src_name.clone()),
-                    total_bytes,
-                    partial,
-                    total_bytes_total,
-                    total_bytes_completed + partial,
-                    Some(format!(
-                        "Resuming transfer after read error ({resume_attempts}/{COPY_RESUME_MAX_ATTEMPTS})"
-                    )),
-                );
-                resume_next_attempt = true;
-                continue;
             }
-            Err(CopyFileError::Verification(e)) => {
-                if *verification_policy == VerificationPolicy::Fail {
-                    return Err(e);
+            Err(CopyFileError::Io(err)) => {
+                if !handle_copy_error(
+                    ctx,
+                    st,
+                    src,
+                    dst,
+                    &err,
+                    &mut resume_next_attempt,
+                    dst_written,
+                )? {
+                    return Ok(false);
                 }
-                match resolve_verification_mismatch(src, dst, &e, tx, job_id, decision_rx)? {
+            }
+            Err(CopyFileError::Verification(err)) => {
+                if *ctx.verification_policy == VerificationPolicy::Fail {
+                    if !handle_copy_error(
+                        ctx,
+                        st,
+                        src,
+                        dst,
+                        &err,
+                        &mut resume_next_attempt,
+                        dst_written,
+                    )? {
+                        return Ok(false);
+                    }
+                    continue;
+                }
+                match resolve_verification_mismatch(ctx, st, src, dst, &err)? {
                     VerificationOutcome::Retry => {
-                        if *cancel_rx.borrow() {
+                        if *ctx.cancel_rx.borrow() {
                             return Err(CANCELLED_ERR.to_string());
                         }
                         resume_next_attempt = false;
-                        send_progress_sync_with_status(
-                            tx,
-                            job_id,
-                            total_files,
-                            completed_files,
+                        send_progress(
+                            ctx,
+                            st,
                             Some(src_name.clone()),
                             total_bytes,
                             0,
-                            total_bytes_total,
-                            total_bytes_completed,
                             Some("Retrying transfer".to_string()),
                         );
-                        continue;
                     }
-                    VerificationOutcome::Skip => return Ok(false),
-                    VerificationOutcome::Abort => return Err(e),
+                    VerificationOutcome::Skip { notify } => {
+                        record_skip(ctx, st, src, err, notify);
+                        return Ok(false);
+                    }
+                    VerificationOutcome::Abort => return Err(err),
                 }
             }
         }
     }
 }
 
+/// Apply the shared error decision to a failed item. Returns `false` when the
+/// item was skipped and the job should move on. A retry starts the file over
+/// from byte zero (the next `open_write` truncates; nothing is removed first).
+/// A skip removes `dst` only when this copy wrote to it, so a destination the
+/// user asked to overwrite or resume survives an error raised before writing.
+fn handle_copy_error(
+    ctx: &FileOpCtx<'_>,
+    st: &mut FileOpState<'_>,
+    src: &str,
+    dst: &str,
+    err: &str,
+    resume_next_attempt: &mut bool,
+    dst_written: bool,
+) -> Result<bool, String> {
+    match resolve_error(ctx, st, src, dst, err) {
+        ErrorOutcome::Retry => {
+            *resume_next_attempt = false;
+            Ok(true)
+        }
+        ErrorOutcome::Skip { notify } => {
+            if dst_written {
+                if let Some(driver) = ctx.dst_driver {
+                    let _ = driver.remove_file(dst);
+                }
+            }
+            record_skip(ctx, st, src, err, notify);
+            Ok(false)
+        }
+        ErrorOutcome::Cancel => Err(CANCELLED_ERR.to_string()),
+    }
+}
+
 enum CopyFileError {
-    Fatal(String),
+    Cancelled,
+    Io(String),
     Recoverable(String),
-    Skipped(String),
+    Skipped,
     Verification(String),
 }
 
 fn copy_file_once_with_progress(
-    job_id: &str,
+    ctx: &FileOpCtx<'_>,
+    st: &mut FileOpState<'_>,
     src: &str,
     dst: &str,
     total_bytes: u64,
-    tx: &mpsc::Sender<ServerMessage>,
-    cancel_rx: &watch::Receiver<bool>,
-    pause_rx: &watch::Receiver<bool>,
-    total_files: usize,
-    completed_files: usize,
-    total_bytes_total: u64,
-    total_bytes_completed: u64,
-    src_driver: &dyn VfsDriver,
-    dst_driver: &dyn VfsDriver,
     src_name: &str,
-    save_digest_file: bool,
     resume_requested: bool,
-    skip_current_file: Arc<AtomicBool>,
-    keep_partial_files_on_cancel: Arc<AtomicBool>,
+    dst_written: &mut bool,
 ) -> Result<(), CopyFileError> {
+    let src_driver = ctx.src_driver;
+    let dst_driver = ctx
+        .dst_driver
+        .ok_or_else(|| CopyFileError::Io("No destination driver for copy/move".to_string()))?;
     let file_size = if total_bytes > 0 {
         total_bytes
     } else {
@@ -865,31 +1062,27 @@ fn copy_file_once_with_progress(
     };
 
     if resume_offset > 0 {
-        send_progress_sync_with_status(
-            tx,
-            job_id,
-            total_files,
-            completed_files,
+        send_progress(
+            ctx,
+            st,
             Some(src_name.to_string()),
             file_size,
             resume_offset,
-            total_bytes_total,
-            total_bytes_completed + resume_offset,
             Some(format!("Resuming from byte {resume_offset}")),
         );
     }
 
-    if skip_current_file.load(Ordering::SeqCst) {
-        if resume_offset == 0 {
+    if ctx.skip_current_file.load(Ordering::SeqCst) {
+        if *dst_written {
             let _ = dst_driver.remove_file(dst);
         }
-        return Err(CopyFileError::Skipped(src_name.to_string()));
+        return Err(CopyFileError::Skipped);
     }
 
     let mut reader = if resume_offset > 0 {
         src_driver.open_read_at(src, resume_offset).map_err(|e| {
             if matches!(e, crate::vfs::VfsError::Cancelled) {
-                CopyFileError::Fatal(CANCELLED_ERR.to_string())
+                CopyFileError::Cancelled
             } else {
                 CopyFileError::Recoverable(format!(
                     "Cannot resume {src} at byte {resume_offset}: {e}"
@@ -899,9 +1092,9 @@ fn copy_file_once_with_progress(
     } else {
         src_driver.open_read(src).map_err(|e| {
             if matches!(e, crate::vfs::VfsError::Cancelled) {
-                CopyFileError::Fatal(CANCELLED_ERR.to_string())
+                CopyFileError::Cancelled
             } else {
-                CopyFileError::Fatal(format!("Cannot open {src}: {e}"))
+                CopyFileError::Io(format!("Cannot open {src}: {e}"))
             }
         })?
     };
@@ -910,9 +1103,7 @@ fn copy_file_once_with_progress(
         if let Some(parent) = dst_driver.parent_path(dst) {
             if !parent.is_empty() {
                 dst_driver.create_dir_all(&parent).map_err(|e| {
-                    CopyFileError::Fatal(format!(
-                        "Cannot create destination directory {parent}: {e}"
-                    ))
+                    CopyFileError::Io(format!("Cannot create destination directory {parent}: {e}"))
                 })?;
             }
         }
@@ -920,36 +1111,38 @@ fn copy_file_once_with_progress(
 
     let mut writer = if resume_offset > 0 {
         dst_driver.open_write_at(dst, resume_offset).map_err(|e| {
-            CopyFileError::Fatal(format!(
+            CopyFileError::Io(format!(
                 "Cannot resume writing {dst} at byte {resume_offset}: {e}"
             ))
         })?
     } else {
-        dst_driver
+        let writer = dst_driver
             .open_write(dst)
-            .map_err(|e| CopyFileError::Fatal(format!("Cannot create {dst}: {e}")))?
+            .map_err(|e| CopyFileError::Io(format!("Cannot create {dst}: {e}")))?;
+        *dst_written = true;
+        writer
     };
 
     let mut buf = vec![0u8; COPY_BUF_SIZE];
     let mut copied: u64 = resume_offset;
     let mut stream_hasher =
-        hash_existing_prefix(dst_driver, dst, resume_offset).map_err(CopyFileError::Fatal)?;
+        hash_existing_prefix(dst_driver, dst, resume_offset).map_err(CopyFileError::Io)?;
     let mut last_progress_at = Instant::now();
     loop {
-        if skip_current_file.load(Ordering::SeqCst) {
+        if ctx.skip_current_file.load(Ordering::SeqCst) {
             drop(writer);
-            if resume_offset == 0 {
+            if *dst_written {
                 let _ = dst_driver.remove_file(dst);
             }
-            return Err(CopyFileError::Skipped(src_name.to_string()));
+            return Err(CopyFileError::Skipped);
         }
 
-        if wait_if_paused(pause_rx, cancel_rx) {
+        if wait_if_paused(ctx.pause_rx, ctx.cancel_rx) {
             drop(writer);
-            if resume_offset == 0 && !keep_partial_files_on_cancel.load(Ordering::Relaxed) {
+            if resume_offset == 0 && !ctx.keep_partial_files_on_cancel.load(Ordering::Relaxed) {
                 let _ = dst_driver.remove_file(dst);
             }
-            return Err(CopyFileError::Fatal(CANCELLED_ERR.to_string()));
+            return Err(CopyFileError::Cancelled);
         }
 
         let read = reader.read(&mut buf);
@@ -959,37 +1152,33 @@ fn copy_file_once_with_progress(
                 .and_then(|inner| inner.downcast_ref::<crate::vfs::VfsError>())
                 .is_some_and(|error| matches!(error, crate::vfs::VfsError::Cancelled))
         });
-        if remote_cancelled || *cancel_rx.borrow() {
+        if remote_cancelled || *ctx.cancel_rx.borrow() {
             drop(writer);
-            if resume_offset == 0 && !keep_partial_files_on_cancel.load(Ordering::Relaxed) {
+            if resume_offset == 0 && !ctx.keep_partial_files_on_cancel.load(Ordering::Relaxed) {
                 let _ = dst_driver.remove_file(dst);
             }
-            return Err(CopyFileError::Fatal(CANCELLED_ERR.to_string()));
+            return Err(CopyFileError::Cancelled);
         }
-        let n =
-            read.map_err(|e| CopyFileError::Recoverable(format!("Read error on {src}: {e}")))?;
+        let n = read.map_err(|e| CopyFileError::Recoverable(format!("Read error on {src}: {e}")))?;
         if n == 0 {
             break;
         }
 
         writer
             .write_all(&buf[..n])
-            .map_err(|e| CopyFileError::Fatal(format!("Write error on {dst}: {e}")))?;
+            .map_err(|e| CopyFileError::Io(format!("Write error on {dst}: {e}")))?;
 
         stream_hasher.update(&buf[..n]);
         copied += n as u64;
 
         if copied == file_size || last_progress_at.elapsed() >= COPY_PROGRESS_INTERVAL {
-            send_progress_sync(
-                tx,
-                job_id,
-                total_files,
-                completed_files,
+            send_progress(
+                ctx,
+                st,
                 Some(src_name.to_string()),
                 file_size,
                 copied,
-                total_bytes_total,
-                total_bytes_completed + copied,
+                None,
             );
             last_progress_at = Instant::now();
         }
@@ -997,21 +1186,21 @@ fn copy_file_once_with_progress(
 
     writer
         .flush()
-        .map_err(|e| CopyFileError::Fatal(format!("Flush error on {dst}: {e}")))?;
+        .map_err(|e| CopyFileError::Io(format!("Flush error on {dst}: {e}")))?;
     drop(writer);
 
     let remote_digest = if resume_offset > 0 {
         src_driver.file_digest(src).map_err(|e| {
             if matches!(e, crate::vfs::VfsError::Cancelled) {
-                CopyFileError::Fatal(CANCELLED_ERR.to_string())
+                CopyFileError::Cancelled
             } else {
                 CopyFileError::Verification(format!("Verification failed for {src}: {e}"))
             }
         })?
     } else {
-        src_driver.transfer_digest(job_id, src).map_err(|e| {
+        src_driver.transfer_digest(ctx.job_id, src).map_err(|e| {
             if matches!(e, crate::vfs::VfsError::Cancelled) {
-                CopyFileError::Fatal(CANCELLED_ERR.to_string())
+                CopyFileError::Cancelled
             } else {
                 CopyFileError::Verification(format!("Verification failed for {src}: {e}"))
             }
@@ -1019,16 +1208,12 @@ fn copy_file_once_with_progress(
     };
 
     if let Some(remote_digest) = remote_digest {
-        send_progress_sync_with_status(
-            tx,
-            job_id,
-            total_files,
-            completed_files,
+        send_progress(
+            ctx,
+            st,
             Some(src_name.to_string()),
             file_size,
             copied,
-            total_bytes_total,
-            total_bytes_completed + copied,
             Some("Verifying transfer".to_string()),
         );
         let stream_digest = VfsTransferDigest {
@@ -1043,13 +1228,13 @@ fn copy_file_once_with_progress(
             .map_err(CopyFileError::Verification)?;
     }
 
-    if *cancel_rx.borrow() {
-        return Err(CopyFileError::Fatal(CANCELLED_ERR.to_string()));
+    if *ctx.cancel_rx.borrow() {
+        return Err(CopyFileError::Cancelled);
     }
 
-    if save_digest_file {
+    if ctx.save_digest_file {
         let digest = stream_hasher.finalize().to_hex().to_string();
-        write_digest_sidecar(dst_driver, dst, src_name, &digest).map_err(CopyFileError::Fatal)?;
+        write_digest_sidecar(dst_driver, dst, src_name, &digest).map_err(CopyFileError::Io)?;
     }
 
     Ok(())
@@ -1087,21 +1272,23 @@ fn hash_existing_prefix(
 
 enum VerificationOutcome {
     Retry,
-    Skip,
+    Skip { notify: bool },
     Abort,
 }
 
 fn resolve_verification_mismatch(
+    ctx: &FileOpCtx<'_>,
+    st: &mut FileOpState<'_>,
     src: &str,
     dst: &str,
     message: &str,
-    tx: &mpsc::Sender<ServerMessage>,
-    job_id: &str,
-    decision_rx: &mut DecisionRx,
 ) -> Result<VerificationOutcome, String> {
+    // Verification has its own policy: "Ask" always prompts, even when the
+    // error policy or Skip all would skip I/O errors silently. Skipping a
+    // mismatch quietly would leave an unverified copy looking like a good one.
     send_event_sync(
-        tx,
-        job_id,
+        ctx.tx,
+        ctx.job_id,
         "DecisionRequired",
         None,
         Some(ConflictDecisionSchema {
@@ -1113,11 +1300,12 @@ fn resolve_verification_mismatch(
             supports_apply_to_all: false,
         }),
         Some(message.to_string()),
+        None,
     );
-    match decision_rx.blocking_recv() {
+    match st.decision_rx.blocking_recv() {
         Some(DecisionResponse { decision, .. }) => match decision.as_str() {
             "retry" => Ok(VerificationOutcome::Retry),
-            "skip" => Ok(VerificationOutcome::Skip),
+            "skip" => Ok(VerificationOutcome::Skip { notify: true }),
             _ => Ok(VerificationOutcome::Abort),
         },
         None => Ok(VerificationOutcome::Abort),
@@ -1202,52 +1390,53 @@ fn compare_transfer_digests(
     Ok(())
 }
 
+/// Copy a directory recursively. Returns `false` when any child was skipped,
+/// so a move can leave the whole source subtree in place.
 fn copy_dir_recursive(
-    job_id: &str,
+    ctx: &FileOpCtx<'_>,
+    st: &mut FileOpState<'_>,
     src: &str,
     dst: &str,
     src_mtime: Option<u64>,
-    conflict_policy: &ConflictPolicy,
-    tx: &mpsc::Sender<ServerMessage>,
-    cancel_rx: &watch::Receiver<bool>,
-    pause_rx: &watch::Receiver<bool>,
-    total_files: &mut usize,
-    completed_files: &mut usize,
-    total_bytes_total: &mut u64,
-    total_bytes_completed: &mut u64,
-    src_driver: &dyn VfsDriver,
-    dst_driver: &dyn VfsDriver,
-    decision_rx: &mut DecisionRx,
-    apply_to_all: &mut Option<ConflictOutcome>,
-    preserve_attributes: bool,
-    verification_policy: &VerificationPolicy,
-    save_digest_file: bool,
-    auto_resume_copies: bool,
-    skip_current_file: Arc<AtomicBool>,
-    keep_partial_files_on_cancel: Arc<AtomicBool>,
-) -> Result<(), String> {
-    dst_driver
-        .create_dir_all(dst)
-        .map_err(|e| format!("Cannot create dir {dst}: {e}"))?;
+) -> Result<bool, String> {
+    let src_driver = ctx.src_driver;
+    let dst_driver = ctx
+        .dst_driver
+        .ok_or_else(|| "No destination driver for copy/move".to_string())?;
 
-    if preserve_attributes && dst_driver.is_local() {
+    let created = attempt(ctx, st, src, dst, || {
+        dst_driver
+            .create_dir_all(dst)
+            .map_err(|e| format!("Cannot create dir {dst}: {e}"))
+    })?;
+    if created.is_none() {
+        return Ok(false);
+    }
+
+    if ctx.preserve_attributes && dst_driver.is_local() {
         apply_file_attrs(dst, src_mtime, None);
     }
 
-    let children = src_driver
-        .read_dir_entries(src)
-        .map_err(|e| format!("Cannot read dir {src}: {e}"))?;
+    let children = match attempt(ctx, st, src, dst, || {
+        src_driver
+            .read_dir_entries(src)
+            .map_err(|e| format!("Cannot read dir {src}: {e}"))
+    })? {
+        Some(children) => children,
+        None => return Ok(false),
+    };
 
-    // Discover files in this directory — grow totals
+    // Discover files in this directory — grow totals.
     for child in &children {
         if !child.is_dir {
-            *total_files += 1;
-            *total_bytes_total += child.size;
+            st.total_files += 1;
+            st.total_bytes_total += child.size;
         }
     }
 
+    let mut complete = true;
     for child in children {
-        if wait_if_paused(pause_rx, cancel_rx) {
+        if wait_if_paused(ctx.pause_rx, ctx.cancel_rx) {
             return Err(CANCELLED_ERR.to_string());
         }
 
@@ -1255,130 +1444,141 @@ fn copy_dir_recursive(
         let child_dst = dst_driver.resolve_child(dst, &child.name);
 
         if child.is_dir {
-            copy_dir_recursive(
-                job_id,
-                &child_src,
-                &child_dst,
-                child.mtime,
-                conflict_policy,
-                tx,
-                cancel_rx,
-                pause_rx,
-                total_files,
-                completed_files,
-                total_bytes_total,
-                total_bytes_completed,
-                src_driver,
-                dst_driver,
-                decision_rx,
-                apply_to_all,
-                preserve_attributes,
-                verification_policy,
-                save_digest_file,
-                auto_resume_copies,
-                Arc::clone(&skip_current_file),
-                Arc::clone(&keep_partial_files_on_cancel),
-            )?;
+            let child_complete =
+                copy_dir_recursive(ctx, st, &child_src, &child_dst, child.mtime)?;
+            if !child_complete {
+                complete = false;
+            } else {
+                let _ = remove_source_dir(ctx, st, &child_src, &child_dst, true)?;
+            }
+            continue;
+        }
+
+        let copied;
+        if child.is_symlink && src_driver.is_local() {
+            copied = copy_symlink(ctx, st, &child_src, &child_dst)?;
         } else {
             let mut resume_requested = false;
-            if child.is_symlink && src_driver.is_local() {
-                let copied = copy_symlink(job_id, &child_src, &child_dst, conflict_policy,
-                    tx, decision_rx, apply_to_all, src_driver, dst_driver)?;
-                *completed_files += 1;
-                send_progress_sync(tx, job_id, *total_files, *completed_files,
-                    None, 0, 0, *total_bytes_total, *total_bytes_completed);
-                if !copied { continue; }
-                continue;
-            }
             if dst_driver.exists_no_follow(&child_dst) {
                 let destination_is_link = dst_driver.read_link(&child_dst).is_ok();
-                let resume_candidate = (!destination_is_link).then(||
-                    resume_candidate(&child_src, &child_dst, child.size, src_driver, dst_driver)
-                ).flatten();
-                match resolve_conflict(
-                    conflict_policy,
-                    &child_src,
-                    &child_dst,
-                    resume_candidate.as_ref(),
-                    tx,
-                    job_id,
-                    decision_rx,
-                    apply_to_all,
-                )? {
+                let candidate = (!destination_is_link)
+                    .then(|| {
+                        resume_candidate(
+                            &child_src,
+                            &child_dst,
+                            child.size,
+                            src_driver,
+                            dst_driver,
+                        )
+                    })
+                    .flatten();
+                match resolve_conflict(ctx, st, &child_src, &child_dst, candidate.as_ref())? {
                     ConflictOutcome::Overwrite => {
                         if destination_is_link {
-                            dst_driver.remove_file(&child_dst).map_err(|error| format!("Cannot replace destination link {child_dst}: {error}"))?;
+                            let replaced = attempt(ctx, st, &child_dst, &child_dst, || {
+                                dst_driver.remove_file(&child_dst).map_err(|error| {
+                                    format!("Cannot replace destination link {child_dst}: {error}")
+                                })
+                            })?;
+                            if replaced.is_none() {
+                                st.completed_files += 1;
+                                st.total_bytes_completed += child.size;
+                                send_progress(ctx, st, None, 0, 0, None);
+                                complete = false;
+                                continue;
+                            }
                         }
                     }
-                    ConflictOutcome::Resume => {
-                        resume_requested = true;
-                    }
+                    ConflictOutcome::Resume => resume_requested = true,
                     ConflictOutcome::Skip => {
-                        *completed_files += 1;
-                        *total_bytes_completed += child.size;
-                        send_progress_sync(
-                            tx,
-                            job_id,
-                            *total_files,
-                            *completed_files,
-                            None,
-                            0,
-                            0,
-                            *total_bytes_total,
-                            *total_bytes_completed,
-                        );
+                        record_conflict_skip(ctx, st, &child_src, &child_dst);
+                        st.completed_files += 1;
+                        st.total_bytes_completed += child.size;
+                        send_progress(ctx, st, None, 0, 0, None);
+                        complete = false;
                         continue;
                     }
-                    ConflictOutcome::Cancel => {
-                        return Err(CANCELLED_ERR.to_string());
-                    }
+                    ConflictOutcome::Cancel => return Err(CANCELLED_ERR.to_string()),
                 }
             }
 
-            let copied = copy_file_with_progress(
-                job_id,
-                &child_src,
-                &child_dst,
-                child.size,
-                tx,
-                cancel_rx,
-                pause_rx,
-                *total_files,
-                *completed_files,
-                *total_bytes_total,
-                *total_bytes_completed,
-                src_driver,
-                dst_driver,
-                decision_rx,
-                verification_policy,
-                save_digest_file,
-                auto_resume_copies,
-                Arc::clone(&skip_current_file),
-                resume_requested,
-                Arc::clone(&keep_partial_files_on_cancel),
-            )?;
-
-            if copied && preserve_attributes && dst_driver.is_local() {
+            copied = copy_file_with_progress(ctx, st, &child_src, &child_dst, child.size, resume_requested)?;
+            if copied && ctx.preserve_attributes && dst_driver.is_local() {
                 apply_file_attrs(&child_dst, child.mtime, child.permissions.as_deref());
             }
+        }
 
-            *completed_files += 1;
-            *total_bytes_completed += child.size;
-            send_progress_sync(
-                tx,
-                job_id,
-                *total_files,
-                *completed_files,
-                None,
-                0,
-                0,
-                *total_bytes_total,
-                *total_bytes_completed,
-            );
+        if copied {
+            let _ = remove_source_file(ctx, st, &child_src, &child_dst)?;
+        }
+
+        if !copied {
+            complete = false;
+        }
+        st.completed_files += 1;
+        st.total_bytes_completed += child.size;
+        send_progress(ctx, st, None, 0, 0, None);
+    }
+
+    Ok(complete)
+}
+
+/// Delete a tree child by child so an individual failure is skippable. A
+/// directory is left in place when any of its children could not be deleted.
+fn delete_tree(
+    ctx: &FileOpCtx<'_>,
+    st: &mut FileOpState<'_>,
+    src: &str,
+    display_name: &str,
+    is_dir: bool,
+) -> Result<bool, String> {
+    let driver = ctx.src_driver;
+    send_progress(ctx, st, Some(display_name.to_string()), 0, 0, None);
+
+    if is_dir {
+        let children = match attempt(ctx, st, src, src, || {
+            driver
+                .read_dir_entries(src)
+                .map_err(|e| format!("Cannot read dir {src}: {e}"))
+        })? {
+            Some(children) => children,
+            None => return Ok(false),
+        };
+        let mut complete = true;
+        for child in children {
+            if wait_if_paused(ctx.pause_rx, ctx.cancel_rx) {
+                return Err(CANCELLED_ERR.to_string());
+            }
+            let child_path = driver.resolve_child(src, &child.name);
+            // Symlinks to directories are removed as links, never traversed.
+            let child_is_dir = child.is_dir && !child.is_symlink;
+            if !child_is_dir {
+                st.total_files += 1;
+                st.total_bytes_total += child.size;
+            }
+            if !delete_tree(ctx, st, &child_path, &child.name, child_is_dir)? {
+                complete = false;
+            }
+            if !child_is_dir {
+                st.completed_files += 1;
+                st.total_bytes_completed += child.size;
+            }
+            send_progress(ctx, st, None, 0, 0, None);
+        }
+        if !complete {
+            return Ok(false);
         }
     }
 
-    Ok(())
+    let removed = attempt(ctx, st, src, src, || {
+        let result = if is_dir {
+            driver.remove_dir_all(src)
+        } else {
+            driver.remove_file(src)
+        };
+        result.map_err(|e| format!("Failed to delete {src}: {e}"))
+    })?;
+    Ok(removed.is_some())
 }
 
 // ─── Dry-run script generation ──────────────────────────────────────────────
@@ -1499,68 +1699,28 @@ fn collect_mv_lines(src: &str, dst: &str, lines: &mut Vec<String>) {
 
 // ─── Sync helpers (used from spawn_blocking context) ────────────────────────
 
-fn send_progress_sync(
-    tx: &mpsc::Sender<ServerMessage>,
-    job_id: &str,
-    total_files: usize,
-    completed_files: usize,
+fn send_progress(
+    ctx: &FileOpCtx<'_>,
+    st: &FileOpState<'_>,
     current_file: Option<String>,
     current_file_bytes_total: u64,
     current_file_bytes_copied: u64,
-    total_bytes_total: u64,
-    total_bytes_copied: u64,
-) {
-    send_progress_sync_with_status(
-        tx,
-        job_id,
-        total_files,
-        completed_files,
-        current_file,
-        current_file_bytes_total,
-        current_file_bytes_copied,
-        total_bytes_total,
-        total_bytes_copied,
-        None,
-    );
-}
-
-fn send_progress_sync_with_status(
-    tx: &mpsc::Sender<ServerMessage>,
-    job_id: &str,
-    total_files: usize,
-    completed_files: usize,
-    current_file: Option<String>,
-    current_file_bytes_total: u64,
-    current_file_bytes_copied: u64,
-    total_bytes_total: u64,
-    total_bytes_copied: u64,
     status_text: Option<String>,
 ) {
     let progress = FileOpProgressSchema {
-        total_files,
-        completed_files,
+        total_files: st.total_files,
+        completed_files: st.completed_files,
         current_file,
         status_text,
         current_file_bytes_total,
         current_file_bytes_copied,
-        total_bytes_total,
-        total_bytes_copied,
+        total_bytes_total: st.total_bytes_total,
+        total_bytes_copied: st.total_bytes_completed,
         current_file_percent: None,
         overall_percent: None,
+        skipped_files: st.skipped_count,
     };
-    let msg = ServerMessage::JobEvent {
-        timestamp: now(),
-        job_id: job_id.to_string(),
-        event: "Progress".to_string(),
-        files: None,
-        progress: Some(progress),
-        search_progress: None,
-        decision: None,
-        error: None,
-        result_path: None,
-        result_panel_id: None,
-    };
-    let _ = tx.try_send(msg);
+    send_event_sync(ctx.tx, ctx.job_id, "Progress", Some(progress), None, None, None);
 }
 
 fn send_event_sync(
@@ -1570,6 +1730,7 @@ fn send_event_sync(
     progress: Option<FileOpProgressSchema>,
     decision: Option<ConflictDecisionSchema>,
     error: Option<String>,
+    skipped: Option<SkippedItem>,
 ) {
     let msg = ServerMessage::JobEvent {
         timestamp: now(),
@@ -1582,8 +1743,17 @@ fn send_event_sync(
         error,
         result_path: None,
         result_panel_id: None,
+        skipped,
     };
-    let _ = tx.try_send(msg);
+    // Progress is a sample and may be dropped under backpressure. Skips and
+    // decisions are not: they feed the job's skipped list and the prompt.
+    // The worker runs in spawn_blocking, so waiting for capacity is safe.
+    match tx.try_send(msg) {
+        Err(mpsc::error::TrySendError::Full(msg)) if event != "Progress" => {
+            let _ = tx.blocking_send(msg);
+        }
+        _ => {}
+    }
 }
 
 async fn tx_event(
@@ -1605,6 +1775,7 @@ async fn tx_event(
         error,
         result_path: None,
         result_panel_id: None,
+        skipped: None,
     })
     .await
     .map_err(|_| ())
@@ -1621,6 +1792,149 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
+
+    // Compatibility shims: existing tests exercise the operation through the
+    // original argument lists; they build the same context/state pair used by
+    // the production entry point.
+    #[allow(clippy::too_many_arguments)]
+    fn run_file_op_blocking(
+        job_id: &str,
+        op_type: &FileOpType,
+        files: &[FileOpEntry],
+        dest_path: Option<&str>,
+        conflict_policy: &ConflictPolicy,
+        tx: &mpsc::Sender<ServerMessage>,
+        cancel_rx: &watch::Receiver<bool>,
+        pause_rx: &watch::Receiver<bool>,
+        decision_rx: &mut DecisionRx,
+        src_driver: &dyn VfsDriver,
+        dst_driver: Option<&dyn VfsDriver>,
+        preserve_attributes: bool,
+        verification_policy: &VerificationPolicy,
+        save_digest_file: bool,
+        auto_resume_copies: bool,
+        skip_current_file: Arc<AtomicBool>,
+        keep_partial_files_on_cancel: Arc<AtomicBool>,
+    ) -> Result<(), String> {
+        let error_policy = ErrorPolicy::Ask;
+        let ctx = FileOpCtx {
+            job_id,
+            op_type,
+            files,
+            dest_path,
+            tx,
+            cancel_rx,
+            pause_rx,
+            src_driver,
+            dst_driver,
+            conflict_policy,
+            error_policy: &error_policy,
+            verification_policy,
+            preserve_attributes,
+            save_digest_file,
+            auto_resume_copies,
+            skip_current_file,
+            keep_partial_files_on_cancel,
+        };
+        let mut st = FileOpState::new(decision_rx);
+        super::run_file_op_blocking(&ctx, &mut st)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn run_file_op_blocking_with_policy(
+        job_id: &str,
+        op_type: &FileOpType,
+        files: &[FileOpEntry],
+        dest_path: Option<&str>,
+        conflict_policy: &ConflictPolicy,
+        error_policy: &ErrorPolicy,
+        tx: &mpsc::Sender<ServerMessage>,
+        cancel_rx: &watch::Receiver<bool>,
+        pause_rx: &watch::Receiver<bool>,
+        decision_rx: &mut DecisionRx,
+        src_driver: &dyn VfsDriver,
+        dst_driver: Option<&dyn VfsDriver>,
+        preserve_attributes: bool,
+        verification_policy: &VerificationPolicy,
+        save_digest_file: bool,
+        auto_resume_copies: bool,
+        skip_current_file: Arc<AtomicBool>,
+        keep_partial_files_on_cancel: Arc<AtomicBool>,
+    ) -> Result<(), String> {
+        let ctx = FileOpCtx {
+            job_id,
+            op_type,
+            files,
+            dest_path,
+            tx,
+            cancel_rx,
+            pause_rx,
+            src_driver,
+            dst_driver,
+            conflict_policy,
+            error_policy,
+            verification_policy,
+            preserve_attributes,
+            save_digest_file,
+            auto_resume_copies,
+            skip_current_file,
+            keep_partial_files_on_cancel,
+        };
+        let mut st = FileOpState::new(decision_rx);
+        super::run_file_op_blocking(&ctx, &mut st)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn copy_file_with_progress(
+        job_id: &str,
+        src: &str,
+        dst: &str,
+        total_bytes: u64,
+        tx: &mpsc::Sender<ServerMessage>,
+        cancel_rx: &watch::Receiver<bool>,
+        pause_rx: &watch::Receiver<bool>,
+        total_files: usize,
+        completed_files: usize,
+        total_bytes_total: u64,
+        total_bytes_completed: u64,
+        src_driver: &dyn VfsDriver,
+        dst_driver: &dyn VfsDriver,
+        decision_rx: &mut DecisionRx,
+        verification_policy: &VerificationPolicy,
+        save_digest_file: bool,
+        auto_resume_copies: bool,
+        skip_current_file: Arc<AtomicBool>,
+        resume_requested: bool,
+        keep_partial_files_on_cancel: Arc<AtomicBool>,
+    ) -> Result<bool, String> {
+        let error_policy = ErrorPolicy::Ask;
+        let op_type = FileOpType::Copy;
+        let ctx = FileOpCtx {
+            job_id,
+            op_type: &op_type,
+            files: &[],
+            dest_path: None,
+            tx,
+            cancel_rx,
+            pause_rx,
+            src_driver,
+            dst_driver: Some(dst_driver),
+            conflict_policy: &ConflictPolicy::Ask,
+            error_policy: &error_policy,
+            verification_policy,
+            preserve_attributes: false,
+            save_digest_file,
+            auto_resume_copies,
+            skip_current_file,
+            keep_partial_files_on_cancel,
+        };
+        let mut st = FileOpState::new(decision_rx);
+        st.total_files = total_files;
+        st.completed_files = completed_files;
+        st.total_bytes_total = total_bytes_total;
+        st.total_bytes_completed = total_bytes_completed;
+        super::copy_file_with_progress(&ctx, &mut st, src, dst, total_bytes, resume_requested)
+    }
 
     struct TestDir {
         path: PathBuf,
@@ -1970,6 +2284,170 @@ mod tests {
         }
     }
 
+    /// Local driver that fails reads/removals for chosen paths. `is_local()` is
+    /// false so copy/move always exercise the copy path rather than `try_rename`.
+    struct FaultyDriver {
+        local: crate::vfs::local::LocalFsDriver,
+        fail_read: Option<String>,
+        fail_read_all: bool,
+        fail_remove: Option<String>,
+        /// Report as local (so moves try `try_rename`) and fail every rename.
+        rename_fails: bool,
+    }
+
+    impl FaultyDriver {
+        fn new(fail_read: Option<&Path>, fail_remove: Option<&Path>) -> Self {
+            Self {
+                local: crate::vfs::local::LocalFsDriver,
+                fail_read: fail_read.map(|path| path.to_string_lossy().into_owned()),
+                fail_read_all: false,
+                fail_remove: fail_remove.map(|path| path.to_string_lossy().into_owned()),
+                rename_fails: false,
+            }
+        }
+
+        fn fail_read(path: &Path) -> Self {
+            Self::new(Some(path), None)
+        }
+
+        fn fail_remove(path: &Path) -> Self {
+            Self::new(None, Some(path))
+        }
+
+        fn healthy() -> Self {
+            Self::new(None, None)
+        }
+
+        fn all_reads_fail() -> Self {
+            let mut driver = Self::healthy();
+            driver.fail_read_all = true;
+            driver
+        }
+
+        fn renames_fail() -> Self {
+            let mut driver = Self::healthy();
+            driver.rename_fails = true;
+            driver
+        }
+    }
+
+    impl VfsDriver for FaultyDriver {
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+
+        fn list(
+            &self,
+            path: &str,
+            sort: &SortSpec,
+            filter: Option<&FilterSpec>,
+            show_hidden: bool,
+        ) -> Result<Vec<VfsEntry>, VfsError> {
+            self.local.list(path, sort, filter, show_hidden)
+        }
+
+        fn resolve_child(&self, base: &str, name: &str) -> String {
+            self.local.resolve_child(base, name)
+        }
+
+        fn parent_path(&self, path: &str) -> Option<String> {
+            self.local.parent_path(path)
+        }
+
+        fn open_read(&self, path: &str) -> Result<Box<dyn Read + Send>, VfsError> {
+            if self.fail_read_all || self.fail_read.as_deref() == Some(path) {
+                return Err(VfsError::IOError("injected read failure".to_string()));
+            }
+            self.local.open_read(path)
+        }
+
+        fn supports_read_at(&self) -> bool {
+            true
+        }
+
+        fn open_read_at(&self, path: &str, _offset: u64) -> Result<Box<dyn Read + Send>, VfsError> {
+            self.open_read(path)
+        }
+
+        fn open_write(&self, path: &str) -> Result<Box<dyn Write + Send>, VfsError> {
+            self.local.open_write(path)
+        }
+
+        fn supports_write_at(&self) -> bool {
+            true
+        }
+
+        fn open_write_at(&self, path: &str, offset: u64) -> Result<Box<dyn Write + Send>, VfsError> {
+            self.local.open_write_at(path, offset)
+        }
+
+        fn create_dir_all(&self, path: &str) -> Result<(), VfsError> {
+            self.local.create_dir_all(path)
+        }
+
+        fn remove_file(&self, path: &str) -> Result<(), VfsError> {
+            if self.fail_remove.as_deref() == Some(path) {
+                return Err(VfsError::PermissionDenied(
+                    "injected removal failure".to_string(),
+                ));
+            }
+            self.local.remove_file(path)
+        }
+
+        fn remove_dir_all(&self, path: &str) -> Result<(), VfsError> {
+            if self.fail_remove.as_deref() == Some(path) {
+                return Err(VfsError::PermissionDenied(
+                    "injected removal failure".to_string(),
+                ));
+            }
+            self.local.remove_dir_all(path)
+        }
+
+        fn exists(&self, path: &str) -> bool {
+            self.local.exists(path)
+        }
+
+        fn exists_no_follow(&self, path: &str) -> bool {
+            self.local.exists_no_follow(path)
+        }
+
+        fn read_link(&self, path: &str) -> Result<crate::vfs::LinkInfo, VfsError> {
+            self.local.read_link(path)
+        }
+
+        fn create_symlink(
+            &self,
+            target: &Path,
+            link: &str,
+            is_dir: bool,
+        ) -> Result<(), VfsError> {
+            self.local.create_symlink(target, link, is_dir)
+        }
+
+        fn file_size(&self, path: &str) -> Option<u64> {
+            self.local.file_size(path)
+        }
+
+        fn read_dir_entries(&self, path: &str) -> Result<Vec<DirChild>, VfsError> {
+            self.local.read_dir_entries(path)
+        }
+
+        fn read_chunk(&self, path: &str, offset: u64, size: usize) -> Result<Vec<u8>, VfsError> {
+            self.local.read_chunk(path, offset, size)
+        }
+
+        fn is_local(&self) -> bool {
+            self.rename_fails
+        }
+
+        fn try_rename(&self, src: &str, dst: &str) -> Result<bool, VfsError> {
+            if self.rename_fails {
+                return Err(VfsError::PermissionDenied("injected rename failure".to_string()));
+            }
+            self.local.try_rename(src, dst)
+        }
+    }
+
     fn bytes(len: usize) -> Vec<u8> {
         (0..len).map(|i| ((i * 31 + 7) % 251) as u8).collect()
     }
@@ -2249,7 +2727,7 @@ mod tests {
     }
 
     #[test]
-    fn skip_fresh_copy_removes_partial_destination_and_emits_event() {
+    fn skip_before_first_write_keeps_existing_destination_and_emits_event() {
         let dir = TestDir::new("skip-fresh");
         let src = dir.path.join("source.bin");
         let dst = dir.path.join("dest.bin");
@@ -2291,7 +2769,8 @@ mod tests {
 
         assert!(!copied);
         assert!(!skip_current_file.load(Ordering::SeqCst));
-        assert!(!dst.exists());
+        // Nothing was written yet, so the user's file is not ours to delete.
+        assert_eq!(fs::read(&dst).unwrap(), b"old partial");
         assert_eq!(skipped_event_file_name(&mut rx).as_deref(), Some("source.bin"));
     }
 
@@ -2571,5 +3050,927 @@ mod tests {
 
         assert!(err.contains("onto itself"));
         assert_eq!(fs::read_to_string(src).unwrap(), "payload\n");
+    }
+
+    fn file_entry(name: &str, path: &Path, size: u64) -> FileOpEntry {
+        FileOpEntry {
+            name: name.to_string(),
+            dest_name: None,
+            source_path: path.to_string_lossy().into_owned(),
+            size: Some(size),
+            kind: "file".to_string(),
+            mtime: None,
+            permissions: None,
+        }
+    }
+
+    fn dir_entry(name: &str, path: &Path) -> FileOpEntry {
+        FileOpEntry {
+            name: name.to_string(),
+            dest_name: None,
+            source_path: path.to_string_lossy().into_owned(),
+            size: None,
+            kind: "directory".to_string(),
+            mtime: None,
+            permissions: None,
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn run_with_driver(
+        op: FileOpType,
+        files: &[FileOpEntry],
+        dest: Option<&str>,
+        conflict_policy: ConflictPolicy,
+        error_policy: ErrorPolicy,
+        tx: &mpsc::Sender<ServerMessage>,
+        decision_rx: &mut DecisionRx,
+        driver: &dyn VfsDriver,
+        skip_current: Arc<AtomicBool>,
+    ) -> Result<(), String> {
+        let (_cancel_tx, cancel_rx) = watch::channel(false);
+        let (_pause_tx, pause_rx) = watch::channel(false);
+        let local = crate::vfs::local::LocalFsDriver;
+        run_file_op_blocking_with_policy(
+            "job-test",
+            &op,
+            files,
+            dest,
+            &conflict_policy,
+            &error_policy,
+            tx,
+            &cancel_rx,
+            &pause_rx,
+            decision_rx,
+            driver,
+            if matches!(op, FileOpType::Delete) {
+                None
+            } else {
+                Some(&local)
+            },
+            false,
+            &VerificationPolicy::Fail,
+            false,
+            false,
+            skip_current,
+            Arc::new(AtomicBool::new(false)),
+        )
+    }
+
+    #[derive(Default)]
+    struct EventSummary {
+        error_prompts: usize,
+        conflict_prompts: usize,
+        skipped: Vec<SkippedItem>,
+    }
+
+    fn collect_events(rx: &mut mpsc::Receiver<ServerMessage>) -> EventSummary {
+        let mut summary = EventSummary::default();
+        while let Ok(message) = rx.try_recv() {
+            if let ServerMessage::JobEvent {
+                event,
+                decision,
+                skipped,
+                ..
+            } = message
+            {
+                if event == "DecisionRequired" {
+                    match decision.and_then(|d| d.kind).as_deref() {
+                        Some("error") => summary.error_prompts += 1,
+                        Some("conflict") => summary.conflict_prompts += 1,
+                        _ => {}
+                    }
+                }
+                if event == "FileSkipped" {
+                    if let Some(item) = skipped {
+                        summary.skipped.push(item);
+                    }
+                }
+            }
+        }
+        summary
+    }
+
+    fn respond(tx: &mpsc::Sender<DecisionResponse>, decision: &str) {
+        tx.try_send(DecisionResponse {
+            decision: decision.to_string(),
+            apply_to_all: false,
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn error_retry_completes_the_file() {
+        let dir = TestDir::new("error-retry");
+        let src = dir.path.join("source.bin");
+        let data = bytes(5);
+        fs::write(&src, &data).unwrap();
+
+        let driver = FlakyReadDriver::new(Some(3));
+        let (tx, mut rx) = mpsc::channel(64);
+        let (decision_tx, mut decision_rx) = mpsc::channel(2);
+        respond(&decision_tx, "retry");
+        let dest = dir.path.join("dst");
+        fs::create_dir_all(&dest).unwrap();
+
+        run_with_driver(
+            FileOpType::Copy,
+            &[file_entry("source.bin", &src, data.len() as u64)],
+            Some(&dest.to_string_lossy()),
+            ConflictPolicy::Overwrite,
+            ErrorPolicy::Ask,
+            &tx,
+            &mut decision_rx,
+            &driver,
+            Arc::new(AtomicBool::new(false)),
+        )
+        .unwrap();
+
+        assert_eq!(fs::read(dest.join("source.bin")).unwrap(), data);
+        let events = collect_events(&mut rx);
+        assert_eq!(events.error_prompts, 1);
+        assert!(events.skipped.is_empty());
+    }
+
+    #[test]
+    fn error_retry_restarts_from_byte_zero_and_drops_partial_copy() {
+        let dir = TestDir::new("error-retry-restart");
+        let src = dir.path.join("source.bin");
+        let data = bytes(2 * 1024 * 1024 + 113);
+        fs::write(&src, &data).unwrap();
+
+        let driver = FlakyReadDriver::new(Some(1152 * 1024));
+        let (tx, mut rx) = mpsc::channel(64);
+        let (decision_tx, mut decision_rx) = mpsc::channel(2);
+        respond(&decision_tx, "retry");
+        let dest = dir.path.join("dst");
+        fs::create_dir_all(&dest).unwrap();
+
+        run_with_driver(
+            FileOpType::Copy,
+            &[file_entry("source.bin", &src, data.len() as u64)],
+            Some(&dest.to_string_lossy()),
+            ConflictPolicy::Overwrite,
+            ErrorPolicy::Ask,
+            &tx,
+            &mut decision_rx,
+            &driver,
+            Arc::new(AtomicBool::new(false)),
+        )
+        .unwrap();
+
+        assert_eq!(fs::read(dest.join("source.bin")).unwrap(), data);
+        let events = collect_events(&mut rx);
+        assert_eq!(events.error_prompts, 1);
+        assert!(events.skipped.is_empty());
+    }
+
+    #[test]
+    fn skipping_after_a_partial_copy_removes_the_fresh_destination() {
+        let dir = TestDir::new("error-skip-partial");
+        let src = dir.path.join("source.bin");
+        let data = bytes(2 * 1024 * 1024 + 113);
+        fs::write(&src, &data).unwrap();
+
+        let driver = FlakyReadDriver::new(Some(1152 * 1024));
+        let (tx, mut rx) = mpsc::channel(64);
+        let (decision_tx, mut decision_rx) = mpsc::channel(2);
+        respond(&decision_tx, "skip");
+        let dest = dir.path.join("dst");
+        fs::create_dir_all(&dest).unwrap();
+
+        run_with_driver(
+            FileOpType::Copy,
+            &[file_entry("source.bin", &src, data.len() as u64)],
+            Some(&dest.to_string_lossy()),
+            ConflictPolicy::Overwrite,
+            ErrorPolicy::Ask,
+            &tx,
+            &mut decision_rx,
+            &driver,
+            Arc::new(AtomicBool::new(false)),
+        )
+        .unwrap();
+
+        assert!(!dest.join("source.bin").exists());
+        let events = collect_events(&mut rx);
+        assert_eq!(events.error_prompts, 1);
+        assert_eq!(events.skipped.len(), 1);
+        assert!(events.skipped[0].notify);
+    }
+
+    #[test]
+    fn explicit_skip_continues_with_the_next_file_and_reports_notify() {
+        let dir = TestDir::new("error-skip");
+        let src_dir = dir.path.join("src");
+        let dest = dir.path.join("dst");
+        fs::create_dir_all(&src_dir).unwrap();
+        fs::create_dir_all(&dest).unwrap();
+        let first = src_dir.join("first.bin");
+        let second = src_dir.join("second.bin");
+        fs::write(&first, "first").unwrap();
+        fs::write(&second, "second").unwrap();
+
+        let driver = FaultyDriver::fail_read(&first);
+        let (tx, mut rx) = mpsc::channel(64);
+        let (decision_tx, mut decision_rx) = mpsc::channel(2);
+        respond(&decision_tx, "skip");
+
+        run_with_driver(
+            FileOpType::Copy,
+            &[
+                file_entry("first.bin", &first, 5),
+                file_entry("second.bin", &second, 6),
+            ],
+            Some(&dest.to_string_lossy()),
+            ConflictPolicy::Overwrite,
+            ErrorPolicy::Ask,
+            &tx,
+            &mut decision_rx,
+            &driver,
+            Arc::new(AtomicBool::new(false)),
+        )
+        .unwrap();
+
+        assert!(!dest.join("first.bin").exists());
+        assert_eq!(
+            fs::read_to_string(dest.join("second.bin")).unwrap(),
+            "second"
+        );
+        let events = collect_events(&mut rx);
+        assert_eq!(events.error_prompts, 1);
+        assert_eq!(events.skipped.len(), 1);
+        assert_eq!(events.skipped[0].path, first.to_string_lossy());
+        assert!(events.skipped[0].notify);
+    }
+
+    #[test]
+    fn skip_all_errors_does_not_prompt_for_later_files() {
+        let dir = TestDir::new("error-skip-all");
+        let src_dir = dir.path.join("src");
+        let dest = dir.path.join("dst");
+        fs::create_dir_all(&src_dir).unwrap();
+        fs::create_dir_all(&dest).unwrap();
+        let first = src_dir.join("first.bin");
+        let second = src_dir.join("second.bin");
+        fs::write(&first, "first").unwrap();
+        fs::write(&second, "second").unwrap();
+
+        let driver = FaultyDriver::all_reads_fail();
+        let (tx, mut rx) = mpsc::channel(64);
+        let (decision_tx, mut decision_rx) = mpsc::channel(2);
+        respond(&decision_tx, "skip-all");
+
+        run_with_driver(
+            FileOpType::Copy,
+            &[
+                file_entry("first.bin", &first, 5),
+                file_entry("second.bin", &second, 6),
+            ],
+            Some(&dest.to_string_lossy()),
+            ConflictPolicy::Overwrite,
+            ErrorPolicy::Ask,
+            &tx,
+            &mut decision_rx,
+            &driver,
+            Arc::new(AtomicBool::new(false)),
+        )
+        .unwrap();
+
+        let events = collect_events(&mut rx);
+        assert_eq!(events.error_prompts, 1);
+        assert_eq!(events.skipped.len(), 2);
+        assert!(events.skipped.iter().all(|item| !item.notify));
+    }
+
+    /// Copies against real permission errors from the local filesystem, not
+    /// injected driver failures. Root ignores mode bits, so these skip as root.
+    #[cfg(unix)]
+    mod access {
+        use super::*;
+        use std::os::unix::fs::PermissionsExt;
+
+        fn is_root() -> bool {
+            // SAFETY: geteuid has no preconditions and cannot fail.
+            unsafe { libc::geteuid() == 0 }
+        }
+
+        /// Sets a mode and restores a removable one on drop, so the temp dir
+        /// cleans up even when an assertion fails.
+        struct Mode(PathBuf);
+
+        impl Mode {
+            fn set(path: &Path, mode: u32) -> Self {
+                fs::set_permissions(path, fs::Permissions::from_mode(mode)).unwrap();
+                Self(path.to_path_buf())
+            }
+        }
+
+        impl Drop for Mode {
+            fn drop(&mut self) {
+                let mode = if self.0.is_dir() { 0o755 } else { 0o644 };
+                let _ = fs::set_permissions(&self.0, fs::Permissions::from_mode(mode));
+            }
+        }
+
+        fn run_local(
+            files: &[FileOpEntry],
+            dest: &Path,
+            error_policy: ErrorPolicy,
+            tx: &mpsc::Sender<ServerMessage>,
+            decision_rx: &mut DecisionRx,
+        ) -> Result<(), String> {
+            let (_cancel_tx, cancel_rx) = watch::channel(false);
+            let (_pause_tx, pause_rx) = watch::channel(false);
+            let local = crate::vfs::local::LocalFsDriver;
+            run_file_op_blocking_with_policy(
+                "job-test",
+                &FileOpType::Copy,
+                files,
+                Some(&dest.to_string_lossy()),
+                &ConflictPolicy::Ask,
+                &error_policy,
+                tx,
+                &cancel_rx,
+                &pause_rx,
+                decision_rx,
+                &local,
+                Some(&local),
+                false,
+                &VerificationPolicy::Fail,
+                false,
+                false,
+                Arc::new(AtomicBool::new(false)),
+                Arc::new(AtomicBool::new(false)),
+            )
+        }
+
+        /// Wait for the next decision and return its kind and message.
+        fn next_decision(rx: &mut mpsc::Receiver<ServerMessage>) -> (String, String) {
+            loop {
+                match rx.blocking_recv() {
+                    Some(ServerMessage::JobEvent { event, decision: Some(decision), .. })
+                        if event == "DecisionRequired" =>
+                    {
+                        return (
+                            decision.kind.unwrap_or_default(),
+                            decision.message.unwrap_or_default(),
+                        );
+                    }
+                    Some(_) => {}
+                    None => panic!("job ended without asking for a decision"),
+                }
+            }
+        }
+
+        fn fixture(name: &str) -> (TestDir, PathBuf, PathBuf) {
+            let dir = TestDir::new(name);
+            let tree = dir.path.join("src").join("tree");
+            let dest = dir.path.join("dst");
+            fs::create_dir_all(&tree).unwrap();
+            fs::create_dir_all(&dest).unwrap();
+            fs::write(tree.join("blocked.bin"), "blocked payload\n").unwrap();
+            fs::write(tree.join("good.txt"), "copied payload\n").unwrap();
+            (dir, tree, dest)
+        }
+
+        #[test]
+        fn unreadable_source_prompts_then_skip_copies_the_rest() {
+            if is_root() {
+                eprintln!("[file_ops] skipped: root ignores file modes");
+                return;
+            }
+            let (_dir, tree, dest) = fixture("access-skip");
+            let blocked = tree.join("blocked.bin");
+            let mode = Mode::set(&blocked, 0o000);
+
+            let (tx, mut rx) = mpsc::channel(256);
+            let (decision_tx, mut decision_rx) = mpsc::channel(2);
+            std::thread::scope(|scope| {
+                let job = scope.spawn(|| {
+                    run_local(&[dir_entry("tree", &tree)], &dest, ErrorPolicy::Ask, &tx, &mut decision_rx)
+                });
+                let (kind, message) = next_decision(&mut rx);
+                assert_eq!(kind, "error");
+                assert!(message.contains("blocked.bin"), "{message}");
+                assert!(message.to_lowercase().contains("permission"), "{message}");
+                decision_tx
+                    .blocking_send(DecisionResponse { decision: "skip".into(), apply_to_all: false })
+                    .unwrap();
+                job.join().unwrap().unwrap();
+            });
+
+            let copied = dest.join("tree");
+            assert_eq!(fs::read_to_string(copied.join("good.txt")).unwrap(), "copied payload\n");
+            assert!(!copied.join("blocked.bin").exists(), "skip must not leave a destination file");
+            drop(mode);
+            assert_eq!(fs::read_to_string(&blocked).unwrap(), "blocked payload\n");
+        }
+
+        #[test]
+        fn unreadable_source_retry_succeeds_after_access_is_fixed() {
+            if is_root() {
+                eprintln!("[file_ops] skipped: root ignores file modes");
+                return;
+            }
+            let (_dir, tree, dest) = fixture("access-retry");
+            let blocked = tree.join("blocked.bin");
+            let mode = Mode::set(&blocked, 0o000);
+
+            let (tx, mut rx) = mpsc::channel(256);
+            let (decision_tx, mut decision_rx) = mpsc::channel(2);
+            std::thread::scope(|scope| {
+                let job = scope.spawn(|| {
+                    run_local(&[dir_entry("tree", &tree)], &dest, ErrorPolicy::Ask, &tx, &mut decision_rx)
+                });
+                let (kind, _) = next_decision(&mut rx);
+                assert_eq!(kind, "error");
+                fs::set_permissions(&blocked, fs::Permissions::from_mode(0o644)).unwrap();
+                decision_tx
+                    .blocking_send(DecisionResponse { decision: "retry".into(), apply_to_all: false })
+                    .unwrap();
+                job.join().unwrap().unwrap();
+            });
+            drop(mode);
+
+            let copied = dest.join("tree");
+            assert_eq!(fs::read_to_string(copied.join("blocked.bin")).unwrap(), "blocked payload\n");
+            assert_eq!(fs::read_to_string(copied.join("good.txt")).unwrap(), "copied payload\n");
+        }
+
+        #[test]
+        fn read_only_destination_with_skip_policy_records_every_file() {
+            if is_root() {
+                eprintln!("[file_ops] skipped: root ignores file modes");
+                return;
+            }
+            let (_dir, tree, dest) = fixture("access-readonly-dest");
+            let target = dest.join("tree");
+            fs::create_dir_all(&target).unwrap();
+            let mode = Mode::set(&target, 0o555);
+
+            let (tx, mut rx) = mpsc::channel(256);
+            let (_decision_tx, mut decision_rx) = mpsc::channel(2);
+            run_local(&[dir_entry("tree", &tree)], &dest, ErrorPolicy::Skip, &tx, &mut decision_rx)
+                .unwrap();
+            drop(mode);
+
+            let events = collect_events(&mut rx);
+            assert_eq!(events.error_prompts, 0);
+            assert_eq!(events.skipped.len(), 2);
+            assert!(events.skipped.iter().all(|item| !item.notify));
+            assert!(events
+                .skipped
+                .iter()
+                .all(|item| item.reason.to_lowercase().contains("permission")));
+            assert!(fs::read_dir(&target).unwrap().next().is_none());
+            assert!(tree.join("blocked.bin").exists() && tree.join("good.txt").exists());
+        }
+    }
+
+    #[test]
+    fn move_rename_error_skip_keeps_source_and_copies_nothing() {
+        let dir = TestDir::new("move-rename-skip");
+        let src_dir = dir.path.join("src");
+        let dest = dir.path.join("dst");
+        fs::create_dir_all(&src_dir).unwrap();
+        fs::create_dir_all(&dest).unwrap();
+        let file = src_dir.join("keep.txt");
+        fs::write(&file, "keep").unwrap();
+
+        let driver = FaultyDriver::renames_fail();
+        let (tx, mut rx) = mpsc::channel(64);
+        let (_decision_tx, mut decision_rx) = mpsc::channel(2);
+        run_with_driver(
+            FileOpType::Move,
+            &[file_entry("keep.txt", &file, 4)],
+            Some(&dest.to_string_lossy()),
+            ConflictPolicy::Ask,
+            ErrorPolicy::Skip,
+            &tx,
+            &mut decision_rx,
+            &driver,
+            Arc::new(AtomicBool::new(false)),
+        )
+        .unwrap();
+
+        assert_eq!(fs::read_to_string(&file).unwrap(), "keep");
+        assert!(!dest.join("keep.txt").exists());
+        assert_eq!(collect_events(&mut rx).skipped.len(), 1);
+    }
+
+    #[test]
+    fn error_before_first_write_skip_keeps_overwritten_destination() {
+        let dir = TestDir::new("skip-keeps-destination");
+        let src_dir = dir.path.join("src");
+        let dest = dir.path.join("dst");
+        fs::create_dir_all(&src_dir).unwrap();
+        fs::create_dir_all(&dest).unwrap();
+        let file = src_dir.join("report.pdf");
+        fs::write(&file, "new").unwrap();
+        fs::write(dest.join("report.pdf"), "existing").unwrap();
+
+        let driver = FaultyDriver::fail_read(&file);
+        let (tx, _rx) = mpsc::channel(64);
+        let (_decision_tx, mut decision_rx) = mpsc::channel(2);
+        run_with_driver(
+            FileOpType::Copy,
+            &[file_entry("report.pdf", &file, 3)],
+            Some(&dest.to_string_lossy()),
+            ConflictPolicy::Overwrite,
+            ErrorPolicy::Skip,
+            &tx,
+            &mut decision_rx,
+            &driver,
+            Arc::new(AtomicBool::new(false)),
+        )
+        .unwrap();
+
+        assert_eq!(fs::read_to_string(dest.join("report.pdf")).unwrap(), "existing");
+    }
+
+    #[test]
+    fn conflict_skip_with_apply_to_all_is_silent() {
+        let dir = TestDir::new("conflict-skip-all-silent");
+        let src_dir = dir.path.join("src");
+        let dest = dir.path.join("dst");
+        fs::create_dir_all(&src_dir).unwrap();
+        fs::create_dir_all(&dest).unwrap();
+        let mut entries = Vec::new();
+        for name in ["a.txt", "b.txt", "c.txt"] {
+            fs::write(src_dir.join(name), "new").unwrap();
+            fs::write(dest.join(name), "old").unwrap();
+            entries.push(file_entry(name, &src_dir.join(name), 3));
+        }
+
+        let driver = FaultyDriver::healthy();
+        let (tx, mut rx) = mpsc::channel(64);
+        let (decision_tx, mut decision_rx) = mpsc::channel(2);
+        decision_tx
+            .try_send(DecisionResponse { decision: "skip".to_string(), apply_to_all: true })
+            .unwrap();
+        run_with_driver(
+            FileOpType::Copy,
+            &entries,
+            Some(&dest.to_string_lossy()),
+            ConflictPolicy::Ask,
+            ErrorPolicy::Ask,
+            &tx,
+            &mut decision_rx,
+            &driver,
+            Arc::new(AtomicBool::new(false)),
+        )
+        .unwrap();
+
+        let events = collect_events(&mut rx);
+        assert_eq!(events.conflict_prompts, 1);
+        assert_eq!(events.skipped.len(), 3);
+        assert!(events.skipped.iter().all(|item| !item.notify));
+        assert_eq!(fs::read_to_string(dest.join("c.txt")).unwrap(), "old");
+    }
+
+    #[test]
+    fn delete_folder_progress_never_exceeds_total() {
+        let dir = TestDir::new("delete-progress");
+        let folder = dir.path.join("folder");
+        fs::create_dir_all(&folder).unwrap();
+        for name in ["1", "2", "3"] {
+            fs::write(folder.join(name), name).unwrap();
+        }
+
+        let driver = FaultyDriver::healthy();
+        let (tx, mut rx) = mpsc::channel(64);
+        let (_decision_tx, mut decision_rx) = mpsc::channel(2);
+        run_with_driver(
+            FileOpType::Delete,
+            &[dir_entry("folder", &folder)],
+            None,
+            ConflictPolicy::Ask,
+            ErrorPolicy::Ask,
+            &tx,
+            &mut decision_rx,
+            &driver,
+            Arc::new(AtomicBool::new(false)),
+        )
+        .unwrap();
+
+        assert!(!folder.exists());
+        let mut last = None;
+        while let Ok(message) = rx.try_recv() {
+            if let ServerMessage::JobEvent { progress: Some(progress), .. } = message {
+                assert!(progress.completed_files <= progress.total_files);
+                last = Some((progress.completed_files, progress.total_files));
+            }
+        }
+        assert_eq!(last, Some((3, 3)));
+    }
+
+    #[test]
+    fn error_policy_skip_never_prompts() {
+        let dir = TestDir::new("error-policy-skip");
+        let src_dir = dir.path.join("src");
+        let dest = dir.path.join("dst");
+        fs::create_dir_all(&src_dir).unwrap();
+        fs::create_dir_all(&dest).unwrap();
+        let first = src_dir.join("first.bin");
+        let second = src_dir.join("second.bin");
+        fs::write(&first, "first").unwrap();
+        fs::write(&second, "second").unwrap();
+
+        let driver = FaultyDriver::all_reads_fail();
+        let (tx, mut rx) = mpsc::channel(64);
+        let (_decision_tx, mut decision_rx) = mpsc::channel(2);
+
+        run_with_driver(
+            FileOpType::Copy,
+            &[
+                file_entry("first.bin", &first, 5),
+                file_entry("second.bin", &second, 6),
+            ],
+            Some(&dest.to_string_lossy()),
+            ConflictPolicy::Overwrite,
+            ErrorPolicy::Skip,
+            &tx,
+            &mut decision_rx,
+            &driver,
+            Arc::new(AtomicBool::new(false)),
+        )
+        .unwrap();
+
+        let events = collect_events(&mut rx);
+        assert_eq!(events.error_prompts, 0);
+        assert_eq!(events.skipped.len(), 2);
+        assert!(events.skipped.iter().all(|item| !item.notify));
+    }
+
+    #[test]
+    fn delete_skips_failing_child_and_keeps_its_parents() {
+        let dir = TestDir::new("delete-skip-child");
+        let folder = dir.path.join("folder");
+        fs::create_dir_all(&folder).unwrap();
+        let good = folder.join("good.txt");
+        let bad = folder.join("bad.txt");
+        fs::write(&good, "good").unwrap();
+        fs::write(&bad, "bad").unwrap();
+
+        let driver = FaultyDriver::fail_remove(&bad);
+        let (tx, mut rx) = mpsc::channel(64);
+        let (decision_tx, mut decision_rx) = mpsc::channel(2);
+        respond(&decision_tx, "skip");
+
+        run_with_driver(
+            FileOpType::Delete,
+            &[dir_entry("folder", &folder)],
+            None,
+            ConflictPolicy::Overwrite,
+            ErrorPolicy::Ask,
+            &tx,
+            &mut decision_rx,
+            &driver,
+            Arc::new(AtomicBool::new(false)),
+        )
+        .unwrap();
+
+        assert!(folder.exists());
+        assert!(!good.exists());
+        assert!(bad.exists());
+        let events = collect_events(&mut rx);
+        assert_eq!(events.error_prompts, 1);
+        assert_eq!(events.skipped.len(), 1);
+        assert_eq!(events.skipped[0].path, bad.to_string_lossy());
+        assert_eq!(events.skipped[0].op_type, "delete");
+        assert!(events.skipped[0].notify);
+    }
+
+    #[test]
+    fn move_conflict_skipped_child_keeps_source() {
+        let dir = TestDir::new("move-conflict-skip");
+        let src_dir = dir.path.join("src");
+        let dest = dir.path.join("dst");
+        fs::create_dir_all(src_dir.join("folder")).unwrap();
+        fs::create_dir_all(dest.join("folder")).unwrap();
+        fs::write(src_dir.join("folder/keep.txt"), "new").unwrap();
+        fs::write(dest.join("folder/keep.txt"), "old").unwrap();
+        let folder = src_dir.join("folder");
+
+        let driver = FaultyDriver::healthy();
+        let (tx, mut rx) = mpsc::channel(64);
+        let (decision_tx, mut decision_rx) = mpsc::channel(2);
+        respond(&decision_tx, "skip");
+
+        run_with_driver(
+            FileOpType::Move,
+            &[dir_entry("folder", &folder)],
+            Some(&dest.to_string_lossy()),
+            ConflictPolicy::Ask,
+            ErrorPolicy::Ask,
+            &tx,
+            &mut decision_rx,
+            &driver,
+            Arc::new(AtomicBool::new(false)),
+        )
+        .unwrap();
+
+        assert_eq!(
+            fs::read_to_string(folder.join("keep.txt")).unwrap(),
+            "new"
+        );
+        assert_eq!(
+            fs::read_to_string(dest.join("folder/keep.txt")).unwrap(),
+            "old"
+        );
+        let events = collect_events(&mut rx);
+        assert_eq!(events.conflict_prompts, 1);
+        assert_eq!(events.skipped.len(), 1);
+        assert_eq!(events.skipped[0].path, folder.join("keep.txt").to_string_lossy());
+        assert!(events.skipped[0].notify);
+    }
+
+    #[test]
+    fn move_progress_skipped_file_keeps_source() {
+        let dir = TestDir::new("move-progress-skip");
+        let src_dir = dir.path.join("src");
+        let dest = dir.path.join("dst");
+        fs::create_dir_all(src_dir.join("folder")).unwrap();
+        fs::create_dir_all(&dest).unwrap();
+        let file = src_dir.join("folder/skipped.txt");
+        fs::write(&file, "payload").unwrap();
+
+        let driver = FaultyDriver::healthy();
+        let (tx, mut rx) = mpsc::channel(64);
+        let (_decision_tx, mut decision_rx) = mpsc::channel(2);
+
+        run_with_driver(
+            FileOpType::Move,
+            &[dir_entry("folder", &src_dir.join("folder"))],
+            Some(&dest.to_string_lossy()),
+            ConflictPolicy::Overwrite,
+            ErrorPolicy::Ask,
+            &tx,
+            &mut decision_rx,
+            &driver,
+            Arc::new(AtomicBool::new(true)),
+        )
+        .unwrap();
+
+        assert!(file.exists());
+        assert!(!dest.join("folder/skipped.txt").exists());
+        let events = collect_events(&mut rx);
+        assert_eq!(events.error_prompts, 0);
+        assert_eq!(events.skipped.len(), 1);
+        assert!(events.skipped[0].notify);
+    }
+
+    #[test]
+    fn move_error_skipped_child_keeps_source() {
+        let dir = TestDir::new("move-error-skip");
+        let src_dir = dir.path.join("src");
+        let dest = dir.path.join("dst");
+        fs::create_dir_all(src_dir.join("folder")).unwrap();
+        fs::create_dir_all(&dest).unwrap();
+        let good = src_dir.join("folder/good.txt");
+        let bad = src_dir.join("folder/bad.txt");
+        fs::write(&good, "good").unwrap();
+        fs::write(&bad, "bad").unwrap();
+
+        let driver = FaultyDriver::fail_read(&bad);
+        let (tx, mut rx) = mpsc::channel(64);
+        let (decision_tx, mut decision_rx) = mpsc::channel(2);
+        respond(&decision_tx, "skip");
+
+        run_with_driver(
+            FileOpType::Move,
+            &[dir_entry("folder", &src_dir.join("folder"))],
+            Some(&dest.to_string_lossy()),
+            ConflictPolicy::Overwrite,
+            ErrorPolicy::Ask,
+            &tx,
+            &mut decision_rx,
+            &driver,
+            Arc::new(AtomicBool::new(false)),
+        )
+        .unwrap();
+
+        assert!(bad.exists());
+        assert!(!dest.join("folder/bad.txt").exists());
+        assert!(dest.join("folder/good.txt").exists());
+        let events = collect_events(&mut rx);
+        assert_eq!(events.error_prompts, 1);
+        assert_eq!(events.skipped.len(), 1);
+        assert_eq!(events.skipped[0].path, bad.to_string_lossy());
+    }
+
+    #[test]
+    fn full_move_removes_the_source_folder_after_copy_path() {
+        let dir = TestDir::new("move-full");
+        let src_dir = dir.path.join("src");
+        let dest = dir.path.join("dst");
+        fs::create_dir_all(src_dir.join("folder/nested")).unwrap();
+        fs::create_dir_all(&dest).unwrap();
+        fs::write(src_dir.join("folder/top.txt"), "top").unwrap();
+        fs::write(src_dir.join("folder/nested/deep.txt"), "deep").unwrap();
+        let folder = src_dir.join("folder");
+
+        let driver = FaultyDriver::healthy();
+        let (tx, mut rx) = mpsc::channel(64);
+        let (_decision_tx, mut decision_rx) = mpsc::channel(2);
+
+        run_with_driver(
+            FileOpType::Move,
+            &[dir_entry("folder", &folder)],
+            Some(&dest.to_string_lossy()),
+            ConflictPolicy::Overwrite,
+            ErrorPolicy::Ask,
+            &tx,
+            &mut decision_rx,
+            &driver,
+            Arc::new(AtomicBool::new(false)),
+        )
+        .unwrap();
+
+        assert!(!folder.exists());
+        assert_eq!(
+            fs::read_to_string(dest.join("folder/top.txt")).unwrap(),
+            "top"
+        );
+        assert_eq!(
+            fs::read_to_string(dest.join("folder/nested/deep.txt")).unwrap(),
+            "deep"
+        );
+        let events = collect_events(&mut rx);
+        assert_eq!(events.error_prompts, 0);
+        assert!(events.skipped.is_empty());
+    }
+
+    #[test]
+    fn move_skips_a_source_removal_failure_without_deleting_the_destination() {
+        let dir = TestDir::new("move-remove-source-failure");
+        let src = dir.path.join("source.txt");
+        let dest = dir.path.join("dst");
+        fs::write(&src, "payload").unwrap();
+        fs::create_dir_all(&dest).unwrap();
+
+        let driver = FaultyDriver::fail_remove(&src);
+        let (tx, mut rx) = mpsc::channel(64);
+        let (decision_tx, mut decision_rx) = mpsc::channel(2);
+        respond(&decision_tx, "skip");
+
+        run_with_driver(
+            FileOpType::Move,
+            &[file_entry("source.txt", &src, 7)],
+            Some(&dest.to_string_lossy()),
+            ConflictPolicy::Overwrite,
+            ErrorPolicy::Ask,
+            &tx,
+            &mut decision_rx,
+            &driver,
+            Arc::new(AtomicBool::new(false)),
+        )
+        .unwrap();
+
+        assert!(src.exists());
+        assert_eq!(
+            fs::read_to_string(dest.join("source.txt")).unwrap(),
+            "payload"
+        );
+        let events = collect_events(&mut rx);
+        assert_eq!(events.error_prompts, 1);
+        assert_eq!(events.skipped.len(), 1);
+        assert!(events.skipped[0].path.ends_with("source.txt"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn delete_removes_symlink_to_folder_without_following_it() {
+        use std::os::unix::fs::symlink;
+
+        let dir = TestDir::new("delete-symlink-folder");
+        let folder = dir.path.join("folder");
+        let target = dir.path.join("target");
+        fs::create_dir_all(&folder).unwrap();
+        fs::create_dir_all(&target).unwrap();
+        fs::write(target.join("kept.txt"), "kept").unwrap();
+        symlink(&target, folder.join("link")).unwrap();
+
+        let driver = crate::vfs::local::LocalFsDriver;
+        let (tx, mut rx) = mpsc::channel(64);
+        let (_decision_tx, mut decision_rx) = mpsc::channel(2);
+
+        run_with_driver(
+            FileOpType::Delete,
+            &[dir_entry("folder", &folder)],
+            None,
+            ConflictPolicy::Overwrite,
+            ErrorPolicy::Ask,
+            &tx,
+            &mut decision_rx,
+            &driver,
+            Arc::new(AtomicBool::new(false)),
+        )
+        .unwrap();
+
+        assert!(!folder.exists());
+        assert_eq!(fs::read_to_string(target.join("kept.txt")).unwrap(), "kept");
+        assert!(collect_events(&mut rx).skipped.is_empty());
     }
 }
