@@ -80,7 +80,8 @@ Search is a full-featured file search capability that operates as a **job-based 
 
 - Case-insensitive text search within file contents
 - Chunked reading (64 KiB buffers) with boundary carry-over
-- Only applied to files, not directories
+- When a content query is set, only regular files can match; directories are
+  still traversed but are never returned as results
 - Performance-optimized with early exit on first match
 
 ### Multi-Path Search

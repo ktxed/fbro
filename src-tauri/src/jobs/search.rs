@@ -663,17 +663,13 @@ fn read_dir_entries(
             continue;
         }
 
-        // Content filter (only for files)
-        if !is_dir {
-            if let Some(ref query) = content_query_lower {
-                // Pipes, sockets, devices, and symlinks are not regular content
-                // files. Opening them may block waiting for an external writer.
-                if !meta.is_file() {
-                    continue;
-                }
-                if !file_contains_query(&full_path, query, cancel) {
-                    continue;
-                }
+        // Content filter: only regular files can contain text. Directories are
+        // still traversed (pushed above) but never match a content query.
+        // Pipes, sockets, devices, and symlinks are skipped too — opening them
+        // may block waiting for an external writer.
+        if let Some(ref query) = content_query_lower {
+            if !meta.is_file() || !file_contains_query(&full_path, query, cancel) {
+                continue;
             }
         }
 
@@ -1078,6 +1074,24 @@ mod tests {
         let (event, progress) = terminal(&messages);
         assert_eq!(event, "Completed");
         assert_eq!(progress.scanned, 2);
+        assert_eq!(progress.matched, 1);
+        assert_eq!(results, 1);
+    }
+
+    #[tokio::test]
+    async fn content_search_never_returns_directories() {
+        let dir = TempDir::new();
+        // `a.dir` matches `*.*` by name but cannot contain text; it must still
+        // be traversed so the matching file inside it is found.
+        std::fs::create_dir(dir.0.join("a.dir")).unwrap();
+        std::fs::write(dir.0.join("a.dir").join("x.txt"), "a needle here").unwrap();
+        std::fs::write(dir.0.join("b.txt"), "nothing").unwrap();
+        let mut search = params(&dir.0, SearchDepth::Unlimited);
+        search.file_mask = Some("*.*".into());
+        search.content_query = Some("needle".into());
+        let (messages, results) = search_messages(search, false).await;
+        let (event, progress) = terminal(&messages);
+        assert_eq!(event, "Completed");
         assert_eq!(progress.matched, 1);
         assert_eq!(results, 1);
     }
