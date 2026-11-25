@@ -1,4 +1,4 @@
-//! One default fbro per user, on platforms that opt in (currently macOS).
+//! One default fbro per user, on platforms that opt in (macOS and Linux).
 //!
 //! The bundled `.app` and `npm run tauri dev` share the bundle identifier and
 //! `~/.config/fbro`. Run together, the second copy cannot bind the WebSocket

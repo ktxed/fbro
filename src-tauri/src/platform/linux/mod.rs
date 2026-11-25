@@ -1,6 +1,7 @@
 pub mod appearance;
 pub mod thumbnail;
 mod notifications;
+mod single_instance;
 pub mod udisks2;
 pub mod volume_watcher;
 
@@ -57,6 +58,14 @@ fn decode_proc_mount_field(field: &str) -> String {
 }
 
 impl Platform for LinuxPlatform {
+    fn single_instance_plugin(&self) -> Option<tauri::plugin::TauriPlugin<tauri::Wry>> {
+        Some(single_instance::plugin())
+    }
+
+    fn ask_already_running(&self) -> super::AlreadyRunningChoice {
+        single_instance::ask_already_running()
+    }
+
     fn supports_os_notifications(&self) -> bool { true }
 
     fn os_notification_platform(&self) -> &'static str { "linux" }

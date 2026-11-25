@@ -212,6 +212,12 @@ default apps and "open with" enumeration, `xdg-open`/`gio open` for fire-and-
 forget launches, `xclip`/`wl-copy` (selected at runtime) for the clipboard,
 `/proc/mounts` for the fallback volume list.
 
+Single instance: `tauri-plugin-single-instance` (D-Bus name keyed by the
+bundle id) hands a later launch over to the running window. The prompt is a
+modal GTK `MessageDialog` ("Show Running fbro" on Enter, "Quit" on Escape)
+shown before Tauri starts, after `gtk::init()`. Without a session bus the
+plugin cannot register; the default WebSocket port check still catches it.
+
 ### 3.2 `MacOSPlatform`
 
 Home from `$HOME` (which the OS always sets). Native APIs: `NSWorkspace` for
