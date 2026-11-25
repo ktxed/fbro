@@ -92,8 +92,12 @@ Make sure `~/.local/bin` is on your `PATH`.
 
 ## Build from source
 
-You need Node.js 22.19 or newer, stable Rust, and the
+You need Node.js 22.19 or newer, Rust installed with
+[rustup](https://rustup.rs/), and the
 [Tauri 2 prerequisites](https://v2.tauri.app/start/prerequisites/) for your OS.
+rustup installs the pinned Rust version on its own. If you use
+[mise](https://mise.jdx.dev), run `mise install` in the clone to get the
+pinned Node.js version.
 
 ```sh
 git clone https://github.com/ktxed/fbro.git

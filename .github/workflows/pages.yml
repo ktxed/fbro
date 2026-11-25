@@ -9,6 +9,8 @@ on:
     paths:
       - "site/**"
       - ".github/workflows/pages.yml"
+      - "mise.toml"
+      - "mise.lock"
   workflow_dispatch:
 
 permissions:
@@ -25,15 +27,15 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: jdx/mise-action@v5
         with:
-          node-version: lts/*
-          cache: npm
-          cache-dependency-path: site/package-lock.json
-      - run: npm ci
-        working-directory: site
-      - run: npm run build
-        working-directory: site
+          version: 2026.11.14
+          install_args: node
+      - uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: npm-${{ runner.os }}-${{ hashFiles('site/package-lock.json') }}
+      - run: mise run ci:site
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site/dist

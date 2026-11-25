@@ -42,6 +42,10 @@ keyboard, or modal behaviour **updates the matching spec in the same commit**.
 
 ## Commands
 
+- Toolchain: Rust is pinned in `rust-toolchain.toml`; Node, gitleaks and
+  cargo-audit in `mise.toml` (+ `mise.lock`), installed with `mise install`.
+  Bump versions there, never in workflow files. CI runs the `mise.toml` tasks
+  (`mise run ci:test`, `ci:site`, `secrets`); `mise run audit` audits both Rust lockfiles.
 - Dev: `npm run tauri dev` · with local-FS spy: `npm run spy` + `tools/lfs-spy`
 - Frontend type check + build: `npm run build` (`tsc` is the only frontend check)
 - Clean frontend output (`dist`, Vite cache) and Cargo targets: `npm run clean`

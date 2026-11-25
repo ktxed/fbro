@@ -46,14 +46,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      # Node comes from mise.toml / mise.lock; only the mise binary is pinned here.
+      # tauri-action picks node and cargo up from PATH.
+      - uses: jdx/mise-action@v5
         with:
-          node-version: lts/*
-          cache: npm
+          version: 2026.11.14
+          install_args: node
 
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin' || '' }}
+      # Installs the toolchain pinned in rust-toolchain.toml.
+      - run: rustup toolchain install
+
+      - name: Add the Apple Silicon target
+        if: matrix.os == 'macos'
+        run: rustup target add aarch64-apple-darwin
 
       - name: Install Linux build dependencies
         if: matrix.os == 'linux'

@@ -29,7 +29,9 @@ Built with [Tauri](https://tauri.app/) (Rust backend + React frontend). The back
 
 ## Development
 
-Requirements: [Node.js](https://nodejs.org/) 22.19 or newer, current stable [Rust](https://rustup.rs/), and [Tauri 2 system deps](https://v2.tauri.app/start/prerequisites/) for your OS.
+Requirements: [Node.js](https://nodejs.org/) 22.19 or newer, [Rust](https://rustup.rs/) via rustup, and [Tauri 2 system deps](https://v2.tauri.app/start/prerequisites/) for your OS.
+
+The versions CI uses are pinned: Rust in `rust-toolchain.toml` (rustup picks it up automatically) and Node plus dev tools in `mise.toml`. With [mise](https://mise.jdx.dev), run `mise install` to get the same versions locally.
 
 ```bash
 npm install

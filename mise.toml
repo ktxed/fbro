@@ -1,0 +1,37 @@
+# Pinned dev and CI tools. `mise install` sets them up; `mise up --bump`
+# updates them on purpose. Rust is pinned in rust-toolchain.toml (rustup).
+min_version = "2025.1.0"
+
+[tools]
+node = "24.14.0"
+gitleaks = "8.30.1"
+# Not in the mise registry; built with cargo (or cargo-binstall when present).
+# Local only — CI does not run the audit.
+"cargo:cargo-audit" = "0.23.0"
+
+[tasks."ci:test"]
+description = "Frontend build and Rust tests, as run by CI"
+run = [
+  "npm ci",
+  "node scripts/check-version.mjs",
+  "npm run test:build-info",
+  "node --test tests/check-version.test.mjs",
+  "npm run build",
+  "cargo test --manifest-path src-tauri/Cargo.toml",
+]
+
+[tasks."ci:site"]
+description = "Build the user guide, as run by CI"
+dir = "site"
+run = ["npm ci", "npm run build"]
+
+[tasks.secrets]
+description = "Scan git history for secrets"
+run = "gitleaks detect --source . --redact --no-banner --exit-code 1"
+
+[tasks.audit]
+description = "Audit both Rust lockfiles"
+run = [
+  "cargo audit --file src-tauri/Cargo.lock",
+  "cargo audit --file tools/lfs-spy/Cargo.lock",
+]

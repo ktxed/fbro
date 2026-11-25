@@ -37,13 +37,16 @@ navigation). Rust tests
 cover backend behavior and adapters;
 the last command checks the optional local-filesystem spy helper.
 
-For dependency changes, also run `npm audit`. With `cargo-audit` installed,
-audit both Rust lockfiles:
+For dependency changes, also run `npm audit` and audit both Rust lockfiles.
+`mise install` provides `cargo-audit`; `mise run audit` runs both:
 
 ```bash
 cargo audit --file src-tauri/Cargo.lock
 cargo audit --file tools/lfs-spy/Cargo.lock
 ```
+
+CI runs the same steps as `mise run ci:test`, `mise run ci:site`, and
+`mise run secrets`, so you can reproduce a CI failure locally.
 
 ## Linux smoke tests
 

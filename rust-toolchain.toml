@@ -1,0 +1,6 @@
+# The Rust pin for the app, tools/lfs-spy, and CI. Read by rustup directly,
+# so it applies with or without mise. Bump it here, never in workflow files.
+[toolchain]
+channel = "1.94.0"
+components = ["rustfmt", "clippy"]
+profile = "minimal"
