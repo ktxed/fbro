@@ -210,6 +210,9 @@ pub(crate) fn build_state_snapshot(
                         .general
                         .fedup_default_ignore_patterns
                         .clone(),
+                    search_ignore_patterns: state.settings.general.search_ignore_patterns.clone(),
+                    search_ignore_patterns_default:
+                        crate::state::settings::default_search_ignore_patterns(),
                     compare_max_file_size_mb: state.settings.general.compare_max_file_size_mb,
                     compare_differ_mode: state
                         .settings

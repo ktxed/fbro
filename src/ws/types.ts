@@ -292,6 +292,8 @@ export interface SearchParams {
   timeOp?: "interval" | "before" | "after" | "relative";
   timeValue?: string;
   timeTo?: string;
+  /** `;`-joined ignore list the search used; null when it ignored nothing. */
+  ignorePatterns?: string | null;
 }
 
 export interface SearchResult {
@@ -849,6 +851,10 @@ export interface GeneralSettings {
   sevenzipResolvedPath: string;
   /** Newline-separated wildcard names Fedup Bro ignores when default ignores are enabled. */
   fedupDefaultIgnorePatterns: string;
+  /** Last ignore list used by a search; the Search dialog's default. */
+  searchIgnorePatterns: string;
+  /** Read-only built-in ignore list (Search dialog reset). */
+  searchIgnorePatternsDefault: string;
   compareMaxFileSizeMb: number;
   /** "internal" | "external" | "auto" */
   compareDifferMode: string;

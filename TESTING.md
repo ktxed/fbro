@@ -135,6 +135,7 @@ FBRO_E2E_REMOTE_ONLY=1 GDK_BACKEND=wayland npm run e2e:smoke:local_debug
 | `FBRO_E2E_HASH_CHECK_ONLY=1` | Check hashes |
 | `FBRO_E2E_HASH_GENERATE_ONLY=1` | Generate hashes, followed by Check hashes |
 | `FBRO_E2E_SEARCH_ACTIVITY_ONLY=1` | Search progress, background jobs, and cancellation |
+| `FBRO_E2E_SEARCH_IGNORE_ONLY=1` | Search ignore list: default skips, persistence, reset, toggle off, Tab order |
 | `FBRO_E2E_SEARCH_ACTIONS_ONLY=1` | Search-result actions, duplicate cursor/selection preservation on reconnect, and focus |
 | `FBRO_E2E_REMOTE_ONLY=1` | Sharing, pairing, browsing, transfers, and cancellation |
 
@@ -181,7 +182,7 @@ coverage reference.
 | Fedup | `fedup.mjs` | Global-selection input, default ignores, case-insensitive includes, and custom excludes |
 | Hashes | `hash-check.mjs`, `hash-generate.mjs` | Discovery, stale targets, options, matching/malformed sidecars, skip/overwrite, reports/toasts, progress, background/reopen, cancellation, and preserving existing sidecars |
 | Archives | `archive.mjs` | Enter a ZIP, copy a file out, and verify its content |
-| Search | `search.mjs` | Activity without hits, inspected counts, cancellation, duplicate-name hints and viewer paths, toolbar/shortcut Copy with cursor and selection targets, repeated-filename exclusion/suffixes via inline and bottom actions, background copies, per-dialog defaults, both themes, Jump to location, Open With, duplicate cursor/selection preservation on reconnect, stale/deleted targets, modal keys, and date/size filters |
+| Search | `search.mjs` | Activity without hits, inspected counts, cancellation, duplicate-name hints and viewer paths, toolbar/shortcut Copy with cursor and selection targets, repeated-filename exclusion/suffixes via inline and bottom actions, background copies, per-dialog defaults, the ignore list (default skips, last list persisted, reset, toggle off, Tab order), both themes, Jump to location, Open With, duplicate cursor/selection preservation on reconnect, stale/deleted targets, modal keys, and date/size filters |
 | Remote | `remote.mjs`, `job-files.mjs`, `remote-journal.mjs` | Folder suggestions and typed shares, validation/history, unsharing, pairing, read-only browsing, viewer full-image/partial-range outgoing job idle completion and resume while connected, job file keyboard expansion/navigation across pages, Tab/Shift+Tab through active-file Copy and Jump before adjacent jobs, copying real paths, revealing files and focus return in both schemes, copying, thumbnails, integrity, cancellation on both peers, a fresh transfer after cancellation, incoming/outgoing connection and explicit disconnection notification history, and durable Journal VFS payloads on both peers: correlated pairing/connection/job lifecycles, pairing revocation on both peers, every viewer idle interval under a stable operation UUID, 28-file backend path snapshots, actual bytes, cancellation, Sync Bro and serving manifest outcomes, secret-field exclusion, and retained records after clearing notification history with OS delivery disabled |
 
 Several UI flows check both `fbro-dark` and `daylight`. Modal tests sample common
@@ -412,7 +413,7 @@ cargo test --manifest-path src-tauri/Cargo.toml --locked patch_tests
 | `remote::` | Share validation/persistence, SFTP root resolution, transfer isolation, cancellation, and late lifecycle events |
 | `vfs::sftp::tests` | SFTP reads/cancellation and paired Ed25519 host-key pinning, including rejection of mismatched keys and certificates |
 | `jobs::file_ops::tests` | File-operation and remote-transfer cleanup/cancellation |
-| `jobs::search::tests` | Activity/counts, estimates, roots/depth, large directory backlogs, permission errors, FIFO avoidance, and cancellation |
+| `jobs::search::tests` | Activity/counts, estimates, roots/depth, ignore list (not returned/traversed, roots exempt, case-insensitive globs), content search excluding directories, large directory backlogs, permission errors, FIFO avoidance, and cancellation |
 | `search_navigation_tests` | Exact source/path resolution, result ordering, and missing results |
 | `copy_duplicates`, `search_copy_duplicates`, `copy_duplicate_args_tests` | Repeated search filenames, exact source identity, exclusion/suffixes, collisions, folder passthrough, defaults, actual copy contents, and matching dry-run destinations |
 | `git::` | Repository operations, target/driver validation, native-path mapping, and replies |

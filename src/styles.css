@@ -5763,7 +5763,76 @@ textarea,
 /* File mask */
 
 .search-modal__mask-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
   margin-bottom: 6px;
+}
+
+.search-modal__mask-cell {
+  min-width: 0;
+}
+
+/* Ignore list, right half of the file-name row */
+
+.search-modal__ignore {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.search-modal__ignore-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  font-size: var(--font-size);
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.search-modal__ignore-toggle input[type="checkbox"] {
+  cursor: pointer;
+  accent-color: var(--accent);
+}
+
+.search-modal__ignore-input {
+  flex: 1;
+  min-width: 0;
+  text-overflow: ellipsis;
+}
+
+.search-modal__ignore-input:disabled {
+  opacity: 0.5;
+}
+
+.search-modal__ignore-reset {
+  appearance: none;
+  font: inherit;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px;
+  background: transparent;
+  color: var(--text-dim);
+  border: 1px solid transparent;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.search-modal__ignore-reset:hover:not(:disabled),
+.search-modal__ignore-reset:focus-visible {
+  color: var(--text);
+  border-color: var(--border-focus);
+  outline: none;
+}
+
+.search-modal__ignore-reset:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 
 .search-modal__mask-input {

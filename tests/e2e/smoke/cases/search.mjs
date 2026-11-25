@@ -151,6 +151,75 @@ export async function runSearchActivityFlow(browser, observer) {
   }
 }
 
+/** The ignore list beside the mask skips names, persists, and can be turned off. */
+export async function runSearchIgnoreFlow(browser, observer) {
+  const root = backendPath("a", "src", "search-ignore");
+  const fixture = hostPath(root);
+  fs.rmSync(fixture, { recursive: true, force: true });
+  for (const folder of ["node_modules/pkg", "src"]) {
+    fs.mkdirSync(path.join(fixture, folder), { recursive: true });
+    fs.writeFileSync(path.join(fixture, folder, "ignore-hit.txt"), "x\n");
+  }
+  const general = () => observer.state.settings?.general ?? {};
+  const previous = general().searchIgnorePatterns;
+  const summary = async (expected) => {
+    const element = await browser.$('[data-testid="search-dialog"] [data-testid="search-summary"]');
+    await browser.waitUntil(async () => (await element.isExisting()) && (await element.getText()).startsWith(expected), {
+      timeout: 10_000, timeoutMsg: `Ignore search summary did not start with "${expected}"`,
+    });
+  };
+  const run = async (configure) => {
+    const input = await openSearch(browser);
+    await input.setValue("ignore-hit.txt");
+    await configure();
+    await clickCommand(browser, "search.start");
+  };
+  try {
+    observer.navigatePanelToPath("left", root);
+    await observer.waitForPanelPath("left", root);
+    await observer.waitForPanelNotShadow("left");
+    await reloadBrowserApp(browser, "fbro-a");
+
+    // Defaults: node_modules is skipped. Tab order: mask → toggle → list → reset.
+    await run(async () => {
+      const value = await (await browser.$('[data-testid="search-ignore-input"]')).getValue();
+      if (!value.split(";").includes("node_modules")) throw new Error(`Default ignore list lacks node_modules: ${value}`);
+      await browser.keys("Tab");
+      await expectModalFocus(browser, '[data-testid="search-ignore-toggle"]', "ignore toggle follows the mask");
+      await browser.keys("Tab");
+      await expectModalFocus(browser, '[data-testid="search-ignore-input"]', "ignore list follows the toggle");
+      await browser.keys("Tab");
+      await expectModalFocus(browser, '[data-testid="search-ignore-reset"]', "reset follows the ignore list");
+    });
+    await summary("1 result found");
+    await clickCommand(browser, "search.close");
+
+    // A custom list is used and becomes the backend default.
+    await run(async () => {
+      await (await browser.$('[data-testid="search-ignore-input"]')).setValue("src");
+    });
+    await summary("1 result found");
+    await waitFor(() => general().searchIgnorePatterns === "src", { timeout: 10_000, label: "ignore list persisted" });
+    await clickCommand(browser, "search.close");
+
+    // The next fresh dialog starts from it; reset restores the built-in list;
+    // unticking the toggle ignores nothing.
+    await run(async () => {
+      const field = await browser.$('[data-testid="search-ignore-input"]');
+      if ((await field.getValue()) !== "src") throw new Error("Fresh search did not reuse the last ignore list");
+      await browser.execute(() => document.querySelector('[data-testid="search-ignore-reset"]')?.click());
+      if ((await field.getValue()) !== general().searchIgnorePatternsDefault) throw new Error("Reset did not restore the default ignore list");
+      await browser.execute(() => document.querySelector('[data-testid="search-ignore-toggle"]')?.click());
+      if (await field.isEnabled()) throw new Error("Ignore list stayed editable while turned off");
+    });
+    await summary("2 results found");
+    await clickCommand(browser, "search.close");
+  } finally {
+    if (previous !== undefined) observer.sendIntent("SetGeneralOption", undefined, { key: "searchIgnorePatterns", value: previous });
+    fs.rmSync(fixture, { recursive: true, force: true });
+  }
+}
+
 export async function runSearchFlow(browser, observer) {
   // Keep duplicate-name fixtures separate from files created by earlier flows.
   const aDst = backendPath("a", "dst", "search-viewer-fixtures");

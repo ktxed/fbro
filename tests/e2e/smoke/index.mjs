@@ -50,7 +50,7 @@ import { runEditorTabFlow } from "./cases/editor-tab.mjs";
 import { runJournalSortFlow } from "./cases/journal-sort.mjs";
 import { verifyThumbnailQueue } from "./cases/thumbnails.mjs";
 import { runRemoteFlow } from "./cases/remote.mjs";
-import { runDatetimeSearchFlow, runSearchActionsFlow, runSearchActivityFlow, runSearchFlow, runSizeSearchFlow } from "./cases/search.mjs";
+import { runDatetimeSearchFlow, runSearchActionsFlow, runSearchActivityFlow, runSearchFlow, runSearchIgnoreFlow, runSizeSearchFlow } from "./cases/search.mjs";
 
 async function main() {
   let browserA;
@@ -167,6 +167,11 @@ async function main() {
       return;
     }
 
+    if (process.env.FBRO_E2E_SEARCH_IGNORE_ONLY === "1") {
+      await runSearchIgnoreFlow(browserA, observerA);
+      return;
+    }
+
     if (process.env.FBRO_E2E_SEARCH_ACTIONS_ONLY === "1") {
       await runSearchActionsFlow(browserA, observerA);
       return;
@@ -225,6 +230,7 @@ async function main() {
     await runArchiveFlow(browserA, observerA);
     await runSearchActivityFlow(browserA, observerA);
     await runSearchFlow(browserA, observerA);
+    await runSearchIgnoreFlow(browserA, observerA);
     await runSearchActionsFlow(browserA, observerA);
     await runDatetimeSearchFlow(browserA, observerA);
     await runSizeSearchFlow(browserA, observerA);

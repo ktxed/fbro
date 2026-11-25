@@ -420,6 +420,7 @@ mod tests {
                     time_value: None,
                     time_to: None,
                     time_date_field: None,
+                    ignore_patterns: Vec::new(),
                 },
             })
         };

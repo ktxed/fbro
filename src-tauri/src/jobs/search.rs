@@ -67,6 +67,9 @@ pub struct SearchParams {
     /// available) or "created" (birth-time; may be unavailable on some
     /// filesystems, in which case entries are skipped).
     pub time_date_field: Option<String>,
+    /// Wildcard entry names to skip: never returned, folders not traversed.
+    /// Search roots themselves are never ignored.
+    pub ignore_patterns: Vec<String>,
 }
 
 // ─── Search results ────────────────────────────────────────────────────────────
@@ -112,20 +115,41 @@ fn compile_mask(mask: Option<&str>, mode: &MaskMode) -> Arc<dyn Fn(&str) -> bool
             let lower = mask.to_lowercase();
             Arc::new(move |name: &str| name.to_lowercase().contains(&lower))
         }
-        MaskMode::Wildcard => {
-            // Translate glob pattern to regex: * -> .*, ? -> .
-            let escaped = regex::escape(&mask);
-            let pattern = escaped.replace("\\*", ".*").replace("\\?", ".");
-            match Regex::new(&format!("(?i)^{}$", pattern)) {
-                Ok(re) => Arc::new(move |name: &str| re.is_match(name)),
-                Err(_) => Arc::new(|_| false),
-            }
-        }
+        MaskMode::Wildcard => match Regex::new(&format!("(?i)^{}$", glob_to_regex(&mask))) {
+            Ok(re) => Arc::new(move |name: &str| re.is_match(name)),
+            Err(_) => Arc::new(|_| false),
+        },
         MaskMode::Regex => match Regex::new(&format!("(?i){}", mask)) {
             Ok(re) => Arc::new(move |name: &str| re.is_match(name)),
             Err(_) => Arc::new(|_| false),
         },
     }
+}
+
+/// Translate a glob to an unanchored regex body: `*` -> `.*`, `?` -> `.`.
+fn glob_to_regex(glob: &str) -> String {
+    regex::escape(glob).replace("\\*", ".*").replace("\\?", ".")
+}
+
+/// Split an ignore list on `;` (also `,` and newlines), trimming and dropping
+/// empty entries.
+pub fn parse_ignore_patterns(input: &str) -> Vec<String> {
+    input
+        .split(|c| matches!(c, ';' | ',' | '\n' | '\r'))
+        .map(str::trim)
+        .filter(|pattern| !pattern.is_empty())
+        .map(ToString::to_string)
+        .collect()
+}
+
+/// One case-insensitive regex matching any ignore pattern against a whole
+/// entry name. `None` when there is nothing to ignore.
+fn compile_ignore(patterns: &[String]) -> Option<Regex> {
+    if patterns.is_empty() {
+        return None;
+    }
+    let alternatives: Vec<String> = patterns.iter().map(|p| glob_to_regex(p)).collect();
+    Regex::new(&format!("(?i)^(?:{})$", alternatives.join("|"))).ok()
 }
 
 // ─── Extra filter helpers ──────────────────────────────────────────────────────
@@ -343,6 +367,7 @@ pub async fn run_search(
     cancel_rx: watch::Receiver<bool>,
 ) {
     let mask_fn = compile_mask(params.file_mask.as_deref(), &params.mask_mode);
+    let ignore = Arc::new(compile_ignore(&params.ignore_patterns));
     let content_query_lower = params
         .content_query
         .as_deref()
@@ -413,6 +438,7 @@ pub async fn run_search(
         let result_tx = result_tx.clone();
         let semaphore = Arc::clone(&semaphore);
         let mask_fn = Arc::clone(&mask_fn);
+        let ignore = Arc::clone(&ignore);
         let content_query_lower = Arc::clone(&content_query_lower);
         let path_source_map = Arc::clone(&path_source_map);
         let pending = Arc::clone(&pending);
@@ -459,6 +485,7 @@ pub async fn run_search(
                 let current_depth = item.depth;
                 let item_source_id = item.source_id.clone();
                 let mask_fn = Arc::clone(&mask_fn);
+                let ignore = Arc::clone(&ignore);
                 let content_query_lower = Arc::clone(&content_query_lower);
                 let cancel_check = cancel_rx.clone();
                 let time_date_field = time_date_field.clone();
@@ -470,6 +497,7 @@ pub async fn run_search(
                         &dir_path,
                         &item_source_id,
                         mask_fn.as_ref(),
+                        ignore.as_ref().as_ref(),
                         &content_query_lower,
                         &cancel_check,
                         size_op,
@@ -622,6 +650,7 @@ fn read_dir_entries(
     dir_path: &str,
     source_id: &str,
     mask_fn: &dyn Fn(&str) -> bool,
+    ignore: Option<&Regex>,
     content_query_lower: &Option<String>,
     cancel: &watch::Receiver<bool>,
     size_op: Option<SizeOp>,
@@ -651,6 +680,10 @@ fn read_dir_entries(
             Err(_) => continue,
         };
         let name = entry.file_name().to_string_lossy().into_owned();
+        // Ignored entries are neither returned nor traversed.
+        if ignore.is_some_and(|re| re.is_match(&name)) {
+            continue;
+        }
         let full_path = entry.path().to_string_lossy().into_owned();
         let is_dir = meta.is_dir();
 
@@ -836,6 +869,7 @@ mod tests {
             time_value: None,
             time_to: None,
             time_date_field: None,
+            ignore_patterns: Vec::new(),
         }
     }
 
@@ -1096,6 +1130,54 @@ mod tests {
         assert_eq!(results, 1);
     }
 
+    #[test]
+    fn ignore_list_parses_and_matches_whole_names_case_insensitively() {
+        assert_eq!(
+            parse_ignore_patterns(" ; node_modules;.venv , *.LOG\n;"),
+            vec!["node_modules", ".venv", "*.LOG"]
+        );
+        let re = compile_ignore(&parse_ignore_patterns("node_modules;*.LOG;.v?nv")).unwrap();
+        assert!(re.is_match("node_modules"));
+        assert!(re.is_match("Node_Modules"));
+        assert!(re.is_match("build.log"));
+        assert!(re.is_match(".venv"));
+        assert!(!re.is_match("my_node_modules"));
+        assert!(!re.is_match("log.txt"));
+        assert!(compile_ignore(&[]).is_none());
+    }
+
+    #[tokio::test]
+    async fn ignored_entries_are_not_returned_or_traversed() {
+        let dir = TempDir::new();
+        std::fs::create_dir_all(dir.0.join("node_modules").join("pkg")).unwrap();
+        std::fs::write(dir.0.join("node_modules").join("pkg").join("a.txt"), "x").unwrap();
+        std::fs::create_dir(dir.0.join("src")).unwrap();
+        std::fs::write(dir.0.join("src").join("b.txt"), "x").unwrap();
+        std::fs::write(dir.0.join("skip.txt"), "x").unwrap();
+        let mut search = params(&dir.0, SearchDepth::Unlimited);
+        search.file_mask = None;
+        search.ignore_patterns = parse_ignore_patterns("node_modules;skip.*");
+        let (messages, results) = search_messages(search, false).await;
+        let (event, progress) = terminal(&messages);
+        assert_eq!(event, "Completed");
+        // `src` and `src/b.txt`; nothing from node_modules, not `skip.txt`.
+        assert_eq!(results, 2);
+        // Root lists node_modules, src, skip.txt; src lists b.txt.
+        assert_eq!(progress.scanned, 4);
+    }
+
+    #[tokio::test]
+    async fn a_root_matching_the_ignore_list_is_still_searched() {
+        let dir = TempDir::new();
+        let root = dir.0.join("node_modules");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(root.join("a.txt"), "x").unwrap();
+        let mut search = params(&root, SearchDepth::Unlimited);
+        search.ignore_patterns = parse_ignore_patterns("node_modules");
+        let (_, results) = search_messages(search, false).await;
+        assert_eq!(results, 1);
+    }
+
     #[tokio::test]
     async fn cancelled_and_empty_searches_report_the_correct_terminal_estimate() {
         let dir = TempDir::new();
@@ -1132,6 +1214,7 @@ mod tests {
                 tx.send(true).unwrap();
                 false
             },
+            None,
             &None,
             &rx,
             None,

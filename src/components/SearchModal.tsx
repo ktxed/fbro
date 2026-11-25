@@ -3,7 +3,7 @@ import { useAppDispatch, useAppState } from "../store";
 import type { PendingSearch } from "../store";
 import type { Source } from "../ws/types";
 import type { WsClient } from "../ws/client";
-import { IconX, IconFolder, IconFile } from "@tabler/icons-react";
+import { IconX, IconFolder, IconFile, IconRestore } from "@tabler/icons-react";
 import { useInputHistory } from "../hooks/useInputHistory";
 import { InputHistoryDropdown } from "./InputHistoryDropdown";
 import { DateTimeInput } from "./DateTimeInput";
@@ -58,6 +58,7 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
   const state = useAppState();
 
   const p = search.searchParams;
+  const general = state.settings.general;
 
   // Section 1 — Search Locations
   const [paths, setPaths] = useState<string[]>(
@@ -77,6 +78,13 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
   const [fileMask, setFileMask] = useState(p?.fileMask ?? "");
   const [maskMode, setMaskMode] = useState<MaskMode>(
     (p?.maskMode as MaskMode | undefined) ?? "wildcard"
+  );
+
+  // Section 2b — Ignore list: entries never returned nor traversed. A fresh
+  // dialog starts from the last list a search used (backend setting).
+  const [ignoreEnabled, setIgnoreEnabled] = useState(p ? p.ignorePatterns != null : true);
+  const [ignorePatterns, setIgnorePatterns] = useState(
+    p?.ignorePatterns ?? general.searchIgnorePatterns
   );
 
   // Section 3 — Content
@@ -191,6 +199,7 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
 
   const maskHistory = useInputHistory("search.fileMask", setFileMask);
   const contentHistory = useInputHistory("search.content", setContentQuery);
+  const ignoreHistory = useInputHistory("search.ignore", setIgnorePatterns);
   const pathHistory = useInputHistory("search.path", setPathInput);
 
   const modalRef = useRef<HTMLDivElement>(null);
@@ -265,6 +274,17 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
 
     maskHistory.addToHistory(fileMask);
     contentHistory.addToHistory(contentQuery);
+    const ignoreValue = ignorePatterns.trim();
+    if (ignoreEnabled) {
+      ignoreHistory.addToHistory(ignoreValue);
+      // The last list used becomes the default for future searches.
+      if (ignoreValue !== general.searchIgnorePatterns) {
+        client.sendIntent("SetGeneralOption", undefined, {
+          key: "searchIgnorePatterns",
+          value: ignoreValue,
+        });
+      }
+    }
 
     dispatch({ type: "RESET_SEARCH_FOR_NEW_JOB", requestId });
 
@@ -275,6 +295,7 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
       fileMask: fileMask || null,
       maskMode,
       contentQuery: contentQuery.trim() ? contentQuery : null,
+      ignorePatterns: ignoreEnabled && ignoreValue ? ignoreValue : null,
       background,
       sizeOp: sizeOp !== "none" ? sizeOp : undefined,
       sizeValue: sizeOp !== "none" && sizeValue ? Number(sizeValue) : undefined,
@@ -335,7 +356,8 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
       const isTextarea = target.tagName === "TEXTAREA";
       const isPathInput = target === pathHistory.inputRef.current;
       const isFileMaskInput = target === maskHistory.inputRef.current;
-      if (!isTextarea && !isPathInput && !isFileMaskInput) {
+      const isIgnoreInput = target === ignoreHistory.inputRef.current;
+      if (!isTextarea && !isPathInput && !isFileMaskInput && !isIgnoreInput) {
         e.preventDefault();
         if (hasResults && search.jobId) {
           handleToResults();
@@ -580,38 +602,96 @@ export function SearchModal({ search, sources, client }: SearchModalProps) {
                 <div className="search-modal__section-title">File name</div>
 
                 <div className="search-modal__mask-row">
-                  <input
-                    ref={maskHistory.inputRef as React.RefObject<HTMLInputElement>}
-                    type="text"
-                    className="search-modal__mask-input"
-                    aria-label="File name"
-                    data-testid="search-file-mask-input"
-                    data-modal-initial-focus
-                    value={fileMask}
-                    onChange={(e) => setFileMask(e.target.value)}
-                    onKeyDown={(e) => {
-                      maskHistory.onKeyDown(e);
-                      if (e.defaultPrevented) return;
-                      if (e.key === "Enter" && search.status === "idle") {
-                        e.preventDefault();
-                        startSearch(false);
-                      }
-                    }}
-                    placeholder="*.*"
-                    spellCheck={false}
-                    autoComplete="off"
-                    autoCorrect="off"
-                    autoCapitalize="off"
-                  />
-                  {maskHistory.isOpen && (
-                    <InputHistoryDropdown
-                      anchorEl={maskHistory.inputRef.current}
-                      items={maskHistory.items}
-                      activeIndex={maskHistory.activeIndex}
-                      onSelect={maskHistory.selectItem}
-                      onClose={maskHistory.close}
+                  <div className="search-modal__mask-cell">
+                    <input
+                      ref={maskHistory.inputRef as React.RefObject<HTMLInputElement>}
+                      type="text"
+                      className="search-modal__mask-input"
+                      aria-label="File name"
+                      data-testid="search-file-mask-input"
+                      data-modal-initial-focus
+                      value={fileMask}
+                      onChange={(e) => setFileMask(e.target.value)}
+                      onKeyDown={(e) => {
+                        maskHistory.onKeyDown(e);
+                        if (e.defaultPrevented) return;
+                        if (e.key === "Enter" && search.status === "idle") {
+                          e.preventDefault();
+                          startSearch(false);
+                        }
+                      }}
+                      placeholder="*.*"
+                      spellCheck={false}
+                      autoComplete="off"
+                      autoCorrect="off"
+                      autoCapitalize="off"
                     />
-                  )}
+                    {maskHistory.isOpen && (
+                      <InputHistoryDropdown
+                        anchorEl={maskHistory.inputRef.current}
+                        items={maskHistory.items}
+                        activeIndex={maskHistory.activeIndex}
+                        onSelect={maskHistory.selectItem}
+                        onClose={maskHistory.close}
+                      />
+                    )}
+                  </div>
+
+                  <div className="search-modal__ignore">
+                    <label className="search-modal__ignore-toggle" title="Skip these names: never listed, folders not searched">
+                      <input
+                        type="checkbox"
+                        data-testid="search-ignore-toggle"
+                        checked={ignoreEnabled}
+                        onChange={(e) => setIgnoreEnabled(e.target.checked)}
+                      />
+                      Ignore
+                    </label>
+                    <input
+                      ref={ignoreHistory.inputRef as React.RefObject<HTMLInputElement>}
+                      type="text"
+                      className="search-modal__mask-input search-modal__ignore-input"
+                      aria-label="Names to ignore, separated by ;"
+                      title={ignorePatterns}
+                      data-testid="search-ignore-input"
+                      value={ignorePatterns}
+                      disabled={!ignoreEnabled}
+                      onChange={(e) => setIgnorePatterns(e.target.value)}
+                      onKeyDown={(e) => {
+                        ignoreHistory.onKeyDown(e);
+                        if (e.defaultPrevented) return;
+                        if (e.key === "Enter" && search.status === "idle") {
+                          e.preventDefault();
+                          startSearch(false);
+                        }
+                      }}
+                      placeholder="node_modules;.venv"
+                      spellCheck={false}
+                      autoComplete="off"
+                      autoCorrect="off"
+                      autoCapitalize="off"
+                    />
+                    {ignoreHistory.isOpen && (
+                      <InputHistoryDropdown
+                        anchorEl={ignoreHistory.inputRef.current}
+                        items={ignoreHistory.items}
+                        activeIndex={ignoreHistory.activeIndex}
+                        onSelect={ignoreHistory.selectItem}
+                        onClose={ignoreHistory.close}
+                      />
+                    )}
+                    <button
+                      type="button"
+                      className="search-modal__ignore-reset"
+                      title="Reset ignore list to defaults"
+                      aria-label="Reset ignore list to defaults"
+                      data-testid="search-ignore-reset"
+                      disabled={!ignoreEnabled}
+                      onClick={() => setIgnorePatterns(general.searchIgnorePatternsDefault)}
+                    >
+                      <IconRestore size={14} aria-hidden />
+                    </button>
+                  </div>
                 </div>
 
                 <div className="search-modal__mode-row">

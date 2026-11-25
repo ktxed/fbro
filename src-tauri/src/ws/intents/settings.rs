@@ -429,6 +429,15 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
                 state_guard.settings.general.fedup_default_ignore_patterns =
                     normalize_fedup_ignore_patterns(v);
             }
+            "searchIgnorePatterns" => {
+                let Some(v) = value.as_str() else {
+                    drop(state_guard);
+                    bad_setting(ctx.tx, "searchIgnorePatterns must be a string").await;
+                    return;
+                };
+                state_guard.settings.general.search_ignore_patterns =
+                    crate::jobs::search::parse_ignore_patterns(v).join(";");
+            }
             "compareMaxFileSizeMb" => {
                 let Some(v) = value.as_u64() else {
                     drop(state_guard);
@@ -740,6 +749,7 @@ async fn set_general_option(args: &Value, ctx: &mut IntentContext<'_>) {
                 "sevenzipCustomPath": general.sevenzip_custom_path,
                 "sevenzipResolvedPath": sevenzip_resolved,
                 "fedupDefaultIgnorePatterns": general.fedup_default_ignore_patterns,
+                "searchIgnorePatterns": general.search_ignore_patterns,
                 "compareMaxFileSizeMb": general.compare_max_file_size_mb,
                 "compareDifferMode": general.compare_differ_mode.as_str(),
                 "compareExternalCommand": general.compare_external_command,

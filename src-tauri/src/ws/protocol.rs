@@ -866,6 +866,9 @@ pub struct GeneralSettingsSchema {
     /// re-running probe logic in the FE.
     pub sevenzip_resolved_path: String,
     pub fedup_default_ignore_patterns: String,
+    pub search_ignore_patterns: String,
+    /// Read-only built-in ignore list, for the Search dialog's reset button.
+    pub search_ignore_patterns_default: String,
     pub compare_max_file_size_mb: u64,
     pub compare_differ_mode: String,
     pub compare_external_command: String,
@@ -1305,6 +1308,8 @@ pub struct SearchParamsSchema {
     pub time_to: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub time_date_field: Option<String>,
+    /// `;`-joined ignore list; `None` when the search ignored nothing.
+    pub ignore_patterns: Option<String>,
 }
 
 #[derive(Serialize, Clone, Debug)]

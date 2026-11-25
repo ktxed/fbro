@@ -116,6 +116,10 @@ pub struct GeneralSettings {
     /// directory names.
     #[serde(default = "default_fedup_ignore_patterns")]
     pub fedup_default_ignore_patterns: String,
+    /// Wildcard entry names the Search dialog skips (not returned, folders not
+    /// traversed). `;` separated; the last list used by a search.
+    #[serde(default = "default_search_ignore_patterns")]
+    pub search_ignore_patterns: String,
     /// Maximum size per text file for the built-in differ.
     #[serde(default = "default_compare_max_file_size_mb")]
     pub compare_max_file_size_mb: u64,
@@ -332,6 +336,20 @@ pub fn default_fedup_ignore_patterns() -> String {
     .join("\n")
 }
 
+pub fn default_search_ignore_patterns() -> String {
+    [
+        ".git",
+        "node_modules",
+        ".venv",
+        "__pycache__",
+        ".tox",
+        ".gradle",
+        ".m2",
+        "target",
+    ]
+    .join(";")
+}
+
 fn legacy_fedup_ignore_patterns() -> String {
     [".git", "node_modules", "__MACOSX", "._*", ".DS_Store"].join("\n")
 }
@@ -381,6 +399,7 @@ impl Default for GeneralSettings {
             sevenzip_extractor: SevenzipExtractorMode::default(),
             sevenzip_custom_path: String::new(),
             fedup_default_ignore_patterns: default_fedup_ignore_patterns(),
+            search_ignore_patterns: default_search_ignore_patterns(),
             compare_max_file_size_mb: default_compare_max_file_size_mb(),
             compare_differ_mode: CompareDifferMode::default(),
             compare_external_command: String::new(),

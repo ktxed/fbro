@@ -84,6 +84,20 @@ Search is a full-featured file search capability that operates as a **job-based 
   still traversed but are never returned as results
 - Performance-optimized with early exit on first match
 
+### Ignore List
+
+- `;`-separated wildcard names (`*`, `?`; `,` and newlines also split),
+  matched case-insensitively against the whole entry **name**.
+- A matching entry is skipped entirely: never returned, and a matching folder
+  is not traversed. It still counts as inspected. Search roots are never
+  ignored, so searching inside `node_modules` explicitly still works.
+- Sent as `ignorePatterns` on `StartSearch` (`null` = ignore nothing) and
+  echoed in `SearchParamsSchema.ignorePatterns` so reopening a job restores it.
+- Default: `.git;node_modules;.venv;__pycache__;.tox;.gradle;.m2;target`
+  (`settings.general.searchIgnorePatternsDefault`, read-only). The last list a
+  search used is persisted as the `searchIgnorePatterns` setting and seeds the
+  next fresh dialog.
+
 ### Multi-Path Search
 
 - Search multiple directories simultaneously
@@ -139,6 +153,7 @@ pub struct SearchParams {
     pub file_mask: Option<String>,
     pub mask_mode: MaskMode,
     pub content_query: Option<String>,  // Always case-insensitive
+    pub ignore_patterns: Vec<String>,   // Wildcard names, never returned/traversed
 }
 ```
 
@@ -175,6 +190,7 @@ pub struct SearchParamsSchema {
     pub file_mask: Option<String>,
     pub mask_mode: String,       // "substring", "wildcard", "regex"
     pub content_query: Option<String>,
+    pub ignore_patterns: Option<String>, // `;`-joined; None = nothing ignored
 }
 ```
 
@@ -214,6 +230,7 @@ interface SearchParams {
   fileMask?: string | null;
   maskMode: string;
   contentQuery?: string | null;
+  ignorePatterns?: string | null;
 }
 ```
 
@@ -271,7 +288,13 @@ and "Extra" (mnemonic: e, size and datetime filters).
 #### Input tab sections
 
 1. **Search Locations**: path input, volume selector, add/remove paths, depth selector
-2. **File Name**: mask input with mode radio buttons (substring/wildcard/regex)
+2. **File Name**: the row is split in two. Left: mask input with mode radio
+   buttons (substring/wildcard/regex) below. Right: **Ignore** checkbox, the
+   ignore-list input (Alt+Down for previous lists via `useInputHistory`,
+   Enter starts the search, disabled while unchecked), and an icon reset
+   button restoring the built-in default. Starting a search with the box
+   checked sends `SetGeneralOption { key: "searchIgnorePatterns" }` when the
+   list differs from the persisted one. See [Ignore List](#ignore-list).
 3. **Content**: textarea for text search query
 
 #### Results tab

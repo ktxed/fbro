@@ -2877,6 +2877,9 @@ async fn start_search(args: &Value, ctx: &mut IntentContext<'_>) {
     let time_date_field = arg_str(args, "timeDateField")
         .filter(|s| !s.is_empty())
         .map(String::from);
+    let ignore_patterns = arg_str(args, "ignorePatterns")
+        .map(crate::jobs::search::parse_ignore_patterns)
+        .unwrap_or_default();
 
     let params = SearchParams {
         paths: paths.clone(),
@@ -2891,6 +2894,7 @@ async fn start_search(args: &Value, ctx: &mut IntentContext<'_>) {
         time_value,
         time_to,
         time_date_field,
+        ignore_patterns,
     };
 
     // Capture params as a serialisable schema before params is moved into run_search.
@@ -2932,6 +2936,8 @@ async fn start_search(args: &Value, ctx: &mut IntentContext<'_>) {
         time_value: params.time_value.clone(),
         time_to: params.time_to.clone(),
         time_date_field: params.time_date_field.clone(),
+        ignore_patterns: (!params.ignore_patterns.is_empty())
+            .then(|| params.ignore_patterns.join(";")),
     };
 
     let (cancel_tx, cancel_rx) = watch::channel(false);
